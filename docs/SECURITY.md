@@ -179,20 +179,20 @@ covered by the closed exclusions. Its private proxy template contains only
 no-replace hard-linked active receipt prevent rounded or partial publication.
 Pre-publication crash residue is inert and grants no provider
 authority, but the later final cleanup must remove it. Preparation creates no
-Engine and carries no Docker auth. The version-5 synthetic receipt grammar
+Engine and carries no Docker auth. The version-6 synthetic receipt grammar
 phase-binds collisions, replays retired cleanup authority and admits a final
 manifest only after the exact success sequence. Provider success is explicitly
 classified and binds its operation kind, plan and intent contract; v1 through
-v4 receipts fail closed. The
+v5 receipts fail closed. The
 fixture finalizer emits an explicitly non-live synthetic schema and rejects
 controlled-background-fake evidence. The append-only mutation journal uses
-slot v6, recovery/root v5 and close v7. Permanent numbered slots bind exact
+slot v7, recovery/root v6 and close v8. Permanent numbered slots bind exact
 source receipt/environment endpoints, prior close, cooperative owner challenge,
 operation kind, contract and plan. Permanent outer settlements bind the
 observed provider frontier. Closes bind exact result endpoints, owner/recovery
 authority and the outer settlement digest; per-slot recovery claims form a
-gap-free prefix. Final journal names are never deleted or reused. Slot v1-v5,
-recovery/root v1-v4 and close v1-v6 are fresh-plan hard cuts. This is a full
+gap-free prefix. Final journal names are never deleted or reused. Slot v1-v6,
+recovery/root v1-v5 and close v1-v7 are fresh-plan hard cuts. This is a full
 state hard cut: deterministic runs made with an older journal or live-plan
 contract must be reset and regenerated; there is no translator.
 Unique fsynced stages and atomic no-replace links prevent partial final files;
@@ -313,7 +313,7 @@ provider class as one content-addressed tuple; a hash match never substitutes
 for comparing all four fields. Create and cleanup use distinct contracts and
 evidence schema names, cleanup binds the create-contract digest, and neither can
 select the deterministic or controlled-background fake. The create tuple grants
-only state planning through `mutation-journal-v6-plan-only`; execution,
+only state planning through `mutation-journal-v7-plan-only`; execution,
 provider recovery, lifecycle and finalization remain false, and cleanup remains
 fully deny-only. The registry imports no process, state, receipt or fake-provider
 module, and hostile tuple values are not echoed in refusals.
@@ -359,21 +359,21 @@ The publisher obtains every admission internally. It first establishes a
 canonical pristine-namespace baseline, then requires exact equality immediately
 before the slot link, after slot acquisition and immediately before the close link.
 Only an owner close with zero receipt, environment and operation-evidence delta
-commits the inert intent through `mutation-journal-v6-inert-intent-only`.
+commits the inert intent through `mutation-journal-v7-inert-intent-only`.
 Collision or drift before slot publication leaves no permanent slot; collision
 or drift after acquisition owner-aborts that generation before effect. An
 abandoned open intent requires an explicit recovery confirmation; the journal
-repair may append only an all-zero recovery v5 observation and an
+repair may append only an all-zero recovery v6 observation and an
 `aborted-before-effect` close. That is not provider-effect recovery.
 
 The successor `provider-start-decision` is likewise state-owned, durable and
 inert. Its publication plan v2 binds the completed intent and exact fresh
 pristine-namespace admission. The owner reconstructs and compares that admission
 at the initial, pre-slot-link, post-slot-acquisition and pre-close-link boundaries,
-then may publish only a zero-delta slot v6/owner-close v7 pair. Production and
+then may publish only a zero-delta slot v7/owner-close v8 pair. Production and
 fixture operation identities cannot cross. A collision before the slot CAS
 leaves no slot; one after acquisition aborts the generation. An abandoned
-decision accepts only an all-zero recovery v5 claim and abort close, while
+decision accepts only an all-zero recovery v6 claim and abort close, while
 generic provider recovery refuses it. Completed decision retry is historical
 and does not claim current namespace state.
 
@@ -396,12 +396,12 @@ foreign collision produces no candidate. Its logical supervisor label is not a
 PID or PGID. The admission is not persisted, has no operation kind or registry
 entry, and the only exposed authorization function unconditionally refuses it.
 
-A pure sibling-effect boundary now binds the exact admission to ADR-0104's
-accepted branch. Production operation kind `colima-live-provider-effect-v1`
-uses `production-deny-only-no-invoker`: every capability is false, event
-publication is refused, and no production state, registry, lifecycle, executor
-or recovery surface imports it. The separate fixture-only operation kind cannot
-be relabelled across that boundary.
+A sibling-effect boundary now binds the exact admission to ADR-0104's accepted
+branch. Production operation kind `colima-live-provider-effect-v1` uses
+`production-deny-only-no-invoker`: every capability is false, event publication
+is refused, and state imports no production effect tuple or production mutation
+entry point. The separate fixture-only operation kind cannot be relabelled
+across that boundary.
 
 The fixture grammar binds the fixed marker and distinct witness, start authority
 and attempt, exact four-role causal graph, four endpoint/socket identities and
@@ -413,11 +413,18 @@ process, network, state or executor import, and a tripwire proves construction
 and validation invoke no observation I/O. This in-memory event fixture is
 distinct from the earlier four-process causal fixture.
 
-Receipt v6 and `mutation-journal-v7-sibling-effect-only` are grammar names only;
-current receipt v5, slot v6, recovery/root v5, close v7 and ADR-0103 v1 evidence
-remain unchanged. No effect witness is persisted, no provider process is
-invoked and no recovery API exists. Serialized pure bytes are replayable data,
-never state provenance or branch selection.
+Receipt v6, mutation slot v7, recovery/root v6 and close v8 are a hard cut. The
+state module exposes fixture-only publication and recovery seams: it creates a
+private random stage, derives the witness from that inode, binds the fixed
+provider-root marker by no-replace hard link and publishes authority only after
+the exact topology is durable. A pre-attempt retirement has a zero receipt
+delta. An attempt fence keeps the marker/witness at two links, invokes no
+process and refuses automatic recovery. Recovery requires the original owner
+and newest recoverer to be absent, advances only a validated physical/event
+frontier, and fsyncs marker retirement before completion. Foreign markers,
+unexpected links, malformed witnesses and crossed production/fixture tuples
+fail closed. These seams are test-only; no supported lifecycle or production
+effect invoker exists.
 
 The earlier non-persisted prerequisite projection remains a separate inert
 review artifact. It defines no action, operation kind or contract, retains its
@@ -434,7 +441,7 @@ closed values retain their canonical bytes and digests. These input-safety bound
 state or effect authority.
 
 The successor no-spawn reservation is a cooperative same-UID exclusion
-protocol, not a hostile-principal boundary. Its v6 slot precedes filesystem
+protocol, not a hostile-principal boundary. Its v7 slot precedes filesystem
 mutation. A private fsynced mode-0600 witness binds the exact state run,
 provider root and all six namespace identities and inventories. Those eight
 directories must have distinct identities, retain their private modes and
@@ -448,11 +455,11 @@ namespace observation is bracketed by topology checks and must equal the bound
 plan. Only then may the immutable
 `retirement-authorized-without-process` settlement be published. The owner
 retires only that verified marker, fsyncs the provider root, proves the witness
-has one link and closes v7 with the settlement digest. No receipt, environment,
+has one link and closes v8 with the settlement digest. No receipt, environment,
 provider, runtime, evidence or registry record is written.
 
 Dedicated reservation recovery is explicitly narrower than provider recovery.
-Its v5 claims bind the deterministic witness, settlement and exact reachable
+Its v6 claims bind the deterministic witness, settlement and exact reachable
 local topology. It may retire an inert stage before abort, complete a partially
 linked witness, or relink an exact standalone witness to the fixed marker before
 settlement and retirement. A foreign or symlink marker, wrong mode/type/inode,

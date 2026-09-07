@@ -112,6 +112,24 @@ import {
   liveProviderProcessStartBytes,
 } from "./clean-engine-live-provider-process-start.mjs";
 import {
+  COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT,
+  COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
+  COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
+  COLIMA_LIVE_PROVIDER_EFFECT_BOUNDS,
+  COLIMA_LIVE_PROVIDER_EFFECT_ENDPOINTS,
+  COLIMA_LIVE_PROVIDER_EFFECT_ROLES,
+  LiveProviderEffectFailure,
+  buildColimaLiveProviderEffectEvent,
+  buildColimaLiveProviderEffectPublicationPlan,
+  buildColimaLiveProviderEffectWitness,
+  liveProviderEffectBytes,
+  liveProviderEffectDigest,
+  validateColimaLiveProviderEffectEventHistory,
+  validateColimaLiveProviderEffectPublicationPlan,
+  validateColimaLiveProviderEffectWitness,
+} from "./clean-engine-live-provider-effect.mjs";
+import {
   COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_OPERATION_CONTRACT_SHA256,
   COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_OPERATION_KIND,
   COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
@@ -149,10 +167,10 @@ const ENVIRONMENT_STAGING_NAME = ".environment-publish";
 const LEGACY_MUTATION_LEASE_NAME = ".mutation-lease";
 const MUTATION_SLOT_PREFIX = ".mutation-slot-";
 const MUTATION_CLOSE_PREFIX = ".mutation-close-";
-const MUTATION_SLOT_SCHEMA = "synveda.clean-engine.mutation-slot.v6";
-const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v7";
+const MUTATION_SLOT_SCHEMA = "synveda.clean-engine.mutation-slot.v7";
+const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v8";
 const MUTATION_RECOVERY_PREFIX = ".mutation-recovery-";
-const MUTATION_RECOVERY_SCHEMA = "synveda.clean-engine.mutation-recovery.v5";
+const MUTATION_RECOVERY_SCHEMA = "synveda.clean-engine.mutation-recovery.v6";
 const MUTATION_OPERATION_PREFIX = ".mutation-operation-";
 const BACKGROUND_CREATE_SETTLEMENT_SCHEMA =
   "synveda.clean-engine.background-create-settlement.v1";
@@ -163,6 +181,9 @@ const BACKGROUND_CLEANUP_SETTLEMENT_SCHEMA =
 const MUTATION_STAGE_PREFIX = ".mutation-stage-";
 const PROVIDER_RESERVATION_STAGE_PREFIX = ".provider-reservation-stage-";
 const PROVIDER_RESERVATION_WITNESS_PREFIX = ".provider-reservation-witness-";
+const PROVIDER_EFFECT_STAGE_PREFIX = ".provider-effect-stage-";
+const PROVIDER_EFFECT_WITNESS_PREFIX = ".provider-effect-witness-";
+const PROVIDER_EFFECT_EVENT_PREFIX = ".provider-effect-event-";
 const PROVIDER_RESERVATION_RECOVERY_STAGES = Object.freeze({
   "marker-held": Object.freeze({
     disposition: "pending",
@@ -253,6 +274,46 @@ const PROVIDER_RESERVATION_SETTLEMENT_AUTHORITY_STAGES = Object.freeze([
   "witness-linked",
   "witness-unlinked",
 ]);
+const PROVIDER_EFFECT_RECOVERY_STAGES = Object.freeze({
+  "attempt-fenced": Object.freeze({ disposition: "pending", links: 2 }),
+  "authority-held": Object.freeze({ disposition: "pending", links: 2 }),
+  "completion-retired": Object.freeze({ disposition: "complete", links: 1 }),
+  "marker-held": Object.freeze({ disposition: "pending", links: 2 }),
+  "marker-linked": Object.freeze({ disposition: "pending", links: 2 }),
+  "not-started": Object.freeze({ disposition: "not-reached", links: 0 }),
+  "stage-initializing": Object.freeze({
+    disposition: "not-reached",
+    links: 1,
+  }),
+  "stage-only": Object.freeze({ disposition: "not-reached", links: 1 }),
+  "stage-retired-before-effect": Object.freeze({
+    disposition: "not-reached",
+    links: 0,
+  }),
+  "witness-linked": Object.freeze({ disposition: "pending", links: 3 }),
+  "witness-unlinked": Object.freeze({ disposition: "pending", links: 1 }),
+});
+const PROVIDER_EFFECT_RECOVERY_TRANSITIONS = Object.freeze({
+  "attempt-fenced": Object.freeze(["attempt-fenced"]),
+  "authority-held": Object.freeze(["authority-held", "witness-unlinked"]),
+  "completion-retired": Object.freeze(["completion-retired"]),
+  "marker-held": Object.freeze(["marker-held", "witness-unlinked"]),
+  "marker-linked": Object.freeze(["marker-linked", "witness-linked"]),
+  "not-started": Object.freeze(["not-started"]),
+  "stage-initializing": Object.freeze([
+    "stage-initializing",
+    "stage-retired-before-effect",
+  ]),
+  "stage-only": Object.freeze(["stage-only", "stage-retired-before-effect"]),
+  "stage-retired-before-effect": Object.freeze([
+    "stage-retired-before-effect",
+  ]),
+  "witness-linked": Object.freeze(["marker-held", "witness-linked"]),
+  "witness-unlinked": Object.freeze([
+    "completion-retired",
+    "witness-unlinked",
+  ]),
+});
 const MUTATION_OWNER_PROBE = "opaque-process-instance-v1";
 const MAX_MUTATION_RECOVERIES = 8;
 const MAX_MUTATION_SLOTS = 64;
@@ -279,7 +340,7 @@ const FAKE_PROVIDER_CONTRACT = Object.freeze({
   kind: "deterministic-fake-provider-v1",
   max_hold_milliseconds: 30_000,
   reconcile_outcomes: Object.freeze(["failed", "passed", "unknown"]),
-  result_contract: "clean-engine-provider-receipt-v5",
+  result_contract: "clean-engine-provider-receipt-v6",
   schema: "synveda.clean-engine.fake-provider-contract.v1",
 });
 const FAKE_PROVIDER_CONTRACT_SHA256 = digest(canonicalBytes(FAKE_PROVIDER_CONTRACT));
@@ -982,7 +1043,8 @@ function writeExclusive(path, bytes, mode = 0o600) {
       offset += written;
     }
     fsyncSync(descriptor);
-  } catch {
+  } catch (error) {
+    if (error instanceof ClosedFailure) throw error;
     fail("immutable state publication failed", 70);
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
@@ -1356,6 +1418,28 @@ function liveProviderReservationFixtureOnly(operationKind, contractSha256) {
   fail("live provider reservation operation contract was refused");
 }
 
+function liveProviderEffectFixtureOnly(operationKind, contractSha256) {
+  if (
+    operationKind === COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND &&
+    contractSha256 ===
+      COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256
+  ) {
+    return true;
+  }
+  fail("live provider effect operation contract was refused");
+}
+
+function validateLiveProviderEffectPublicationPlanForState(value, source) {
+  try {
+    return validateColimaLiveProviderEffectPublicationPlan(value, source);
+  } catch (error) {
+    if (error instanceof LiveProviderEffectFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
 function validateLiveProviderReservationPublicationPlanForState(
   value,
   source,
@@ -1481,6 +1565,28 @@ function validateMutationOperation(value) {
     }
     return;
   }
+  if (value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION) {
+    if (
+      value.operation_plan === null ||
+      Array.isArray(value.operation_plan) ||
+      typeof value.operation_plan !== "object"
+    ) {
+      fail("live provider effect operation was refused");
+    }
+    if (
+      liveProviderEffectFixtureOnly(
+        value.operation_kind,
+        value.operation_contract_sha256,
+      ) !== true ||
+      value.operation_plan.fixture_id !== value.fixture_id ||
+      value.operation_plan.operation_kind !== value.operation_kind ||
+      value.operation_plan.operation_contract_sha256 !==
+        value.operation_contract_sha256
+    ) {
+      fail("live provider effect operation binding was refused");
+    }
+    return;
+  }
   if (value.action === "provider-create") {
     if (
       value.operation_kind === DETERMINISTIC_PROVIDER_OPERATION_KIND &&
@@ -1576,6 +1682,7 @@ function validateMutationLeaseValue(value, fixtureId) {
       COLIMA_LIVE_PROVIDER_INTENT_ACTION,
       COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
       COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+      COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
       LIVE_PROVIDER_PLAN_ACTION,
     ]).has(value.action) ||
     !onlyLowerHex(value.intent_receipt_sha256, 64) ||
@@ -1650,6 +1757,26 @@ function providerReservationWitnessFileName(sequence) {
   return `${PROVIDER_RESERVATION_WITNESS_PREFIX}${String(sequence).padStart(2, "0")}`;
 }
 
+function providerEffectWitnessFileName(sequence) {
+  return `${PROVIDER_EFFECT_WITNESS_PREFIX}${String(sequence).padStart(2, "0")}`;
+}
+
+function providerEffectStageFileName(sequence, nonce) {
+  if (
+    !Number.isSafeInteger(sequence) ||
+    sequence < 0 ||
+    sequence >= MAX_MUTATION_SLOTS ||
+    !onlyLowerHex(nonce, 32)
+  ) {
+    fail("provider effect stage name was refused", 70);
+  }
+  return `${PROVIDER_EFFECT_STAGE_PREFIX}${String(sequence).padStart(2, "0")}-${nonce}`;
+}
+
+function providerEffectEventFileName(slotSequence, eventSequence) {
+  return `${PROVIDER_EFFECT_EVENT_PREFIX}${String(slotSequence).padStart(2, "0")}-${String(eventSequence).padStart(3, "0")}`;
+}
+
 function recoveryFileName(slotSequence, sequence) {
   return `${MUTATION_RECOVERY_PREFIX}${String(slotSequence).padStart(2, "0")}-${String(sequence).padStart(2, "0")}`;
 }
@@ -1662,7 +1789,7 @@ function recoveryChainRootSha256(fixtureId, leaseSha256, operation) {
     operation_contract_sha256: operation.operation_contract_sha256,
     operation_kind: operation.operation_kind,
     operation_plan_sha256: operationPlanSha256(operation.operation_plan),
-    schema: "synveda.clean-engine.mutation-recovery-root.v5",
+    schema: "synveda.clean-engine.mutation-recovery-root.v6",
   }));
 }
 
@@ -1680,6 +1807,41 @@ function reservationRecoveryTopologySha256({
     settlement_sha256: settlementSha256,
     slot_sequence: slotSequence,
   }));
+}
+
+function effectRecoveryTopologySha256({
+  eventCount,
+  eventHeadSha256,
+  evidenceStage,
+  localLinks,
+  markerPresent,
+  slotSequence,
+  witnessSha256,
+}) {
+  return digest(canonicalBytes({
+    event_count: eventCount,
+    event_head_sha256: eventHeadSha256,
+    evidence_stage: evidenceStage,
+    local_links: localLinks,
+    marker_present: markerPresent,
+    slot_sequence: slotSequence,
+    witness_sha256: witnessSha256,
+  }));
+}
+
+function liveProviderEffectRecoveryStageReachable(from, to) {
+  const visited = new Set();
+  const pending = [from];
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (current === to) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const next of PROVIDER_EFFECT_RECOVERY_TRANSITIONS[current] ?? []) {
+      if (!visited.has(next)) pending.push(next);
+    }
+  }
+  return false;
 }
 
 function validateRecoveryClaims(claims, fixtureId, slot, operation) {
@@ -1845,6 +2007,32 @@ function validateRecoveryClaims(claims, fixtureId, slot, operation) {
         ) {
           fail("live provider reservation recovery history was refused");
         }
+      }
+    }
+    if (slot.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION) {
+      const stage =
+        PROVIDER_EFFECT_RECOVERY_STAGES[
+          claim.value.observed_evidence_stage
+        ];
+      if (
+        stage === undefined ||
+        claim.value.observed_effect_name !== "provider-effect" ||
+        claim.value.observed_effect_disposition !== stage.disposition ||
+        claim.value.observed_settlement_sha256 !== ZERO_SHA256 ||
+        (claim.value.observed_evidence_stage === "not-started"
+          ? claim.value.observed_evidence_head_sha256 !== ZERO_SHA256 ||
+            claim.value.observed_evidence_prefix_sha256 !== ZERO_SHA256 ||
+            claim.value.observed_residual_sha256 !== ZERO_SHA256
+          : claim.value.observed_evidence_prefix_sha256 === ZERO_SHA256 ||
+            claim.value.observed_residual_sha256 !==
+              claim.value.observed_evidence_prefix_sha256) ||
+        (previous?.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+          !liveProviderEffectRecoveryStageReachable(
+            previous.value.observed_evidence_stage,
+            claim.value.observed_evidence_stage,
+          ))
+      ) {
+        fail("live provider effect recovery observation was refused");
       }
     }
     if (slot.value.operation_kind === CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND) {
@@ -2504,7 +2692,7 @@ function validatePlan(plan, candidateBytes, stateMetadata) {
     "plan receipt",
   );
   if (
-    plan.schema !== "synveda.clean-engine.receipt.v5" ||
+    plan.schema !== "synveda.clean-engine.receipt.v6" ||
     plan.sequence !== 0 ||
     plan.outcome !== "passed" ||
     plan.phase !== "plan" ||
@@ -2563,7 +2751,8 @@ function sameMutationStageIdentity(left, right) {
 function isMutationPublicationDestinationName(name) {
   return (
     /^\.mutation-(?:slot|close|operation)-[0-9]{2}$/.test(name) ||
-    /^\.mutation-recovery-[0-9]{2}-[0-9]{2}$/.test(name)
+    /^\.mutation-recovery-[0-9]{2}-[0-9]{2}$/.test(name) ||
+    /^\.provider-effect-event-[0-9]{2}-[0-9]{3}$/.test(name)
   );
 }
 
@@ -2704,6 +2893,15 @@ function validatePlanRunInventorySnapshot(
   const providerReservationWitnessNames = entries.filter((entry) =>
     /^\.provider-reservation-witness-[0-9]{2}$/.test(entry),
   );
+  const providerEffectStageNames = entries.filter((entry) =>
+    /^\.provider-effect-stage-[0-9]{2}-[0-9a-f]{32}$/.test(entry),
+  );
+  const providerEffectWitnessNames = entries.filter((entry) =>
+    /^\.provider-effect-witness-[0-9]{2}$/.test(entry),
+  );
+  const providerEffectEventNames = entries.filter((entry) =>
+    /^\.provider-effect-event-[0-9]{2}-[0-9]{3}$/.test(entry),
+  );
   if (
     receipts.length < 1 ||
     receipts.length > 64 ||
@@ -2714,6 +2912,10 @@ function validatePlanRunInventorySnapshot(
     mutationStageNames.length > MAX_MUTATION_STAGES ||
     providerReservationStageNames.length > 1 ||
     providerReservationWitnessNames.length > 1 ||
+    providerEffectStageNames.length > 1 ||
+    providerEffectWitnessNames.length > 1 ||
+    providerEffectEventNames.length >
+      COLIMA_LIVE_PROVIDER_EFFECT_BOUNDS.effect_events ||
     required.some((entry) => !entries.includes(entry)) ||
     entries.some(
       (entry) =>
@@ -2729,7 +2931,10 @@ function validatePlanRunInventorySnapshot(
         !mutationOperationNames.includes(entry) &&
         !mutationStageNames.includes(entry) &&
         !providerReservationStageNames.includes(entry) &&
-        !providerReservationWitnessNames.includes(entry),
+        !providerReservationWitnessNames.includes(entry) &&
+        !providerEffectStageNames.includes(entry) &&
+        !providerEffectWitnessNames.includes(entry) &&
+        !providerEffectEventNames.includes(entry),
     )
   ) {
     fail("plan run inventory was refused");
@@ -2823,6 +3028,7 @@ function validatePlanRunInventorySnapshot(
     ...mutationCloseNames,
     ...mutationRecoveryNames,
     ...mutationOperationNames,
+    ...providerEffectEventNames,
   ];
   const linkedMutationDestinations = new Map();
   const mutationStages = mutationStageNames.map((name) => {
@@ -2874,7 +3080,7 @@ function validatePlanRunInventorySnapshot(
       fail("mutation slot sequence was refused");
     }
   }
-  const readReservationArtifact = (name, label) => {
+  const readProviderLinkArtifact = (name, label) => {
     if (name === undefined) return undefined;
     const path = join(run, name);
     const metadata = inspectPendingFile(
@@ -2890,11 +3096,11 @@ function validatePlanRunInventorySnapshot(
       path,
     };
   };
-  const providerReservationStage = readReservationArtifact(
+  const providerReservationStage = readProviderLinkArtifact(
     providerReservationStageNames[0],
     "provider reservation stage",
   );
-  const providerReservationWitness = readReservationArtifact(
+  const providerReservationWitness = readProviderLinkArtifact(
     providerReservationWitnessNames[0],
     "provider reservation witness",
   );
@@ -2939,6 +3145,139 @@ function validatePlanRunInventorySnapshot(
     ) {
       fail("provider reservation witness slot binding was refused");
     }
+  }
+  const readProviderEffectStage = (name) => {
+    if (name === undefined) return undefined;
+    const path = join(run, name);
+    const metadata = inspectPendingFile(
+      path,
+      "provider effect stage",
+      stateMetadata.dev,
+      new Set([1n, 2n, 3n]),
+    );
+    const bytes = readPrivate(
+      path,
+      "provider effect stage",
+      Number(metadata.nlink),
+      0n,
+    );
+    let value;
+    let canonicalValue = false;
+    try {
+      value = JSON.parse(bytes.toString("utf8"));
+      canonicalValue = canonicalBytes(value).equals(bytes);
+    } catch {
+      canonicalValue = false;
+    }
+    const slotSequence = Number(name.slice(PROVIDER_EFFECT_STAGE_PREFIX.length, -33));
+    if (!canonicalValue) {
+      if (metadata.nlink !== 1n) {
+        fail("linked provider effect stage was not canonical");
+      }
+      return {
+        bytes,
+        initializing: true,
+        metadata,
+        name,
+        path,
+        slotSequence,
+        value: undefined,
+      };
+    }
+    if (value === null || Array.isArray(value) || typeof value !== "object") {
+      fail("provider effect stage was not a canonical object");
+    }
+    return {
+      bytes,
+      initializing: false,
+      metadata,
+      name,
+      path,
+      slotSequence,
+      value,
+    };
+  };
+  const providerEffectStage = readProviderEffectStage(
+    providerEffectStageNames[0],
+  );
+  const providerEffectWitness = readProviderLinkArtifact(
+    providerEffectWitnessNames[0],
+    "provider effect witness",
+  );
+  if (
+    providerEffectStage !== undefined &&
+    providerEffectWitness !== undefined
+  ) {
+    if (
+      providerEffectStage.initializing ||
+      !sameMutationArtifact(
+        providerEffectStage.metadata,
+        providerEffectWitness.metadata,
+      ) ||
+      providerEffectStage.metadata.nlink !== 3n ||
+      providerEffectWitness.metadata.nlink !== 3n ||
+      !providerEffectStage.bytes.equals(providerEffectWitness.bytes)
+    ) {
+      fail("provider effect local link topology was refused");
+    }
+  } else {
+    const onlyArtifact = providerEffectStage ?? providerEffectWitness;
+    if (
+      onlyArtifact !== undefined &&
+      !new Set([1n, 2n]).has(onlyArtifact.metadata.nlink)
+    ) {
+      fail("provider effect local link topology was refused");
+    }
+  }
+  for (const artifact of [providerEffectStage, providerEffectWitness]) {
+    if (artifact === undefined) continue;
+    const sequence =
+      artifact === providerEffectStage
+        ? artifact.slotSequence
+        : artifact.value?.slot_sequence;
+    const slot = Number.isSafeInteger(sequence)
+      ? mutationSlots[sequence]
+      : undefined;
+    if (
+      slot?.value.action !== COLIMA_LIVE_PROVIDER_EFFECT_ACTION ||
+      (artifact === providerEffectStage &&
+        artifact.name.slice(PROVIDER_EFFECT_STAGE_PREFIX.length, -33) !==
+          String(sequence).padStart(2, "0")) ||
+      (artifact === providerEffectStage &&
+        !artifact.initializing && artifact.value.slot_sequence !== sequence) ||
+      (artifact === providerEffectWitness &&
+        artifact.name !== providerEffectWitnessFileName(sequence))
+    ) {
+      fail("provider effect witness slot binding was refused");
+    }
+  }
+  const providerEffectEvents = providerEffectEventNames.map((name) => ({
+    ...parseCanonical(
+      join(run, name),
+      "provider effect event",
+      linkedMutationDestinations.has(name) ? 2 : 1,
+    ),
+    name,
+  }));
+  const effectEventsBySlot = new Map();
+  for (const event of providerEffectEvents) {
+    const slotSequence = event.value?.slot_sequence;
+    const eventSequence = event.value?.event_sequence;
+    const slot = Number.isSafeInteger(slotSequence)
+      ? mutationSlots[slotSequence]
+      : undefined;
+    const events = effectEventsBySlot.get(slotSequence) ?? [];
+    if (
+      slot?.value.action !== COLIMA_LIVE_PROVIDER_EFFECT_ACTION ||
+      !Number.isSafeInteger(eventSequence) ||
+      eventSequence !== events.length ||
+      eventSequence >= COLIMA_LIVE_PROVIDER_EFFECT_BOUNDS.effect_events ||
+      event.name !== providerEffectEventFileName(slotSequence, eventSequence)
+    ) {
+      fail("provider effect event sequence was refused");
+    }
+    events.push(event);
+    effectEventsBySlot.set(slotSequence, events);
   }
   const mutationCloses = mutationCloseNames.map((name) => ({
     ...parseCanonical(
@@ -3015,6 +3354,7 @@ function validatePlanRunInventorySnapshot(
       slot.value.action === COLIMA_LIVE_PROVIDER_INTENT_ACTION ||
       slot.value.action === COLIMA_LIVE_PROVIDER_START_DECISION_ACTION ||
       slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION ||
+      slot.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION ||
       (slot.value.action === "provider-cleanup" &&
         slot.value.operation_kind ===
           CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND);
@@ -3050,6 +3390,10 @@ function validatePlanRunInventorySnapshot(
     mutationRecoveries: activeMutationRecoveries,
     mutationSlots,
     mutationStages,
+    effectEventsBySlot,
+    providerEffectEvents,
+    providerEffectStage,
+    providerEffectWitness,
     providerReservationStage,
     providerReservationWitness,
     pendingPublication,
@@ -3106,6 +3450,254 @@ function validatePlanRunInventory(
     return { inventory, stateMetadata: snapshot.metadata };
   }
   fail("plan run inventory was repeatedly superseded", 73);
+}
+
+function providerEffectMarkerWitnessIdentitySha256(metadata, slotSha256) {
+  return digest(canonicalBytes({
+    device: String(metadata.dev),
+    inode: String(metadata.ino),
+    mode: modeString(metadata),
+    schema: "synveda.clean-engine.provider-effect-physical-witness.v1",
+    slot_sha256: slotSha256,
+    uid: String(metadata.uid),
+  }));
+}
+
+function providerEffectInitializingStageSha256(stage, slot) {
+  if (
+    stage?.initializing !== true ||
+    slot?.value.action !== COLIMA_LIVE_PROVIDER_EFFECT_ACTION ||
+    stage.slotSequence !== slot.value.journal_sequence
+  ) {
+    fail("initializing provider effect stage was refused", 70);
+  }
+  return digest(canonicalBytes({
+    content_sha256: digest(stage.bytes),
+    device: String(stage.metadata.dev),
+    inode: String(stage.metadata.ino),
+    mode: modeString(stage.metadata),
+    name: stage.name,
+    schema: "synveda.clean-engine.provider-effect-initializing-stage.v1",
+    size: String(stage.metadata.size),
+    slot_sequence: slot.value.journal_sequence,
+    uid: String(stage.metadata.uid),
+  }));
+}
+
+function validateProviderEffectStageEventConsistency(stage, events) {
+  const kinds = events.map((event) => event.value.event_kind);
+  const preEventStages = new Set([
+    "marker-held",
+    "marker-linked",
+    "not-started",
+    "stage-initializing",
+    "stage-only",
+    "stage-retired-before-effect",
+    "witness-linked",
+  ]);
+  if (
+    (preEventStages.has(stage) && events.length !== 0) ||
+    (stage === "authority-held" &&
+      canonical(kinds) !== canonical(["start-authority"])) ||
+    (stage === "attempt-fenced" && !kinds.includes("start-attempt")) ||
+    (stage === "witness-unlinked" &&
+      (kinds.includes("start-attempt") || kinds.includes("completion"))) ||
+    (stage === "completion-retired" && kinds.at(-1) !== "completion")
+  ) {
+    fail("live provider effect recovery event stage was refused");
+  }
+}
+
+function providerEffectCurrentStage(stage, witness, events, previousStage) {
+  if (stage !== undefined && events.length !== 0) {
+    fail("provider effect event preceded witness publication");
+  }
+  if (stage !== undefined && witness !== undefined) return "witness-linked";
+  if (stage !== undefined) {
+    if (stage.initializing === true) return "stage-initializing";
+    return stage.metadata.nlink === 1n ? "stage-only" : "marker-linked";
+  }
+  if (witness !== undefined) {
+    if (events.at(-1)?.value.event_kind === "completion") {
+      if (witness.metadata.nlink !== 1n) {
+        fail("completed provider effect retained its marker");
+      }
+      return "completion-retired";
+    }
+    if (events.some((event) => event.value.event_kind === "start-attempt")) {
+      if (witness.metadata.nlink !== 2n) {
+        fail("provider effect attempt fence lost its marker");
+      }
+      return "attempt-fenced";
+    }
+    if (witness.metadata.nlink === 1n) return "witness-unlinked";
+    if (events.some((event) => event.value.event_kind === "start-authority")) {
+      return "authority-held";
+    }
+    return "marker-held";
+  }
+  if (events.length !== 0) {
+    fail("provider effect event lacked its witness");
+  }
+  return previousStage === "stage-initializing" ||
+    previousStage === "stage-only" ||
+    previousStage === "stage-retired-before-effect"
+    ? "stage-retired-before-effect"
+    : "not-started";
+}
+
+function providerEffectEventPrefixCount(events, headSha256, witnessSha256) {
+  if (headSha256 === ZERO_SHA256 || headSha256 === witnessSha256) return 0;
+  const index = events.findIndex((event) => digest(event.bytes) === headSha256);
+  if (index === -1) {
+    fail("live provider effect recovery event frontier was refused");
+  }
+  return index + 1;
+}
+
+function providerEffectPublisherAuthorityChain(
+  events,
+  recoveries,
+  witness,
+  { includePending = false } = {},
+) {
+  const witnessSha256 = digest(witness.bytes);
+  const authorities = [{
+    authority_sha256: witness.value.slot_sha256,
+    first_event_sequence: 0,
+    kind: "owner-slot",
+    prior_authority_sha256: ZERO_SHA256,
+    recovery_claim_sha256: ZERO_SHA256,
+  }];
+  for (const recovery of recoveries) {
+    const firstEventSequence = providerEffectEventPrefixCount(
+      events,
+      recovery.value.observed_evidence_head_sha256,
+      witnessSha256,
+    );
+    if (
+      firstEventSequence > events.length ||
+      (!includePending && firstEventSequence === events.length)
+    ) {
+      continue;
+    }
+    const authoritySha256 = digest(recovery.bytes);
+    authorities.push({
+      authority_sha256: authoritySha256,
+      first_event_sequence: firstEventSequence,
+      kind: "state-recovery-claim",
+      prior_authority_sha256: authorities.at(-1).authority_sha256,
+      recovery_claim_sha256: authoritySha256,
+    });
+  }
+  return authorities;
+}
+
+function validateLiveProviderEffectRecoveryHistory(
+  effectState,
+  recoveries,
+) {
+  const { events, slot, stage, witness } = effectState;
+  const witnessSha256 =
+    witness !== undefined
+      ? digest(witness.bytes)
+      : stage?.initializing === true
+        ? providerEffectInitializingStageSha256(stage, slot)
+        : stage !== undefined
+          ? digest(stage.bytes)
+          : ZERO_SHA256;
+  let previousStage;
+  let previousEventCount = 0;
+  let historicalWitnessSha256 = witnessSha256;
+  for (const recovery of recoveries) {
+    const recoveryStage = recovery.value.observed_evidence_stage;
+    const descriptor = PROVIDER_EFFECT_RECOVERY_STAGES[recoveryStage];
+    if (descriptor === undefined) {
+      fail("live provider effect recovery history was refused");
+    }
+    if (
+      recoveryStage !== "not-started" &&
+      recovery.value.observed_evidence_head_sha256 === ZERO_SHA256
+    ) {
+      fail("live provider effect recovery history was refused");
+    }
+    if (
+      historicalWitnessSha256 === ZERO_SHA256 &&
+      recoveryStage !== "not-started"
+    ) {
+      historicalWitnessSha256 =
+        recovery.value.observed_evidence_head_sha256;
+    }
+    const eventCount = providerEffectEventPrefixCount(
+      events,
+      recovery.value.observed_evidence_head_sha256,
+      historicalWitnessSha256,
+    );
+    const markerPresent = new Set([
+      "attempt-fenced",
+      "authority-held",
+      "marker-held",
+      "marker-linked",
+      "witness-linked",
+    ]).has(recoveryStage);
+    validateProviderEffectStageEventConsistency(
+      recoveryStage,
+      events.slice(0, eventCount),
+    );
+    const expectedTopologySha256 =
+      recoveryStage === "not-started"
+        ? ZERO_SHA256
+        : effectRecoveryTopologySha256({
+            eventCount,
+            eventHeadSha256:
+              eventCount === 0
+                ? ZERO_SHA256
+                : digest(events[eventCount - 1].bytes),
+            evidenceStage: recoveryStage,
+            localLinks: descriptor.links,
+            markerPresent,
+            slotSequence: recovery.value.slot_sequence,
+            witnessSha256: historicalWitnessSha256,
+          });
+    if (
+      eventCount < previousEventCount ||
+      (previousStage === undefined &&
+        recoveryStage === "stage-retired-before-effect") ||
+      (previousStage !== undefined &&
+        !liveProviderEffectRecoveryStageReachable(
+          previousStage,
+          recoveryStage,
+        )) ||
+      recovery.value.observed_evidence_prefix_sha256 !==
+        expectedTopologySha256 ||
+      recovery.value.observed_residual_sha256 !== expectedTopologySha256 ||
+      (eventCount === 0
+        ? recoveryStage === "not-started"
+          ? recovery.value.observed_evidence_head_sha256 !== ZERO_SHA256
+          : recovery.value.observed_evidence_head_sha256 !==
+            historicalWitnessSha256
+        : recovery.value.observed_evidence_head_sha256 !==
+          digest(events[eventCount - 1].bytes))
+    ) {
+      fail("live provider effect recovery history was refused");
+    }
+    previousStage = recoveryStage;
+    previousEventCount = eventCount;
+  }
+  const currentStage = providerEffectCurrentStage(
+    stage,
+    witness,
+    events,
+    previousStage,
+  );
+  validateProviderEffectStageEventConsistency(currentStage, events);
+  if (
+    previousStage !== undefined &&
+    !liveProviderEffectRecoveryStageReachable(previousStage, currentStage)
+  ) {
+    fail("live provider effect recovery topology regressed");
+  }
+  return currentStage;
 }
 
 function loadState(
@@ -3262,8 +3854,20 @@ function loadState(
     const resultReceipt = receipts[close.value.result_sequence];
     const resultDelta = close.value.result_sequence - lease.source_sequence;
     const boundOperation = inventory.operationsBySlot.get(sequence);
+    const effectEvents = inventory.effectEventsBySlot.get(sequence) ?? [];
+    const effectCompletion =
+      effectEvents.at(-1)?.value.event_kind === "completion"
+        ? effectEvents.at(-1)
+        : undefined;
+    const effectTerminalReceipt = effectEvents.find(
+      (event) => event.value.event_kind === "terminal-receipt",
+    );
     const expectedOperationEvidenceSha256 =
-      boundOperation === undefined ? ZERO_SHA256 : digest(boundOperation.bytes);
+      boundOperation !== undefined
+        ? digest(boundOperation.bytes)
+        : effectCompletion === undefined
+          ? ZERO_SHA256
+          : digest(effectCompletion.bytes);
     const slotRecoveries = inventory.allMutationRecoveries.filter(
       (recovery) => recovery.value.slot_sequence === sequence,
     );
@@ -3320,6 +3924,18 @@ function loadState(
         ]).has(lease.action) &&
         resultDelta !== 0) ||
       (close.value.disposition === "completed" &&
+        lease.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+        (effectCompletion === undefined ||
+          (effectCompletion.value.evidence?.variant ===
+          "pre-attempt-retired-zero-receipt"
+            ? resultDelta !== 0
+            : effectTerminalReceipt === undefined ||
+              resultDelta !== 1 ||
+              resultReceipt.phase !== "provider-effect-retired" ||
+              !canonicalBytes(resultReceipt).equals(
+                canonicalBytes(effectTerminalReceipt.value.evidence.receipt),
+              )))) ||
+      (close.value.disposition === "completed" &&
         !controlledCleanup &&
         new Set(["append-receipt", "provider-cleanup"]).has(lease.action) &&
         (resultDelta > 2 ||
@@ -3363,6 +3979,9 @@ function loadState(
   if (inventory.mutationLease !== undefined) {
     const lease = inventory.mutationLease.value;
     const delta = receiptState.head.sequence - lease.source_sequence;
+    const openEffectTerminalReceipt = (
+      inventory.effectEventsBySlot.get(lease.journal_sequence) ?? []
+    ).find((event) => event.value.event_kind === "terminal-receipt");
     const controlledCleanup =
       lease.action === "provider-cleanup" &&
       lease.operation_kind === CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND;
@@ -3402,6 +4021,17 @@ function loadState(
         COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
       ]).has(lease.action) &&
         delta !== 0)
+      ||
+      (lease.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+        (delta > 1 ||
+          (delta === 1 &&
+            (receiptState.head.phase !== "provider-effect-retired" ||
+              openEffectTerminalReceipt === undefined ||
+              !canonicalBytes(receiptState.head).equals(
+                canonicalBytes(
+                  openEffectTerminalReceipt.value.evidence.receipt,
+                ),
+              )))))
     ) {
       fail("open mutation slot did not cover the receipt head");
     }
@@ -3422,6 +4052,9 @@ function loadState(
     let requiredAction;
     if (receipt.phase.startsWith("provider-create-")) requiredAction = "provider-create";
     if (receipt.phase.startsWith("provider-cleanup-")) requiredAction = "provider-cleanup";
+    if (receipt.phase === "provider-effect-retired") {
+      requiredAction = COLIMA_LIVE_PROVIDER_EFFECT_ACTION;
+    }
     if (receipt.phase === "finalize-passed") requiredAction = "finalize-environment";
     if (requiredAction === undefined && receipt.phase !== "preflight-refused") continue;
     const owner = inventory.mutationSlots.find((slot) => {
@@ -3504,6 +4137,7 @@ function loadState(
               COLIMA_LIVE_PROVIDER_INTENT_ACTION,
               COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
               COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+              COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
             ]).has(slot.value.action),
         )
     ) {
@@ -3618,6 +4252,7 @@ function loadState(
             !new Set([
               COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
               COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+              COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
             ]).has(slot.value.action),
         ) ||
       liveProviderStartDecisionSlots.some(
@@ -3701,7 +4336,10 @@ function loadState(
         )
         .some(
           (slot) =>
-            slot.value.action !== COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+            !new Set([
+              COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+              COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
+            ]).has(slot.value.action),
         ))
   ) {
     fail("live provider start decision journal was ambiguous");
@@ -3988,6 +4626,215 @@ function loadState(
     reservationState?.fixtureOnly === false ? reservationState : undefined;
   const liveProviderFixtureReservation =
     reservationState?.fixtureOnly === true ? reservationState : undefined;
+  const liveProviderEffectSlots = inventory.mutationSlots.filter(
+    (slot) => slot.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
+  );
+  if (
+    liveProviderEffectSlots.length > 0 &&
+    completedLiveProviderStartDecision === undefined
+  ) {
+    fail("live provider effect lacked a completed start decision");
+  }
+  if (
+    liveProviderEffectSlots.length > 0 &&
+    liveProviderReservationSlots.length > 0
+  ) {
+    fail("live provider reservation and effect branches were mixed");
+  }
+  let liveProviderFixtureEffect;
+  for (const [index, slot] of liveProviderEffectSlots.entries()) {
+    const fixtureOnly = liveProviderEffectFixtureOnly(
+      slot.value.operation_kind,
+      slot.value.operation_contract_sha256,
+    );
+    if (
+      fixtureOnly !== true ||
+      completedLiveProviderStartDecision.fixtureOnly !== true
+    ) {
+      fail("live provider effect production persistence was refused");
+    }
+    const publicationPlan =
+      validateLiveProviderEffectPublicationPlanForState(
+        slot.value.operation_plan,
+        reservationSource,
+      );
+    const sequence = slot.value.journal_sequence;
+    const close = mutationClosesBySlot.get(sequence);
+    const recoveries = inventory.allMutationRecoveries.filter(
+      (recovery) => recovery.value.slot_sequence === sequence,
+    );
+    const stage =
+      inventory.providerEffectStage?.slotSequence === sequence
+        ? inventory.providerEffectStage
+        : undefined;
+    const witness =
+      inventory.providerEffectWitness?.value.slot_sequence === sequence
+        ? inventory.providerEffectWitness
+        : undefined;
+    const events = inventory.effectEventsBySlot.get(sequence) ?? [];
+    if (
+      sequence <=
+        completedLiveProviderStartDecision.slot.value.journal_sequence ||
+      slot.value.source_sequence !== 0 ||
+      slot.value.source_head_sha256 !== digest(plan.bytes) ||
+      slot.value.source_environment_sha256 !== ZERO_SHA256 ||
+      slot.value.intent_receipt_sha256 !== ZERO_SHA256 ||
+      liveProviderEffectSlots
+        .slice(0, index)
+        .some(
+          (predecessor) =>
+            mutationClosesBySlot.get(
+              predecessor.value.journal_sequence,
+            )?.value.disposition !== "aborted-before-effect",
+        )
+    ) {
+      fail("live provider effect journal was refused");
+    }
+    const artifacts = [stage, witness].filter(
+      (artifact) => artifact !== undefined && artifact.initializing !== true,
+    );
+    for (const artifact of artifacts) {
+      try {
+        validateColimaLiveProviderEffectWitness(artifact.value, {
+          publicationPlan,
+          source: reservationSource,
+        });
+      } catch (error) {
+        if (error instanceof LiveProviderEffectFailure) {
+          fail(error.message, error.exitStatus);
+        }
+        throw error;
+      }
+      if (
+        artifact.value.slot_sequence !== sequence ||
+        artifact.value.slot_sha256 !== digest(slot.bytes) ||
+        artifact.value.marker_witness_identity_sha256 !==
+        providerEffectMarkerWitnessIdentitySha256(
+          artifact.metadata,
+          digest(slot.bytes),
+        )
+      ) {
+        fail("live provider effect physical witness was refused");
+      }
+    }
+    if (events.length > 0 && witness === undefined) {
+      fail("live provider effect history lacked its witness");
+    }
+    let publisherAuthorityChain = [];
+    if (witness !== undefined) {
+      publisherAuthorityChain = providerEffectPublisherAuthorityChain(
+        events,
+        recoveries,
+        witness,
+      );
+      try {
+        validateColimaLiveProviderEffectEventHistory(
+          events.map((event) => event.value),
+          {
+            publicationPlan,
+            publisherAuthorityChain,
+            source: reservationSource,
+            witness: witness.value,
+          },
+        );
+      } catch (error) {
+        if (error instanceof LiveProviderEffectFailure) {
+          fail(error.message, error.exitStatus);
+        }
+        throw error;
+      }
+      const authorityEvent = events.find(
+        (event) => event.value.event_kind === "start-authority",
+      );
+      if (
+        authorityEvent !== undefined &&
+        (authorityEvent.value.publisher_authority_sha256 !==
+          digest(slot.bytes) ||
+          authorityEvent.value.evidence.current_owner_boot_sha256 !==
+            slot.value.owner_boot_sha256 ||
+          authorityEvent.value.evidence.current_owner_instance_sha256 !==
+            slot.value.owner_instance_sha256)
+      ) {
+        fail("live provider effect owner start authority was refused");
+      }
+    }
+    const effectState = {
+      close,
+      events,
+      fixtureOnly,
+      publicationPlan,
+      publisherAuthorityChain,
+      recoveries,
+      slot,
+      source: reservationSource,
+      stage,
+      witness,
+    };
+    const currentStage = validateLiveProviderEffectRecoveryHistory(
+      effectState,
+      recoveries,
+    );
+    const completion =
+      events.at(-1)?.value.event_kind === "completion"
+        ? events.at(-1)
+        : undefined;
+    if (
+      close?.value.disposition === "aborted-before-effect" &&
+      (!new Set(["not-started", "stage-retired-before-effect"]).has(
+        currentStage,
+      ) ||
+        stage !== undefined ||
+        witness !== undefined ||
+        events.length !== 0 ||
+        close.value.operation_evidence_sha256 !== ZERO_SHA256)
+    ) {
+      fail("live provider effect could not be aborted");
+    }
+    if (
+      close?.value.disposition === "completed" &&
+      (currentStage !== "completion-retired" ||
+        completion === undefined ||
+        witness?.metadata.nlink !== 1n ||
+        close.value.operation_evidence_sha256 !== digest(completion.bytes))
+    ) {
+      fail("live provider effect completion was refused");
+    }
+    liveProviderFixtureEffect = Object.freeze({
+      ...effectState,
+      completion,
+      currentStage,
+    });
+  }
+  if (
+    inventory.providerEffectStage !== undefined &&
+    liveProviderFixtureEffect?.stage === undefined
+  ) {
+    fail("provider effect stage was outside the current generation");
+  }
+  if (
+    inventory.providerEffectWitness !== undefined &&
+    liveProviderFixtureEffect?.witness === undefined
+  ) {
+    fail("provider effect witness was outside the current generation");
+  }
+  if (
+    inventory.providerEffectEvents.length > 0 &&
+    liveProviderFixtureEffect?.events.length === 0
+  ) {
+    fail("provider effect events were outside the current generation");
+  }
+  const completedLiveProviderEffects = liveProviderEffectSlots.filter(
+    (slot) =>
+      mutationClosesBySlot.get(slot.value.journal_sequence)?.value.disposition ===
+      "completed",
+  );
+  if (
+    completedLiveProviderEffects.length > 1 ||
+    (completedLiveProviderEffects.length === 1 &&
+      completedLiveProviderEffects[0] !== inventory.mutationSlots.at(-1))
+  ) {
+    fail("live provider effect journal was ambiguous");
+  }
   const providerSlots = inventory.mutationSlots.filter(
     (slot) => slot.value.action === "provider-create",
   );
@@ -4038,7 +4885,9 @@ function loadState(
     }
     providerState = Object.freeze({
       contract:
-        liveProviderReservation !== undefined
+        liveProviderFixtureEffect !== undefined
+          ? "live-provider-fixture-effect-only"
+          : liveProviderReservation !== undefined
           ? "live-provider-reservation-only"
           : liveProviderFixtureReservation !== undefined
             ? "live-provider-fixture-reservation-only"
@@ -4053,7 +4902,10 @@ function loadState(
                 : liveProviderPlan === undefined
                   ? "synchronous-fake"
                   : "live-provider-plan-only",
-      operationEvidenceSha256: ZERO_SHA256,
+      operationEvidenceSha256:
+        liveProviderFixtureEffect?.completion === undefined
+          ? ZERO_SHA256
+          : digest(liveProviderFixtureEffect.completion.bytes),
     });
   } else if (providerSlot.value.operation_kind === DETERMINISTIC_PROVIDER_OPERATION_KIND) {
     if (providerEntries.length !== 0 || inventory.mutationOperations.length !== 0) {
@@ -4720,6 +5572,7 @@ function loadState(
     environment,
     environmentPublication: inventory.environmentPublication,
     liveProviderFixtureIntent,
+    liveProviderFixtureEffect,
     liveProviderFixtureReservation,
     liveProviderFixtureStartDecision,
     liveProviderIntent,
@@ -4737,6 +5590,9 @@ function loadState(
     mutationRecoveries: inventory.mutationRecoveries,
     mutationSlots: inventory.mutationSlots,
     mutationStages: inventory.mutationStages,
+    providerEffectEvents: inventory.providerEffectEvents,
+    providerEffectStage: inventory.providerEffectStage,
+    providerEffectWitness: inventory.providerEffectWitness,
     providerReservationStage: inventory.providerReservationStage,
     providerReservationWitness: inventory.providerReservationWitness,
     pendingPublication: inventory.pendingPublication,
@@ -4827,7 +5683,7 @@ function plan(roots, values) {
         state_device: String(stateMetadata.dev),
         state_inode: String(stateMetadata.ino),
       },
-      schema: "synveda.clean-engine.receipt.v5",
+      schema: "synveda.clean-engine.receipt.v6",
       sequence: 0,
     };
     writeExclusive(join(pending, "00-plan.json"), canonicalBytes(receipt));
@@ -5278,6 +6134,7 @@ function acquireMutationLease(
       COLIMA_LIVE_PROVIDER_INTENT_ACTION,
       COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
       COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+      COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
     ]).has(action)
   ) {
     fail("live provider execution remains disabled after state planning", 73);
@@ -5303,11 +6160,26 @@ function acquireMutationLease(
     action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION &&
     ((initial.liveProviderStartDecision === undefined) ===
       (initial.liveProviderFixtureStartDecision === undefined) ||
+      initial.mutationSlots.some(
+        (slot) => slot.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
+      ) ||
       initial.liveProviderReservation?.close?.value.disposition === "completed" ||
       initial.liveProviderFixtureReservation?.close?.value.disposition ===
         "completed")
   ) {
     fail("live provider reservation state was refused", 73);
+  }
+  if (
+    action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+    (initial.liveProviderFixtureStartDecision === undefined ||
+      initial.liveProviderStartDecision !== undefined ||
+      initial.mutationSlots.some(
+        (slot) => slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+      ) ||
+      initial.liveProviderFixtureEffect?.close?.value.disposition ===
+        "completed")
+  ) {
+    fail("live provider effect state was refused", 73);
   }
   if (initial.mutationRecoveries.length > 0) {
     fail("a clean-engine mutation recovery is active or abandoned", 73);
@@ -5327,6 +6199,7 @@ function acquireMutationLease(
     COLIMA_LIVE_PROVIDER_INTENT_ACTION,
     COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
     COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+    COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
     LIVE_PROVIDER_PLAN_ACTION,
   ]).has(action)) {
     fail("mutation action was refused", 70);
@@ -5362,6 +6235,15 @@ function acquireMutationLease(
     ) !== (initial.liveProviderFixtureStartDecision !== undefined)
   ) {
     fail("live provider reservation evidence class differed", 73);
+  }
+  if (
+    action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+    liveProviderEffectFixtureOnly(
+      operation.kind,
+      operation.contractSha256,
+    ) !== true
+  ) {
+    fail("live provider effect production persistence was refused", 73);
   }
   const journalSequence = initial.mutationSlots.length;
   if (journalSequence >= MAX_MUTATION_SLOTS) {
@@ -5484,6 +6366,10 @@ function operationSettlementForSlot(state, slot) {
 }
 
 function operationEvidenceForSlot(state, slot) {
+  if (slot?.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION) {
+    const completion = state.liveProviderFixtureEffect?.completion;
+    return completion === undefined ? ZERO_SHA256 : digest(completion.bytes);
+  }
   const settlement = operationSettlementForSlot(state, slot);
   return settlement === undefined ? ZERO_SHA256 : digest(settlement.bytes);
 }
@@ -5552,6 +6438,29 @@ function publishMutationClose(
   ) {
     fail("live provider reservation completion was refused", 73);
   }
+  if (
+    slot.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+    disposition === "aborted-before-effect" &&
+    (state.providerEffectStage !== undefined ||
+      state.providerEffectWitness !== undefined ||
+      state.providerEffectEvents.length !== 0 ||
+      operationEvidenceSha256 !== ZERO_SHA256)
+  ) {
+    fail("live provider effect close disposition was refused", 73);
+  }
+  if (
+    slot.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+    disposition === "completed" &&
+    (state.liveProviderFixtureEffect?.currentStage !==
+      "completion-retired" ||
+      state.providerEffectStage !== undefined ||
+      state.providerEffectWitness?.metadata.nlink !== 1n ||
+      state.liveProviderFixtureEffect.completion === undefined ||
+      operationEvidenceSha256 !==
+        digest(state.liveProviderFixtureEffect.completion.bytes))
+  ) {
+    fail("live provider effect completion was refused", 73);
+  }
   const result = state.receiptState;
   if (
     slot.value.operation_kind === CONTROLLED_BACKGROUND_OPERATION_KIND &&
@@ -5584,6 +6493,19 @@ function publishMutationClose(
       operationEvidenceSha256 === ZERO_SHA256)
   ) {
     fail("live provider reservation close disposition was refused", 70);
+  }
+  if (
+    disposition === "completed" &&
+    slot.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+    (result.head.sequence - slot.value.source_sequence !==
+      (state.liveProviderFixtureEffect.completion.value.evidence.variant ===
+      "pre-attempt-retired-zero-receipt"
+        ? 0
+        : 1) ||
+      resultEnvironmentSha256 !== slot.value.source_environment_sha256 ||
+      operationEvidenceSha256 === ZERO_SHA256)
+  ) {
+    fail("live provider effect close disposition was refused", 70);
   }
   if (
     disposition === "aborted-before-effect" &&
@@ -5679,7 +6601,19 @@ function publishMutationClose(
         close.disposition === "aborted-before-effect" &&
         (current.providerReservationStage !== undefined ||
           current.providerReservationWitness !== undefined ||
-          operationSettlementForSlot(current, slot) !== undefined))
+          operationSettlementForSlot(current, slot) !== undefined)) ||
+      (slot.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+        close.disposition === "completed" &&
+        (current.liveProviderFixtureEffect?.currentStage !==
+          "completion-retired" ||
+          current.providerEffectStage !== undefined ||
+          current.providerEffectWitness?.metadata.nlink !== 1n ||
+          current.liveProviderFixtureEffect.completion === undefined)) ||
+      (slot.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+        close.disposition === "aborted-before-effect" &&
+        (current.providerEffectStage !== undefined ||
+          current.providerEffectWitness !== undefined ||
+          current.providerEffectEvents.length !== 0))
     ) {
       fail("mutation close authority changed", 73);
     }
@@ -7667,6 +8601,1395 @@ export function observeColimaLiveProviderStartEffectFreshAdmissionForTest(
       fixtureOnly: true,
       testCheckpoint: admittedArguments.testCheckpoint,
     },
+  );
+}
+
+function callLiveProviderEffectCheckpoint(testCheckpoint, name) {
+  if (
+    testCheckpoint !== undefined &&
+    testCheckpoint(name) !== undefined
+  ) {
+    fail("live provider effect checkpoint returned a value", 70);
+  }
+}
+
+function completedLiveProviderStartDecisionEffectSnapshot(state) {
+  const completed = state.liveProviderFixtureStartDecision;
+  if (
+    completed === undefined ||
+    state.liveProviderStartDecision !== undefined ||
+    state.mutationSlots.some(
+      (slot) => slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+    )
+  ) {
+    fail("fixture provider effect start decision was unavailable", 69);
+  }
+  const decisionSequence = completed.slot.value.journal_sequence;
+  const closes = new Map(
+    state.mutationCloses.map((close) => [close.value.slot_sequence, close]),
+  );
+  const effectTail = state.mutationSlots.slice(decisionSequence + 1);
+  if (
+    effectTail.some(
+      (slot) =>
+        slot.value.action !== COLIMA_LIVE_PROVIDER_EFFECT_ACTION ||
+        liveProviderEffectFixtureOnly(
+          slot.value.operation_kind,
+          slot.value.operation_contract_sha256,
+        ) !== true ||
+        closes.get(slot.value.journal_sequence)?.value.disposition !==
+          "aborted-before-effect",
+    ) ||
+    state.mutationLease !== undefined ||
+    state.mutationRecoveries.length !== 0 ||
+    state.mutationStages.length !== 0 ||
+    state.providerEffectStage !== undefined ||
+    state.providerEffectWitness !== undefined ||
+    state.providerEffectEvents.length !== 0 ||
+    state.mutationOperations.length !== 0
+  ) {
+    fail("fixture provider effect start decision was unavailable", 69);
+  }
+  const historicalState = {
+    ...state,
+    liveProviderFixtureEffect: undefined,
+    mutationCloses: state.mutationCloses.filter(
+      (close) => close.value.slot_sequence <= decisionSequence,
+    ),
+    mutationSlots: state.mutationSlots.slice(0, decisionSequence + 1),
+    providerState: Object.freeze({
+      contract: "live-provider-fixture-start-decision-only",
+      operationEvidenceSha256: ZERO_SHA256,
+    }),
+  };
+  return completedLiveProviderStartDecisionCoreSnapshot(
+    historicalState,
+    true,
+  );
+}
+
+function availableLiveProviderEffectStartDecisionSnapshot(
+  state,
+  publicationPlan,
+  ownStage,
+) {
+  if (
+    state.mutationStages.some(
+      (stage) => stage.linkedDestination !== undefined,
+    )
+  ) {
+    fail("fixture provider effect slot stage was refused", 73);
+  }
+  if (ownStage === undefined) {
+    if (state.mutationStages.length !== 0) {
+      fail("fixture provider effect slot stage was refused", 73);
+    }
+  } else {
+    const stage = state.mutationStages.find(
+      (candidate) => candidate.path === ownStage.stagePath,
+    );
+    if (
+      stage === undefined ||
+      stage.name !== ownStage.stagePath.split(sep).at(-1) ||
+      !sameMetadata(stage.metadata, ownStage.identity)
+    ) {
+      fail("fixture provider effect slot stage changed", 73);
+    }
+    const staged = parseCanonical(
+      ownStage.stagePath,
+      "prospective fixture provider effect slot",
+      1,
+    );
+    validateMutationLeaseValue(staged.value, state.candidate.run_id);
+    const previousClose = state.mutationCloses.at(-1);
+    if (
+      ownStage.destinationName !==
+        mutationSlotFileName(state.mutationSlots.length) ||
+      staged.value.action !== COLIMA_LIVE_PROVIDER_EFFECT_ACTION ||
+      staged.value.journal_sequence !== state.mutationSlots.length ||
+      staged.value.source_sequence !== 0 ||
+      staged.value.source_head_sha256 !== state.receiptState.head_sha256 ||
+      staged.value.source_environment_sha256 !== ZERO_SHA256 ||
+      staged.value.intent_receipt_sha256 !== ZERO_SHA256 ||
+      staged.value.previous_close_sha256 !== digest(previousClose.bytes) ||
+      staged.value.operation_kind !== publicationPlan.operation_kind ||
+      staged.value.operation_contract_sha256 !==
+        publicationPlan.operation_contract_sha256 ||
+      !liveProviderEffectBytes(staged.value.operation_plan).equals(
+        liveProviderEffectBytes(publicationPlan),
+      ) ||
+      mutationOwnerState(staged.value) !== "current"
+    ) {
+      fail("prospective fixture provider effect slot was refused", 73);
+    }
+  }
+  return completedLiveProviderStartDecisionEffectSnapshot({
+    ...state,
+    mutationStages: [],
+  });
+}
+
+function effectCommitment(seed, label) {
+  return liveProviderEffectDigest(
+    liveProviderEffectBytes({
+      domain: "synveda-cpr45-state-owned-fixture-effect-v1",
+      label,
+      seed,
+    }),
+  );
+}
+
+function buildLiveProviderEffectPublicationPlanForState(
+  admission,
+  observed,
+  snapshot,
+) {
+  const seed = liveProviderEffectDigest(liveProviderEffectBytes({
+    admission_sha256: liveProviderEffectDigest(
+      liveProviderEffectBytes(admission),
+    ),
+    fixture_id: snapshot.operationPlan.fixture_id,
+    provider_root_identity: observed.provider_root_identity,
+    state_run_identity: observed.state_run_identity,
+  }));
+  const invocationBinding = Object.freeze({
+    argv_sha256: effectCommitment(seed, "fixed-fixture-argv"),
+    cwd_identity_sha256: effectCommitment(seed, "fixed-fixture-cwd"),
+    environment_sha256: effectCommitment(seed, "fixed-fixture-environment"),
+    executable_sha256: effectCommitment(seed, "fixed-fixture-executable"),
+    toolchain_sha256: effectCommitment(seed, "fixed-fixture-toolchain"),
+  });
+  const plannedRoleContracts = COLIMA_LIVE_PROVIDER_EFFECT_ROLES.map(
+    (role) => ({
+      argv_sha256:
+        role === "outer"
+          ? invocationBinding.argv_sha256
+          : effectCommitment(seed, `${role}-argv`),
+      cwd_identity_sha256:
+        role === "outer"
+          ? invocationBinding.cwd_identity_sha256
+          : effectCommitment(seed, `${role}-cwd`),
+      depth: role === "outer" ? 0 : role === "hostagent" ? 1 : 2,
+      environment_sha256:
+        role === "outer"
+          ? invocationBinding.environment_sha256
+          : effectCommitment(seed, `${role}-environment`),
+      executable_sha256:
+        role === "outer"
+          ? invocationBinding.executable_sha256
+          : effectCommitment(seed, `${role}-executable`),
+      parent_role:
+        role === "outer"
+          ? "state-owner"
+          : role === "hostagent"
+            ? "outer"
+            : "hostagent",
+      public_key_spki_sha256: effectCommitment(seed, `${role}-public-key`),
+      role,
+      role_challenge_sha256: effectCommitment(seed, `${role}-challenge`),
+      toolchain_sha256:
+        role === "outer"
+          ? invocationBinding.toolchain_sha256
+          : effectCommitment(seed, `${role}-toolchain`),
+      uid: observed.provider_root_identity.uid,
+    }),
+  );
+  const endpointRoles = Object.freeze({
+    "engine-api": "hostagent",
+    "hostagent-control": "hostagent",
+    "ssh-control": "ssh-controlmaster",
+    "usernet-control": "usernet",
+  });
+  const endpointNamespaces = Object.freeze({
+    "engine-api": "colima-home-namespace",
+    "hostagent-control": "lima-home-namespace",
+    "ssh-control": "temporary-namespace",
+    "usernet-control": "lima-home-namespace",
+  });
+  const plannedEndpointContracts = COLIMA_LIVE_PROVIDER_EFFECT_ENDPOINTS.map(
+    (endpointKind) => ({
+      docker_context_namespace_role:
+        endpointKind === "engine-api" ? "docker-config-namespace" : "none",
+      docker_context_path_identity_hmac_sha256:
+        endpointKind === "engine-api"
+          ? effectCommitment(seed, "engine-api-docker-context-path")
+          : ZERO_SHA256,
+      docker_context_sha256:
+        endpointKind === "engine-api"
+          ? effectCommitment(seed, "engine-api-docker-context")
+          : ZERO_SHA256,
+      endpoint_kind: endpointKind,
+      final_challenge_commitment_sha256: effectCommitment(
+        seed,
+        `${endpointKind}-final-challenge`,
+      ),
+      initial_challenge_commitment_sha256: effectCommitment(
+        seed,
+        `${endpointKind}-initial-challenge`,
+      ),
+      namespace_role: endpointNamespaces[endpointKind],
+      path_identity_hmac_sha256: effectCommitment(
+        seed,
+        `${endpointKind}-path`,
+      ),
+      role: endpointRoles[endpointKind],
+    }),
+  );
+  try {
+    return buildColimaLiveProviderEffectPublicationPlan({
+      admission,
+      invocationBinding,
+      namespaceBindings: observed.namespace_bindings.map((binding) => ({
+        device: binding.device,
+        inode: binding.inode,
+        mode: binding.mode,
+        role: binding.role,
+        uid: binding.uid,
+      })),
+      plannedEndpointContracts,
+      plannedQuiescenceFenceSha256: effectCommitment(
+        seed,
+        "quiescence-fence",
+      ),
+      plannedRoleContracts,
+      plannedStartAttemptSha256: effectCommitment(seed, "start-attempt"),
+      providerRootIdentity: observed.provider_root_identity,
+      source: snapshot.source,
+      stateRunIdentity: observed.state_run_identity,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderEffectFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function fixtureEffectArguments(argumentsValue) {
+  const admitted = admissionArguments(argumentsValue, [
+    "requirements",
+    "testCheckpoint",
+  ]);
+  if (
+    admitted.requirements === null ||
+    Array.isArray(admitted.requirements) ||
+    typeof admitted.requirements !== "object" ||
+    typeof admitted.testCheckpoint !== "function"
+  ) {
+    fail("fixture provider effect arguments were refused", 64);
+  }
+  return admitted;
+}
+
+function observeLiveProviderEffectPhysicalRoots(
+  argumentsValue,
+  state,
+  source,
+  publicationPlan,
+  markerDisposition,
+) {
+  const observed = observeLiveProviderReservationPhysicalRoots(
+    argumentsValue,
+    state,
+    source,
+    undefined,
+    true,
+    markerDisposition,
+    undefined,
+  );
+  if (publicationPlan === undefined) return observed;
+  const physicalNamespaces = publicationPlan.namespace_bindings.map(
+    (binding) => ({
+      device: binding.device,
+      inode: binding.inode,
+      mode: binding.mode,
+      namespace_identity_hmac_sha256:
+        binding.namespace_identity_hmac_sha256,
+      observed_entry_set_hmac_sha256:
+        binding.observed_entry_set_hmac_sha256,
+      role: binding.role,
+      uid: binding.uid,
+    }),
+  );
+  if (
+    observed.marker_disposition !== markerDisposition ||
+    !liveProviderEffectBytes(observed.root_observation).equals(
+      liveProviderEffectBytes(publicationPlan.admission.root_observation),
+    ) ||
+    !liveProviderEffectBytes(observed.provider_root_identity).equals(
+      liveProviderEffectBytes(publicationPlan.provider_root_identity),
+    ) ||
+    !liveProviderEffectBytes(observed.state_run_identity).equals(
+      liveProviderEffectBytes(publicationPlan.state_run_identity),
+    ) ||
+    !liveProviderEffectBytes(observed.namespace_bindings).equals(
+      liveProviderEffectBytes(physicalNamespaces),
+    )
+  ) {
+    fail("fixture provider effect root observation changed", 73);
+  }
+  return observed;
+}
+
+function assertLiveProviderEffectOpenState(state, publicationPlan) {
+  const effect = state.liveProviderFixtureEffect;
+  if (
+    effect === undefined ||
+    effect.close !== undefined ||
+    state.mutationLease === undefined ||
+    !state.mutationLease.bytes.equals(effect.slot.bytes) ||
+    !liveProviderEffectBytes(effect.publicationPlan).equals(
+      liveProviderEffectBytes(publicationPlan),
+    ) ||
+    state.receiptState.head.sequence !== effect.slot.value.source_sequence ||
+    state.receiptState.head_sha256 !== effect.slot.value.source_head_sha256 ||
+    state.environment !== undefined ||
+    state.pendingPublication !== undefined ||
+    state.environmentPublication !== undefined ||
+    state.mutationOperations.length !== 0 ||
+    state.providerState.contract !== "live-provider-fixture-effect-only" ||
+    state.cleanupState.contract !== "journal-only"
+  ) {
+    fail("fixture provider effect state changed", 73);
+  }
+  return effect;
+}
+
+function assertLiveProviderEffectBoundDirectories(
+  state,
+  publicationPlan,
+  argumentsValue,
+) {
+  const runMetadata = reservationDirectoryIdentity(
+    state.run,
+    publicationPlan.state_run_identity,
+    "fixture provider effect state run",
+  );
+  const providerRootMetadata = reservationDirectoryIdentity(
+    argumentsValue.observationInput.provider_root,
+    publicationPlan.provider_root_identity,
+    "fixture provider effect provider root",
+  );
+  if (runMetadata.dev !== providerRootMetadata.dev) {
+    fail("fixture provider effect filesystem changed", 73);
+  }
+  return Object.freeze({ providerRootMetadata, runMetadata });
+}
+
+function assertLiveProviderEffectMarkerAbsent(
+  state,
+  publicationPlan,
+  argumentsValue,
+) {
+  assertLiveProviderEffectBoundDirectories(
+    state,
+    publicationPlan,
+    argumentsValue,
+  );
+  if (
+    !liveProviderReservationMarkerIsAbsent(
+      liveProviderReservationMarkerPath(argumentsValue),
+    )
+  ) {
+    fail("fixture provider effect marker was not absent", 73);
+  }
+}
+
+function assertLiveProviderEffectLinkedTopology(
+  state,
+  publicationPlan,
+  argumentsValue,
+  expectedLinks,
+) {
+  const { providerRootMetadata, runMetadata } =
+    assertLiveProviderEffectBoundDirectories(
+      state,
+      publicationPlan,
+      argumentsValue,
+    );
+  const artifacts = [state.providerEffectStage, state.providerEffectWitness]
+    .filter((artifact) => artifact !== undefined);
+  if (
+    artifacts.length === 0 ||
+    artifacts.some(
+      (artifact) =>
+        artifact.initializing === true ||
+        artifact.metadata.nlink !== BigInt(expectedLinks),
+    )
+  ) {
+    fail("fixture provider effect local topology changed", 73);
+  }
+  const expectedBytes = artifacts[0].bytes;
+  const expectedIdentity = artifacts[0].metadata;
+  for (const artifact of artifacts) {
+    const metadata = inspectLiveProviderReservationArtifact(
+      artifact.path,
+      "fixture provider effect state artifact",
+      runMetadata.dev,
+      expectedLinks,
+      expectedBytes,
+      expectedIdentity,
+    );
+    if (!sameMutationArtifact(metadata, artifact.metadata)) {
+      fail("fixture provider effect state artifact changed", 73);
+    }
+  }
+  const marker = inspectLiveProviderReservationArtifact(
+    liveProviderReservationMarkerPath(argumentsValue),
+    "fixture provider effect marker",
+    providerRootMetadata.dev,
+    expectedLinks,
+    expectedBytes,
+    expectedIdentity,
+  );
+  if (!sameMutationArtifact(marker, expectedIdentity)) {
+    fail("fixture provider effect marker identity changed", 73);
+  }
+  return Object.freeze({ bytes: expectedBytes, identity: expectedIdentity });
+}
+
+function assertLiveProviderEffectRetiredWitness(
+  state,
+  publicationPlan,
+  argumentsValue,
+) {
+  const { runMetadata } = assertLiveProviderEffectBoundDirectories(
+    state,
+    publicationPlan,
+    argumentsValue,
+  );
+  const witness = state.providerEffectWitness;
+  if (
+    state.providerEffectStage !== undefined ||
+    witness === undefined ||
+    witness.metadata.nlink !== 1n
+  ) {
+    fail("fixture provider effect retirement was not durable", 73);
+  }
+  inspectLiveProviderReservationArtifact(
+    witness.path,
+    "fixture provider effect witness",
+    runMetadata.dev,
+    1,
+    witness.bytes,
+    witness.metadata,
+  );
+  assertLiveProviderEffectMarkerAbsent(
+    state,
+    publicationPlan,
+    argumentsValue,
+  );
+  return witness;
+}
+
+function writeLiveProviderEffectStage(
+  state,
+  publicationPlan,
+  held,
+  source,
+  testCheckpoint,
+) {
+  const nonce = randomBytes(16).toString("hex");
+  const name = providerEffectStageFileName(
+    held.lease.journal_sequence,
+    nonce,
+  );
+  const path = join(state.run, name);
+  const runMetadata = ownedPrivateDirectory(state.run, "active run state");
+  let descriptor;
+  let witness;
+  let bytes;
+  let identity;
+  try {
+    descriptor = openSync(
+      path,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    identity = exactFstat(descriptor);
+    if (
+      !identity.isFile() ||
+      identity.uid !== OWNER_UID ||
+      identity.dev !== runMetadata.dev ||
+      identity.nlink !== 1n ||
+      (identity.mode & 0o7777n) !== 0o600n ||
+      identity.size !== 0n
+    ) {
+      fail("fixture provider effect stage creation was refused");
+    }
+    fsyncSync(descriptor);
+    syncDirectory(state.run);
+    callLiveProviderEffectCheckpoint(
+      testCheckpoint,
+      "after-witness-stage-create",
+    );
+    witness = buildColimaLiveProviderEffectWitness({
+      markerWitnessIdentitySha256:
+        providerEffectMarkerWitnessIdentitySha256(
+          identity,
+          digest(held.leaseBytes),
+        ),
+      publicationPlan,
+      slotSequence: held.lease.journal_sequence,
+      slotSha256: digest(held.leaseBytes),
+      source,
+    });
+    bytes = liveProviderEffectBytes(witness);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const written = writeSync(
+        descriptor,
+        bytes,
+        offset,
+        bytes.length - offset,
+      );
+      if (written < 1) {
+        fail("fixture provider effect stage write failed", 70);
+      }
+      offset += written;
+    }
+    fsyncSync(descriptor);
+    const writtenIdentity = exactFstat(descriptor);
+    if (
+      writtenIdentity.dev !== identity.dev ||
+      writtenIdentity.ino !== identity.ino ||
+      writtenIdentity.uid !== identity.uid ||
+      writtenIdentity.mode !== identity.mode ||
+      writtenIdentity.nlink !== 1n ||
+      writtenIdentity.size !== BigInt(bytes.length)
+    ) {
+      fail("fixture provider effect stage identity changed", 73);
+    }
+    identity = writtenIdentity;
+  } catch (error) {
+    if (error instanceof ClosedFailure) throw error;
+    fail("fixture provider effect stage publication failed", 70);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+  syncDirectory(state.run);
+  const verifiedIdentity = inspectLiveProviderReservationArtifact(
+    path,
+    "fixture provider effect stage",
+    runMetadata.dev,
+    1,
+    bytes,
+    identity,
+  );
+  callLiveProviderEffectCheckpoint(testCheckpoint, "after-witness-stage");
+  return Object.freeze({
+    bytes,
+    identity: verifiedIdentity,
+    name,
+    path,
+    value: witness,
+  });
+}
+
+function linkLiveProviderEffectMarker(
+  state,
+  stage,
+  argumentsValue,
+  testCheckpoint,
+) {
+  try {
+    linkSync(
+      stage.path,
+      liveProviderReservationMarkerPath(argumentsValue),
+    );
+  } catch (error) {
+    if (error?.code === "EEXIST") return false;
+    fail("fixture provider effect marker publication failed", 70);
+  }
+  callLiveProviderEffectCheckpoint(testCheckpoint, "after-marker-link");
+  syncDirectory(argumentsValue.observationInput.provider_root);
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "after-marker-directory-sync",
+  );
+  return true;
+}
+
+function linkLiveProviderEffectWitness(
+  state,
+  stage,
+  witnessPath,
+  testCheckpoint,
+) {
+  try {
+    linkSync(stage.path, witnessPath);
+  } catch {
+    fail("fixture provider effect witness publication failed", 70);
+  }
+  callLiveProviderEffectCheckpoint(testCheckpoint, "after-state-witness-link");
+  syncDirectory(state.run);
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "after-state-witness-directory-sync",
+  );
+}
+
+function unlinkLiveProviderEffectStage(
+  state,
+  stage,
+  expectedLinks,
+  testCheckpoint,
+) {
+  const runMetadata = ownedPrivateDirectory(state.run, "active run state");
+  const expectedBytes = stage.bytes;
+  const metadata = inspectPendingFile(
+    stage.path,
+    "fixture provider effect stage",
+    runMetadata.dev,
+    new Set([BigInt(expectedLinks)]),
+  );
+  if (
+    !sameMutationArtifact(metadata, stage.identity ?? stage.metadata) ||
+    !readPrivate(
+      stage.path,
+      "fixture provider effect stage",
+      expectedLinks,
+      0n,
+    ).equals(expectedBytes)
+  ) {
+    fail("fixture provider effect stage identity changed", 73);
+  }
+  try {
+    unlinkSync(stage.path);
+  } catch {
+    fail("fixture provider effect stage retirement failed", 70);
+  }
+  callLiveProviderEffectCheckpoint(testCheckpoint, "after-witness-stage-unlink");
+  syncDirectory(state.run);
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "after-witness-stage-directory-sync",
+  );
+}
+
+function liveProviderEffectValueDigest(value) {
+  return liveProviderEffectDigest(liveProviderEffectBytes(value));
+}
+
+function observeLiveProviderEffectStartReproof(
+  roots,
+  argumentsValue,
+  publicationPlan,
+  source,
+  witness,
+  observationSequence,
+  assertAuthority,
+) {
+  let state = assertAuthority();
+  assertLiveProviderEffectLinkedTopology(
+    state,
+    publicationPlan,
+    argumentsValue,
+    2,
+  );
+  const observed = observeLiveProviderEffectPhysicalRoots(
+    argumentsValue,
+    state,
+    source,
+    publicationPlan,
+    "present",
+  );
+  state = assertAuthority();
+  assertLiveProviderEffectLinkedTopology(
+    state,
+    publicationPlan,
+    argumentsValue,
+    2,
+  );
+  const observationChallengeSha256 = liveProviderEffectDigest(
+    Buffer.concat([
+      liveProviderEffectBytes({
+        marker_disposition: observed.marker_disposition,
+        namespace_bindings: observed.namespace_bindings,
+        provider_root_identity: observed.provider_root_identity,
+        root_observation: observed.root_observation,
+        state_run_identity: observed.state_run_identity,
+      }),
+      randomBytes(32),
+    ]),
+  );
+  return Object.freeze({
+    admission_sha256: liveProviderEffectValueDigest(publicationPlan.admission),
+    invocation_sha256: liveProviderEffectValueDigest(
+      publicationPlan.invocation_binding,
+    ),
+    marker_link_count: 2,
+    marker_present: true,
+    marker_witness_identity_sha256:
+      witness.marker_witness_identity_sha256,
+    marker_witness_same_inode: true,
+    namespace_sha256: liveProviderEffectValueDigest(
+      publicationPlan.namespace_bindings,
+    ),
+    observation_challenge_sha256: observationChallengeSha256,
+    observation_sequence: observationSequence,
+    provider_root_identity_sha256: liveProviderEffectValueDigest(
+      publicationPlan.provider_root_identity,
+    ),
+    source_sha256: liveProviderEffectValueDigest(source),
+    state_run_identity_sha256: liveProviderEffectValueDigest(
+      publicationPlan.state_run_identity,
+    ),
+    topology_sha256: liveProviderEffectValueDigest({
+      endpoints: publicationPlan.planned_endpoint_contracts,
+      roles: publicationPlan.planned_role_contracts,
+    }),
+    witness_link_count: 2,
+  });
+}
+
+function publishLiveProviderEffectEvent(
+  roots,
+  state,
+  argumentsValue,
+  eventKind,
+  evidence,
+  assertAuthority,
+  testCheckpoint,
+) {
+  if (typeof assertAuthority !== "function") {
+    fail("fixture provider effect event authority was refused", 70);
+  }
+  const effect = assertLiveProviderEffectOpenState(
+    state,
+    state.liveProviderFixtureEffect.publicationPlan,
+  );
+  const witness = effect.witness;
+  if (witness === undefined) {
+    fail("fixture provider effect event lacked its witness", 73);
+  }
+  const publisherAuthorityChain = providerEffectPublisherAuthorityChain(
+    effect.events,
+    effect.recoveries,
+    witness,
+    { includePending: true },
+  );
+  const publisherAuthoritySha256 =
+    effect.recoveries.length === 0
+      ? digest(effect.slot.bytes)
+      : digest(effect.recoveries.at(-1).bytes);
+  let event;
+  try {
+    event = buildColimaLiveProviderEffectEvent({
+      eventKind,
+      evidence,
+      history: effect.events.map((entry) => entry.value),
+      publicationPlan: effect.publicationPlan,
+      publisherAuthorityChain,
+      publisherAuthoritySha256,
+      source: effect.source,
+      witness: witness.value,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderEffectFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+  const bytes = liveProviderEffectBytes(event);
+  const name = providerEffectEventFileName(
+    effect.slot.value.journal_sequence,
+    effect.events.length,
+  );
+  const reassertEventPublication = () => {
+    const current = assertAuthority();
+    const currentEffect = assertLiveProviderEffectOpenState(
+      current,
+      effect.publicationPlan,
+    );
+    if (
+      currentEffect.events.length !== effect.events.length ||
+      currentEffect.events.some(
+        (entry, index) => !entry.bytes.equals(effect.events[index].bytes),
+      ) ||
+      !currentEffect.witness?.bytes.equals(witness.bytes) ||
+      !currentEffect.slot.bytes.equals(effect.slot.bytes)
+    ) {
+      fail("fixture provider effect event source changed", 73);
+    }
+    if (eventKind === "completion") {
+      if (currentEffect.currentStage !== "witness-unlinked") {
+        fail("fixture provider effect completion source changed", 73);
+      }
+      assertLiveProviderEffectRetiredWitness(
+        current,
+        effect.publicationPlan,
+        argumentsValue,
+      );
+    } else {
+      assertLiveProviderEffectLinkedTopology(
+        current,
+        effect.publicationPlan,
+        argumentsValue,
+        2,
+      );
+    }
+  };
+  let afterLinkFailure;
+  if (!publishMutationBlocker(state.run, name, bytes, {
+    afterLinkObserver:
+      testCheckpoint === undefined
+        ? undefined
+        : () => {
+            try {
+              callLiveProviderEffectCheckpoint(
+                testCheckpoint,
+                `after-${eventKind}-link`,
+              );
+            } catch (error) {
+              afterLinkFailure = error;
+            }
+          },
+    reassertAuthority: reassertEventPublication,
+  })) {
+    const existing = parseCanonical(
+      join(state.run, name),
+      "fixture provider effect event",
+    );
+    if (!existing.bytes.equals(bytes)) {
+      fail("fixture provider effect event publication conflicted", 73);
+    }
+  }
+  const verified = assertAuthority();
+  const recorded = verified.liveProviderFixtureEffect?.events.at(-1);
+  if (recorded === undefined || !recorded.bytes.equals(bytes)) {
+    fail("fixture provider effect event was not durable", 70);
+  }
+  if (afterLinkFailure !== undefined) throw afterLinkFailure;
+  callLiveProviderEffectCheckpoint(testCheckpoint, `after-${eventKind}`);
+  return Object.freeze({ event: recorded, state: verified });
+}
+
+function retireLiveProviderEffectMarker(
+  roots,
+  state,
+  argumentsValue,
+  assertAuthority,
+  testCheckpoint,
+) {
+  const effect = assertLiveProviderEffectOpenState(
+    state,
+    state.liveProviderFixtureEffect.publicationPlan,
+  );
+  const held = assertLiveProviderEffectLinkedTopology(
+    state,
+    effect.publicationPlan,
+    argumentsValue,
+    2,
+  );
+  const markerPath = liveProviderReservationMarkerPath(argumentsValue);
+  inspectLiveProviderReservationArtifact(
+    markerPath,
+    "fixture provider effect marker",
+    BigInt(effect.publicationPlan.provider_root_identity.device),
+    2,
+    held.bytes,
+    held.identity,
+  );
+  const markerRetirementObservationSha256 = liveProviderEffectDigest(
+    Buffer.concat([
+      liveProviderEffectBytes({
+        device: String(held.identity.dev),
+        inode: String(held.identity.ino),
+        links: "2",
+        marker: effect.publicationPlan.fixed_marker_name,
+        slot_sha256: digest(effect.slot.bytes),
+      }),
+      randomBytes(32),
+    ]),
+  );
+  try {
+    unlinkSync(markerPath);
+  } catch {
+    fail("fixture provider effect marker retirement failed", 70);
+  }
+  callLiveProviderEffectCheckpoint(testCheckpoint, "after-marker-unlink");
+  syncDirectory(argumentsValue.observationInput.provider_root);
+  const providerRootFsyncObservationSha256 = liveProviderEffectDigest(
+    Buffer.concat([
+      liveProviderEffectBytes({
+        marker_retirement_observation_sha256:
+          markerRetirementObservationSha256,
+        provider_root_identity: effect.publicationPlan.provider_root_identity,
+        state: "marker-absent-parent-fsynced",
+      }),
+      randomBytes(32),
+    ]),
+  );
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "after-marker-retirement-directory-sync",
+  );
+  const verified = assertAuthority();
+  assertLiveProviderEffectRetiredWitness(
+    verified,
+    effect.publicationPlan,
+    argumentsValue,
+  );
+  return Object.freeze({
+    markerRetirementObservationSha256,
+    providerRootFsyncObservationSha256,
+    state: verified,
+  });
+}
+
+function liveProviderEffectPreAttemptCompletionEvidence(
+  effect,
+  publisherAuthoritySha256,
+  retirement,
+) {
+  const startAuthority = effect.events.find(
+    (event) => event.value.event_kind === "start-authority",
+  );
+  const evidence = {
+    cleanup_settlement_sha256: ZERO_SHA256,
+    create_settlement_sha256: ZERO_SHA256,
+    marker_present: false,
+    marker_retirement_binding_sha256: ZERO_SHA256,
+    marker_retirement_observation_sha256:
+      retirement.markerRetirementObservationSha256,
+    provider_root_fsync_observation_sha256:
+      retirement.providerRootFsyncObservationSha256,
+    receipt_event_sha256: ZERO_SHA256,
+    receipt_sha256: ZERO_SHA256,
+    start_authority_sha256:
+      startAuthority === undefined ? ZERO_SHA256 : digest(startAuthority.bytes),
+    start_attempt_sha256: ZERO_SHA256,
+    variant: "pre-attempt-retired-zero-receipt",
+    witness_identity_sha256:
+      effect.witness.value.marker_witness_identity_sha256,
+    witness_link_count: 1,
+  };
+  evidence.marker_retirement_binding_sha256 = liveProviderEffectValueDigest({
+    cleanup_settlement_sha256: evidence.cleanup_settlement_sha256,
+    marker_retirement_observation_sha256:
+      evidence.marker_retirement_observation_sha256,
+    provider_root_fsync_observation_sha256:
+      evidence.provider_root_fsync_observation_sha256,
+    publisher_authority_sha256: publisherAuthoritySha256,
+    receipt_sha256: evidence.receipt_sha256,
+    witness_identity_sha256: evidence.witness_identity_sha256,
+    witness_link_count: evidence.witness_link_count,
+  });
+  return Object.freeze(evidence);
+}
+
+function publishColimaLiveProviderFixtureEffect(argumentsValue, terminal) {
+  if (!new Set(["attempt-fenced", "pre-attempt-retired"]).has(terminal)) {
+    fail("fixture provider effect terminal was refused", 64);
+  }
+  const admittedArguments = fixtureEffectArguments(argumentsValue);
+  const { testCheckpoint } = admittedArguments;
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  const validateCompleted = (state) => {
+    const effect = state.liveProviderFixtureEffect;
+    if (effect?.close?.value.disposition !== "completed") {
+      fail("fixture provider effect completion changed", 73);
+    }
+    if (terminal !== "pre-attempt-retired") {
+      fail("fixture provider effect terminal differed", 73);
+    }
+    validateLiveProviderReservationArgumentBinding(
+      admittedArguments,
+      effect.source,
+      true,
+    );
+    assertLiveProviderEffectRetiredWitness(
+      state,
+      effect.publicationPlan,
+      admittedArguments,
+    );
+    if (
+      effect.completion?.value.evidence.variant !==
+      "pre-attempt-retired-zero-receipt"
+    ) {
+      fail("fixture provider effect completion differed", 73);
+    }
+    return effect;
+  };
+  let initial = loadState(roots, true);
+  let completed = initial.liveProviderFixtureEffect;
+  if (completed?.close?.value.disposition === "completed") {
+    validateCompleted(initial);
+    reconcileMutationStages(roots);
+    initial = loadState(roots, true);
+    completed = validateCompleted(initial);
+    return completed.completion.value;
+  }
+  reconcileMutationStages(roots);
+  initial = loadState(roots, true);
+  const snapshot = completedLiveProviderStartDecisionEffectSnapshot(initial);
+  const admission = observeColimaLiveProviderStartEffectFreshAdmission(
+    admittedArguments,
+    {
+      fixtureOnly: true,
+      stateSnapshot: completedLiveProviderStartDecisionEffectSnapshot,
+      testCheckpoint,
+    },
+  );
+  const observed = observeLiveProviderEffectPhysicalRoots(
+    admittedArguments,
+    initial,
+    snapshot.source,
+    undefined,
+    "absent",
+  );
+  if (
+    !liveProviderEffectBytes(observed.root_observation).equals(
+      liveProviderEffectBytes(admission.root_observation),
+    )
+  ) {
+    fail("fixture provider effect admission changed", 73);
+  }
+  const publicationPlan = buildLiveProviderEffectPublicationPlanForState(
+    admission,
+    observed,
+    snapshot,
+  );
+  callLiveProviderEffectCheckpoint(testCheckpoint, "after-effect-plan");
+  const reassertSlotPublication = (ownStage) => {
+    const current = loadState(roots, true);
+    const currentSnapshot = availableLiveProviderEffectStartDecisionSnapshot(
+      current,
+      publicationPlan,
+      ownStage,
+    );
+    if (
+      !sameCompletedLiveProviderStartDecisionSnapshot(
+        snapshot,
+        currentSnapshot,
+      )
+    ) {
+      fail("fixture provider effect start decision changed", 73);
+    }
+    assertLiveProviderEffectMarkerAbsent(
+      current,
+      publicationPlan,
+      admittedArguments,
+    );
+    observeLiveProviderEffectPhysicalRoots(
+      admittedArguments,
+      current,
+      snapshot.source,
+      publicationPlan,
+      "absent",
+    );
+  };
+  const expectedSource = Object.freeze({
+    sequence: initial.receiptState.head.sequence,
+    sha256: initial.receiptState.head_sha256,
+  });
+  let afterSlotLinkFailure;
+  const held = acquireMutationLease(
+    roots,
+    COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
+    ZERO_SHA256,
+    expectedSource,
+    {
+      afterLinkObserver: () => {
+        try {
+          callLiveProviderEffectCheckpoint(
+            testCheckpoint,
+            "after-effect-slot-link",
+          );
+        } catch (error) {
+          afterSlotLinkFailure = error;
+        }
+      },
+      reassertAuthority: reassertSlotPublication,
+    },
+    Object.freeze({
+      contractSha256: publicationPlan.operation_contract_sha256,
+      kind: publicationPlan.operation_kind,
+      plan: publicationPlan,
+    }),
+  );
+  if (afterSlotLinkFailure !== undefined) throw afterSlotLinkFailure;
+  callLiveProviderEffectCheckpoint(testCheckpoint, "after-effect-slot");
+  const assertOwner = () => {
+    const current = assertMutationLeaseHeld(roots, held, false);
+    assertLiveProviderEffectOpenState(current, publicationPlan);
+    return current;
+  };
+  let state = assertOwner();
+  let effect = assertLiveProviderEffectOpenState(state, publicationPlan);
+  assertLiveProviderEffectMarkerAbsent(
+    state,
+    publicationPlan,
+    admittedArguments,
+  );
+  observeLiveProviderEffectPhysicalRoots(
+    admittedArguments,
+    state,
+    effect.source,
+    publicationPlan,
+    "absent",
+  );
+  const stage = writeLiveProviderEffectStage(
+    state,
+    publicationPlan,
+    held,
+    effect.source,
+    testCheckpoint,
+  );
+  state = assertOwner();
+  effect = assertLiveProviderEffectOpenState(state, publicationPlan);
+  if (
+    effect.stage?.initializing === true ||
+    !effect.stage?.bytes.equals(stage.bytes)
+  ) {
+    fail("fixture provider effect stage was not durable", 70);
+  }
+  assertLiveProviderEffectMarkerAbsent(
+    state,
+    publicationPlan,
+    admittedArguments,
+  );
+  observeLiveProviderEffectPhysicalRoots(
+    admittedArguments,
+    state,
+    effect.source,
+    publicationPlan,
+    "absent",
+  );
+  callLiveProviderEffectCheckpoint(testCheckpoint, "before-marker-link");
+  if (
+    !linkLiveProviderEffectMarker(
+      state,
+      stage,
+      admittedArguments,
+      testCheckpoint,
+    )
+  ) {
+    unlinkLiveProviderEffectStage(state, stage, 1, testCheckpoint);
+    closeMutationLease(
+      roots,
+      held,
+      "aborted-before-effect",
+      {},
+      ZERO_SHA256,
+      (current) => {
+        assertLiveProviderEffectOpenState(current, publicationPlan);
+      },
+    );
+    fail("fixture provider effect marker was already held", 73);
+  }
+  state = assertOwner();
+  assertLiveProviderEffectLinkedTopology(
+    state,
+    publicationPlan,
+    admittedArguments,
+    2,
+  );
+  const witnessPath = join(
+    state.run,
+    providerEffectWitnessFileName(held.lease.journal_sequence),
+  );
+  linkLiveProviderEffectWitness(
+    state,
+    stage,
+    witnessPath,
+    testCheckpoint,
+  );
+  state = assertOwner();
+  assertLiveProviderEffectLinkedTopology(
+    state,
+    publicationPlan,
+    admittedArguments,
+    3,
+  );
+  unlinkLiveProviderEffectStage(state, stage, 3, testCheckpoint);
+  state = assertOwner();
+  effect = assertLiveProviderEffectOpenState(state, publicationPlan);
+  const linkedWitness = assertLiveProviderEffectLinkedTopology(
+    state,
+    publicationPlan,
+    admittedArguments,
+    2,
+  );
+  if (!effect.witness?.bytes.equals(linkedWitness.bytes)) {
+    fail("fixture provider effect witness changed", 73);
+  }
+  callLiveProviderEffectCheckpoint(testCheckpoint, "before-start-authority-reproof");
+  const firstReproof = observeLiveProviderEffectStartReproof(
+    roots,
+    admittedArguments,
+    publicationPlan,
+    effect.source,
+    effect.witness.value,
+    0,
+    assertOwner,
+  );
+  const authorityEvidence = Object.freeze({
+    authority_scope: "current-in-memory-owner-attempt-publication-only",
+    current_owner_boot_sha256: held.lease.owner_boot_sha256,
+    current_owner_instance_sha256: held.lease.owner_instance_sha256,
+    first_reproof: firstReproof,
+    first_reproof_sha256: liveProviderEffectValueDigest(firstReproof),
+    recovery_invocation_authorized: false,
+    serialized_invocation_authorized: false,
+    witness_sha256: digest(effect.witness.bytes),
+  });
+  let published = publishLiveProviderEffectEvent(
+    roots,
+    state,
+    admittedArguments,
+    "start-authority",
+    authorityEvidence,
+    assertOwner,
+    testCheckpoint,
+  );
+  state = published.state;
+  const authorityEvent = published.event;
+  effect = assertLiveProviderEffectOpenState(state, publicationPlan);
+  if (terminal === "attempt-fenced") {
+    callLiveProviderEffectCheckpoint(testCheckpoint, "before-start-attempt-reproof");
+    const secondReproof = observeLiveProviderEffectStartReproof(
+      roots,
+      admittedArguments,
+      publicationPlan,
+      effect.source,
+      effect.witness.value,
+      1,
+      assertOwner,
+    );
+    const attemptEvidence = Object.freeze({
+      authority_event_sha256: digest(authorityEvent.bytes),
+      attempt_sha256: publicationPlan.planned_start_attempt_sha256,
+      invocation_binding_sha256: liveProviderEffectValueDigest(
+        publicationPlan.invocation_binding,
+      ),
+      invocation_limit: 1,
+      recovery_invocation_authorized: false,
+      replay_authorized: false,
+      second_reproof: secondReproof,
+      second_reproof_sha256: liveProviderEffectValueDigest(secondReproof),
+      variant: "attempt-fence",
+    });
+    published = publishLiveProviderEffectEvent(
+      roots,
+      state,
+      admittedArguments,
+      "start-attempt",
+      attemptEvidence,
+      assertOwner,
+      testCheckpoint,
+    );
+    const blocked = published.state.liveProviderFixtureEffect;
+    if (
+      blocked?.currentStage !== "attempt-fenced" ||
+      blocked.close !== undefined ||
+      blocked.events.at(-1)?.value.event_kind !== "start-attempt"
+    ) {
+      fail("fixture provider effect attempt fence was not durable", 70);
+    }
+    return Object.freeze({
+      disposition: "attempt-fenced",
+      event_sha256: digest(published.event.bytes),
+      process_invoked: false,
+      receipt_published: false,
+    });
+  }
+  const retirement = retireLiveProviderEffectMarker(
+    roots,
+    state,
+    admittedArguments,
+    assertOwner,
+    testCheckpoint,
+  );
+  state = retirement.state;
+  effect = assertLiveProviderEffectOpenState(state, publicationPlan);
+  const completionEvidence = liveProviderEffectPreAttemptCompletionEvidence(
+    effect,
+    digest(effect.slot.bytes),
+    retirement,
+  );
+  published = publishLiveProviderEffectEvent(
+    roots,
+    state,
+    admittedArguments,
+    "completion",
+    completionEvidence,
+    assertOwner,
+    testCheckpoint,
+  );
+  state = published.state;
+  const completion = published.event;
+  let afterCloseLinkFailure;
+  const closed = closeMutationLease(
+    roots,
+    held,
+    "completed",
+    {
+      afterLinkObserver: () => {
+        try {
+          callLiveProviderEffectCheckpoint(
+            testCheckpoint,
+            "after-effect-close-link",
+          );
+        } catch (error) {
+          afterCloseLinkFailure = error;
+        }
+      },
+    },
+    digest(completion.bytes),
+    (current) => {
+      const currentEffect = assertLiveProviderEffectOpenState(
+        current,
+        publicationPlan,
+      );
+      if (
+        currentEffect.currentStage !== "completion-retired" ||
+        !currentEffect.completion?.bytes.equals(completion.bytes)
+      ) {
+        fail("fixture provider effect completion changed", 73);
+      }
+      assertLiveProviderEffectRetiredWitness(
+        current,
+        publicationPlan,
+        admittedArguments,
+      );
+    },
+  );
+  if (afterCloseLinkFailure !== undefined) throw afterCloseLinkFailure;
+  callLiveProviderEffectCheckpoint(testCheckpoint, "after-effect-close");
+  const durable = closed.liveProviderFixtureEffect;
+  if (
+    durable?.close?.value.disposition !== "completed" ||
+    !durable.completion?.bytes.equals(completion.bytes)
+  ) {
+    fail("fixture provider effect completion was not durable", 70);
+  }
+  return durable.completion.value;
+}
+
+export function publishColimaLiveProviderEffectPreAttemptForTest(
+  argumentsValue,
+) {
+  return publishColimaLiveProviderFixtureEffect(
+    argumentsValue,
+    "pre-attempt-retired",
+  );
+}
+
+export function publishColimaLiveProviderEffectAttemptFenceForTest(
+  argumentsValue,
+) {
+  return publishColimaLiveProviderFixtureEffect(
+    argumentsValue,
+    "attempt-fenced",
   );
 }
 
@@ -10846,6 +13169,12 @@ function providerRecoveryBase(state) {
     lease.value.action === COLIMA_LIVE_PROVIDER_START_DECISION_ACTION;
   const recoverableReservation =
     lease.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION;
+  const recoverableEffect =
+    lease.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION &&
+    liveProviderEffectFixtureOnly(
+      lease.value.operation_kind,
+      lease.value.operation_contract_sha256,
+    ) === true;
   const recoverableCleanup =
     lease.value.action === "provider-cleanup" &&
     lease.value.operation_kind ===
@@ -10856,6 +13185,7 @@ function providerRecoveryBase(state) {
     !recoverableIntent &&
     !recoverableStartDecision &&
     !recoverableReservation &&
+    !recoverableEffect &&
     !recoverableCleanup
   ) {
     fail("mutation recovery action was refused", 73);
@@ -10975,7 +13305,82 @@ function liveProviderReservationRecoveryObservation(state) {
   });
 }
 
+function liveProviderEffectRecoveryObservation(state) {
+  const effect = state.liveProviderFixtureEffect;
+  if (
+    effect === undefined ||
+    effect.close !== undefined ||
+    state.mutationLease === undefined ||
+    !state.mutationLease.bytes.equals(effect.slot.bytes)
+  ) {
+    fail("fixture provider effect recovery state was refused", 73);
+  }
+  const evidenceStage = effect.currentStage;
+  const descriptor = PROVIDER_EFFECT_RECOVERY_STAGES[evidenceStage];
+  if (descriptor === undefined) {
+    fail("fixture provider effect recovery stage was refused", 73);
+  }
+  const previous = state.mutationRecoveries.at(-1);
+  let witnessSha256;
+  if (effect.witness !== undefined) {
+    witnessSha256 = digest(effect.witness.bytes);
+  } else if (effect.stage?.initializing === true) {
+    witnessSha256 = providerEffectInitializingStageSha256(
+      effect.stage,
+      effect.slot,
+    );
+  } else if (effect.stage !== undefined) {
+    witnessSha256 = digest(effect.stage.bytes);
+  } else if (evidenceStage === "stage-retired-before-effect") {
+    witnessSha256 = previous?.value.observed_evidence_head_sha256;
+  } else {
+    witnessSha256 = ZERO_SHA256;
+  }
+  if (!onlyLowerHex(witnessSha256, 64)) {
+    fail("fixture provider effect recovery witness was refused", 73);
+  }
+  const eventHeadSha256 =
+    effect.events.length === 0
+      ? ZERO_SHA256
+      : digest(effect.events.at(-1).bytes);
+  const evidenceHeadSha256 =
+    eventHeadSha256 === ZERO_SHA256 ? witnessSha256 : eventHeadSha256;
+  const markerPresent = new Set([
+    "attempt-fenced",
+    "authority-held",
+    "marker-held",
+    "marker-linked",
+    "witness-linked",
+  ]).has(evidenceStage);
+  const topologySha256 =
+    evidenceStage === "not-started"
+      ? ZERO_SHA256
+      : effectRecoveryTopologySha256({
+          eventCount: effect.events.length,
+          eventHeadSha256,
+          evidenceStage,
+          localLinks: descriptor.links,
+          markerPresent,
+          slotSequence: effect.slot.value.journal_sequence,
+          witnessSha256,
+        });
+  return Object.freeze({
+    observed_effect_disposition: descriptor.disposition,
+    observed_effect_name: "provider-effect",
+    observed_evidence_head_sha256: evidenceHeadSha256,
+    observed_evidence_prefix_sha256: topologySha256,
+    observed_evidence_stage: evidenceStage,
+    observed_residual_sha256: topologySha256,
+    observed_settlement_sha256: ZERO_SHA256,
+  });
+}
+
 function providerRecoveryObservation(state) {
+  if (
+    state.mutationLease?.value.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION
+  ) {
+    return liveProviderEffectRecoveryObservation(state);
+  }
   if (
     state.mutationLease?.value.action ===
     COLIMA_LIVE_PROVIDER_RESERVATION_ACTION
@@ -11019,6 +13424,9 @@ export function providerRecoveryConfirmationForExecutor(argumentsValue) {
   const base = providerRecoveryBase(state);
   if (base.operation.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION) {
     fail("live provider reservation requires its physical recovery confirmation", 73);
+  }
+  if (base.operation.action === COLIMA_LIVE_PROVIDER_EFFECT_ACTION) {
+    fail("fixture provider effect requires its physical recovery confirmation", 73);
   }
   return providerRecoveryConfirmation(base);
 }
@@ -11272,6 +13680,179 @@ export function liveProviderFixtureReservationRecoveryConfirmationForTest(
   return liveProviderReservationRecoveryConfirmation(argumentsValue, true);
 }
 
+function validateLiveProviderEffectRecoveryArguments(
+  argumentsValue,
+  { confirmation, testCheckpoint },
+) {
+  const fields = [
+    "observation",
+    "observationInput",
+    "repoRoot",
+    "requirements",
+    "stateBase",
+    ...(confirmation ? ["confirmation"] : []),
+    ...(testCheckpoint ? ["testCheckpoint"] : []),
+  ];
+  exactKeys(
+    argumentsValue,
+    fields,
+    "fixture provider effect recovery arguments",
+  );
+  if (
+    typeof argumentsValue.repoRoot !== "string" ||
+    typeof argumentsValue.stateBase !== "string" ||
+    argumentsValue.observation === null ||
+    Array.isArray(argumentsValue.observation) ||
+    typeof argumentsValue.observation !== "object" ||
+    argumentsValue.observationInput === null ||
+    Array.isArray(argumentsValue.observationInput) ||
+    typeof argumentsValue.observationInput !== "object" ||
+    argumentsValue.requirements === null ||
+    Array.isArray(argumentsValue.requirements) ||
+    typeof argumentsValue.requirements !== "object" ||
+    (confirmation && typeof argumentsValue.confirmation !== "string") ||
+    (testCheckpoint && typeof argumentsValue.testCheckpoint !== "function")
+  ) {
+    fail("fixture provider effect recovery arguments were refused", 64);
+  }
+  return argumentsValue;
+}
+
+function validateLiveProviderEffectRecoveryPhysicalState(
+  state,
+  argumentsValue,
+  { permitAttemptFence = false } = {},
+) {
+  const effect = state.liveProviderFixtureEffect;
+  if (effect === undefined) {
+    fail("fixture provider effect recovery state was unavailable", 73);
+  }
+  assertLiveProviderEffectOpenState(state, effect.publicationPlan);
+  validateLiveProviderReservationArgumentBinding(
+    argumentsValue,
+    effect.source,
+    true,
+  );
+  const stage = state.providerEffectStage;
+  const witness = state.providerEffectWitness;
+  let markerDisposition;
+  if (stage === undefined && witness === undefined) {
+    markerDisposition = "absent";
+    assertLiveProviderEffectMarkerAbsent(
+      state,
+      effect.publicationPlan,
+      argumentsValue,
+    );
+  } else if (stage !== undefined && witness === undefined) {
+    if (stage.metadata.nlink === 1n) {
+      markerDisposition = "absent";
+      const { runMetadata } = assertLiveProviderEffectBoundDirectories(
+        state,
+        effect.publicationPlan,
+        argumentsValue,
+      );
+      const current = inspectPendingFile(
+        stage.path,
+        "fixture provider effect stage",
+        runMetadata.dev,
+        new Set([1n]),
+      );
+      if (
+        !sameMutationArtifact(current, stage.metadata) ||
+        !readPrivate(
+          stage.path,
+          "fixture provider effect stage",
+          1,
+          0n,
+        ).equals(stage.bytes)
+      ) {
+        fail("fixture provider effect stage changed", 73);
+      }
+      assertLiveProviderEffectMarkerAbsent(
+        state,
+        effect.publicationPlan,
+        argumentsValue,
+      );
+    } else {
+      markerDisposition = "present";
+      assertLiveProviderEffectLinkedTopology(
+        state,
+        effect.publicationPlan,
+        argumentsValue,
+        2,
+      );
+    }
+  } else if (stage !== undefined && witness !== undefined) {
+    markerDisposition = "present";
+    assertLiveProviderEffectLinkedTopology(
+      state,
+      effect.publicationPlan,
+      argumentsValue,
+      3,
+    );
+  } else if (witness.metadata.nlink === 2n) {
+    markerDisposition = "present";
+    assertLiveProviderEffectLinkedTopology(
+      state,
+      effect.publicationPlan,
+      argumentsValue,
+      2,
+    );
+  } else {
+    markerDisposition = "absent";
+    assertLiveProviderEffectRetiredWitness(
+      state,
+      effect.publicationPlan,
+      argumentsValue,
+    );
+  }
+  observeLiveProviderEffectPhysicalRoots(
+    argumentsValue,
+    state,
+    effect.source,
+    effect.publicationPlan,
+    markerDisposition,
+  );
+  const observation = liveProviderEffectRecoveryObservation(state);
+  if (
+    observation.observed_evidence_stage === "attempt-fenced" &&
+    !permitAttemptFence
+  ) {
+    fail("fixture provider effect attempt fence requires operator resolution", 73);
+  }
+  return Object.freeze({ effect, observation });
+}
+
+export function liveProviderFixtureEffectRecoveryConfirmationForTest(
+  argumentsValue,
+) {
+  const admittedArguments = validateLiveProviderEffectRecoveryArguments(
+    argumentsValue,
+    { confirmation: false, testCheckpoint: false },
+  );
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  const state = loadState(roots, false);
+  const base = providerRecoveryBase(state);
+  if (
+    base.operation.action !== COLIMA_LIVE_PROVIDER_EFFECT_ACTION ||
+    liveProviderEffectFixtureOnly(
+      base.operation.operation_kind,
+      base.operation.operation_contract_sha256,
+    ) !== true
+  ) {
+    fail("fixture provider effect recovery action was refused", 73);
+  }
+  validateLiveProviderEffectRecoveryPhysicalState(
+    state,
+    admittedArguments,
+  );
+  return providerRecoveryConfirmation(base);
+}
+
 export function backgroundProviderCleanupRecoveryConfirmationForExecutor(
   argumentsValue,
 ) {
@@ -11298,6 +13879,7 @@ function acquireProviderRecovery(
   ownerProbe,
   publicationHolds = {},
   additionalReassertObservation = undefined,
+  requireLeaseAndLatestAbsent = false,
 ) {
   if (
     additionalReassertObservation !== undefined &&
@@ -11305,23 +13887,34 @@ function acquireProviderRecovery(
   ) {
     fail("provider recovery physical observer was refused", 70);
   }
+  if (typeof requireLeaseAndLatestAbsent !== "boolean") {
+    fail("provider recovery predecessor policy was refused", 70);
+  }
+  const assertAbsentPredecessors = (base, latest) => {
+    const owners = requireLeaseAndLatestAbsent
+      ? [base.lease.value, latest?.value].filter((owner) => owner !== undefined)
+      : [latest?.value ?? base.lease.value];
+    for (const owner of owners) {
+      const ownerState = mutationOwnerState(owner, ownerProbe);
+      if (ownerState === "current" || ownerState === "unknown") {
+        fail(
+          requireLeaseAndLatestAbsent
+            ? "provider recovery predecessor is active or could not be identified"
+            : latest === undefined
+              ? "provider mutation owner is active or could not be identified"
+              : "another provider recovery is active or could not be identified",
+          73,
+        );
+      }
+    }
+  };
   let state = loadState(roots, false);
   const observedBase = providerRecoveryBase(state);
   if (confirmation !== providerRecoveryConfirmation(observedBase)) {
     fail("provider recovery confirmation was refused", 64);
   }
   const observedLatest = state.mutationRecoveries.at(-1);
-  if (observedLatest !== undefined) {
-    const latestState = mutationOwnerState(observedLatest.value, ownerProbe);
-    if (latestState === "current" || latestState === "unknown") {
-      fail("another provider recovery is active or could not be identified", 73);
-    }
-  } else {
-    const leaseOwnerState = mutationOwnerState(observedBase.lease.value, ownerProbe);
-    if (leaseOwnerState === "current" || leaseOwnerState === "unknown") {
-      fail("provider mutation owner is active or could not be identified", 73);
-    }
-  }
+  assertAbsentPredecessors(observedBase, observedLatest);
   state = reconcileMutationStages(roots);
   const base = providerRecoveryBase(state);
   const latest = state.mutationRecoveries.at(-1);
@@ -11333,6 +13926,7 @@ function acquireProviderRecovery(
   ) {
     fail("provider recovery predecessor changed during reconciliation", 73);
   }
+  assertAbsentPredecessors(base, latest);
   const observation = providerRecoveryObservation(state);
   const sequence = (latest?.value.sequence ?? -1) + 1;
   const cleanupNeedsFinalObservationClaim =
@@ -11395,6 +13989,7 @@ function acquireProviderRecovery(
     ) {
       fail("provider recovery observation changed before claim publication", 73);
     }
+    assertAbsentPredecessors(base, latest);
     if (additionalReassertObservation?.(current) !== undefined) {
       fail("provider recovery physical observer returned a value", 70);
     }
@@ -11420,7 +14015,15 @@ function acquireProviderRecovery(
   if (published === undefined || !published.bytes.equals(bytes)) {
     fail("provider recovery claim ownership was refused", 73);
   }
-  const held = Object.freeze({ base, bytes, claim, identity, observation, path });
+  const held = Object.freeze({
+    base,
+    bytes,
+    claim,
+    identity,
+    observation,
+    path,
+    predecessor: latest,
+  });
   const predecessorPresent =
     state.mutationLease?.bytes.equals(base.lease.bytes) === true &&
     (latest === undefined ||
@@ -11432,6 +14035,7 @@ function acquireProviderRecovery(
   ) {
     fail("provider recovery source changed", 73);
   }
+  assertAbsentPredecessors(base, latest);
   if (additionalReassertObservation?.(state) !== undefined) {
     fail("provider recovery physical observer returned a value", 70);
   }
@@ -11549,6 +14153,88 @@ function assertLiveProviderReservationRecoveryHeld(
           digest(reservation.settlement.bytes)))
   ) {
     fail("live provider reservation recovery observation changed", 73);
+  }
+  return state;
+}
+
+function assertLiveProviderEffectRecoveryHeld(
+  roots,
+  held,
+  argumentsValue,
+) {
+  const currentClaim = parseCanonical(
+    held.path,
+    "fixture provider effect recovery claim",
+  );
+  const claimMetadata = mutationHeldIdentity(held.path);
+  if (
+    !sameMetadata(held.identity, claimMetadata) ||
+    !currentClaim.bytes.equals(held.bytes)
+  ) {
+    fail("fixture provider effect recovery claim identity changed", 73);
+  }
+  for (const predecessor of [
+    held.base.lease,
+    held.predecessor,
+  ].filter((entry) => entry !== undefined)) {
+    const ownerState = mutationOwnerState(predecessor.value);
+    if (ownerState === "current" || ownerState === "unknown") {
+      fail(
+        "fixture provider effect recovery predecessor became ambiguous",
+        73,
+      );
+    }
+  }
+  const state = loadState(roots, false);
+  const latest = state.mutationRecoveries.at(-1);
+  if (
+    latest === undefined ||
+    !latest.bytes.equals(held.bytes) ||
+    state.mutationLease === undefined ||
+    !state.mutationLease.bytes.equals(held.base.lease.bytes)
+  ) {
+    fail("fixture provider effect recovery ownership was refused", 73);
+  }
+  const { effect, observation } =
+    validateLiveProviderEffectRecoveryPhysicalState(
+      state,
+      argumentsValue,
+    );
+  const previousStage = held.observation.observed_evidence_stage;
+  const currentStage = observation.observed_evidence_stage;
+  const witnessSha256 =
+    effect.witness === undefined
+      ? held.observation.observed_evidence_head_sha256
+      : digest(effect.witness.bytes);
+  const previousEventCount = providerEffectEventPrefixCount(
+    effect.events,
+    held.observation.observed_evidence_head_sha256,
+    witnessSha256,
+  );
+  const currentEventCount = providerEffectEventPrefixCount(
+    effect.events,
+    observation.observed_evidence_head_sha256,
+    witnessSha256,
+  );
+  const appendedEvents = effect.events.slice(
+    previousEventCount,
+    currentEventCount,
+  );
+  if (
+    !liveProviderEffectRecoveryStageReachable(previousStage, currentStage) ||
+    currentEventCount < previousEventCount ||
+    appendedEvents.some(
+      (event) =>
+        event.value.event_kind !== "completion" ||
+        event.value.publisher_authority_sha256 !== digest(held.bytes),
+    ) ||
+    appendedEvents.length > 1 ||
+    state.receiptState.head.sequence !==
+      held.base.lease.value.source_sequence ||
+    state.receiptState.head_sha256 !==
+      held.base.lease.value.source_head_sha256
+  ) {
+    fail("fixture provider effect recovery observation changed", 73);
   }
   return state;
 }
@@ -12050,6 +14736,308 @@ function closeRecoveredLiveProviderReservation(
     "after-recovery-close",
   );
   return closed;
+}
+
+function observeRetiredLiveProviderEffectMarker(
+  roots,
+  held,
+  state,
+  effect,
+  argumentsValue,
+  testCheckpoint,
+) {
+  assertLiveProviderEffectRetiredWitness(
+    state,
+    effect.publicationPlan,
+    argumentsValue,
+  );
+  observeLiveProviderEffectPhysicalRoots(
+    argumentsValue,
+    state,
+    effect.source,
+    effect.publicationPlan,
+    "absent",
+  );
+  syncDirectory(argumentsValue.observationInput.provider_root);
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "after-recovery-marker-retirement-directory-sync",
+  );
+  const verified = assertLiveProviderEffectRecoveryHeld(
+    roots,
+    held,
+    argumentsValue,
+  );
+  const verifiedEffect = verified.liveProviderFixtureEffect;
+  const witness = assertLiveProviderEffectRetiredWitness(
+    verified,
+    verifiedEffect.publicationPlan,
+    argumentsValue,
+  );
+  observeLiveProviderEffectPhysicalRoots(
+    argumentsValue,
+    verified,
+    verifiedEffect.source,
+    verifiedEffect.publicationPlan,
+    "absent",
+  );
+  const seed = liveProviderEffectBytes({
+    marker_witness_identity_sha256:
+      witness.value.marker_witness_identity_sha256,
+    slot_sha256: digest(verifiedEffect.slot.bytes),
+    state: "marker-absent-witness-one-link",
+  });
+  return Object.freeze({
+    markerRetirementObservationSha256: liveProviderEffectDigest(
+      Buffer.concat([seed, Buffer.from("marker-retirement", "utf8"), randomBytes(32)]),
+    ),
+    providerRootFsyncObservationSha256: liveProviderEffectDigest(
+      Buffer.concat([seed, Buffer.from("provider-root-fsync", "utf8"), randomBytes(32)]),
+    ),
+    state: verified,
+  });
+}
+
+function closeRecoveredLiveProviderEffect(
+  roots,
+  held,
+  argumentsValue,
+  disposition,
+  operationEvidenceSha256,
+  testCheckpoint,
+) {
+  const assertHeld = () =>
+    assertLiveProviderEffectRecoveryHeld(roots, held, argumentsValue);
+  const state = assertHeld();
+  const effect = state.liveProviderFixtureEffect;
+  if (
+    effect === undefined ||
+    (disposition === "aborted-before-effect" &&
+      (!new Set(["not-started", "stage-retired-before-effect"]).has(
+        effect.currentStage,
+      ) ||
+        state.providerEffectStage !== undefined ||
+        state.providerEffectWitness !== undefined ||
+        state.providerEffectEvents.length !== 0 ||
+        operationEvidenceSha256 !== ZERO_SHA256)) ||
+    (disposition === "completed" &&
+      (effect.currentStage !== "completion-retired" ||
+        effect.completion === undefined ||
+        state.providerEffectStage !== undefined ||
+        state.providerEffectWitness?.metadata.nlink !== 1n ||
+        operationEvidenceSha256 !== digest(effect.completion.bytes)))
+  ) {
+    fail("fixture provider effect recovery close was refused", 73);
+  }
+  let afterLinkFailure;
+  const closed = publishMutationClose(
+    roots,
+    state,
+    state.mutationLease,
+    disposition,
+    assertHeld,
+    {
+      afterLinkObserver: () => {
+        try {
+          callLiveProviderEffectCheckpoint(
+            testCheckpoint,
+            "after-recovery-close-link",
+          );
+        } catch (error) {
+          afterLinkFailure = error;
+        }
+      },
+    },
+    operationEvidenceSha256,
+  );
+  if (afterLinkFailure !== undefined) throw afterLinkFailure;
+  callLiveProviderEffectCheckpoint(testCheckpoint, "after-recovery-close");
+  return closed;
+}
+
+export function recoverColimaLiveProviderEffectForTest(argumentsValue) {
+  const admittedArguments = validateLiveProviderEffectRecoveryArguments(
+    argumentsValue,
+    { confirmation: true, testCheckpoint: true },
+  );
+  const { testCheckpoint } = admittedArguments;
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  const initial = loadState(roots, false);
+  const base = providerRecoveryBase(initial);
+  if (
+    base.operation.action !== COLIMA_LIVE_PROVIDER_EFFECT_ACTION ||
+    liveProviderEffectFixtureOnly(
+      base.operation.operation_kind,
+      base.operation.operation_contract_sha256,
+    ) !== true
+  ) {
+    fail("fixture provider effect recovery action was refused", 73);
+  }
+  validateLiveProviderEffectRecoveryPhysicalState(
+    initial,
+    admittedArguments,
+  );
+  if (initial.liveProviderFixtureEffect?.currentStage === "attempt-fenced") {
+    fail("fixture provider effect attempt fence requires operator resolution", 73);
+  }
+  const held = acquireProviderRecovery(
+    roots,
+    admittedArguments.confirmation,
+    defaultMutationOwnerProbe,
+    {},
+    (current) => {
+      validateLiveProviderEffectRecoveryPhysicalState(
+        current,
+        admittedArguments,
+      );
+    },
+    true,
+  );
+  callLiveProviderEffectCheckpoint(testCheckpoint, "after-recovery-claim");
+  let retirement;
+  for (let transition = 0; transition < 12; transition += 1) {
+    let state = assertLiveProviderEffectRecoveryHeld(
+      roots,
+      held,
+      admittedArguments,
+    );
+    let effect = state.liveProviderFixtureEffect;
+    switch (effect.currentStage) {
+      case "not-started":
+      case "stage-retired-before-effect": {
+        const closed = closeRecoveredLiveProviderEffect(
+          roots,
+          held,
+          admittedArguments,
+          "aborted-before-effect",
+          ZERO_SHA256,
+          testCheckpoint,
+        );
+        return closed.receiptState.head;
+      }
+      case "stage-initializing":
+      case "stage-only":
+        callLiveProviderEffectCheckpoint(
+          testCheckpoint,
+          "before-recovery-stage-retirement",
+        );
+        unlinkLiveProviderEffectStage(
+          state,
+          {
+            ...state.providerEffectStage,
+            identity: state.providerEffectStage.metadata,
+          },
+          1,
+          testCheckpoint,
+        );
+        break;
+      case "marker-linked": {
+        callLiveProviderEffectCheckpoint(
+          testCheckpoint,
+          "before-recovery-witness-link",
+        );
+        const witnessPath = join(
+          state.run,
+          providerEffectWitnessFileName(effect.slot.value.journal_sequence),
+        );
+        linkLiveProviderEffectWitness(
+          state,
+          state.providerEffectStage,
+          witnessPath,
+          testCheckpoint,
+        );
+        break;
+      }
+      case "witness-linked":
+        callLiveProviderEffectCheckpoint(
+          testCheckpoint,
+          "before-recovery-stage-unlink",
+        );
+        unlinkLiveProviderEffectStage(
+          state,
+          {
+            ...state.providerEffectStage,
+            identity: state.providerEffectStage.metadata,
+          },
+          3,
+          testCheckpoint,
+        );
+        break;
+      case "marker-held":
+      case "authority-held":
+        retirement = retireLiveProviderEffectMarker(
+          roots,
+          state,
+          admittedArguments,
+          () =>
+            assertLiveProviderEffectRecoveryHeld(
+              roots,
+              held,
+              admittedArguments,
+            ),
+          testCheckpoint,
+        );
+        break;
+      case "witness-unlinked": {
+        retirement ??= observeRetiredLiveProviderEffectMarker(
+          roots,
+          held,
+          state,
+          effect,
+          admittedArguments,
+          testCheckpoint,
+        );
+        state = assertLiveProviderEffectRecoveryHeld(
+          roots,
+          held,
+          admittedArguments,
+        );
+        effect = state.liveProviderFixtureEffect;
+        const completionEvidence =
+          liveProviderEffectPreAttemptCompletionEvidence(
+            effect,
+            digest(held.bytes),
+            retirement,
+          );
+        publishLiveProviderEffectEvent(
+          roots,
+          state,
+          admittedArguments,
+          "completion",
+          completionEvidence,
+          () =>
+            assertLiveProviderEffectRecoveryHeld(
+              roots,
+              held,
+              admittedArguments,
+            ),
+          testCheckpoint,
+        );
+        break;
+      }
+      case "completion-retired": {
+        const completion = effect.completion;
+        const closed = closeRecoveredLiveProviderEffect(
+          roots,
+          held,
+          admittedArguments,
+          "completed",
+          digest(completion.bytes),
+          testCheckpoint,
+        );
+        return closed.liveProviderFixtureEffect.completion.value;
+      }
+      case "attempt-fenced":
+        fail("fixture provider effect attempt fence requires operator resolution", 73);
+      default:
+        fail("fixture provider effect recovery stage was refused", 73);
+    }
+  }
+  fail("fixture provider effect recovery did not converge", 73);
 }
 
 function recoverColimaLiveProviderReservation(argumentsValue, fixtureOnly) {
@@ -12786,6 +15774,7 @@ export function appendReceiptForExecutor(argumentsValue) {
     typeof argumentsValue.phase === "string" &&
     (argumentsValue.phase.startsWith("provider-create-") ||
       argumentsValue.phase.startsWith("provider-cleanup-") ||
+      argumentsValue.phase === "provider-effect-retired" ||
       argumentsValue.phase === "preflight-refused" ||
       argumentsValue.phase === "finalize-passed")
   ) {

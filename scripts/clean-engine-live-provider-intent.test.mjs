@@ -436,11 +436,11 @@ test("intent publication has distinct inert production and fixture contracts", (
   assert.notEqual(variants[0].digest, variants[1].digest);
   assert.equal(
     variants[0].digest,
-    "737a474bebc1ceb956586a19e848eb7a300ae5fb8ba2750352a2f84dfc59125f",
+    "24c8d98eb13962fd7139f72f034b7b4f85b1474eb9b681b8db57f2881bdaed9d",
   );
   assert.equal(
     variants[1].digest,
-    "25537c0d763a1df7a088cfbba2bcda001683f03e7190157a09b1c1d7a3f1370e",
+    "bf7681827912b6a848525145ffc3a8eebafa1239e68cf6c4ec6184b6045e8d6d",
   );
   for (const value of variants) {
     assert.deepEqual(value.contract, {
@@ -457,14 +457,14 @@ test("intent publication has distinct inert production and fixture contracts", (
       receipt_publication_authorized: false,
       recovery_disposition: "aborted-before-effect-only",
       schema: value.schema,
-      state_integration: "mutation-journal-v6-inert-intent-only",
+      state_integration: "mutation-journal-v7-inert-intent-only",
       state_intent_publication_authorized: true,
       target_create_operation_contract_sha256:
-        "0039cdbb343dea4de86efd63a4cf6e160d3b4167b46339db201f89a219a61196",
+        "bbf65bbb13c58e31e15b040576253b32c1f07a62445d585c8436cc821d845fe4",
       target_create_operation_kind: "colima-vz-docker-live-create-v1",
       target_provider_plan_schema:
         "synveda.clean-engine.colima-live-provider-operation-plan.v1",
-      target_provider_plan_state_integration: "mutation-journal-v6-plan-only",
+      target_provider_plan_state_integration: "mutation-journal-v7-plan-only",
     });
     assert.equal(value.digest, digest(value.contract));
     assertRecursivelyFrozen(value.contract);

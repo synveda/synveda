@@ -147,7 +147,7 @@ test("production and fixture prerequisite projections are exact and non-authoriz
       evidenceClass: "production-pinned",
       fixtureOnly: false,
       projectionDigest:
-        "ae3d98ae3d4eee54ef0094874d73fb63f75b817a9a4005868ee22074d12202e7",
+        "81c496e201dbb75b17470f09d7cad2114d266641ca11cd8fbff25a992584b8da",
       schema:
         COLIMA_LIVE_PROVIDER_EFFECT_GENERATION_PREREQUISITE_PROJECTION_SCHEMA,
     },
@@ -155,7 +155,7 @@ test("production and fixture prerequisite projections are exact and non-authoriz
       evidenceClass: "fixture-only",
       fixtureOnly: true,
       projectionDigest:
-        "58241bcd4d95b5f74968fdca1880becd0c6bee1a10a060d49e553e950dc7e853",
+        "a38253aff84b502c683e64413e62b13307f50b05a5a420e3b175bb6c3733a57e",
       schema:
         COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_GENERATION_PREREQUISITE_PROJECTION_SCHEMA,
     },
@@ -907,23 +907,23 @@ test("the prerequisite module remains outside production authority", () => {
   );
   assert.match(
     receipts,
-    /RECEIPT_SCHEMA = "synveda\.clean-engine\.receipt\.v5"/u,
+    /RECEIPT_SCHEMA = "synveda\.clean-engine\.receipt\.v6"/u,
   );
   assert.match(
     state,
-    /MUTATION_SLOT_SCHEMA = "synveda\.clean-engine\.mutation-slot\.v6"/u,
+    /MUTATION_SLOT_SCHEMA = "synveda\.clean-engine\.mutation-slot\.v7"/u,
   );
   assert.match(
     state,
-    /MUTATION_CLOSE_SCHEMA = "synveda\.clean-engine\.mutation-close\.v7"/u,
+    /MUTATION_CLOSE_SCHEMA = "synveda\.clean-engine\.mutation-close\.v8"/u,
   );
   assert.match(
     state,
-    /MUTATION_RECOVERY_SCHEMA = "synveda\.clean-engine\.mutation-recovery\.v5"/u,
+    /MUTATION_RECOVERY_SCHEMA = "synveda\.clean-engine\.mutation-recovery\.v6"/u,
   );
   assert.match(
     state,
-    /schema: "synveda\.clean-engine\.mutation-recovery-root\.v5"/u,
+    /schema: "synveda\.clean-engine\.mutation-recovery-root\.v6"/u,
   );
   assert.match(
     state,
@@ -931,7 +931,7 @@ test("the prerequisite module remains outside production authority", () => {
   );
   assert.match(
     reservation,
-    /"mutation-journal-v6-no-spawn-reservation-only"/u,
+    /"mutation-journal-v7-no-spawn-reservation-only"/u,
   );
   assert.match(lifecycle, /plan\|status\|verify/u);
   for (const consumer of [state, receipts, reservation, registry, lifecycle]) {

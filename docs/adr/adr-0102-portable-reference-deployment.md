@@ -16,11 +16,11 @@ distinct effect witness at the same fixed marker basename and holds only that
 new marker/witness inode across its start-attempt and settlement protocol.
 Neither sibling may extend, translate, relabel or reuse the other.
 
-The current generic mutation-recovery claim is v5; the earlier v4 reference
-below records an older intermediate state generation. ADR-0104 is accepted as
-the design for the next atomic hard cut, but its state generation is not yet
-implemented. This amendment grants no process, provider-effect recovery,
-registry, lifecycle, finalization or readiness authority.
+The current generic mutation-recovery claim is v6; the earlier v4 reference
+below records an older intermediate state generation. ADR-0104's fixture-only
+state generation and recovery are implemented, while production effect
+publication and recovery remain absent. This amendment grants no production
+process, registry, lifecycle, finalization or readiness authority.
 
 ## Context
 
@@ -146,9 +146,9 @@ actor path is removed. The controlled path is the lifecycle-unexposed
 background process canary, wrapped in state-born authority without making its
 inner process model the operation authority.
 
-Receipt schema v5, mutation slot v6, mutation recovery/root v5 and mutation
-close v7 are fresh-plan hard cuts; receipt v1-v4, slot v1-v5, recovery/root
-v1-v4 and close v1-v6 are refused rather than translated. A canonical background-create
+Receipt schema v6, mutation slot v7, mutation recovery/root v6 and mutation
+close v8 are fresh-plan hard cuts; receipt v1-v5, slot v1-v6, recovery/root
+v1-v5 and close v1-v7 are refused rather than translated. A canonical background-create
 operation plan binds the private
 provider base, evidence directory, root key and ownership nonce. The slot binds
 that plan, operation kind and v4 process contract before intent or root
@@ -179,10 +179,10 @@ remains exact. Source closure is required at intent, pass and close. A stale
 staged intent is retired before effect; drift after complete identity enters
 the closed execution-failure branch.
 
-This original decision recorded generic recovery v4; the amendment above names
-the current v5 generation. Recovery confirmation is read-only. Recovery
+This original decision recorded generic recovery v4; the current hard cut uses
+v6. Recovery confirmation is read-only. Recovery
 acquisition first proves the recorded owner and newest recoverer absent, then
-may reconcile only exact mutation-stage aliases and append a v4 claim bound to
+may reconcile only exact mutation-stage aliases and append a v6 claim bound to
 the fresh observation.
 It never launches, signals, deletes, repairs the inner chain or replays a
 durable controller/start decision. Controller launch without authenticated
@@ -203,8 +203,8 @@ settlement remain a separate head and expose an operation-bound read-only
 prefix observation.
 
 The inner settlement grants no result-receipt or close authority. Only the
-distinct outer cleanup settlement may bind receipt v5's controlled pass and
-close v7. Action-dispatched recovery holds the newest observation claim and,
+distinct outer cleanup settlement may bind receipt v6's controlled pass and
+close v8. Action-dispatched recovery holds the newest observation claim and,
 when retirement advances, publishes a reserved final settled-prefix claim
 before outer settlement. Owner close permits no claims; recovery close must
 name the latest claim. Pre-intent recovery is effect-free, settled history
@@ -256,16 +256,16 @@ operation-contract digest and
 `colima-vz-docker-live` provider class. Both contracts bind the production
 requirements digest; cleanup additionally binds the create-contract digest.
 The create entry grants only state planning through
-`mutation-journal-v6-plan-only`; execution, provider recovery, lifecycle
+`mutation-journal-v7-plan-only`; execution, provider recovery, lifecycle
 exposure and finalization remain false, cleanup remains wholly deny-only, and
 the registry imports no process, state, receipt or fake-provider implementation.
 
 The state owner embeds the exact live plan in a dedicated `provider-plan`
-mutation slot v6. The plan binds the active run/candidate/head, registry tuple,
+mutation slot v7. The plan binds the active run/candidate/head, registry tuple,
 production requirements, private observation digest and provider
 profile/resource, but persists no paths, command, environment, `HOME`, binding
 key or credentials. The production observation is revalidated before slot
-acquisition and at the owner-close v7 publication boundary. This action shares
+acquisition and at the owner-close v8 publication boundary. This action shares
 the same slot CAS as fake-provider mutation, changes no receipt or environment,
 produces no provider evidence and blocks all later mutation/finalization except
 the exact inert intent successor while execution remains disabled. An
@@ -283,7 +283,7 @@ and `requested-not-authorized`; its logical pre-effect prefix has zero entries.
 
 The state owner alone may persist those values through the distinct
 `provider-intent` successor and
-`mutation-journal-v6-inert-intent-only`. Production and fixture operation
+`mutation-journal-v7-inert-intent-only`. Production and fixture operation
 kinds, contracts, schemas and evidence classes are distinct; neither tuple is
 registered with the provider adapter. Both contracts deny execution, receipt,
 provider-effect recovery, cleanup, lifecycle and finalization authority.
@@ -291,11 +291,11 @@ provider-effect recovery, cleanup, lifecycle and finalization authority.
 Publication derives all admission values internally. It requires the initial
 canonical pristine-namespace admission to equal the observations immediately
 before the slot link, after slot acquisition and immediately before the close link.
-Slot v6 contains only content-free state, and its owner close v7 commits with
+Slot v7 contains only content-free state, and its owner close v8 commits with
 zero receipt, environment and operation-evidence delta. Collision or drift
 before slot publication leaves no permanent slot; after acquisition it
 owner-aborts that generation. An abandoned intent can only append an all-zero
-recovery v5 observation and close `aborted-before-effect`. Exact completed
+recovery v6 observation and close `aborted-before-effect`. Exact completed
 retries return historical non-authorizing state without claiming current
 namespace state.
 
@@ -307,7 +307,7 @@ The next boundary is a durable but effect-free `provider-start-decision`,
 separate for production and fixtures. It binds the exact completed intent slot,
 close, publication plan and completed-plan projection, and its only decision is
 `requested-not-executed-not-authorized`. Its publication-plan schema is v2 and
-its state integration is `mutation-journal-v6-inert-start-decision-only`.
+its state integration is `mutation-journal-v7-inert-start-decision-only`.
 Process start/spawn/signal, adapter/effect execution, root mutation,
 provider/evidence/runtime/receipt/environment publication, provider-effect
 recovery, cleanup, lifecycle and finalization remain false.
@@ -322,7 +322,7 @@ publishers hard-code their class and reject caller-supplied state, source, plan,
 root result, historical admission, candidate or authority.
 
 A pre-CAS collision leaves no slot; a post-CAS collision aborts the generation.
-Abandoned decisions admit only an all-zero recovery v5 claim and recovery close;
+Abandoned decisions admit only an all-zero recovery v6 claim and recovery close;
 generic effect recovery refuses them. The journal admits only aborted plan,
 intent and decision generations before each matching owner completion. Exact retry returns historical non-authorizing
 state without re-reading roots. No process authority follows from persistence.
@@ -335,14 +335,14 @@ false; stable collision derives `null`. The result is not persisted and
 introduces no journal action, operation kind, contract digest, registry entry or receipt. Its
 authorization function always refuses.
 
-ADR-0103 adds the only currently implemented persisted successor: one
-cooperative terminal no-spawn reservation. Its v6 slot precedes filesystem mutation; a private fsynced witness
+ADR-0103 adds one persisted successor: a cooperative terminal no-spawn
+reservation. Its v7 slot precedes filesystem mutation; a private fsynced witness
 binds the exact state run, provider root and six namespace identities on one
 device. One fixed provider-root hard-link CAS selects the owner. While the exact
 two-link marker/witness inode remains held, bracketed fresh observation must
 match the plan before immutable retirement authorization is published. The
 verified marker is then retired, its parent fsynced, the one-link witness proved
-and close v7 bound to the settlement digest. Dedicated v5 recovery may retire an
+and close v8 bound to the settlement digest. Dedicated v6 recovery may retire an
 inert stage, finish partial witness publication or relink the exact standalone
 witness. It grants reservation recovery only; all process/provider-effect,
 receipt/environment/provider/runtime/evidence, cleanup, lifecycle and
@@ -352,10 +352,14 @@ same-UID owners and is not a hostile-principal boundary.
 This original decision anticipated an indivisible effect cut that would keep
 the no-spawn reservation held across start authority and effect. That
 continuation model is superseded by the amendment above: ADR-0104 instead owns
-a sibling generation with a distinct effect witness. Its complete recursive
-settlement and causal ownership/recovery for the outer process, detached Lima
-hostagent, usernet and SSH ControlMaster remain open, as do live macOS proxy
-observation and per-file OS executable identity.
+a sibling generation with a distinct effect witness. Its production-unreachable
+fixture state now persists the physical stage/witness/marker prefix, a
+zero-receipt pre-attempt completion, an attempt fence and crash recovery through
+receipt v6, slot v7, recovery/root v6 and close v8. It invokes no process and
+cannot recover across the attempt fence. Complete recursive settlement and
+causal ownership/recovery for the outer process, detached Lima hostagent,
+usernet and SSH ControlMaster remain open, as do live macOS proxy observation
+and per-file OS executable identity.
 
 ## Options considered
 
@@ -409,7 +413,7 @@ observation and per-file OS executable identity.
 - The controlled clean-Engine seams remain internal and fake-only. The
   deterministic background create path distinguishes controller, host agent,
   Engine, both sockets and Docker context; its outer settlement is integrated
-  with receipt v5 and close v7. Legacy retirement v1 remains fixture-only; the
+  with receipt v6 and close v8. Legacy retirement v1 remains fixture-only; the
   state owner composes retirement v2 through a dedicated cleanup slot, exact
   lower checkpoints, an outer settlement, action-dispatched recovery, receipt
   and close. Only the outer cleanup settlement is operation evidence. A live

@@ -23,6 +23,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
+import * as cleanEngineStateModule from "../deploy/compose/scripts/clean-engine-state.mjs";
 import {
   appendProviderCleanupReceiptForExecutor,
   appendReceiptForExecutor,
@@ -30,6 +31,7 @@ import {
   COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA,
   executeProviderCreateForExecutor,
   finalizeEnvironmentForExecutor,
+  liveProviderFixtureEffectRecoveryConfirmationForTest,
   liveProviderFixtureReservationRecoveryConfirmationForTest,
   liveProviderFixtureStartDecisionRecoveryConfirmationForTest,
   liveProviderIntentRecoveryConfirmationForExecutor,
@@ -45,6 +47,8 @@ import {
   providerRecoveryConfirmationForExecutor,
   publishColimaLiveProviderIntentForExecutor,
   publishColimaLiveProviderIntentForTest,
+  publishColimaLiveProviderEffectAttemptFenceForTest,
+  publishColimaLiveProviderEffectPreAttemptForTest,
   publishColimaLiveProviderReservationForTest,
   publishColimaLiveProviderStartDecisionForExecutor,
   publishColimaLiveProviderStartDecisionForTest,
@@ -54,6 +58,7 @@ import {
   recoverLiveProviderStartDecisionForExecutor,
   recoverLiveProviderStartDecisionForTest,
   recoverColimaLiveProviderReservationForTest,
+  recoverColimaLiveProviderEffectForTest,
   recoverProviderCreateForExecutor,
 } from "../deploy/compose/scripts/clean-engine-state.mjs";
 import {
@@ -88,6 +93,11 @@ import {
   COLIMA_LIVE_FIXTURE_PROCESS_START_EFFECT_FRESH_ADMISSION_SCHEMA,
   liveProviderProcessStartBytes,
 } from "../deploy/compose/scripts/clean-engine-live-provider-process-start.mjs";
+import {
+  COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
+  COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_SCHEMAS,
+} from "../deploy/compose/scripts/clean-engine-live-provider-effect.mjs";
 import {
   COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_COMPLETION_SCHEMA,
 } from "../deploy/compose/scripts/clean-engine-live-provider-reservation.mjs";
@@ -320,7 +330,8 @@ function liveProviderOperationPlan(state, observationSha256 = "e".repeat(64)) {
 }
 
 function prepareLiveProviderIntentFixture(state) {
-  assert.equal(run(state, "plan").status, 0);
+  const planned = run(state, "plan");
+  assert.equal(planned.status, 0, planned.stderr);
   const active = activeRun(state);
   const fixtureId = parse(join(active, "candidate.json")).run_id;
   const preparation = createCleanEngineColimaLiveObservationFixture({
@@ -515,7 +526,7 @@ function stageProductionLiveProviderIntent(
     result_environment_sha256: slot.source_environment_sha256,
     result_head_sha256: slot.source_head_sha256,
     result_sequence: slot.source_sequence,
-    schema: "synveda.clean-engine.mutation-close.v7",
+    schema: "synveda.clean-engine.mutation-close.v8",
     slot_sequence: slot.journal_sequence,
     slot_sha256: sha256(slotBytes),
   };
@@ -572,7 +583,7 @@ function replaceCompletedFixtureIntentGeneration(state) {
     result_environment_sha256: secondSlot.source_environment_sha256,
     result_head_sha256: secondSlot.source_head_sha256,
     result_sequence: secondSlot.source_sequence,
-    schema: "synveda.clean-engine.mutation-close.v7",
+    schema: "synveda.clean-engine.mutation-close.v8",
     slot_sequence: secondSlot.journal_sequence,
     slot_sha256: sha256(secondSlotBytes),
   };
@@ -603,7 +614,7 @@ function mutationLease(state, {
     journal_sequence: journalSequence,
     nonce: "f".repeat(32),
     operation_contract_sha256: providerCreate
-      ? "3ce0f279e4d9b981d88f9d84cf7a754acb91f222170902c7b36d07464f199833"
+      ? "81159eaee9bc06e651a529008b9531b873b700a1fbf88852d58f018cd8c8d39e"
       : "0".repeat(64),
     operation_kind: providerCreate ? "deterministic-fake-provider-create-v1" : "none",
     operation_plan: null,
@@ -612,7 +623,7 @@ function mutationLease(state, {
     owner_pid: ownerPid,
     owner_probe: "opaque-process-instance-v1",
     previous_close_sha256: previousCloseSha256,
-    schema: "synveda.clean-engine.mutation-slot.v6",
+    schema: "synveda.clean-engine.mutation-slot.v7",
     source_environment_sha256: "0".repeat(64),
     source_head_sha256: sha256(canonicalBytes(planReceipt)),
     source_sequence: 0,
@@ -647,7 +658,7 @@ function fakeProviderAdapter({
 function stageAbandonedProviderLease(state, {
   ownerPid = 2_147_483_647,
   providerContractSha256 =
-    "3ce0f279e4d9b981d88f9d84cf7a754acb91f222170902c7b36d07464f199833",
+    "81159eaee9bc06e651a529008b9531b873b700a1fbf88852d58f018cd8c8d39e",
   publishIntent = true,
 } = {}) {
   const active = activeRun(state);
@@ -690,7 +701,7 @@ function stageAbandonedProviderMutation(state, options) {
       operation_contract_sha256: lease.operation_contract_sha256,
       operation_kind: lease.operation_kind,
       operation_plan_sha256: "0".repeat(64),
-      schema: "synveda.clean-engine.mutation-recovery-root.v5",
+      schema: "synveda.clean-engine.mutation-recovery-root.v6",
     })),
     fixture_id: candidate.run_id,
     lease_sha256: sha256(leaseBytes),
@@ -710,7 +721,7 @@ function stageAbandonedProviderMutation(state, options) {
     owner_pid: 2_147_483_646,
     owner_probe: "opaque-process-instance-v1",
     parent_sha256: "0".repeat(64),
-    schema: "synveda.clean-engine.mutation-recovery.v5",
+    schema: "synveda.clean-engine.mutation-recovery.v6",
     sequence: 0,
     slot_sequence: 0,
     source_head_sha256: sha256(canonicalBytes(intentReceipt)),
@@ -747,7 +758,7 @@ function recoveryClaimForSlot(state, {
       operation_plan_sha256: slot.operation_plan === null
         ? "0".repeat(64)
         : sha256(canonicalBytes(slot.operation_plan)),
-      schema: "synveda.clean-engine.mutation-recovery-root.v5",
+      schema: "synveda.clean-engine.mutation-recovery-root.v6",
     })),
     fixture_id: candidate.run_id,
     lease_sha256: sha256(slotBytes),
@@ -769,7 +780,7 @@ function recoveryClaimForSlot(state, {
     owner_pid: ownerPid,
     owner_probe: "opaque-process-instance-v1",
     parent_sha256: previous === undefined ? "0".repeat(64) : sha256(canonicalBytes(previous)),
-    schema: "synveda.clean-engine.mutation-recovery.v5",
+    schema: "synveda.clean-engine.mutation-recovery.v6",
     sequence,
     slot_sequence: slotSequence,
     source_head_sha256: sourceHeadSha256 ?? sha256(canonicalBytes(head)),
@@ -819,7 +830,7 @@ async function waitForPublishedMutationSlot(
         !readdirSync(active).some((name) => name.startsWith(".mutation-stage-"))
       ) {
         const value = parse(path);
-        assert.equal(value.schema, "synveda.clean-engine.mutation-slot.v6");
+        assert.equal(value.schema, "synveda.clean-engine.mutation-slot.v7");
         assert.equal(value.action, expectedAction);
         return;
       }
@@ -891,15 +902,19 @@ async function crashLiveProviderReservationAt(
       action,
       state.repo,
       state.state,
-      JSON.stringify(input),
       checkpoint,
       releasePath,
     ],
     {
       env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     },
   );
+  let inputWriteError;
+  child.stdin.on("error", (error) => {
+    inputWriteError = error;
+  });
+  child.stdin.end(JSON.stringify(input));
   child.stdout.resume();
   let stderr = "";
   child.stderr.setEncoding("utf8");
@@ -910,6 +925,7 @@ async function crashLiveProviderReservationAt(
     const readyPath = `${releasePath}.ready-${child.pid}`;
     const deadline = Date.now() + 10_000;
     while (!existsSync(readyPath)) {
+      assert.equal(inputWriteError, undefined);
       assert.equal(child.exitCode, null, stderr);
       assert.ok(Date.now() < deadline, stderr);
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
@@ -921,6 +937,66 @@ async function crashLiveProviderReservationAt(
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGKILL");
+    }
+  }
+}
+
+async function crashLiveProviderEffectAt(
+  state,
+  {
+    action = "publish",
+    checkpoint,
+    input,
+    releaseName,
+    signal: terminationSignal = "SIGKILL",
+  },
+) {
+  const helper = resolve(
+    "scripts/fixtures/clean-engine-live-provider-effect-process.mjs",
+  );
+  const releasePath = join(state.root, releaseName);
+  const child = spawn(
+    process.execPath,
+    [
+      helper,
+      action,
+      state.repo,
+      state.state,
+      checkpoint,
+      releasePath,
+    ],
+    {
+      env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  let inputWriteError;
+  child.stdin.on("error", (error) => {
+    inputWriteError = error;
+  });
+  child.stdin.end(JSON.stringify(input));
+  child.stdout.resume();
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  try {
+    const readyPath = `${releasePath}.ready-${child.pid}`;
+    const deadline = Date.now() + 12_000;
+    while (!existsSync(readyPath)) {
+      assert.equal(inputWriteError, undefined);
+      assert.equal(child.exitCode, null, stderr);
+      assert.ok(Date.now() < deadline, stderr);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    child.kill(terminationSignal);
+    const [status, observedSignal] = await once(child, "close");
+    assert.equal(status, null);
+    assert.equal(observedSignal, terminationSignal);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill(terminationSignal);
     }
   }
 }
@@ -1058,10 +1134,10 @@ test("a live provider operation plan is journaled once and grants no effect auth
     const close = parse(closePath);
     assertPrivate(slotPath, 0o600);
     assertPrivate(closePath, 0o600);
-    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v6");
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v7");
     assert.equal(slot.action, "provider-plan");
     assert.deepEqual(slot.operation_plan, operationPlan);
-    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v7");
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v8");
     assert.equal(close.disposition, "completed");
     assert.equal(close.operation_plan_sha256, sha256(canonicalBytes(operationPlan)));
     assert.equal(close.operation_evidence_sha256, "0".repeat(64));
@@ -1411,7 +1487,7 @@ test("fixture intent publication commits one inert state-only successor", () => 
     const close = parse(closePath);
     assertPrivate(slotPath, 0o600);
     assertPrivate(closePath, 0o600);
-    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v6");
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v7");
     assert.equal(slot.action, "provider-intent");
     assert.equal(
       slot.operation_kind,
@@ -1426,7 +1502,7 @@ test("fixture intent publication commits one inert state-only successor", () => 
       slot.operation_plan.schema,
       "synveda.clean-engine.colima-live-fixture-provider-intent-publication-plan.v1",
     );
-    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v7");
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v8");
     assert.equal(close.disposition, "completed");
     assert.equal(close.authority, "owner");
     assert.equal(close.result_sequence, 0);
@@ -2101,7 +2177,7 @@ test("fixture start decision publication commits one inert completed successor",
     const close = parse(closePath);
     assertPrivate(slotPath, 0o600);
     assertPrivate(closePath, 0o600);
-    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v6");
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v7");
     assert.equal(slot.action, "provider-start-decision");
     assert.equal(
       slot.operation_kind,
@@ -2117,10 +2193,10 @@ test("fixture start decision publication commits one inert completed successor",
     );
     assert.equal(
       slot.operation_plan.state_integration,
-      "mutation-journal-v6-inert-start-decision-only",
+      "mutation-journal-v7-inert-start-decision-only",
     );
     assert.equal(slot.intent_receipt_sha256, "0".repeat(64));
-    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v7");
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v8");
     assert.equal(close.disposition, "completed");
     assert.equal(close.authority, "owner");
     assert.equal(close.result_sequence, 0);
@@ -2664,7 +2740,7 @@ test("an abandoned start decision is recovered only by an all-zero abort", async
     const closePath = join(active, ".mutation-close-02");
     const recovery = parse(recoveryPath);
     const close = parse(closePath);
-    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v5");
+    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v6");
     assert.equal(recovery.action, "provider-start-decision");
     assert.deepEqual(
       {
@@ -3309,6 +3385,1864 @@ test("completed start decision admits only a current deny-only effect candidate"
   }
 });
 
+test("the state owner retires the fixture provider effect before attempt with no receipt", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const checkpoints = [];
+    const argumentsValue = fixtureStartAdmissionArguments(
+      state,
+      preparation,
+      (checkpoint) => {
+        checkpoints.push(checkpoint);
+      },
+    );
+    const completion =
+      publishColimaLiveProviderEffectPreAttemptForTest(argumentsValue);
+    assert.equal(
+      completion.schema,
+      COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_SCHEMAS.event.completion,
+    );
+    assert.equal(completion.event_kind, "completion");
+    assert.equal(completion.event_sequence, 1);
+    assert.equal(
+      completion.operation_kind,
+      COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
+    );
+    assert.equal(
+      completion.operation_contract_sha256,
+      COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
+    );
+    assert.equal(
+      completion.evidence.variant,
+      "pre-attempt-retired-zero-receipt",
+    );
+    for (const field of [
+      "cleanup_settlement_sha256",
+      "create_settlement_sha256",
+      "receipt_event_sha256",
+      "receipt_sha256",
+      "start_attempt_sha256",
+    ]) {
+      assert.equal(completion.evidence[field], "0".repeat(64));
+    }
+    assert.equal(
+      existsSync(
+        join(
+          preparation.providerRoot,
+          ".synveda-clean-engine-provider-reservation",
+        ),
+      ),
+      false,
+    );
+    assertPrivate(
+      join(prepared.active, ".provider-effect-witness-03"),
+      0o600,
+      false,
+      1,
+    );
+    assertPrivate(join(prepared.active, ".provider-effect-event-03-000"), 0o600);
+    assertPrivate(join(prepared.active, ".provider-effect-event-03-001"), 0o600);
+    assertPrivate(join(prepared.active, ".mutation-close-03"), 0o600);
+    assert.equal(
+      parse(join(prepared.active, ".mutation-slot-03")).schema,
+      "synveda.clean-engine.mutation-slot.v7",
+    );
+    const close = parse(join(prepared.active, ".mutation-close-03"));
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v8");
+    assert.equal(close.disposition, "completed");
+    assert.equal(
+      close.operation_evidence_sha256,
+      sha256(canonicalBytes(completion)),
+    );
+    assert.deepEqual(
+      readdirSync(prepared.active).filter((name) =>
+        /^\d{2}-.*\.json$/u.test(name),
+      ),
+      ["00-plan.json"],
+    );
+    assert.equal(
+      readdirSync(prepared.active).some((name) =>
+        name.startsWith(".provider-effect-stage-"),
+      ),
+      false,
+    );
+    assert.equal(run(state, "verify").status, 0);
+    assert.deepEqual(
+      publishColimaLiveProviderEffectPreAttemptForTest(argumentsValue),
+      completion,
+    );
+    const completedState = snapshotTree(state.root);
+    assert.throws(
+      () => publishColimaLiveProviderEffectAttemptFenceForTest(argumentsValue),
+      /fixture provider effect terminal differed/u,
+    );
+    assert.deepEqual(snapshotTree(state.root), completedState);
+    assert.equal(checkpoints.includes("after-start-authority"), true);
+    assert.equal(checkpoints.includes("after-completion"), true);
+    assert.equal(checkpoints.includes("after-effect-close"), true);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("the fixture provider effect attempt fence is durable and process-free", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const fenced = publishColimaLiveProviderEffectAttemptFenceForTest(
+      fixtureStartAdmissionArguments(state, preparation),
+    );
+    const active = prepared.active;
+    const eventPath = join(active, ".provider-effect-event-03-001");
+    const eventBytes = readFileSync(eventPath);
+    assert.deepEqual(fenced, {
+      disposition: "attempt-fenced",
+      event_sha256: sha256(eventBytes),
+      process_invoked: false,
+      receipt_published: false,
+    });
+    assert.match(fenced.event_sha256, /^[0-9a-f]{64}$/u);
+    const marker = join(
+      preparation.providerRoot,
+      ".synveda-clean-engine-provider-reservation",
+    );
+    const witness = join(active, ".provider-effect-witness-03");
+    assertPrivate(marker, 0o600, false, 2);
+    assertPrivate(witness, 0o600, false, 2);
+    const markerIdentity = lstatSync(marker, { bigint: true });
+    const witnessIdentity = lstatSync(witness, { bigint: true });
+    assert.equal(markerIdentity.nlink, 2n);
+    assert.equal(witnessIdentity.nlink, 2n);
+    assert.equal(markerIdentity.dev, witnessIdentity.dev);
+    assert.equal(markerIdentity.ino, witnessIdentity.ino);
+    assert.deepEqual(readFileSync(marker), readFileSync(witness));
+    assert.equal(existsSync(join(active, ".mutation-close-03")), false);
+    assert.deepEqual(
+      readdirSync(active).filter((name) => /^\d{2}-.*\.json$/u.test(name)),
+      ["00-plan.json"],
+    );
+    assert.equal(
+      JSON.parse(eventBytes.toString("utf8")).event_kind,
+      "start-attempt",
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("fixture provider effect recovery closes a dead pre-attempt owner", async () => {
+  for (const [index, checkpoint] of [
+    "after-effect-slot",
+    "after-witness-stage-create",
+  ].entries()) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const serialized = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      await crashLiveProviderEffectAt(state, {
+        checkpoint,
+        input: serialized,
+        releaseName: `effect-owner-${checkpoint}`,
+        signal: index % 2 === 0 ? "SIGKILL" : "SIGTERM",
+      });
+      const confirmationArguments = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        repoRoot: state.repo,
+        requirements: preparation.requirements,
+        stateBase: state.state,
+      };
+      assert.throws(
+        () => providerRecoveryConfirmationForExecutor({
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+        /fixture provider effect requires its physical recovery confirmation/u,
+      );
+      const confirmation =
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          confirmationArguments,
+        );
+      const recovered = recoverColimaLiveProviderEffectForTest({
+        ...confirmationArguments,
+        confirmation,
+        testCheckpoint() {},
+      });
+      assert.equal(recovered.phase, "plan");
+      const close = parse(join(prepared.active, ".mutation-close-03"));
+      assert.equal(close.disposition, "aborted-before-effect");
+      assert.equal(close.operation_evidence_sha256, "0".repeat(64));
+      assert.equal(
+        readdirSync(prepared.active).some((name) =>
+          name.startsWith(".provider-effect-stage-"),
+        ),
+        false,
+      );
+      const completion = publishColimaLiveProviderEffectPreAttemptForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      );
+      assert.equal(completion.slot_sequence, 4);
+      assert.equal(run(state, "verify").status, 0);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("fixture provider effect recovery classifies and retires a partial stage", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      checkpoint: "after-witness-stage-create",
+      input: serialized,
+      releaseName: "effect-partial-stage-owner",
+    });
+    const stageName = readdirSync(prepared.active).find((name) =>
+      name.startsWith(".provider-effect-stage-03-"),
+    );
+    assert.notEqual(stageName, undefined);
+    writeFileSync(join(prepared.active, stageName), '{"schema":', {
+      mode: 0o600,
+    });
+    const base = {
+      ...serialized,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    const beforeConfirmation = snapshotTree(state.root);
+    let confirmation =
+      liveProviderFixtureEffectRecoveryConfirmationForTest(base);
+    assert.deepEqual(snapshotTree(state.root), beforeConfirmation);
+    await crashLiveProviderEffectAt(state, {
+      action: "recover",
+      checkpoint: "after-recovery-claim",
+      input: { ...serialized, confirmation },
+      releaseName: "effect-partial-stage-recovery",
+      signal: "SIGTERM",
+    });
+    const firstClaim = parse(
+      join(prepared.active, ".mutation-recovery-03-00"),
+    );
+    assert.equal(firstClaim.observed_evidence_stage, "stage-initializing");
+    assert.equal(firstClaim.observed_effect_disposition, "not-reached");
+    assert.match(firstClaim.observed_evidence_head_sha256, /^[0-9a-f]{64}$/u);
+    assert.match(
+      firstClaim.observed_evidence_prefix_sha256,
+      /^[0-9a-f]{64}$/u,
+    );
+    assert.notEqual(firstClaim.observed_evidence_head_sha256, "0".repeat(64));
+    assert.notEqual(
+      firstClaim.observed_evidence_prefix_sha256,
+      "0".repeat(64),
+    );
+    confirmation = liveProviderFixtureEffectRecoveryConfirmationForTest(base);
+    const recovered = recoverColimaLiveProviderEffectForTest({
+      ...base,
+      confirmation,
+      testCheckpoint() {},
+    });
+    assert.equal(recovered.phase, "plan");
+    assert.equal(existsSync(join(prepared.active, stageName)), false);
+    const close = parse(join(prepared.active, ".mutation-close-03"));
+    assert.equal(close.disposition, "aborted-before-effect");
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("fixture provider effect recovery claims bind the surviving physical stage", async () => {
+  const frontiers = [
+    {
+      checkpoint: "after-witness-stage-create",
+      localLinks: 1,
+      markerPresent: false,
+      recoveryStage: "stage-initializing",
+    },
+    {
+      checkpoint: "after-witness-stage",
+      localLinks: 1,
+      markerPresent: false,
+      recoveryStage: "stage-only",
+    },
+    {
+      checkpoint: "after-marker-link",
+      localLinks: 2,
+      markerPresent: true,
+      recoveryStage: "marker-linked",
+    },
+  ];
+  for (const frontier of frontiers) {
+    for (const tamperedHeadSha256 of ["a".repeat(64), "0".repeat(64)]) {
+      const state = fixture();
+      let preparation;
+      try {
+        const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+        preparation = prepared.preparation;
+        const serialized = {
+          observation: preparation.observation,
+          observationInput: preparation.input,
+          requirements: preparation.requirements,
+        };
+        const suffix =
+          tamperedHeadSha256 === "0".repeat(64) ? "zero" : "foreign";
+        await crashLiveProviderEffectAt(state, {
+          checkpoint: frontier.checkpoint,
+          input: serialized,
+          releaseName: `effect-stage-binding-owner-${frontier.recoveryStage}-${suffix}`,
+        });
+        const stageName = readdirSync(prepared.active).find((name) =>
+          name.startsWith(".provider-effect-stage-03-"),
+        );
+        assert.notEqual(stageName, undefined);
+        const stagePath = join(prepared.active, stageName);
+        const stageBytes = readFileSync(stagePath);
+        const stageMetadata = lstatSync(stagePath, { bigint: true });
+        assert.equal(stageMetadata.nlink, BigInt(frontier.localLinks));
+        const markerPath = join(
+          preparation.providerRoot,
+          ".synveda-clean-engine-provider-reservation",
+        );
+        assert.equal(existsSync(markerPath), frontier.markerPresent);
+        if (frontier.markerPresent) {
+          const markerBytes = readFileSync(markerPath);
+          const markerMetadata = lstatSync(markerPath, { bigint: true });
+          assert.equal(markerMetadata.nlink, 2n);
+          assert.equal(markerMetadata.dev, stageMetadata.dev);
+          assert.equal(markerMetadata.ino, stageMetadata.ino);
+          assert.deepEqual(markerBytes, stageBytes);
+        }
+        const expectedPhysicalSha256 =
+          frontier.recoveryStage === "stage-initializing"
+            ? sha256(
+                canonicalBytes({
+                  content_sha256: sha256(stageBytes),
+                  device: String(stageMetadata.dev),
+                  inode: String(stageMetadata.ino),
+                  mode: (stageMetadata.mode & 0o7777n)
+                    .toString(8)
+                    .padStart(4, "0"),
+                  name: stageName,
+                  schema:
+                    "synveda.clean-engine.provider-effect-initializing-stage.v1",
+                  size: String(stageMetadata.size),
+                  slot_sequence: 3,
+                  uid: String(stageMetadata.uid),
+                }),
+              )
+            : sha256(stageBytes);
+        const recoveryArguments = {
+          ...serialized,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        };
+        const confirmation =
+          liveProviderFixtureEffectRecoveryConfirmationForTest(
+            recoveryArguments,
+          );
+        await crashLiveProviderEffectAt(state, {
+          action: "recover",
+          checkpoint: "after-recovery-claim",
+          input: { ...serialized, confirmation },
+          releaseName: `effect-stage-binding-recovery-${frontier.recoveryStage}-${suffix}`,
+          signal: "SIGTERM",
+        });
+        const claimPath = join(
+          prepared.active,
+          ".mutation-recovery-03-00",
+        );
+        const claim = parse(claimPath);
+        assert.equal(
+          claim.observed_evidence_stage,
+          frontier.recoveryStage,
+        );
+        assert.equal(
+          claim.observed_evidence_head_sha256,
+          expectedPhysicalSha256,
+        );
+        const expectedTopologySha256 = sha256(
+          canonicalBytes({
+            event_count: 0,
+            event_head_sha256: "0".repeat(64),
+            evidence_stage: frontier.recoveryStage,
+            local_links: frontier.localLinks,
+            marker_present: frontier.markerPresent,
+            slot_sequence: 3,
+            witness_sha256: expectedPhysicalSha256,
+          }),
+        );
+        assert.equal(
+          claim.observed_evidence_prefix_sha256,
+          expectedTopologySha256,
+        );
+        assert.equal(claim.observed_residual_sha256, expectedTopologySha256);
+        const untamperedState = snapshotTree(state.root);
+        const untamperedPreparation = snapshotTree(preparation.root);
+        assert.equal(run(state, "status").status, 0);
+        assert.equal(run(state, "verify").status, 0);
+        assert.deepEqual(snapshotTree(state.root), untamperedState);
+        assert.deepEqual(
+          snapshotTree(preparation.root),
+          untamperedPreparation,
+        );
+        claim.observed_evidence_head_sha256 = tamperedHeadSha256;
+        const topologySha256 = sha256(
+          canonicalBytes({
+            event_count: 0,
+            event_head_sha256: "0".repeat(64),
+            evidence_stage: frontier.recoveryStage,
+            local_links: frontier.localLinks,
+            marker_present: frontier.markerPresent,
+            slot_sequence: 3,
+            witness_sha256: tamperedHeadSha256,
+          }),
+        );
+        claim.observed_evidence_prefix_sha256 = topologySha256;
+        claim.observed_residual_sha256 = topologySha256;
+        writeFileSync(claimPath, canonicalBytes(claim), { mode: 0o600 });
+        const stateBefore = snapshotTree(state.root);
+        const preparationBefore = snapshotTree(preparation.root);
+        for (const action of ["status", "verify"]) {
+          const refused = run(state, action);
+          assert.equal(refused.status, 78, `${frontier.recoveryStage}:${suffix}`);
+          assert.equal(
+            refused.stderr,
+            tamperedHeadSha256 === "0".repeat(64)
+              ? "clean-engine: live provider effect recovery history was refused\n"
+              : "clean-engine: live provider effect recovery event frontier was refused\n",
+          );
+        }
+        assert.deepEqual(snapshotTree(state.root), stateBefore);
+        assert.deepEqual(snapshotTree(preparation.root), preparationBefore);
+      } finally {
+        if (preparation !== undefined) {
+          rmSync(preparation.root, { recursive: true, force: true });
+        }
+        rmSync(state.root, { recursive: true, force: true });
+      }
+    }
+  }
+});
+
+test("fixture provider effect recovery accepts a skipped transitive frontier", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      checkpoint: "after-marker-link",
+      input: serialized,
+      releaseName: "effect-marker-linked-owner",
+      signal: "SIGTERM",
+    });
+    const base = {
+      ...serialized,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    let confirmation =
+      liveProviderFixtureEffectRecoveryConfirmationForTest(base);
+    await crashLiveProviderEffectAt(state, {
+      action: "recover",
+      checkpoint: "after-witness-stage-unlink",
+      input: { ...serialized, confirmation },
+      releaseName: "effect-transitive-recovery",
+    });
+    const firstClaim = parse(
+      join(prepared.active, ".mutation-recovery-03-00"),
+    );
+    assert.equal(firstClaim.observed_evidence_stage, "marker-linked");
+    confirmation = liveProviderFixtureEffectRecoveryConfirmationForTest(base);
+    const completion = recoverColimaLiveProviderEffectForTest({
+      ...base,
+      confirmation,
+      testCheckpoint() {},
+    });
+    const secondClaim = parse(
+      join(prepared.active, ".mutation-recovery-03-01"),
+    );
+    assert.equal(secondClaim.observed_evidence_stage, "marker-held");
+    assert.equal(
+      secondClaim.parent_sha256,
+      sha256(canonicalBytes(firstClaim)),
+    );
+    assert.equal(completion.event_kind, "completion");
+    assert.equal(
+      completion.publisher_authority_sha256,
+      sha256(canonicalBytes(secondClaim)),
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("fixture provider effect recovery persists the derived retired-stage frontier", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      checkpoint: "after-witness-stage-create",
+      input: serialized,
+      releaseName: "effect-derived-stage-owner",
+      signal: "SIGTERM",
+    });
+    const stageName = readdirSync(prepared.active).find((name) =>
+      name.startsWith(".provider-effect-stage-03-"),
+    );
+    assert.notEqual(stageName, undefined);
+    const stagePath = join(prepared.active, stageName);
+    const stageBytes = readFileSync(stagePath);
+    const stageIdentity = lstatSync(stagePath, { bigint: true });
+    const runIdentity = lstatSync(prepared.active, { bigint: true });
+    assert.equal(stageIdentity.isFile(), true);
+    assert.equal(stageBytes.length, 0);
+    assert.equal(stageIdentity.size, 0n);
+    assert.equal(stageIdentity.nlink, 1n);
+    assert.equal(stageIdentity.dev, runIdentity.dev);
+    assert.equal(stageIdentity.uid, runIdentity.uid);
+    assert.equal(stageIdentity.mode & 0o7777n, 0o600n);
+    const physicalStageSha256 = sha256(
+      canonicalBytes({
+        content_sha256: sha256(stageBytes),
+        device: String(stageIdentity.dev),
+        inode: String(stageIdentity.ino),
+        mode: (stageIdentity.mode & 0o7777n)
+          .toString(8)
+          .padStart(4, "0"),
+        name: stageName,
+        schema: "synveda.clean-engine.provider-effect-initializing-stage.v1",
+        size: String(stageIdentity.size),
+        slot_sequence: 3,
+        uid: String(stageIdentity.uid),
+      }),
+    );
+    const recoveryArguments = {
+      ...serialized,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    let confirmation =
+      liveProviderFixtureEffectRecoveryConfirmationForTest(
+        recoveryArguments,
+      );
+    await crashLiveProviderEffectAt(state, {
+      action: "recover",
+      checkpoint: "after-witness-stage-unlink",
+      input: { ...serialized, confirmation },
+      releaseName: "effect-derived-stage-first-recoverer",
+      signal: "SIGKILL",
+    });
+    assert.equal(existsSync(stagePath), false);
+    const firstClaimPath = join(
+      prepared.active,
+      ".mutation-recovery-03-00",
+    );
+    const firstClaimBytes = readFileSync(firstClaimPath);
+    const firstClaim = JSON.parse(firstClaimBytes.toString("utf8"));
+    const firstTopologySha256 = sha256(
+      canonicalBytes({
+        event_count: 0,
+        event_head_sha256: "0".repeat(64),
+        evidence_stage: "stage-initializing",
+        local_links: 1,
+        marker_present: false,
+        slot_sequence: 3,
+        witness_sha256: physicalStageSha256,
+      }),
+    );
+    assert.equal(firstClaim.observed_evidence_stage, "stage-initializing");
+    assert.equal(
+      firstClaim.observed_evidence_head_sha256,
+      physicalStageSha256,
+    );
+    assert.equal(
+      firstClaim.observed_evidence_prefix_sha256,
+      firstTopologySha256,
+    );
+    assert.equal(firstClaim.observed_residual_sha256, firstTopologySha256);
+
+    confirmation = liveProviderFixtureEffectRecoveryConfirmationForTest(
+      recoveryArguments,
+    );
+    const recovered = recoverColimaLiveProviderEffectForTest({
+      ...recoveryArguments,
+      confirmation,
+      testCheckpoint() {},
+    });
+    assert.deepEqual(recovered, parse(join(prepared.active, "00-plan.json")));
+    const secondClaimPath = join(
+      prepared.active,
+      ".mutation-recovery-03-01",
+    );
+    const secondClaimBytes = readFileSync(secondClaimPath);
+    const secondClaim = JSON.parse(secondClaimBytes.toString("utf8"));
+    const secondTopologySha256 = sha256(
+      canonicalBytes({
+        event_count: 0,
+        event_head_sha256: "0".repeat(64),
+        evidence_stage: "stage-retired-before-effect",
+        local_links: 0,
+        marker_present: false,
+        slot_sequence: 3,
+        witness_sha256: physicalStageSha256,
+      }),
+    );
+    assert.equal(secondClaim.parent_sha256, sha256(firstClaimBytes));
+    assert.equal(
+      secondClaim.observed_effect_disposition,
+      "not-reached",
+    );
+    assert.equal(
+      secondClaim.observed_evidence_stage,
+      "stage-retired-before-effect",
+    );
+    assert.equal(
+      secondClaim.observed_evidence_head_sha256,
+      physicalStageSha256,
+    );
+    assert.equal(
+      secondClaim.observed_evidence_prefix_sha256,
+      secondTopologySha256,
+    );
+    assert.equal(secondClaim.observed_residual_sha256, secondTopologySha256);
+    const close = parse(join(prepared.active, ".mutation-close-03"));
+    assert.equal(close.disposition, "aborted-before-effect");
+    assert.equal(close.authority, "recovery");
+    assert.equal(close.authority_sha256, sha256(secondClaimBytes));
+    assert.equal(close.operation_evidence_sha256, "0".repeat(64));
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("fixture provider effect recovery resumes every physical pre-attempt frontier", async () => {
+  const checkpoints = [
+    "after-witness-stage",
+    "after-marker-link",
+    "after-state-witness-link",
+    "after-witness-stage-unlink",
+    "after-start-authority",
+    "after-marker-unlink",
+    "after-completion",
+  ];
+  for (const [index, checkpoint] of checkpoints.entries()) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const serialized = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      await crashLiveProviderEffectAt(state, {
+        checkpoint,
+        input: serialized,
+        releaseName: `effect-frontier-${checkpoint}`,
+        signal: index % 2 === 0 ? "SIGTERM" : "SIGKILL",
+      });
+      let witnessLinkedBytes;
+      if (checkpoint === "after-state-witness-link") {
+        const stageName = readdirSync(prepared.active).find((name) =>
+          name.startsWith(".provider-effect-stage-03-"),
+        );
+        assert.notEqual(stageName, undefined);
+        const stagePath = join(prepared.active, stageName);
+        const witnessPath = join(
+          prepared.active,
+          ".provider-effect-witness-03",
+        );
+        const markerPath = join(
+          preparation.providerRoot,
+          ".synveda-clean-engine-provider-reservation",
+        );
+        const stageIdentity = lstatSync(stagePath, { bigint: true });
+        const witnessIdentity = lstatSync(witnessPath, { bigint: true });
+        const markerIdentity = lstatSync(markerPath, { bigint: true });
+        for (const identity of [
+          stageIdentity,
+          witnessIdentity,
+          markerIdentity,
+        ]) {
+          assert.equal(identity.nlink, 3n);
+          assert.equal(identity.dev, stageIdentity.dev);
+          assert.equal(identity.ino, stageIdentity.ino);
+        }
+        witnessLinkedBytes = readFileSync(witnessPath);
+        assert.deepEqual(readFileSync(stagePath), witnessLinkedBytes);
+        assert.deepEqual(readFileSync(markerPath), witnessLinkedBytes);
+      }
+      const recoveryArguments = {
+        ...serialized,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      };
+      const confirmation =
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        );
+      const recovered = recoverColimaLiveProviderEffectForTest({
+        ...recoveryArguments,
+        confirmation,
+        testCheckpoint() {},
+      });
+      if (witnessLinkedBytes !== undefined) {
+        const claim = parse(
+          join(prepared.active, ".mutation-recovery-03-00"),
+        );
+        const witnessSha256 = sha256(witnessLinkedBytes);
+        const topologySha256 = sha256(
+          canonicalBytes({
+            event_count: 0,
+            event_head_sha256: "0".repeat(64),
+            evidence_stage: "witness-linked",
+            local_links: 3,
+            marker_present: true,
+            slot_sequence: 3,
+            witness_sha256: witnessSha256,
+          }),
+        );
+        assert.equal(claim.observed_effect_disposition, "pending");
+        assert.equal(claim.observed_evidence_stage, "witness-linked");
+        assert.equal(claim.observed_evidence_head_sha256, witnessSha256);
+        assert.equal(claim.observed_evidence_prefix_sha256, topologySha256);
+        assert.equal(claim.observed_residual_sha256, topologySha256);
+      }
+      if (checkpoint === "after-witness-stage") {
+        assert.equal(recovered.phase, "plan", checkpoint);
+        const close = parse(join(prepared.active, ".mutation-close-03"));
+        assert.equal(close.disposition, "aborted-before-effect", checkpoint);
+        const completion = publishColimaLiveProviderEffectPreAttemptForTest(
+          fixtureStartAdmissionArguments(state, preparation),
+        );
+        assert.equal(completion.slot_sequence, 4, checkpoint);
+        assert.equal(run(state, "verify").status, 0, checkpoint);
+        continue;
+      }
+      assert.equal(recovered.event_kind, "completion", checkpoint);
+      assert.equal(
+        recovered.evidence.variant,
+        "pre-attempt-retired-zero-receipt",
+        checkpoint,
+      );
+      assert.equal(recovered.slot_sequence, 3, checkpoint);
+      const close = parse(join(prepared.active, ".mutation-close-03"));
+      assert.equal(close.disposition, "completed", checkpoint);
+      assert.equal(
+        close.operation_evidence_sha256,
+        sha256(canonicalBytes(recovered)),
+        checkpoint,
+      );
+      assertPrivate(
+        join(prepared.active, ".provider-effect-witness-03"),
+        0o600,
+        false,
+        1,
+      );
+      assert.equal(
+        existsSync(
+          join(
+            preparation.providerRoot,
+            ".synveda-clean-engine-provider-reservation",
+          ),
+        ),
+        false,
+        checkpoint,
+      );
+      assert.deepEqual(
+        publishColimaLiveProviderEffectPreAttemptForTest(
+          fixtureStartAdmissionArguments(state, preparation),
+        ),
+        recovered,
+        checkpoint,
+      );
+      assert.equal(run(state, "verify").status, 0, checkpoint);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("fixture provider effect reconciles every linked generic publication stage", async () => {
+  const cases = [
+    {
+      checkpoint: "after-effect-slot-link",
+      destination: ".mutation-slot-03",
+      disposition: "aborted-before-effect",
+      effectDisposition: "not-reached",
+      eventCount: 0,
+      recoveryStage: "not-started",
+    },
+    {
+      checkpoint: "after-start-authority-link",
+      destination: ".provider-effect-event-03-000",
+      disposition: "completed",
+      effectDisposition: "pending",
+      eventCount: 1,
+      recoveryStage: "authority-held",
+    },
+    {
+      checkpoint: "after-completion-link",
+      destination: ".provider-effect-event-03-001",
+      disposition: "completed",
+      effectDisposition: "complete",
+      eventCount: 2,
+      recoveryStage: "completion-retired",
+    },
+  ];
+  for (const [index, testCase] of cases.entries()) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const serialized = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      await crashLiveProviderEffectAt(state, {
+        checkpoint: testCase.checkpoint,
+        input: serialized,
+        releaseName: `effect-linked-publication-${testCase.checkpoint}`,
+        signal: index % 2 === 0 ? "SIGKILL" : "SIGTERM",
+      });
+      const stageNames = readdirSync(prepared.active).filter((name) =>
+        name.startsWith(".mutation-stage-"),
+      );
+      assert.equal(stageNames.length, 1, testCase.checkpoint);
+      assert.match(stageNames[0], /^\.mutation-stage-[0-9a-f]{32}$/u);
+      const stagePath = join(prepared.active, stageNames[0]);
+      const destinationPath = join(prepared.active, testCase.destination);
+      assertPrivate(stagePath, 0o600, false, 2);
+      assertPrivate(destinationPath, 0o600, false, 2);
+      const stage = lstatSync(stagePath, { bigint: true });
+      const destination = lstatSync(destinationPath, { bigint: true });
+      assert.equal(stage.nlink, 2n, testCase.checkpoint);
+      assert.equal(destination.nlink, 2n, testCase.checkpoint);
+      assert.equal(stage.dev, destination.dev, testCase.checkpoint);
+      assert.equal(stage.ino, destination.ino, testCase.checkpoint);
+      const destinationBytes = readFileSync(destinationPath);
+      assert.deepEqual(readFileSync(stagePath), destinationBytes);
+      const eventNamesBefore = readdirSync(prepared.active)
+        .filter((name) => /^\.provider-effect-event-03-\d{3}$/u.test(name))
+        .sort();
+      assert.equal(
+        eventNamesBefore.length,
+        testCase.eventCount,
+        testCase.checkpoint,
+      );
+      const preservedEvents = eventNamesBefore.map((name) => {
+        const path = join(prepared.active, name);
+        return {
+          bytes: readFileSync(path),
+          identity: lstatSync(path, { bigint: true }),
+          name,
+          value: parse(path),
+        };
+      });
+      const slotPath = join(prepared.active, ".mutation-slot-03");
+      const slotBefore = {
+        bytes: readFileSync(slotPath),
+        identity: lstatSync(slotPath, { bigint: true }),
+      };
+      const witnessPath = join(
+        prepared.active,
+        ".provider-effect-witness-03",
+      );
+      const witnessBefore = existsSync(witnessPath)
+        ? {
+            bytes: readFileSync(witnessPath),
+            identity: lstatSync(witnessPath, { bigint: true }),
+          }
+        : undefined;
+      assert.equal(
+        witnessBefore === undefined,
+        testCase.recoveryStage === "not-started",
+        testCase.checkpoint,
+      );
+      const stateBeforeObservation = snapshotTree(state.root);
+      const preparationBeforeObservation = snapshotTree(preparation.root);
+      assert.equal(run(state, "status").status, 0, testCase.checkpoint);
+      assert.equal(run(state, "verify").status, 0, testCase.checkpoint);
+
+      const recoveryArguments = {
+        ...serialized,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      };
+      const confirmation =
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        );
+      assert.deepEqual(
+        snapshotTree(state.root),
+        stateBeforeObservation,
+        testCase.checkpoint,
+      );
+      assert.deepEqual(
+        snapshotTree(preparation.root),
+        preparationBeforeObservation,
+        testCase.checkpoint,
+      );
+      const recovered = recoverColimaLiveProviderEffectForTest({
+        ...recoveryArguments,
+        confirmation,
+        testCheckpoint() {},
+      });
+      assert.equal(
+        existsSync(stagePath),
+        false,
+        testCase.checkpoint,
+      );
+      const destinationAfter = lstatSync(destinationPath, { bigint: true });
+      assert.equal(destinationAfter.nlink, 1n, testCase.checkpoint);
+      assert.equal(destinationAfter.dev, destination.dev, testCase.checkpoint);
+      assert.equal(destinationAfter.ino, destination.ino, testCase.checkpoint);
+      assert.deepEqual(
+        readFileSync(destinationPath),
+        destinationBytes,
+        testCase.checkpoint,
+      );
+      for (const preserved of preservedEvents) {
+        const path = join(prepared.active, preserved.name);
+        const identity = lstatSync(path, { bigint: true });
+        assert.equal(identity.dev, preserved.identity.dev, testCase.checkpoint);
+        assert.equal(identity.ino, preserved.identity.ino, testCase.checkpoint);
+        assert.deepEqual(
+          readFileSync(path),
+          preserved.bytes,
+          testCase.checkpoint,
+        );
+      }
+      const slotAfter = lstatSync(slotPath, { bigint: true });
+      assert.equal(slotAfter.dev, slotBefore.identity.dev, testCase.checkpoint);
+      assert.equal(slotAfter.ino, slotBefore.identity.ino, testCase.checkpoint);
+      assert.deepEqual(
+        readFileSync(slotPath),
+        slotBefore.bytes,
+        testCase.checkpoint,
+      );
+      if (witnessBefore !== undefined) {
+        const witnessAfter = lstatSync(witnessPath, { bigint: true });
+        assert.equal(
+          witnessAfter.dev,
+          witnessBefore.identity.dev,
+          testCase.checkpoint,
+        );
+        assert.equal(
+          witnessAfter.ino,
+          witnessBefore.identity.ino,
+          testCase.checkpoint,
+        );
+        assert.deepEqual(
+          readFileSync(witnessPath),
+          witnessBefore.bytes,
+          testCase.checkpoint,
+        );
+      }
+      const slot = parse(slotPath);
+      const claimPath = join(prepared.active, ".mutation-recovery-03-00");
+      const claim = parse(claimPath);
+      const zero = "0".repeat(64);
+      assert.equal(claim.schema, "synveda.clean-engine.mutation-recovery.v6");
+      assert.equal(claim.action, "provider-effect");
+      assert.equal(claim.sequence, 0);
+      assert.equal(claim.slot_sequence, 3);
+      assert.equal(claim.lease_sha256, sha256(slotBefore.bytes));
+      assert.equal(claim.parent_sha256, zero);
+      assert.equal(
+        claim.operation_kind,
+        COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
+      );
+      assert.equal(
+        claim.operation_contract_sha256,
+        COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
+      );
+      assert.equal(claim.observed_effect_name, "provider-effect");
+      assert.equal(
+        claim.observed_effect_disposition,
+        testCase.effectDisposition,
+      );
+      assert.equal(claim.observed_evidence_stage, testCase.recoveryStage);
+      assert.equal(claim.observed_settlement_sha256, zero);
+      const eventHeadSha256 =
+        preservedEvents.length === 0
+          ? zero
+          : sha256(preservedEvents.at(-1).bytes);
+      const witnessSha256 =
+        witnessBefore === undefined ? zero : sha256(witnessBefore.bytes);
+      const topologySha256 =
+        testCase.recoveryStage === "not-started"
+          ? zero
+          : sha256(
+              canonicalBytes({
+                event_count: testCase.eventCount,
+                event_head_sha256: eventHeadSha256,
+                evidence_stage: testCase.recoveryStage,
+                local_links:
+                  testCase.recoveryStage === "completion-retired" ? 1 : 2,
+                marker_present:
+                  testCase.recoveryStage !== "completion-retired",
+                slot_sequence: 3,
+                witness_sha256: witnessSha256,
+              }),
+            );
+      assert.equal(claim.observed_evidence_head_sha256, eventHeadSha256);
+      assert.equal(claim.observed_evidence_prefix_sha256, topologySha256);
+      assert.equal(claim.observed_residual_sha256, topologySha256);
+      const close = parse(join(prepared.active, ".mutation-close-03"));
+      assert.equal(
+        close.disposition,
+        testCase.disposition,
+        testCase.checkpoint,
+      );
+      assert.equal(close.schema, "synveda.clean-engine.mutation-close.v8");
+      assert.equal(close.authority, "recovery", testCase.checkpoint);
+      assert.equal(
+        close.authority_sha256,
+        sha256(canonicalBytes(claim)),
+        testCase.checkpoint,
+      );
+      if (testCase.disposition === "completed") {
+        assert.equal(recovered.event_kind, "completion", testCase.checkpoint);
+        const eventsAfter = readdirSync(prepared.active)
+          .filter((name) => /^\.provider-effect-event-03-\d{3}$/u.test(name))
+          .sort();
+        assert.deepEqual(
+          eventsAfter,
+          [
+            ".provider-effect-event-03-000",
+            ".provider-effect-event-03-001",
+          ],
+          testCase.checkpoint,
+        );
+        const completionPath = join(prepared.active, eventsAfter.at(-1));
+        const completion = parse(completionPath);
+        assert.deepEqual(recovered, completion, testCase.checkpoint);
+        assert.equal(
+          close.operation_evidence_sha256,
+          sha256(canonicalBytes(completion)),
+          testCase.checkpoint,
+        );
+        const expectedPublisher =
+          testCase.recoveryStage === "authority-held"
+            ? sha256(canonicalBytes(claim))
+            : sha256(canonicalBytes(slot));
+        assert.equal(
+          completion.publisher_authority_sha256,
+          expectedPublisher,
+          testCase.checkpoint,
+        );
+        if (testCase.recoveryStage === "authority-held") {
+          assert.equal(
+            completion.evidence.start_authority_sha256,
+            sha256(preservedEvents[0].bytes),
+          );
+        }
+        const beforeRetry = snapshotTree(state.root);
+        const beforePreparationRetry = snapshotTree(preparation.root);
+        assert.deepEqual(
+          publishColimaLiveProviderEffectPreAttemptForTest(
+            fixtureStartAdmissionArguments(state, preparation),
+          ),
+          completion,
+          testCase.checkpoint,
+        );
+        assert.deepEqual(snapshotTree(state.root), beforeRetry);
+        assert.deepEqual(snapshotTree(preparation.root), beforePreparationRetry);
+      } else {
+        assert.deepEqual(
+          recovered,
+          parse(join(prepared.active, "00-plan.json")),
+          testCase.checkpoint,
+        );
+        assert.equal(close.operation_evidence_sha256, zero);
+        assert.equal(
+          readdirSync(prepared.active).some((name) =>
+            name.startsWith(".provider-effect-"),
+          ),
+          false,
+        );
+        const oldArtifacts = [
+          ".mutation-slot-03",
+          ".mutation-recovery-03-00",
+          ".mutation-close-03",
+        ].map((name) => ({
+          bytes: readFileSync(join(prepared.active, name)),
+          name,
+        }));
+        const next = publishColimaLiveProviderEffectPreAttemptForTest(
+          fixtureStartAdmissionArguments(state, preparation),
+        );
+        assert.equal(next.slot_sequence, 4);
+        for (const artifact of oldArtifacts) {
+          assert.deepEqual(
+            readFileSync(join(prepared.active, artifact.name)),
+            artifact.bytes,
+            artifact.name,
+          );
+        }
+      }
+      assert.deepEqual(
+        readdirSync(prepared.active).filter((name) =>
+          /^\d{2}-.*\.json$/u.test(name),
+        ),
+        ["00-plan.json"],
+      );
+      assert.equal(run(state, "verify").status, 0, testCase.checkpoint);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      checkpoint: "after-effect-close-link",
+      input: serialized,
+      releaseName: "effect-linked-publication-after-effect-close-link",
+      signal: "SIGTERM",
+    });
+    const stageNames = readdirSync(prepared.active).filter((name) =>
+      name.startsWith(".mutation-stage-"),
+    );
+    assert.equal(stageNames.length, 1);
+    assert.match(stageNames[0], /^\.mutation-stage-[0-9a-f]{32}$/u);
+    const stagePath = join(prepared.active, stageNames[0]);
+    const closePath = join(prepared.active, ".mutation-close-03");
+    assertPrivate(stagePath, 0o600, false, 2);
+    assertPrivate(closePath, 0o600, false, 2);
+    const stage = lstatSync(stagePath, { bigint: true });
+    const close = lstatSync(closePath, { bigint: true });
+    const closeBytes = readFileSync(closePath);
+    assert.equal(stage.nlink, 2n);
+    assert.equal(close.nlink, 2n);
+    assert.equal(stage.dev, close.dev);
+    assert.equal(stage.ino, close.ino);
+    assert.deepEqual(readFileSync(stagePath), closeBytes);
+    const slot = parse(join(prepared.active, ".mutation-slot-03"));
+    const completionPath = join(
+      prepared.active,
+      ".provider-effect-event-03-001",
+    );
+    const completionBefore = parse(completionPath);
+    const completionBytes = readFileSync(completionPath);
+    const completionIdentity = lstatSync(completionPath, { bigint: true });
+    const closeValue = parse(closePath);
+    assert.equal(closeValue.schema, "synveda.clean-engine.mutation-close.v8");
+    assert.equal(closeValue.disposition, "completed");
+    assert.equal(closeValue.authority, "owner");
+    assert.equal(closeValue.authority_sha256, sha256(canonicalBytes(slot)));
+    assert.equal(
+      closeValue.operation_evidence_sha256,
+      sha256(completionBytes),
+    );
+    assert.deepEqual(
+      readdirSync(prepared.active).filter((name) =>
+        /^\d{2}-.*\.json$/u.test(name),
+      ),
+      ["00-plan.json"],
+    );
+    assert.equal(
+      existsSync(
+        join(
+          preparation.providerRoot,
+          ".synveda-clean-engine-provider-reservation",
+        ),
+      ),
+      false,
+    );
+    assertPrivate(
+      join(prepared.active, ".provider-effect-witness-03"),
+      0o600,
+      false,
+      1,
+    );
+    const stateBeforeObservation = snapshotTree(state.root);
+    const preparationBeforeObservation = snapshotTree(preparation.root);
+    assert.equal(run(state, "status").status, 0);
+    assert.equal(run(state, "verify").status, 0);
+    const beforeWrongBinding = snapshotTree(state.root);
+    assert.throws(
+      () =>
+        publishColimaLiveProviderEffectPreAttemptForTest({
+          ...fixtureStartAdmissionArguments(state, preparation),
+          requirements: {
+            ...preparation.requirements,
+            historical_retry_probe: "changed",
+          },
+        }),
+      /live provider reservation preparation binding was refused/u,
+    );
+    assert.deepEqual(snapshotTree(state.root), beforeWrongBinding);
+    assert.deepEqual(
+      snapshotTree(preparation.root),
+      preparationBeforeObservation,
+    );
+    assert.equal(lstatSync(stagePath, { bigint: true }).nlink, 2n);
+    assert.equal(lstatSync(closePath, { bigint: true }).nlink, 2n);
+    const beforeWrongTerminal = snapshotTree(state.root);
+    assert.throws(
+      () =>
+        publishColimaLiveProviderEffectAttemptFenceForTest(
+          fixtureStartAdmissionArguments(state, preparation),
+        ),
+      /fixture provider effect terminal differed/u,
+    );
+    assert.deepEqual(snapshotTree(state.root), beforeWrongTerminal);
+    assert.deepEqual(
+      snapshotTree(preparation.root),
+      preparationBeforeObservation,
+    );
+    assert.equal(
+      lstatSync(join(prepared.active, stageNames[0]), { bigint: true }).nlink,
+      2n,
+    );
+    assert.equal(
+      lstatSync(join(prepared.active, ".mutation-close-03"), {
+        bigint: true,
+      }).nlink,
+      2n,
+    );
+    const beforeRecoveryConfirmation = snapshotTree(state.root);
+    assert.throws(
+      () =>
+        liveProviderFixtureEffectRecoveryConfirmationForTest({
+          ...serialized,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /no abandoned provider mutation was available/u,
+    );
+    assert.deepEqual(snapshotTree(state.root), beforeRecoveryConfirmation);
+    assert.deepEqual(
+      snapshotTree(preparation.root),
+      preparationBeforeObservation,
+    );
+    assert.deepEqual(stateBeforeObservation, beforeWrongTerminal);
+    const completion = publishColimaLiveProviderEffectPreAttemptForTest(
+      fixtureStartAdmissionArguments(state, preparation),
+    );
+    assert.deepEqual(completion, completionBefore);
+    assert.equal(existsSync(stagePath), false);
+    const closeAfter = lstatSync(closePath, { bigint: true });
+    assert.equal(closeAfter.nlink, 1n);
+    assert.equal(closeAfter.dev, close.dev);
+    assert.equal(closeAfter.ino, close.ino);
+    assert.deepEqual(readFileSync(closePath), closeBytes);
+    const completionAfter = lstatSync(completionPath, { bigint: true });
+    assert.equal(completionAfter.dev, completionIdentity.dev);
+    assert.equal(completionAfter.ino, completionIdentity.ino);
+    assert.deepEqual(readFileSync(completionPath), completionBytes);
+    assert.equal(
+      readdirSync(prepared.active).some((name) =>
+        /^\.mutation-recovery-03-/u.test(name) ||
+        name === ".mutation-slot-04" ||
+        name === ".provider-effect-event-03-002",
+      ),
+      false,
+    );
+    assert.deepEqual(
+      readdirSync(prepared.active).filter((name) =>
+        /^\d{2}-.*\.json$/u.test(name),
+      ),
+      ["00-plan.json"],
+    );
+    assert.deepEqual(
+      snapshotTree(preparation.root),
+      preparationBeforeObservation,
+    );
+    const beforeSecondRetry = snapshotTree(state.root);
+    const beforeSecondPreparationRetry = snapshotTree(preparation.root);
+    assert.deepEqual(
+      publishColimaLiveProviderEffectPreAttemptForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      ),
+      completionBefore,
+    );
+    assert.deepEqual(snapshotTree(state.root), beforeSecondRetry);
+    assert.deepEqual(
+      snapshotTree(preparation.root),
+      beforeSecondPreparationRetry,
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("fixture provider effect recovery reconciles linked claim and close stages", async () => {
+  {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const serialized = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      await crashLiveProviderEffectAt(state, {
+        checkpoint: "after-effect-slot",
+        input: serialized,
+        releaseName: "effect-linked-recovery-claim-owner",
+      });
+      const recoveryArguments = {
+        ...serialized,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      };
+      let confirmation =
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        );
+      await crashLiveProviderEffectAt(state, {
+        action: "recover",
+        checkpoint: "after-recovery-claim",
+        input: { ...serialized, confirmation },
+        releaseName: "effect-linked-recovery-claim-first-recoverer",
+        signal: "SIGTERM",
+      });
+      const claimPath = join(
+        prepared.active,
+        ".mutation-recovery-03-00",
+      );
+      const stagePath = join(
+        prepared.active,
+        `.mutation-stage-${"b".repeat(32)}`,
+      );
+      const claimBytes = readFileSync(claimPath);
+      const claimIdentity = lstatSync(claimPath, { bigint: true });
+      linkSync(claimPath, stagePath);
+      assertPrivate(claimPath, 0o600, false, 2);
+      assertPrivate(stagePath, 0o600, false, 2);
+      const linkedClaimIdentity = lstatSync(claimPath, { bigint: true });
+      const linkedStageIdentity = lstatSync(stagePath, { bigint: true });
+      assert.equal(linkedClaimIdentity.nlink, 2n);
+      assert.equal(linkedStageIdentity.nlink, 2n);
+      assert.equal(linkedStageIdentity.dev, linkedClaimIdentity.dev);
+      assert.equal(linkedStageIdentity.ino, linkedClaimIdentity.ino);
+      assert.deepEqual(readFileSync(stagePath), claimBytes);
+      const stateBeforeObservation = snapshotTree(state.root);
+      const preparationBeforeObservation = snapshotTree(preparation.root);
+      assert.equal(run(state, "status").status, 0);
+      assert.equal(run(state, "verify").status, 0);
+      confirmation =
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        );
+      assert.deepEqual(snapshotTree(state.root), stateBeforeObservation);
+      assert.deepEqual(
+        snapshotTree(preparation.root),
+        preparationBeforeObservation,
+      );
+      const recovered = recoverColimaLiveProviderEffectForTest({
+        ...recoveryArguments,
+        confirmation,
+        testCheckpoint() {},
+      });
+      assert.deepEqual(
+        recovered,
+        parse(join(prepared.active, "00-plan.json")),
+      );
+      assert.equal(existsSync(stagePath), false);
+      const claimAfter = lstatSync(claimPath, { bigint: true });
+      assert.equal(claimAfter.nlink, 1n);
+      assert.equal(claimAfter.dev, claimIdentity.dev);
+      assert.equal(claimAfter.ino, claimIdentity.ino);
+      assert.deepEqual(readFileSync(claimPath), claimBytes);
+      const nextClaim = parse(
+        join(prepared.active, ".mutation-recovery-03-01"),
+      );
+      assert.equal(nextClaim.sequence, 1);
+      assert.equal(nextClaim.parent_sha256, sha256(claimBytes));
+      const close = parse(join(prepared.active, ".mutation-close-03"));
+      assert.equal(close.disposition, "aborted-before-effect");
+      assert.equal(close.authority, "recovery");
+      assert.equal(close.authority_sha256, sha256(canonicalBytes(nextClaim)));
+      assert.equal(close.operation_evidence_sha256, "0".repeat(64));
+      assert.equal(run(state, "verify").status, 0);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+
+  {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const serialized = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      await crashLiveProviderEffectAt(state, {
+        checkpoint: "after-completion",
+        input: serialized,
+        releaseName: "effect-linked-recovery-close-owner",
+        signal: "SIGTERM",
+      });
+      const recoveryArguments = {
+        ...serialized,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      };
+      const confirmation =
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        );
+      await crashLiveProviderEffectAt(state, {
+        action: "recover",
+        checkpoint: "after-recovery-close-link",
+        input: { ...serialized, confirmation },
+        releaseName: "effect-linked-recovery-close-recoverer",
+      });
+      const stageNames = readdirSync(prepared.active).filter((name) =>
+        /^\.mutation-stage-[0-9a-f]{32}$/u.test(name),
+      );
+      assert.equal(stageNames.length, 1);
+      const stagePath = join(prepared.active, stageNames[0]);
+      const closePath = join(prepared.active, ".mutation-close-03");
+      const claimPath = join(
+        prepared.active,
+        ".mutation-recovery-03-00",
+      );
+      const completionPath = join(
+        prepared.active,
+        ".provider-effect-event-03-001",
+      );
+      assertPrivate(stagePath, 0o600, false, 2);
+      assertPrivate(closePath, 0o600, false, 2);
+      const stageIdentity = lstatSync(stagePath, { bigint: true });
+      const closeIdentity = lstatSync(closePath, { bigint: true });
+      assert.equal(stageIdentity.nlink, 2n);
+      assert.equal(closeIdentity.nlink, 2n);
+      assert.equal(stageIdentity.dev, closeIdentity.dev);
+      assert.equal(stageIdentity.ino, closeIdentity.ino);
+      const closeBytes = readFileSync(closePath);
+      assert.deepEqual(readFileSync(stagePath), closeBytes);
+      const claimBytes = readFileSync(claimPath);
+      const completionBytes = readFileSync(completionPath);
+      const close = parse(closePath);
+      assert.equal(close.disposition, "completed");
+      assert.equal(close.authority, "recovery");
+      assert.equal(close.authority_sha256, sha256(claimBytes));
+      assert.equal(close.operation_evidence_sha256, sha256(completionBytes));
+      const stateBeforeObservation = snapshotTree(state.root);
+      const preparationBeforeObservation = snapshotTree(preparation.root);
+      assert.equal(run(state, "status").status, 0);
+      assert.equal(run(state, "verify").status, 0);
+      assert.throws(
+        () =>
+          liveProviderFixtureEffectRecoveryConfirmationForTest(
+            recoveryArguments,
+          ),
+        /no abandoned provider mutation was available/u,
+      );
+      assert.deepEqual(snapshotTree(state.root), stateBeforeObservation);
+      assert.deepEqual(
+        snapshotTree(preparation.root),
+        preparationBeforeObservation,
+      );
+      const completion = publishColimaLiveProviderEffectPreAttemptForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      );
+      assert.deepEqual(completion, parse(completionPath));
+      assert.equal(existsSync(stagePath), false);
+      const closeAfter = lstatSync(closePath, { bigint: true });
+      assert.equal(closeAfter.nlink, 1n);
+      assert.equal(closeAfter.dev, closeIdentity.dev);
+      assert.equal(closeAfter.ino, closeIdentity.ino);
+      assert.deepEqual(readFileSync(closePath), closeBytes);
+      assert.deepEqual(readFileSync(claimPath), claimBytes);
+      assert.deepEqual(readFileSync(completionPath), completionBytes);
+      assert.equal(
+        existsSync(join(prepared.active, ".mutation-recovery-03-01")),
+        false,
+      );
+      assert.equal(run(state, "verify").status, 0);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("fixture provider effect recovery newest same-frontier claim alone completes", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      checkpoint: "after-marker-unlink",
+      input: serialized,
+      releaseName: "effect-owner-marker-unlinked",
+    });
+    const base = {
+      ...serialized,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    let confirmation =
+      liveProviderFixtureEffectRecoveryConfirmationForTest(base);
+    await crashLiveProviderEffectAt(state, {
+      action: "recover",
+      checkpoint: "after-recovery-claim",
+      input: { ...serialized, confirmation },
+      releaseName: "effect-recovery-first-claim",
+      signal: "SIGTERM",
+    });
+    confirmation = liveProviderFixtureEffectRecoveryConfirmationForTest(base);
+    await crashLiveProviderEffectAt(state, {
+      action: "recover",
+      checkpoint: "after-recovery-marker-retirement-directory-sync",
+      input: { ...serialized, confirmation },
+      releaseName: "effect-recovery-second-claim",
+    });
+    confirmation = liveProviderFixtureEffectRecoveryConfirmationForTest(base);
+    const completion = recoverColimaLiveProviderEffectForTest({
+      ...base,
+      confirmation,
+      testCheckpoint() {},
+    });
+    const claimNames = readdirSync(prepared.active)
+      .filter((name) => /^\.mutation-recovery-03-\d{2}$/u.test(name))
+      .sort();
+    assert.deepEqual(claimNames, [
+      ".mutation-recovery-03-00",
+      ".mutation-recovery-03-01",
+      ".mutation-recovery-03-02",
+    ]);
+    const claims = claimNames.map((name) =>
+      parse(join(prepared.active, name)),
+    );
+    assert.equal(
+      new Set(claims.map((claim) => claim.observed_evidence_stage)).size,
+      1,
+    );
+    assert.equal(claims[0].observed_evidence_stage, "witness-unlinked");
+    for (let index = 1; index < claims.length; index += 1) {
+      assert.equal(
+        claims[index].parent_sha256,
+        sha256(canonicalBytes(claims[index - 1])),
+      );
+    }
+    assert.equal(
+      completion.publisher_authority_sha256,
+      sha256(canonicalBytes(claims.at(-1))),
+    );
+    const close = parse(join(prepared.active, ".mutation-close-03"));
+    assert.equal(close.authority, "recovery");
+    assert.equal(close.authority_sha256, completion.publisher_authority_sha256);
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("a dead fixture provider effect attempt fence refuses recovery without mutation", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      action: "attempt",
+      checkpoint: "after-start-attempt",
+      input: serialized,
+      releaseName: "effect-attempt-fence",
+    });
+    const before = snapshotTree(state.root);
+    assert.throws(
+      () =>
+        liveProviderFixtureEffectRecoveryConfirmationForTest({
+          ...serialized,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /attempt fence requires operator resolution/u,
+    );
+    assert.deepEqual(snapshotTree(state.root), before);
+    assert.equal(
+      readdirSync(prepared.active).some((name) =>
+        name.startsWith(".mutation-recovery-03-"),
+      ),
+      false,
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("a linked attempt-fence publication stage remains inert and unrecoverable", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      action: "attempt",
+      checkpoint: "after-start-attempt-link",
+      input: serialized,
+      releaseName: "effect-attempt-fence-linked-stage",
+      signal: "SIGTERM",
+    });
+    const stageNames = readdirSync(prepared.active).filter((name) =>
+      name.startsWith(".mutation-stage-"),
+    );
+    assert.equal(stageNames.length, 1);
+    const stagePath = join(prepared.active, stageNames[0]);
+    const eventPath = join(
+      prepared.active,
+      ".provider-effect-event-03-001",
+    );
+    const stageIdentity = lstatSync(stagePath, { bigint: true });
+    const eventIdentity = lstatSync(eventPath, { bigint: true });
+    assert.equal(stageIdentity.nlink, 2n);
+    assert.equal(eventIdentity.nlink, 2n);
+    assert.equal(stageIdentity.dev, eventIdentity.dev);
+    assert.equal(stageIdentity.ino, eventIdentity.ino);
+    assert.deepEqual(readFileSync(stagePath), readFileSync(eventPath));
+    const before = snapshotTree(state.root);
+    assert.throws(
+      () =>
+        liveProviderFixtureEffectRecoveryConfirmationForTest({
+          ...serialized,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /attempt fence requires operator resolution/u,
+    );
+    assert.deepEqual(snapshotTree(state.root), before);
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("fixture provider effect marker collision preserves foreign evidence and aborts", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const marker = join(
+      preparation.providerRoot,
+      ".synveda-clean-engine-provider-reservation",
+    );
+    const foreign = Buffer.from("foreign provider effect marker\n", "utf8");
+    const argumentsValue = fixtureStartAdmissionArguments(
+      state,
+      preparation,
+      (checkpoint) => {
+        if (checkpoint === "before-marker-link") {
+          writePrivateColimaLiveFixtureFile(marker, foreign, 0o600);
+        }
+      },
+    );
+    assert.throws(
+      () => publishColimaLiveProviderEffectPreAttemptForTest(argumentsValue),
+      /fixture provider effect marker was already held/u,
+    );
+    assert.deepEqual(readFileSync(marker), foreign);
+    const active = activeRun(state);
+    const close = parse(join(active, ".mutation-close-03"));
+    assert.equal(close.disposition, "aborted-before-effect");
+    assert.equal(close.operation_evidence_sha256, "0".repeat(64));
+    assert.equal(
+      readdirSync(active).some((name) =>
+        name.startsWith(".provider-effect-stage-") ||
+        name.startsWith(".provider-effect-witness-") ||
+        name.startsWith(".provider-effect-event-"),
+      ),
+      false,
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("crashed fixture provider effect collision never retires the foreign marker", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      action: "collision",
+      checkpoint: "after-witness-stage-unlink",
+      input: serialized,
+      releaseName: "effect-collision-after-stage-unlink",
+    });
+    const marker = join(
+      preparation.providerRoot,
+      ".synveda-clean-engine-provider-reservation",
+    );
+    const markerBytes = readFileSync(marker);
+    const markerIdentity = lstatSync(marker, { bigint: true });
+    assert.equal(markerIdentity.nlink, 1n);
+    assert.equal(
+      markerBytes.toString("utf8"),
+      "foreign provider effect marker\n",
+    );
+    const recoveryArguments = {
+      ...serialized,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    const before = snapshotTree(state.root);
+    assert.throws(
+      () =>
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        ),
+      /fixture provider effect marker was not absent/u,
+    );
+    assert.deepEqual(snapshotTree(state.root), before);
+    const markerAfterRefusal = lstatSync(marker, { bigint: true });
+    assert.equal(markerAfterRefusal.nlink, 1n);
+    assert.equal(markerAfterRefusal.dev, markerIdentity.dev);
+    assert.equal(markerAfterRefusal.ino, markerIdentity.ino);
+    assert.deepEqual(readFileSync(marker), markerBytes);
+
+    unlinkSync(marker);
+    const confirmation =
+      liveProviderFixtureEffectRecoveryConfirmationForTest(
+        recoveryArguments,
+      );
+    const recovered = recoverColimaLiveProviderEffectForTest({
+      ...recoveryArguments,
+      confirmation,
+      testCheckpoint() {},
+    });
+    assert.equal(recovered.phase, "plan");
+    const close = parse(join(prepared.active, ".mutation-close-03"));
+    assert.equal(close.disposition, "aborted-before-effect");
+    assert.equal(close.operation_evidence_sha256, "0".repeat(64));
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
 test("the state owner publishes and retires one no-process provider reservation", () => {
   const state = fixture();
   let preparation;
@@ -3330,7 +5264,7 @@ test("the state owner publishes and retires one no-process provider reservation"
       COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_COMPLETION_SCHEMA,
     );
     assert.equal(completion.slot_sequence, 3);
-    assert.equal(completion.state_integration, "mutation-journal-v6-no-spawn-reservation-only");
+    assert.equal(completion.state_integration, "mutation-journal-v7-no-spawn-reservation-only");
     assert.equal(
       existsSync(
         join(
@@ -3474,7 +5408,7 @@ test("reservation state refuses malformed orphan and non-effect settlements", ()
             operation_contract_sha256: slot.operation_contract_sha256,
             operation_kind: slot.operation_kind,
             operation_plan_sha256: operationPlanSha256,
-            schema: "synveda.clean-engine.mutation-recovery-root.v5",
+            schema: "synveda.clean-engine.mutation-recovery-root.v6",
           })),
           fixture_id: slot.fixture_id,
           lease_sha256: leaseSha256,
@@ -3495,7 +5429,7 @@ test("reservation state refuses malformed orphan and non-effect settlements", ()
           owner_pid: 2_147_483_645,
           owner_probe: "opaque-process-instance-v1",
           parent_sha256: zeroSha256,
-          schema: "synveda.clean-engine.mutation-recovery.v5",
+          schema: "synveda.clean-engine.mutation-recovery.v6",
           sequence: 0,
           slot_sequence: 3,
           source_head_sha256: slot.source_head_sha256,
@@ -3557,15 +5491,19 @@ test("reservation recovery retires an inert stage and a fresh generation complet
         "publish",
         state.repo,
         state.state,
-        serialized,
         "after-witness-stage",
         releasePath,
       ],
       {
         env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       },
     );
+    let inputWriteError;
+    child.stdin.on("error", (error) => {
+      inputWriteError = error;
+    });
+    child.stdin.end(serialized);
     child.stdout.resume();
     let stderr = "";
     child.stderr.setEncoding("utf8");
@@ -3575,6 +5513,7 @@ test("reservation recovery retires an inert stage and a fresh generation complet
     const readyPath = `${releasePath}.ready-${child.pid}`;
     const deadline = Date.now() + 10_000;
     while (!existsSync(readyPath)) {
+      assert.equal(inputWriteError, undefined);
       assert.equal(child.exitCode, null, stderr);
       assert.ok(Date.now() < deadline, stderr);
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
@@ -3667,15 +5606,19 @@ test("reservation recovery survives a crash after retiring an inert stage", asyn
         action,
         state.repo,
         state.state,
-        JSON.stringify(serialized),
         checkpoint,
         releasePath,
       ],
       {
         env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       },
     );
+    let inputWriteError;
+    child.stdin.on("error", (error) => {
+      inputWriteError = error;
+    });
+    child.stdin.end(JSON.stringify(serialized));
     child.stdout.resume();
     let stderr = "";
     child.stderr.setEncoding("utf8");
@@ -3685,6 +5628,7 @@ test("reservation recovery survives a crash after retiring an inert stage", asyn
     const readyPath = `${releasePath}.ready-${child.pid}`;
     const deadline = Date.now() + 10_000;
     while (!existsSync(readyPath)) {
+      assert.equal(inputWriteError, undefined);
       assert.equal(child.exitCode, null, stderr);
       assert.ok(Date.now() < deadline, stderr);
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
@@ -3776,15 +5720,19 @@ test("reservation recovery accepts reachable stages across repeated crashes", as
         action,
         state.repo,
         state.state,
-        JSON.stringify(serialized),
         checkpoint,
         releasePath,
       ],
       {
         env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       },
     );
+    let inputWriteError;
+    child.stdin.on("error", (error) => {
+      inputWriteError = error;
+    });
+    child.stdin.end(JSON.stringify(serialized));
     child.stdout.resume();
     let stderr = "";
     child.stderr.setEncoding("utf8");
@@ -3794,6 +5742,7 @@ test("reservation recovery accepts reachable stages across repeated crashes", as
     const readyPath = `${releasePath}.ready-${child.pid}`;
     const deadline = Date.now() + 10_000;
     while (!existsSync(readyPath)) {
+      assert.equal(inputWriteError, undefined);
       assert.equal(child.exitCode, null, stderr);
       assert.ok(Date.now() < deadline, stderr);
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
@@ -4037,15 +5986,19 @@ test("reservation state refuses a recovery claim followed by local topology regr
         action,
         state.repo,
         state.state,
-        JSON.stringify(serialized),
         checkpoint,
         releasePath,
       ],
       {
         env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       },
     );
+    let inputWriteError;
+    child.stdin.on("error", (error) => {
+      inputWriteError = error;
+    });
+    child.stdin.end(JSON.stringify(serialized));
     child.stdout.resume();
     let stderr = "";
     child.stderr.setEncoding("utf8");
@@ -4055,6 +6008,7 @@ test("reservation state refuses a recovery claim followed by local topology regr
     const readyPath = `${releasePath}.ready-${child.pid}`;
     const deadline = Date.now() + 10_000;
     while (!existsSync(readyPath)) {
+      assert.equal(inputWriteError, undefined);
       assert.equal(child.exitCode, null, stderr);
       assert.ok(Date.now() < deadline, stderr);
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
@@ -4223,15 +6177,19 @@ test("reservation recovery durably reacquires a prematurely unlinked marker", as
         action,
         state.repo,
         state.state,
-        JSON.stringify(serialized),
         checkpoint,
         releasePath,
       ],
       {
         env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       },
     );
+    let inputWriteError;
+    child.stdin.on("error", (error) => {
+      inputWriteError = error;
+    });
+    child.stdin.end(JSON.stringify(serialized));
     child.stdout.resume();
     let stderr = "";
     child.stderr.setEncoding("utf8");
@@ -4241,6 +6199,7 @@ test("reservation recovery durably reacquires a prematurely unlinked marker", as
     const readyPath = `${releasePath}.ready-${child.pid}`;
     const deadline = Date.now() + 10_000;
     while (!existsSync(readyPath) || !ready()) {
+      assert.equal(inputWriteError, undefined);
       assert.equal(child.exitCode, null, stderr);
       assert.ok(Date.now() < deadline, stderr);
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
@@ -4393,15 +6352,19 @@ test("reservation crash boundaries converge without process or receipt authority
           "publish",
           state.repo,
           state.state,
-          JSON.stringify(fixtureInput),
           checkpoint,
           releasePath,
         ],
         {
           env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["pipe", "pipe", "pipe"],
         },
       );
+      let inputWriteError;
+      child.stdin.on("error", (error) => {
+        inputWriteError = error;
+      });
+      child.stdin.end(JSON.stringify(fixtureInput));
       child.stdout.resume();
       let stderr = "";
       child.stderr.setEncoding("utf8");
@@ -4411,6 +6374,7 @@ test("reservation crash boundaries converge without process or receipt authority
       const readyPath = `${releasePath}.ready-${child.pid}`;
       const deadline = Date.now() + 15_000;
       while (!existsSync(readyPath)) {
+        assert.equal(inputWriteError, undefined, checkpoint);
         assert.equal(child.exitCode, null, `${checkpoint}: ${stderr}`);
         assert.ok(Date.now() < deadline, `${checkpoint}: ${stderr}`);
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
@@ -4562,6 +6526,11 @@ test("two state journals sharing one provider root admit one reservation CAS win
     );
     const releasePath = join(firstState.root, "release-reservation-writers");
     const launch = (state, prepared) => {
+      const privateInput = {
+        observation: prepared.observation,
+        observationInput: prepared.input,
+        requirements: prepared.requirements,
+      };
       const child = spawn(
         process.execPath,
         [
@@ -4569,21 +6538,20 @@ test("two state journals sharing one provider root admit one reservation CAS win
           "publish",
           state.repo,
           state.state,
-          JSON.stringify({
-            observation: prepared.observation,
-            observationInput: prepared.input,
-            requirements: prepared.requirements,
-          }),
           "after-witness-stage",
           releasePath,
         ],
         {
           env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["pipe", "pipe", "pipe"],
         },
       );
       child.stdout.resume();
-      const output = { child, stderr: "" };
+      const output = { child, inputWriteError: undefined, stderr: "" };
+      child.stdin.on("error", (error) => {
+        output.inputWriteError = error;
+      });
+      child.stdin.end(JSON.stringify(privateInput));
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk) => {
         output.stderr += chunk;
@@ -4599,6 +6567,8 @@ test("two state journals sharing one provider root admit one reservation CAS win
         name.startsWith(`${basename(releasePath)}.ready-`),
       ).length !== 2
     ) {
+      assert.equal(first.inputWriteError, undefined);
+      assert.equal(second.inputWriteError, undefined);
       assert.equal(first.child.exitCode, null, first.stderr);
       assert.equal(second.child.exitCode, null, second.stderr);
       assert.ok(Date.now() < deadline, `${first.stderr}${second.stderr}`);
@@ -4694,15 +6664,19 @@ test("reservation authority preserves replacement extra-link and namespace drift
           "publish",
           state.repo,
           state.state,
-          JSON.stringify(fixtureInput),
           "before-retirement-observation",
           releasePath,
         ],
         {
           env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["pipe", "pipe", "pipe"],
         },
       );
+      let inputWriteError;
+      child.stdin.on("error", (error) => {
+        inputWriteError = error;
+      });
+      child.stdin.end(JSON.stringify(fixtureInput));
       child.stdout.resume();
       let stderr = "";
       child.stderr.setEncoding("utf8");
@@ -4720,6 +6694,7 @@ test("reservation authority preserves replacement extra-link and namespace drift
       );
       const deadline = Date.now() + 15_000;
       while (!existsSync(readyPath) || !existsSync(marker) || !existsSync(witness)) {
+        assert.equal(inputWriteError, undefined, mutation);
         assert.equal(child.exitCode, null, `${mutation}: ${stderr}`);
         assert.ok(Date.now() < deadline, `${mutation}: ${stderr}`);
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
@@ -4963,7 +6938,7 @@ test("the post-decision effect observer has no provider-effect control surface",
     "function completedLiveProviderStartDecisionCoreSnapshot",
   );
   const end = stateSource.indexOf(
-    "function callLiveProviderReservationCheckpoint",
+    "function callLiveProviderEffectCheckpoint",
     start,
   );
   assert.ok(start >= 0 && end > start);
@@ -4977,6 +6952,136 @@ test("the post-decision effect observer has no provider-effect control surface",
     /\b(?:inspectControlledBackgroundProvider|inspectControlledBackgroundProviderPrefix|launchControlledBackgroundProviderWithAuthorityGate|mutationOperationFileName|planControlledBackgroundProviderCreateWithAuthorityGate|planControlledBackgroundProviderOperation|providerAdapterReceipt|providerProcessBytes|providerProcessDigest|receiptFileName|retireControlledBackgroundProviderWithAuthorityGate)\b/u,
   );
   assert.doesNotMatch(observerSource, /authorizeColimaLiveProviderProcessStartEffect/u);
+  const expectedEffectExports = [
+    "liveProviderFixtureEffectRecoveryConfirmationForTest",
+    "observeColimaLivePreEffectAdmissionForExecutor",
+    "observeColimaLivePreEffectAdmissionForTest",
+    "observeColimaLiveProviderStartEffectFreshAdmissionForExecutor",
+    "observeColimaLiveProviderStartEffectFreshAdmissionForTest",
+    "publishColimaLiveProviderEffectAttemptFenceForTest",
+    "publishColimaLiveProviderEffectPreAttemptForTest",
+    "recoverColimaLiveProviderEffectForTest",
+  ];
+  const effectExports = Object.keys(cleanEngineStateModule)
+    .filter((name) => name.includes("Effect"))
+    .sort();
+  assert.deepEqual(effectExports, expectedEffectExports);
+  for (const name of expectedEffectExports) {
+    assert.match(stateSource, new RegExp(`export function ${name}\\b`, "u"));
+  }
+  const effectMutators = effectExports.filter((name) =>
+    /^(?:publish|recover)/u.test(name),
+  );
+  assert.deepEqual(effectMutators, [
+    "publishColimaLiveProviderEffectAttemptFenceForTest",
+    "publishColimaLiveProviderEffectPreAttemptForTest",
+    "recoverColimaLiveProviderEffectForTest",
+  ]);
+
+  const trackedSources = command("git", [
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+    "--",
+    "adapters",
+    "console",
+    "crates",
+    "demos",
+    "deploy",
+    "policies",
+    "scripts",
+  ]);
+  assert.equal(trackedSources.status, 0, trackedSources.stderr);
+  const effectMutatorConsumers = trackedSources.stdout
+    .split("\0")
+    .filter((path) => path.length > 0)
+    .filter((path) => {
+      const bytes = readFileSync(path);
+      if (bytes.includes(0)) return false;
+      let source;
+      try {
+        source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        return false;
+      }
+      return effectMutators.some((name) => source.includes(name));
+    })
+    .sort();
+  assert.deepEqual(effectMutatorConsumers, [
+    "deploy/compose/scripts/clean-engine-state.mjs",
+    "scripts/clean-engine-state.test.mjs",
+    "scripts/fixtures/clean-engine-live-provider-effect-process.mjs",
+  ]);
+
+  const malformedInputSentinel = "must-not-escape-private-fixture-input";
+  for (const path of [
+    "scripts/fixtures/clean-engine-live-provider-effect-process.mjs",
+    "scripts/fixtures/clean-engine-live-provider-reservation-process.mjs",
+  ]) {
+    const helper = readFileSync(path, "utf8");
+    assert.match(
+      helper,
+      /const \[action, repoRoot, stateBase, checkpoint, releasePath\] = values;/u,
+    );
+    assert.match(helper, /values\.length !== 5/u);
+    assert.match(helper, /readFileSync\(0, "utf8"\)/u);
+    assert.doesNotMatch(
+      helper,
+      /const \[[^\]]*\bserialized\b[^\]]*\] = values;/u,
+    );
+    const malformed = command(
+      process.execPath,
+      [
+        resolve(path),
+        "publish",
+        "unused-repository-root",
+        "unused-state-root",
+        "unused-checkpoint",
+        "unused-release-path",
+      ],
+      {
+        input: `{"observationInput":{"binding_key":"${malformedInputSentinel}`,
+      },
+    );
+    assert.equal(malformed.status, 64);
+    assert.equal(malformed.stdout, "");
+    assert.equal(malformed.stderr, "fixture input was malformed\n");
+    assert.doesNotMatch(malformed.stderr, new RegExp(malformedInputSentinel, "u"));
+  }
+
+  const effectPublicationStart = stateSource.indexOf(
+    "function callLiveProviderEffectCheckpoint",
+  );
+  const effectPublicationEnd = stateSource.indexOf(
+    "function callLiveProviderReservationCheckpoint",
+    effectPublicationStart,
+  );
+  const effectRecoveryStart = stateSource.indexOf(
+    "function observeRetiredLiveProviderEffectMarker",
+  );
+  const effectRecoveryEnd = stateSource.indexOf(
+    "function recoverColimaLiveProviderReservation(",
+    effectRecoveryStart,
+  );
+  assert.ok(
+    effectPublicationStart >= 0 && effectPublicationEnd > effectPublicationStart,
+  );
+  assert.ok(effectRecoveryStart >= 0 && effectRecoveryEnd > effectRecoveryStart);
+  for (const source of [
+    stateSource.slice(effectPublicationStart, effectPublicationEnd),
+    stateSource.slice(effectRecoveryStart, effectRecoveryEnd),
+  ]) {
+    assert.doesNotMatch(
+      source,
+      /\b(?:authorizeColimaLiveProviderProcessStartEffect|executeProviderCreateForExecutor|launchControlledBackgroundProviderWithAuthorityGate|retireControlledBackgroundProviderWithAuthorityGate)\b/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /\b(?:execFile|execFileSync|execSync|fork|spawn|spawnSync)\s*\(/u,
+    );
+  }
 
   const lifecycle = readFileSync(
     new URL(
@@ -5505,7 +7610,7 @@ test("an abandoned inert intent is recovered only by an all-zero abort", async (
     });
     assert.equal(recovered.phase, "plan");
     const recovery = parse(join(active, ".mutation-recovery-01-00"));
-    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v5");
+    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v6");
     assert.equal(recovery.action, "provider-intent");
     assert.deepEqual(
       {
@@ -6829,6 +8934,7 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
       "synveda.clean-engine.mutation-slot.v3",
       "synveda.clean-engine.mutation-slot.v4",
       "synveda.clean-engine.mutation-slot.v5",
+      "synveda.clean-engine.mutation-slot.v6",
     ]) {
       slot.schema = schema;
       writeFileSync(slotPath, canonicalBytes(slot), { mode: 0o600 });
@@ -6847,6 +8953,7 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
     "synveda.clean-engine.mutation-close.v4",
     "synveda.clean-engine.mutation-close.v5",
     "synveda.clean-engine.mutation-close.v6",
+    "synveda.clean-engine.mutation-close.v7",
   ]) {
     const legacyClose = fixture();
     try {
@@ -6869,7 +8976,7 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
   }
 
   for (const legacyRoot of [false, true]) {
-    for (const version of [1, 2, 3, 4]) {
+    for (const version of [1, 2, 3, 4, 5]) {
       const legacyRecovery = fixture();
       try {
         assert.equal(run(legacyRecovery, "plan").status, 0);
@@ -7459,7 +9566,7 @@ test("the fake provider adapter holds one slot across intent effect and result",
     const intent = parse(join(activeRun(state), "01-provider-create-intent.json"));
     assert.equal(
       intent.result.provider_contract_sha256,
-      "3ce0f279e4d9b981d88f9d84cf7a754acb91f222170902c7b36d07464f199833",
+      "81159eaee9bc06e651a529008b9531b873b700a1fbf88852d58f018cd8c8d39e",
     );
     assert.equal(intent.result.provider_resource, `synveda-cpr45-${candidate.run_id}`);
     assertPrivate(join(activeRun(state), ".mutation-slot-00"), 0o600);
@@ -7482,7 +9589,7 @@ test("the synchronous fake cannot publish controlled-provider evidence", () => {
               evidence_class: "controlled-fake",
               platform: "deterministic-posix",
               provider_contract_sha256:
-                "3ce0f279e4d9b981d88f9d84cf7a754acb91f222170902c7b36d07464f199833",
+                "81159eaee9bc06e651a529008b9531b873b700a1fbf88852d58f018cd8c8d39e",
               provider_evidence_sha256: "d".repeat(64),
               provider_name: "controlled-fake",
               runtime_name: "none",
@@ -7544,6 +9651,7 @@ test("generic receipt append cannot own provider or finalization evidence", () =
       "provider-create-passed",
       "provider-cleanup-intent",
       "provider-cleanup-passed",
+      "provider-effect-retired",
       "finalize-passed",
     ]) {
       assert.throws(
@@ -7551,7 +9659,11 @@ test("generic receipt append cannot own provider or finalization evidence", () =
           phase,
           repoRoot: state.repo,
           result: cleanEngineReceiptResult(
-            new Set(["finalize-passed", "provider-cleanup-passed"]).has(phase)
+            new Set([
+              "finalize-passed",
+              "provider-cleanup-passed",
+              "provider-effect-retired",
+            ]).has(phase)
               ? "provider-create-passed"
               : phase,
             candidate.run_id,
@@ -8701,12 +10813,13 @@ test("a finalized environment is mandatory, private and not replaceable", () => 
   }
 });
 
-test("receipt schemas v1 through v4 are explicit pre-provider hard-cut refusals", () => {
+test("receipt schemas v1 through v5 are explicit pre-provider hard-cut refusals", () => {
   for (const schema of [
     "synveda.clean-engine.receipt.v1",
     "synveda.clean-engine.receipt.v2",
     "synveda.clean-engine.receipt.v3",
     "synveda.clean-engine.receipt.v4",
+    "synveda.clean-engine.receipt.v5",
   ]) {
     const state = fixture();
     try {

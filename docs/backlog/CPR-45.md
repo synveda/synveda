@@ -385,7 +385,7 @@ content-free `buildx inspect` evidence for exactly one running embedded
 contacts neither Docker nor Colima and does not install the resolver mapping,
 so it closes no live acceptance criterion.
 
-The deterministic executor boundary now validates an append-only version-5
+The deterministic executor boundary now validates an append-only version-6
 receipt grammar from provider intent through registry, proxy, zero-read
 builder, browser, project cleanup and provider cleanup. Every phase has a
 closed content-free result schema; failures enter only an exact receipt-owned
@@ -394,15 +394,15 @@ authority across cleanup retries. Receipt and synthetic-manifest publication
 use fsynced staging plus no-replace links. The fixture-only manifest schema is
 explicitly non-live and controlled background evidence cannot become eligible.
 Provider success carries an explicit evidence class and must bind the exact
-provider-contract digest from its intent; receipt v1 through v4 state is a
-fresh-plan hard cut. Mutation slot v1 through v5, recovery/root v1 through v4
-and close v1 through v6
+provider-contract digest from its intent; receipt v1 through v5 state is a
+fresh-plan hard cut. Mutation slot v1 through v6, recovery/root v1 through v5
+and close v1 through v7
 are also refused and require regeneration; there is no translator. Mutation
-slot v6 binds the exact source receipt and
+slot v7 binds the exact source receipt and
 environment, previous close, operation kind, contract and canonical operation
-plan. Recovery v5 binds that operation and its exact observed evidence/root
-frontier; close v7 binds the result, owner or newest recovery authority and the
-outer operation-settlement digest. The recovery root is v5. Permanent,
+plan. Recovery v6 binds that operation and its exact observed evidence/root
+frontier; close v8 binds the result, owner or newest recovery authority and the
+outer operation-settlement digest. The recovery root is v6. Permanent,
 gap-free slots, settlements, closes and per-slot recovery claims are never
 deleted or reused. Only unique staging aliases reconcile. Every final link
 re-proves authority, endpoints, operation evidence and staged inode/bytes; a
@@ -442,7 +442,7 @@ identity enters the closed execution-failure branch.
 
 Recovery confirmation is read-only. After proving the recorded owner and any
 newest recoverer absent, acquisition alone may reconcile exact mutation-stage
-aliases, then appends a v5 claim bound to a fresh observation. Recovery never
+aliases, then appends a v6 claim bound to a fresh observation. Recovery never
 launches, signals, deletes, repairs the inner chain or replays a durable
 controller/start decision. Unauthenticated controller-launch and start-without-
 PID windows remain permanently uncertain. A complete identity, an exact
@@ -531,14 +531,14 @@ A new pure provider-adapter registry reserves
 `colima-vz-docker-live-create-v1` and
 `colima-vz-docker-live-cleanup-v1` plus distinct live evidence schema names. The
 create operation contract digest is
-`0039cdbb343dea4de86efd63a4cf6e160d3b4167b46339db201f89a219a61196`;
-cleanup is `d11c5cbdd517c8c99967179c36321a4858452aaf94d8d4a9e2441fb6e42bf1d2`
+`bbf65bbb13c58e31e15b040576253b32c1f07a62445d585c8436cc821d845fe4`;
+cleanup is `3fd567d325cb0a6575109f03ddbb8eb0fff7331cd32f5a559c360ce7a4e8182b`
 and binds the create digest. Registry digest
-`78ac3e6d877db749eb090660090042ffefb41a3788419f3a1edec09802b18a1b`
+`4eda07f8bf439f631e1541717e5345fc41ec374c43580c406a129115c8366052`
 accepts only an exact action, operation kind, operation-contract digest and
 provider-class tuple. It compares all fields after the content-addressed key,
 cannot select either fake class and returns only closed metadata. Create grants
-state planning only through `mutation-journal-v6-plan-only`; execution,
+state planning only through `mutation-journal-v7-plan-only`; execution,
 provider recovery, lifecycle exposure and finalization remain false, while
 cleanup remains wholly deny-only. The registry imports no process,
 mutation-state, receipt or fake-provider module; state reaches it only through
@@ -550,8 +550,8 @@ The new `synveda.clean-engine.colima-live-provider-operation-plan.v1` binds the
 active run/candidate/head, exact registry resolution, production requirements,
 private preparation-observation digest and provider profile/resource. It
 persists no private paths, command, environment, `HOME`, binding key or
-credentials. The state owner embeds it in a `provider-plan` mutation slot v6
-and owner close v7 after revalidating the production observation before slot
+credentials. The state owner embeds it in a `provider-plan` mutation slot v7
+and owner close v8 after revalidating the production observation before slot
 acquisition and again at the close link. Planning and both fake executors
 therefore compete on the same atomic slot name. Completion changes no receipt
 or environment, writes no provider evidence and blocks later mutation and
@@ -616,8 +616,8 @@ inode bind the exactly reconstructable bytes; changed parent identities,
 resources, source or inert state staging refuse.
 
 After complete retirement, the owner publishes a distinct outer cleanup
-settlement. Receipt v5 accepts only that digest as operation evidence for the
-controlled cleanup pass, and close v7 binds the same digest; the inner
+settlement. Receipt v6 accepts only that digest as operation evidence for the
+controlled cleanup pass, and close v8 binds the same digest; the inner
 retirement settlement, provider identity, create settlement and unrelated
 digests are rejected. Owner close is valid only before any recovery claim.
 Action-dispatched cleanup recovery may abort an untouched pre-intent slot
@@ -658,18 +658,18 @@ The state owner projects only content-free slot, close, plan and observation
 digests. Intent candidates remain `provider-create`/
 `requested-not-authorized` with a zero-entry logical prefix. Production intent
 operation kind `colima-live-provider-intent-publication-v1` now has contract
-digest `737a474bebc1ceb956586a19e848eb7a300ae5fb8ba2750352a2f84dfc59125f`;
+digest `24c8d98eb13962fd7139f72f034b7b4f85b1474eb9b681b8db57f2881bdaed9d`;
 the separate fixture digest is
-`25537c0d763a1df7a088cfbba2bcda001683f03e7190157a09b1c1d7a3f1370e`.
-They authorize only `mutation-journal-v6-inert-intent-only` publication.
+`bf7681827912b6a848525145ffc3a8eebafa1239e68cf6c4ec6184b6045e8d6d`.
+They authorize only `mutation-journal-v7-inert-intent-only` publication.
 
 The successor `provider-start-decision` uses production operation kind
 `colima-live-provider-start-decision-publication-v1` with contract digest
-`09a4ffc67a1a94c62317f115c1f8432a8d21967b4192fc893c9b126d155cd69b`;
+`358eb1f8be6d3ee632df8d262239c1ab09c9dcd544fb62607d3ed2d242a63e4c`;
 the distinct fixture digest is
-`ea9726aef040dafb8ea8a330961894fbbb19b9141ef7d8c3c5ae680ec0513b15`.
+`8ae81955e5d4ce75b5d1c9f9fe72d0de5ae6d2827e6bc3f746e2c3513f0f6c73`.
 Its publication plan is schema v2 and authorizes only
-`mutation-journal-v6-inert-start-decision-only`. Both contracts bind the exact
+`mutation-journal-v7-inert-start-decision-only`. Both contracts bind the exact
 completed intent and allow only `requested-not-executed-not-authorized` from an
 `observed-pristine` namespace observation. They remain absent from the
 provider-adapter registry.
@@ -678,8 +678,8 @@ The publisher reconstructs state/source and fresh namespace admission at four
 boundaries: initial, immediately before slot link, after slot acquisition and
 immediately before close link. Every canonical completed-intent projection,
 intent completion/publication plan, root observation, admission and decision
-publication plan must equal the initial pristine-namespace value. Slot v6 and
-owner close v7 have result sequence zero and zero receipt, environment and
+publication plan must equal the initial pristine-namespace value. Slot v7 and
+owner close v8 have result sequence zero and zero receipt, environment and
 operation-evidence delta. They create no process, provider, registry, runtime,
 receipt, environment or operation-settlement artifact. A pre-CAS collision leaves no
 slot; a post-CAS collision owner-aborts that generation.
@@ -688,14 +688,14 @@ The journal grammar is ordered and class-closed: aborted plan generations before
 one completed owner plan, aborted intent generations before one matching-class
 completed owner intent, then aborted decision generations before one
 matching-class completed owner decision.
-Abandoned intent and decision slots accept only an all-zero recovery v5 claim
+Abandoned intent and decision slots accept only an all-zero recovery v6 claim
 and `aborted-before-effect` recovery close; generic effect recovery refuses
 them. Exact completed retry checks the preparation-observation and fixture-
 requirements digests and returns historical non-authorizing state without
 reading or claiming current namespace state.
 
-Mutation slot v6, close v7, recovery v5 and recovery-root v5 are an indivisible
-full-state hard cut. Slot v1-v5, close v1-v6 and recovery/root v1-v4 are refused
+Mutation slot v7, close v8, recovery v6 and recovery-root v6 are an indivisible
+full-state hard cut. Slot v1-v6, close v1-v7 and recovery/root v1-v5 are refused
 with reset-and-regenerate guidance; no migration or relabelling exists. Crash,
 collision, source drift, competing writer, recovery, class-crossing, schema and
 validly rehashed semantic-tamper tests cover the boundary.
@@ -713,16 +713,16 @@ authorization function always refuses.
 ADR-0103 now locks and the state owner implements one cooperative aggregate
 no-spawn reservation. Production operation kind
 `colima-live-provider-reservation-publication-v1` has contract digest
-`eda9f544d1fb9752debcff6bb486081d855a9e0cead01e42d78979da18674c98`;
+`1dd6bd0e68e2b5991c7dd5f98230ec951ab3fa479746c2c695357f4c8b728ec6`;
 the fixture-only operation kind
 `colima-live-fixture-provider-reservation-publication-v1` has digest
-`3c8da820554ef086ed0a84144512b12c845412db682be07064b7e7154fbdc23b`.
-Both use `mutation-journal-v6-no-spawn-reservation-only` and remain absent from
+`abb0b37f748540272149140d615e7569873bb204ffcfab14f08da38235542b6b`.
+Both use `mutation-journal-v7-no-spawn-reservation-only` and remain absent from
 the provider-adapter registry and supported lifecycle.
 
 After the completed matching-class decision, aborted reservation generations
 may precede at most one completed reservation, which must be the last slot. The
-owner publishes the complete v6 slot before filesystem mutation, writes and
+owner publishes the complete v7 slot before filesystem mutation, writes and
 fsyncs one private mode-0600 immutable witness stage, and revalidates the bound
 state and roots. Its plan binds one provider root, all six fixed namespace
 identities and inventories, and one state run. All eight directory identities
@@ -735,11 +735,11 @@ While the exact marker/witness inode remains held with two links, the owner
 brackets a fresh six-namespace observation with topology checks and requires it
 to equal the plan. It then publishes the immutable
 `retirement-authorized-without-process` settlement, retires only the verified
-marker, fsyncs the provider root, proves the witness has one link, and closes v7
+marker, fsyncs the provider root, proves the witness has one link, and closes v8
 with the settlement digest. Receipt and environment do not advance, and no
 provider, registry, runtime or evidence artifact appears.
 
-Dedicated v5 recovery records bounded topology and settlement evidence. It can
+Dedicated v6 recovery records bounded topology and settlement evidence. It can
 retire an inert stage and abort, finish a partial witness publication, or relink
 an exact standalone witness to the fixed marker before completing observation,
 settlement and retirement. Claim history must be reachable, bind the
@@ -759,43 +759,38 @@ false. No Docker, Colima or Lima process ran; only repository-owned deterministi
 fixtures and filesystem state were exercised. The logical supervisor label is
 not a PID, PGID, ownership or liveness fact.
 
-### Immediate next slice
+### Current effect-state slice and exact next action
 
 [ADR-0104](../adr/adr-0104-indivisible-live-provider-effect-generation.md) is
-accepted as the next atomic state design. Its pure sibling-effect boundary is
-now implemented, but no process-effect state generation or production
-authority exists. Production operation kind
-`colima-live-provider-effect-v1` has contract digest
-`e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`.
-Its authority model is `production-deny-only-no-invoker`, every capability is
-false, and it is absent from state, registry, lifecycle, executor, recovery and
-finalizer modules. The separate fixture-only contract digest is
-`c0ec4548243b1e65ca71babb822290afb1650f2801be4e0da7a25c8ea832c087`;
-the two operation kinds, schemas and evidence classes cannot cross.
+accepted and its first persisted-state slice is implemented. Production
+operation kind `colima-live-provider-effect-v1` remains
+`production-deny-only-no-invoker`, is pinned to
+`e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`
+and has no production publisher, recovery entry point, registry row or
+lifecycle command. The separate fixture-only contract is pinned to
+`2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8`;
+its recovery capability cannot cross into the production tuple.
 
 The earlier non-persisted prerequisite projection remains a separate inert
 review artifact. Its production/fixture digests are
-`ae3d98ae3d4eee54ef0094874d73fb63f75b817a9a4005868ee22074d12202e7`
-and `58241bcd4d95b5f74968fdca1880becd0c6bee1a10a060d49e553e950dc7e853`.
+`81c496e201dbb75b17470f09d7cad2114d266641ca11cd8fbff25a992584b8da`
+and `a38253aff84b502c683e64413e62b13307f50b05a5a420e3b175bb6c3733a57e`.
 It defines no action, operation kind or contract, retains its independent
 512-occurrence preflight, and is consumed by neither state nor the pure effect
 grammar. It is not a compatibility or execution path.
 
-The pure fixture grammar binds the exact completed decision and trusted v5
-recursive baseline through a distinct witness, fixed marker, start authority
-and one-shot attempt. It closes four authenticated roles, four causal edges at
-depth two, four endpoint/socket identities plus the private Docker-context
-identity and bytes, a
-quiescence fence, two byte-equal paged recursive inventories across all six
-namespaces, intra-namespace hard-link groups, exact directory-scaffolding
-capacity, derived cleanup, paged progress, cleanup settlement, terminal receipt
-and marker retirement. Six closed histories cover pre-attempt, authority-only,
-attempted residual, uncertain, normal and rich paged/hard-link outcomes. The 24
-deterministic tests mutate every event and descriptor field, exercise duplicate
-dispatch-like prefixes, paging, alias and maximum-shape failures. The boundary-
-owned module has no direct filesystem, process, network, state or executor
-import, and a tripwire proves construction and validation invoke no observation
-I/O.
+The pure fixture grammar still binds the exact completed decision, trusted v5
+recursive baseline, witness/marker, causal graph, endpoints, inventories,
+cleanup, terminal receipt and retirement without observation I/O. The state
+owner now persists the fixture-only pre-attempt prefix using receipt v6,
+mutation slot v7, recovery/root v6 and close v8. A sequence-bound private stage
+derives its witness from the physical inode before the fixed marker CAS. It may
+retire before attempt with no receipt, or publish a durable attempt fence and
+stop without invoking a process. Recovery proves the original owner and newest
+recoverer absent, preserves repeated same-frontier claims, advances only a
+valid forward topology and refuses the attempt fence. Partial stages, foreign
+markers and interrupted marker retirement fail closed or recover without
+adopting/deleting foreign evidence.
 
 An iterative closed-data preflight runs before validation or freezing. It
 rejects proxies without invoking traps, cycles, depth above 16, more than 1,024
@@ -803,12 +798,12 @@ value occurrences, more than 64 entries in one container, and canonical UTF-8
 above 64 KiB including the newline. Shared acyclic aliases are permitted and
 counted per occurrence. Refusals are typed and content-free.
 
-The grammar names receipt v6 and
-`mutation-journal-v7-sibling-effect-only`, but these are not persisted
-generations. Current receipt v5, slot v6, recovery/root v5, close v7 and
-ADR-0103's terminal v1 no-spawn evidence are unchanged. No effect witness is
-published, no process or provider is invoked, no recovery entry point exists,
-and caller-held pure bytes carry no state provenance or branch selection.
+The generic receipt API rejects `provider-effect-retired` before slot
+acquisition; receipt v6 reserves that phase for the future state-owned attempted
+tail. The current pre-attempt completion publishes no receipt. All effect
+mutation/recovery APIs are fixture-only, ADR-0103's completed no-spawn branch
+remains terminal, and caller-held pure bytes carry no state provenance or
+branch selection.
 
 A standalone deterministic preparation fixture validates
 the closed four-role causal shape with four repository-owned Node processes:
@@ -825,30 +820,22 @@ the six-namespace inventory, crash recovery or any Colima/Lima/SSH/Engine
 evidence. The recorded execution is Darwin-only; Linux execution remains an
 open evidence requirement.
 
-Next implement the production-unreachable, state-owned sibling generation
-directly after the exact completed start decision, never after ADR-0103's
-terminal no-spawn completion. It is one indivisible persisted-state hard cut:
-receipt v5 to v6, mutation slot v6 to v7, recovery/root v5 to v6, close v7 to
-v8, and every dependent envelope and digest. Begin with the exact pre-attempt
-owner/recovery path: effect slot, distinct witness, fixed-marker CAS,
-start-authority/attempt fences and zero-receipt retirement. Do not land or read
-a mixed generation.
+Next bind the durable fixture attempt fence to the existing repository-owned
+four-process causal fixture, still without Docker, Colima or Lima. Persist the
+post-attempt role/endpoint/quiescence/inventory/cleanup events, exact terminal
+receipt and close through the already hard-cut generation. Cover uncertain
+acknowledgement, duplicate dispatch, every crash boundary, cleanup retry and
+attempt-fence operator resolution before considering a production invoker.
 
 Keep the production effect contract deny-only, absent from the adapter registry
-and lifecycle-unexposed. Do not invoke Docker, Colima, Lima or a provider
-process until state publication, physical witness handling, post-attempt
-recovery, cleanup and terminal-receipt paths are complete and independently
-reviewed. Never reuse the generic mutation-slot inode, ADR-0103's retired marker
-inode or its immutable no-spawn witness, and do not branch through, relabel or
-import the class-closed controlled-background v5 fake. Finalization remains
-blocked until a separately reviewed live environment-manifest schema exists.
-
-The first real invocation must use the closed helper `PATH`, explicit provider
-roots, `--mount none`, the receipt-owned disk copy and receipt-private `HOME`.
-It requires explicit authority, a fresh isolated provider, exact
-content-free evidence and exact cleanup. Only after deterministic conformance
-and independent review may execution and recovery appear behind one supported
-lifecycle target.
+and lifecycle-unexposed. Never reuse the generic mutation-slot inode,
+ADR-0103's retired marker inode or its immutable no-spawn witness, and do not
+branch through, relabel or import the class-closed controlled-background v5
+fake. Finalization remains blocked until a separately reviewed live
+environment-manifest schema exists. A later real invocation must use the closed
+helper `PATH`, explicit provider roots, `--mount none`, the receipt-owned disk
+copy and receipt-private `HOME`; it requires separate environment/platform
+evidence and independent review before any supported lifecycle target exists.
 Subsequent bounded steps add the globally clean Engine proof, TLS/bcrypt
 private registry,
 authenticated push/pull, synthetic Docker-client proxy activation, a zero-read

@@ -86,12 +86,12 @@ synthetic Docker client proxy configuration, canary remote builder and private
 registry. Current ACL exploit and metadata-retention evidence is macOS plus
 deterministic Linux grammar coverage. This is not public PKIX/browser trust,
 explicit custom-CA/proxy support, a clean-volume login or recovery evidence.
-One append-only version-5 receipt machine now enforces closed intent/results,
+One append-only version-6 receipt machine now enforces closed intent/results,
 collision-preserving failure branches, no-replace publication and an exact
-success-only synthetic manifest. Receipt v1 through v4, mutation slot v1 through
-v5, recovery/root v1 through v4 and close v1 through v6 are direct hard-cut
-refusals. Slot v6 binds source/result predecessors plus operation kind,
-contract and plan; recovery v5 binds a fresh observation; close v7 binds the
+success-only synthetic manifest. Receipt v1 through v5, mutation slot v1 through
+v6, recovery/root v1 through v5 and close v1 through v7 are direct hard-cut
+refusals. Slot v7 binds source/result predecessors plus operation kind,
+contract and plan; recovery v6 binds a fresh observation; close v8 binds the
 outer operation settlement.
 Final journal names are never deleted or reused, and generic append cannot own
 preflight, provider-create, provider-cleanup or finalization.
@@ -170,7 +170,7 @@ deny-only. The registry still imports no state, receipt, process or fake-provide
 path.
 
 The state owner embeds one content-free live operation plan in a dedicated
-mutation slot v6 and close v7. It binds the active candidate/head, exact registry
+mutation slot v7 and close v8. It binds the active candidate/head, exact registry
 resolution, production requirements and private observation digest. The same
 slot CAS serializes it against fake-provider mutation; completion changes no
 receipt or environment, writes no provider evidence and blocks every later
@@ -196,7 +196,7 @@ the close link. Every canonical admission must equal the initial pristine
 baseline. A successful owner close changes no receipt or environment, writes no
 provider or operation evidence and grants no effect authority. Collisions and
 drift abort before effect; abandoned slots can only acquire an all-zero recovery
-v5 claim and an `aborted-before-effect` close. Generic provider recovery refuses
+v6 claim and an `aborted-before-effect` close. Generic provider recovery refuses
 inert decisions. The ordered journal permits aborted plan, intent and decision
 generations before each matching owner completion. Completed retries return the
 historical non-authorizing result and make no fresh namespace claim. This adds
@@ -212,13 +212,14 @@ its authorization entry point always refuses. This closes only the
 post-decision observation shape; it is not process, provider, recovery or
 readiness evidence.
 
-A pure ADR-0104 sibling-effect boundary now binds that exact admission. Its
+A sibling-effect boundary now binds that exact admission. Its
 production `colima-live-provider-effect-v1` contract digest is
 `e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`;
 the class-separated fixture digest is
-`c0ec4548243b1e65ca71babb822290afb1650f2801be4e0da7a25c8ea832c087`.
+`2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8`.
 Production uses `production-deny-only-no-invoker`, keeps every capability false
-and has no state, registry, lifecycle, executor or recovery importer.
+and has no production state publisher, recovery entry point, registry row or
+lifecycle command.
 
 The earlier non-persisted prerequisite projection remains a separate inert
 review artifact with no action, operation kind or contract. It retains its own
@@ -235,23 +236,26 @@ uncertain and pre-attempt branches without invoking filesystem observation,
 process or network execution. This in-memory event fixture is distinct from the
 earlier four-process causal fixture.
 
-Receipt v6 and `mutation-journal-v7-sibling-effect-only` are grammar names only;
-the current receipt v5, slot v6, recovery/root v5, close v7 and ADR-0103 v1
-no-spawn evidence remain unchanged. No effect witness is persisted, no provider
-process is invoked and no recovery API exists. This is pure contract evidence,
-not state integration, execution, recovery, platform or readiness evidence.
+Receipt v6, slot v7, recovery/root v6 and close v8 now form one persisted hard
+cut. A test-only state seam publishes a sequence-bound stage, inode-derived
+witness, fixed marker and pre-attempt events. It can close after verified
+zero-receipt retirement, or stop at an unrecoverable attempt fence without
+invoking a process. Fixture recovery proves the owner and newest recoverer
+absent, handles partial and interrupted physical transitions, and never crosses
+the attempt fence. This is deterministic fixture state/recovery evidence, not
+live process, provider, platform or readiness evidence.
 
 The current state generation adds one deterministic cooperative reservation and
-still performs no provider process action. A v6 slot precedes a private fsynced
+still performs no provider process action. A v7 slot precedes a private fsynced
 witness. One fixed no-replace provider-root hard-link CAS binds the exact state
 run and all six namespace identities on one device. While the exact two-link
 marker/witness inode remains held, a bracketed fresh namespace observation must
 match the plan before immutable retirement authorization is published. The
 exact marker is then retired, its parent fsynced, the one-link witness proved
-and close v7 bound to the settlement digest. Receipt, environment, provider,
+and close v8 bound to the settlement digest. Receipt, environment, provider,
 runtime and evidence state remain unchanged.
 
-Dedicated v5 recovery can retire an inert stage, complete partial witness
+Dedicated v6 recovery can retire an inert stage, complete partial witness
 publication, or relink an exact standalone witness before settlement. Recovery
 history binds the deterministic witness, settlement and reachable local
 topology. Replacement, extra links, wrong type/mode/inode, backward topology or

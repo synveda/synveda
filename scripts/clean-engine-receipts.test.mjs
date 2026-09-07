@@ -17,6 +17,12 @@ import {
   CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
   CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
 } from "../deploy/compose/scripts/clean-engine-provider-process-contract.mjs";
+import {
+  COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
+  COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_KIND,
+} from "../deploy/compose/scripts/clean-engine-live-provider-effect.mjs";
 
 const fixtureId = "a".repeat(32);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -35,7 +41,7 @@ function plan(candidateSha256 = sha256(canonicalBytes(candidate()))) {
       state_device: "42",
       state_inode: "73",
     },
-    schema: "synveda.clean-engine.receipt.v5",
+    schema: "synveda.clean-engine.receipt.v6",
     sequence: 0,
   };
 }
@@ -231,6 +237,44 @@ function successBeforeFinalize(initialPlan = plan()) {
   return receipts;
 }
 
+function providerEffectRetirementResult({ production = false } = {}) {
+  return {
+    cleanup_settlement_sha256: "1".repeat(64),
+    create_settlement_sha256: "2".repeat(64),
+    evidence_class: production ? "production-pinned" : "fixture-only",
+    operation_contract_sha256: production
+      ? COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256
+      : COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
+    operation_kind: production
+      ? COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_KIND
+      : COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
+    operation_plan_sha256: "3".repeat(64),
+    phase: "provider-effect-retired",
+    publisher_authority_sha256: "4".repeat(64),
+    schema: "synveda.clean-engine.provider-effect-receipt-binding.v1",
+    slot_sequence: 3,
+    slot_sha256: "5".repeat(64),
+    start_attempt_sha256: "6".repeat(64),
+    witness_sha256: "7".repeat(64),
+  };
+}
+
+function stateOwnedProviderEffectReceipt(resultValue) {
+  const source = plan();
+  return [
+    source,
+    {
+      fixture_id: fixtureId,
+      outcome: "passed",
+      phase: "provider-effect-retired",
+      previous_sha256: sha256(canonicalBytes(source)),
+      result: resultValue,
+      schema: "synveda.clean-engine.receipt.v6",
+      sequence: 1,
+    },
+  ];
+}
+
 function candidate() {
   return {
     created_at: "2026-09-01T00:00:00.000Z",
@@ -370,6 +414,123 @@ test("unknown, skipped, reordered and mutated receipts are refused", () => {
     () => createNextReceipt([plan()], fixtureId, "registry-intent", result("registry-intent")),
     /next receipt phase was refused/,
   );
+});
+
+test("provider effect retirement is an exact state-owned terminal receipt", () => {
+  for (const production of [false, true]) {
+    const receipts = stateOwnedProviderEffectReceipt(
+      providerEffectRetirementResult({ production }),
+    );
+    const state = validateReceiptChain(receipts, fixtureId);
+    assert.equal(state.terminal, true);
+    assert.equal(state.manifest_eligible, false);
+    assert.equal(
+      receiptFileName(receipts[1]),
+      "01-provider-effect-retired.json",
+    );
+    assert.throws(
+      () =>
+        createNextReceipt(
+          receipts,
+          fixtureId,
+          "provider-create-intent",
+          result("provider-create-intent"),
+        ),
+      /next receipt phase was refused/,
+    );
+  }
+
+  assert.throws(
+    () =>
+      createNextReceipt(
+        [plan()],
+        fixtureId,
+        "provider-effect-retired",
+        providerEffectRetirementResult(),
+      ),
+    /provider effect retirement must be state-owned/,
+  );
+
+  const providerIntentPrefix = [plan()];
+  providerIntentPrefix.push(
+    createNextReceipt(
+      providerIntentPrefix,
+      fixtureId,
+      "provider-create-intent",
+      result("provider-create-intent"),
+    ),
+  );
+  providerIntentPrefix.push({
+    ...stateOwnedProviderEffectReceipt(
+      providerEffectRetirementResult(),
+    )[1],
+    previous_sha256: sha256(canonicalBytes(providerIntentPrefix.at(-1))),
+    sequence: 2,
+  });
+  assert.throws(
+    () => validateReceiptChain(providerIntentPrefix, fixtureId),
+    /receipt chain was refused/,
+  );
+
+  const mutations = [
+    (value) => {
+      value.evidence_class = "production-pinned";
+    },
+    (value) => {
+      value.operation_kind = COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_KIND;
+    },
+    (value) => {
+      value.operation_contract_sha256 =
+        COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256;
+    },
+    (value) => {
+      value.operation_kind = "arbitrary-effect";
+    },
+    (value) => {
+      value.schema = "synveda.clean-engine.provider-effect-receipt-binding.v2";
+    },
+    (value) => {
+      value.phase = "provider-effect-attempted";
+    },
+    (value) => {
+      value.slot_sequence = 64;
+    },
+    (value) => {
+      value.unreviewed = true;
+    },
+    (value) => {
+      delete value.witness_sha256;
+    },
+  ];
+  for (const field of [
+    "cleanup_settlement_sha256",
+    "create_settlement_sha256",
+    "operation_contract_sha256",
+    "operation_plan_sha256",
+    "publisher_authority_sha256",
+    "slot_sha256",
+    "start_attempt_sha256",
+    "witness_sha256",
+  ]) {
+    mutations.push((value) => {
+      value[field] = "0".repeat(64);
+    });
+    mutations.push((value) => {
+      value[field] = "g".repeat(64);
+    });
+  }
+  for (const mutate of mutations) {
+    const value = providerEffectRetirementResult();
+    mutate(value);
+    assert.throws(
+      () =>
+        validateReceiptChain(
+          stateOwnedProviderEffectReceipt(value),
+          fixtureId,
+        ),
+      ReceiptFailure,
+    );
+  }
 });
 
 test("provider success binds its explicit evidence class and intent contract", () => {

@@ -74,13 +74,13 @@ test("production and fixture process-start contracts are exact, inert and unregi
       contract: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT,
       digest: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
       expectedDigest:
-        "09a4ffc67a1a94c62317f115c1f8432a8d21967b4192fc893c9b126d155cd69b",
+        "358eb1f8be6d3ee632df8d262239c1ab09c9dcd544fb62607d3ed2d242a63e4c",
       evidenceClass: "production-pinned",
       fixtureOnly: false,
       intentCompletionSchema:
         "synveda.clean-engine.colima-live-provider-intent-completion.v1",
       intentContractSha256:
-        "737a474bebc1ceb956586a19e848eb7a300ae5fb8ba2750352a2f84dfc59125f",
+        "24c8d98eb13962fd7139f72f034b7b4f85b1474eb9b681b8db57f2881bdaed9d",
       intentKind: "colima-live-provider-intent-publication-v1",
       kind: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_KIND,
     },
@@ -90,13 +90,13 @@ test("production and fixture process-start contracts are exact, inert and unregi
       digest:
         COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
       expectedDigest:
-        "ea9726aef040dafb8ea8a330961894fbbb19b9141ef7d8c3c5ae680ec0513b15",
+        "8ae81955e5d4ce75b5d1c9f9fe72d0de5ae6d2827e6bc3f746e2c3513f0f6c73",
       evidenceClass: "fixture-only",
       fixtureOnly: true,
       intentCompletionSchema:
         "synveda.clean-engine.colima-live-fixture-provider-intent-completion.v1",
       intentContractSha256:
-        "25537c0d763a1df7a088cfbba2bcda001683f03e7190157a09b1c1d7a3f1370e",
+        "bf7681827912b6a848525145ffc3a8eebafa1239e68cf6c4ec6184b6045e8d6d",
       intentKind: "colima-live-fixture-provider-intent-publication-v1",
       kind: COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_KIND,
     },
@@ -152,7 +152,7 @@ test("production and fixture process-start contracts are exact, inert and unregi
     );
     assert.equal(
       value.contract.target_provider_intent_state_integration,
-      "mutation-journal-v6-inert-intent-only",
+      "mutation-journal-v7-inert-intent-only",
     );
     assert.equal(
       value.contract.state_process_start_decision_publication_authorized,
@@ -160,7 +160,7 @@ test("production and fixture process-start contracts are exact, inert and unregi
     );
     assert.equal(
       value.contract.state_integration,
-      "mutation-journal-v6-inert-start-decision-only",
+      "mutation-journal-v7-inert-start-decision-only",
     );
     assert.equal(value.contract.future_effect_fresh_admission_required, true);
     assert.equal(
@@ -654,7 +654,7 @@ test("publication plans and completion structures are exact and variant-bound", 
     );
     assert.equal(
       publicationPlan.state_integration,
-      "mutation-journal-v6-inert-start-decision-only",
+      "mutation-journal-v7-inert-start-decision-only",
     );
     assertRecursivelyFrozen(publicationPlan);
     expectRefusal(() =>

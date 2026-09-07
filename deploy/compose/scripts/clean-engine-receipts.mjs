@@ -4,8 +4,14 @@ import {
   CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
   CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
 } from "./clean-engine-provider-process-contract.mjs";
+import {
+  COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
+  COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_KIND,
+} from "./clean-engine-live-provider-effect.mjs";
 
-export const RECEIPT_SCHEMA = "synveda.clean-engine.receipt.v5";
+export const RECEIPT_SCHEMA = "synveda.clean-engine.receipt.v6";
 export const ZERO_SHA256 = "0".repeat(64);
 
 const REGISTRY_IMAGE =
@@ -733,6 +739,59 @@ function validatePreflightRefused(result) {
   }
 }
 
+function validateProviderEffectRetired(result) {
+  exactKeys(
+    result,
+    [
+      "cleanup_settlement_sha256",
+      "create_settlement_sha256",
+      "evidence_class",
+      "operation_contract_sha256",
+      "operation_kind",
+      "operation_plan_sha256",
+      "phase",
+      "publisher_authority_sha256",
+      "schema",
+      "slot_sequence",
+      "slot_sha256",
+      "start_attempt_sha256",
+      "witness_sha256",
+    ],
+    "provider effect retirement result",
+  );
+  if (
+    result.schema !==
+      "synveda.clean-engine.provider-effect-receipt-binding.v1" ||
+    result.phase !== "provider-effect-retired" ||
+    !(
+      (result.evidence_class === "fixture-only" &&
+        result.operation_kind ===
+          COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND &&
+        result.operation_contract_sha256 ===
+          COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256) ||
+      (result.evidence_class === "production-pinned" &&
+        result.operation_kind === COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_KIND &&
+        result.operation_contract_sha256 ===
+          COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256)
+    ) ||
+    !Number.isSafeInteger(result.slot_sequence) ||
+    result.slot_sequence < 0 ||
+    result.slot_sequence > 63 ||
+    [
+      result.cleanup_settlement_sha256,
+      result.create_settlement_sha256,
+      result.operation_contract_sha256,
+      result.operation_plan_sha256,
+      result.publisher_authority_sha256,
+      result.slot_sha256,
+      result.start_attempt_sha256,
+      result.witness_sha256,
+    ].some((value) => !lowerHex(value, 64) || value === ZERO_SHA256)
+  ) {
+    refuse("provider effect retirement result was refused");
+  }
+}
+
 function validateFailureCleanupFailed(result, receipts) {
   exactKeys(
     result,
@@ -788,6 +847,8 @@ function validateResult(phase, result, fixtureId, previousSha256, previousReceip
       return validateProviderCleanupIntent(result, fixtureId, previousReceipts);
     case "provider-cleanup-passed":
       return validateProviderCleanupPassed(result, previousReceipts);
+    case "provider-effect-retired":
+      return validateProviderEffectRetired(result);
     case "finalize-passed": return validateFinalizePassed(result, previousSha256);
     case "failure-cleanup-intent": return validateFailureCleanupIntent(result, previousReceipts);
     case "failure-cleanup-passed": return validateFailureCleanupPassed(result);
@@ -802,7 +863,12 @@ function validateResult(phase, result, fixtureId, previousSha256, previousReceip
 }
 
 function expectedOutcome(phase) {
-  if (phase === "plan" || PASSED_PHASES.has(phase) || phase === "failure-cleanup-passed") {
+  if (
+    phase === "plan" ||
+    phase === "provider-effect-retired" ||
+    PASSED_PHASES.has(phase) ||
+    phase === "failure-cleanup-passed"
+  ) {
     return "passed";
   }
   if (INTENT_PHASES.has(phase) || phase === "failure-cleanup-intent") return "intent";
@@ -815,7 +881,13 @@ function expectedOutcome(phase) {
 }
 
 function allowedNext(previousPhase) {
-  if (previousPhase === "plan") return ["provider-create-intent", "preflight-refused"];
+  if (previousPhase === "plan") {
+    return [
+      "provider-create-intent",
+      "provider-effect-retired",
+      "preflight-refused",
+    ];
+  }
   const successIndex = SUCCESS_PATH.indexOf(previousPhase);
   if (successIndex >= 0 && successIndex < SUCCESS_PATH.length - 1) {
     const next = [SUCCESS_PATH[successIndex + 1]];
@@ -894,6 +966,7 @@ export function validateReceiptChain(receipts, fixtureId) {
     terminal:
       receipts.at(-1).phase === "finalize-passed" ||
       receipts.at(-1).phase === "failure-cleanup-passed" ||
+      receipts.at(-1).phase === "provider-effect-retired" ||
       receipts.at(-1).phase === "preflight-refused",
   });
 }
@@ -916,6 +989,9 @@ function constructNextReceipt(receipts, fixtureId, phase, result) {
 
 export function createNextReceipt(receipts, fixtureId, phase, result) {
   if (phase === "finalize-passed") refuse("finalization must be state-owned");
+  if (phase === "provider-effect-retired") {
+    refuse("provider effect retirement must be state-owned");
+  }
   return constructNextReceipt(receipts, fixtureId, phase, result);
 }
 

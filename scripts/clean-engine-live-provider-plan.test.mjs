@@ -34,7 +34,7 @@ test("the production-shaped fixture plan is exact, content addressed and plan on
   const value = plan();
   assert.equal(validateColimaLiveProviderOperationPlan(value), value);
   assert.equal(value.action, "provider-create");
-  assert.equal(value.state_integration, "mutation-journal-v6-plan-only");
+  assert.equal(value.state_integration, "mutation-journal-v7-plan-only");
   assert.deepEqual(value.capabilities, {
     execution_authorized: false,
     finalization_eligible: false,

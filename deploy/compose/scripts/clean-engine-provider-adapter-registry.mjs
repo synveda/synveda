@@ -121,7 +121,7 @@ export const COLIMA_LIVE_CREATE_OPERATION_CONTRACT = deepFreeze({
   provider_class: COLIMA_LIVE_PROVIDER_CLASS,
   requirements_sha256: COLIMA_LIVE_REQUIREMENTS_SHA256,
   schema: COLIMA_LIVE_CREATE_OPERATION_CONTRACT_SCHEMA,
-  state_integration: "mutation-journal-v6-plan-only",
+  state_integration: "mutation-journal-v7-plan-only",
 });
 
 export const COLIMA_LIVE_CREATE_OPERATION_CONTRACT_SHA256 =
@@ -401,7 +401,7 @@ export function authorizeProviderAdapterPlanning(value) {
   const resolution = resolveProviderAdapter(value);
   if (
     resolution.action !== "provider-create" ||
-    resolution.state_integration !== "mutation-journal-v6-plan-only" ||
+    resolution.state_integration !== "mutation-journal-v7-plan-only" ||
     !sameCanonical(
       resolution.capabilities,
       PROVIDER_ADAPTER_PLAN_ONLY_CAPABILITIES,

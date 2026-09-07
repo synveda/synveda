@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
-  publishColimaLiveProviderReservationForTest,
-  recoverColimaLiveProviderReservationForTest,
+  publishColimaLiveProviderEffectAttemptFenceForTest,
+  publishColimaLiveProviderEffectPreAttemptForTest,
+  recoverColimaLiveProviderEffectForTest,
 } from "../../deploy/compose/scripts/clean-engine-state.mjs";
 
 function malformedFixtureInput() {
@@ -33,7 +35,7 @@ const values = process.argv.slice(2);
 const [action, repoRoot, stateBase, checkpoint, releasePath] = values;
 if (
   values.length !== 5 ||
-  !new Set(["publish", "recover"]).has(action) ||
+  !new Set(["attempt", "collision", "publish", "recover"]).has(action) ||
   [repoRoot, stateBase, checkpoint, releasePath].some(
     (value) => typeof value !== "string" || value.length === 0,
   )
@@ -43,6 +45,16 @@ if (
   try {
     const input = readFixtureInput();
     const waitAtCheckpoint = (name) => {
+      if (action === "collision" && name === "before-marker-link") {
+        writeFileSync(
+          join(
+            input.observationInput.provider_root,
+            ".synveda-clean-engine-provider-reservation",
+          ),
+          "foreign provider effect marker\n",
+          { flag: "wx", mode: 0o600 },
+        );
+      }
       if (name !== checkpoint) return;
       writeFileSync(`${releasePath}.ready-${process.pid}`, "ready\n", {
         flag: "wx",
@@ -57,14 +69,16 @@ if (
       stateBase,
       testCheckpoint: waitAtCheckpoint,
     };
-    if (action === "publish") {
-      publishColimaLiveProviderReservationForTest(argumentsValue);
+    if (action === "publish" || action === "collision") {
+      publishColimaLiveProviderEffectPreAttemptForTest(argumentsValue);
+    } else if (action === "attempt") {
+      publishColimaLiveProviderEffectAttemptFenceForTest(argumentsValue);
     } else {
-      recoverColimaLiveProviderReservationForTest(argumentsValue);
+      recoverColimaLiveProviderEffectForTest(argumentsValue);
     }
   } catch (error) {
     process.stderr.write(
-      `${error?.message ?? "live provider reservation fixture failed"}\n`,
+      `${error?.message ?? "live provider effect fixture failed"}\n`,
     );
     process.exitCode = Number.isSafeInteger(error?.exitStatus)
       ? error.exitStatus

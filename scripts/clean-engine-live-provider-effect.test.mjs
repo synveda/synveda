@@ -605,7 +605,7 @@ test("the public effect boundary is exact, class-separated and recursively froze
   );
   assert.equal(
     COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
-    "c0ec4548243b1e65ca71babb822290afb1650f2801be4e0da7a25c8ea832c087",
+    "2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8",
   );
   assert.equal(
     digest(COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT),
@@ -664,6 +664,7 @@ test("the public effect boundary is exact, class-separated and recursively froze
       "cleanup_authorized",
       "effect_witness_publication_authorized",
       "fixture_effect_execution_authorized",
+      "fixture_effect_recovery_authorized",
       "marker_link_authorized",
       "marker_retirement_authorized",
       "process_group_ownership_authorized",
@@ -680,7 +681,7 @@ test("the public effect boundary is exact, class-separated and recursively froze
   assert.equal(
     COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT.capabilities
       .fixture_effect_recovery_authorized,
-    false,
+    true,
   );
   for (const value of [
     COLIMA_LIVE_PROVIDER_EFFECT_BOUNDS,
@@ -873,37 +874,37 @@ test("the fixture API is closed, content-free and returns no signing authority",
 test("all closed histories and every prefix validate with stable terminal bindings", () => {
   const variants = [
     {
-      digest: "ef3f2884c7f1db21d7ea6e702766fa9bda3a84a8439cb565e96fdc1a10c09231",
+      digest: "3c5cf35361e874e7ff3538192783089cf502b22cde4f9b617b0a12f61dd3367d",
       events: 1,
       outcome: "pre-attempt-retired",
       terminal: "completion",
     },
     {
-      digest: "c6073b6fab60cca6279c176774374d7154a638803816ffcf983d3ea6da098a45",
+      digest: "bcae354d262b3d49f2e9bc3fe4b8d712ab0714a001b540e008485c680f1c0c2f",
       events: 2,
       outcome: "authority-retired",
       terminal: "completion",
     },
     {
-      digest: "487fa3684990a5445aedb9e521963856798d47c6c278f64d8842628d780751c1",
+      digest: "f554e81fbb8aa52776c639f4b3876eb4656c385db2f7f1d825a027b701470caf",
       events: 11,
       outcome: "residual",
       terminal: "completion",
     },
     {
-      digest: "adb9074fa223aa4768675806881d4cd7b4deb27d5a59faa1605c164e0281d73e",
+      digest: "a3fad401cf7a84a86c1c78ba2394c33b19c1e71c9ede9864e4b9cba52cf0e12a",
       events: 12,
       outcome: "uncertain",
       terminal: "uncertain-start",
     },
     {
-      digest: "9b6c473082207e093df97d7110bcf9446634b94fa184ab282f2cfa1457030004",
+      digest: "b85815f48d8e5577cd3f0c5465a1ab13e092b15a088647648bea9c8f01365aae",
       events: 44,
       outcome: "retired",
       terminal: "completion",
     },
     {
-      digest: "20b1549051b285f7e1bacc79900a69cdf6d1e901e64ad8b892524d913b817a24",
+      digest: "dd6a8d8fb3a0d3c0140853661c58a0f86cd368db043fdccf0dfae7c1fbe79f60",
       events: 54,
       outcome: "rich-retired",
       terminal: "completion",
@@ -1138,7 +1139,7 @@ test("publication plans, witnesses and nested contracts reject every mutation", 
   }
 });
 
-test("publisher authority is exactly the singleton owner while recovery is disabled", () => {
+test("publisher authority is owner-first and permits only chained fixture recovery", () => {
   const fixture = prepared("pre-attempt-retired");
   const validate = (publisherAuthorityChain, history = fixture.events) =>
     validateColimaLiveProviderEffectEventHistory(history, {
@@ -1164,23 +1165,151 @@ test("publisher authority is exactly the singleton owner while recovery is disab
     ...clone(fixture.publisherAuthorityChain),
     {
       authority_sha256: claimSha256,
-      first_event_sequence: 1,
+      first_event_sequence: 0,
       kind: "state-recovery-claim",
       prior_authority_sha256: fixture.witness.slot_sha256,
       recovery_claim_sha256: claimSha256,
     },
   ];
-  expectRefusal(
-    () => validate(structuralRecovery),
-    /recovery publisher was not authorized/u,
+  const recoveredEvidence = clone(fixture.events[0].evidence);
+  recoveredEvidence.marker_retirement_binding_sha256 = digest({
+    cleanup_settlement_sha256:
+      recoveredEvidence.cleanup_settlement_sha256,
+    marker_retirement_observation_sha256:
+      recoveredEvidence.marker_retirement_observation_sha256,
+    provider_root_fsync_observation_sha256:
+      recoveredEvidence.provider_root_fsync_observation_sha256,
+    publisher_authority_sha256: claimSha256,
+    receipt_sha256: recoveredEvidence.receipt_sha256,
+    witness_identity_sha256: recoveredEvidence.witness_identity_sha256,
+    witness_link_count: recoveredEvidence.witness_link_count,
+  });
+  const recoveredCompletion = buildColimaLiveProviderEffectEvent({
+    eventKind: "completion",
+    evidence: recoveredEvidence,
+    history: [],
+    publicationPlan: fixture.publicationPlan,
+    publisherAuthorityChain: structuralRecovery,
+    publisherAuthoritySha256: claimSha256,
+    source: fixture.source,
+    witness: fixture.witness,
+  });
+  assert.doesNotThrow(() =>
+    validate(structuralRecovery, [recoveredCompletion]),
+  );
+  const supersedingClaimSha256 = "c".repeat(64);
+  const repeatedRecovery = [
+    ...structuralRecovery,
+    {
+      authority_sha256: supersedingClaimSha256,
+      first_event_sequence: 0,
+      kind: "state-recovery-claim",
+      prior_authority_sha256: claimSha256,
+      recovery_claim_sha256: supersedingClaimSha256,
+    },
+  ];
+  const repeatedRecoveryEvidence = clone(recoveredEvidence);
+  repeatedRecoveryEvidence.marker_retirement_binding_sha256 = digest({
+    cleanup_settlement_sha256:
+      repeatedRecoveryEvidence.cleanup_settlement_sha256,
+    marker_retirement_observation_sha256:
+      repeatedRecoveryEvidence.marker_retirement_observation_sha256,
+    provider_root_fsync_observation_sha256:
+      repeatedRecoveryEvidence.provider_root_fsync_observation_sha256,
+    publisher_authority_sha256: supersedingClaimSha256,
+    receipt_sha256: repeatedRecoveryEvidence.receipt_sha256,
+    witness_identity_sha256:
+      repeatedRecoveryEvidence.witness_identity_sha256,
+    witness_link_count: repeatedRecoveryEvidence.witness_link_count,
+  });
+  const repeatedRecoveryCompletion = buildColimaLiveProviderEffectEvent({
+    eventKind: "completion",
+    evidence: repeatedRecoveryEvidence,
+    history: [],
+    publicationPlan: fixture.publicationPlan,
+    publisherAuthorityChain: repeatedRecovery,
+    publisherAuthoritySha256: supersedingClaimSha256,
+    source: fixture.source,
+    witness: fixture.witness,
+  });
+  assert.doesNotThrow(() =>
+    validate(repeatedRecovery, [repeatedRecoveryCompletion]),
+  );
+
+  const authorityFixture = prepared("authority-retired");
+  const authorityClaimSha256 = "b".repeat(64);
+  const authorityRecovery = [
+    ...clone(authorityFixture.publisherAuthorityChain),
+    {
+      authority_sha256: authorityClaimSha256,
+      first_event_sequence: 1,
+      kind: "state-recovery-claim",
+      prior_authority_sha256: authorityFixture.witness.slot_sha256,
+      recovery_claim_sha256: authorityClaimSha256,
+    },
+  ];
+  const authorityRecoveryEvidence = clone(
+    authorityFixture.events[1].evidence,
+  );
+  authorityRecoveryEvidence.marker_retirement_binding_sha256 = digest({
+    cleanup_settlement_sha256:
+      authorityRecoveryEvidence.cleanup_settlement_sha256,
+    marker_retirement_observation_sha256:
+      authorityRecoveryEvidence.marker_retirement_observation_sha256,
+    provider_root_fsync_observation_sha256:
+      authorityRecoveryEvidence.provider_root_fsync_observation_sha256,
+    publisher_authority_sha256: authorityClaimSha256,
+    receipt_sha256: authorityRecoveryEvidence.receipt_sha256,
+    witness_identity_sha256:
+      authorityRecoveryEvidence.witness_identity_sha256,
+    witness_link_count: authorityRecoveryEvidence.witness_link_count,
+  });
+  const authorityRecoveryCompletion =
+    buildColimaLiveProviderEffectEvent({
+      eventKind: "completion",
+      evidence: authorityRecoveryEvidence,
+      history: [authorityFixture.events[0]],
+      publicationPlan: authorityFixture.publicationPlan,
+      publisherAuthorityChain: authorityRecovery,
+      publisherAuthoritySha256: authorityClaimSha256,
+      source: authorityFixture.source,
+      witness: authorityFixture.witness,
+    });
+  assert.doesNotThrow(() =>
+    validateColimaLiveProviderEffectEventHistory(
+      [authorityFixture.events[0], authorityRecoveryCompletion],
+      {
+        ...validationOptions(authorityFixture),
+        publisherAuthorityChain: authorityRecovery,
+      },
+    ),
   );
   expectRefusal(
-    () => validate(structuralRecovery, []),
-    /recovery publisher was not authorized/u,
+    () =>
+      buildColimaLiveProviderEffectEvent({
+        eventKind: "start-authority",
+        evidence: authorityFixture.events[0].evidence,
+        history: [],
+        publicationPlan: authorityFixture.publicationPlan,
+        publisherAuthorityChain: [
+          authorityFixture.publisherAuthorityChain[0],
+          {
+            authority_sha256: authorityClaimSha256,
+            first_event_sequence: 0,
+            kind: "state-recovery-claim",
+            prior_authority_sha256: authorityFixture.witness.slot_sha256,
+            recovery_claim_sha256: authorityClaimSha256,
+          },
+        ],
+        publisherAuthoritySha256: authorityClaimSha256,
+        source: authorityFixture.source,
+        witness: authorityFixture.witness,
+      }),
+    /event envelope/u,
   );
   const malformedRecoveries = [
     setAtPath(structuralRecovery, [1, "authority_sha256"]),
-    setAtPath(structuralRecovery, [1, "first_event_sequence"], () => 0),
+    setAtPath(structuralRecovery, [1, "first_event_sequence"], () => 2),
     setAtPath(structuralRecovery, [1, "kind"]),
     setAtPath(structuralRecovery, [1, "prior_authority_sha256"]),
     setAtPath(structuralRecovery, [1, "recovery_claim_sha256"]),
@@ -3028,6 +3157,16 @@ test("the pure boundary has no executor imports and its joint maxima fit the eve
   const authorityPaths = authorityRoots
     .flatMap((root) => firstPartyFiles(resolve(REPO_ROOT, root)))
     .filter((path) => !excluded.has(path));
+  const permittedConsumers = new Set([
+    resolve(
+      REPO_ROOT,
+      "deploy/compose/scripts/clean-engine-receipts.mjs",
+    ),
+    resolve(REPO_ROOT, "deploy/compose/scripts/clean-engine-state.mjs"),
+    resolve(REPO_ROOT, "scripts/clean-engine-receipts.test.mjs"),
+    resolve(REPO_ROOT, "scripts/clean-engine-state.test.mjs"),
+  ]);
+  const observedConsumers = [];
   assert.ok(authorityPaths.length > 100, "authority scan was unexpectedly small");
   for (const path of authorityPaths) {
     const bytes = readFileSync(path);
@@ -3038,12 +3177,39 @@ test("the pure boundary has no executor imports and its joint maxima fit the eve
     } catch {
       continue;
     }
-    assert.doesNotMatch(
-      consumer,
-      /clean-engine-live-provider-effect\.mjs/u,
-      relative(REPO_ROOT, path),
-    );
+    if (/clean-engine-live-provider-effect\.mjs/u.test(consumer)) {
+      assert.equal(
+        permittedConsumers.has(path),
+        true,
+        relative(REPO_ROOT, path),
+      );
+      observedConsumers.push(relative(REPO_ROOT, path));
+    }
   }
+  assert.deepEqual(observedConsumers.sort(), [
+    "deploy/compose/scripts/clean-engine-receipts.mjs",
+    "deploy/compose/scripts/clean-engine-state.mjs",
+    "scripts/clean-engine-receipts.test.mjs",
+    "scripts/clean-engine-state.test.mjs",
+  ]);
+
+  const stateSource = readFileSync(
+    resolve(REPO_ROOT, "deploy/compose/scripts/clean-engine-state.mjs"),
+    "utf8",
+  );
+  const lifecycleSource = readFileSync(
+    resolve(REPO_ROOT, "deploy/compose/scripts/clean-engine-acceptance.sh"),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    stateSource,
+    /COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_(?:CONTRACT|CONTRACT_SHA256|KIND)/u,
+  );
+  assert.doesNotMatch(
+    stateSource,
+    /export function (?:publish|recover)[A-Za-z0-9]*ProviderEffect[A-Za-z0-9]*ForExecutor/u,
+  );
+  assert.doesNotMatch(lifecycleSource, /provider-effect/u);
 
   const inventoryPagesPerSample = Math.floor(
     (COLIMA_LIVE_PROVIDER_EFFECT_BOUNDS.inventory_entries +

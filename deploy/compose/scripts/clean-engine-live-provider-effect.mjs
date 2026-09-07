@@ -1341,7 +1341,7 @@ function operationContract(fixtureOnly) {
       evidence_publication_authorized: false,
       finalization_authorized: false,
       fixture_effect_execution_authorized: fixtureAuthority,
-      fixture_effect_recovery_authorized: false,
+      fixture_effect_recovery_authorized: fixtureAuthority,
       lifecycle_exposed: false,
       marker_link_authorized: fixtureAuthority,
       marker_retirement_authorized: fixtureAuthority,
@@ -1711,7 +1711,7 @@ function validatePublisherAuthorityChain(value, witness) {
         : authority.kind !== "state-recovery-claim" ||
           authority.authority_sha256 !== authority.recovery_claim_sha256 ||
           authority.prior_authority_sha256 !== prior.authority_sha256 ||
-          authority.first_event_sequence <= prior.first_event_sequence)
+          authority.first_event_sequence < prior.first_event_sequence)
     ) {
       fail("live provider effect publisher authority was refused", 69);
     }
@@ -4915,10 +4915,10 @@ function validateHistoryInternal(
       (authority) => authority.first_event_sequence >= validated.length,
     );
   if (
-    pendingAuthorities.length > (allowNextAuthority ? 1 : 0) ||
-    (allowNextAuthority &&
-      pendingAuthorities.length === 1 &&
-      pendingAuthorities[0].first_event_sequence !== validated.length)
+    pendingAuthorities.some(
+      (authority) => authority.first_event_sequence !== validated.length,
+    ) ||
+    (!allowNextAuthority && pendingAuthorities.length > 0)
   ) {
     fail("live provider effect publisher authority frontier was refused", 69);
   }

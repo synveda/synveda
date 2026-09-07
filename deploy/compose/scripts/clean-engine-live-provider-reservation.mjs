@@ -39,7 +39,7 @@ export const COLIMA_LIVE_PROVIDER_RESERVATION_COMPLETION_SCHEMA =
 export const COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_COMPLETION_SCHEMA =
   "synveda.clean-engine.colima-live-fixture-provider-reservation-completion.v1";
 export const COLIMA_LIVE_PROVIDER_RESERVATION_STATE_INTEGRATION =
-  "mutation-journal-v6-no-spawn-reservation-only";
+  "mutation-journal-v7-no-spawn-reservation-only";
 
 const ZERO_SHA256 = "0".repeat(64);
 const IDENTITY_FIELDS = Object.freeze([

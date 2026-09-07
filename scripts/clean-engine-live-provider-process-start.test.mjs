@@ -64,23 +64,23 @@ test("production and fixture post-decision admissions are exact and deny only", 
   const variants = [
     {
       admissionDigest:
-        "ff50b902b7760a847432e7b3e2b94b564f20626c564474c27ee05e3b235d6683",
+        "5fc002ad29401b719342a66e509346aba2f6cd3656dc44e2f891d172eac2760c",
       candidateDigest:
-        "a44975399650ccd041c48f2736e5d5f673bcb5cfab44c3aa858e967d847b6fa6",
+        "218851027e4cf2b2cd027fd1d53a97905d87d01005ef813b9da627663b66b61a",
       evidenceClass: "production-pinned",
       fixture: cleanEngineLiveProviderProcessStartFreshAdmissionFixture(false),
       projectionDigest:
-        "4a3d70d1e314591dad65a36269e098ca853d0d7471e542637930018578d11fc5",
+        "ee782e43c15d0243eece07a91c5592194eb408122f09fc91a059998b96c9eab4",
     },
     {
       admissionDigest:
-        "ab23074b61cc7fd6ecc9474a6db5bd260bbae771581915bfe6a2a513ae19aba6",
+        "d93445c2fd7c3aa5b2b725477564d4de75c9ff588ee2e2aa146a754895681314",
       candidateDigest:
-        "37b4424cde612cead877c1b9d0893d2d65b303c3fbefbf7d08f6b2b0ecad4c49",
+        "a2125c69bc286c639202ddd0cdec122351e5aad88a68ff7cd5bb389ced6b4120",
       evidenceClass: "fixture-only",
       fixture: cleanEngineLiveProviderProcessStartFreshAdmissionFixture(true),
       projectionDigest:
-        "4e0ecbb120403b408d7eb9c8c19fa904cd81007cbae4b9724bf4f34c10e4b009",
+        "3e4ba398a7e80aa201bb935013d701ff89f8872ee83af6956ebd9d258480db64",
     },
   ];
   assert.equal(

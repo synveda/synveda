@@ -16,7 +16,7 @@ export function cleanEngineReceiptResult(phase, fixtureId) {
         operation_plan_sha256: "0".repeat(64),
         preexisting_resource: "absent",
         provider_contract_sha256:
-          "3ce0f279e4d9b981d88f9d84cf7a754acb91f222170902c7b36d07464f199833",
+          "81159eaee9bc06e651a529008b9531b873b700a1fbf88852d58f018cd8c8d39e",
         provider_resource: `synveda-cpr45-${fixtureId}`,
         provider_root_key: `sv-c45-${fixtureId.slice(0, 16)}`,
       };
@@ -32,7 +32,7 @@ export function cleanEngineReceiptResult(phase, fixtureId) {
         operation_plan_sha256: "0".repeat(64),
         platform: "darwin-arm64-colima-vz",
         provider_contract_sha256:
-          "3ce0f279e4d9b981d88f9d84cf7a754acb91f222170902c7b36d07464f199833",
+          "81159eaee9bc06e651a529008b9531b873b700a1fbf88852d58f018cd8c8d39e",
         provider_name: "colima",
         provider_version: "0.10.3",
         runtime_client_version: "29.4.0",

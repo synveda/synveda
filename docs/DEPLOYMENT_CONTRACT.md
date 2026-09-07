@@ -133,7 +133,7 @@ hard link to the immutable mode-0600 `00-plan.json`. The link and run-directory
 device/inode identities use exact 64-bit filesystem values. The receipt hash
 chain is correlation evidence, not a signature or release provenance.
 
-Receipt schema version 5 is an append-only state machine with one exact success
+Receipt schema version 6 is an append-only state machine with one exact success
 path: provider create, registry, proxy, zero-read builder, browser, project
 cleanup, provider cleanup and finalization. Each external mutation must first
 publish its closed intent; each result is a closed content-free assertion.
@@ -142,24 +142,24 @@ collision is removed from cleanup authority even when cleanup itself is
 retried. A preflight provider collision is terminal and grants no cleanup
 authority. Provider success has an explicit evidence class and must bind the
 same operation kind, plan and provider-contract digest as its intent. Version-1
-through version-4 receipts predate this contract and are a hard-cut refusal:
+through version-5 receipts predate this contract and are a hard-cut refusal:
 discard their
 non-mutating preparation state and create a new plan; there is no compatibility
 mode.
 
 All receipt appends and finalization use an append-only, private, content-free
-mutation journal. A permanent v6 `.mutation-slot-SS` binds the closed action,
+mutation journal. A permanent v7 `.mutation-slot-SS` binds the closed action,
 exact source receipt/environment endpoints, intended provider receipt, random
 nonce, cooperative process-instance challenge, prior close digest, operation
 kind, contract and canonical plan. A permanent
 `.mutation-operation-SS` is the outer provider-operation settlement. A
-permanent v7 `.mutation-close-SS` binds exact result endpoints, operation
+permanent v8 `.mutation-close-SS` binds exact result endpoints, operation
 identity, the slot-owner or newest recovery authority and the outer settlement
 digest.
 Recovery attempts append permanent, gap-free `.mutation-recovery-SS-RR`
-v5 claims whose chain root binds the same operation. These final names are
+v6 claims whose chain root binds the same operation. These final names are
 never deleted or reused; the next slot is valid only when it binds the prior
-close exactly. Mutation slot v1-v5, recovery/root v1-v4, close v1-v6 and the
+close exactly. Mutation slot v1-v6, recovery/root v1-v5, close v1-v7 and the
 reusable `.mutation-lease` layout are fresh-plan hard-cut refusals. Older
 deterministic state and live-plan artefacts must be reset and regenerated; no
 compatibility translator exists.
@@ -218,7 +218,7 @@ not invalidate the journal, while all Synveda-owned evidence remains exact.
 
 Recovery confirmation only reads. Acquisition first proves the slot owner and
 newest recovery owner absent, then may reconcile exact mutation-stage aliases,
-rechecks the predecessor bytes and appends an observation-bound v5 claim.
+rechecks the predecessor bytes and appends an observation-bound v6 claim.
 Recovery never launches, signals, deletes, repairs inner evidence or replays a
 durable controller/start decision. Launch without authenticated controller
 readiness and start without authenticated host-agent PID remain permanently
@@ -242,7 +242,7 @@ binds the expected operation even before its lower plan exists.
 
 The inner retirement settlement grants no result-receipt or close authority.
 The mutation owner publishes a distinct outer cleanup settlement after exact
-completion; receipt v5 and close v7 accept only that digest. Cleanup recovery
+completion; receipt v6 and close v8 accept only that digest. Cleanup recovery
 is action-dispatched and binds the latest observation claim, including a
 reserved final settled-prefix refresh when retirement changes the observation.
 An untouched pre-intent recovery may close aborted without effect. Owner close
@@ -371,24 +371,24 @@ names but reject every superseded digest chain.
 The closed provider-adapter registry reserves two fresh operation contracts:
 
 - `colima-vz-docker-live-create-v1`, contract digest
-  `0039cdbb343dea4de86efd63a4cf6e160d3b4167b46339db201f89a219a61196`;
+  `bbf65bbb13c58e31e15b040576253b32c1f07a62445d585c8436cc821d845fe4`;
 - `colima-vz-docker-live-cleanup-v1`, contract digest
-  `d11c5cbdd517c8c99967179c36321a4858452aaf94d8d4a9e2441fb6e42bf1d2`.
+  `3fd567d325cb0a6575109f03ddbb8eb0fff7331cd32f5a559c360ce7a4e8182b`.
 
 Their evidence schema names are distinct from every deterministic and
 controlled-background fake schema. Cleanup binds the exact create-contract
 digest, and both contracts bind the production requirements digest. Registry
-digest `78ac3e6d877db749eb090660090042ffefb41a3788419f3a1edec09802b18a1b`
+digest `4eda07f8bf439f631e1541717e5345fc41ec374c43580c406a129115c8366052`
 selects only an exact action, operation kind, operation-contract digest and
 `colima-vz-docker-live` provider-class tuple.
 
 Exact selection grants no effect authority. The create entry grants only
-`state_planning_authorized` through `mutation-journal-v6-plan-only`; execution,
+`state_planning_authorized` through `mutation-journal-v7-plan-only`; execution,
 provider recovery, lifecycle exposure and finalization remain false. Cleanup
 retains all five capabilities false. The state owner records the create plan as
 an embedded, content-free
 `synveda.clean-engine.colima-live-provider-operation-plan.v1` inside a
-dedicated `provider-plan` mutation slot v6 and owner close v7. That plan binds
+dedicated `provider-plan` mutation slot v7 and owner close v8. That plan binds
 the active run/candidate/head, exact registry resolution, production
 requirements and private observation digest without persisting paths, commands,
 environment, `HOME`, binding material or credentials. It changes no receipt or
@@ -443,26 +443,26 @@ adopted.
 The state owner can durably publish that request only through the distinct
 `provider-intent` successor. Production operation kind
 `colima-live-provider-intent-publication-v1` has contract digest
-`737a474bebc1ceb956586a19e848eb7a300ae5fb8ba2750352a2f84dfc59125f`;
+`24c8d98eb13962fd7139f72f034b7b4f85b1474eb9b681b8db57f2881bdaed9d`;
 the deterministic fixture uses a different operation kind, schema, evidence
 class and contract digest
-`25537c0d763a1df7a088cfbba2bcda001683f03e7190157a09b1c1d7a3f1370e`.
+`bf7681827912b6a848525145ffc3a8eebafa1239e68cf6c4ec6184b6045e8d6d`.
 Neither contract is a provider-adapter entry. Both grant only inert state
-publication through `mutation-journal-v6-inert-intent-only`; effect execution,
+publication through `mutation-journal-v7-inert-intent-only`; effect execution,
 receipt publication, provider-effect recovery, cleanup, finalization and
 lifecycle exposure are false.
 
 The publisher establishes an initial canonical pristine-namespace admission and
 requires an exactly equal reconstruction immediately before the slot link,
 after slot acquisition and immediately before the close link. The permanent
-slot v6 contains content-free generic journal metadata; its `operation_plan`
+slot v7 contains content-free generic journal metadata; its `operation_plan`
 embeds only the admission, completed provider plan and their digests. The owner
-close v7 commits with result sequence zero and zero
+close v8 commits with result sequence zero and zero
 environment and operation-evidence digests. It creates no receipt, provider,
 registry, runtime, environment or operation-settlement artifact. Collision or
 drift before slot publication leaves no permanent slot; after acquisition it
 closes that generation `aborted-before-effect`. An abandoned intent can only be
-repaired through an explicit all-zero recovery v5 claim and abort close.
+repaired through an explicit all-zero recovery v6 claim and abort close.
 
 The repeated namespace observations are point-in-time evidence, not an atomic
 reservation across the six mutation namespaces and the journal. They do not
@@ -476,9 +476,9 @@ and the supported lifecycle remains `plan|status|verify`.
 The successor process-start decision is also durable and inert. Production
 operation kind
 `colima-live-provider-start-decision-publication-v1` has contract digest
-`09a4ffc67a1a94c62317f115c1f8432a8d21967b4192fc893c9b126d155cd69b`;
+`358eb1f8be6d3ee632df8d262239c1ab09c9dcd544fb62607d3ed2d242a63e4c`;
 the fixture-only domain has digest
-`ea9726aef040dafb8ea8a330961894fbbb19b9141ef7d8c3c5ae680ec0513b15`.
+`8ae81955e5d4ce75b5d1c9f9fe72d0de5ae6d2827e6bc3f746e2c3513f0f6c73`.
 Their production and fixture publication-plan schemas are v2. They bind the
 completed intent slot, close, publication-plan and completed-plan
 projection digests. An `observed-pristine` namespace observation derives only
@@ -487,7 +487,7 @@ candidate. Process start/spawn/signal, adapter/effect execution, root mutation,
 provider/evidence/runtime/receipt/environment publication, provider-effect
 recovery, cleanup, lifecycle and finalization are false. The structures do not
 prove provenance or reserve provider namespaces. State may publish only this
-decision record through `mutation-journal-v6-inert-start-decision-only`; the
+decision record through `mutation-journal-v7-inert-start-decision-only`; the
 contracts remain absent from the provider-adapter registry.
 
 The state owner reconstructs the completed intent internally and performs a
@@ -504,15 +504,15 @@ writer wins.
 The journal grammar is strictly aborted plans followed by one completed owner
 plan, aborted same-class intents followed by one completed owner intent, then
 aborted same-class decisions followed by one completed owner decision. An
-abandoned decision admits only an exact all-zero recovery v5 claim and a
+abandoned decision admits only an exact all-zero recovery v6 claim and a
 recovery-authority `aborted-before-effect`
 close; generic provider execution recovery refuses it. Exact completed retries
 validate the observation and fixture-requirements identities, then return the
 historical non-authorizing completion without reading or claiming current
 namespace-pristine state.
 
-Mutation slot v6, close v7, recovery v5 and recovery-root v5 are one full-state
-hard cut. State made with slot v1-v5, close v1-v6 or recovery/root v1-v4 is
+Mutation slot v7, close v8, recovery v6 and recovery-root v6 are one full-state
+hard cut. State made with slot v1-v6, close v1-v7 or recovery/root v1-v5 is
 refused and must be reset and regenerated; there is no migration or relabelling.
 The decision writes no process, adapter, provider, evidence, registry, runtime,
 receipt, environment, settlement, lifecycle or finalizer artifact. The
@@ -531,20 +531,20 @@ digest, registry entry, receipt, state slot or persistent artifact is added.
 
 The earlier non-persisted effect-generation prerequisite projection is retained
 as a separate inert review artifact. Its production and fixture projections are
-pinned to `ae3d98ae3d4eee54ef0094874d73fb63f75b817a9a4005868ee22074d12202e7`
-and `58241bcd4d95b5f74968fdca1880becd0c6bee1a10a060d49e553e950dc7e853`.
+pinned to `81c496e201dbb75b17470f09d7cad2114d266641ca11cd8fbff25a992584b8da`
+and `a38253aff84b502c683e64413e62b13307f50b05a5a420e3b175bb6c3733a57e`.
 It defines no action, operation kind or operation contract, keeps every
 authority false and is consumed by neither state nor the pure effect grammar.
 Its closed-data preflight retains its own 512-occurrence bound. It is not a
 compatibility or execution path.
 
-A pure sibling-effect boundary now consumes only that exact deny-only admission.
+A sibling-effect boundary now consumes only that exact deny-only admission.
 Its production `colima-live-provider-effect-v1` operation contract is pinned to
 `e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`.
 Every production capability remains false, its authority model is
-`production-deny-only-no-invoker`, and no state, registry, lifecycle, executor
-or recovery module imports it. A separate fixture-only contract is pinned to
-`c0ec4548243b1e65ca71babb822290afb1650f2801be4e0da7a25c8ea832c087`;
+`production-deny-only-no-invoker`, and state imports no production effect tuple
+or production mutation entry point. A separate fixture-only contract is pinned to
+`2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8`;
 it cannot be relabelled as production evidence.
 
 The pure fixture grammar binds the distinct effect witness and fixed marker,
@@ -564,13 +564,19 @@ process or network-executor import, and a tripwire proves construction and
 validation invoke no observation I/O. This in-memory event fixture is distinct
 from the earlier four-process causal fixture.
 
-The operation contract names receipt v6 and
-`mutation-journal-v7-sibling-effect-only` as the intended atomic integration,
-but does not persist either. Current receipt v5, slot v6, recovery/root v5,
-close v7 and ADR-0103 v1 records remain unchanged. There is still no state
-effect slot, effect-witness publisher, process invocation, recovery API,
-registry entry, lifecycle exposure or live provider evidence. Serialized pure
-values do not carry state provenance or select a branch.
+The clean-engine state owner implements receipt v6, mutation slot v7,
+recovery/root v6 and close v8 as one hard cut. Fixture-only seams persist a
+sequence-bound physical stage, inode-derived effect witness, fixed external
+marker and exact effect events. Before any process attempt they may either
+retire the marker and close with no receipt, or publish a durable attempt fence
+and stop without invocation. Fixture recovery proves the slot owner and newest
+recoverer absent, accepts only forward physical/event transitions, and never
+crosses an attempt fence. Multiple dead recoverers at one frontier are retained
+and only the newest may publish or close. The generic receipt API refuses the
+state-owned `provider-effect-retired` phase before slot acquisition. There is
+no production effect publisher, registry entry, lifecycle exposure, process
+invocation or live-provider evidence; serialized pure values alone do not
+carry state provenance or select a branch.
 
 ### Cooperative no-spawn reservation
 
@@ -578,14 +584,14 @@ After one completed matching-class start decision, aborted reservation
 generations may precede at most one completed reservation, which must be the
 last journal slot. Production operation kind
 `colima-live-provider-reservation-publication-v1` is pinned to contract digest
-`eda9f544d1fb9752debcff6bb486081d855a9e0cead01e42d78979da18674c98`;
+`1dd6bd0e68e2b5991c7dd5f98230ec951ab3fa479746c2c695357f4c8b728ec6`;
 the fixture-only kind
 `colima-live-fixture-provider-reservation-publication-v1` is pinned separately
-to `3c8da820554ef086ed0a84144512b12c845412db682be07064b7e7154fbdc23b`.
+to `abb0b37f748540272149140d615e7569873bb204ffcfab14f08da38235542b6b`.
 Neither kind is registered for provider execution or exposed through a
 supported lifecycle command.
 
-The owner publishes the complete v6 reservation slot before filesystem
+The owner publishes the complete v7 reservation slot before filesystem
 mutation, then writes and fsyncs an immutable mode-0600 witness stage. The
 publication plan binds one canonical private provider root, the six fixed
 mutation namespaces and one private state run. All eight directories must have
@@ -600,10 +606,10 @@ of all six namespaces is bracketed by exact topology checks and must equal the
 bound plan. The owner then publishes the immutable
 `retirement-authorized-without-process` settlement, verifies and retires only
 that marker, fsyncs the provider root, proves the durable witness has one link,
-and closes v7 with the settlement digest. Receipt and environment state do not
+and closes v8 with the settlement digest. Receipt and environment state do not
 change, and `registry/`, `runtime/`, `provider/` and `evidence/` remain empty.
 
-Dedicated v5 recovery records bounded, content-free topology transitions. It
+Dedicated v6 recovery records bounded, content-free topology transitions. It
 may retire an inert stage and abort, finish a partially linked witness, or
 relink the exact standalone witness to the fixed marker before completing the
 same observation, settlement and retirement sequence. Recovery claims bind the
