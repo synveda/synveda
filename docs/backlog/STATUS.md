@@ -405,6 +405,18 @@ generic receipt API rejects the state-owned `provider-effect-retired` phase
 before acquiring a slot. All mutation/recovery exports are test-only, and
 caller-held pure bytes are not state provenance or branch selection.
 
+That state plan now consumes a closed process-free launch blueprint instead of
+synthetic label commitments. It binds descriptor-stable hashes of the fixed
+Node/protocol/role runtime, exact planned argv/cwd/closed environment, four
+roles and four endpoints. Ed25519 public-key identities, challenges, endpoint
+paths, the start attempt and quiescence fence derive from the unpersisted
+fixture binding key; only opaque digests are durable. Component bytes are
+re-opened with no-follow descriptor checks at authority boundaries. Receipt v6,
+slot v7, recovery/root v6, close v8 and both effect-contract digests are
+unchanged. This remains pre-execution evidence: it invokes no process, proves
+no endpoint and grants no production, registry, recovery or lifecycle
+authority.
+
 The accepted branch starts after the completed start decision, not as a
 successor to ADR-0103's terminal no-spawn completion. It uses a distinct
 effect-witness inode

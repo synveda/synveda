@@ -362,6 +362,15 @@ topologies and never crosses an attempt fence. The generic receipt path cannot
 publish `provider-effect-retired`. No supported lifecycle, production effect
 entry point, Docker/Colima/Lima invocation or readiness claim follows.
 
+The fixture effect plan is now projected by a closed process-free blueprint.
+It hashes the fixed Node/protocol/role bytes through no-follow descriptors,
+binds the closed child environment and exact planned role/endpoint topology,
+and derives Ed25519 public identities plus private-path/challenge commitments
+from the unpersisted fixture binding key. State re-proves the component bytes
+before start-authority and attempt publication. Only public/opaque digests are
+durable. The blueprint invokes no process, observes no endpoint and does not
+turn the separate standalone four-process harness into deployment evidence.
+
 The earlier non-persisted prerequisite projection remains a separate inert
 review artifact. It defines no action, operation kind or contract, retains its
 own 512-occurrence preflight, and is consumed by neither state nor the pure

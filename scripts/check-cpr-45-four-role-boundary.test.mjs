@@ -26,8 +26,16 @@ const ROOT_AUTHORITY_FILES = [
   "tsconfig.base.json",
 ].map((path) => join(ROOT, path));
 const ALLOWED_PATHS = new Set([
+  join(
+    ROOT,
+    "deploy/compose/scripts/clean-engine-live-provider-effect-fixture-blueprint.mjs",
+  ),
   join(ROOT, "scripts/check-cpr-45-four-role-boundary.test.mjs"),
   join(ROOT, "scripts/cpr-45-four-role-fixture.test.mjs"),
+  join(
+    ROOT,
+    "scripts/clean-engine-live-provider-effect-fixture-blueprint.test.mjs",
+  ),
   join(ROOT, "scripts/fixtures/cpr-45-four-role/harness.mjs"),
   join(ROOT, "scripts/fixtures/cpr-45-four-role/protocol.mjs"),
   join(ROOT, "scripts/fixtures/cpr-45-four-role/role.mjs"),

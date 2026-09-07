@@ -805,6 +805,25 @@ mutation/recovery APIs are fixture-only, ADR-0103's completed no-spawn branch
 remains terminal, and caller-held pure bytes carry no state provenance or
 branch selection.
 
+The persisted fixture plan now comes from one closed, process-free launch
+blueprint rather than label-derived synthetic commitments. The blueprint is a
+pure leaf with only Node crypto/type imports. It fixes the state-owner-to-outer
+four-role topology, four planned endpoint kinds and bounded runtime envelope,
+then projects exact invocation, role, endpoint, start-attempt and quiescence
+commitments into the existing effect plan without adding a persisted field or
+schema generation. The state seam opens Node, protocol and role bytes with
+`O_NOFOLLOW`, compares descriptor identity before and after hashing, and
+re-proves those bytes before start authority and the attempt fence. Role-key,
+challenge and private-path commitments are domain-separated HMACs under the
+unpersisted observation binding key; only Ed25519 SPKI digests and opaque
+commitments enter the slot, witness and event chain. The closed Darwin child
+environment is also bound. No raw key, path or environment value is persisted.
+
+This is preparation evidence only. It does not invoke a process, prove that the
+planned endpoints exist, retain a launch capability or make the standalone
+four-process fixture an effect executor. That fixture deliberately retains its
+truthful `fixture-supervisor` ancestry and imports no deployment module.
+
 A standalone deterministic preparation fixture validates
 the closed four-role causal shape with four repository-owned Node processes:
 pre-spawn fsynced edges, IPC-only role keys, authenticated private endpoints,
@@ -820,12 +839,16 @@ the six-namespace inventory, crash recovery or any Colima/Lima/SSH/Engine
 evidence. The recorded execution is Darwin-only; Linux execution remains an
 open evidence requirement.
 
-Next bind the durable fixture attempt fence to the existing repository-owned
-four-process causal fixture, still without Docker, Colima or Lima. Persist the
-post-attempt role/endpoint/quiescence/inventory/cleanup events, exact terminal
-receipt and close through the already hard-cut generation. Cover uncertain
-acknowledgement, duplicate dispatch, every crash boundary, cleanup retry and
-attempt-fence operator resolution before considering a production invoker.
+Next add a dedicated state-owned, phaseful fixture adapter that consumes the
+same in-memory private preparation and can satisfy the persisted blueprint; do
+not import or relabel the standalone fixture as state-owned evidence. Land the
+first attempted tail as the bounded conclusively-not-created residual branch,
+then add authenticated role/endpoint/quiescence/inventory evidence. Persist the
+post-attempt cleanup events, exact terminal receipt and close through the
+already hard-cut generation. Cover uncertain acknowledgement, duplicate
+dispatch, every crash boundary, cleanup retry and attempt-fence operator
+resolution before considering a production invoker. No Docker, Colima or Lima
+belongs in that fixture step.
 
 Keep the production effect contract deny-only, absent from the adapter registry
 and lifecycle-unexposed. Never reuse the generic mutation-slot inode,

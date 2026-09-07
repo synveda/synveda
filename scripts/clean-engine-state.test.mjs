@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import {
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  sign,
+  verify,
+} from "node:crypto";
 import { once } from "node:events";
 import {
   chmodSync,
@@ -97,7 +104,13 @@ import {
   COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
   COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
   COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_SCHEMAS,
+  liveProviderEffectBytes,
+  liveProviderEffectDigest,
 } from "../deploy/compose/scripts/clean-engine-live-provider-effect.mjs";
+import {
+  COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENT_LOCATORS,
+  buildColimaLiveProviderEffectFixtureBlueprintStructure,
+} from "../deploy/compose/scripts/clean-engine-live-provider-effect-fixture-blueprint.mjs";
 import {
   COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_COMPLETION_SCHEMA,
 } from "../deploy/compose/scripts/clean-engine-live-provider-reservation.mjs";
@@ -390,6 +403,48 @@ function fixtureStartAdmissionArguments(
     stateBase: state.state,
     testCheckpoint,
   };
+}
+
+function fixtureEffectPrivateHmac(bindingKey, fixtureId, purpose, value) {
+  return createHmac("sha256", bindingKey)
+    .update(
+      "synveda.clean-engine.colima-live-fixture-provider-effect-private.v1\0",
+      "utf8",
+    )
+    .update(fixtureId, "ascii")
+    .update("\0", "ascii")
+    .update(purpose, "ascii")
+    .update("\0", "ascii")
+    .update(liveProviderEffectBytes(value))
+    .digest("hex");
+}
+
+function fixtureEffectRoleKey(bindingKey, fixtureId, role) {
+  const seed = Buffer.from(
+    fixtureEffectPrivateHmac(
+      bindingKey,
+      fixtureId,
+      `${role}-role-key-seed`,
+      { role },
+    ),
+    "hex",
+  );
+  try {
+    const privateKey = createPrivateKey({
+      format: "der",
+      key: Buffer.concat([
+        Buffer.from("302e020100300506032b657004220420", "hex"),
+        seed,
+      ]),
+      type: "pkcs8",
+    });
+    return {
+      privateKey,
+      publicKey: createPublicKey(privateKey),
+    };
+  } finally {
+    seed.fill(0);
+  }
 }
 
 function assertNoStartDecisionArtifacts(active) {
@@ -3524,6 +3579,273 @@ test("the fixture provider effect attempt fence is durable and process-free", ()
     assert.equal(markerIdentity.dev, witnessIdentity.dev);
     assert.equal(markerIdentity.ino, witnessIdentity.ino);
     assert.deepEqual(readFileSync(marker), readFileSync(witness));
+    const slotPath = join(active, ".mutation-slot-03");
+    const slot = parse(slotPath);
+    const publicationPlan = slot.operation_plan;
+    const witnessValue = parse(witness);
+    const blueprintPath = resolve(
+      "deploy/compose/scripts/clean-engine-live-provider-effect-fixture-blueprint.mjs",
+    );
+    const componentPaths =
+      COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENT_LOCATORS.map(
+        (component) =>
+          component.module_path === null
+            ? realpathSync(process.execPath)
+            : resolve(dirname(blueprintPath), component.module_path),
+      );
+    const componentManifest =
+      COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENT_LOCATORS.map(
+        (component, index) => ({
+          kind: component.kind,
+          sha256: sha256(readFileSync(componentPaths[index])),
+        }),
+      );
+    const closedEnvironment =
+      process.platform === "darwin"
+        ? { __CF_USER_TEXT_ENCODING: process.env.__CF_USER_TEXT_ENCODING }
+        : {};
+    assert.match(
+      closedEnvironment.__CF_USER_TEXT_ENCODING ?? "linux",
+      /^(?:linux|0x[0-9A-F]+:[0-9]+:[0-9]+)$/u,
+    );
+    assert.equal(
+      publicationPlan.invocation_binding.environment_sha256,
+      liveProviderEffectDigest(liveProviderEffectBytes(closedEnvironment)),
+    );
+    assert.equal(
+      publicationPlan.invocation_binding.executable_sha256,
+      componentManifest[0].sha256,
+    );
+    const rolePath = componentPaths.at(-1);
+    for (const [sequence, roleContract] of
+      publicationPlan.planned_role_contracts.entries()) {
+      const expectedArgv = [
+        componentPaths[0],
+        rolePath,
+        roleContract.role,
+        join(
+          preparation.input.environment.TMPDIR,
+          `.synveda-cpr45-effect-edge-${String(sequence).padStart(2, "0")}.json`,
+        ),
+      ];
+      assert.equal(
+        roleContract.argv_sha256,
+        liveProviderEffectDigest(liveProviderEffectBytes(expectedArgv)),
+      );
+      assert.equal(
+        roleContract.role_challenge_sha256,
+        fixtureEffectPrivateHmac(
+          preparation.input.binding_key,
+          publicationPlan.fixture_id,
+          `${roleContract.role}-role-challenge`,
+          { role: roleContract.role },
+        ),
+      );
+      const roleKey = fixtureEffectRoleKey(
+        preparation.input.binding_key,
+        publicationPlan.fixture_id,
+        roleContract.role,
+      );
+      const publicDer = roleKey.publicKey.export({
+        format: "der",
+        type: "spki",
+      });
+      assert.equal(
+        roleContract.public_key_spki_sha256,
+        liveProviderEffectDigest(publicDer),
+      );
+      const proof = Buffer.from(`fixture-role-proof:${roleContract.role}`, "utf8");
+      const signature = sign(null, proof, roleKey.privateKey);
+      assert.equal(verify(null, proof, roleKey.publicKey, signature), true);
+      assert.doesNotMatch(
+        readFileSync(slotPath, "utf8"),
+        new RegExp(
+          roleKey.privateKey
+            .export({ format: "der", type: "pkcs8" })
+            .toString("hex"),
+          "u",
+        ),
+      );
+    }
+    const endpointPaths = {
+      "engine-api": join(
+        preparation.input.environment.COLIMA_HOME,
+        "engine.sock",
+      ),
+      "hostagent-control": join(
+        preparation.input.environment.LIMA_HOME,
+        "hostagent.sock",
+      ),
+      "ssh-control": join(
+        preparation.input.environment.TMPDIR,
+        "ssh-control.sock",
+      ),
+      "usernet-control": join(
+        preparation.input.environment.LIMA_HOME,
+        "usernet.sock",
+      ),
+    };
+    const dockerContextIdentity = fixtureEffectPrivateHmac(
+      preparation.input.binding_key,
+      publicationPlan.fixture_id,
+      "docker-context-identity",
+      { fixture_id: publicationPlan.fixture_id },
+    );
+    const dockerContextPath = join(
+      preparation.input.environment.DOCKER_CONFIG,
+      "contexts",
+      "meta",
+      dockerContextIdentity,
+      "meta.json",
+    );
+    for (const endpoint of publicationPlan.planned_endpoint_contracts) {
+      assert.equal(
+        endpoint.path_identity_hmac_sha256,
+        fixtureEffectPrivateHmac(
+          preparation.input.binding_key,
+          publicationPlan.fixture_id,
+          `${endpoint.endpoint_kind}-path`,
+          { path: endpointPaths[endpoint.endpoint_kind] },
+        ),
+      );
+      assert.equal(
+        endpoint.initial_challenge_commitment_sha256,
+        fixtureEffectPrivateHmac(
+          preparation.input.binding_key,
+          publicationPlan.fixture_id,
+          `${endpoint.endpoint_kind}-initial-challenge`,
+          { endpoint_kind: endpoint.endpoint_kind },
+        ),
+      );
+      assert.equal(
+        endpoint.final_challenge_commitment_sha256,
+        fixtureEffectPrivateHmac(
+          preparation.input.binding_key,
+          publicationPlan.fixture_id,
+          `${endpoint.endpoint_kind}-final-challenge`,
+          { endpoint_kind: endpoint.endpoint_kind },
+        ),
+      );
+      if (endpoint.endpoint_kind === "engine-api") {
+        assert.equal(
+          endpoint.docker_context_path_identity_hmac_sha256,
+          fixtureEffectPrivateHmac(
+            preparation.input.binding_key,
+            publicationPlan.fixture_id,
+            "engine-api-docker-context-path",
+            { path: dockerContextPath },
+          ),
+        );
+      }
+    }
+    assert.equal(
+      publicationPlan.planned_start_attempt_sha256,
+      fixtureEffectPrivateHmac(
+        preparation.input.binding_key,
+        publicationPlan.fixture_id,
+        "start-attempt",
+        { fixture_id: publicationPlan.fixture_id },
+      ),
+    );
+    assert.equal(
+      publicationPlan.planned_quiescence_fence_sha256,
+      fixtureEffectPrivateHmac(
+        preparation.input.binding_key,
+        publicationPlan.fixture_id,
+        "quiescence-fence",
+        { fixture_id: publicationPlan.fixture_id },
+      ),
+    );
+    const blueprint =
+      buildColimaLiveProviderEffectFixtureBlueprintStructure({
+        architecture: process.arch,
+        component_manifest: componentManifest,
+        endpoint_bindings: publicationPlan.planned_endpoint_contracts.map(
+          ({ role: _role, ...binding }) => binding,
+        ),
+        environment_sha256:
+          publicationPlan.invocation_binding.environment_sha256,
+        fixture_id: publicationPlan.fixture_id,
+        operation_contract_sha256:
+          publicationPlan.operation_contract_sha256,
+        operation_kind: publicationPlan.operation_kind,
+        planned_quiescence_fence_sha256:
+          publicationPlan.planned_quiescence_fence_sha256,
+        planned_start_attempt_sha256:
+          publicationPlan.planned_start_attempt_sha256,
+        platform: process.platform,
+        role_bindings: publicationPlan.planned_role_contracts.map(
+          ({
+            argv_sha256,
+            cwd_identity_sha256,
+            public_key_spki_sha256,
+            role,
+            role_challenge_sha256,
+            uid,
+          }) => ({
+            argv_sha256,
+            cwd_identity_sha256,
+            public_key_spki_sha256,
+            role,
+            role_challenge_sha256,
+            uid,
+          }),
+        ),
+      });
+    assert.deepEqual(
+      publicationPlan.invocation_binding,
+      blueprint.invocation_binding,
+    );
+    assert.deepEqual(
+      publicationPlan.planned_role_contracts,
+      blueprint.role_contracts,
+    );
+    assert.deepEqual(
+      publicationPlan.planned_endpoint_contracts,
+      blueprint.endpoint_contracts,
+    );
+    assert.equal(
+      publicationPlan.driver_contract_sha256,
+      blueprint.driver_contract_sha256,
+    );
+    assert.equal(
+      witnessValue.invocation_binding_sha256,
+      liveProviderEffectDigest(
+        liveProviderEffectBytes(publicationPlan.invocation_binding),
+      ),
+    );
+    assert.equal(
+      witnessValue.planned_role_contracts_sha256,
+      liveProviderEffectDigest(
+        liveProviderEffectBytes(publicationPlan.planned_role_contracts),
+      ),
+    );
+    assert.equal(
+      witnessValue.planned_endpoint_contracts_sha256,
+      liveProviderEffectDigest(
+        liveProviderEffectBytes(publicationPlan.planned_endpoint_contracts),
+      ),
+    );
+    const persisted = Buffer.concat([
+      readFileSync(slotPath),
+      readFileSync(witness),
+      eventBytes,
+    ]).toString("utf8");
+    for (const secret of [
+      preparation.input.binding_key.toString("hex"),
+      preparation.providerRoot,
+      ...Object.values(preparation.input.environment).filter(
+        (value) => typeof value === "string" && value.startsWith("/"),
+      ),
+      ...componentPaths,
+    ]) {
+      assert.equal(persisted.includes(secret), false, secret);
+    }
+    const stateSource = readFileSync(stateTool, "utf8");
+    assert.doesNotMatch(stateSource, /effectCommitment\(|fixed-fixture-/u);
+    assert.doesNotMatch(stateSource, /FixtureComponentCache/u);
+    assert.match(stateSource, /constants\.O_NOFOLLOW/u);
+    assert.match(stateSource, /exactFstat\(descriptor\)/u);
     assert.equal(existsSync(join(active, ".mutation-close-03")), false);
     assert.deepEqual(
       readdirSync(active).filter((name) => /^\d{2}-.*\.json$/u.test(name)),

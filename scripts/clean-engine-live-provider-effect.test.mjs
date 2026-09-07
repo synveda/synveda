@@ -3164,6 +3164,10 @@ test("the pure boundary has no executor imports and its joint maxima fit the eve
     ),
     resolve(REPO_ROOT, "deploy/compose/scripts/clean-engine-state.mjs"),
     resolve(REPO_ROOT, "scripts/clean-engine-receipts.test.mjs"),
+    resolve(
+      REPO_ROOT,
+      "scripts/clean-engine-live-provider-effect-fixture-blueprint.test.mjs",
+    ),
     resolve(REPO_ROOT, "scripts/clean-engine-state.test.mjs"),
   ]);
   const observedConsumers = [];
@@ -3189,6 +3193,7 @@ test("the pure boundary has no executor imports and its joint maxima fit the eve
   assert.deepEqual(observedConsumers.sort(), [
     "deploy/compose/scripts/clean-engine-receipts.mjs",
     "deploy/compose/scripts/clean-engine-state.mjs",
+    "scripts/clean-engine-live-provider-effect-fixture-blueprint.test.mjs",
     "scripts/clean-engine-receipts.test.mjs",
     "scripts/clean-engine-state.test.mjs",
   ]);

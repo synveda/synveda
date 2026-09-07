@@ -268,6 +268,15 @@ retire the marker and publish a zero-receipt pre-attempt completion, or publish
 an attempt fence and stop with the marker/witness inode held at two links. The
 attempt fence invokes no process and is not recoverable automatically.
 
+The fixture plan is now produced by a closed process-free launch blueprint.
+Without changing any persisted generation, it projects descriptor-stable
+Node/protocol/role component hashes, exact planned invocation/role/endpoint
+contracts and binding-key-derived Ed25519 public identities into the existing
+plan, slot and witness. The binding key and derived private key material are not
+persisted. State re-proves component bytes before authority and attempt
+publication. This precursor is not process or endpoint evidence and does not
+make the separate standalone four-role harness a state-owned executor.
+
 Fixture-only recovery proves the original owner and newest prior recoverer are
 absent, binds every claim to the observed physical/event frontier, supports
 crash-safe forward completion before attempt, and never crosses an attempt

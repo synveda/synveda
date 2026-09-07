@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  randomBytes,
+} from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -24,7 +30,7 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ReceiptFailure,
   buildEnvironmentManifest,
@@ -117,7 +123,6 @@ import {
   COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
   COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
   COLIMA_LIVE_PROVIDER_EFFECT_BOUNDS,
-  COLIMA_LIVE_PROVIDER_EFFECT_ENDPOINTS,
   COLIMA_LIVE_PROVIDER_EFFECT_ROLES,
   LiveProviderEffectFailure,
   buildColimaLiveProviderEffectEvent,
@@ -129,6 +134,13 @@ import {
   validateColimaLiveProviderEffectPublicationPlan,
   validateColimaLiveProviderEffectWitness,
 } from "./clean-engine-live-provider-effect.mjs";
+import {
+  COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENTS,
+  COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENT_LOCATORS,
+  COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ENDPOINT_TOPOLOGY,
+  LiveProviderEffectFixtureBlueprintFailure,
+  buildColimaLiveProviderEffectFixtureBlueprintStructure,
+} from "./clean-engine-live-provider-effect-fixture-blueprint.mjs";
 import {
   COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_OPERATION_CONTRACT_SHA256,
   COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_OPERATION_KIND,
@@ -8729,116 +8741,392 @@ function availableLiveProviderEffectStartDecisionSnapshot(
   });
 }
 
-function effectCommitment(seed, label) {
-  return liveProviderEffectDigest(
-    liveProviderEffectBytes({
-      domain: "synveda-cpr45-state-owned-fixture-effect-v1",
-      label,
-      seed,
+function liveProviderEffectFixtureComponentPaths() {
+  try {
+    const blueprintUrl = new URL(
+      "./clean-engine-live-provider-effect-fixture-blueprint.mjs",
+      import.meta.url,
+    );
+    return COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENT_LOCATORS.map(
+      (component) =>
+        Object.freeze([
+          component.kind,
+          component.module_path === null
+            ? realpathSync.native(process.execPath)
+            : fileURLToPath(new URL(component.module_path, blueprintUrl)),
+          component.kind === "node-runtime"
+            ? 256 * 1024 * 1024
+            : 2 * 1024 * 1024,
+        ]),
+    );
+  } catch {
+    fail("fixture provider effect component path was unavailable", 69);
+  }
+}
+
+function liveProviderEffectFixtureComponentDigest(path, maximumBytes) {
+  let descriptor;
+  try {
+    const initial = exactLstat(path);
+    if (
+      !initial.isFile() ||
+      initial.isSymbolicLink() ||
+      initial.size < 1n ||
+      initial.size > BigInt(maximumBytes)
+    ) {
+      fail("fixture provider effect component was refused", 69);
+    }
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const before = exactFstat(descriptor);
+    if (!sameMetadata(initial, before) || !before.isFile()) {
+      fail("fixture provider effect component identity was refused", 69);
+    }
+    const hash = createHash("sha256");
+    const chunk = Buffer.allocUnsafe(64 * 1024);
+    let offset = 0;
+    while (offset < Number(before.size)) {
+      const length = Math.min(chunk.length, Number(before.size) - offset);
+      const count = readSync(descriptor, chunk, 0, length, offset);
+      if (count < 1) {
+        fail("fixture provider effect component changed while read", 73);
+      }
+      hash.update(chunk.subarray(0, count));
+      offset += count;
+    }
+    const after = exactFstat(descriptor);
+    const current = exactLstat(path);
+    if (!sameMetadata(before, after) || !sameMetadata(after, current)) {
+      fail("fixture provider effect component changed while read", 73);
+    }
+    return hash.digest("hex");
+  } catch (error) {
+    if (error instanceof ClosedFailure) throw error;
+    fail("fixture provider effect component was unavailable", 69);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function liveProviderEffectFixtureComponentManifest(componentPaths) {
+  if (
+    componentPaths.length !==
+      COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENTS.length
+  ) {
+    fail("fixture provider effect component inventory changed", 70);
+  }
+  return Object.freeze(
+    componentPaths.map(([kind, path, maximumBytes], index) => {
+      if (
+        kind !==
+        COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENTS[index]
+      ) {
+        fail("fixture provider effect component inventory changed", 70);
+      }
+      return Object.freeze({
+        kind,
+        sha256: liveProviderEffectFixtureComponentDigest(path, maximumBytes),
+      });
     }),
   );
 }
 
+function liveProviderEffectFixtureSecretHmac(
+  bindingKey,
+  fixtureId,
+  purpose,
+  value,
+) {
+  if (
+    !Buffer.isBuffer(bindingKey) ||
+    bindingKey.length < 32 ||
+    !/^[0-9a-f]{32}$/u.test(fixtureId) ||
+    !/^[a-z0-9-]{1,64}$/u.test(purpose)
+  ) {
+    fail("fixture provider effect private commitment was refused", 69);
+  }
+  return createHmac("sha256", bindingKey)
+    .update(
+      "synveda.clean-engine.colima-live-fixture-provider-effect-private.v1\0",
+      "utf8",
+    )
+    .update(fixtureId, "ascii")
+    .update("\0", "ascii")
+    .update(purpose, "ascii")
+    .update("\0", "ascii")
+    .update(liveProviderEffectBytes(value))
+    .digest("hex");
+}
+
+function liveProviderEffectFixturePathHmac(
+  bindingKey,
+  fixtureId,
+  purpose,
+  path,
+) {
+  if (!isAbsolute(path) || Buffer.byteLength(path, "utf8") > 4_096) {
+    fail("fixture provider effect private path binding was refused", 69);
+  }
+  return liveProviderEffectFixtureSecretHmac(
+    bindingKey,
+    fixtureId,
+    purpose,
+    { path },
+  );
+}
+
+function liveProviderEffectFixtureRolePublicKeySha256(
+  bindingKey,
+  fixtureId,
+  role,
+) {
+  const seed = Buffer.from(
+    liveProviderEffectFixtureSecretHmac(
+      bindingKey,
+      fixtureId,
+      `${role}-role-key-seed`,
+      { role },
+    ),
+    "hex",
+  );
+  try {
+    const privateKey = createPrivateKey({
+      format: "der",
+      key: Buffer.concat([
+        Buffer.from("302e020100300506032b657004220420", "hex"),
+        seed,
+      ]),
+      type: "pkcs8",
+    });
+    const publicKey = createPublicKey(privateKey);
+    if (publicKey.asymmetricKeyType !== "ed25519") {
+      fail("fixture provider effect role key was refused", 70);
+    }
+    return liveProviderEffectDigest(
+      publicKey.export({ format: "der", type: "spki" }),
+    );
+  } catch (error) {
+    if (error instanceof ClosedFailure) throw error;
+    fail("fixture provider effect role key was unavailable", 69);
+  } finally {
+    seed.fill(0);
+  }
+}
+
+function liveProviderEffectFixtureEnvironment() {
+  if (process.platform !== "darwin") return Object.freeze({});
+  const value = process.env.__CF_USER_TEXT_ENCODING;
+  if (
+    typeof value !== "string" ||
+    !/^0x[0-9A-F]+:[0-9]+:[0-9]+$/u.test(value)
+  ) {
+    fail("fixture provider effect Darwin environment was refused", 69);
+  }
+  return Object.freeze({ __CF_USER_TEXT_ENCODING: value });
+}
+
+function liveProviderEffectFixtureBlueprint(admittedArguments, observed, snapshot) {
+  const observationInput = admittedArguments.observationInput;
+  const fixtureId = snapshot.operationPlan.fixture_id;
+  const providerRoot = observationInput.provider_root;
+  const bindingKey = observationInput.binding_key;
+  const privateEnvironment = liveProviderEffectFixtureEnvironment();
+  const componentPaths = liveProviderEffectFixtureComponentPaths();
+  const componentManifest =
+    liveProviderEffectFixtureComponentManifest(componentPaths);
+  const roleFile = componentPaths.at(-1)[1];
+  const edgeRoot = observationInput.environment.TMPDIR;
+  const cwdIdentitySha256 = liveProviderEffectDigest(
+    liveProviderEffectBytes(observed.provider_root_identity),
+  );
+  const roleBindings = COLIMA_LIVE_PROVIDER_EFFECT_ROLES.map(
+    (role, sequence) => ({
+      argv_sha256: liveProviderEffectDigest(
+        liveProviderEffectBytes([
+          componentPaths[0][1],
+          roleFile,
+          role,
+          join(
+            edgeRoot,
+            `.synveda-cpr45-effect-edge-${String(sequence).padStart(2, "0")}.json`,
+          ),
+        ]),
+      ),
+      cwd_identity_sha256: cwdIdentitySha256,
+      public_key_spki_sha256:
+        liveProviderEffectFixtureRolePublicKeySha256(
+          bindingKey,
+          fixtureId,
+          role,
+        ),
+      role,
+      role_challenge_sha256: liveProviderEffectFixtureSecretHmac(
+        bindingKey,
+        fixtureId,
+        `${role}-role-challenge`,
+        { role },
+      ),
+      uid: observed.provider_root_identity.uid,
+    }),
+  );
+  const endpointPaths = Object.freeze({
+    "engine-api": join(observationInput.environment.COLIMA_HOME, "engine.sock"),
+    "hostagent-control": join(
+      observationInput.environment.LIMA_HOME,
+      "hostagent.sock",
+    ),
+    "ssh-control": join(observationInput.environment.TMPDIR, "ssh-control.sock"),
+    "usernet-control": join(
+      observationInput.environment.LIMA_HOME,
+      "usernet.sock",
+    ),
+  });
+  const dockerContextPath = join(
+    observationInput.environment.DOCKER_CONFIG,
+    "contexts",
+    "meta",
+    liveProviderEffectFixtureSecretHmac(
+      bindingKey,
+      fixtureId,
+      "docker-context-identity",
+      { fixture_id: fixtureId },
+    ),
+    "meta.json",
+  );
+  for (const path of [...Object.values(endpointPaths), dockerContextPath]) {
+    if (!inside(providerRoot, path)) {
+      fail("fixture provider effect path escaped its provider root", 69);
+    }
+  }
+  const endpointBindings =
+    COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ENDPOINT_TOPOLOGY.map((entry) => {
+      const engine = entry.endpoint_kind === "engine-api";
+      const pathIdentityHmacSha256 = liveProviderEffectFixturePathHmac(
+        bindingKey,
+        fixtureId,
+        `${entry.endpoint_kind}-path`,
+        endpointPaths[entry.endpoint_kind],
+      );
+      const dockerContextPathIdentityHmacSha256 = engine
+        ? liveProviderEffectFixturePathHmac(
+            bindingKey,
+            fixtureId,
+            "engine-api-docker-context-path",
+            dockerContextPath,
+          )
+        : ZERO_SHA256;
+      return {
+        docker_context_namespace_role:
+          entry.docker_context_namespace_role,
+        docker_context_path_identity_hmac_sha256:
+          dockerContextPathIdentityHmacSha256,
+        docker_context_sha256: engine
+          ? liveProviderEffectDigest(
+              liveProviderEffectBytes({
+                endpoint_path_identity_hmac_sha256:
+                  pathIdentityHmacSha256,
+                metadata_path_identity_hmac_sha256:
+                  dockerContextPathIdentityHmacSha256,
+                transport: "private-unix-socket-fixture-only",
+              }),
+            )
+          : ZERO_SHA256,
+        endpoint_kind: entry.endpoint_kind,
+        final_challenge_commitment_sha256:
+          liveProviderEffectFixtureSecretHmac(
+            bindingKey,
+            fixtureId,
+            `${entry.endpoint_kind}-final-challenge`,
+            { endpoint_kind: entry.endpoint_kind },
+          ),
+        initial_challenge_commitment_sha256:
+          liveProviderEffectFixtureSecretHmac(
+            bindingKey,
+            fixtureId,
+            `${entry.endpoint_kind}-initial-challenge`,
+            { endpoint_kind: entry.endpoint_kind },
+          ),
+        namespace_role: entry.namespace_role,
+        path_identity_hmac_sha256: pathIdentityHmacSha256,
+      };
+    });
+  try {
+    return buildColimaLiveProviderEffectFixtureBlueprintStructure({
+      architecture: process.arch,
+      component_manifest: componentManifest,
+      endpoint_bindings: endpointBindings,
+      environment_sha256: liveProviderEffectDigest(
+        liveProviderEffectBytes(privateEnvironment),
+      ),
+      fixture_id: fixtureId,
+      operation_contract_sha256:
+        COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
+      operation_kind: COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
+      planned_quiescence_fence_sha256:
+        liveProviderEffectFixtureSecretHmac(
+          bindingKey,
+          fixtureId,
+          "quiescence-fence",
+          { fixture_id: fixtureId },
+        ),
+      planned_start_attempt_sha256:
+        liveProviderEffectFixtureSecretHmac(
+          bindingKey,
+          fixtureId,
+          "start-attempt",
+          { fixture_id: fixtureId },
+        ),
+      platform: process.platform,
+      role_bindings: roleBindings,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderEffectFixtureBlueprintFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function sameLiveProviderEffectFixtureBlueprintProjection(
+  blueprint,
+  publicationPlan,
+) {
+  return (
+    publicationPlan.driver_contract_sha256 ===
+      blueprint.driver_contract_sha256 &&
+    publicationPlan.fixture_id === blueprint.fixture_id &&
+    publicationPlan.operation_contract_sha256 ===
+      blueprint.operation_contract_sha256 &&
+    publicationPlan.planned_start_attempt_sha256 ===
+      blueprint.planned_start_attempt_sha256 &&
+    publicationPlan.planned_quiescence_fence_sha256 ===
+      blueprint.planned_quiescence_fence_sha256 &&
+    liveProviderEffectBytes(publicationPlan.invocation_binding).equals(
+      liveProviderEffectBytes(blueprint.invocation_binding),
+    ) &&
+    liveProviderEffectBytes(publicationPlan.planned_role_contracts).equals(
+      liveProviderEffectBytes(blueprint.role_contracts),
+    ) &&
+    liveProviderEffectBytes(
+      publicationPlan.planned_endpoint_contracts,
+    ).equals(liveProviderEffectBytes(blueprint.endpoint_contracts))
+  );
+}
+
 function buildLiveProviderEffectPublicationPlanForState(
+  admittedArguments,
   admission,
   observed,
   snapshot,
 ) {
-  const seed = liveProviderEffectDigest(liveProviderEffectBytes({
-    admission_sha256: liveProviderEffectDigest(
-      liveProviderEffectBytes(admission),
-    ),
-    fixture_id: snapshot.operationPlan.fixture_id,
-    provider_root_identity: observed.provider_root_identity,
-    state_run_identity: observed.state_run_identity,
-  }));
-  const invocationBinding = Object.freeze({
-    argv_sha256: effectCommitment(seed, "fixed-fixture-argv"),
-    cwd_identity_sha256: effectCommitment(seed, "fixed-fixture-cwd"),
-    environment_sha256: effectCommitment(seed, "fixed-fixture-environment"),
-    executable_sha256: effectCommitment(seed, "fixed-fixture-executable"),
-    toolchain_sha256: effectCommitment(seed, "fixed-fixture-toolchain"),
-  });
-  const plannedRoleContracts = COLIMA_LIVE_PROVIDER_EFFECT_ROLES.map(
-    (role) => ({
-      argv_sha256:
-        role === "outer"
-          ? invocationBinding.argv_sha256
-          : effectCommitment(seed, `${role}-argv`),
-      cwd_identity_sha256:
-        role === "outer"
-          ? invocationBinding.cwd_identity_sha256
-          : effectCommitment(seed, `${role}-cwd`),
-      depth: role === "outer" ? 0 : role === "hostagent" ? 1 : 2,
-      environment_sha256:
-        role === "outer"
-          ? invocationBinding.environment_sha256
-          : effectCommitment(seed, `${role}-environment`),
-      executable_sha256:
-        role === "outer"
-          ? invocationBinding.executable_sha256
-          : effectCommitment(seed, `${role}-executable`),
-      parent_role:
-        role === "outer"
-          ? "state-owner"
-          : role === "hostagent"
-            ? "outer"
-            : "hostagent",
-      public_key_spki_sha256: effectCommitment(seed, `${role}-public-key`),
-      role,
-      role_challenge_sha256: effectCommitment(seed, `${role}-challenge`),
-      toolchain_sha256:
-        role === "outer"
-          ? invocationBinding.toolchain_sha256
-          : effectCommitment(seed, `${role}-toolchain`),
-      uid: observed.provider_root_identity.uid,
-    }),
-  );
-  const endpointRoles = Object.freeze({
-    "engine-api": "hostagent",
-    "hostagent-control": "hostagent",
-    "ssh-control": "ssh-controlmaster",
-    "usernet-control": "usernet",
-  });
-  const endpointNamespaces = Object.freeze({
-    "engine-api": "colima-home-namespace",
-    "hostagent-control": "lima-home-namespace",
-    "ssh-control": "temporary-namespace",
-    "usernet-control": "lima-home-namespace",
-  });
-  const plannedEndpointContracts = COLIMA_LIVE_PROVIDER_EFFECT_ENDPOINTS.map(
-    (endpointKind) => ({
-      docker_context_namespace_role:
-        endpointKind === "engine-api" ? "docker-config-namespace" : "none",
-      docker_context_path_identity_hmac_sha256:
-        endpointKind === "engine-api"
-          ? effectCommitment(seed, "engine-api-docker-context-path")
-          : ZERO_SHA256,
-      docker_context_sha256:
-        endpointKind === "engine-api"
-          ? effectCommitment(seed, "engine-api-docker-context")
-          : ZERO_SHA256,
-      endpoint_kind: endpointKind,
-      final_challenge_commitment_sha256: effectCommitment(
-        seed,
-        `${endpointKind}-final-challenge`,
-      ),
-      initial_challenge_commitment_sha256: effectCommitment(
-        seed,
-        `${endpointKind}-initial-challenge`,
-      ),
-      namespace_role: endpointNamespaces[endpointKind],
-      path_identity_hmac_sha256: effectCommitment(
-        seed,
-        `${endpointKind}-path`,
-      ),
-      role: endpointRoles[endpointKind],
-    }),
+  const blueprint = liveProviderEffectFixtureBlueprint(
+    admittedArguments,
+    observed,
+    snapshot,
   );
   try {
-    return buildColimaLiveProviderEffectPublicationPlan({
+    const publicationPlan = buildColimaLiveProviderEffectPublicationPlan({
       admission,
-      invocationBinding,
+      invocationBinding: blueprint.invocation_binding,
       namespaceBindings: observed.namespace_bindings.map((binding) => ({
         device: binding.device,
         inode: binding.inode,
@@ -8846,22 +9134,50 @@ function buildLiveProviderEffectPublicationPlanForState(
         role: binding.role,
         uid: binding.uid,
       })),
-      plannedEndpointContracts,
-      plannedQuiescenceFenceSha256: effectCommitment(
-        seed,
-        "quiescence-fence",
-      ),
-      plannedRoleContracts,
-      plannedStartAttemptSha256: effectCommitment(seed, "start-attempt"),
+      plannedEndpointContracts: blueprint.endpoint_contracts,
+      plannedQuiescenceFenceSha256:
+        blueprint.planned_quiescence_fence_sha256,
+      plannedRoleContracts: blueprint.role_contracts,
+      plannedStartAttemptSha256: blueprint.planned_start_attempt_sha256,
       providerRootIdentity: observed.provider_root_identity,
       source: snapshot.source,
       stateRunIdentity: observed.state_run_identity,
     });
+    if (
+      !sameLiveProviderEffectFixtureBlueprintProjection(
+        blueprint,
+        publicationPlan,
+      )
+    ) {
+      fail("fixture provider effect blueprint projection changed", 70);
+    }
+    return publicationPlan;
   } catch (error) {
     if (error instanceof LiveProviderEffectFailure) {
       fail(error.message, error.exitStatus);
     }
     throw error;
+  }
+}
+
+function reproveLiveProviderEffectFixtureBlueprint(
+  admittedArguments,
+  observed,
+  snapshot,
+  publicationPlan,
+) {
+  const blueprint = liveProviderEffectFixtureBlueprint(
+    admittedArguments,
+    observed,
+    snapshot,
+  );
+  if (
+    !sameLiveProviderEffectFixtureBlueprintProjection(
+      blueprint,
+      publicationPlan,
+    )
+  ) {
+    fail("fixture provider effect blueprint changed", 73);
   }
 }
 
@@ -9654,6 +9970,7 @@ function publishColimaLiveProviderFixtureEffect(argumentsValue, terminal) {
     fail("fixture provider effect admission changed", 73);
   }
   const publicationPlan = buildLiveProviderEffectPublicationPlanForState(
+    admittedArguments,
     admission,
     observed,
     snapshot,
@@ -9685,6 +10002,12 @@ function publishColimaLiveProviderFixtureEffect(argumentsValue, terminal) {
       snapshot.source,
       publicationPlan,
       "absent",
+    );
+    reproveLiveProviderEffectFixtureBlueprint(
+      admittedArguments,
+      observed,
+      snapshot,
+      publicationPlan,
     );
   };
   const expectedSource = Object.freeze({
@@ -9823,6 +10146,12 @@ function publishColimaLiveProviderFixtureEffect(argumentsValue, terminal) {
     fail("fixture provider effect witness changed", 73);
   }
   callLiveProviderEffectCheckpoint(testCheckpoint, "before-start-authority-reproof");
+  reproveLiveProviderEffectFixtureBlueprint(
+    admittedArguments,
+    observed,
+    snapshot,
+    publicationPlan,
+  );
   const firstReproof = observeLiveProviderEffectStartReproof(
     roots,
     admittedArguments,
@@ -9856,6 +10185,12 @@ function publishColimaLiveProviderFixtureEffect(argumentsValue, terminal) {
   effect = assertLiveProviderEffectOpenState(state, publicationPlan);
   if (terminal === "attempt-fenced") {
     callLiveProviderEffectCheckpoint(testCheckpoint, "before-start-attempt-reproof");
+    reproveLiveProviderEffectFixtureBlueprint(
+      admittedArguments,
+      observed,
+      snapshot,
+      publicationPlan,
+    );
     const secondReproof = observeLiveProviderEffectStartReproof(
       roots,
       admittedArguments,

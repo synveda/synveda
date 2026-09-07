@@ -426,6 +426,18 @@ unexpected links, malformed witnesses and crossed production/fixture tuples
 fail closed. These seams are test-only; no supported lifecycle or production
 effect invoker exists.
 
+The fixture attempt plan uses a pure, process-free launch blueprint. Runtime
+component files are opened with `O_NOFOLLOW`, hashed through their descriptors
+and checked against pre/post path identity; the hashes are re-proved at the
+start-authority and attempt boundaries. Domain-separated HMAC under the
+unpersisted observation binding key derives Ed25519 role seeds, role/endpoint
+challenges and private-path identities. Durable artifacts contain only public
+SPKI hashes and opaque commitments, never the binding key, private key bytes or
+raw component/provider paths. The Darwin child environment is closed and
+digest-bound. These are planned commitments only: no process or endpoint is
+observed, and the standalone HMAC process fixture remains a separate
+non-authoritative test.
+
 The earlier non-persisted prerequisite projection remains a separate inert
 review artifact. It defines no action, operation kind or contract, retains its
 own 512-occurrence preflight, and is consumed by neither state nor the pure

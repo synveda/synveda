@@ -245,6 +245,16 @@ absent, handles partial and interrupted physical transitions, and never crosses
 the attempt fence. This is deterministic fixture state/recovery evidence, not
 live process, provider, platform or readiness evidence.
 
+The fixture state publisher now derives its existing plan projection through a
+separate process-free launch blueprint rather than synthetic labels. Exact
+Node/protocol/role hashes are read with no-follow descriptor checks and
+re-proved before authority/attempt publication; the closed environment, role
+argv/cwd, Ed25519 public identities, endpoint paths and attempt/quiescence
+commitments are bound without persisting private key or path material. This
+changes no effect/receipt schema or digest and remains deterministic
+pre-execution evidence only. It closes neither live process/endpoint evidence
+nor the production-provider gap.
+
 The current state generation adds one deterministic cooperative reservation and
 still performs no provider process action. A v7 slot precedes a private fsynced
 witness. One fixed no-replace provider-root hard-link CAS binds the exact state

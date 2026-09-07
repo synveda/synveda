@@ -578,6 +578,19 @@ no production effect publisher, registry entry, lifecycle exposure, process
 invocation or live-provider evidence; serialized pure values alone do not
 carry state provenance or select a branch.
 
+The fixture plan is assembled through
+`clean-engine-live-provider-effect-fixture-blueprint.mjs`, a process-free pure
+leaf. Its existing-plan projection binds the fixed Node/protocol/role bytes,
+closed child environment, exact role argv/cwd, four role public identities,
+four endpoint paths, Docker-context path/content commitments and the planned
+attempt/quiescence values. State performs no-follow descriptor hashing and
+re-proves those component bytes before authority and attempt publication.
+Private role seeds and path/challenge commitments derive from the private
+observation binding key; no key or raw path is serialized. This adds no image,
+command, port, secret file, persistent volume or supported lifecycle surface.
+It is not runtime endpoint evidence and does not consume the standalone
+four-process harness.
+
 ### Cooperative no-spawn reservation
 
 After one completed matching-class start decision, aborted reservation
