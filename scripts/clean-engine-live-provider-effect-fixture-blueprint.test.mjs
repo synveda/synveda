@@ -35,7 +35,7 @@ import {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ZERO_SHA256 = "0".repeat(64);
 const ADAPTER_CONTRACT_SHA256 =
-  "f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2";
+  "b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681";
 const AUTHORITY_ROOTS = [
   ".claude",
   ".github",
@@ -228,11 +228,11 @@ test("the fixture launch blueprint is one closed process-free public projection"
   );
   assert.equal(
     blueprint.schema,
-    "synveda.clean-engine.colima-live-fixture-provider-effect-blueprint.v2",
+    "synveda.clean-engine.colima-live-fixture-provider-effect-blueprint.v3",
   );
   assert.equal(
     liveProviderEffectFixtureBlueprintDigest(blueprint),
-    "6c9c9c543890cc9053d72281211dc0a36531316a45b634bbedf75296fb957b7d",
+    "f17a1387395a5b402e7f81331cef1c4fde10792fb55a27e1dc4a9bbe78c4128c",
   );
   assert.equal(blueprint.adapter_contract_sha256, ADAPTER_CONTRACT_SHA256);
   assert.equal(blueprint.authority, "none-process-free-public-projection-only");
@@ -314,11 +314,11 @@ test("the fixture launch blueprint is one closed process-free public projection"
   );
   assert.equal(
     blueprint.invocation_binding.toolchain_sha256,
-    "745f5b0c88a28d91245772f6bca18a8f2b8b9ed4a56d58db0a295e8741d59719",
+    "b9ea3c56b6e830021994d930234da8621e843afae40be9a4d8cdc98463bc7b9b",
   );
   assert.equal(
     blueprint.driver_contract_sha256,
-    "159b8389002aa2e789cbcb70362f186ec182be16e1f2d253526516500b5e0c9e",
+    "300f13403fbbce4a047c511fa2e8929ee7988f95f7a2d6608353ffce666970a7",
   );
   assert.equal(
     new Set(

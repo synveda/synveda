@@ -372,8 +372,9 @@ receipt-v6/slot-v7/recovery-v6/close-v8 hard cut. Production operation kind
 `production-deny-only-no-invoker`, pinned to
 `e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`,
 and has no production state publisher, recovery API, registry row or lifecycle
-command. The class-separated fixture-only contract is pinned to
-`2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8`.
+command. The class-separated fixture-only
+`colima-live-fixture-provider-effect-v2` contract is pinned to
+`fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60`.
 
 The earlier read-only prerequisite projection is retained separately as an
 inert review artifact. It defines no action, operation kind or contract, keeps
@@ -409,10 +410,30 @@ fsync, completion and close. The generic receipt API rejects the state-owned
 exports remain test-only, and caller-held pure bytes are not state provenance
 or branch selection.
 
-That state plan now consumes the closed process-free launch blueprint v2
+The same fixture contract has one explicit missing-delivery terminal. Only the
+two-event authority/attempt prefix or that prefix plus the outer launch edge is
+eligible. A local same-UID confirmation hashes the complete content-free
+source, plan, slot, witness, event, predecessor-recovery and pending-stage
+statement. The resolver retires no pending stage, or only the exact confirmed
+inert stage or alias; it publishes a
+recovery claim and appends `uncertain-start` with `effect_possible: true`. The
+lease and receipt head remain unchanged, the marker/witness inode remains at
+two links, and no delivery, cleanup, receipt, completion or close is created.
+Changed pre-terminal state requires a new confirmation; a durable terminal is
+idempotent on normal retry or crash/restart. This is not authenticated human
+approval, non-repudiation, an atomic physical snapshot or hostile-same-UID
+rollback detection.
+
+The exact persisted vocabulary is disposition
+`acknowledge-indeterminate-effect-possible`, event variant
+`operator-acknowledged-missing-delivery`, reason
+`delivery-record-not-durable`, and confirmation provenance
+`local-same-uid-explicit-confirmation-v1`.
+
+That state plan now consumes the closed process-free launch blueprint v3
 instead of synthetic label commitments. The fourth component is a
 `conclusive-adapter` pinned to contract digest
-`f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+`b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681`.
 Together with descriptor-stable hashes of the fixed Node/protocol/role bytes,
 it binds exact planned argv/cwd/closed environment, four roles and four
 endpoints. The adapter returns only `conclusive-not-created`, a zero child
@@ -425,11 +446,11 @@ environment value is serialized. State re-opens the exact source/component
 bytes with no-follow descriptor checks at event, marker-retirement, close and
 recovery boundaries. No persisted receipt/journal generation advances:
 receipt v6, slot v7, recovery/root v6 and close v8 remain unchanged. The
-process-free blueprint advances to v2; new adapter contract/result and private
-tail-observation domains start at v1. Both effect-contract digests remain
-unchanged.
+process-free blueprint advances to v3; the fixture operation contract,
+fixture `uncertain-start` and adapter contract/result advance to v2. The
+production operation contract and digest remain v1 and unchanged.
 
-Attempted recovery remains operator-blocked before an exact durable delivery
+Generic attempted recovery remains blocked before an exact durable delivery
 event. Recovery never calls the adapter executor; state exact-byte loads the
 module and recovery validates the durable result. After that event, it
 revalidates the fixed adapter result, opaque proposed-outer-node identity
@@ -440,9 +461,9 @@ malformed or crossed evidence and physical drift fail closed. A pending
 receipt's canonical bytes matching the embedded receipt and its observed
 staged inode can be reconciled, and repeated same-frontier recoverers are
 retained while only the newest may publish. This is deterministic
-conclusive-not-created retirement evidence: it launches or adopts no provider
-process, proves no endpoint and grants no production, registry or lifecycle
-authority.
+conclusive-not-created retirement and acknowledged-indeterminate terminal
+evidence: it launches or adopts no provider process, proves no endpoint and
+grants no production, registry or lifecycle authority.
 
 The accepted branch starts after the completed start decision, not as a
 successor to ADR-0103's terminal no-spawn completion. It uses a distinct

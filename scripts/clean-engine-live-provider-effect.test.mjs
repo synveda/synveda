@@ -29,6 +29,11 @@ const {
   COLIMA_LIVE_PROVIDER_EFFECT_CLEANUP_ACTIONS,
   COLIMA_LIVE_PROVIDER_EFFECT_ENDPOINTS,
   COLIMA_LIVE_PROVIDER_EFFECT_EVENT_KINDS,
+  COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION,
+  COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE,
+  COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON,
+  COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_STATEMENT_SCHEMA,
+  COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT,
   COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT,
   COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
   COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_KIND,
@@ -173,6 +178,117 @@ function buildEvent(fixture, history, original, evidence = original.evidence) {
     source: fixture.source,
     witness: fixture.witness,
   });
+}
+
+function missingDeliveryResolutionFixture({
+  pendingStageDisposition = "absent",
+  predecessorRecoveryClaimSha256 = ZERO_SHA256,
+  withLaunch,
+}) {
+  const fixture = prepared("residual");
+  const history = fixture.events.slice(0, withLaunch ? 3 : 2);
+  const recoveryClaimSha256 = digest(
+    `missing-delivery-recovery:${withLaunch}:${pendingStageDisposition}`,
+  );
+  const priorAuthoritySha256 =
+    predecessorRecoveryClaimSha256 === ZERO_SHA256
+      ? fixture.witness.slot_sha256
+      : predecessorRecoveryClaimSha256;
+  const publisherAuthorityChain = [
+    ...clone(fixture.publisherAuthorityChain),
+    ...(predecessorRecoveryClaimSha256 === ZERO_SHA256
+      ? []
+      : [
+          {
+            authority_sha256: predecessorRecoveryClaimSha256,
+            first_event_sequence: history.length,
+            kind: "state-recovery-claim",
+            prior_authority_sha256: fixture.witness.slot_sha256,
+            recovery_claim_sha256: predecessorRecoveryClaimSha256,
+          },
+        ]),
+    {
+      authority_sha256: recoveryClaimSha256,
+      first_event_sequence: history.length,
+      kind: "state-recovery-claim",
+      prior_authority_sha256: priorAuthoritySha256,
+      recovery_claim_sha256: recoveryClaimSha256,
+    },
+  ];
+  const attempt = history[1];
+  const launchEdge = withLaunch ? history[2] : undefined;
+  const sourceOperationPlan =
+    fixture.source.startDecisionSource.intentPublicationPlan
+      .provider_operation_plan;
+  const resolutionStatement = {
+    confirmation_provenance:
+      COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE,
+    disposition: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION,
+    event_count: history.length,
+    event_head_sha256: digest(history.at(-1)),
+    fixture_id: fixture.publicationPlan.fixture_id,
+    launch_edge_sha256:
+      launchEdge === undefined ? ZERO_SHA256 : digest(launchEdge),
+    predecessor_recovery_claim_sha256: predecessorRecoveryClaimSha256,
+    marker_link_count: 2,
+    marker_witness_same_inode: true,
+    operation_contract_sha256:
+      fixture.publicationPlan.operation_contract_sha256,
+    operation_kind: fixture.publicationPlan.operation_kind,
+    operation_plan_sha256: digest(fixture.publicationPlan),
+    pending_stage_disposition: pendingStageDisposition,
+    pending_stage_fingerprint_sha256:
+      pendingStageDisposition === "absent"
+        ? ZERO_SHA256
+        : digest(`pending-stage:${pendingStageDisposition}`),
+    reason: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON,
+    schema: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_STATEMENT_SCHEMA,
+    slot_sequence: fixture.witness.slot_sequence,
+    slot_sha256: fixture.witness.slot_sha256,
+    source_head_sha256: sourceOperationPlan.source_head_sha256,
+    source_sequence: sourceOperationPlan.source_sequence,
+    start_attempt_sha256: digest(attempt),
+    witness_identity_sha256:
+      fixture.witness.marker_witness_identity_sha256,
+    witness_sha256: digest(fixture.witness),
+  };
+  const evidence = {
+    confirmation_provenance:
+      COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE,
+    delivery_result_sha256: ZERO_SHA256,
+    disposition: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION,
+    effect_possible: true,
+    launch_edge_sha256:
+      launchEdge === undefined ? ZERO_SHA256 : digest(launchEdge),
+    marker_link_count: 2,
+    reason: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON,
+    recovery_claim_sha256: recoveryClaimSha256,
+    recovery_invocation_authorized: false,
+    replay_authorized: false,
+    resolution_statement: resolutionStatement,
+    resolution_statement_sha256: digest(resolutionStatement),
+    start_attempt_sha256: digest(attempt),
+    variant: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT,
+    witness_identity_sha256:
+      fixture.witness.marker_witness_identity_sha256,
+  };
+  const event = buildColimaLiveProviderEffectEvent({
+    eventKind: "uncertain-start",
+    evidence,
+    history,
+    publicationPlan: fixture.publicationPlan,
+    publisherAuthorityChain,
+    publisherAuthoritySha256: recoveryClaimSha256,
+    source: fixture.source,
+    witness: fixture.witness,
+  });
+  return {
+    event,
+    fixture,
+    history,
+    publisherAuthorityChain,
+    recoveryClaimSha256,
+  };
 }
 
 function eventIndex(fixture, kind, predicate = () => true) {
@@ -568,6 +684,11 @@ test("the public effect boundary is exact, class-separated and recursively froze
     "COLIMA_LIVE_PROVIDER_EFFECT_CLEANUP_ACTIONS",
     "COLIMA_LIVE_PROVIDER_EFFECT_ENDPOINTS",
     "COLIMA_LIVE_PROVIDER_EFFECT_EVENT_KINDS",
+    "COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION",
+    "COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE",
+    "COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON",
+    "COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_STATEMENT_SCHEMA",
+    "COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT",
     "COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT",
     "COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256",
     "COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_KIND",
@@ -597,6 +718,26 @@ test("the public effect boundary is exact, class-separated and recursively froze
     COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_KIND,
     COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
   );
+  assert.equal(
+    COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
+    "colima-live-fixture-provider-effect-v2",
+  );
+  assert.equal(
+    COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_SCHEMAS.contract,
+    "synveda.clean-engine.colima-live-fixture-provider-effect-operation-contract.v2",
+  );
+  assert.equal(
+    COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_SCHEMAS.event["uncertain-start"],
+    "synveda.clean-engine.colima-live-fixture-provider-effect-uncertain-start.v2",
+  );
+  assert.equal(
+    COLIMA_LIVE_PROVIDER_EFFECT_SCHEMAS.contract,
+    "synveda.clean-engine.colima-live-provider-effect-operation-contract.v1",
+  );
+  assert.equal(
+    COLIMA_LIVE_PROVIDER_EFFECT_SCHEMAS.event["uncertain-start"],
+    "synveda.clean-engine.colima-live-provider-effect-uncertain-start.v1",
+  );
   assert.notEqual(
     COLIMA_LIVE_PROVIDER_EFFECT_SCHEMAS.contract,
     COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_SCHEMAS.contract,
@@ -607,7 +748,7 @@ test("the public effect boundary is exact, class-separated and recursively froze
   );
   assert.equal(
     COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT_SHA256,
-    "2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8",
+    "fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60",
   );
   assert.equal(
     digest(COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_CONTRACT),
@@ -669,6 +810,7 @@ test("the public effect boundary is exact, class-separated and recursively froze
       "fixture_effect_recovery_authorized",
       "marker_link_authorized",
       "marker_retirement_authorized",
+      "missing_delivery_resolution_authorized",
       "process_group_ownership_authorized",
       "process_signal_authorized",
       "process_spawn_authorized",
@@ -876,37 +1018,37 @@ test("the fixture API is closed, content-free and returns no signing authority",
 test("all closed histories and every prefix validate with stable terminal bindings", () => {
   const variants = [
     {
-      digest: "3c5cf35361e874e7ff3538192783089cf502b22cde4f9b617b0a12f61dd3367d",
+      digest: "4cdf5cea624f8a3f18fbd79e92f32a80a2cc2c9bc3be8d3e49a88c0d2bd30534",
       events: 1,
       outcome: "pre-attempt-retired",
       terminal: "completion",
     },
     {
-      digest: "bcae354d262b3d49f2e9bc3fe4b8d712ab0714a001b540e008485c680f1c0c2f",
+      digest: "5becb36141cd54b50a2f94c36de89a00f6d565be3d731bc77d9b940da9289e1b",
       events: 2,
       outcome: "authority-retired",
       terminal: "completion",
     },
     {
-      digest: "f554e81fbb8aa52776c639f4b3876eb4656c385db2f7f1d825a027b701470caf",
+      digest: "61a66358bfc1bf9127c8e503360149a83103940423a4a082ebb6016ba1e661c5",
       events: 11,
       outcome: "residual",
       terminal: "completion",
     },
     {
-      digest: "a3fad401cf7a84a86c1c78ba2394c33b19c1e71c9ede9864e4b9cba52cf0e12a",
+      digest: "2c8235b7fc8986f4a8bb1b624088be00479b17daf68da9a1a25ba8f67627376e",
       events: 12,
       outcome: "uncertain",
       terminal: "uncertain-start",
     },
     {
-      digest: "b85815f48d8e5577cd3f0c5465a1ab13e092b15a088647648bea9c8f01365aae",
+      digest: "efd22508daafb45b0ddb0419d2fb2a2dbb2d6e84c74c1010a87b0f81127fa145",
       events: 44,
       outcome: "retired",
       terminal: "completion",
     },
     {
-      digest: "dd6a8d8fb3a0d3c0140853661c58a0f86cd368db043fdccf0dfae7c1fbe79f60",
+      digest: "a33d4681d89700f8b7bee4f9bee33847c0ef1ade23e57a94db6590763d2905bb",
       events: 54,
       outcome: "rich-retired",
       terminal: "completion",
@@ -1341,6 +1483,162 @@ test("publisher authority is owner-first and permits only chained fixture recove
   });
   accessor.length = 1;
   expectRefusal(() => validate(accessor));
+});
+
+test("explicit missing-delivery acknowledgement is one closed fixture-only terminal", () => {
+  assert.equal(
+    COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION,
+    "acknowledge-indeterminate-effect-possible",
+  );
+  assert.equal(
+    COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT,
+    "operator-acknowledged-missing-delivery",
+  );
+  assert.equal(
+    COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON,
+    "delivery-record-not-durable",
+  );
+  assert.equal(
+    COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE,
+    "local-same-uid-explicit-confirmation-v1",
+  );
+  const cases = [
+    missingDeliveryResolutionFixture({ withLaunch: false }),
+    missingDeliveryResolutionFixture({
+      pendingStageDisposition: "one-link-inert",
+      withLaunch: true,
+    }),
+    missingDeliveryResolutionFixture({
+      pendingStageDisposition: "two-link-durable-alias",
+      predecessorRecoveryClaimSha256: digest(
+        "missing-delivery-predecessor-recovery",
+      ),
+      withLaunch: true,
+    }),
+  ];
+  for (const preparedCase of cases) {
+    const {
+      event,
+      fixture,
+      history,
+      publisherAuthorityChain,
+      recoveryClaimSha256,
+    } = preparedCase;
+    const options = {
+      ...validationOptions(fixture),
+      publisherAuthorityChain,
+    };
+    assert.equal(event.event_kind, "uncertain-start");
+    assert.equal(event.event_sequence, history.length);
+    assert.equal(event.publisher_authority_sha256, recoveryClaimSha256);
+    assert.equal(
+      publisherAuthorityChain.at(-1).first_event_sequence,
+      history.length,
+    );
+    assert.equal(event.evidence.delivery_result_sha256, ZERO_SHA256);
+    assert.equal(event.evidence.effect_possible, true);
+    assert.equal(event.evidence.marker_link_count, 2);
+    assert.equal(event.evidence.recovery_invocation_authorized, false);
+    assert.equal(event.evidence.replay_authorized, false);
+    assert.equal(
+      event.evidence.resolution_statement_sha256,
+      digest(event.evidence.resolution_statement),
+    );
+    assert.equal(
+      validateColimaLiveProviderEffectEvent(
+        event,
+        { history, ...options },
+      ),
+      event,
+    );
+    assert.deepEqual(
+      validateColimaLiveProviderEffectEventHistory(
+        [...history, event],
+        options,
+      ),
+      [...history, event],
+    );
+    expectRefusal(() =>
+      validateColimaLiveProviderEffectEventHistory(
+        [...history, event, event],
+        options,
+      ),
+    );
+  }
+
+  const canonicalCase = cases[1];
+  const validateChanged = (candidate) =>
+    validateColimaLiveProviderEffectEvent(candidate, {
+      history: canonicalCase.history,
+      ...validationOptions(canonicalCase.fixture),
+      publisherAuthorityChain: canonicalCase.publisherAuthorityChain,
+    });
+  for (const field of Object.keys(canonicalCase.event.evidence)) {
+    const changed = clone(canonicalCase.event);
+    changed.evidence[field] = changedValue(changed.evidence[field]);
+    expectRefusal(() => validateChanged(changed));
+  }
+  for (const field of Object.keys(
+    canonicalCase.event.evidence.resolution_statement,
+  )) {
+    const changed = clone(canonicalCase.event);
+    changed.evidence.resolution_statement[field] =
+      field === "pending_stage_fingerprint_sha256"
+        ? ZERO_SHA256
+        : changedValue(changed.evidence.resolution_statement[field]);
+    changed.evidence.resolution_statement_sha256 = digest(
+      changed.evidence.resolution_statement,
+    );
+    expectRefusal(() => validateChanged(changed));
+  }
+  for (const [disposition, fingerprint] of [
+    ["absent", digest("invalid-absent-stage")],
+    ["one-link-inert", ZERO_SHA256],
+    ["two-link-durable-alias", ZERO_SHA256],
+  ]) {
+    const changed = clone(canonicalCase.event);
+    changed.evidence.resolution_statement.pending_stage_disposition =
+      disposition;
+    changed.evidence.resolution_statement.pending_stage_fingerprint_sha256 =
+      fingerprint;
+    changed.evidence.resolution_statement_sha256 = digest(
+      changed.evidence.resolution_statement,
+    );
+    expectRefusal(() => validateChanged(changed));
+  }
+  const wrongFrontier = clone(canonicalCase.publisherAuthorityChain);
+  wrongFrontier.at(-1).first_event_sequence -= 1;
+  expectRefusal(() =>
+    validateColimaLiveProviderEffectEvent(
+      canonicalCase.event,
+      {
+        history: canonicalCase.history,
+        ...validationOptions(canonicalCase.fixture),
+        publisherAuthorityChain: wrongFrontier,
+      },
+    ),
+  );
+
+  const production = productionPrepared();
+  expectRefusal(() =>
+    validateColimaLiveProviderEffectEvent(canonicalCase.event, {
+      history: canonicalCase.history,
+      publicationPlan: production.publicationPlan,
+      publisherAuthorityChain: canonicalCase.publisherAuthorityChain,
+      source: production.source,
+      witness: production.witness,
+    }),
+  );
+  const delivered = prepared("uncertain");
+  const confused = clone(delivered.events.at(-1));
+  confused.evidence.variant =
+    COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT;
+  expectRefusal(() =>
+    validateColimaLiveProviderEffectEvent(
+      confused,
+      eventValidationOptions(delivered, delivered.events.slice(0, -1)),
+    ),
+  );
 });
 
 test("event envelopes and every evidence field are hash-chain tamper evident", () => {

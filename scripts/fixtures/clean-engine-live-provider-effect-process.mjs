@@ -5,6 +5,7 @@ import {
   publishColimaLiveProviderEffectConclusiveNotCreatedForTest,
   publishColimaLiveProviderEffectPreAttemptForTest,
   recoverColimaLiveProviderEffectForTest,
+  resolveColimaLiveProviderEffectMissingDeliveryForTest,
 } from "../../deploy/compose/scripts/clean-engine-state.mjs";
 
 function malformedFixtureInput() {
@@ -36,9 +37,14 @@ const values = process.argv.slice(2);
 const [action, repoRoot, stateBase, checkpoint, releasePath] = values;
 if (
   values.length !== 5 ||
-  !new Set(["attempt", "collision", "conclusive", "publish", "recover"]).has(
-    action,
-  ) ||
+  !new Set([
+    "attempt",
+    "collision",
+    "conclusive",
+    "publish",
+    "recover",
+    "resolve",
+  ]).has(action) ||
   [repoRoot, stateBase, checkpoint, releasePath].some(
     (value) => typeof value !== "string" || value.length === 0,
   )
@@ -80,8 +86,10 @@ if (
       publishColimaLiveProviderEffectConclusiveNotCreatedForTest(
         argumentsValue,
       );
-    } else {
+    } else if (action === "recover") {
       recoverColimaLiveProviderEffectForTest(argumentsValue);
+    } else {
+      resolveColimaLiveProviderEffectMissingDeliveryForTest(argumentsValue);
     }
   } catch (error) {
     process.stderr.write(

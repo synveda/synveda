@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { isProxy } from "node:util/types";
 
 export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_SCHEMA =
-  "synveda.clean-engine.colima-live-fixture-provider-effect-blueprint.v2";
+  "synveda.clean-engine.colima-live-fixture-provider-effect-blueprint.v3";
 
 export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENTS =
   Object.freeze([
@@ -101,11 +101,11 @@ export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ENDPOINT_TOPOLOGY =
     }),
   ]);
 
-const FIXTURE_OPERATION_KIND = "colima-live-fixture-provider-effect-v1";
+const FIXTURE_OPERATION_KIND = "colima-live-fixture-provider-effect-v2";
 const FIXTURE_OPERATION_CONTRACT_SHA256 =
-  "2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8";
+  "fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60";
 const CONCLUSIVE_ADAPTER_CONTRACT_SHA256 =
-  "f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2";
+  "b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681";
 const EFFECT_STATE_INTEGRATION = "mutation-journal-v7-sibling-effect-only";
 const ROLES = Object.freeze([
   "outer",

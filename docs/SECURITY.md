@@ -419,8 +419,7 @@ private random stage, derives the witness from that inode, binds the fixed
 provider-root marker by no-replace hard link and publishes authority only after
 the exact topology is durable. A pre-attempt retirement has a zero receipt
 delta. An attempt fence keeps the marker/witness at two links and launches or
-adopts no provider process. The sole attempted exception consumes an exact
-process-free
+adopts no provider process. One attempted branch consumes an exact process-free
 `conclusive-not-created` adapter result, then publishes the 11-event
 authority/attempt/delivery/settlement/cleanup/receipt/completion history. The
 staged receipt bytes are canonical-byte-identical to the receipt embedded in
@@ -431,8 +430,20 @@ close.
 
 Recovery requires the original owner and newest recoverer to be absent.
 Recovery never calls the adapter executor; state exact-byte loads the module
-and recovery validates the durable result. An attempt without exact durable
-delivery remains operator-blocked. After delivery, recovery revalidates the
+and recovery validates the durable result. Generic recovery remains blocked
+without exact durable delivery. A distinct test-only resolver accepts only the
+authority/attempt prefix, optionally plus the outer launch edge, and requires a
+local same-UID confirmation over the exact content-free source, plan, slot,
+witness, event, predecessor and pending-stage statement. It retires no pending
+stage, or only the exact confirmed inert stage or alias, and appends an
+`effect_possible: true` `uncertain-start`; the lease, receipt head and two-link
+marker/witness remain
+unchanged. It has no delivery, cleanup, receipt, completion or close path. A
+changed pre-terminal frontier requires a new confirmation, while a durable
+terminal is idempotent on normal retry or crash/restart. The confirmation does
+not authenticate a human, provide non-repudiation, create an atomic physical
+snapshot or detect hostile same-UID rollback. After delivery, conclusive
+recovery revalidates the
 fixed adapter result, opaque proposed-outer-node identity commitment,
 source/component/blueprint binding, provider root, all six namespace identities
 and the accepted event prefix, then resumes only the missing suffix. Pending
@@ -442,7 +453,7 @@ unexpected links, malformed witnesses, physical drift and crossed
 production/fixture tuples fail closed. These seams are test-only; no supported
 lifecycle or production effect invoker exists.
 
-The fixture attempt plan uses pure, process-free blueprint v2. Runtime
+The fixture attempt plan uses pure, process-free blueprint v3. Runtime
 component files are opened with `O_NOFOLLOW`, hashed through their descriptors
 and checked against pre/post path identity. Its fourth component is the
 `conclusive-adapter`, pinned by source and contract digest. State removes the
@@ -474,9 +485,9 @@ private files between syscalls; exact descriptor/inode checks and bracketed
 reproofs make such interference fail closed when observed but do not create a
 new principal boundary. No persisted receipt/journal generation advances:
 receipt v6, slot v7, recovery/root v6 and close v8 remain unchanged. The
-process-free blueprint advances to v2; new adapter contract/result and private
-tail-observation domains start at v1. The operation-contract digests remain
-unchanged.
+process-free blueprint advances to v3; the fixture operation contract,
+fixture `uncertain-start` and adapter contract/result advance to v2. The
+production operation contract and digest remain v1 and unchanged.
 
 The earlier non-persisted prerequisite projection remains a separate inert
 review artifact. It defines no action, operation kind or contract, retains its

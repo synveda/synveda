@@ -27,9 +27,10 @@ a user can install, sign in, use, back up, restore or upgrade the product.
 architecture. [ADR-0103](../adr/adr-0103-cooperative-live-provider-reservation.md)
 locks the implemented terminal no-spawn reservation. Accepted
 [ADR-0104](../adr/adr-0104-indivisible-live-provider-effect-generation.md)
-defines the sibling generation; its fixture-only pre-attempt and bounded
-conclusive-not-created attempted branch is implemented, while every
-provider-process/live-identity branch remains absent. [The deployment
+defines the sibling generation; its fixture-only pre-attempt,
+conclusive-not-created attempted branch and explicitly acknowledged
+missing-delivery terminal are implemented, while every provider-process and
+live-identity branch remains absent. [The deployment
 contract](../DEPLOYMENT_CONTRACT.md) fixes the provider-neutral commands,
 configuration and external dependency seams.
 
@@ -769,9 +770,11 @@ operation kind `colima-live-provider-effect-v1` remains
 `production-deny-only-no-invoker`, is pinned to
 `e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`
 and has no production publisher, recovery entry point, registry row or
-lifecycle command. The separate fixture-only contract is pinned to
-`2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8`;
-its recovery capability cannot cross into the production tuple.
+lifecycle command. The separate fixture-only
+`colima-live-fixture-provider-effect-v2` contract is pinned to
+`fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60`;
+its recovery and explicit missing-delivery-resolution capabilities cannot
+cross into the production tuple.
 
 The earlier non-persisted prerequisite projection remains a separate inert
 review artifact. Its production/fixture digests are
@@ -806,10 +809,10 @@ receipt. All effect mutation/recovery APIs are fixture-only, ADR-0103's
 completed no-spawn branch remains terminal, and caller-held pure bytes carry no
 state provenance or branch selection.
 
-The persisted fixture plan now comes from the closed process-free blueprint v2
+The persisted fixture plan now comes from the closed process-free blueprint v3
 rather than label-derived synthetic commitments. Its fourth component is the
-`conclusive-adapter`, whose v1 contract digest is
-`f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+`conclusive-adapter`, whose v2 contract digest is
+`b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681`.
 The blueprint fixes the state-owner-to-outer four-role topology, four planned
 endpoint kinds and bounded runtime envelope, then projects exact invocation,
 role, endpoint, adapter, start-attempt and quiescence commitments into the
@@ -834,13 +837,32 @@ published byte-identically and durably before the exact marker is unlinked and
 its bound provider-root descriptor fsynced. Completion and mutation close are
 last.
 
-Once the attempt fence exists, recovery is operator-blocked until an exact
+Once the attempt fence exists, generic recovery is blocked until an exact
 durable conclusive delivery event exists. Recovery never calls the adapter
 executor; state exact-byte loads the module and recovery validates the durable
-result. After that event it revalidates the adapter result,
+result. A separate test-only acknowledgement accepts only the exact two-event
+authority/attempt prefix or that prefix plus the outer launch edge. It binds a
+local same-UID confirmation to the complete content-free source, plan, slot,
+witness, event, predecessor-recovery and pending-stage statement. The resolver
+retires no pending stage, or only the exact confirmed inert stage or alias;
+then it publishes a new recovery claim and an
+`uncertain-start` terminal with `effect_possible: true`, and leaves the lease,
+receipt head and two-link marker/witness unchanged. It publishes no synthetic
+delivery, cleanup, receipt, completion or close. A pre-terminal crash that
+changes the frontier requires a new confirmation; after terminal linkage the
+embedded statement makes normal retry and crash/restart idempotent. This does
+not authenticate a human, provide non-repudiation, create an atomic physical
+snapshot or detect hostile same-UID rollback. After conclusive delivery the
+ordinary recovery path revalidates the adapter result,
 source/component/blueprint binding, opaque proposed-outer-node identity
 commitment, provider root, all six namespace identities and the accepted event
 prefix, then resumes only the missing suffix under the newest recovery claim.
+
+The exact durable vocabulary is disposition
+`acknowledge-indeterminate-effect-possible`, event variant
+`operator-acknowledged-missing-delivery`, reason
+`delivery-record-not-durable`, and confirmation provenance
+`local-same-uid-explicit-confirmation-v1`.
 Receipt-first, marker-first, embedded/global receipt mismatch,
 malformed/crossed evidence and physical drift fail closed. Pending one- or
 two-link receipt publication is reconciled only from canonical bytes matching
@@ -850,15 +872,17 @@ bytes retain their original publisher and identity; among recoverers only the
 newest recovery authority may publish new suffix state, reconcile the receipt,
 retire the marker or close.
 
-This remains deterministic preparation and conclusive-not-created retirement
-evidence only. It does not launch or adopt a provider process, prove that a
+This remains deterministic preparation, conclusive-not-created retirement and
+acknowledged-indeterminate terminal evidence only. It does not launch or adopt
+a provider process, prove that a
 planned endpoint exists, retain a launch capability or make the standalone
 four-process fixture an effect executor. That fixture deliberately retains its
 truthful `fixture-supervisor` ancestry and imports no deployment module. No
 persisted receipt/journal generation advances: receipt v6, slot v7,
 recovery/root v6 and close v8 remain unchanged. The process-free blueprint
-advances to v2; new adapter contract/result and private tail-observation
-domains start at v1. Both operation-contract digests remain unchanged.
+advances to v3; the fixture operation contract, fixture `uncertain-start` and
+adapter contract/result advance to v2. The production operation contract and
+digest remain v1 and unchanged.
 
 A standalone deterministic preparation fixture validates
 the closed four-role causal shape with four repository-owned Node processes:
@@ -876,11 +900,10 @@ evidence. The recorded execution is Darwin-only; Linux execution remains an
 open evidence requirement.
 
 Next add authenticated live-role, endpoint, quiescence and recursive inventory
-evidence without changing this process-free adapter into an executor. Define
-the explicit operator resolution for an attempt whose delivery was not made
-durable, then cover uncertain acknowledgement and live cleanup retry before
-considering a production invoker. No production registration or supported
-lifecycle may precede independently reviewed platform evidence.
+evidence without changing this process-free adapter into an executor. Then
+cover live cleanup retry before considering a production invoker. No
+production registration or supported lifecycle may precede independently
+reviewed platform evidence.
 
 Keep the production effect contract deny-only, absent from the adapter registry
 and lifecycle-unexposed. Never reuse the generic mutation-slot inode,

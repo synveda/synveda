@@ -369,8 +369,20 @@ unlink, bound provider-root fsync, completion and close.
 Fixture recovery proves both the original owner and latest recoverer absent.
 Recovery never calls the adapter executor; state exact-byte loads the module
 and recovery validates the durable result. It is operator-blocked after an
-attempt until exact durable delivery exists. It may then revalidate the fixed
-result, opaque proposed-outer-node identity commitment,
+attempt until exact durable delivery exists or the fixture-only
+missing-delivery acknowledgement is explicitly selected. That path accepts
+only the two-event authority/attempt prefix, optionally with the outer launch
+edge, and confirms a digest of the complete content-free frontier and pending
+stage. It retires no pending stage, or only the exact confirmed inert stage or
+alias, and publishes `uncertain-start` with
+`effect_possible: true`, and retains the open lease, unchanged receipt head and
+two-link marker/witness. It creates no delivery, cleanup, receipt, completion
+or close and does not call the adapter. Changed pre-terminal state requires a
+new confirmation; a durable terminal is idempotent on normal retry or
+crash/restart. The local same-UID confirmation is not human authentication,
+non-repudiation, an atomic physical snapshot or hostile-same-UID rollback
+detection. Conclusive recovery may
+revalidate the fixed result, opaque proposed-outer-node identity commitment,
 source/component/blueprint binding, provider root, all six namespaces and event
 prefix, and resume only the missing suffix under the newest claim. A pending
 receipt's canonical bytes matching the embedded receipt and its observed
@@ -379,9 +391,9 @@ drift and crossed evidence fail closed. The generic receipt path
 cannot publish `provider-effect-retired`. No supported lifecycle, production
 effect entry point, Docker/Colima/Lima invocation or readiness claim follows.
 
-The fixture effect plan is projected by closed process-free blueprint v2. Its
+The fixture effect plan is projected by closed process-free blueprint v3. Its
 fourth component is `conclusive-adapter`, whose contract digest is
-`f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+`b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681`.
 State descriptor-reads and source-digest-pins the adapter before evaluating the
 same bytes, requires the later manifest to match, and re-proves it with the
 fixed Node/protocol/role components at event, receipt, marker-retirement, close
@@ -392,8 +404,9 @@ Public SPKI material plus content-free hashes and opaque commitments are
 durable; no private key, raw path or environment value is serialized. No
 persisted receipt/journal generation advances: receipt v6, slot v7,
 recovery/root v6 and close v8 remain unchanged. The process-free blueprint
-advances to v2; new adapter contract/result and private tail-observation
-domains start at v1. Operation-contract digests remain unchanged. This launches
+advances to v3; the fixture operation contract, fixture `uncertain-start` and
+adapter contract/result advance to v2. The production operation contract and
+digest remain v1 and unchanged. This launches
 or adopts no provider process, contacts no endpoint and does not turn the
 separate standalone four-process harness into deployment evidence.
 

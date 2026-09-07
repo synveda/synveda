@@ -215,8 +215,8 @@ readiness evidence.
 A sibling-effect boundary now binds that exact admission. Its
 production `colima-live-provider-effect-v1` contract digest is
 `e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`;
-the class-separated fixture digest is
-`2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8`.
+the class-separated `colima-live-fixture-provider-effect-v2` digest is
+`fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60`.
 Production uses `production-deny-only-no-invoker`, keeps every capability false
 and has no production state publisher, recovery entry point, registry row or
 lifecycle command.
@@ -250,9 +250,9 @@ inode; after directory fsync and stage retirement, the one-link final receipt
 is durable before marker unlink, bound provider-root fsync, completion and
 close. Mutation close is last.
 
-The fixture state publisher derives its plan through process-free blueprint v2.
+The fixture state publisher derives its plan through process-free blueprint v3.
 Its fourth component binds a state-owned `conclusive-adapter` with contract
-digest `f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+digest `b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681`.
 Exact Node/protocol/role/adapter hashes are read through no-follow descriptors;
 the loaded adapter source is snapshotted at module initialization and must equal
 the later component manifest. The closed environment, role argv/cwd, Ed25519
@@ -262,17 +262,22 @@ bound without persisting private keys or paths. The adapter returns only
 safe code `not-created`; it has no filesystem, network, process, provider or
 runtime-publication capability.
 
-Attempted recovery remains operator-blocked before an exact durable delivery
-event. Recovery never calls the adapter executor; state exact-byte loads the
-module and recovery validates the durable result. After delivery it revalidates
-the adapter result, opaque proposed-outer-node identity commitment,
-source/component/blueprint binding, provider root, all six namespaces and the
-event prefix, then publishes only the missing suffix under the newest claim. A
-pending receipt's canonical bytes matching the embedded receipt and its
-observed staged inode are preserved; receipt-first, marker-first,
-embedded/global mismatch, malformed or crossed evidence and
-physical drift fail closed. This is deterministic fixture state/recovery
-evidence, not live process, provider, platform or readiness evidence.
+Without an explicit missing-delivery acknowledgement, attempted recovery
+remains blocked before an exact durable delivery event. Recovery never calls
+the adapter executor; state exact-byte loads the module and validates a durable
+result before following the conclusive path. The fixture-only alternative
+accepts only the exact authority/attempt prefix, optionally followed by the
+outer launch edge. A local same-UID caller confirms a digest of the complete
+content-free frontier and pending-stage statement. State retires no pending
+stage, or only the exact confirmed inert stage or alias; it publishes a
+recovery claim and terminates at
+`uncertain-start` with `effect_possible: true`; it leaves the two-link
+marker/witness, lease and receipt head unchanged and publishes no delivery,
+cleanup, receipt, completion or close. A pre-terminal crash that changes the
+durable frontier requires a newly derived confirmation; a durable terminal is
+idempotent on normal retry or crash/restart. This is not authenticated human
+approval, non-repudiation, an atomic physical snapshot or protection against
+hostile same-UID rollback.
 
 Separately, ADR-0103's mutually exclusive terminal no-spawn sibling adds one
 deterministic cooperative reservation and performs no provider process action.
@@ -298,16 +303,17 @@ code. `reservation_recovery_authorized` does not grant provider-effect recovery.
 Real process execution remains blocked. ADR-0104's sibling generation branches
 directly from the exact completed start decision and must not extend the
 terminal no-spawn reservation or reuse its evidence. The fixture now proves
-only the conclusively-not-created attempted tail. Authenticated live causal
+the conclusively-not-created attempted tail and a distinct acknowledged
+missing-delivery terminal. Authenticated live causal
 identity/recovery for the outer process, detached Lima hostagent, usernet and
-SSH ControlMaster, recursive post-start inventory, endpoint/quiescence evidence
-and explicit operator resolution for uncertain delivery remain open. Live
+SSH ControlMaster, recursive post-start inventory and endpoint/quiescence
+evidence remain open. Live
 macOS proxy observation and individual OS-executable identity evidence also
 remain open. No persisted receipt/journal generation advances: receipt v6,
 slot v7, recovery/root v6 and close v8 remain unchanged. The process-free
-blueprint advances to v2; new adapter contract/result and private
-tail-observation domains start at v1. Both operation-contract digests remain
-unchanged.
+blueprint advances to v3; the fixture operation contract, fixture
+`uncertain-start` and adapter contract/result advance to v2. The production
+operation contract and digest remain v1 and unchanged.
 
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness.

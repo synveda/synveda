@@ -543,8 +543,9 @@ Its production `colima-live-provider-effect-v1` operation contract is pinned to
 `e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`.
 Every production capability remains false, its authority model is
 `production-deny-only-no-invoker`, and state imports no production effect tuple
-or production mutation entry point. A separate fixture-only contract is pinned to
-`2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8`;
+or production mutation entry point. A separate fixture-only
+`colima-live-fixture-provider-effect-v2` contract is pinned to
+`fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60`;
 it cannot be relabelled as production evidence.
 
 The pure fixture grammar binds the distinct effect witness and fixed marker,
@@ -584,13 +585,29 @@ Mutation close remains last. The generic receipt API refuses the state-owned
 Fixture recovery proves the slot owner and newest recoverer absent and accepts
 only forward physical/event transitions. Recovery never calls the adapter
 executor; state exact-byte loads the module and recovery validates the durable
-result. Before exact durable delivery, an attempt fence is operator-blocked.
-After delivery, recovery revalidates the adapter result, opaque
-proposed-outer-node identity commitment, source/component/blueprint binding,
-provider root, all six namespaces and the event prefix before resuming only the
-missing suffix. Pending receipt reconciliation binds exact bytes and observed
-inode. Multiple dead recoverers at one frontier are retained and only the
-newest may publish or close.
+result. Without explicit acknowledgement, an attempt fence before durable
+delivery remains blocked. The test-only acknowledgement path accepts only
+`start-authority`/`start-attempt`, optionally followed by the outer
+`launch-edge`, and hashes the complete content-free frontier, predecessor and
+pending-stage fingerprint into the required local same-UID confirmation. It
+retires no pending stage, or only the exact confirmed inert stage or alias, and
+publishes `uncertain-start` with
+`effect_possible: true`, while retaining the open lease, unchanged receipt
+head and two-link marker/witness. It cannot publish a delivery, cleanup,
+receipt, completion or close and never calls the adapter. A changed
+pre-terminal frontier requires a new confirmation; a durable terminal is
+idempotent on normal retry or crash/restart. This is not human authentication,
+non-repudiation, an atomic physical snapshot or hostile-same-UID rollback
+detection. After conclusive
+delivery, ordinary recovery still revalidates the adapter and exact bindings
+before resuming only the missing suffix. Multiple dead recoverers at one
+frontier are retained and only the newest may publish or close.
+
+The durable acknowledgement vocabulary is exact: disposition
+`acknowledge-indeterminate-effect-possible`, event variant
+`operator-acknowledged-missing-delivery`, reason
+`delivery-record-not-durable`, and confirmation provenance
+`local-same-uid-explicit-confirmation-v1`.
 Receipt-first, marker-first, mismatch, malformed/crossed evidence and physical
 drift fail closed. There is no production effect publisher, registry entry,
 lifecycle exposure, process invocation or live-provider evidence; serialized
@@ -598,9 +615,9 @@ pure values alone do not carry state provenance or select a branch.
 
 The fixture plan is assembled through
 `clean-engine-live-provider-effect-fixture-blueprint.mjs`, a process-free pure
-leaf at schema v2. Its fourth component is the
+leaf at schema v3. Its fourth component is the
 `conclusive-adapter`, pinned to contract digest
-`f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+`b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681`.
 The projection also binds fixed Node/protocol/role bytes, closed child
 environment, exact role argv/cwd, four role public identities, four endpoint
 paths, Docker-context path/content commitments and the planned
@@ -612,8 +629,9 @@ boundaries. Private role seeds and path/challenge commitments derive from the
 private observation binding key; no key or raw path is serialized. No
 persisted receipt/journal generation advances: receipt v6, slot v7,
 recovery/root v6 and close v8 remain unchanged. The process-free blueprint
-advances to v2; new adapter contract/result and private tail-observation
-domains start at v1. Operation-contract digests remain unchanged.
+advances to v3; the fixture operation contract, fixture `uncertain-start` and
+adapter contract/result advance to v2. The production operation contract and
+digest remain v1 and unchanged.
 
 The adapter has no filesystem, network, process, provider or
 runtime-publication capability and returns only a zero child handle,

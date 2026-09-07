@@ -123,6 +123,11 @@ import {
   COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND,
   COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
   COLIMA_LIVE_PROVIDER_EFFECT_BOUNDS,
+  COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION,
+  COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE,
+  COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON,
+  COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_STATEMENT_SCHEMA,
+  COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT,
   COLIMA_LIVE_PROVIDER_EFFECT_ROLES,
   LiveProviderEffectFailure,
   buildColimaLiveProviderEffectEvent,
@@ -176,11 +181,11 @@ const MAX_CONTEXT_TOTAL_BYTES = 2n * 1024n * 1024n * 1024n;
 const OWNER_UID = BigInt(process.getuid());
 const ZERO_SHA256 = "0".repeat(64);
 const PINNED_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_SOURCE_SHA256 =
-  "cb0fe34d1796376289bcd9d51edd186ade31acca18d1eefb15b9d5c8e467dca9";
+  "94afbbcdc522aa0679cc390630cec7366ca290b694f1d4163f4b500273d009e4";
 const PINNED_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_CONTRACT_SHA256 =
-  "f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2";
+  "b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681";
 const PINNED_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_RESULT_SCHEMA =
-  "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v1";
+  "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v2";
 const RECEIPT_STAGING_NAME = ".receipt-publish";
 const ENVIRONMENT_NAME = "environment.json";
 const ENVIRONMENT_STAGING_NAME = ".environment-publish";
@@ -310,11 +315,19 @@ const PROVIDER_EFFECT_RECOVERY_STAGES = Object.freeze({
     disposition: "not-reached",
     links: 0,
   }),
+  "uncertain-start-held": Object.freeze({
+    disposition: "uncertain",
+    links: 2,
+  }),
   "witness-linked": Object.freeze({ disposition: "pending", links: 3 }),
   "witness-unlinked": Object.freeze({ disposition: "pending", links: 1 }),
 });
 const PROVIDER_EFFECT_RECOVERY_TRANSITIONS = Object.freeze({
-  "attempt-fenced": Object.freeze(["attempt-fenced", "witness-unlinked"]),
+  "attempt-fenced": Object.freeze([
+    "attempt-fenced",
+    "uncertain-start-held",
+    "witness-unlinked",
+  ]),
   "authority-held": Object.freeze(["authority-held", "witness-unlinked"]),
   "completion-retired": Object.freeze(["completion-retired"]),
   "marker-held": Object.freeze(["marker-held", "witness-unlinked"]),
@@ -328,6 +341,7 @@ const PROVIDER_EFFECT_RECOVERY_TRANSITIONS = Object.freeze({
   "stage-retired-before-effect": Object.freeze([
     "stage-retired-before-effect",
   ]),
+  "uncertain-start-held": Object.freeze(["uncertain-start-held"]),
   "witness-linked": Object.freeze(["marker-held", "witness-linked"]),
   "witness-unlinked": Object.freeze([
     "completion-retired",
@@ -1245,6 +1259,56 @@ function parseCanonical(path, label, expectedLinks = 1, minimumBytes = 2n) {
   }
   if (!Buffer.from(canonicalBytes(value)).equals(bytes)) fail(`${label} was not canonical JSON`);
   return { bytes, value };
+}
+
+function parseCanonicalBoundArtifact(
+  path,
+  label,
+  expectedIdentity,
+  expectedLinks,
+) {
+  let descriptor;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const before = exactFstat(descriptor);
+    if (
+      !before.isFile() ||
+      before.uid !== OWNER_UID ||
+      before.nlink !== BigInt(expectedLinks) ||
+      (before.mode & 0o7777n) !== 0o600n ||
+      before.size < 1n ||
+      before.size > BigInt(MAX_FILE_BYTES) ||
+      !sameMutationArtifact(before, expectedIdentity)
+    ) {
+      fail(`${label} file was refused`);
+    }
+    const bytes = readFileSync(descriptor);
+    const after = exactFstat(descriptor);
+    const named = exactLstat(path);
+    if (
+      !sameMutationArtifact(before, after) ||
+      !sameMutationArtifact(after, named) ||
+      after.nlink !== BigInt(expectedLinks) ||
+      after.size !== BigInt(bytes.length)
+    ) {
+      fail(`${label} file changed while it was read`);
+    }
+    let value;
+    try {
+      value = JSON.parse(bytes.toString("utf8"));
+    } catch {
+      fail(`${label} was not canonical JSON`);
+    }
+    if (!canonicalBytes(value).equals(bytes)) {
+      fail(`${label} was not canonical JSON`);
+    }
+    return Object.freeze({ bytes, identity: after, value });
+  } catch (error) {
+    if (error instanceof ClosedFailure) throw error;
+    fail(`${label} file was unavailable`, 69);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
 }
 
 function exactKeys(value, keys, label) {
@@ -3645,6 +3709,9 @@ function validateProviderEffectStageEventConsistency(stage, events) {
     canonical(PROVIDER_EFFECT_ATTEMPTED_EVENT_KINDS.slice(0, -1));
   const exactAttemptedCompletion =
     canonical(kinds) === canonical(PROVIDER_EFFECT_ATTEMPTED_EVENT_KINDS);
+  const exactUncertainTerminal =
+    kinds.at(-1) === "uncertain-start" &&
+    kinds.filter((kind) => kind === "uncertain-start").length === 1;
   const exactPreAttemptRetirement =
     kinds.length === 0 || canonical(kinds) === canonical(["start-authority"]);
   const exactPreAttemptCompletion =
@@ -3664,6 +3731,8 @@ function validateProviderEffectStageEventConsistency(stage, events) {
     (stage === "authority-held" &&
       canonical(kinds) !== canonical(["start-authority"])) ||
     (stage === "attempt-fenced" && !exactAttemptedPrefix) ||
+    (stage === "uncertain-start-held" &&
+      !exactUncertainTerminal) ||
     (stage === "witness-unlinked" &&
       !exactPreAttemptRetirement &&
       !exactAttemptedRetirement) ||
@@ -3685,6 +3754,12 @@ function providerEffectCurrentStage(stage, witness, events, previousStage) {
     return stage.metadata.nlink === 1n ? "stage-only" : "marker-linked";
   }
   if (witness !== undefined) {
+    if (events.at(-1)?.value.event_kind === "uncertain-start") {
+      if (witness.metadata.nlink !== 2n) {
+        fail("uncertain provider effect lost its marker");
+      }
+      return "uncertain-start-held";
+    }
     if (events.at(-1)?.value.event_kind === "completion") {
       if (witness.metadata.nlink !== 1n) {
         fail("completed provider effect retained its marker");
@@ -3805,6 +3880,7 @@ function validateLiveProviderEffectRecoveryHistory(
       "authority-held",
       "marker-held",
       "marker-linked",
+      "uncertain-start-held",
       "witness-linked",
     ]).has(recoveryStage);
     validateProviderEffectStageEventConsistency(
@@ -3865,6 +3941,81 @@ function validateLiveProviderEffectRecoveryHistory(
     fail("live provider effect recovery topology regressed");
   }
   return currentStage;
+}
+
+function validateLiveProviderEffectMissingDeliveryResolution(
+  effect,
+  currentStage,
+  receiptState,
+  pendingPublication,
+  mutationStages,
+  run,
+) {
+  const event = effect.events.at(-1);
+  if (event?.value.event_kind !== "uncertain-start") return;
+  const evidence = event.value.evidence;
+  if (
+    evidence.variant !==
+    COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT
+  ) {
+    return;
+  }
+  const statement = evidence.resolution_statement;
+  const recoveryIndex = effect.recoveries.findIndex(
+    (recovery) =>
+      digest(recovery.bytes) === evidence.recovery_claim_sha256,
+  );
+  const recovery =
+    recoveryIndex === -1 ? undefined : effect.recoveries[recoveryIndex];
+  const predecessorSha256 =
+    recoveryIndex <= 0
+      ? ZERO_SHA256
+      : digest(effect.recoveries[recoveryIndex - 1].bytes);
+  const terminalAliasValid = (() => {
+    if (mutationStages.length === 0) return true;
+    if (
+      mutationStages.length !== 1 ||
+      mutationStages[0].metadata.nlink !== 2n ||
+      mutationStages[0].linkedDestination !== event.name
+    ) {
+      return false;
+    }
+    const stage = mutationStages[0];
+    const staged = parseCanonicalBoundArtifact(
+      stage.path,
+      "fixture provider effect terminal resolution stage",
+      stage.metadata,
+      2,
+    );
+    const destination = parseCanonicalBoundArtifact(
+      join(run, event.name),
+      "fixture provider effect terminal resolution event",
+      staged.identity,
+      2,
+    );
+    return staged.bytes.equals(event.bytes) && destination.bytes.equals(event.bytes);
+  })();
+  if (
+    currentStage !== "uncertain-start-held" ||
+    effect.close !== undefined ||
+    recovery === undefined ||
+    recoveryIndex !== effect.recoveries.length - 1 ||
+    recovery.value.observed_evidence_stage !== "attempt-fenced" ||
+    recovery.value.observed_effect_disposition !== "pending" ||
+    recovery.value.observed_evidence_head_sha256 !==
+      statement.event_head_sha256 ||
+    recovery.value.source_head_sha256 !== effect.slot.value.source_head_sha256 ||
+    recovery.value.parent_sha256 !== predecessorSha256 ||
+    statement.predecessor_recovery_claim_sha256 !== predecessorSha256 ||
+    statement.source_sequence !== effect.slot.value.source_sequence ||
+    statement.source_head_sha256 !== effect.slot.value.source_head_sha256 ||
+    receiptState.head.sequence !== effect.slot.value.source_sequence ||
+    receiptState.head_sha256 !== effect.slot.value.source_head_sha256 ||
+    pendingPublication !== undefined ||
+    !terminalAliasValid
+  ) {
+    fail("fixture provider effect missing delivery resolution was refused");
+  }
 }
 
 function loadState(
@@ -4946,6 +5097,14 @@ function loadState(
     const currentStage = validateLiveProviderEffectRecoveryHistory(
       effectState,
       recoveries,
+    );
+    validateLiveProviderEffectMissingDeliveryResolution(
+      effectState,
+      currentStage,
+      receiptState,
+      inventory.pendingPublication,
+      inventory.mutationStages,
+      run,
     );
     const attemptedRetired =
       events.some((event) => event.value.event_kind === "start-attempt") &&
@@ -9999,14 +10158,29 @@ function publishLiveProviderEffectEvent(
     effect.slot.value.journal_sequence,
     effect.events.length,
   );
-  const reassertEventPublication = () => {
-    const current = assertAuthority();
+  const reassertEventPublication = (publicationWitness) => {
+    const current = assertAuthority(publicationWitness);
     const currentEffect = assertLiveProviderEffectOpenState(
       current,
       effect.publicationPlan,
       { allowEffectReceipt: eventKind === "completion" },
     );
+    const currentStage =
+      publicationWitness === undefined
+        ? undefined
+        : current.mutationStages.find(
+            (candidate) => candidate.path === publicationWitness.stagePath,
+          );
     if (
+      (publicationWitness === undefined
+        ? current.mutationStages.length !== 0
+        : current.mutationStages.length !== 1 ||
+          currentStage === undefined ||
+          currentStage.linkedDestination !== undefined ||
+          !sameMutationArtifact(
+            currentStage.metadata,
+            publicationWitness.identity,
+          )) ||
       currentEffect.events.length !== effect.events.length ||
       currentEffect.events.some(
         (entry, index) => !entry.bytes.equals(effect.events[index].bytes),
@@ -10060,7 +10234,7 @@ function publishLiveProviderEffectEvent(
         argumentsValue,
       );
     }
-    const confirmed = assertAuthority();
+    const confirmed = assertAuthority(publicationWitness);
     const confirmedEffect = assertLiveProviderEffectOpenState(
       confirmed,
       effect.publicationPlan,
@@ -15286,6 +15460,7 @@ function liveProviderEffectRecoveryObservation(state) {
     "authority-held",
     "marker-held",
     "marker-linked",
+    "uncertain-start-held",
     "witness-linked",
   ]).has(evidenceStage);
   const topologySha256 =
@@ -15654,6 +15829,421 @@ function validateLiveProviderEffectRecoveryArguments(
   return argumentsValue;
 }
 
+function liveProviderEffectMissingDeliveryPrefix(effect) {
+  const kinds = effect.events.map((event) => event.value.event_kind);
+  const withoutLaunch = canonical(kinds) ===
+    canonical(["start-authority", "start-attempt"]);
+  const withLaunch = canonical(kinds) ===
+    canonical(["start-authority", "start-attempt", "launch-edge"]);
+  if (
+    effect.currentStage !== "attempt-fenced" ||
+    (!withoutLaunch && !withLaunch) ||
+    effect.events.some(
+      (event) => event.value.event_kind === "delivery-result",
+    )
+  ) {
+    fail("fixture provider effect missing delivery frontier was refused", 73);
+  }
+  const attempt = effect.events[1];
+  const launchEdge = withLaunch ? effect.events[2] : undefined;
+  if (
+    attempt?.value.event_kind !== "start-attempt" ||
+    (launchEdge !== undefined &&
+      (launchEdge.value.event_kind !== "launch-edge" ||
+        launchEdge.value.evidence.child_role !== "outer"))
+  ) {
+    fail("fixture provider effect missing delivery frontier was refused", 73);
+  }
+  return Object.freeze({ attempt, launchEdge });
+}
+
+function validateLiveProviderEffectPendingRecoveryCandidate(
+  state,
+  effect,
+  parsed,
+) {
+  const expectedSequence =
+    (state.mutationRecoveries.at(-1)?.value.sequence ?? -1) + 1;
+  const candidate = {
+    ...parsed,
+    name: recoveryFileName(
+      effect.slot.value.journal_sequence,
+      expectedSequence,
+    ),
+  };
+  validateRecoveryClaims(
+    [...state.mutationRecoveries, candidate],
+    effect.slot.value.fixture_id,
+    effect.slot,
+    undefined,
+  );
+  const expectedObservation = liveProviderEffectRecoveryObservation(state);
+  if (
+    parsed.value.sequence !== expectedSequence ||
+    parsed.value.source_head_sha256 !== state.receiptState.head_sha256 ||
+    canonical({
+      observed_effect_disposition:
+        parsed.value.observed_effect_disposition,
+      observed_effect_name: parsed.value.observed_effect_name,
+      observed_evidence_head_sha256:
+        parsed.value.observed_evidence_head_sha256,
+      observed_evidence_prefix_sha256:
+        parsed.value.observed_evidence_prefix_sha256,
+      observed_evidence_stage: parsed.value.observed_evidence_stage,
+      observed_residual_sha256: parsed.value.observed_residual_sha256,
+      observed_settlement_sha256:
+        parsed.value.observed_settlement_sha256,
+    }) !== canonical(expectedObservation)
+  ) {
+    fail("fixture provider effect pending recovery claim was refused", 73);
+  }
+}
+
+function validateLiveProviderEffectPendingEventCandidate(
+  effect,
+  parsed,
+) {
+  const eventKind = parsed.value?.event_kind;
+  const currentCount = effect.events.length;
+  const allowed =
+    (currentCount === 2 &&
+      new Set(["launch-edge", "uncertain-start"]).has(eventKind)) ||
+    (currentCount === 3 &&
+      new Set(["delivery-result", "uncertain-start"]).has(eventKind));
+  if (!allowed) {
+    fail("fixture provider effect pending event was refused", 73);
+  }
+  try {
+    validateColimaLiveProviderEffectEventHistory(
+      [...effect.events.map((event) => event.value), parsed.value],
+      {
+        publicationPlan: effect.publicationPlan,
+        publisherAuthorityChain: providerEffectPublisherAuthorityChain(
+          effect.events,
+          effect.recoveries,
+          effect.witness,
+          { includePending: true },
+        ),
+        source: effect.source,
+        witness: effect.witness.value,
+      },
+    );
+  } catch (error) {
+    if (error instanceof LiveProviderEffectFailure) {
+      fail("fixture provider effect pending event was refused", error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function liveProviderEffectMissingDeliveryPendingStage(state, effect) {
+  if (state.mutationStages.length === 0) {
+    return Object.freeze({
+      disposition: "absent",
+      fingerprintSha256: ZERO_SHA256,
+      stage: undefined,
+    });
+  }
+  if (state.mutationStages.length !== 1) {
+    fail("fixture provider effect pending stage set was refused", 73);
+  }
+  const stage = state.mutationStages[0];
+  const links = Number(stage.metadata.nlink);
+  if (!new Set([1, 2]).has(links)) {
+    fail("fixture provider effect pending stage links were refused", 73);
+  }
+  const parsed = parseCanonicalBoundArtifact(
+    stage.path,
+    "fixture provider effect pending mutation stage",
+    stage.metadata,
+    links,
+  );
+  if (links === 1) {
+    if (parsed.value?.schema === MUTATION_RECOVERY_SCHEMA) {
+      validateLiveProviderEffectPendingRecoveryCandidate(
+        state,
+        effect,
+        parsed,
+      );
+    } else {
+      validateLiveProviderEffectPendingEventCandidate(effect, parsed);
+    }
+  } else {
+    const latestEvent = effect.events.at(-1);
+    const latestRecovery = state.mutationRecoveries.at(-1);
+    if (
+      stage.linkedDestination === undefined ||
+      (stage.linkedDestination !== latestEvent?.name &&
+        stage.linkedDestination !== latestRecovery?.name)
+    ) {
+      fail("fixture provider effect linked pending stage was refused", 73);
+    }
+    const destinationPath = join(state.run, stage.linkedDestination);
+    const destination = parseCanonicalBoundArtifact(
+      destinationPath,
+      "fixture provider effect linked pending destination",
+      parsed.identity,
+      2,
+    );
+    if (!destination.bytes.equals(parsed.bytes)) {
+      fail("fixture provider effect linked pending stage changed", 73);
+    }
+  }
+  const fingerprintSha256 = digest(canonicalBytes({
+    content_sha256: digest(parsed.bytes),
+    destination_name: stage.linkedDestination ?? "none",
+    device: String(parsed.identity.dev),
+    inode: String(parsed.identity.ino),
+    links,
+    mode: modeString(parsed.identity),
+    name: stage.name,
+    schema:
+      "synveda.clean-engine.colima-live-fixture-provider-effect-pending-stage-fingerprint.v1",
+    size: String(parsed.identity.size),
+    uid: String(parsed.identity.uid),
+  }));
+  return Object.freeze({
+    disposition:
+      links === 1 ? "one-link-inert" : "two-link-durable-alias",
+    fingerprintSha256,
+    stage: Object.freeze({
+      bytes: parsed.bytes,
+      identity: parsed.identity,
+      linkedDestination: stage.linkedDestination,
+      name: stage.name,
+      path: stage.path,
+      value: parsed.value,
+    }),
+  });
+}
+
+function liveProviderEffectMissingDeliveryResolutionStatement(state, effect) {
+  if (state.pendingPublication !== undefined) {
+    fail("fixture provider effect missing delivery receipt frontier changed", 73);
+  }
+  const { attempt, launchEdge } =
+    liveProviderEffectMissingDeliveryPrefix(effect);
+  const pending = liveProviderEffectMissingDeliveryPendingStage(
+    state,
+    effect,
+  );
+  const predecessor = state.mutationRecoveries.at(-1);
+  return Object.freeze({
+    confirmation_provenance:
+      COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE,
+    disposition: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION,
+    event_count: effect.events.length,
+    event_head_sha256: digest(effect.events.at(-1).bytes),
+    fixture_id: effect.publicationPlan.fixture_id,
+    launch_edge_sha256:
+      launchEdge === undefined ? ZERO_SHA256 : digest(launchEdge.bytes),
+    marker_link_count: 2,
+    marker_witness_same_inode: true,
+    operation_contract_sha256:
+      effect.publicationPlan.operation_contract_sha256,
+    operation_kind: effect.publicationPlan.operation_kind,
+    operation_plan_sha256: liveProviderEffectValueDigest(
+      effect.publicationPlan,
+    ),
+    pending_stage_disposition: pending.disposition,
+    pending_stage_fingerprint_sha256: pending.fingerprintSha256,
+    predecessor_recovery_claim_sha256:
+      predecessor === undefined ? ZERO_SHA256 : digest(predecessor.bytes),
+    reason: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON,
+    schema: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_STATEMENT_SCHEMA,
+    slot_sequence: effect.slot.value.journal_sequence,
+    slot_sha256: digest(effect.slot.bytes),
+    source_head_sha256: effect.slot.value.source_head_sha256,
+    source_sequence: effect.slot.value.source_sequence,
+    start_attempt_sha256: digest(attempt.bytes),
+    witness_identity_sha256:
+      effect.witness.value.marker_witness_identity_sha256,
+    witness_sha256: digest(effect.witness.bytes),
+  });
+}
+
+function liveProviderEffectMissingDeliveryConfirmation(statementSha256) {
+  if (!onlyLowerHex(statementSha256, 64) || statementSha256 === ZERO_SHA256) {
+    fail("fixture provider effect missing delivery statement was refused", 70);
+  }
+  return `${COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION}:${statementSha256}`;
+}
+
+function assertLiveProviderEffectTerminalResolutionStage(state, effect) {
+  if (state.mutationStages.length === 0) return;
+  if (
+    state.mutationStages.length !== 1 ||
+    state.mutationStages[0].metadata.nlink !== 2n ||
+    state.mutationStages[0].linkedDestination !== effect.events.at(-1)?.name
+  ) {
+    fail("fixture provider effect terminal resolution stage was refused", 73);
+  }
+  const stage = state.mutationStages[0];
+  const staged = parseCanonicalBoundArtifact(
+    stage.path,
+    "fixture provider effect terminal resolution stage",
+    stage.metadata,
+    2,
+  );
+  const destination = parseCanonicalBoundArtifact(
+    join(state.run, stage.linkedDestination),
+    "fixture provider effect terminal resolution event",
+    staged.identity,
+    2,
+  );
+  if (
+    !staged.bytes.equals(effect.events.at(-1).bytes) ||
+    !destination.bytes.equals(effect.events.at(-1).bytes)
+  ) {
+    fail("fixture provider effect terminal resolution stage changed", 73);
+  }
+}
+
+function liveProviderEffectMissingDeliveryDurableStatement(value) {
+  const {
+    pending_stage_disposition: _pendingStageDisposition,
+    pending_stage_fingerprint_sha256: _pendingStageFingerprintSha256,
+    ...durable
+  } = value;
+  return durable;
+}
+
+function assertLiveProviderEffectMissingDeliveryPredecessorsAbsent(
+  state,
+  pending,
+  ownerProbe = defaultMutationOwnerProbe,
+) {
+  const owners = [
+    state.mutationLease?.value,
+    state.mutationRecoveries.at(-1)?.value,
+    pending.stage?.value?.schema === MUTATION_RECOVERY_SCHEMA
+      ? pending.stage.value
+      : undefined,
+  ].filter((value, index, values) =>
+    value !== undefined && values.indexOf(value) === index
+  );
+  for (const owner of owners) {
+    const ownerState = mutationOwnerState(owner, ownerProbe);
+    if (ownerState === "current" || ownerState === "unknown") {
+      fail(
+        "fixture provider effect missing delivery predecessor is active or could not be identified",
+        73,
+      );
+    }
+  }
+}
+
+function retireExactLiveProviderEffectMissingDeliveryStage(
+  roots,
+  argumentsValue,
+  statement,
+  testCheckpoint,
+) {
+  let state = loadState(roots, false);
+  let verified = validateLiveProviderEffectRecoveryPhysicalState(
+    state,
+    argumentsValue,
+    { allowMissingDeliveryAttempt: true },
+  );
+  let currentStatement =
+    liveProviderEffectMissingDeliveryResolutionStatement(
+      state,
+      verified.effect,
+    );
+  if (
+    !liveProviderEffectBytes(currentStatement).equals(
+      liveProviderEffectBytes(statement),
+    )
+  ) {
+    fail("fixture provider effect missing delivery confirmation changed", 73);
+  }
+  const pending = liveProviderEffectMissingDeliveryPendingStage(
+    state,
+    verified.effect,
+  );
+  assertLiveProviderEffectMissingDeliveryPredecessorsAbsent(state, pending);
+  if (pending.stage === undefined) return state;
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "before-missing-delivery-stage-retirement",
+  );
+  const runMetadata = ownedPrivateDirectory(state.run, "active run state");
+  const current = parseCanonicalBoundArtifact(
+    pending.stage.path,
+    "fixture provider effect missing delivery pending stage",
+    pending.stage.identity,
+    Number(pending.stage.identity.nlink),
+  );
+  if (
+    current.identity.dev !== runMetadata.dev ||
+    !current.bytes.equals(pending.stage.bytes)
+  ) {
+    fail("fixture provider effect missing delivery pending stage changed", 73);
+  }
+  if (pending.stage.linkedDestination !== undefined) {
+    const destination = parseCanonicalBoundArtifact(
+      join(state.run, pending.stage.linkedDestination),
+      "fixture provider effect missing delivery pending destination",
+      pending.stage.identity,
+      2,
+    );
+    if (
+      destination.identity.dev !== runMetadata.dev ||
+      !destination.bytes.equals(pending.stage.bytes)
+    ) {
+      fail("fixture provider effect missing delivery pending link changed", 73);
+    }
+  }
+  state = loadState(roots, false);
+  verified = validateLiveProviderEffectRecoveryPhysicalState(
+    state,
+    argumentsValue,
+    { allowMissingDeliveryAttempt: true },
+  );
+  currentStatement = liveProviderEffectMissingDeliveryResolutionStatement(
+    state,
+    verified.effect,
+  );
+  if (
+    !liveProviderEffectBytes(currentStatement).equals(
+      liveProviderEffectBytes(statement),
+    )
+  ) {
+    fail("fixture provider effect missing delivery pending stage changed", 73);
+  }
+  try {
+    unlinkSync(pending.stage.path);
+    syncDirectory(state.run);
+  } catch {
+    fail("fixture provider effect missing delivery stage retirement failed", 70);
+  }
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "after-missing-delivery-stage-retirement",
+  );
+  state = loadState(roots, false);
+  verified = validateLiveProviderEffectRecoveryPhysicalState(
+    state,
+    argumentsValue,
+    { allowMissingDeliveryAttempt: true },
+  );
+  if (
+    state.mutationStages.length !== 0 ||
+    canonical(
+      liveProviderEffectMissingDeliveryDurableStatement(
+        liveProviderEffectMissingDeliveryResolutionStatement(
+          state,
+          verified.effect,
+        ),
+      ),
+    ) !==
+      canonical(liveProviderEffectMissingDeliveryDurableStatement(statement))
+  ) {
+    fail("fixture provider effect missing delivery stage did not retire", 70);
+  }
+  return state;
+}
+
 function validateLiveProviderEffectConclusiveCanaryEvidence(
   effect,
   argumentsValue,
@@ -15732,7 +16322,17 @@ function liveProviderEffectHasConclusiveDelivery(effect, argumentsValue) {
 function validateLiveProviderEffectRecoveryPhysicalState(
   state,
   argumentsValue,
+  {
+    allowMissingDeliveryAttempt = false,
+    allowUncertainTerminal = false,
+  } = {},
 ) {
+  if (
+    typeof allowMissingDeliveryAttempt !== "boolean" ||
+    typeof allowUncertainTerminal !== "boolean"
+  ) {
+    fail("fixture provider effect recovery physical policy was refused", 70);
+  }
   const effect = state.liveProviderFixtureEffect;
   if (effect === undefined) {
     fail("fixture provider effect recovery state was unavailable", 73);
@@ -15848,9 +16448,16 @@ function validateLiveProviderEffectRecoveryPhysicalState(
   const observation = liveProviderEffectRecoveryObservation(state);
   if (
     observation.observed_evidence_stage === "attempt-fenced" &&
-    !liveProviderEffectHasConclusiveDelivery(effect, argumentsValue)
+    !liveProviderEffectHasConclusiveDelivery(effect, argumentsValue) &&
+    !allowMissingDeliveryAttempt
   ) {
     fail("fixture provider effect attempt fence requires operator resolution", 73);
+  }
+  if (
+    observation.observed_evidence_stage === "uncertain-start-held" &&
+    !allowUncertainTerminal
+  ) {
+    fail("fixture provider effect uncertainty is terminal", 73);
   }
   return Object.freeze({ effect, observation });
 }
@@ -15885,6 +16492,409 @@ export function liveProviderFixtureEffectRecoveryConfirmationForTest(
   return providerRecoveryConfirmation(base);
 }
 
+function validateLiveProviderEffectMissingDeliveryBase(state) {
+  const base = providerRecoveryBase(state);
+  if (
+    base.operation.action !== COLIMA_LIVE_PROVIDER_EFFECT_ACTION ||
+    liveProviderEffectFixtureOnly(
+      base.operation.operation_kind,
+      base.operation.operation_contract_sha256,
+    ) !== true ||
+    COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_CONTRACT.capabilities
+      .missing_delivery_resolution_authorized !== true
+  ) {
+    fail("fixture provider effect missing delivery action was refused", 73);
+  }
+  return base;
+}
+
+function liveProviderEffectDurableMissingDeliveryResolution(effect) {
+  const event = effect.events.at(-1);
+  return event?.value.event_kind === "uncertain-start" &&
+    event.value.evidence.variant ===
+      COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT
+    ? event
+    : undefined;
+}
+
+export function liveProviderFixtureEffectMissingDeliveryResolutionConfirmationForTest(
+  argumentsValue,
+) {
+  const admittedArguments = validateLiveProviderEffectRecoveryArguments(
+    argumentsValue,
+    { confirmation: false, testCheckpoint: false },
+  );
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  const state = loadState(roots, false);
+  validateLiveProviderEffectMissingDeliveryBase(state);
+  const { effect } = validateLiveProviderEffectRecoveryPhysicalState(
+    state,
+    admittedArguments,
+    {
+      allowMissingDeliveryAttempt: true,
+      allowUncertainTerminal: true,
+    },
+  );
+  const terminal = liveProviderEffectDurableMissingDeliveryResolution(effect);
+  if (terminal !== undefined) {
+    assertLiveProviderEffectTerminalResolutionStage(state, effect);
+    return liveProviderEffectMissingDeliveryConfirmation(
+      terminal.value.evidence.resolution_statement_sha256,
+    );
+  }
+  const statement = liveProviderEffectMissingDeliveryResolutionStatement(
+    state,
+    effect,
+  );
+  return liveProviderEffectMissingDeliveryConfirmation(
+    liveProviderEffectValueDigest(statement),
+  );
+}
+
+function retireExactLiveProviderEffectTerminalResolutionAlias(
+  roots,
+  argumentsValue,
+  effect,
+  testCheckpoint,
+) {
+  const state = loadState(roots, false);
+  const verified = validateLiveProviderEffectRecoveryPhysicalState(
+    state,
+    argumentsValue,
+    { allowUncertainTerminal: true },
+  );
+  const terminal = liveProviderEffectDurableMissingDeliveryResolution(
+    verified.effect,
+  );
+  if (
+    terminal === undefined ||
+    !terminal.bytes.equals(effect.events.at(-1).bytes)
+  ) {
+    fail("fixture provider effect terminal resolution changed", 73);
+  }
+  assertLiveProviderEffectTerminalResolutionStage(state, verified.effect);
+  if (state.mutationStages.length === 0) return terminal;
+  const stage = state.mutationStages[0];
+  const pending = Object.freeze({
+    stage: Object.freeze({
+      value: state.mutationRecoveries.at(-1)?.value,
+    }),
+  });
+  assertLiveProviderEffectMissingDeliveryPredecessorsAbsent(state, pending);
+  const staged = parseCanonicalBoundArtifact(
+    stage.path,
+    "fixture provider effect terminal resolution stage",
+    stage.metadata,
+    2,
+  );
+  const destination = parseCanonicalBoundArtifact(
+    join(state.run, stage.linkedDestination),
+    "fixture provider effect terminal resolution event",
+    staged.identity,
+    2,
+  );
+  if (
+    !staged.bytes.equals(terminal.bytes) ||
+    !destination.bytes.equals(terminal.bytes)
+  ) {
+    fail("fixture provider effect terminal resolution alias changed", 73);
+  }
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "before-missing-delivery-terminal-stage-retirement",
+  );
+  const reasserted = loadState(roots, false);
+  const reassertedEffect = validateLiveProviderEffectRecoveryPhysicalState(
+    reasserted,
+    argumentsValue,
+    { allowUncertainTerminal: true },
+  ).effect;
+  const reassertedTerminal =
+    liveProviderEffectDurableMissingDeliveryResolution(reassertedEffect);
+  assertLiveProviderEffectTerminalResolutionStage(
+    reasserted,
+    reassertedEffect,
+  );
+  if (
+    reassertedTerminal === undefined ||
+    !reassertedTerminal.bytes.equals(terminal.bytes)
+  ) {
+    fail("fixture provider effect terminal resolution alias changed", 73);
+  }
+  if (reasserted.mutationStages.length === 0) {
+    return reassertedTerminal;
+  }
+  const reassertedStage = reasserted.mutationStages[0];
+  if (
+    reassertedStage.path !== stage.path ||
+    !sameMutationArtifact(reassertedStage.metadata, stage.metadata)
+  ) {
+    fail("fixture provider effect terminal resolution alias changed", 73);
+  }
+  assertLiveProviderEffectMissingDeliveryPredecessorsAbsent(
+    reasserted,
+    pending,
+  );
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "immediately-before-missing-delivery-terminal-stage-unlink",
+  );
+  try {
+    unlinkSync(reassertedStage.path);
+    syncDirectory(reasserted.run);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      const raced = loadState(roots, false);
+      const racedEffect = validateLiveProviderEffectRecoveryPhysicalState(
+        raced,
+        argumentsValue,
+        { allowUncertainTerminal: true },
+      ).effect;
+      const racedTerminal =
+        liveProviderEffectDurableMissingDeliveryResolution(racedEffect);
+      if (
+        raced.mutationStages.length === 0 &&
+        racedTerminal !== undefined &&
+        racedTerminal.bytes.equals(terminal.bytes)
+      ) {
+        return racedTerminal;
+      }
+    }
+    fail("fixture provider effect terminal resolution stage retirement failed", 70);
+  }
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "after-missing-delivery-terminal-stage-retirement",
+  );
+  const durable = loadState(roots, false);
+  const durableEffect = validateLiveProviderEffectRecoveryPhysicalState(
+    durable,
+    argumentsValue,
+    { allowUncertainTerminal: true },
+  ).effect;
+  const durableTerminal =
+    liveProviderEffectDurableMissingDeliveryResolution(durableEffect);
+  if (
+    durable.mutationStages.length !== 0 ||
+    durableTerminal === undefined ||
+    !durableTerminal.bytes.equals(terminal.bytes)
+  ) {
+    fail("fixture provider effect terminal resolution alias did not retire", 70);
+  }
+  return durableTerminal;
+}
+
+export function resolveColimaLiveProviderEffectMissingDeliveryForTest(
+  argumentsValue,
+) {
+  const admittedArguments = validateLiveProviderEffectRecoveryArguments(
+    argumentsValue,
+    { confirmation: true, testCheckpoint: true },
+  );
+  const { testCheckpoint } = admittedArguments;
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  let state = loadState(roots, false);
+  validateLiveProviderEffectMissingDeliveryBase(state);
+  let verified = validateLiveProviderEffectRecoveryPhysicalState(
+    state,
+    admittedArguments,
+    {
+      allowMissingDeliveryAttempt: true,
+      allowUncertainTerminal: true,
+    },
+  );
+  let effect = verified.effect;
+  const terminal = liveProviderEffectDurableMissingDeliveryResolution(effect);
+  if (terminal !== undefined) {
+    const expected = liveProviderEffectMissingDeliveryConfirmation(
+      terminal.value.evidence.resolution_statement_sha256,
+    );
+    if (admittedArguments.confirmation !== expected) {
+      fail("fixture provider effect missing delivery confirmation was refused", 64);
+    }
+    return retireExactLiveProviderEffectTerminalResolutionAlias(
+      roots,
+      admittedArguments,
+      effect,
+      testCheckpoint,
+    ).value;
+  }
+  const statement = liveProviderEffectMissingDeliveryResolutionStatement(
+    state,
+    effect,
+  );
+  const statementSha256 = liveProviderEffectValueDigest(statement);
+  if (
+    admittedArguments.confirmation !==
+    liveProviderEffectMissingDeliveryConfirmation(statementSha256)
+  ) {
+    fail("fixture provider effect missing delivery confirmation was refused", 64);
+  }
+  state = retireExactLiveProviderEffectMissingDeliveryStage(
+    roots,
+    admittedArguments,
+    statement,
+    testCheckpoint,
+  );
+  verified = validateLiveProviderEffectRecoveryPhysicalState(
+    state,
+    admittedArguments,
+    { allowMissingDeliveryAttempt: true },
+  );
+  effect = verified.effect;
+  const durableStatement =
+    liveProviderEffectMissingDeliveryDurableStatement(statement);
+  const assertDurableFrontier = (current, phase) => {
+    const currentEffect = validateLiveProviderEffectRecoveryPhysicalState(
+      current,
+      admittedArguments,
+      { allowMissingDeliveryAttempt: true },
+    ).effect;
+    if (phase === "publication") {
+      const currentStatement =
+        liveProviderEffectMissingDeliveryResolutionStatement(
+          current,
+          currentEffect,
+        );
+      if (
+        current.mutationStages.length !== 1 ||
+        current.mutationStages[0].metadata.nlink !== 1n ||
+        currentStatement.pending_stage_disposition !== "one-link-inert" ||
+        current.mutationStages[0].linkedDestination !== undefined ||
+        current.mutationStages[0].path === undefined ||
+        canonical(
+          liveProviderEffectMissingDeliveryDurableStatement(currentStatement),
+        ) !== canonical(durableStatement)
+      ) {
+        fail("fixture provider effect missing delivery claim frontier changed", 73);
+      }
+      return;
+    }
+    const latest = current.mutationRecoveries.at(-1);
+    if (
+      phase !== "durable" ||
+      current.mutationStages.length !== 0 ||
+      latest === undefined ||
+      latest.value.parent_sha256 !==
+        statement.predecessor_recovery_claim_sha256 ||
+      latest.value.observed_evidence_head_sha256 !==
+        statement.event_head_sha256 ||
+      latest.value.observed_evidence_stage !== "attempt-fenced" ||
+      latest.value.source_head_sha256 !== statement.source_head_sha256 ||
+      canonical(
+        liveProviderEffectMissingDeliveryDurableStatement({
+          ...liveProviderEffectMissingDeliveryResolutionStatement(
+            current,
+            currentEffect,
+          ),
+          predecessor_recovery_claim_sha256:
+            statement.predecessor_recovery_claim_sha256,
+        }),
+      ) !== canonical(durableStatement)
+    ) {
+      fail("fixture provider effect missing delivery claim frontier changed", 73);
+    }
+  };
+  const held = acquireProviderRecovery(
+    roots,
+    providerRecoveryConfirmation(providerRecoveryBase(state)),
+    defaultMutationOwnerProbe,
+    {
+      afterAuthorityObserver: () =>
+        callLiveProviderEffectCheckpoint(
+          testCheckpoint,
+          "after-missing-delivery-recovery-claim-stage",
+        ),
+      afterLinkObserver: () =>
+        callLiveProviderEffectCheckpoint(
+          testCheckpoint,
+          "after-missing-delivery-recovery-claim-link",
+        ),
+    },
+    assertDurableFrontier,
+    true,
+    true,
+  );
+  callLiveProviderEffectCheckpoint(
+    testCheckpoint,
+    "after-missing-delivery-recovery-claim",
+  );
+  const assertHeld = (publicationWitness) =>
+    assertLiveProviderEffectRecoveryHeld(
+      roots,
+      held,
+      admittedArguments,
+      {
+        missingDeliveryStatementSha256: statementSha256,
+        publicationWitness,
+      },
+    );
+  const reproof = observeLiveProviderEffectTailReproof(
+    roots,
+    admittedArguments,
+    assertHeld,
+  );
+  state = reproof.state;
+  effect = reproof.effect;
+  const prefix = liveProviderEffectMissingDeliveryPrefix(effect);
+  const published = publishLiveProviderEffectEvent(
+    roots,
+    state,
+    admittedArguments,
+    "uncertain-start",
+    Object.freeze({
+      confirmation_provenance:
+        COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE,
+      delivery_result_sha256: ZERO_SHA256,
+      disposition: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION,
+      effect_possible: true,
+      launch_edge_sha256:
+        prefix.launchEdge === undefined
+          ? ZERO_SHA256
+          : digest(prefix.launchEdge.bytes),
+      marker_link_count: 2,
+      reason: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON,
+      recovery_claim_sha256: digest(held.bytes),
+      recovery_invocation_authorized: false,
+      replay_authorized: false,
+      resolution_statement: statement,
+      resolution_statement_sha256: statementSha256,
+      start_attempt_sha256: digest(prefix.attempt.bytes),
+      variant: COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT,
+      witness_identity_sha256:
+        effect.witness.value.marker_witness_identity_sha256,
+    }),
+    assertHeld,
+    testCheckpoint,
+  );
+  state = published.state;
+  effect = validateLiveProviderEffectRecoveryPhysicalState(
+    state,
+    admittedArguments,
+    { allowUncertainTerminal: true },
+  ).effect;
+  const durable = liveProviderEffectDurableMissingDeliveryResolution(effect);
+  if (
+    durable === undefined ||
+    !durable.bytes.equals(published.event.bytes) ||
+    state.mutationStages.length !== 0 ||
+    state.pendingPublication !== undefined ||
+    state.mutationLease === undefined ||
+    effect.witness.metadata.nlink !== 2n
+  ) {
+    fail("fixture provider effect missing delivery resolution was not durable", 70);
+  }
+  return durable.value;
+}
+
 export function backgroundProviderCleanupRecoveryConfirmationForExecutor(
   argumentsValue,
 ) {
@@ -15912,6 +16922,7 @@ function acquireProviderRecovery(
   publicationHolds = {},
   additionalReassertObservation = undefined,
   requireLeaseAndLatestAbsent = false,
+  requirePreReconciledStages = false,
 ) {
   if (
     additionalReassertObservation !== undefined &&
@@ -15919,7 +16930,10 @@ function acquireProviderRecovery(
   ) {
     fail("provider recovery physical observer was refused", 70);
   }
-  if (typeof requireLeaseAndLatestAbsent !== "boolean") {
+  if (
+    typeof requireLeaseAndLatestAbsent !== "boolean" ||
+    typeof requirePreReconciledStages !== "boolean"
+  ) {
     fail("provider recovery predecessor policy was refused", 70);
   }
   const assertAbsentPredecessors = (base, latest) => {
@@ -15946,11 +16960,17 @@ function acquireProviderRecovery(
     fail("provider recovery confirmation was refused", 64);
   }
   const observedLatest = state.mutationRecoveries.at(-1);
+  if (requirePreReconciledStages && state.mutationStages.length !== 0) {
+    fail("provider recovery pre-reconciled stage frontier changed", 73);
+  }
   assertAbsentPredecessors(observedBase, observedLatest);
-  state = reconcileMutationStages(roots);
+  state = requirePreReconciledStages
+    ? loadState(roots, false)
+    : reconcileMutationStages(roots);
   const base = providerRecoveryBase(state);
   const latest = state.mutationRecoveries.at(-1);
   if (
+    (requirePreReconciledStages && state.mutationStages.length !== 0) ||
     !base.lease.bytes.equals(observedBase.lease.bytes) ||
     (observedLatest === undefined
       ? latest !== undefined
@@ -16022,7 +17042,9 @@ function acquireProviderRecovery(
       fail("provider recovery observation changed before claim publication", 73);
     }
     assertAbsentPredecessors(base, latest);
-    if (additionalReassertObservation?.(current) !== undefined) {
+    if (
+      additionalReassertObservation?.(current, "publication") !== undefined
+    ) {
       fail("provider recovery physical observer returned a value", 70);
     }
   };
@@ -16068,7 +17090,7 @@ function acquireProviderRecovery(
     fail("provider recovery source changed", 73);
   }
   assertAbsentPredecessors(base, latest);
-  if (additionalReassertObservation?.(state) !== undefined) {
+  if (additionalReassertObservation?.(state, "durable") !== undefined) {
     fail("provider recovery physical observer returned a value", 70);
   }
   return held;
@@ -16193,7 +17215,15 @@ function assertLiveProviderEffectRecoveryHeld(
   roots,
   held,
   argumentsValue,
+  { missingDeliveryStatementSha256, publicationWitness } = {},
 ) {
+  if (
+    missingDeliveryStatementSha256 !== undefined &&
+    (!onlyLowerHex(missingDeliveryStatementSha256, 64) ||
+      missingDeliveryStatementSha256 === ZERO_SHA256)
+  ) {
+    fail("fixture provider effect recovery terminal policy was refused", 70);
+  }
   const currentClaim = parseCanonical(
     held.path,
     "fixture provider effect recovery claim",
@@ -16218,6 +17248,34 @@ function assertLiveProviderEffectRecoveryHeld(
     }
   }
   const state = loadState(roots, false);
+  if (missingDeliveryStatementSha256 !== undefined) {
+    const publicationStage =
+      publicationWitness === undefined
+        ? undefined
+        : state.mutationStages.find(
+            (candidate) => candidate.path === publicationWitness.stagePath,
+          );
+    if (
+      (publicationWitness === undefined
+        ? state.mutationStages.length !== 0
+        : state.mutationStages.length !== 1 ||
+          publicationStage === undefined ||
+          publicationStage.linkedDestination !== undefined ||
+          !sameMutationArtifact(
+            publicationStage.metadata,
+            publicationWitness.identity,
+          )) ||
+      (publicationWitness !== undefined &&
+        !parseCanonicalBoundArtifact(
+          publicationWitness.stagePath,
+          "fixture provider effect terminal event stage",
+          publicationWitness.identity,
+          1,
+        ).bytes.equals(publicationWitness.bytes))
+    ) {
+      fail("fixture provider effect recovery publication stage changed", 73);
+    }
+  }
   const latest = state.mutationRecoveries.at(-1);
   if (
     latest === undefined ||
@@ -16231,6 +17289,12 @@ function assertLiveProviderEffectRecoveryHeld(
     validateLiveProviderEffectRecoveryPhysicalState(
       state,
       argumentsValue,
+      {
+        allowMissingDeliveryAttempt:
+          missingDeliveryStatementSha256 !== undefined,
+        allowUncertainTerminal:
+          missingDeliveryStatementSha256 !== undefined,
+      },
     );
   const previousStage = held.observation.observed_evidence_stage;
   const currentStage = observation.observed_evidence_stage;
@@ -16258,15 +17322,29 @@ function assertLiveProviderEffectRecoveryHeld(
   const appendedKinds = appendedEvents.map(
     (event) => event.value.event_kind,
   );
+  const missingDeliveryStable =
+    missingDeliveryStatementSha256 !== undefined &&
+    new Set([2, 3]).has(previousEventCount) &&
+    currentEventCount === previousEventCount &&
+    appendedEvents.length === 0;
+  const missingDeliveryAppend =
+    missingDeliveryStatementSha256 !== undefined &&
+    new Set([2, 3]).has(previousEventCount) &&
+    currentEventCount === previousEventCount + 1 &&
+    canonical(appendedKinds) === canonical(["uncertain-start"]) &&
+    appendedEvents[0]?.value.evidence.variant ===
+      COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT;
   const appendedKindsValid = attempted
-    ? previousEventCount >= 4 &&
-      canonical(appendedKinds) ===
-        canonical(
-          PROVIDER_EFFECT_ATTEMPTED_EVENT_KINDS.slice(
-            previousEventCount,
-            currentEventCount,
-          ),
-        )
+    ? missingDeliveryStable ||
+      missingDeliveryAppend ||
+      (previousEventCount >= 4 &&
+        canonical(appendedKinds) ===
+          canonical(
+            PROVIDER_EFFECT_ATTEMPTED_EVENT_KINDS.slice(
+              previousEventCount,
+              currentEventCount,
+            ),
+          ))
     : appendedEvents.length <= 1 &&
       appendedEvents.every(
         (event) => event.value.event_kind === "completion",
@@ -16302,6 +17380,18 @@ function assertLiveProviderEffectRecoveryHeld(
     (claimStartedAtTerminal && !currentAtTerminal)
   ) {
     fail("fixture provider effect recovery observation changed", 73);
+  }
+  if (currentStage === "uncertain-start-held") {
+    const terminal = liveProviderEffectDurableMissingDeliveryResolution(effect);
+    if (
+      missingDeliveryStatementSha256 === undefined ||
+      terminal === undefined ||
+      terminal.value.evidence.resolution_statement_sha256 !==
+        missingDeliveryStatementSha256 ||
+      terminal.value.evidence.recovery_claim_sha256 !== digest(held.bytes)
+    ) {
+      fail("fixture provider effect recovery terminal changed", 73);
+    }
   }
   return state;
 }

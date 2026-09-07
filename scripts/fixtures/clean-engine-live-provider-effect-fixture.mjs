@@ -1593,6 +1593,7 @@ export function cleanEngineLiveProviderEffectFixture(input = {}) {
       recovery_invocation_authorized: false,
       replay_authorized: false,
       start_attempt_sha256: valueDigest(attempt),
+      variant: "durable-delivery-incomplete-evidence",
     });
     return publicFixture(context);
   }

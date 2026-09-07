@@ -24,7 +24,7 @@ export const COLIMA_LIVE_PROVIDER_EFFECT_ACTION = "provider-effect";
 export const COLIMA_LIVE_PROVIDER_EFFECT_OPERATION_KIND =
   "colima-live-provider-effect-v1";
 export const COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_OPERATION_KIND =
-  "colima-live-fixture-provider-effect-v1";
+  "colima-live-fixture-provider-effect-v2";
 export const COLIMA_LIVE_PROVIDER_EFFECT_STATE_INTEGRATION =
   "mutation-journal-v7-sibling-effect-only";
 
@@ -139,14 +139,19 @@ export const COLIMA_LIVE_PROVIDER_EFFECT_EVENT_KINDS = Object.freeze([
   "completion",
 ]);
 
-function schemaMap(prefix) {
+function schemaMap(
+  prefix,
+  { contractVersion = 1, uncertainStartVersion = 1 } = {},
+) {
   return Object.freeze({
-    contract: `${prefix}-operation-contract.v1`,
+    contract: `${prefix}-operation-contract.v${contractVersion}`,
     event: Object.freeze(
       Object.fromEntries(
         COLIMA_LIVE_PROVIDER_EFFECT_EVENT_KINDS.map((kind) => [
           kind,
-          `${prefix}-${kind}.v1`,
+          `${prefix}-${kind}.v${
+            kind === "uncertain-start" ? uncertainStartVersion : 1
+          }`,
         ]),
       ),
     ),
@@ -162,6 +167,7 @@ export const COLIMA_LIVE_PROVIDER_EFFECT_SCHEMAS = schemaMap(
 );
 export const COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_SCHEMAS = schemaMap(
   "synveda.clean-engine.colima-live-fixture-provider-effect",
+  { contractVersion: 2, uncertainStartVersion: 2 },
 );
 
 const IDENTITY_FIELDS = Object.freeze(["device", "inode", "mode", "uid"]);
@@ -235,6 +241,10 @@ const CAPABILITY_FIELDS = Object.freeze([
   "start_authority_publication_authorized",
   "state_effect_slot_publication_authorized",
   "state_evidence_publication_authorized",
+]);
+const FIXTURE_CAPABILITY_FIELDS = Object.freeze([
+  ...CAPABILITY_FIELDS,
+  "missing_delivery_resolution_authorized",
 ]);
 const CONTRACT_FIELDS = Object.freeze([
   "action",
@@ -508,13 +518,59 @@ const CREATE_SETTLEMENT_FIELDS = Object.freeze([
   "start_attempt_sha256",
   "variant",
 ]);
-const UNCERTAIN_START_FIELDS = Object.freeze([
+const UNCERTAIN_START_V1_FIELDS = Object.freeze([
   "delivery_result_sha256",
   "marker_link_count",
   "reason",
   "recovery_invocation_authorized",
   "replay_authorized",
   "start_attempt_sha256",
+]);
+const FIXTURE_UNCERTAIN_START_DELIVERED_V2_FIELDS = Object.freeze([
+  ...UNCERTAIN_START_V1_FIELDS,
+  "variant",
+]);
+const FIXTURE_UNCERTAIN_START_MISSING_DELIVERY_V2_FIELDS = Object.freeze([
+  "confirmation_provenance",
+  "delivery_result_sha256",
+  "disposition",
+  "effect_possible",
+  "launch_edge_sha256",
+  "marker_link_count",
+  "reason",
+  "recovery_claim_sha256",
+  "recovery_invocation_authorized",
+  "replay_authorized",
+  "resolution_statement",
+  "resolution_statement_sha256",
+  "start_attempt_sha256",
+  "variant",
+  "witness_identity_sha256",
+]);
+const MISSING_DELIVERY_RESOLUTION_STATEMENT_FIELDS = Object.freeze([
+  "confirmation_provenance",
+  "disposition",
+  "event_count",
+  "event_head_sha256",
+  "fixture_id",
+  "launch_edge_sha256",
+  "predecessor_recovery_claim_sha256",
+  "marker_link_count",
+  "marker_witness_same_inode",
+  "operation_contract_sha256",
+  "operation_kind",
+  "operation_plan_sha256",
+  "pending_stage_disposition",
+  "pending_stage_fingerprint_sha256",
+  "reason",
+  "schema",
+  "slot_sequence",
+  "slot_sha256",
+  "source_head_sha256",
+  "source_sequence",
+  "start_attempt_sha256",
+  "witness_identity_sha256",
+  "witness_sha256",
 ]);
 const CLEANUP_ACTION_FIELDS = Object.freeze([
   "action_kind",
@@ -644,6 +700,21 @@ const UNCERTAIN_START_REASONS = new Set([
   "identity-incomplete",
   "endpoint-incomplete",
   "topology-incomplete",
+]);
+export const COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION =
+  "acknowledge-indeterminate-effect-possible";
+export const COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT =
+  "operator-acknowledged-missing-delivery";
+export const COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON =
+  "delivery-record-not-durable";
+export const COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE =
+  "local-same-uid-explicit-confirmation-v1";
+export const COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_STATEMENT_SCHEMA =
+  "synveda.clean-engine.colima-live-fixture-provider-effect-missing-delivery-resolution-statement.v1";
+const MISSING_DELIVERY_PENDING_STAGE_DISPOSITIONS = new Set([
+  "absent",
+  "one-link-inert",
+  "two-link-durable-alias",
 ]);
 const INVENTORY_TYPES = new Set([
   "directory",
@@ -1328,38 +1399,42 @@ function validateEndpointContracts(value) {
 function operationContract(fixtureOnly) {
   const selected = variant(fixtureOnly);
   const fixtureAuthority = fixtureOnly;
+  const capabilities = {
+    cleanup_authorized: fixtureAuthority,
+    effect_witness_publication_authorized: fixtureAuthority,
+    environment_publication_authorized: false,
+    evidence_publication_authorized: false,
+    finalization_authorized: false,
+    fixture_effect_execution_authorized: fixtureAuthority,
+    fixture_effect_recovery_authorized: fixtureAuthority,
+    lifecycle_exposed: false,
+    marker_link_authorized: fixtureAuthority,
+    marker_retirement_authorized: fixtureAuthority,
+    ...(fixtureOnly
+      ? { missing_delivery_resolution_authorized: true }
+      : {}),
+    process_group_ownership_authorized: fixtureAuthority,
+    process_signal_authorized: fixtureAuthority,
+    process_spawn_authorized: fixtureAuthority,
+    process_start_authorized: fixtureAuthority,
+    provider_adapter_execution_authorized: false,
+    provider_artifact_publication_authorized: false,
+    provider_recovery_authorized: false,
+    provider_root_mutation_authorized: false,
+    receipt_publication_authorized: fixtureAuthority,
+    runtime_publication_authorized: false,
+    start_attempt_publication_authorized: fixtureAuthority,
+    start_authority_publication_authorized: fixtureAuthority,
+    state_effect_slot_publication_authorized: fixtureAuthority,
+    state_evidence_publication_authorized: fixtureAuthority,
+  };
   return deepFreeze({
     action: COLIMA_LIVE_PROVIDER_EFFECT_ACTION,
     authority_model: fixtureOnly
-      ? "state-owned-single-use-fixed-fixture-invoker"
+      ? "state-owned-single-use-fixed-fixture-invoker-with-explicit-missing-delivery-resolution"
       : "production-deny-only-no-invoker",
     bounds: { ...COLIMA_LIVE_PROVIDER_EFFECT_BOUNDS },
-    capabilities: {
-      cleanup_authorized: fixtureAuthority,
-      effect_witness_publication_authorized: fixtureAuthority,
-      environment_publication_authorized: false,
-      evidence_publication_authorized: false,
-      finalization_authorized: false,
-      fixture_effect_execution_authorized: fixtureAuthority,
-      fixture_effect_recovery_authorized: fixtureAuthority,
-      lifecycle_exposed: false,
-      marker_link_authorized: fixtureAuthority,
-      marker_retirement_authorized: fixtureAuthority,
-      process_group_ownership_authorized: fixtureAuthority,
-      process_signal_authorized: fixtureAuthority,
-      process_spawn_authorized: fixtureAuthority,
-      process_start_authorized: fixtureAuthority,
-      provider_adapter_execution_authorized: false,
-      provider_artifact_publication_authorized: false,
-      provider_recovery_authorized: false,
-      provider_root_mutation_authorized: false,
-      receipt_publication_authorized: fixtureAuthority,
-      runtime_publication_authorized: false,
-      start_attempt_publication_authorized: fixtureAuthority,
-      start_authority_publication_authorized: fixtureAuthority,
-      state_effect_slot_publication_authorized: fixtureAuthority,
-      state_evidence_publication_authorized: fixtureAuthority,
-    },
+    capabilities,
     endpoints: [...COLIMA_LIVE_PROVIDER_EFFECT_ENDPOINTS],
     evidence_class: selected.evidenceClass,
     fixed_marker_name: COLIMA_LIVE_PROVIDER_RESERVATION_NAME,
@@ -1377,7 +1452,11 @@ function validateOperationContract(value, fixtureOnly) {
   const expected = operationContract(fixtureOnly);
   exactKeys(value, CONTRACT_FIELDS, "live provider effect operation contract");
   exactKeys(value.bounds, Object.keys(COLIMA_LIVE_PROVIDER_EFFECT_BOUNDS), "live provider effect bounds");
-  exactKeys(value.capabilities, CAPABILITY_FIELDS, "live provider effect capabilities");
+  exactKeys(
+    value.capabilities,
+    fixtureOnly ? FIXTURE_CAPABILITY_FIELDS : CAPABILITY_FIELDS,
+    "live provider effect capabilities",
+  );
   if (!liveProviderEffectBytes(value).equals(liveProviderEffectBytes(expected))) {
     fail("live provider effect operation contract was refused", 69);
   }
@@ -3887,10 +3966,151 @@ function validateCreateSettlement(evidence, { history }) {
   }
 }
 
-function validateUncertainStart(evidence, { history }) {
+function validateMissingDeliveryResolutionStatement(
+  value,
+  { history, publicationPlan, source, witness },
+) {
+  exactKeys(
+    value,
+    MISSING_DELIVERY_RESOLUTION_STATEMENT_FIELDS,
+    "fixture provider effect missing delivery resolution statement",
+  );
+  const attempt = uniqueEvent(history, "start-attempt");
+  const launchEdges = eventsOfKind(history, "launch-edge");
+  const launchEdgeSha256 =
+    launchEdges.length === 0 ? ZERO_SHA256 : valueDigest(launchEdges[0]);
+  const sourceOperationPlan =
+    source.startDecisionSource.intentPublicationPlan.provider_operation_plan;
+  const pendingStageAbsent = value.pending_stage_disposition === "absent";
+  if (
+    canonical(history.map((event) => event.event_kind)) !==
+      canonical(
+        launchEdges.length === 0
+          ? ["start-authority", "start-attempt"]
+          : ["start-authority", "start-attempt", "launch-edge"],
+      ) ||
+    launchEdges.length > 1 ||
+    (launchEdges.length === 1 &&
+      launchEdges[0].evidence.child_role !== "outer") ||
+    value.schema !==
+      COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_STATEMENT_SCHEMA ||
+    value.confirmation_provenance !==
+      COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE ||
+    value.disposition !==
+      COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION ||
+    value.reason !== COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON ||
+    value.fixture_id !== publicationPlan.fixture_id ||
+    value.operation_kind !== publicationPlan.operation_kind ||
+    value.operation_contract_sha256 !==
+      publicationPlan.operation_contract_sha256 ||
+    value.operation_plan_sha256 !== valueDigest(publicationPlan) ||
+    value.slot_sequence !== witness.slot_sequence ||
+    value.slot_sha256 !== witness.slot_sha256 ||
+    value.witness_sha256 !== valueDigest(witness) ||
+    value.witness_identity_sha256 !==
+      witness.marker_witness_identity_sha256 ||
+    value.start_attempt_sha256 !== valueDigest(attempt) ||
+    value.launch_edge_sha256 !== launchEdgeSha256 ||
+    value.event_count !== history.length ||
+    value.event_head_sha256 !== valueDigest(history.at(-1)) ||
+    value.marker_link_count !== 2 ||
+    value.marker_witness_same_inode !== true ||
+    value.source_sequence !== sourceOperationPlan.source_sequence ||
+    value.source_head_sha256 !== sourceOperationPlan.source_head_sha256 ||
+    !sha256OrZero(value.predecessor_recovery_claim_sha256) ||
+    !MISSING_DELIVERY_PENDING_STAGE_DISPOSITIONS.has(
+      value.pending_stage_disposition,
+    ) ||
+    !sha256OrZero(value.pending_stage_fingerprint_sha256) ||
+    pendingStageAbsent !==
+      (value.pending_stage_fingerprint_sha256 === ZERO_SHA256)
+  ) {
+    fail(
+      "fixture provider effect missing delivery resolution statement was refused",
+      69,
+    );
+  }
+}
+
+function validateUncertainStart(
+  evidence,
+  {
+    history,
+    publicationPlan,
+    publisherAuthorityChain,
+    publisherAuthoritySha256,
+    source,
+    witness,
+  },
+) {
+  const missingDelivery =
+    source.fixtureOnly === true &&
+    evidence?.variant ===
+      COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_VARIANT;
+  if (missingDelivery) {
+    exactKeys(
+      evidence,
+      FIXTURE_UNCERTAIN_START_MISSING_DELIVERY_V2_FIELDS,
+      "fixture provider effect missing delivery uncertainty",
+    );
+    validateMissingDeliveryResolutionStatement(
+      evidence.resolution_statement,
+      { history, publicationPlan, source, witness },
+    );
+    const attempt = uniqueEvent(history, "start-attempt");
+    const launchEdges = eventsOfKind(history, "launch-edge");
+    const launchEdgeSha256 =
+      launchEdges.length === 0 ? ZERO_SHA256 : valueDigest(launchEdges[0]);
+    const recoveryAuthorityIndex = publisherAuthorityChain.findIndex(
+      (authority) =>
+        authority.authority_sha256 === publisherAuthoritySha256,
+    );
+    const recoveryAuthority =
+      recoveryAuthorityIndex === -1
+        ? undefined
+        : publisherAuthorityChain[recoveryAuthorityIndex];
+    const predecessorRecoveryClaimSha256 =
+      recoveryAuthorityIndex <= 1
+        ? ZERO_SHA256
+        : publisherAuthorityChain[recoveryAuthorityIndex - 1]
+            .recovery_claim_sha256;
+    if (
+      evidence.confirmation_provenance !==
+        COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_PROVENANCE ||
+      evidence.delivery_result_sha256 !== ZERO_SHA256 ||
+      evidence.disposition !==
+        COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_DISPOSITION ||
+      evidence.effect_possible !== true ||
+      evidence.launch_edge_sha256 !== launchEdgeSha256 ||
+      evidence.marker_link_count !== 2 ||
+      evidence.reason !==
+        COLIMA_LIVE_PROVIDER_EFFECT_MISSING_DELIVERY_REASON ||
+      evidence.recovery_claim_sha256 !== publisherAuthoritySha256 ||
+      evidence.recovery_claim_sha256 === witness.slot_sha256 ||
+      recoveryAuthority?.kind !== "state-recovery-claim" ||
+      recoveryAuthority.first_event_sequence !== history.length ||
+      evidence.resolution_statement.predecessor_recovery_claim_sha256 !==
+        predecessorRecoveryClaimSha256 ||
+      evidence.recovery_invocation_authorized !== false ||
+      evidence.replay_authorized !== false ||
+      evidence.resolution_statement_sha256 !==
+        valueDigest(evidence.resolution_statement) ||
+      evidence.start_attempt_sha256 !== valueDigest(attempt) ||
+      evidence.witness_identity_sha256 !==
+        witness.marker_witness_identity_sha256 ||
+      eventsOfKind(history, "delivery-result").length !== 0 ||
+      eventsOfKind(history, "uncertain-start").length !== 0 ||
+      eventsOfKind(history, "create-settlement").length !== 0
+    ) {
+      fail("fixture provider effect missing delivery uncertainty was refused", 69);
+    }
+    return;
+  }
   exactKeys(
     evidence,
-    UNCERTAIN_START_FIELDS,
+    source.fixtureOnly
+      ? FIXTURE_UNCERTAIN_START_DELIVERED_V2_FIELDS
+      : UNCERTAIN_START_V1_FIELDS,
     "live provider effect uncertain start",
   );
   const attempt = uniqueEvent(history, "start-attempt");
@@ -3915,6 +4135,8 @@ function validateUncertainStart(evidence, { history }) {
     evidence.marker_link_count !== 2 ||
     !UNCERTAIN_START_REASONS.has(evidence.reason) ||
     evidence.reason !== expectedReason ||
+    (source.fixtureOnly &&
+      evidence.variant !== "durable-delivery-incomplete-evidence") ||
     evidence.recovery_invocation_authorized !== false ||
     evidence.replay_authorized !== false ||
     eventsOfKind(history, "uncertain-start").length !== 0 ||
@@ -4935,6 +5157,7 @@ function validateEventInternal(
     history,
     parentSha256: value.parent_sha256,
     publicationPlan,
+    publisherAuthorityChain,
     publisherAuthoritySha256: value.publisher_authority_sha256,
     source,
     witness,

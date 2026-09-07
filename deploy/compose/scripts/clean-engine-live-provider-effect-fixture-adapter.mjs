@@ -3,13 +3,13 @@ import { createHash } from "node:crypto";
 import { isProxy } from "node:util/types";
 
 export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_CONTRACT_SCHEMA =
-  "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-contract.v1";
+  "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-contract.v2";
 export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_RESULT_SCHEMA =
-  "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v1";
+  "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v2";
 
-const FIXTURE_OPERATION_KIND = "colima-live-fixture-provider-effect-v1";
+const FIXTURE_OPERATION_KIND = "colima-live-fixture-provider-effect-v2";
 const FIXTURE_OPERATION_CONTRACT_SHA256 =
-  "2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8";
+  "fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60";
 const ZERO_SHA256 = "0".repeat(64);
 const INPUT_FIELDS = Object.freeze([
   "adapter_contract_sha256",
@@ -79,7 +79,7 @@ function deepFreeze(value) {
 }
 
 export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_CONTRACT = deepFreeze({
-  adapter: "state-owned-conclusive-not-created-v1",
+  adapter: "state-owned-conclusive-not-created-v2",
   authority: "none-fixture-process-free-result-only",
   capabilities: {
     child_handle_creation: false,
@@ -181,7 +181,7 @@ function resultFor(input) {
     observation_sha256: digest({
       adapter_contract_sha256: input.adapter_contract_sha256,
       domain:
-        "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v1",
+        "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v2",
       fixture_id: input.fixture_id,
       operation_contract_sha256: input.operation_contract_sha256,
       operation_kind: input.operation_kind,

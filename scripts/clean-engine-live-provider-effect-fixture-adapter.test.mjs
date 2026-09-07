@@ -29,11 +29,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MODULE_NAME =
   "clean-engine-live-provider-effect-fixture-adapter.mjs";
 const CONTRACT_SHA256 =
-  "f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2";
+  "b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681";
 const SOURCE_SHA256 =
-  "cb0fe34d1796376289bcd9d51edd186ade31acca18d1eefb15b9d5c8e467dca9";
+  "94afbbcdc522aa0679cc390630cec7366ca290b694f1d4163f4b500273d009e4";
 const OPERATION_CONTRACT_SHA256 =
-  "2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8";
+  "fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60";
 const ZERO_SHA256 = "0".repeat(64);
 const AUTHORITY_ROOTS = [
   ".claude",
@@ -109,7 +109,7 @@ function inputFixture() {
     driver_contract_sha256: digest("driver"),
     fixture_id: "a".repeat(32),
     operation_contract_sha256: OPERATION_CONTRACT_SHA256,
-    operation_kind: "colima-live-fixture-provider-effect-v1",
+    operation_kind: "colima-live-fixture-provider-effect-v2",
     outer_launch_edge_sha256: digest("outer-edge"),
     planned_start_attempt_sha256: digest("planned-attempt"),
   };
@@ -168,18 +168,18 @@ test("the conclusive fixture adapter has one pinned process-free result", () => 
   ]);
   assert.equal(
     COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_CONTRACT_SCHEMA,
-    "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-contract.v1",
+    "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-contract.v2",
   );
   assert.equal(
     COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_RESULT_SCHEMA,
-    "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v1",
+    "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v2",
   );
   assert.equal(
     COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_CONTRACT_SHA256,
     CONTRACT_SHA256,
   );
   assert.deepEqual(COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_CONTRACT, {
-    adapter: "state-owned-conclusive-not-created-v1",
+    adapter: "state-owned-conclusive-not-created-v2",
     authority: "none-fixture-process-free-result-only",
     capabilities: {
       child_handle_creation: false,
@@ -203,7 +203,7 @@ test("the conclusive fixture adapter has one pinned process-free result", () => 
       "planned_start_attempt_sha256",
     ],
     operation_contract_sha256: OPERATION_CONTRACT_SHA256,
-    operation_kind: "colima-live-fixture-provider-effect-v1",
+    operation_kind: "colima-live-fixture-provider-effect-v2",
     result_fields: [
       "attempt_event_sha256",
       "child_handle_identity_sha256",
@@ -216,9 +216,9 @@ test("the conclusive fixture adapter has one pinned process-free result", () => 
       "schema",
     ],
     result_schema:
-      "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v1",
+      "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v2",
     schema:
-      "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-contract.v1",
+      "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-contract.v2",
   });
   assertRecursivelyFrozen(
     COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_CONTRACT,
@@ -233,7 +233,7 @@ test("the conclusive fixture adapter has one pinned process-free result", () => 
     driver_contract_sha256: input.driver_contract_sha256,
     effect_possible: false,
     observation_sha256:
-      "5182457b49f4375f465cc91c0095512a8cdd5599c0f81aa51e066c925ef55b45",
+      "e35f7633841a5615a2787198fc6e73b331a35e7aa12a287408cc8c4d3ff29914",
     outer_launch_edge_sha256: input.outer_launch_edge_sha256,
     safe_error_code: "not-created",
     schema: COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ADAPTER_RESULT_SCHEMA,

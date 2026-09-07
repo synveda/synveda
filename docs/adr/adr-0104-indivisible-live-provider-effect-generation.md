@@ -242,10 +242,11 @@ admission to this branch shape. The production
 `e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`;
 every capability is false and event publication is refused. State imports no
 production effect operation tuple and exposes no production effect publisher
-or recovery entry point. A separate fixture-only contract, pinned to
-`2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8`,
-uses a distinct operation kind, schema and evidence class; its recovery-only
-capability cannot be relabelled as production.
+or recovery entry point. A separate fixture-only
+`colima-live-fixture-provider-effect-v2` contract, pinned to
+`fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60`,
+uses a distinct schema and evidence class; its recovery and explicit
+missing-delivery-resolution capabilities cannot be relabelled as production.
 
 That fixture grammar closes the distinct witness and fixed marker, one start
 authority and attempt, exactly four authenticated roles and four causal edges
@@ -274,9 +275,31 @@ attempt through the complete bounded tail. The attempted event order is
 global receipt is linked from its exact staged inode and durable before marker
 unlink and bound provider-root fsync; close remains last.
 
-The fixture plan is produced by closed process-free launch blueprint v2. Its
-fourth component is `conclusive-adapter`, with v1 contract digest
-`f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+The fixture also permits one terminal acknowledgement when delivery was not
+made durable. Only `start-authority`/`start-attempt`, optionally followed by
+the outer `launch-edge`, is eligible. A local same-UID caller confirms the
+digest of an exact content-free statement binding the source receipt, plan,
+slot, witness, event head, newest prior recovery and pending mutation-stage
+identity. The resolver retires no pending stage, or only the exact confirmed
+inert stage or alias; it acquires a recovery claim and appends
+`uncertain-start` with `effect_possible: true`. It retains
+the open lease, unchanged receipt head and two-link marker/witness and cannot
+publish delivery, cleanup, receipt, completion or close. When a pre-terminal
+crash changes durable state, a new statement must be confirmed; after the
+terminal event is linked, its embedded statement makes normal retry and
+crash/restart idempotent. This confirmation is test-only cooperative same-UID
+intent, not authenticated human approval, non-repudiation, an atomic physical
+snapshot or hostile-same-UID rollback detection.
+
+Its persisted vocabulary is closed: disposition
+`acknowledge-indeterminate-effect-possible`, event variant
+`operator-acknowledged-missing-delivery`, reason
+`delivery-record-not-durable`, and confirmation provenance
+`local-same-uid-explicit-confirmation-v1`.
+
+The fixture plan is produced by closed process-free launch blueprint v3. Its
+fourth component is `conclusive-adapter`, with v2 contract digest
+`b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681`.
 Without changing a persisted state generation, it projects descriptor-stable
 Node/protocol/role/adapter component hashes, exact planned
 invocation/role/endpoint contracts and binding-key-derived Ed25519 public
@@ -289,8 +312,9 @@ capability. Binding/private key and raw path material are not persisted.
 
 Fixture-only recovery proves the original owner and newest prior recoverer are
 absent, binds every claim to the observed physical/event frontier, supports
-crash-safe forward completion before attempt, and remains operator-blocked at
-an attempt fence until the exact durable conclusive delivery event exists. It
+crash-safe forward completion before attempt, and keeps generic recovery
+blocked at an attempt fence until the exact durable conclusive delivery event
+exists. It
 never calls the adapter executor; state exact-byte loads the module and
 recovery validates the durable result. After that event, recovery revalidates
 the fixed result, opaque proposed-outer-node identity commitment,
@@ -309,9 +333,10 @@ selection.
 
 No persisted receipt/journal generation advances in this amendment slice:
 receipt v6, slot v7, recovery/root v6 and close v8 remain unchanged. The
-process-free blueprint advances to v2; new adapter contract/result and private
-tail-observation domains start at v1. The production and fixture operation
-contract digests remain unchanged. This is conclusive-not-created retirement
+process-free blueprint advances to v3; the fixture operation contract,
+fixture `uncertain-start` and adapter contract/result advance to v2. The
+production operation contract and digest remain v1 and unchanged. This is
+conclusive-not-created retirement and acknowledged-indeterminate terminal
 evidence, not a live process, endpoint, provider, platform, lifecycle,
 finalization or readiness result.
 
