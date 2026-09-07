@@ -925,10 +925,10 @@ cannot bring the deployment back up.
 
 `reset` drops and recreates **the application database** — not the volumes,
 not the installation. Your `kms.key`, the compose profile, the console bundle,
-your stored logins and every other database on the same server (Temporal's
-two live in the same volume) all survive. It stops the gateway first, installs
-the extensions, migrates to the current epoch, removes the derived search
-index, and is idempotent: running it twice leaves the same thing.
+your stored logins and every other database on the same server all survive. It
+stops the gateway first, installs the extensions, migrates to the current
+epoch, removes the derived search index, and is idempotent: running it twice
+leaves the same thing.
 
 It requires both flags. `synveda reset --database` on its own tells you what
 it would destroy and destroys nothing. It also refuses a `DATABASE_URL` or

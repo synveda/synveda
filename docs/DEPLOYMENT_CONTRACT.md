@@ -43,7 +43,7 @@ compose.keycloak-external-postgres.yaml    external Keycloak database egress bri
 compose.external.yaml    external-provider labels, no provider services
 compose.apalis.yaml      planned experimental routing plus dispatcher/executor; not yet present
 compose.db-test.yaml     isolated database acceptance fixture, not an operator topology
-docker-compose.yml       legacy Rauthy/Temporal development stack retained only until cutover acceptance
+docker-compose.yml       legacy Rauthy development stack retained only until identity cutover acceptance
 .env.example             non-secret selectors and hostnames only
 configs/                 proxy, Collector, identity and monitoring config
 secrets.example/         filenames and generation instructions, never values
@@ -1777,8 +1777,16 @@ credentials and reachability exist.
 
 ## Runtime residue gate
 
-After cutover, `make check-runtime-residue` requires zero active Rauthy or
-Temporal service/image/config/environment/dependency/script/fixture/support
+`make check-deploy` already requires Temporal runtime markers to remain absent
+from canonical and contributor Compose, the release manifest, rendered Helm,
+the contributor smoke script, the Makefile, Rust/npm dependency manifests and
+the retired configuration directory. Comment-only architectural statements and
+bitemporal domain language do not trip that semantic check. The contributor
+lifecycle removes orphaned containers from this fixed project without deleting
+volumes; it does not remove databases left in an upgraded PostgreSQL volume.
+
+After identity cutover, the planned `make check-runtime-residue` requires zero
+active Rauthy service/image/config/environment/dependency/script/fixture/support
 references. It scans runtime source, `Cargo.toml`/lockfiles, Make/scripts,
 active deploy/release assets, README/install/security/architecture docs and
 generated client/support contracts. Historical `docs/adr/**` decision records

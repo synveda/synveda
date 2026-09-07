@@ -57,17 +57,15 @@ runtime dependency and is pinned here exactly.
 ## Images the legacy contributor topology still runs
 
 `make dev-up` remains executable during the bounded Keycloak cutover. It is
-not the canonical reference graph, and its Rauthy and Temporal services are
-deletion residue rather than supported-provider claims. The inventory keeps
-that current executable surface visible until replacement acceptance permits
-its atomic removal.
+not the canonical reference graph, and its Rauthy service is deletion residue
+rather than a supported-provider claim. The inventory keeps that current
+executable surface visible until identity replacement acceptance permits its
+removal.
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
 | `synveda/dev-postgres:17` | legacy contributor PostgreSQL | ours over PostgreSQL-licensed PostgreSQL | Local build output used only by the pre-cutover contributor topology. |
 | `synveda/gateway:dev` | legacy contributor gateway and worker | ours | Local product build output used only by the pre-cutover contributor topology. |
-| `temporalio/auto-setup:1.29.7` | stale legacy Temporal server | MIT Temporal server/docker-build scripts over Alpine and database-client/system packages, which retain upstream licences | Deprecated upstream image and executable residue with no supported Synveda consumer; retained only until the tested hard deletion. |
-| `temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2` | stale legacy Temporal health tooling | MIT Temporal server tools, tctl and Temporal CLI over Alpine/system packages, which retain upstream licences | Executable residue used only to probe the stale Temporal service; its bundled tctl reached end of support on 2025-09-30, and the image is retained only until hard deletion. |
 
 ## Planned release image set
 

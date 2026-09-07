@@ -19,8 +19,8 @@ freshness or Skill/Tool advertisement.
   exact-confirmation `reset` lifecycle.
   Deterministic lifecycle tests are implementation evidence, not a validated
   reference claim: clean-volume browser/Keycloak acceptance is still open.
-  The separate `make dev-up` contributor stack retains Rauthy/Temporal residue
-  and is not the reference product lifecycle.
+  The separate `make dev-up` contributor stack retains Rauthy residue and is
+  not the reference product lifecycle. Its unused Temporal services are gone.
 - `release/` is the pull-only transitional artifact manifest installed under
   `~/.synveda/profile`. It is retained for cutover evidence but is no longer
   advertised as a turnkey single-host install.

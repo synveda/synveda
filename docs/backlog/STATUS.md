@@ -505,9 +505,10 @@ process-tree proof and it supplies no provider effect, live evidence, recovery,
 state integration or lifecycle authority. This slice was executed on Darwin;
 Linux execution remains open and is not claimed.
 Live-provider identity, builder, proxy, browser and cleanup evidence follow;
-Linux/reference
-HTTPS must pass before legacy Rauthy/Temporal assets are deleted. Backup/restore,
-upgrade and Apalis remain open CPR-45 slices.
+Linux/reference HTTPS must pass before legacy Rauthy assets are deleted. The
+unused Temporal services, configuration and self-probe are deleted after a
+no-consumer inventory. Backup/restore, upgrade and Apalis remain open CPR-45
+slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

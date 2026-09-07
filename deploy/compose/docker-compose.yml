@@ -1,5 +1,5 @@
 # Synveda contributor environment (FND-2; CPR-36, ADR-0095):
-# Postgres 17 (+pgvector), Rauthy (OIDC), Temporal, TEI (BGE-M3), Jaeger.
+# Postgres 17 (+pgvector), Rauthy (OIDC), TEI (BGE-M3), Jaeger.
 # Dev-only credentials throughout; never reuse them outside local compose.
 # The deployed gateway is the same context-platform binary and contract as the
 # release and Helm forms; personal/team/enterprise behaviour is governed
@@ -52,37 +52,6 @@ services:
     volumes:
       - ./rauthy/config.toml:/app/config.toml:ro
       - rauthy-data:/app/data
-
-  temporal:
-    # auto-setup provisions the temporal + temporal_visibility databases in
-    # the postgres service on first boot (DB=postgres12 is Temporal's name
-    # for the postgres12+ driver).
-    image: temporalio/auto-setup:1.29.7
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DB: postgres12
-      DB_PORT: "5432"
-      POSTGRES_USER: synveda
-      POSTGRES_PWD: synveda-dev
-      POSTGRES_SEEDS: postgres
-      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
-    ports:
-      - "7233:7233"
-    volumes:
-      - ./temporal/dynamicconfig.yaml:/etc/temporal/config/dynamicconfig/development-sql.yaml:ro
-
-  temporal-admin-tools:
-    # Sidecar with the `temporal` CLI; the smoke test uses it for cluster
-    # health, and it doubles as a dev shell (docker compose exec).
-    image: temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2
-    depends_on:
-      - temporal
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-    stdin_open: true
-    tty: true
 
   tei:
     # text-embeddings-inference serving BGE-M3 (tech plan §1.3). First start

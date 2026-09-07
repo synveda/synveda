@@ -4,22 +4,15 @@
 # This is what a tester installs: every image is pulled from a public
 # registry and there is no `build:` stanza anywhere, so the machine running
 # it needs Docker and nothing else — no source tree, no Rust toolchain, no
-# pnpm. `deploy/compose/docker-compose.yml` remains what its own header
-# calls it, the contributor's loop, and keeps the build contexts and Temporal
-# that only make sense next to a checkout.
+# pnpm. `deploy/compose/docker-compose.yml` remains what its own header calls
+# it, the contributor's loop, and keeps build contexts that only make sense
+# next to a checkout.
 #
 # `__SYNVEDA_VERSION__` is a placeholder. `scripts/package-release.sh`
 # replaces it with the release tag when it assembles the bundle, so the
 # packaged file is self-contained and depends on no environment variable. This
 # transitional artifact may still read a preserved `.env`, but the CPR-45
 # cutover does not advertise or start this profile as a reference lifecycle.
-#
-# One contributor-only service is deliberately absent:
-#
-#   temporal, temporal-admin-tools — VedaFlow runs in Postgres (ADR-0003).
-#     Nothing in this profile consumes them; shipping a cluster nobody calls
-#     is 700 MB of pull and
-#     a second thing to explain when it is unhealthy.
 name: synveda
 
 services:

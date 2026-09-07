@@ -244,9 +244,8 @@ enum Command {
     ///
     /// It keeps everything that is not the database: `kms.key`, the compose
     /// profile, the console bundle, your stored logins, the Docker volumes,
-    /// and the other databases on the same server — Temporal's two share the
-    /// volume with ours, which is why this drops a database rather than a
-    /// volume.
+    /// and the other databases on the same server. That is why this drops a
+    /// database rather than a volume.
     Reset {
         /// What to reset. Required: `reset` names what it destroys rather
         /// than defaulting to everything there is.

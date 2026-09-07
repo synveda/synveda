@@ -8,9 +8,14 @@ the committed no-capture browser PKCE fixture has not run against live
 containers, and a clean Linux run, reference HTTPS, backup, restore and upgrade
 remain open.
 
-The contributor-only `make dev-up` stack still contains Rauthy and Temporal
-residue. It is not an alternative reference deployment and will be removed
-only after the replacement acceptance is complete.
+The contributor-only `make dev-up` stack still contains Rauthy residue. It is
+not an alternative reference deployment and will be removed only after the
+identity replacement acceptance is complete. The unused Temporal services,
+configuration and self-probe were removed after an executable inventory found
+no Synveda consumer. `make dev-up` and `make dev-down` remove obsolete
+containers that belong to this fixed Compose project, but never remove its
+volumes; an upgraded `pg-data` volume and any old peer databases remain
+untouched.
 
 ## Prerequisites
 
@@ -900,5 +905,5 @@ Separately, every development source build proves the embedded local builder
 grammar before mutation; none of that is live provider evidence. The core
 Collector remains private but
 currently exports to `nop`; the bounded observability profile and Operations UI
-are open. Do not delete the legacy Rauthy/Temporal assets or change the
-production-readiness verdict until replacement acceptance passes.
+are open. Do not delete the legacy Rauthy assets or change the
+production-readiness verdict until identity replacement acceptance passes.

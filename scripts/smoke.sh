@@ -3,9 +3,9 @@
 # (deploy/compose). Run via `make smoke` after `make dev-up`.
 #
 # Every check exercises the service, not just the port: SQL round-trips for
-# pgvector and the epoch-3 baseline, an OIDC health probe, a Temporal cluster-health RPC, a
-# real embedding, and an OTLP ingest. Retries are generous because on a cold
-# cache TEI first downloads BGE-M3 (~2.3 GB).
+# pgvector and the epoch-3 baseline, an OIDC health probe, a real embedding and
+# an OTLP ingest. Retries are generous because on a cold cache TEI first
+# downloads BGE-M3 (~2.3 GB).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -61,13 +61,6 @@ echo "    vector: OK"
 echo "==> rauthy: OIDC provider health"
 retry rauthy 120 "rauthy" http_ok http://localhost:8100/auth/v1/health
 echo "    rauthy: OK"
-
-echo "==> temporal: cluster health + default namespace"
-retry temporal 300 "temporal server" \
-  compose exec -T temporal-admin-tools temporal operator cluster health --address temporal:7233
-retry temporal 120 "temporal default namespace" \
-  compose exec -T temporal-admin-tools temporal operator namespace describe --namespace default --address temporal:7233
-echo "    temporal: OK"
 
 echo "==> tei: real embedding (first run downloads BGE-M3, be patient)"
 retry tei 1800 "tei model load" http_ok http://localhost:8110/health

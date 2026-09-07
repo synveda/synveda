@@ -160,8 +160,8 @@ for (const name of composeFiles) {
 }
 
 // The contributor `make dev-up` stack remains executable until CPR-45 deletes
-// its Rauthy and Temporal residue. It is not canonical, but exclusion from the
-// reference graph cannot make its pulled and locally built images invisible.
+// its Rauthy residue. It is not canonical, but exclusion from the reference
+// graph cannot make its pulled and locally built images invisible.
 try {
   for (const ref of composeImageReferences(read(LEGACY_COMPOSE), composeDefaults)) {
     found.set(ref, `${LEGACY_COMPOSE} (legacy image:)`);

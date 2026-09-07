@@ -11,9 +11,8 @@
 //!
 //! `kms.key`, the compose profile, the console bundle, the installed binaries,
 //! `~/.config/synveda/credentials.json`, the Docker volumes, and the other
-//! databases on the same server — Temporal's two live in the same `pg-data`
-//! volume as ours (`deploy/compose/docker-compose.yml`), which is exactly why
-//! this drops a *database* rather than a volume.
+//! databases on the same server. That is exactly why this drops a *database*
+//! rather than a volume.
 //!
 use std::ffi::OsString;
 use std::path::Path;

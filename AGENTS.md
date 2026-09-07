@@ -129,7 +129,7 @@ and unsupported platform.
 ## Commands
 
 ```sh
-make dev-up              # Postgres, Rauthy, Temporal, TEI, Jaeger
+make dev-up              # Postgres, Rauthy, TEI, Jaeger
 make smoke               # end-to-end health check
 make dev-down            # stop; named-volume state persists
 make ci                  # the pull-request gate

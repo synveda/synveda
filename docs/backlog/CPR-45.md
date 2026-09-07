@@ -23,6 +23,13 @@ multi-architecture release-image parity, or clean-volume cross-platform
 acceptance. Static deployment convergence is valuable but does not prove that
 a user can install, sign in, use, back up, restore or upgrade the product.
 
+An executable inventory found no Temporal SDK, application consumer,
+migration, release service, Helm service, demo or CI job. Its two legacy
+services, configuration and self-referential smoke probe were therefore
+deleted independently. The contributor lifecycle removes the retired project
+containers as orphans without deleting volumes or old peer databases. That
+removal does not satisfy the still-open Rauthy to Keycloak identity cutover.
+
 [ADR-0102](../adr/adr-0102-portable-reference-deployment.md) fixes the target
 architecture. [ADR-0103](../adr/adr-0103-cooperative-live-provider-reservation.md)
 locks the implemented terminal no-spawn reservation. Accepted
@@ -54,7 +61,8 @@ configuration and external dependency seams.
   operation/outbox adapter on the inert Skill `validation_sandbox` test,
   disabled by default. Stable 0.7.4 has no Synveda business-idempotency or
   fencing contract and declares no MSRV, so Synveda state remains authoritative.
-- Remove Rauthy and unused Temporal residue after their replacements pass.
+- Keep the unused Temporal runtime residue deleted; remove Rauthy only after
+  the Keycloak identity replacement passes live acceptance.
 - Add portable local pgBackRest backup, WAL/PITR and isolated restore evidence
   for PostgreSQL state plus separately held Synveda key material.
 - Record exact source/deployment/image inputs and exercise restart, upgrade,
@@ -286,9 +294,10 @@ authority resolved from the host and this is not browser-login acceptance. The
 current source narrows the public identity matcher to the exact discovery,
 authorization, token, JWKS, logout, login-action, account and static-resource
 paths, but that revision post-dates the frozen candidate. The legacy
-Rauthy/Temporal lifecycle remains non-authoritative cutover residue until a
-later candidate passes real browser login, callback/token/audience/group/admin
-admission and the deletion gate.
+Rauthy lifecycle remains non-authoritative cutover residue until a later
+candidate passes real browser login, callback/token/audience/group/admin
+admission and the deletion gate. Temporal's unused legacy runtime has been
+deleted after a no-consumer inventory.
 
 Fresh database-authority evidence previously proved normalized pairwise
 credential refusal, idempotent Synveda/Keycloak convergence, the fixed
@@ -951,9 +960,9 @@ created container retains the ten exact empty proxy entries, and the real
 browser completes authorization-code + PKCE without recording credentials,
 codes, tokens, cookies, HAR, trace, video or screenshots.
 Repeat the resolver/lifecycle contract on Linux, then exercise reference HTTPS.
-Only after replacement acceptance may the Rauthy/Temporal callers and assets
-be deleted atomically. Backup/isolated joint database-and-key restore, upgrade
-and the Apalis canary remain subsequent slices.
+Only after replacement acceptance may the Rauthy callers and assets be
+deleted. Backup/isolated joint database-and-key restore, upgrade and the Apalis
+canary remain subsequent slices.
 
 ## Acceptance criteria
 
@@ -1003,7 +1012,8 @@ and the Apalis canary remain subsequent slices.
 - External OIDC/DB/OTLP/S3/custom-CA/proxy/private-registry configuration is
   validated with the same product image; live support is claimed only for
   providers actually exercised.
-- Rauthy and unsupported Temporal tracked residue reach zero after cutover.
+- Unsupported Temporal runtime residue remains at zero. Rauthy tracked residue
+  reaches zero only after live Keycloak cutover acceptance.
 - Clean reference acceptance passes on Linux Docker and at least one Docker
   Desktop platform before the verdict can be “validated for controlled
   single-host use.”
@@ -1042,9 +1052,10 @@ and the Apalis canary remain subsequent slices.
 - Add a checked literal `upgrade-from.json`, the complete ordered
   migration/restart/rollback matrix from the deployment contract, volume
   identity checks and refusal of mutable/current-image fixtures.
-- Add `make check-runtime-residue`: zero active Rauthy/Temporal
-  runtime/config/support references, with historical ADRs and narrow negative
-  fixtures as the only allowlists.
+- Keep the focused Temporal runtime regression under `make check-deploy`.
+  After Keycloak cutover, add `make check-runtime-residue` for zero active
+  Rauthy runtime/config/support references, with historical ADRs and narrow
+  negative fixtures as the only allowlists.
 - Run proprietary live harness acceptance only when its real executable and
   credentials exist; otherwise record the missing prerequisite.
 - Keep one runnable CPR-45 acceptance script under `demos/`; static Compose

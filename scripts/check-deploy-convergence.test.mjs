@@ -63,6 +63,7 @@ import {
   shellFunctionOrderFindings,
   sqlxPrepareFixtureFindings,
   suppressesCargoBuildFailure,
+  temporalRuntimeResidueFindings,
 } from "./check-deploy-convergence.mjs";
 
 const PRODUCT_LAUNCHER = fileURLToPath(
@@ -101,6 +102,43 @@ const POSTGRES_DOCKERFILE = fileURLToPath(
 const DEVELOPMENT_INITDB = fileURLToPath(
   new URL("../deploy/compose/postgres/development-initdb.sql", import.meta.url),
 );
+const MAKEFILE = fileURLToPath(new URL("../Makefile", import.meta.url));
+
+test("Temporal runtime markers are rejected without matching temporal domain language", () => {
+  assert.deepEqual(
+    temporalRuntimeResidueFindings(
+      [["clean", "# Temporal is absent\nBitemporalEvidence=true\nchanged_temporally=true\n"]],
+      false,
+    ),
+    [],
+  );
+  for (const marker of [
+    "  temporal:\n",
+    "image: temporalio/auto-setup:1\n",
+    "TEMPORAL_ADDRESS: temporal:7233\n",
+    "DYNAMIC_CONFIG_FILE_PATH: config/file.yaml\n",
+    "depends_on: [temporal]\n",
+    "curl http://temporal:7233\n",
+    "temporal operator cluster health\n",
+    'temporal-client = "1"\n',
+  ]) {
+    assert.deepEqual(temporalRuntimeResidueFindings([["fixture", marker]], false), [
+      "fixture",
+    ]);
+  }
+  assert.deepEqual(temporalRuntimeResidueFindings([], true), ["deploy/compose/temporal"]);
+});
+
+test("the contributor lifecycle converges retired containers without deleting volumes", () => {
+  const makefile = readFileSync(MAKEFILE, "utf8");
+  assert.match(
+    makefile,
+    /^dev-up:\n\t\$\(COMPOSE\) up --build --detach --wait --remove-orphans$/m,
+  );
+  assert.match(makefile, /^dev-down:\n\t\$\(COMPOSE\) down --remove-orphans$/m);
+  const lifecycle = makefile.match(/^dev-up:\n[\s\S]*?^smoke:/m)?.[0] ?? "";
+  assert.doesNotMatch(lifecycle, /(?:^|\s)(?:-v|--volumes)(?:\s|$)/);
+});
 
 const HELM_DATABASE_CONTRACT = `
 kind: Cluster

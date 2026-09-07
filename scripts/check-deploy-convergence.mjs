@@ -61,6 +61,22 @@ export function retiredFindings(source) {
   return RETIRED_RUNTIME_MARKERS.filter((marker) => active.includes(marker));
 }
 
+export function temporalRuntimeResidueFindings(sources, temporalConfigPresent) {
+  const marker = /(?:^|[^a-z])temporal(?:io|[-_][a-z0-9_]+|(?=[^a-z]|$))/i;
+  const findings = [];
+  for (const [path, source] of sources) {
+    const active = source
+      .split("\n")
+      .filter((line) => !/^\s*#/.test(line))
+      .join("\n");
+    if (marker.test(active) || /\bDYNAMIC_CONFIG_FILE_PATH\b/.test(active)) {
+      findings.push(path);
+    }
+  }
+  if (temporalConfigPresent) findings.push("deploy/compose/temporal");
+  return findings;
+}
+
 export function hasRetiredDemoField(source) {
   return /^\s*demo:\s*bool,/m.test(source);
 }
@@ -2067,6 +2083,33 @@ function checkCompose(relative, release) {
   run("docker", ["compose", "-f", relative, "config", "--no-interpolate"]);
 }
 
+function checkTemporalRuntimeResidue() {
+  const composeSources = readdirSync(join(ROOT, "deploy/compose"), {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isFile() && /^compose(?:\.[a-z0-9-]+)?\.yaml$/.test(entry.name))
+    .map((entry) => [
+      `deploy/compose/${entry.name}`,
+      read(`deploy/compose/${entry.name}`),
+    ]);
+  const dependencyPaths = ["Cargo.toml", "Cargo.lock", "package.json", "pnpm-lock.yaml"];
+  for (const entry of readdirSync(join(ROOT, "crates"), { withFileTypes: true })) {
+    if (entry.isDirectory()) dependencyPaths.push(`crates/${entry.name}/Cargo.toml`);
+  }
+  const findings = temporalRuntimeResidueFindings(
+    [
+      ["deploy/compose/docker-compose.yml", read("deploy/compose/docker-compose.yml")],
+      ["deploy/release/docker-compose.yml", read("deploy/release/docker-compose.yml")],
+      ["scripts/smoke.sh", read("scripts/smoke.sh")],
+      ["Makefile", read("Makefile")],
+      ...composeSources,
+      ...dependencyPaths.map((path) => [path, read(path)]),
+    ],
+    existsSync(join(ROOT, "deploy/compose/temporal")),
+  );
+  if (findings.length > 0) fail(`unused Temporal runtime residue: ${findings.join(", ")}`);
+}
+
 function checkHelm() {
   const rendered = run("helm", [
     "template",
@@ -2075,6 +2118,8 @@ function checkHelm() {
     "-f",
     "deploy/helm/synveda/ci/full-values.yaml",
   ]);
+  const temporal = temporalRuntimeResidueFindings([["rendered Helm", rendered]], false);
+  if (temporal.length > 0) fail(`unused Temporal runtime residue: ${temporal.join(", ")}`);
   if (!rendered.includes("replicas: 1")) fail("Helm no longer pins one gateway replica");
   const contractFindings = helmContractFindings(rendered);
   if (contractFindings.length) fail(contractFindings.join("; "));
@@ -2358,6 +2403,7 @@ function checkReleaseUpgradeShape() {
 }
 
 export function main() {
+  checkTemporalRuntimeResidue();
   checkCompose("deploy/compose/docker-compose.yml", false);
   checkCompose("deploy/release/docker-compose.yml", true);
   checkHelm();
