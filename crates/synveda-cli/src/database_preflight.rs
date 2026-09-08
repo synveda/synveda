@@ -6,7 +6,7 @@ use std::fs::{File, Metadata};
 use std::future::Future;
 use std::io::Read;
 use std::os::unix::fs::MetadataExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -23,6 +23,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const EXPECTED_HOST_SETTING: &str = "SYNVEDA_DATABASE_EXPECTED_HOST";
 const EXPECTED_PORT_SETTING: &str = "SYNVEDA_DATABASE_EXPECTED_PORT";
 const EXPECTED_DATABASE_SETTING: &str = "SYNVEDA_DATABASE_EXPECTED_NAME";
+const EXPECTED_ROOT_CERT_SETTING: &str = "SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE";
 const REQUIRED_PEER_SETTING: &str = "SYNVEDA_DATABASE_REQUIRED_PEER";
 const PEER_WITNESS_SETTING: &str = "SYNVEDA_DATABASE_PEER_WITNESS_FILE";
 const PEER_WITNESS_MAX_BYTES: u64 = 256;
@@ -91,6 +92,7 @@ struct TopologyRequirements {
     endpoint: Option<ExpectedEndpoint>,
     required_peer: Option<String>,
     witness: Option<PeerWitness>,
+    expected_root_cert: Option<PathBuf>,
 }
 
 impl TopologyRequirements {
@@ -100,14 +102,18 @@ impl TopologyRequirements {
         let witness = std::env::var_os(PEER_WITNESS_SETTING)
             .map(read_peer_witness)
             .transpose()?;
-        Self::from_values(
+        let mut requirements = Self::from_values(
             std::env::var_os(EXPECTED_HOST_SETTING),
             std::env::var_os(EXPECTED_PORT_SETTING),
             std::env::var_os(EXPECTED_DATABASE_SETTING),
             std::env::var_os(REQUIRED_PEER_SETTING),
             witness,
             roles,
-        )
+        )?;
+        requirements.expected_root_cert = std::env::var_os(EXPECTED_ROOT_CERT_SETTING)
+            .map(parse_expected_root_cert)
+            .transpose()?;
+        Ok(requirements)
     }
 
     fn from_values(
@@ -177,7 +183,22 @@ impl TopologyRequirements {
             endpoint,
             required_peer,
             witness,
+            expected_root_cert: None,
         })
+    }
+
+    fn parse_options(
+        &self,
+        file_setting: &str,
+        value: &str,
+    ) -> Result<sqlx::postgres::PgConnectOptions, String> {
+        let parsed = match self.expected_root_cert.as_deref() {
+            Some(root_cert) => {
+                synveda_store::database_url::parse_verify_full(file_setting, value, root_cert)
+            }
+            None => synveda_store::database_url::parse(file_setting, value),
+        };
+        parsed.map_err(|_| format!("{file_setting} is not a valid PostgreSQL URL"))
     }
 
     fn verify_options(
@@ -214,6 +235,17 @@ impl TopologyRequirements {
         }
         Ok(())
     }
+}
+
+fn parse_expected_root_cert(value: OsString) -> Result<PathBuf, String> {
+    let value = bounded_setting(EXPECTED_ROOT_CERT_SETTING, value, 4_096)?;
+    let path = PathBuf::from(value);
+    if !path.is_absolute() {
+        return Err(format!(
+            "{EXPECTED_ROOT_CERT_SETTING} must be an absolute path"
+        ));
+    }
+    Ok(path)
 }
 
 fn read_peer_witness(path: OsString) -> Result<PeerWitness, String> {
@@ -409,8 +441,7 @@ async fn inspect(
         std::env::var_os(target.direct_setting),
         std::env::var_os(target.file_setting),
     )?);
-    let options = synveda_store::database_url::parse(target.file_setting, &url)
-        .map_err(|_| format!("{} is not a valid PostgreSQL URL", target.file_setting))?;
+    let options = requirements.parse_options(target.file_setting, &url)?;
     requirements.verify_options(target.file_setting, &options)?;
     if options.get_username() != expected_role {
         return Err(format!(
@@ -709,6 +740,46 @@ mod tests {
                 "SYNVEDA_GATEWAY_DATABASE_URL_FILE does not match the peer database cluster witness"
             );
         }
+    }
+
+    #[test]
+    fn external_preflight_requires_the_mounted_verify_full_root() {
+        let base_roles = roles(vec!["postgres".to_owned()], Vec::new());
+        let mut requirements =
+            TopologyRequirements::from_values(None, None, None, None, None, &base_roles)
+                .expect("base topology");
+        requirements.expected_root_cert = Some(PathBuf::from("/run/secrets/postgres_root_ca"));
+
+        let valid = "postgresql://gateway:secret@database.example.test/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca";
+        requirements
+            .parse_options("SYNVEDA_GATEWAY_DATABASE_URL_FILE", valid)
+            .expect("strict external TLS URL");
+
+        const SENTINEL: &str = "external-preflight-secret-sentinel";
+        for invalid in [
+            format!("postgresql://gateway:{SENTINEL}@database.example.test/synveda"),
+            format!(
+                "postgresql://gateway:{SENTINEL}@database.example.test/synveda?sslmode=require&sslrootcert=/run/secrets/postgres_root_ca"
+            ),
+            format!(
+                "postgresql://gateway:{SENTINEL}@database.example.test/synveda?sslmode=verify-full&sslrootcert=/wrong/path"
+            ),
+        ] {
+            let error = requirements
+                .parse_options("SYNVEDA_GATEWAY_DATABASE_URL_FILE", &invalid)
+                .expect_err("weak TLS URL must fail before connection");
+            assert_eq!(
+                error,
+                "SYNVEDA_GATEWAY_DATABASE_URL_FILE is not a valid PostgreSQL URL"
+            );
+            assert!(!error.contains(SENTINEL));
+        }
+
+        assert_eq!(
+            parse_expected_root_cert(OsString::from("relative/ca.pem"))
+                .expect_err("relative CA path"),
+            "SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE must be an absolute path"
+        );
     }
 
     #[test]

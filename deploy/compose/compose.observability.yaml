@@ -7,13 +7,6 @@ services:
       # Compose networks for Collector scraping; no worker port is published.
       SYNVEDA_WORKER_LISTEN_ADDR: 0.0.0.0:8121
 
-  otel-collector:
-    volumes:
-      - type: bind
-        source: ./configs/otel/collector.observability.yaml
-        target: /etc/otelcol/config.yaml
-        read_only: true
-
   prometheus:
     profiles: [observability]
     image: ${SYNVEDA_PROMETHEUS_IMAGE:?set SYNVEDA_PROMETHEUS_IMAGE}

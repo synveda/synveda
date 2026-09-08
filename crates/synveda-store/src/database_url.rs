@@ -5,7 +5,9 @@
 //! validate the provider and the pinned SQLx query vocabulary before handing
 //! an untrusted configuration value to SQLx.
 
-use sqlx::postgres::PgConnectOptions;
+use std::path::Path;
+
+use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use synveda_types::{Error, Result};
 
 // `PgConnectOptions::from_str` starts from these libpq-compatible process
@@ -81,6 +83,52 @@ pub fn parse(setting: &str, value: &str) -> Result<PgConnectOptions> {
     // replication semantics before a sentinel query runs, so the closed URL
     // vocabulary alone is not enough: refuse the ambient value as well.
     if options.get_options().is_some() {
+        return Err(invalid(setting));
+    }
+    Ok(options)
+}
+
+/// Parses an external PostgreSQL URL with hostname and CA verification.
+///
+/// The URL remains the complete connection authority. Deployment preflight
+/// uses this stricter entry point before any external database client starts.
+pub fn parse_verify_full(
+    setting: &str,
+    value: &str,
+    expected_root_cert: &Path,
+) -> Result<PgConnectOptions> {
+    if !expected_root_cert.is_absolute() {
+        return Err(invalid(setting));
+    }
+    let parsed = url::Url::parse(value).map_err(|_| invalid(setting))?;
+    let mut ssl_mode = None;
+    let mut ssl_root_cert = None;
+    let mut password_is_nonempty = parsed
+        .password()
+        .is_some_and(|password| !password.is_empty());
+    for (key, query_value) in parsed.query_pairs() {
+        match key.as_ref() {
+            "sslmode" if ssl_mode.is_none() => ssl_mode = Some(query_value.into_owned()),
+            "sslrootcert" if ssl_root_cert.is_none() => {
+                ssl_root_cert = Some(query_value.into_owned());
+            }
+            "password" => password_is_nonempty = !query_value.is_empty(),
+            "sslmode" | "sslrootcert" | "ssl-mode" | "ssl-root-cert" | "ssl-ca" | "sslcert"
+            | "ssl-cert" | "sslkey" | "ssl-key" | "hostaddr" => {
+                return Err(invalid(setting));
+            }
+            _ => {}
+        }
+    }
+    if !password_is_nonempty
+        || ssl_mode.as_deref() != Some("verify-full")
+        || ssl_root_cert.as_deref() != expected_root_cert.to_str()
+    {
+        return Err(invalid(setting));
+    }
+
+    let options = parse(setting, value)?;
+    if !matches!(options.get_ssl_mode(), PgSslMode::VerifyFull) || options.get_socket().is_some() {
         return Err(invalid(setting));
     }
     Ok(options)
@@ -170,6 +218,46 @@ mod tests {
                 "invalid: DATABASE_URL is not a valid PostgreSQL connection URL"
             );
             assert!(!error.to_string().contains("secret"), "{error}");
+        }
+    }
+
+    #[test]
+    fn external_urls_require_one_canonical_verify_full_ca_contract() {
+        let ca = Path::new("/run/secrets/postgres_root_ca");
+        let accepted = "postgresql://app:secret@database.example.test:5432/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca";
+        let options = parse_verify_full("DATABASE_URL_FILE", accepted, ca)
+            .expect("canonical verify-full URL");
+        assert!(matches!(options.get_ssl_mode(), PgSslMode::VerifyFull));
+        assert_eq!(options.get_host(), "database.example.test");
+
+        for refused in [
+            "postgresql://app:secret@database.example.test/synveda",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=disable&sslrootcert=/run/secrets/postgres_root_ca",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=allow&sslrootcert=/run/secrets/postgres_root_ca",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=prefer&sslrootcert=/run/secrets/postgres_root_ca",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=require&sslrootcert=/run/secrets/postgres_root_ca",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=verify-ca&sslrootcert=/run/secrets/postgres_root_ca",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=verify-full",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=verify-full&sslrootcert=/wrong/path",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=verify-full&sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca&ssl-ca=/run/secrets/postgres_root_ca",
+            "postgresql://app:secret@database.example.test/synveda?ssl-mode=verify-full&sslrootcert=/run/secrets/postgres_root_ca",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=verify-full&ssl-root-cert=/run/secrets/postgres_root_ca",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca&sslcert=/run/secrets/client.crt",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca&sslkey=/run/secrets/client.key",
+            "postgresql://app:secret@database.example.test/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca&hostaddr=192.0.2.1",
+            "postgresql:///synveda?host=%2Frun%2Fpostgresql&user=app&password=secret&sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca",
+            "postgresql://app:@database.example.test/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca",
+            "postgresql://app@database.example.test/synveda?password=&sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca",
+        ] {
+            let error = parse_verify_full("DATABASE_URL_FILE", refused, ca)
+                .expect_err("weakened external TLS URL must be refused");
+            assert_eq!(
+                error.to_string(),
+                "invalid: DATABASE_URL_FILE is not a valid PostgreSQL connection URL"
+            );
+            assert!(!error.to_string().contains("secret"));
+            assert!(!error.to_string().contains("postgres_root_ca"));
         }
     }
 

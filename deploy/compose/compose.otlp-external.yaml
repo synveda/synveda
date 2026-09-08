@@ -1,0 +1,9 @@
+services:
+  otel-collector:
+    labels:
+      com.synveda.otlp.provider: external
+    environment:
+      SYNVEDA_OTLP_EXPORT_ENDPOINT: ${SYNVEDA_OTLP_EXPORT_ENDPOINT:?set SYNVEDA_OTLP_EXPORT_ENDPOINT}
+    networks:
+      telemetry-egress:
+        gw_priority: 1

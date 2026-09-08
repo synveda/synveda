@@ -2,8 +2,8 @@
 
 This directory is Synveda's canonical single-host deployment for CPR-45. It
 runs the gateway and worker as separate processes with PostgreSQL, bundled
-Keycloak, a reverse proxy and a private OpenTelemetry Collector. An optional
-profile adds a bounded local Prometheus operator view.
+Keycloak, a reverse proxy and a private OpenTelemetry Collector. Optional
+settings add a bounded local Prometheus operator view or external trace export.
 
 It supports development and reference configuration. Logical backup and
 isolated restore commands are implemented, but live browser, reference-HTTPS,
@@ -133,14 +133,15 @@ no production monitoring or alerting claim.
 
 ## Secrets
 
-Generate secrets explicitly when preparing a deployment:
+Generate secrets explicitly when preparing a bundled-PostgreSQL deployment:
 
     make compose-secrets
     make compose-issuer
 
 The generator writes mode-0600 secret files below a mode-0700 project
 directory, refuses overwrite unless explicitly forced and never prints secret
-values. The checked-in .env.example contains no usable credential.
+values. It refuses external PostgreSQL because those credentials and its CA
+are operator-owned. The checked-in .env.example contains no usable credential.
 
 Do not put credentials, database URLs, KMS key material or client secrets in
 Compose YAML, a committed environment file, an image layer or a shell command.
@@ -370,10 +371,72 @@ DNS and does not run the hosts targets.
 
 ## External PostgreSQL
 
-External PostgreSQL rows render and validate through the same role and secret
-file contract. Canonical up and reset currently refuse this mode because its
-authenticated transport/bootstrap acceptance is unfinished. A successful
-configuration render is not a live external-database claim.
+The executable external mode currently pairs external PostgreSQL with external
+OIDC. The provider/operator must first provide PostgreSQL 17, create database
+`synveda`, install `btree_gin` 1.3 and `vector` 0.8.6 in `public`, and create
+the database owner plus the exact protected role shape: NOLOGIN capability role
+`synveda_app` and the least-privilege migrator, gateway and worker logins with
+the memberships, ownership and ACLs required by the selected role contract.
+It must also provide a server certificate for the database DNS authority.
+Compose validates this authority and applies Synveda migrations; it does not
+provision, reset, back up or restore an externally owned cluster. Bundled
+Keycloak with external PostgreSQL remains outside this slice.
+
+Prepare an absolute mode-0700 secret directory owned by the configured runtime
+UID:GID. Its path must end in the exact selected project and `/secrets`, for
+example `/absolute/private/synveda-development/secrets`; a reference or
+suffixed acceptance project uses its own exact project name. Create a
+non-symlink mode-0700 `oidc-directory` child for the product's empty directory
+secret. Put these non-symlink mode-0600 files in the secret directory:
+
+- `synveda_migrator_database_url`;
+- `synveda_gateway_database_url`;
+- `synveda_worker_database_url`;
+- `synveda_kms_key` and `synveda_kms_key_ref`; and
+- `postgres_root_ca`, currently one PEM root certificate.
+
+Each role URL has this exact TLS shape, with the password percent-encoded for a
+URL and the role name varied per file:
+
+    postgresql://synveda_gateway:<encoded-password>@database.example.com:5432/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca
+
+Prepare the external issuer document separately as described above. Its parent
+must also be a non-symlink mode-0700 directory owned by the runtime UID:GID and
+the file must be non-symlink, nonempty and mode 0600. It must not sit inside
+the secret directory. Then set:
+
+    export SYNVEDA_POSTGRES_MODE=external
+    export SYNVEDA_OIDC_MODE=external
+    export SYNVEDA_SECRETS_DIR=/absolute/private/synveda-development/secrets
+    export SYNVEDA_DATABASE_ROLES_FILE=$PWD/deploy/compose/configs/database/roles.external-oidc.json
+    export SYNVEDA_DATABASE_EXPECTED_HOST=database.example.com
+    export SYNVEDA_DATABASE_EXPECTED_PORT=5432
+    export SYNVEDA_DATABASE_EXPECTED_NAME=synveda
+    make compose-config
+    make compose-up
+    make compose-smoke
+
+The preflight checks all three URLs against the declared endpoint and requires
+hostname-and-CA verification before migration or either runtime starts. Native
+TLS adds the mounted CA to normal platform trust; it is not exclusive
+certificate pinning. A deterministic graph check is not a live external-
+database claim. External acceptance, reset and recovery remain explicitly
+refused.
+
+## External OTLP traces
+
+The application always sends traces to the private Collector. To forward them
+to an external public-PKI OTLP/gRPC receiver, set one non-secret DNS authority:
+
+    export SYNVEDA_OTLP_MODE=external
+    export SYNVEDA_OTLP_EXPORT_ENDPOINT=otel.example.com:4317
+    make compose-up
+
+The Collector uses TLS, bounded batching, an in-memory queue and a one-minute
+retry window. The endpoint accepts no scheme, path, credentials or IP address.
+Private CA, authentication-header and mTLS delivery are not implemented in
+this slice. Metrics remain local when the observability profile is selected,
+and normal smoke proves Collector configuration rather than remote receipt.
 
 ## Network and edge contract
 
@@ -416,10 +479,10 @@ implemented:
 - live execution of the paired logical backup and isolated restore on the
   supported development/reference platforms;
 - one experimental forced-RLS operation/outbox and opaque-ID Apalis canary;
-- a customer-safe Operations route and external OTLP export;
+- a customer-safe Operations route;
 - canonical release/installer cutover and Rauthy deletion after live Keycloak
   browser acceptance;
-- deterministic upgrade/rollback and external-dependency contract checks.
+- deterministic same-schema upgrade/rollback checks.
 
 A general dashboard platform, ACME, HA, Helm promotion, signed provenance,
 S3/WAL-PITR recovery and enterprise controls remain later production work.

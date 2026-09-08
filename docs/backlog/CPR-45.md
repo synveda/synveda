@@ -129,8 +129,8 @@ visibility, not the customer-safe Operations route.
 2. Add the minimal `operation`, `operation_attempt` and
    `operation_outbox` schema/API for `skill_validation@1` under forced RLS.
 3. Add the exact-pinned Apalis leaf adapter and optional Compose fragment.
-4. Add the customer-safe Operations route and external OTLP exporter.
-5. Add upgrade/rollback and executable external-PostgreSQL contract acceptance.
+4. Add the customer-safe Operations route.
+5. Add same-schema product upgrade/rollback acceptance.
 6. Run current-source development and reference acceptance on Linux and one
    Docker Desktop platform.
 7. After the Keycloak gate passes, replace release/install assets with the
@@ -145,6 +145,13 @@ Knowledge and context reuse, reopens and checks its active receipt without
 repeating mutations, then verifies that receipt against live rows after the
 restart matrix. Deterministic lifecycle and contract tests pass; a supported
 Docker host is still required for live evidence.
+
+Executable external PostgreSQL plus external OIDC now uses the same product
+graph with operator-provisioned roles, strict verify-full role URLs and a
+mounted root certificate. External OTLP sends traces through the same private
+Collector over public-PKI TLS with bounded in-memory retry. Their provider
+matrix, lifecycle and mutation checks are deterministic; neither is yet a live
+external-service result.
 
 The `make compose-backup` and `make compose-restore-smoke` gates are also
 implemented. Deterministic tests cover writer pause/resume and ordinary

@@ -98,6 +98,56 @@ const COLLECTOR_OBSERVABILITY_HEALTH_BODY = JSON.stringify({
   pipelines: ["metrics", "traces"],
   status: "ok",
 });
+const COLLECTOR_EXTERNAL_HEALTH_BODY = JSON.stringify({
+  pipelines: ["traces"],
+  status: "configured",
+});
+const COLLECTOR_EXTERNAL_OBSERVABILITY_HEALTH_BODY = JSON.stringify({
+  pipelines: ["metrics", "traces"],
+  status: "configured",
+});
+const COLLECTOR_CONFIG = `extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+    response_body:
+      healthy: '{"receivers":{"nop":{}},"exporters":{"nop":{}},"service":{"pipelines":{"traces":{"receivers":["nop"],"exporters":["nop"]}}}}'
+      unhealthy: '{}'
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 4
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 96
+  batch:
+    send_batch_size: 512
+    send_batch_max_size: 1024
+    timeout: 5s
+
+exporters:
+  nop: {}
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      level: basic
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [nop]
+`;
 const COLLECTOR_OBSERVABILITY_CONFIG = `extensions:
   health_check:
     endpoint: 127.0.0.1:13133
@@ -162,6 +212,37 @@ service:
       processors: [memory_limiter, batch]
       exporters: [prometheus]
 `;
+const COLLECTOR_EXTERNAL_EXPORTER = `  otlp/external:
+    endpoint: \${env:SYNVEDA_OTLP_EXPORT_ENDPOINT}
+    timeout: 5s
+    tls:
+      insecure: false
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 128
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+`;
+
+function externalCollectorConfig(config, healthBody) {
+  return config
+    .replace(/      healthy: '.*'\n/, `      healthy: '${healthBody}'\n`)
+    .replace("  nop: {}\n", COLLECTOR_EXTERNAL_EXPORTER)
+    .replace("      exporters: [nop]\n", "      exporters: [otlp/external]\n");
+}
+
+const COLLECTOR_EXTERNAL_CONFIG = externalCollectorConfig(
+  COLLECTOR_CONFIG,
+  COLLECTOR_EXTERNAL_HEALTH_BODY,
+);
+const COLLECTOR_EXTERNAL_OBSERVABILITY_CONFIG = externalCollectorConfig(
+  COLLECTOR_OBSERVABILITY_CONFIG,
+  COLLECTOR_EXTERNAL_OBSERVABILITY_HEALTH_BODY,
+);
 const PROMETHEUS_CONFIG = `global:
   scrape_interval: 15s
   scrape_timeout: 5s
@@ -181,6 +262,7 @@ const CORE_SECRETS = [
   "synveda_kms_key",
   "synveda_kms_key_ref",
 ];
+const EXTERNAL_POSTGRES_SECRETS = ["postgres_root_ca"];
 const PROVIDER_SECRETS = [
   "postgres_owner_password",
   "synveda_migrator_password",
@@ -465,7 +547,7 @@ export function makeComposeFixture() {
   mkdirSync(oidcDirectorySecrets, { mode: 0o700 });
   chmodSync(oidcDirectorySecrets, 0o700);
   if (processUid === 0) chownSync(oidcDirectorySecrets, owner.uid, owner.gid);
-  for (const name of [...CORE_SECRETS, ...PROVIDER_SECRETS]) {
+  for (const name of [...CORE_SECRETS, ...PROVIDER_SECRETS, ...EXTERNAL_POSTGRES_SECRETS]) {
     writePrivate(join(secrets, name), `${SECRET_SENTINEL}-${name}`, owner);
   }
   const tls = generateTestTlsChain({
@@ -539,7 +621,13 @@ export function composeEnvironment(fixture, overrides = {}) {
     if (process.getuid?.() === 0) {
       chownSync(projectOidcDirectory, fixture.uid, fixture.gid);
     }
-    for (const name of [...CORE_SECRETS, ...PROVIDER_SECRETS, "tls_cert", "tls_key"]) {
+    for (const name of [
+      ...CORE_SECRETS,
+      ...PROVIDER_SECRETS,
+      ...EXTERNAL_POSTGRES_SECRETS,
+      "tls_cert",
+      "tls_key",
+    ]) {
       writePrivate(
         join(projectSecrets, name),
         readFileSync(join(fixture.secrets, name), "utf8").trimEnd(),
@@ -1327,14 +1415,18 @@ export function browserAcceptanceFindings(browser, expected) {
   return findings;
 }
 
-export function collectorConfigFindings(config, observability = false) {
+export function collectorConfigFindings(config, observability = false, external = false) {
   const findings = [];
   if (!config.includes("extensions:\n  health_check:\n    endpoint: 127.0.0.1:13133\n")) {
     findings.push("Collector health endpoint is not container-loopback-only");
   }
-  const healthBody = observability
-    ? COLLECTOR_OBSERVABILITY_HEALTH_BODY
-    : COLLECTOR_HEALTH_BODY;
+  const healthBody = external
+    ? observability
+      ? COLLECTOR_EXTERNAL_OBSERVABILITY_HEALTH_BODY
+      : COLLECTOR_EXTERNAL_HEALTH_BODY
+    : observability
+      ? COLLECTOR_OBSERVABILITY_HEALTH_BODY
+      : COLLECTOR_HEALTH_BODY;
   if (!config.includes(`    response_body:\n      healthy: '${healthBody}'\n`)) {
     findings.push("Collector healthy response does not match the selected pipeline contract");
   }
@@ -1355,11 +1447,20 @@ export function collectorConfigFindings(config, observability = false) {
     for (const marker of metricsMarkers) {
       if (!config.includes(marker)) findings.push("Collector metrics fan-in drifted");
     }
-    if (config !== COLLECTOR_OBSERVABILITY_CONFIG) {
-      findings.push("Collector observability configuration is not the closed reviewed grammar");
-    }
   } else if (metricsMarkers.some((marker) => config.includes(marker))) {
     findings.push("base Collector unexpectedly enables the local metrics fan-in");
+  }
+  const expectedConfig = external
+    ? observability
+      ? COLLECTOR_EXTERNAL_OBSERVABILITY_CONFIG
+      : COLLECTOR_EXTERNAL_CONFIG
+    : observability
+      ? COLLECTOR_OBSERVABILITY_CONFIG
+      : COLLECTOR_CONFIG;
+  if (config !== expectedConfig) {
+    findings.push(
+      `Collector ${external ? "external " : ""}${observability ? "observability " : ""}configuration is not the closed reviewed grammar`,
+    );
   }
   return findings;
 }
@@ -2320,6 +2421,14 @@ export function canonicalComposeFindings(model, expected) {
       findings.push(`${name} overrides the single-host deploy replica contract`);
     }
   }
+  if (
+    !sameJson(services["otel-collector"]?.labels, {
+      "com.synveda.contract": "cpr-45",
+      "com.synveda.otlp.provider": expected.otlp,
+    })
+  ) {
+    findings.push("Collector OTLP provider label drifted");
+  }
   const expectedTopLevelSecrets = {
     synveda_gateway_database_url: "synveda_gateway_database_url",
     synveda_kms_key: "synveda_kms_key",
@@ -2333,6 +2442,11 @@ export function canonicalComposeFindings(model, expected) {
       synveda_gateway_password: "synveda_gateway_password",
       synveda_migrator_password: "synveda_migrator_password",
       synveda_worker_password: "synveda_worker_password",
+    });
+  }
+  if (expected.postgres === "external") {
+    Object.assign(expectedTopLevelSecrets, {
+      synveda_postgres_root_ca: "postgres_root_ca",
     });
   }
   if (expected.oidc === "bundled") {
@@ -2853,9 +2967,7 @@ export function canonicalComposeFindings(model, expected) {
   const expectedDatabaseEndpoint =
     expected.postgres === "bundled"
       ? { host: "postgres", port: "5432", database: "synveda" }
-      : expected.oidc === "bundled"
-        ? { host: "database.compose.example", port: "5432", database: "synveda" }
-        : undefined;
+      : { host: "database.compose.example", port: "5432", database: "synveda" };
   const preflightEnvironment = services["database-preflight"]?.environment ?? {};
   if (
     expectedDatabaseEndpoint !== undefined &&
@@ -2864,14 +2976,6 @@ export function canonicalComposeFindings(model, expected) {
       preflightEnvironment.SYNVEDA_DATABASE_EXPECTED_NAME !== expectedDatabaseEndpoint.database)
   ) {
     findings.push("database target preflight is not bound to the selected PostgreSQL endpoint");
-  }
-  if (
-    expectedDatabaseEndpoint === undefined &&
-    (preflightEnvironment.SYNVEDA_DATABASE_EXPECTED_HOST !== undefined ||
-      preflightEnvironment.SYNVEDA_DATABASE_EXPECTED_PORT !== undefined ||
-      preflightEnvironment.SYNVEDA_DATABASE_EXPECTED_NAME !== undefined)
-  ) {
-    findings.push("database target preflight has an unexpected endpoint binding");
   }
   if (
     preflightEnvironment.SYNVEDA_DATABASE_REQUIRED_PEER !==
@@ -3377,6 +3481,17 @@ export function canonicalComposeFindings(model, expected) {
       "synveda_migrator_database_url:database_url",
     ],
   });
+  if (expected.postgres === "external") {
+    for (const name of [
+      "database-preflight",
+      "migrate",
+      "tenant-convergence",
+      "gateway",
+      "worker",
+    ]) {
+      expectedSecrets[name].push("synveda_postgres_root_ca:postgres_root_ca");
+    }
+  }
   if (expected.postgres === "bundled") {
     expectedSecrets.postgres = ["postgres_owner_password:postgres_owner_password"];
     expectedSecrets["database-bootstrap"] = [
@@ -3655,7 +3770,7 @@ export function canonicalComposeFindings(model, expected) {
       "SYNVEDA_OIDC_ISSUERS_FILE",
       "SYNVEDA_WORKER_LISTEN_ADDR",
     ],
-    "otel-collector": [],
+    "otel-collector": expected.otlp === "external" ? ["SYNVEDA_OTLP_EXPORT_ENDPOINT"] : [],
   };
   if (expected.observability === true) {
     expectedEnvironmentKeys.worker.push("SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH");
@@ -3669,11 +3784,14 @@ export function canonicalComposeFindings(model, expected) {
       "SYNVEDA_INSECURE_DEVELOPMENT_HTTP",
     ];
   }
-  if (expected.postgres === "bundled" || expected.oidc === "bundled") {
+  expectedEnvironmentKeys["database-preflight"].push(
+    "SYNVEDA_DATABASE_EXPECTED_HOST",
+    "SYNVEDA_DATABASE_EXPECTED_NAME",
+    "SYNVEDA_DATABASE_EXPECTED_PORT",
+  );
+  if (expected.postgres === "external") {
     expectedEnvironmentKeys["database-preflight"].push(
-      "SYNVEDA_DATABASE_EXPECTED_HOST",
-      "SYNVEDA_DATABASE_EXPECTED_NAME",
-      "SYNVEDA_DATABASE_EXPECTED_PORT",
+      "SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE",
     );
   }
   if (expected.postgres === "bundled") {
@@ -3755,6 +3873,19 @@ export function canonicalComposeFindings(model, expected) {
       findings.push(`${name} environment key set drifted`);
     }
   }
+  if (
+    services["database-preflight"]?.environment
+      ?.SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE !==
+    (expected.postgres === "external" ? "/run/secrets/postgres_root_ca" : undefined)
+  ) {
+    findings.push("external PostgreSQL root-CA preflight setting drifted");
+  }
+  if (
+    services["otel-collector"]?.environment?.SYNVEDA_OTLP_EXPORT_ENDPOINT !==
+    (expected.otlp === "external" ? "telemetry.compose.example:4317" : undefined)
+  ) {
+    findings.push("Collector external OTLP endpoint boundary drifted");
+  }
   const expectedWorkerListen =
     expected.observability === true ? "0.0.0.0:8121" : "127.0.0.1:8121";
   if (
@@ -3794,7 +3925,9 @@ export function canonicalComposeFindings(model, expected) {
     "tenant-convergence": { "synveda-data": {} },
     "otel-collector": {
       telemetry: {},
-      "telemetry-egress": { gw_priority: 1 },
+      ...(expected.otlp === "external"
+        ? { "telemetry-egress": { gw_priority: 1 } }
+        : {}),
     },
     proxy: {
       "app-backend": {
@@ -4020,8 +4153,8 @@ export function canonicalComposeFindings(model, expected) {
     "public-edge",
     "synveda-data",
     "telemetry",
-    "telemetry-egress",
   ];
+  if (expected.otlp === "external") expectedNetworkNames.push("telemetry-egress");
   if (expected.postgres === "bundled" || expected.oidc === "bundled") {
     expectedNetworkNames.push("keycloak-data");
   }
@@ -4105,9 +4238,10 @@ export function canonicalComposeFindings(model, expected) {
 }
 
 function render(fixture, expected) {
+  expected.otlp ??= "discard";
   const output = join(
     fixture.scratch,
-    `${expected.runtime}-${expected.postgres}-${expected.oidc}${expected.demo === true ? "-demo" : ""}${expected.browser === true ? "-browser" : ""}${expected.observability === true ? "-observability" : ""}.json`,
+    `${expected.runtime}-${expected.postgres}-${expected.oidc}-${expected.otlp}${expected.demo === true ? "-demo" : ""}${expected.browser === true ? "-browser" : ""}${expected.observability === true ? "-observability" : ""}.json`,
   );
   const reference = expected.runtime === "reference";
   expected.publicPort = reference ? 443 : (expected.devPort ?? 8080);
@@ -4175,9 +4309,7 @@ function render(fixture, expected) {
   );
   expected.collectorConfig = join(
     COMPOSE,
-    expected.observability === true
-      ? "configs/otel/collector.observability.yaml"
-      : "configs/otel/collector.yaml",
+    `configs/otel/collector${expected.otlp === "external" ? ".external" : ""}${expected.observability === true ? ".observability" : ""}.yaml`,
   );
   expected.prometheusConfig = join(
     COMPOSE,
@@ -4220,6 +4352,14 @@ function render(fixture, expected) {
     SYNVEDA_COMPOSE_RUNTIME: expected.runtime,
     SYNVEDA_POSTGRES_MODE: expected.postgres,
     SYNVEDA_OIDC_MODE: expected.oidc,
+    SYNVEDA_OTLP_MODE: expected.otlp,
+    ...(expected.postgres === "external"
+      ? {
+          SYNVEDA_DATABASE_EXPECTED_HOST: "database.compose.example",
+          SYNVEDA_DATABASE_EXPECTED_PORT: "5432",
+          SYNVEDA_DATABASE_EXPECTED_NAME: "synveda",
+        }
+      : {}),
     SYNVEDA_PUBLIC_SCHEME: reference ? "https" : "http",
     SYNVEDA_APP_HOST: expected.appHost,
     ...(expected.authHost === undefined ? {} : { SYNVEDA_AUTH_HOST: expected.authHost }),
@@ -4229,6 +4369,9 @@ function render(fixture, expected) {
     SYNVEDA_KEYCLOAK_IMAGE: expected.keycloakImage,
     SYNVEDA_CADDY_IMAGE: expected.caddyImage,
     SYNVEDA_OTEL_COLLECTOR_IMAGE: expected.otelCollectorImage,
+    ...(expected.otlp === "external"
+      ? { SYNVEDA_OTLP_EXPORT_ENDPOINT: "telemetry.compose.example:4317" }
+      : {}),
     ...(selectedProfiles.length === 0
       ? {}
       : { SYNVEDA_COMPOSE_PROFILES: selectedProfiles.join(",") }),
@@ -4290,6 +4433,7 @@ function checkStaticInputs() {
     "compose.browser-acceptance.yaml",
     "compose.browser-acceptance.dev.yaml",
     "compose.observability.yaml",
+    "compose.otlp-external.yaml",
     "compose.backup.yaml",
     "compose.restore.yaml",
     "compose.external.yaml",
@@ -4388,6 +4532,19 @@ function checkStaticInputs() {
   assert.match(observableCollector, /batch:/);
   assert.doesNotMatch(observableCollector, /debug:|logging:/);
   assert.doesNotMatch(observableCollector, /^\s+address:/m);
+  const externalCollector = readFileSync(
+    join(COMPOSE, "configs/otel/collector.external.yaml"),
+    "utf8",
+  );
+  assert.deepEqual(collectorConfigFindings(externalCollector, false, true), []);
+  const externalObservableCollector = readFileSync(
+    join(COMPOSE, "configs/otel/collector.external.observability.yaml"),
+    "utf8",
+  );
+  assert.deepEqual(
+    collectorConfigFindings(externalObservableCollector, true, true),
+    [],
+  );
   assert.deepEqual(
     prometheusConfigFindings(
       readFileSync(join(COMPOSE, "configs/prometheus/prometheus.yaml"), "utf8"),
@@ -4515,6 +4672,15 @@ function checkStaticInputs() {
     .filter((line) => !line.trimStart().startsWith("#") && /\bcargo build\b/.test(line));
   assert.equal(productBuilds.length, 2);
   for (const build of productBuilds) assert.match(build, /\bcargo build --locked\b/);
+  assert.match(
+    product,
+    /apt-get install --no-install-recommends --yes ca-certificates curl libssl3/,
+  );
+  const workspaceManifest = readFileSync(join(ROOT, "Cargo.toml"), "utf8");
+  assert.match(
+    workspaceManifest,
+    /sqlx = \{ version = "0\.8", default-features = false, features = \[[\s\S]*?"tls-native-tls"[\s\S]*?\] \}/,
+  );
 
   const proxy = readFileSync(join(COMPOSE, "proxy/Dockerfile"), "utf8");
   assert.match(proxy, /caddy:2\.11\.4-alpine@sha256:5f5c8640aae0/);
@@ -4540,20 +4706,30 @@ export function main() {
   const fixture = makeComposeFixture();
   try {
     let rows = 0;
-    for (const runtime of ["development", "reference"]) {
-      for (const [postgres, oidc] of [
-        ["bundled", "bundled"],
-        ["bundled", "external"],
-        ["external", "bundled"],
-        ["external", "external"],
-      ]) {
-        const expected = { runtime, postgres, oidc };
-        const first = render(fixture, expected);
-        const findings = canonicalComposeFindings(first, expected);
-        assert.deepEqual(findings, [], `${runtime}/${postgres}/${oidc}: ${findings.join("; ")}`);
-        const second = render(fixture, expected);
-        assert.deepEqual(second, first, `${runtime}/${postgres}/${oidc} render is not deterministic`);
-        rows += 1;
+    for (const otlp of ["discard", "external"]) {
+      for (const runtime of ["development", "reference"]) {
+        for (const [postgres, oidc] of [
+          ["bundled", "bundled"],
+          ["bundled", "external"],
+          ["external", "bundled"],
+          ["external", "external"],
+        ]) {
+          const expected = { runtime, postgres, oidc, otlp };
+          const first = render(fixture, expected);
+          const findings = canonicalComposeFindings(first, expected);
+          assert.deepEqual(
+            findings,
+            [],
+            `${runtime}/${postgres}/${oidc}/${otlp}: ${findings.join("; ")}`,
+          );
+          const second = render(fixture, expected);
+          assert.deepEqual(
+            second,
+            first,
+            `${runtime}/${postgres}/${oidc}/${otlp} render is not deterministic`,
+          );
+          rows += 1;
+        }
       }
     }
     const customPortExpected = {
@@ -4585,16 +4761,13 @@ export function main() {
       [],
       `development/demo: ${demoFindings.join("; ")}`,
     );
-    for (const [runtime, postgres, oidc] of [
-      ["development", "bundled", "bundled"],
-      ["reference", "external", "external"],
+    for (const [runtime, postgres, oidc, otlp] of [
+      ["development", "bundled", "bundled", "discard"],
+      ["development", "bundled", "bundled", "external"],
+      ["reference", "external", "external", "discard"],
+      ["reference", "external", "external", "external"],
     ]) {
-      const observabilityExpected = {
-        runtime,
-        postgres,
-        oidc,
-        observability: true,
-      };
+      const observabilityExpected = { runtime, postgres, oidc, otlp, observability: true };
       const observability = render(fixture, observabilityExpected);
       const observabilityFindings = canonicalComposeFindings(
         observability,
@@ -4603,12 +4776,12 @@ export function main() {
       assert.deepEqual(
         observabilityFindings,
         [],
-        `${runtime}/${postgres}/${oidc}/observability: ${observabilityFindings.join("; ")}`,
+        `${runtime}/${postgres}/${oidc}/${otlp}/observability: ${observabilityFindings.join("; ")}`,
       );
       assert.deepEqual(
         render(fixture, observabilityExpected),
         observability,
-        `${runtime}/${postgres}/${oidc}/observability render is not deterministic`,
+        `${runtime}/${postgres}/${oidc}/${otlp}/observability render is not deterministic`,
       );
       const udpOperatorPort = structuredClone(observability);
       udpOperatorPort.services.prometheus.ports[0].protocol = "udp";
@@ -4658,8 +4831,8 @@ export function main() {
       );
     }
     console.log(
-      `canonical Compose static shape validates: ${rows}/8 deterministic provider/runtime rows, ` +
-        "one bundled demo profile, two private observability rows, two sandboxed browser-acceptance rows, one exact custom development issuer port, role-scoped file secrets, " +
+      `canonical Compose static shape validates: ${rows}/16 deterministic provider/runtime/OTLP rows, ` +
+        "one bundled demo profile, four private observability rows, two sandboxed browser-acceptance rows, one exact custom development issuer port, role-scoped file secrets, " +
         "isolated networks, public proxy plus optional loopback operator ports and closed runtime/build proxy injection; " +
         "live clean-start and browser acceptance execution remain pending",
     );

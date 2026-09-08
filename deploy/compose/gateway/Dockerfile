@@ -158,9 +158,9 @@ ARG all_proxy
 COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
 RUN /usr/local/bin/assert-build-proxy-closed
 # ca-certificates for OIDC discovery against an external issuer over TLS;
-# curl for the healthcheck compose waits on.
+# libssl3 for SQLx's external-PostgreSQL TLS backend; curl for health probes.
 RUN apt-get update \
- && apt-get install --no-install-recommends --yes ca-certificates curl \
+ && apt-get install --no-install-recommends --yes ca-certificates curl libssl3 \
  && rm -rf /var/lib/apt/lists/*
 # Three binaries and no data: the Cedar schema, the base layer and all three
 # product packs are `include_str!`d into synveda-policy, so there is no

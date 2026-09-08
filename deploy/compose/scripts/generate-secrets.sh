@@ -36,6 +36,18 @@ case "$runtime" in
         exit 64
         ;;
 esac
+postgres_mode=${SYNVEDA_POSTGRES_MODE:-bundled}
+case "$postgres_mode" in
+    bundled) ;;
+    external)
+        echo "generate-secrets: external PostgreSQL credentials and CA are operator-owned" >&2
+        exit 69
+        ;;
+    *)
+        echo "generate-secrets: SYNVEDA_POSTGRES_MODE must be bundled|external" >&2
+        exit 64
+        ;;
+esac
 project=synveda-$runtime
 suffix=${SYNVEDA_COMPOSE_PROJECT_SUFFIX:-}
 if [ -n "$suffix" ]; then

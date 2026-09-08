@@ -1,0 +1,76 @@
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+    response_body:
+      healthy: '{"pipelines":["metrics","traces"],"status":"configured"}'
+      unhealthy: '{}'
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 4
+      http:
+        endpoint: 0.0.0.0:4318
+  prometheus:
+    config:
+      global:
+        scrape_interval: 15s
+        scrape_timeout: 5s
+      scrape_configs:
+        - job_name: synveda-gateway
+          honor_labels: false
+          static_configs:
+            - targets: [gateway:8120]
+        - job_name: synveda-worker
+          honor_labels: false
+          static_configs:
+            - targets: [worker:8121]
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 96
+  batch:
+    send_batch_size: 512
+    send_batch_max_size: 1024
+    timeout: 5s
+
+exporters:
+  otlp/external:
+    endpoint: ${env:SYNVEDA_OTLP_EXPORT_ENDPOINT}
+    timeout: 5s
+    tls:
+      insecure: false
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 128
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    send_timestamps: true
+    metric_expiration: 5m
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      level: basic
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/external]
+    metrics:
+      receivers: [prometheus]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]

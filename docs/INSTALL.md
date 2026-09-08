@@ -90,8 +90,12 @@ reference HTTPS, live backup/restore and upgrade acceptance remain open. The
 browser checks bind administrator authority to the configured tenant before
 and after the matrix; those identity rows and the PulseBoard rows witness
 persistence across the restarts.
-External PostgreSQL bootstrap deliberately refuses before secret reads or SQL until the
-authenticated-TLS contract is implemented.
+External PostgreSQL plus external OIDC now starts through the same product
+graph when the operator supplies pre-provisioned roles, strict verify-full role
+URLs and a mounted root certificate. Compose applies Synveda schema migrations
+and tenant convergence, but it does not provision, reset, back up or restore
+that external cluster. Exact preparation and limitations are documented in the
+Compose README.
 
 For optional local infrastructure metrics, set
 `SYNVEDA_COMPOSE_PROFILES=observability` for `compose-up`, `compose-smoke` and

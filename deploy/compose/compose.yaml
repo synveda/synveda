@@ -305,6 +305,7 @@ services:
     image: ${SYNVEDA_OTEL_COLLECTOR_IMAGE:?set SYNVEDA_OTEL_COLLECTOR_IMAGE}
     labels:
       com.synveda.contract: cpr-45
+      com.synveda.otlp.provider: discard
     user: "${SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID}"
     command: ["--config=/etc/otelcol/config.yaml"]
     read_only: true
@@ -320,7 +321,7 @@ services:
       - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
     volumes:
       - type: bind
-        source: ./configs/otel/collector.yaml
+        source: ${SYNVEDA_RENDER_OTEL_COLLECTOR_CONFIG:?set SYNVEDA_RENDER_OTEL_COLLECTOR_CONFIG}
         target: /etc/otelcol/config.yaml
         read_only: true
     healthcheck:
@@ -330,8 +331,6 @@ services:
       retries: 3
     networks:
       telemetry: {}
-      telemetry-egress:
-        gw_priority: 1
 
 networks:
   public-edge:

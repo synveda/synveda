@@ -147,10 +147,11 @@ serde_json = "1"
 # Synveda's own persisted/configuration formats remain JSON (CPR-27,
 # ADR-0087). MIT/Apache-2.0.
 serde_yaml = "0.9"
-# No TLS feature on purpose: dev connections are plain; the production TLS
-# backend is chosen (and licence-reviewed) when a deployment needs it.
+# Native TLS keeps bundled development connections unchanged while allowing
+# the external deployment preflight to require hostname and CA verification.
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio",
+    "tls-native-tls",
     "postgres",
     "macros",
     "migrate",

@@ -187,6 +187,10 @@ fi
 if [ -n "\${SYNVEDA_FAKE_EXPECT_DOCKER_AUTH_CONFIG:-}" ]; then
   [ "\${DOCKER_AUTH_CONFIG:-}" = "$SYNVEDA_FAKE_EXPECT_DOCKER_AUTH_CONFIG" ] || exit 93
 fi
+if [ -n "\${SYNVEDA_FAKE_EXPECT_COLLECTOR_CONFIG:-}" ] &&
+  [ "\${1:-}" = compose ] && [ "\${2:-}" != version ]; then
+  [ "\${SYNVEDA_RENDER_OTEL_COLLECTOR_CONFIG:-}" = "$SYNVEDA_FAKE_EXPECT_COLLECTOR_CONFIG" ] || exit 93
+fi
 if [ "\${NODE_OPTIONS+x}" = x ] || [ "\${NODE_EXTRA_CA_CERTS+x}" = x ] ||
   [ "\${NODE_TLS_REJECT_UNAUTHORIZED+x}" = x ] ||
   [ "\${NODE_USE_SYSTEM_CA+x}" = x ] || [ "\${NODE_USE_ENV_PROXY+x}" = x ] ||
@@ -676,6 +680,67 @@ function prepareReferenceFixture(state) {
   writeFileSync(join(state.secrets, "tls_key"), tls.privateKey, { mode: 0o600 });
   chmodSync(join(state.secrets, "tls_cert"), 0o600);
   chmodSync(join(state.secrets, "tls_key"), 0o600);
+}
+
+function prepareExternalPostgresFixture(state) {
+  mkdirSync(state.secrets, { recursive: true, mode: 0o700 });
+  chmodSync(state.secrets, 0o700);
+  const directorySecrets = join(state.secrets, "oidc-directory");
+  mkdirSync(directorySecrets, { mode: 0o700 });
+  chmodSync(directorySecrets, 0o700);
+  const roleUrls = {
+    synveda_migrator_database_url:
+      "postgresql://synveda_migrator:migrator-secret@database.lifecycle.example:5432/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca",
+    synveda_gateway_database_url:
+      "postgresql://synveda_gateway:gateway-secret@database.lifecycle.example:5432/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca",
+    synveda_worker_database_url:
+      "postgresql://synveda_worker:worker-secret@database.lifecycle.example:5432/synveda?sslmode=verify-full&sslrootcert=/run/secrets/postgres_root_ca",
+  };
+  const inputs = {
+    ...roleUrls,
+    synveda_kms_key: "11".repeat(32),
+    synveda_kms_key_ref: "compose/external",
+    postgres_root_ca: "-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----",
+  };
+  if (state.runtimeKind === "reference") {
+    const tls = generateTestTlsChain({
+      commonName: "app.lifecycle.example",
+      sanHosts: ["app.lifecycle.example"],
+    });
+    inputs.tls_cert = tls.certificateChain.trimEnd();
+    inputs.tls_key = tls.privateKey.trimEnd();
+  }
+  for (const [name, value] of Object.entries(inputs)) {
+    writeFileSync(join(state.secrets, name), `${value}\n`, { mode: 0o600 });
+    chmodSync(join(state.secrets, name), 0o600);
+  }
+  writeFileSync(
+    state.issuer,
+    `${JSON.stringify([
+      {
+        issuer: "https://identity.lifecycle.example/realms/synveda",
+        client_id: "synveda",
+        audience: "synveda-api",
+        tenant: { static: { tenant_id: "019b53c0-7c00-7000-8000-000000000045" } },
+        login_scopes: ["openid", "profile", "email"],
+      },
+    ])}\n`,
+    { mode: 0o600 },
+  );
+  chmodSync(state.issuer, 0o600);
+  return {
+    SYNVEDA_POSTGRES_MODE: "external",
+    SYNVEDA_OIDC_MODE: "external",
+    SYNVEDA_COMPOSE_PROFILES: "",
+    SYNVEDA_OIDC_ISSUER: "https://identity.lifecycle.example/realms/synveda",
+    SYNVEDA_DATABASE_ROLES_FILE: join(
+      ROOT,
+      "deploy/compose/configs/database/roles.external-oidc.json",
+    ),
+    SYNVEDA_DATABASE_EXPECTED_HOST: "database.lifecycle.example",
+    SYNVEDA_DATABASE_EXPECTED_PORT: "5432",
+    SYNVEDA_DATABASE_EXPECTED_NAME: "synveda",
+  };
 }
 
 function recoveryRoots(state) {
@@ -1623,6 +1688,175 @@ test("observability selects one private overlay and routes exact smoke evidence"
       calls,
       /check-runtime-smoke\.mjs>.*<--observability> <true>.*<--prometheus-url> <http:\/\/127\.0\.0\.1:9090>/,
     );
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("external OTLP selects one TLS exporter overlay and composes with local metrics", () => {
+  for (const [profiles, configName] of [
+    ["demo", "collector.external.yaml"],
+    ["observability", "collector.external.observability.yaml"],
+  ]) {
+    const state = fixture();
+    const collectorConfig = join(ROOT, "deploy/compose/configs/otel", configName);
+    try {
+      const up = run(state, "up", {
+        SYNVEDA_COMPOSE_PROFILES: profiles,
+        SYNVEDA_OTLP_MODE: "external",
+        SYNVEDA_OTLP_EXPORT_ENDPOINT: "telemetry.lifecycle.example:4317",
+        SYNVEDA_RENDER_OTEL_COLLECTOR_CONFIG: "/tmp/ambient-injection.yaml",
+        SYNVEDA_FAKE_EXPECT_COLLECTOR_CONFIG: collectorConfig,
+      });
+      assert.equal(up.status, 0, up.stderr);
+      const calls = readFileSync(state.log, "utf8");
+      assert.equal(calls.match(/compose\.otlp-external\.yaml>/g)?.length, 3, calls);
+      assert.doesNotMatch(calls, /ambient-injection/);
+      if (profiles === "observability") {
+        assert.match(calls, /compose\.observability\.yaml>/);
+      }
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("external OTLP refuses ambiguous selectors and endpoints before Docker", () => {
+  const cases = [
+    [{ SYNVEDA_OTLP_MODE: "remote" }, /SYNVEDA_OTLP_MODE must be discard\|external/],
+    [
+      { SYNVEDA_OTLP_MODE: "external" },
+      /SYNVEDA_OTLP_EXPORT_ENDPOINT must be a lower-case DNS name and canonical TCP port/,
+    ],
+    [
+      { SYNVEDA_OTLP_EXPORT_ENDPOINT: "telemetry.lifecycle.example:4317" },
+      /accepted only when SYNVEDA_OTLP_MODE=external/,
+    ],
+    ...[
+      "https://telemetry.lifecycle.example:4317",
+      "TELEMETRY.lifecycle.example:4317",
+      "127.0.0.1:4317",
+      "telemetry.lifecycle.example",
+      "telemetry.lifecycle.example:04317",
+      "telemetry.lifecycle.example:0",
+      "telemetry.lifecycle.example:65536",
+      "user@telemetry.lifecycle.example:4317",
+      "telemetry.lifecycle.example:4317/path",
+    ].map((endpoint) => [
+      { SYNVEDA_OTLP_MODE: "external", SYNVEDA_OTLP_EXPORT_ENDPOINT: endpoint },
+      /SYNVEDA_OTLP_EXPORT_ENDPOINT must be a lower-case DNS name and canonical TCP port/,
+    ]),
+  ];
+  for (const [extra, diagnostic] of cases) {
+    const state = fixture();
+    try {
+      const refused = run(state, "config", extra);
+      assert.equal(refused.status, 64, refused.stderr);
+      assert.match(refused.stderr, diagnostic);
+      assert.equal(existsSync(state.log), false, "refused input reached Docker");
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("external PostgreSQL and OIDC start through the same product graph with strict TLS inputs", () => {
+  const state = fixture();
+  try {
+    const external = prepareExternalPostgresFixture(state);
+    const before = Object.fromEntries(
+      [
+        "synveda_migrator_database_url",
+        "synveda_gateway_database_url",
+        "synveda_worker_database_url",
+        "synveda_kms_key",
+        "postgres_root_ca",
+      ].map((name) => [name, readFileSync(join(state.secrets, name), "utf8")]),
+    );
+    const up = run(state, "up", external);
+    assert.equal(up.status, 0, up.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /compose\.external-postgres\.yaml>/);
+    assert.match(calls, /compose\.external\.yaml>/);
+    assert.doesNotMatch(calls, /compose\.postgres\.yaml>|compose\.keycloak\.yaml>/);
+    assert.match(calls, / <up> <--no-build> <--detach> <--wait>/);
+    for (const [name, value] of Object.entries(before)) {
+      assert.equal(readFileSync(join(state.secrets, name), "utf8"), value, name);
+    }
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("external PostgreSQL refuses unsafe CA files before Compose mutation", () => {
+  const mutations = [
+    ["missing", (path) => rmSync(path)],
+    ["empty", (path) => writeFileSync(path, "", { mode: 0o600 })],
+    ["public", (path) => chmodSync(path, 0o644)],
+    [
+      "symlink",
+      (path, state) => {
+        const target = join(state.runtime, "root-ca-target");
+        writeFileSync(target, "fixture\n", { mode: 0o600 });
+        rmSync(path);
+        symlinkSync(target, path);
+      },
+    ],
+  ];
+  for (const [name, mutate] of mutations) {
+    const state = fixture();
+    try {
+      const external = prepareExternalPostgresFixture(state);
+      mutate(join(state.secrets, "postgres_root_ca"), state);
+      const refused = run(state, "up", external);
+      assert.equal(refused.status, 78, `${name}: ${refused.stderr}`);
+      assert.match(refused.stderr, /required postgres_root_ca file/);
+      const calls = existsSync(state.log) ? readFileSync(state.log, "utf8") : "";
+      assert.doesNotMatch(calls, / <build>| <up>/, name);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("external PostgreSQL keeps bundled identity and owned-data actions out of scope", () => {
+  for (const [action, extra, diagnostic] of [
+    [
+      "up",
+      { SYNVEDA_POSTGRES_MODE: "external", SYNVEDA_COMPOSE_PROFILES: "" },
+      /executable external PostgreSQL currently requires external OIDC/,
+    ],
+    [
+      "reset",
+      {
+        SYNVEDA_POSTGRES_MODE: "external",
+        SYNVEDA_OIDC_MODE: "external",
+        SYNVEDA_COMPOSE_PROFILES: "",
+      },
+      /acceptance, restore and reset are unavailable/,
+    ],
+  ]) {
+    const state = fixture();
+    try {
+      const refused = run(state, action, extra);
+      assert.equal(refused.status, 69, refused.stderr);
+      assert.match(refused.stderr, diagnostic);
+      assert.equal(existsSync(state.log), false);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+
+  const state = fixture();
+  try {
+    const refused = spawnSync(SECRET_GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env: environment(state, { SYNVEDA_POSTGRES_MODE: "external" }),
+      encoding: "utf8",
+    });
+    assert.equal(refused.status, 69, refused.stderr);
+    assert.match(refused.stderr, /credentials and CA are operator-owned/);
+    assert.equal(existsSync(state.secrets), false);
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }

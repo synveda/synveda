@@ -201,13 +201,18 @@ credentials or unbounded tenant/principal labels. Caller-supplied trace and
 baggage headers are stripped at the edge.
 
 Gateway and worker traces use OTLP to a private Collector with memory limiting
-and batching. The Collector currently terminates traces at a no-op exporter.
+and batching. Discard mode terminates traces at a no-op exporter. External mode
+uses public-PKI TLS to one validated OTLP/gRPC DNS authority with bounded
+in-memory queueing and retry. It has no private-CA, authentication-header or
+mTLS contract, and readiness does not prove remote receipt.
 The optional observability profile uses a closed Collector configuration to
 scrape only the private gateway and worker metrics endpoints, then exposes one
 private fan-in to a digest-pinned Prometheus with 72-hour/1-GB TSDB
 block-retention thresholds and a loopback-only UI. Those thresholds are not a
 disk quota. It carries no tenant-safe Operations or production monitoring claim.
-External OTLP export remains an open implementation gap.
+The external exporter carries traces only; metrics remain on the private local
+path. Telemetry still may not contain prompts, messages, Knowledge bodies,
+credentials or unbounded tenant/principal labels.
 
 ## Backup boundary
 

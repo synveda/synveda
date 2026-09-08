@@ -57,6 +57,7 @@ hosts_manager=$script_dir/manage-hosts-file.mjs
 runtime=${SYNVEDA_COMPOSE_RUNTIME:-development}
 postgres_mode=${SYNVEDA_POSTGRES_MODE:-bundled}
 oidc_mode=${SYNVEDA_OIDC_MODE:-bundled}
+otlp_mode=${SYNVEDA_OTLP_MODE:-discard}
 profiles=${SYNVEDA_COMPOSE_PROFILES:-}
 demo_profile=false
 browser_acceptance_profile=false
@@ -410,7 +411,8 @@ unset SYNVEDA_RENDER_PUBLIC_EDGE_SUBNET SYNVEDA_RENDER_PUBLIC_EDGE_GATEWAY \
     SYNVEDA_RENDER_TELEMETRY_SUBNET SYNVEDA_RENDER_TELEMETRY_GATEWAY \
     SYNVEDA_RENDER_APPLICATION_EGRESS_SUBNET SYNVEDA_RENDER_APPLICATION_EGRESS_GATEWAY \
     SYNVEDA_RENDER_IDENTITY_EGRESS_SUBNET SYNVEDA_RENDER_IDENTITY_EGRESS_GATEWAY \
-    SYNVEDA_RENDER_TELEMETRY_EGRESS_SUBNET SYNVEDA_RENDER_TELEMETRY_EGRESS_GATEWAY
+    SYNVEDA_RENDER_TELEMETRY_EGRESS_SUBNET SYNVEDA_RENDER_TELEMETRY_EGRESS_GATEWAY \
+    SYNVEDA_RENDER_OTEL_COLLECTOR_CONFIG
 export COMPOSE_DISABLE_ENV_FILE=1
 
 case "$runtime" in
@@ -424,6 +426,10 @@ esac
 case "$oidc_mode" in
     bundled|external) ;;
     *) echo "compose: SYNVEDA_OIDC_MODE must be bundled|external" >&2; exit 64 ;;
+esac
+case "$otlp_mode" in
+    discard|external) ;;
+    *) echo "compose: SYNVEDA_OTLP_MODE must be discard|external" >&2; exit 64 ;;
 esac
 
 old_ifs=$IFS
@@ -493,10 +499,15 @@ if [ "$action" = restore-smoke ] && [ "$browser_acceptance_profile" != true ]; t
     echo "compose: restore smoke requires exactly the demo,browser-acceptance profiles" >&2
     exit 64
 fi
-if { [ "$action" = up ] || [ "$action" = acceptance ] || \
-    [ "$action" = restore-smoke ] || [ "$action" = reset ]; } && \
-    [ "$postgres_mode" = external ]; then
-    echo "compose: canonical start/acceptance/reset is unavailable for external PostgreSQL in this checkpoint" >&2
+if { [ "$action" = acceptance ] || [ "$action" = restore-smoke ] || \
+    [ "$action" = reset ]; } && [ "$postgres_mode" = external ]; then
+    echo "compose: acceptance, restore and reset are unavailable for operator-owned external PostgreSQL" >&2
+    exit 69
+fi
+if { [ "$action" = up ] || [ "$action" = smoke ] || \
+    [ "$action" = restart-gateway ]; } && [ "$postgres_mode" = external ] && \
+    [ "$oidc_mode" = bundled ]; then
+    echo "compose: executable external PostgreSQL currently requires external OIDC" >&2
     exit 69
 fi
 
@@ -779,6 +790,40 @@ valid_host "$app_host" || {
     echo "compose: application and identity hostnames must be lower-case DNS names" >&2
     exit 64
 }
+
+otlp_endpoint_set=${SYNVEDA_OTLP_EXPORT_ENDPOINT+x}
+if [ "$otlp_mode" = external ]; then
+    otlp_export_endpoint=${SYNVEDA_OTLP_EXPORT_ENDPOINT:-}
+    case "$otlp_export_endpoint" in
+        *[!a-z0-9.:-]*|*'::'*|*'..'*|.*|*.|*:|:*|*'@'*|*'/'*|*'?'*|*'#'*)
+            echo "compose: SYNVEDA_OTLP_EXPORT_ENDPOINT must be a lower-case DNS name and canonical TCP port" >&2
+            exit 64
+            ;;
+    esac
+    otlp_export_host=${otlp_export_endpoint%:*}
+    otlp_export_port=${otlp_export_endpoint##*:}
+    [ "$otlp_export_host" != "$otlp_export_endpoint" ] && \
+        [ "$otlp_export_endpoint" = "$otlp_export_host:$otlp_export_port" ] && \
+        valid_host "$otlp_export_host" && valid_runtime_id "$otlp_export_port" && \
+        [ "$otlp_export_port" -le 65535 ] || {
+        echo "compose: SYNVEDA_OTLP_EXPORT_ENDPOINT must be a lower-case DNS name and canonical TCP port" >&2
+        exit 64
+    }
+    if [ "$runtime" = reference ]; then
+        case "$otlp_export_host" in
+            *.test|*.localhost)
+                echo "compose: reference external OTLP requires an operator DNS name" >&2
+                exit 64
+                ;;
+        esac
+    fi
+else
+    [ -z "${otlp_endpoint_set:-}" ] || {
+        echo "compose: SYNVEDA_OTLP_EXPORT_ENDPOINT is accepted only when SYNVEDA_OTLP_MODE=external" >&2
+        exit 64
+    }
+    otlp_export_endpoint=
+fi
 if [ "$oidc_mode" = bundled ]; then
     valid_host "$auth_host" || {
         echo "compose: application and identity hostnames must be lower-case DNS names" >&2
@@ -1238,15 +1283,17 @@ if [ "$action" = up ] || [ "$action" = acceptance ] || \
     fi
     run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/check-network-preflight.mjs" \
         --project "$project" --pool "$compose_ipv4_pool" --docker-bin "$docker_bin"
-    run_bounded "$lifecycle_timeout" env \
-        "SYNVEDA_COMPOSE_RUNTIME=$runtime" \
-        "SYNVEDA_POSTGRES_MODE=$postgres_mode" \
-        "SYNVEDA_OIDC_MODE=$oidc_mode" \
-        "SYNVEDA_COMPOSE_PROJECT_SUFFIX=$suffix" \
-        "SYNVEDA_APP_HOST=$app_host" \
-        "SYNVEDA_PUBLIC_SCHEME=$public_scheme" \
-        "SYNVEDA_DEV_HTTP_PORT=$public_port" \
-        "$script_dir/generate-secrets.sh" --if-missing
+    if [ "$postgres_mode" = bundled ]; then
+        run_bounded "$lifecycle_timeout" env \
+            "SYNVEDA_COMPOSE_RUNTIME=$runtime" \
+            "SYNVEDA_POSTGRES_MODE=$postgres_mode" \
+            "SYNVEDA_OIDC_MODE=$oidc_mode" \
+            "SYNVEDA_COMPOSE_PROJECT_SUFFIX=$suffix" \
+            "SYNVEDA_APP_HOST=$app_host" \
+            "SYNVEDA_PUBLIC_SCHEME=$public_scheme" \
+            "SYNVEDA_DEV_HTTP_PORT=$public_port" \
+            "$script_dir/generate-secrets.sh" --if-missing
+    fi
     if [ "$oidc_mode" = bundled ]; then
         run_bounded "$lifecycle_timeout" env \
             "SYNVEDA_COMPOSE_RUNTIME=$runtime" \
@@ -1270,6 +1317,19 @@ absolute_from_compose() {
 }
 
 secret_dir=$(absolute_from_compose "${SYNVEDA_SECRETS_DIR:-./runtime/$project/secrets}")
+if [ "$postgres_mode" = external ]; then
+    [ "${SYNVEDA_SECRETS_DIR+x}" = x ] && [ -n "${SYNVEDA_SECRETS_DIR:-}" ] || {
+        echo "compose: external PostgreSQL requires an explicit operator-owned SYNVEDA_SECRETS_DIR" >&2
+        exit 78
+    }
+    case "$SYNVEDA_SECRETS_DIR" in
+        /*) ;;
+        *)
+            echo "compose: external PostgreSQL requires an absolute SYNVEDA_SECRETS_DIR" >&2
+            exit 78
+            ;;
+    esac
+fi
 issuer_file=$(absolute_from_compose "${SYNVEDA_OIDC_ISSUERS_FILE:-./runtime/$project/issuers.json}")
 database_authority_dir=$(absolute_from_compose "${SYNVEDA_DATABASE_AUTHORITY_DIR:-./runtime/$project/database-authority}")
 keycloak_public_gate_dir=$(absolute_from_compose "${SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR:-./runtime/$project/keycloak-public-gate}")
@@ -1528,6 +1588,9 @@ if [ "$postgres_mode" = bundled ]; then
     require_private_file "$secret_dir/synveda_gateway_password" synveda_gateway_password
     require_private_file "$secret_dir/synveda_worker_password" synveda_worker_password
 fi
+if [ "$postgres_mode" = external ]; then
+    require_private_file "$secret_dir/postgres_root_ca" postgres_root_ca
+fi
 if [ "$oidc_mode" = bundled ]; then
     require_private_file "$secret_dir/postgres_owner_password" postgres_owner_password
     require_private_file "$secret_dir/keycloak_database_password" keycloak_database_password
@@ -1750,6 +1813,33 @@ else
     }
     postgres_bootstrap_url=
     postgres_bundled_cluster=false
+    database_expected_host=${SYNVEDA_DATABASE_EXPECTED_HOST:-}
+    database_expected_port=${SYNVEDA_DATABASE_EXPECTED_PORT:-}
+    database_expected_name=${SYNVEDA_DATABASE_EXPECTED_NAME:-}
+    valid_host "$database_expected_host" && \
+        valid_runtime_id "$database_expected_port" && \
+        [ "$database_expected_port" -le 65535 ] || {
+        echo "compose: external PostgreSQL requires a canonical SYNVEDA_DATABASE_EXPECTED_HOST and SYNVEDA_DATABASE_EXPECTED_PORT" >&2
+        exit 64
+    }
+    case "$database_expected_name" in
+        [a-z]*)
+            case "$database_expected_name" in
+                *[!a-z0-9_]*)
+                    echo "compose: SYNVEDA_DATABASE_EXPECTED_NAME must be a canonical PostgreSQL database name" >&2
+                    exit 64
+                    ;;
+            esac
+            [ "${#database_expected_name}" -le 63 ] || {
+                echo "compose: SYNVEDA_DATABASE_EXPECTED_NAME must be a canonical PostgreSQL database name" >&2
+                exit 64
+            }
+            ;;
+        *)
+            echo "compose: SYNVEDA_DATABASE_EXPECTED_NAME must be a canonical PostgreSQL database name" >&2
+            exit 64
+            ;;
+    esac
 fi
 
 product_image=${SYNVEDA_PRODUCT_IMAGE:-synveda/product:dev}
@@ -1938,6 +2028,7 @@ fi
 export SYNVEDA_COMPOSE_RUNTIME=$runtime
 export SYNVEDA_POSTGRES_MODE=$postgres_mode
 export SYNVEDA_OIDC_MODE=$oidc_mode
+export SYNVEDA_OTLP_MODE=$otlp_mode
 export SYNVEDA_RUNTIME_UID=$runtime_uid
 export SYNVEDA_RUNTIME_GID=$runtime_gid
 export SYNVEDA_COMPOSE_RESTART_POLICY=$restart_policy
@@ -1986,6 +2077,18 @@ export SYNVEDA_RENDER_IDENTITY_EGRESS_SUBNET=$identity_egress_subnet
 export SYNVEDA_RENDER_IDENTITY_EGRESS_GATEWAY=$identity_egress_gateway
 export SYNVEDA_RENDER_TELEMETRY_EGRESS_SUBNET=$telemetry_egress_subnet
 export SYNVEDA_RENDER_TELEMETRY_EGRESS_GATEWAY=$telemetry_egress_gateway
+case "$otlp_mode:$observability_profile" in
+    discard:false) otel_collector_config=$compose_dir/configs/otel/collector.yaml ;;
+    discard:true) otel_collector_config=$compose_dir/configs/otel/collector.observability.yaml ;;
+    external:false) otel_collector_config=$compose_dir/configs/otel/collector.external.yaml ;;
+    external:true) otel_collector_config=$compose_dir/configs/otel/collector.external.observability.yaml ;;
+esac
+export SYNVEDA_RENDER_OTEL_COLLECTOR_CONFIG=$otel_collector_config
+if [ "$otlp_mode" = external ]; then
+    export SYNVEDA_OTLP_EXPORT_ENDPOINT=$otlp_export_endpoint
+else
+    unset SYNVEDA_OTLP_EXPORT_ENDPOINT
+fi
 export SYNVEDA_CADDY_APP_CONFIG=$caddy_app_config
 export SYNVEDA_CADDY_IDENTITY_CONFIG=$caddy_identity_config
 export SYNVEDA_SECRETS_DIR=$secret_dir
@@ -2056,6 +2159,9 @@ if [ "$postgres_mode" = external ]; then
 fi
 if [ "$postgres_mode" = external ] || [ "$oidc_mode" = external ]; then
     set -- "$@" -f "$compose_dir/compose.external.yaml"
+fi
+if [ "$otlp_mode" = external ]; then
+    set -- "$@" -f "$compose_dir/compose.otlp-external.yaml"
 fi
 if [ "$demo_profile" = true ]; then
     set -- "$@" -f "$compose_dir/compose.demo.yaml"

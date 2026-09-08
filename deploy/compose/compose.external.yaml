@@ -19,6 +19,3 @@ services:
     labels:
       com.synveda.postgres.provider: ${SYNVEDA_POSTGRES_MODE}
       com.synveda.oidc.provider: ${SYNVEDA_OIDC_MODE}
-  otel-collector:
-    labels:
-      com.synveda.otlp.provider: external-capable

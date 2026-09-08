@@ -645,6 +645,52 @@ test("the Collector health contract is loopback-only and self-probing", () => {
       ),
     );
   }
+
+  const external = readFileSync(
+    join(COMPOSE, "configs/otel/collector.external.yaml"),
+    "utf8",
+  );
+  assert.deepEqual(collectorConfigFindings(external, false, true), []);
+  const externalObservable = readFileSync(
+    join(COMPOSE, "configs/otel/collector.external.observability.yaml"),
+    "utf8",
+  );
+  assert.deepEqual(collectorConfigFindings(externalObservable, true, true), []);
+  for (const [name, mutation, observability] of [
+    ["insecure transport", external.replace("insecure: false", "insecure: true"), false],
+    [
+      "server-name bypass",
+      external.replace("      insecure: false\n", "      insecure: false\n      insecure_skip_verify: true\n"),
+      false,
+    ],
+    [
+      "foreign endpoint",
+      external.replace(
+        "${env:SYNVEDA_OTLP_EXPORT_ENDPOINT}",
+        "attacker.invalid:4317",
+      ),
+      false,
+    ],
+    ["disabled queue", external.replace("      enabled: true", "      enabled: false"), false],
+    [
+      "authentication header",
+      external.replace("    timeout: 5s\n", "    timeout: 5s\n    headers:\n      authorization: secret\n"),
+      false,
+    ],
+    [
+      "lost local metrics pipeline",
+      externalObservable.replace("      exporters: [prometheus]\n", "      exporters: [otlp/external]\n"),
+      true,
+    ],
+  ]) {
+    assert.notEqual(mutation, observability ? externalObservable : external, `${name} mutation`);
+    assert.ok(
+      collectorConfigFindings(mutation, observability, true).some((finding) =>
+        finding.includes("closed reviewed grammar") || finding.includes("metrics fan-in"),
+      ),
+      name,
+    );
+  }
   const prometheus = readFileSync(
     join(COMPOSE, "configs/prometheus/prometheus.yaml"),
     "utf8",
@@ -6621,6 +6667,9 @@ test("model findings reject privilege, port, command and secret regressions", ()
       synveda_worker_database_url: {
         file: "/fixture/secrets/synveda_worker_database_url",
       },
+      synveda_postgres_root_ca: {
+        file: "/fixture/secrets/postgres_root_ca",
+      },
     },
     services: {
       "database-preflight": {
@@ -6641,6 +6690,11 @@ test("model findings reject privilege, port, command and secret regressions", ()
           SYNVEDA_WORKER_DATABASE_URL_FILE:
             "/run/secrets/synveda_worker_database_url",
           SYNVEDA_DATABASE_ROLES_FILE: "/etc/synveda/database/roles.json",
+          SYNVEDA_DATABASE_EXPECTED_HOST: "database.compose.example",
+          SYNVEDA_DATABASE_EXPECTED_PORT: "5432",
+          SYNVEDA_DATABASE_EXPECTED_NAME: "synveda",
+          SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE:
+            "/run/secrets/postgres_root_ca",
           RUST_LOG: "info",
         },
         secrets: [
@@ -6656,6 +6710,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
             source: "synveda_worker_database_url",
             target: "synveda_worker_database_url",
           },
+          { source: "synveda_postgres_root_ca", target: "postgres_root_ca" },
         ],
         volumes: [
           {
@@ -6713,6 +6768,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           { source: "synveda_gateway_database_url", target: "database_url" },
           { source: "synveda_kms_key", target: "kms_key" },
           { source: "synveda_kms_key_ref", target: "kms_key_ref" },
+          { source: "synveda_postgres_root_ca", target: "postgres_root_ca" },
         ],
         volumes: [
           {
@@ -6776,6 +6832,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           { source: "synveda_worker_database_url", target: "database_url" },
           { source: "synveda_kms_key", target: "kms_key" },
           { source: "synveda_kms_key_ref", target: "kms_key_ref" },
+          { source: "synveda_postgres_root_ca", target: "postgres_root_ca" },
         ],
         volumes: [
           {
@@ -6855,7 +6912,10 @@ test("model findings reject privilege, port, command and secret regressions", ()
         depends_on: {
           "database-preflight": { condition: "service_completed_successfully" },
         },
-        secrets: [{ source: "synveda_migrator_database_url", target: "database_url" }],
+        secrets: [
+          { source: "synveda_migrator_database_url", target: "database_url" },
+          { source: "synveda_postgres_root_ca", target: "postgres_root_ca" },
+        ],
         volumes: [
           {
             type: "bind",
@@ -6897,6 +6957,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           { source: "synveda_migrator_database_url", target: "database_url" },
           { source: "synveda_kms_key", target: "kms_key" },
           { source: "synveda_kms_key_ref", target: "kms_key_ref" },
+          { source: "synveda_postgres_root_ca", target: "postgres_root_ca" },
         ],
         volumes: [
           {
@@ -6981,6 +7042,10 @@ test("model findings reject privilege, port, command and secret regressions", ()
       "otel-collector": {
         command: ["--config=/etc/otelcol/config.yaml"],
         image: "collector-provider",
+        labels: {
+          "com.synveda.contract": "cpr-45",
+          "com.synveda.otlp.provider": "discard",
+        },
         user: "1:1",
         cap_drop: ["ALL"],
         security_opt: ["no-new-privileges:true"],
@@ -7009,7 +7074,6 @@ test("model findings reject privilege, port, command and secret regressions", ()
         ],
         networks: {
           telemetry: {},
-          "telemetry-egress": { gw_priority: 1 },
         },
       },
     },
@@ -7019,7 +7083,6 @@ test("model findings reject privilege, port, command and secret regressions", ()
       "public-edge": network("public-edge"),
       "synveda-data": network("synveda-data", true),
       telemetry: network("telemetry", true),
-      "telemetry-egress": network("telemetry-egress"),
     },
   };
   base.services.gateway.build = {
@@ -7036,6 +7099,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
     runtime: "development",
     postgres: "external",
     oidc: "external",
+    otlp: "discard",
     appHost: "app.synveda.test",
     authHost: undefined,
     appUrl: "http://app.synveda.test:8080",
@@ -7066,6 +7130,93 @@ test("model findings reject privilege, port, command and secret regressions", ()
     keycloakPublicGateDir: "/fixture/keycloak-public-gate",
   };
   assert.deepEqual(canonicalComposeFindings(base, expected), []);
+  const discardWithEgress = structuredClone(base);
+  discardWithEgress.services["otel-collector"].networks["telemetry-egress"] = {
+    gw_priority: 1,
+  };
+  assert.ok(
+    canonicalComposeFindings(discardWithEgress, expected).includes(
+      "otel-collector network boundary drifted",
+    ),
+  );
+  const externalOtlp = structuredClone(base);
+  externalOtlp.services["otel-collector"].labels["com.synveda.otlp.provider"] =
+    "external";
+  externalOtlp.services["otel-collector"].environment = {
+    ...externalOtlp.services["otel-collector"].environment,
+    SYNVEDA_OTLP_EXPORT_ENDPOINT: "telemetry.compose.example:4317",
+  };
+  externalOtlp.services["otel-collector"].networks["telemetry-egress"] = {
+    gw_priority: 1,
+  };
+  externalOtlp.networks["telemetry-egress"] = network("telemetry-egress");
+  externalOtlp.services["otel-collector"].volumes[0].source =
+    "/fixture/collector.external.yaml";
+  const externalExpected = {
+    ...expected,
+    otlp: "external",
+    collectorConfig: "/fixture/collector.external.yaml",
+  };
+  assert.deepEqual(canonicalComposeFindings(externalOtlp, externalExpected), []);
+  const externalWithoutEgress = structuredClone(externalOtlp);
+  delete externalWithoutEgress.services["otel-collector"].networks["telemetry-egress"];
+  assert.ok(
+    canonicalComposeFindings(externalWithoutEgress, externalExpected).includes(
+      "otel-collector network boundary drifted",
+    ),
+  );
+  const missingEgressIpam = structuredClone(externalOtlp);
+  delete missingEgressIpam.networks["telemetry-egress"].ipam;
+  const missingEgressFindings = canonicalComposeFindings(
+    missingEgressIpam,
+    externalExpected,
+  );
+  assert.ok(
+    missingEgressFindings.includes(
+      "telemetry-egress IPAM, ownership or isolation contract drifted",
+    ),
+    missingEgressFindings.join("; "),
+  );
+  const missingRootSecret = structuredClone(base);
+  delete missingRootSecret.secrets.synveda_postgres_root_ca;
+  assert.ok(
+    canonicalComposeFindings(missingRootSecret, expected).includes(
+      "top-level secret set differs from the selected provider row",
+    ),
+  );
+  for (const service of [
+    "database-preflight",
+    "migrate",
+    "tenant-convergence",
+    "gateway",
+    "worker",
+  ]) {
+    const missingMount = structuredClone(base);
+    missingMount.services[service].secrets = missingMount.services[service].secrets.filter(
+      ({ source }) => source !== "synveda_postgres_root_ca",
+    );
+    assert.ok(
+      canonicalComposeFindings(missingMount, expected).some((finding) =>
+        finding.includes("secret mounts"),
+      ),
+      service,
+    );
+  }
+  const wrongRootSetting = structuredClone(base);
+  wrongRootSetting.services["database-preflight"].environment
+    .SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE = "/tmp/ca.pem";
+  assert.ok(
+    canonicalComposeFindings(wrongRootSetting, expected).includes(
+      "external PostgreSQL root-CA preflight setting drifted",
+    ),
+  );
+  const ambientTlsOverride = structuredClone(base);
+  ambientTlsOverride.services.gateway.environment.PGSSLMODE = "disable";
+  assert.ok(
+    canonicalComposeFindings(ambientTlsOverride, expected).includes(
+      "gateway environment key set drifted",
+    ),
+  );
   const sshBuild = structuredClone(base);
   sshBuild.services.gateway.build.ssh = ["default"];
   assert.ok(
@@ -7455,10 +7606,6 @@ test("model findings reject privilege, port, command and secret regressions", ()
     "synveda-proxy": "172.30.240.2",
   };
   bundledMutants.push(["conflicting auxiliary proxy reservation", auxiliaryProxyReservation]);
-
-  const missingEgressIpam = structuredClone(bundled);
-  delete missingEgressIpam.networks["telemetry-egress"].ipam;
-  bundledMutants.push(["egress IPAM removed", missingEgressIpam]);
 
   const extraIdentityRange = structuredClone(bundled);
   extraIdentityRange.networks["identity-backend"].ipam.config.push({

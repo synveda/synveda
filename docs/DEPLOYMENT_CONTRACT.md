@@ -37,16 +37,19 @@ and assembles these files:
 | compose.keycloak-postgres.yaml | shared-server bootstrap ordering |
 | compose.external-postgres.yaml | external PostgreSQL mounts and labels |
 | compose.external.yaml | external provider labels |
+| compose.otlp-external.yaml | external OTLP export through the private Collector |
 | compose.demo.yaml | short-lived demo users |
 | compose.browser-acceptance*.yaml | isolated browser acceptance runner |
 | compose.observability.yaml | optional private Collector metrics fan-in and loopback Prometheus UI |
 | compose.backup.yaml | private, profile-gated logical backup one-shot |
 | compose.restore.yaml | private isolated restore and key-verification one-shots |
 
-Implemented selectors are development or reference,
-bundled or external PostgreSQL and bundled or external OIDC. External
-PostgreSQL is configuration-renderable but canonical start/reset is still
-refused. Demo, browser-acceptance and observability are implemented profiles.
+Implemented selectors are development or reference, bundled or external
+PostgreSQL, bundled or external OIDC, and discarded or external OTLP traces.
+The executable external-PostgreSQL combination currently requires external
+OIDC and operator-provisioned database roles. Compose applies Synveda schema
+migrations and tenant convergence but does not provision, reset, back up or
+restore that server. Demo, browser-acceptance and observability are implemented profiles.
 Other optional profiles are not part of the current executable contract until
 their services and acceptance tests land.
 
@@ -89,6 +92,7 @@ The bundled reference graph is:
     tenant-convergence + issuer-diagnostic ── worker
     gateway + worker ── otel-collector
     observability: gateway + worker metrics ── otel-collector ── prometheus
+    optional traces: gateway + worker ── otel-collector ── external OTLP
 
 The bootstrap, preflight, migration, tenant convergence, issuer diagnostic and
 recovery services are bounded jobs. Proxy, PostgreSQL, Keycloak, realm
@@ -127,6 +131,7 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_COMPOSE_RUNTIME | development or reference |
 | SYNVEDA_POSTGRES_MODE | bundled or external |
 | SYNVEDA_OIDC_MODE | bundled or external |
+| SYNVEDA_OTLP_MODE | discard or external |
 | SYNVEDA_COMPOSE_PROFILES | closed comma-separated optional profile set |
 | SYNVEDA_APP_HOST | browser-visible application DNS name |
 | SYNVEDA_AUTH_HOST | browser-visible bundled issuer DNS name |
@@ -136,6 +141,9 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_OIDC_ISSUER | exact external issuer URL |
 | SYNVEDA_OIDC_ISSUERS_FILE | mounted provider-neutral issuer document |
 | SYNVEDA_DATABASE_ROLES_FILE | mounted database role contract |
+| SYNVEDA_DATABASE_EXPECTED_HOST | external PostgreSQL DNS authority asserted by preflight |
+| SYNVEDA_DATABASE_EXPECTED_PORT | external PostgreSQL canonical TCP port asserted by preflight |
+| SYNVEDA_DATABASE_EXPECTED_NAME | external PostgreSQL database asserted by preflight |
 | SYNVEDA_BOOTSTRAP_TENANT_ID | UUIDv7 bound into backup and required unchanged at restore |
 | SYNVEDA_COMPOSE_IPV4_POOL | explicit private /24 for reference/evidence |
 | SYNVEDA_PRODUCT_IMAGE | immutable product image reference |
@@ -145,6 +153,7 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_OTEL_COLLECTOR_IMAGE | immutable Collector image reference |
 | SYNVEDA_PROMETHEUS_IMAGE | exact digest-pinned optional Prometheus image |
 | SYNVEDA_PROMETHEUS_PORT | optional loopback operator port |
+| SYNVEDA_OTLP_EXPORT_ENDPOINT | non-secret external OTLP/gRPC DNS authority and port |
 | SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH | false by default; exact true permits only an unspecified worker health bind for a deployment-owned private network |
 | OTEL_EXPORTER_OTLP_ENDPOINT | OTLP/gRPC destination used by application processes |
 | SYNVEDA_BACKUP_ID | optional explicit immutable logical-backup identifier |
@@ -187,6 +196,17 @@ Bundled mode uses these files under the selected secret directory:
 - tls_cert and tls_key in reference mode
 - demo credentials only when the demo profile is selected
 
+External PostgreSQL uses the same three role-URL and two KMS files plus
+`postgres_root_ca`. Its secret directory and issuer document are prepared by
+the operator; the bundled generator refuses this mode. The mode-0700 secret
+directory is scoped to the exact Compose project and contains the required
+mode-0700 `oidc-directory` child. The separately mounted issuer file has a
+private parent and may not be nested under that secret directory. Every role
+URL must use the asserted DNS host, port and database, exactly one
+`sslmode=verify-full`, and exactly
+`sslrootcert=/run/secrets/postgres_root_ca`. Client certificates, `hostaddr`,
+socket routing and libpq TLS aliases are outside this contract.
+
 The Keycloak entrypoint reads upstream-required values from mounted files,
 exports them only to its child, and execs Keycloak without printing them.
 Secrets must not appear in Compose YAML, committed .env files, image layers,
@@ -222,6 +242,18 @@ contents.
 
 Migration ownership remains separate: Synveda runs migrate; Keycloak owns its
 schema lifecycle. Keycloak realm export is not a database backup.
+
+In external-PostgreSQL mode, the provider/operator supplies PostgreSQL 17,
+database `synveda`, `btree_gin` 1.3 and `vector` 0.8.6 in `public`, the declared
+database owner, NOLOGIN capability role `synveda_app`, and the least-privilege
+migrator, gateway and worker logins with the exact memberships, ownership and
+ACL shape required by the role contract. The bounded `database-preflight`
+checks the declared endpoint, role contract and TLS settings before migration,
+gateway or worker startup. The CA is added to the native TLS trust calculation;
+this is hostname-and-chain verification, not exclusive certificate pinning.
+The current SQLx native-TLS path is documented for one PEM root certificate
+until a larger bundle is live-proven. External backup, restore, reset and
+bundled-Keycloak database bootstrap remain refused.
 
 ## OIDC contract
 
@@ -268,8 +300,13 @@ Temporal has no executable consumer and is not part of this deployment.
 ## Telemetry
 
 Application processes emit traces through OTLP to the private Collector. The
-Collector applies memory limiting and batching and currently terminates traces
-at a no-op exporter. With the optional observability profile, the Collector
+Collector applies memory limiting and batching. Discard mode terminates traces
+at a no-op exporter. External mode sends traces over TLS to one validated
+DNS-authority endpoint using the Collector image's public CA trust and a
+bounded in-memory queue/retry window. It does not yet support a private CA,
+mTLS or an authentication header, and Collector readiness does not prove that
+the remote backend received a trace. With the optional observability profile,
+the Collector
 also scrapes the private gateway and worker metrics endpoints and exposes one
 private fan-in target to Prometheus. Smoke requires gateway authority ready,
 worker ready and a fresh worker heartbeat from samples newer than the smoke
@@ -277,10 +314,11 @@ start. Prometheus applies 72-hour and 1-GB TSDB block-retention thresholds,
 whichever triggers first, and exposes only a loopback operator UI. This is a
 block-retention policy, not a disk quota.
 
-External OTLP export and the customer-safe Operations route remain open CPR-45
-slices. The local backend is infrastructure visibility, not the tenant-safe
-Operations product. No prompt, message, Knowledge body, credential or
-unbounded tenant/user label may enter telemetry.
+The external exporter carries traces only; local application metrics are not
+forwarded. The customer-safe Operations route remains a separate CPR-45 slice.
+The local backend is infrastructure visibility, not the tenant-safe Operations
+product. No prompt, message, Knowledge body, credential or unbounded
+tenant/user label may enter telemetry.
 
 ## Backup and restore
 
@@ -352,9 +390,11 @@ the disposable browser credential-and-receipt volume after exact ownership
 checks while retaining product data; confirmed compose-reset also removes it.
 Reset retains the project's secrets, issuer document and KMS key. Paired
 logical backup/isolated restore are implemented for bundled PostgreSQL and
-bundled Keycloak. External-provider recovery and upgrade smoke remain open.
-Live targets must report an unavailable prerequisite distinctly from a
-passing test.
+bundled Keycloak. External PostgreSQL plus external OIDC can start the same
+product graph; its deterministic wiring tests do not constitute a live
+provider result. External-provider recovery and upgrade smoke remain open.
+Live targets must report an unavailable prerequisite distinctly from a passing
+test.
 
 ## Security and network boundary
 
