@@ -198,6 +198,12 @@ SaaS, signing or Helm-production claim follows. S3/WAL-PITR and encrypted
 off-host retention remain OPS-5 production work rather than Docker-reference
 completion work.
 
+The remaining operation/outbox slice changes the epoch-3 catalogue and adds
+static SQLx queries. It therefore cannot be landed without the repository's
+fresh PostgreSQL-backed authority-fingerprint and SQLx-prepare generators;
+those generated values must not be hand-edited. The optional Apalis transport
+database remains separate from Synveda's closed authoritative schema.
+
 ## Unscheduled — not listed in the Sequencing section
 
 - [ ] [AUTH-6: Session & token hygiene](AUTH-6.md) — open

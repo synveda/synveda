@@ -139,6 +139,15 @@ states which operational signals are unavailable rather than inferring them.
 6. After the Keycloak gate passes, replace release/install assets with the
    canonical pull-only graph and delete all Rauthy residue.
 
+Slices 2–3 require one fresh disposable PostgreSQL fixture. Changing the
+operation schema alters live-derived application-ACL, routine, trigger and RLS
+fingerprints, while its new static SQLx queries require regenerated metadata.
+The supported generation commands are the repository's `authority-fingerprints`
+and `sqlx-prepare` database-test tasks; neither output may be guessed or
+hand-edited. Apalis transport tables belong in a separate disposable queue
+database because Synveda intentionally refuses extra schemas and migration
+ledger rows in its authoritative database.
+
 The direct `make compose-acceptance` gate is implemented. It holds one exact
 project lock from initial asset-absence proof through two browser logins, a
 fixed PostgreSQL, Keycloak, Collector, worker, gateway and proxy restart
