@@ -298,6 +298,18 @@ public API.
 
 Temporal has no executable consumer and is not part of this deployment.
 
+The customer-safe `/console/operations` route is an application view, not an
+infrastructure or identity-administration surface. For the selected project it
+makes three independent, bounded calls through the generated public API:
+recent Sessions, context runs and Capture batches. Each call retains its own
+PDP/RLS, loading, empty and failure semantics. The view renders only safe
+lifecycle fields and source-event/attempt counts, omits separately protected
+candidate counts and zero-filled context-list aggregates, labels its snapshot
+as potentially stale and states that dependency, worker/operation,
+latency/token, Knowledge/index, Skill/MCP, backup and provider-health
+aggregates are not available rather than inferring them from probes or
+policy-filtered rows.
+
 ## Telemetry
 
 Application processes emit traces through OTLP to the private Collector. The
@@ -316,9 +328,8 @@ whichever triggers first, and exposes only a loopback operator UI. This is a
 block-retention policy, not a disk quota.
 
 The external exporter carries traces only; local application metrics are not
-forwarded. The customer-safe Operations route remains a separate CPR-45 slice.
-The local backend is infrastructure visibility, not the tenant-safe Operations
-product. No prompt, message, Knowledge body, credential or unbounded
+forwarded. The local backend is infrastructure visibility, not the tenant-safe
+Operations product. No prompt, message, Knowledge body, credential or unbounded
 tenant/user label may enter telemetry.
 
 ## Backup and restore

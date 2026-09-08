@@ -42,6 +42,7 @@ import { ContextInspector } from "./Context.js";
 import { Learnings } from "./Learnings.js";
 import { Onboarding } from "./Onboarding.js";
 import { OkfExchange } from "./Okf.js";
+import { Operations } from "./Operations.js";
 import { People } from "./People.js";
 import { Reviews } from "./Reviews.js";
 import { Session } from "./Session.js";
@@ -192,6 +193,8 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
   switch (route.id) {
     case "home":
       return <Home />;
+    case "operations":
+      return <Operations />;
     case "welcome":
       return <Onboarding />;
     case "people":

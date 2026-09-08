@@ -39,6 +39,7 @@ export const BASE = "/console";
 /** Every page the console has. Closed, so a switch over it is exhaustive. */
 export type RouteId =
   | "home"
+  | "operations"
   | "sessions"
   | "session"
   | "context-run"
@@ -105,6 +106,13 @@ export const ROUTES: readonly RouteDef[] = [
     label: "Home",
     group: "primary",
     blurb: "Where you are, what you have, and what to do next.",
+  },
+  {
+    id: "operations",
+    segment: "operations",
+    label: "Operations",
+    group: "primary",
+    blurb: "Recent authorised activity and what this console cannot yet measure.",
   },
   {
     id: "sessions",

@@ -185,10 +185,12 @@ implemented with a read-only candidate compatibility check and deterministic
 failure recovery; its live reference run remains pending. Remaining
 implementation work is one forced-RLS
 skill-validation operation/outbox and its disabled-by-default Apalis 0.7.4 leaf
-adapter and a customer-safe Operations route. Executable external PostgreSQL
-plus external OIDC and public-PKI external OTLP wiring are deterministically
-implemented but still await live provider evidence. A bounded private Collector-to-
-Prometheus profile is implemented with loopback-only operator access and
+adapter. The customer-safe Operations route is implemented from bounded
+generated public APIs and explicitly marks unavailable signals. Executable
+external PostgreSQL plus external OIDC and public-PKI external OTLP wiring are
+deterministically implemented but still await live provider evidence. A
+bounded private Collector-to-Prometheus profile is implemented with
+loopback-only operator access and
 deterministic lifecycle evidence. Current-source Linux and Docker Desktop
 browser acceptance must pass before the legacy Rauthy paths are deleted.
 Feature-local recovery evidence does not establish DR or owned RPO/RTO; no HA,

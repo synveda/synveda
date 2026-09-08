@@ -104,7 +104,9 @@ worker readiness into a digest-pinned Prometheus whose UI is available only on
 host loopback (port 9090 by default). Its TSDB blocks use 72-hour and 1-GB
 retention thresholds, whichever triggers first; WAL/head/compaction overhead
 means that policy is not a disk quota. This is not the customer-safe Operations
-page or production monitoring;
+page: `/console/operations` separately presents three bounded, authorised
+project activity lists and explicitly identifies signals the public API cannot
+yet provide. Neither surface is production monitoring;
 the full profile contract and tunnel guidance are in the Compose README.
 
 Reference certificate-file preparation and its executable ordering are defined

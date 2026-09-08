@@ -120,7 +120,10 @@ metrics fan-in and digest-pinned Prometheus. It publishes only a loopback
 operator UI, applies 72-hour/1-GB TSDB block-retention thresholds rather than a
 disk quota, and deterministically pins the gateway-authority/worker-readiness
 smoke contract, lifecycle and exact reset ownership. It is infrastructure
-visibility, not the customer-safe Operations route.
+visibility, not the customer-safe Operations route. That customer route now
+uses three bounded generated public APIs for policy-visible Sessions, context
+runs and Capture work, keeps their loading and failure states independent and
+states which operational signals are unavailable rather than inferring them.
 
 ### Remaining implementation slices
 
@@ -129,12 +132,11 @@ visibility, not the customer-safe Operations route.
 2. Add the minimal `operation`, `operation_attempt` and
    `operation_outbox` schema/API for `skill_validation@1` under forced RLS.
 3. Add the exact-pinned Apalis leaf adapter and optional Compose fragment.
-4. Add the customer-safe Operations route.
-5. Run the implemented same-schema product upgrade/rollback acceptance on a
+4. Run the implemented same-schema product upgrade/rollback acceptance on a
    supported reference host.
-6. Run current-source development and reference acceptance on Linux and one
+5. Run current-source development and reference acceptance on Linux and one
    Docker Desktop platform.
-7. After the Keycloak gate passes, replace release/install assets with the
+6. After the Keycloak gate passes, replace release/install assets with the
    canonical pull-only graph and delete all Rauthy residue.
 
 The direct `make compose-acceptance` gate is implemented. It holds one exact

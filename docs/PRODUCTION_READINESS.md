@@ -31,7 +31,7 @@ score for the implemented code.
 | Scope | Status | Exit evidence | Limit |
 |---|---|---|---|
 | Development Compose | Not ready | Clean-volume browser login and product lifecycle on a supported Docker Desktop platform | Explicit loopback HTTP; no reference security claim |
-| Single-host reference | Not ready | Linux and desktop HTTPS runs with the restart matrix, joint logical database/key restore, Apalis canary and Operations visibility | One host; planned interruption; no HA, owned RPO/RTO or DR |
+| Single-host reference | Not ready | Linux and desktop HTTPS runs with the restart matrix, joint logical database/key restore, Apalis canary and the implemented Operations view | One host; planned interruption; no HA, owned RPO/RTO or DR |
 | External OIDC | Not assessed | Same product image boots against a named conformant provider | Configuration-only evidence is not provider support |
 | Hosted promotion | Not ready | Published artifacts, off-host recovery, custody, abuse controls and runbooks | Compose evidence is necessary, not sufficient |
 
@@ -52,9 +52,11 @@ separate KMS/Keycloak recovery set and fresh private restore are implemented
 and deterministically tested. The same-schema product-image upgrade lifecycle
 and its read-only compatibility refusal are also implemented and
 deterministically tested, but await live reference evidence. Remaining
-implementation work is one
-disabled-by-default Apalis 0.7.4 `skill_validation@1` canary behind
-forced-RLS operation/outbox state and the customer-safe Operations route.
+implementation work is one disabled-by-default Apalis 0.7.4
+`skill_validation@1` canary behind forced-RLS operation/outbox state. The
+customer-safe Operations route is implemented from three existing bounded
+public APIs; it deliberately labels the operational signals those APIs cannot
+yet provide.
 Executable external PostgreSQL plus
 external OIDC and external OTLP wiring are implemented deterministically but
 remain live-validation pending. Rauthy remains only until
@@ -70,9 +72,9 @@ queueing; private CA, authentication, mTLS and remote-receipt evidence remain
 open. The optional bounded local
 Collector-to-Prometheus path is implemented with loopback-only operator access,
 72-hour/1-GB TSDB block-retention thresholds (not a disk quota) and
-deterministic lifecycle/smoke checks. Live metrics visibility and the
-customer-safe Operations route remain open; a general
-dashboard/support platform remains later supportability work.
+deterministic lifecycle/smoke checks. Live metrics visibility and richer
+tenant-safe operational aggregates remain open; a general dashboard/support
+platform remains later supportability work.
 
 ## Runtime and availability
 
@@ -122,7 +124,7 @@ dashboard/support platform remains later supportability work.
 |---|---|---|---|---|---|---|---|---|
 | Traces, metrics, logs and sensitive-content defaults | Conditional | P1 | The telemetry module installs OTLP tracing and Prometheus (`crates/synveda-gateway/src/telemetry.rs:212-280,292-336`) and describes PDP, Capture, audit and key signals (`crates/synveda-gateway/src/telemetry.rs:363-382,412-452,485-506`); planner metrics are emitted by the context API (`crates/synveda-gateway/src/context_api.rs:74-81,1897-2019`). Security tests pin content-minimised audit and adapter redaction (`docs/SECURITY.md:218-243`). Canonical Compose optionally uses a closed private Collector scrape/fan-in and digest-pinned Prometheus with loopback-only access and bounded retention; the same Collector can export traces over public-PKI TLS to one external OTLP/gRPC authority. | `/metrics`; OTel exporter; Compose contract/runtime/lifecycle mutation tests; observability and redaction tests | Live Collector-to-Prometheus and external-OTLP visibility are unproved on a supported Docker host. External export has no private-CA, authentication-header or mTLS path, and readiness does not prove remote receipt. The unauthenticated gateway `/metrics` route shares its main listener; canonical Caddy returns 404 for it, but the legacy contributor direct gateway port and transitional Helm ingress can still expose it. The legacy contributor stack also publishes Jaeger UI and OTLP receivers. There is no production alerting, log schema/version contract, end-to-end dropped-telemetry alarm or documented sensitive-field allowlist for support export. | A production-shaped outage/error can be traced gateway-to-store/provider without payloads; application metrics leave only through a private Collector; telemetry loss is alerted; a fixture scan proves secrets/session/Knowledge bodies absent from default exports. | Prove both Compose telemetry modes live, then close legacy telemetry host ports and add a machine-checked telemetry field policy/release marker. | Owner chooses telemetry backend, region and retention. |
 | SLOs, alerts, usage, quota and cost | Not ready | P1 | Request latency and context-token histograms exist (`crates/synveda-gateway/src/telemetry.rs:18-32,292-327`); eval reports p50/p95 and tokens (`crates/synveda-eval/src/report.rs:590-610`). | Eval baselines; raw Prometheus metrics | No availability/error-budget SLOs, alert thresholds, queue-age/index-lag/provider-health alerts, per-tenant usage/quota model or cardinality-reviewed cost dashboard. | Published SLOs have recording/alert rules and synthetic checks; per-tenant usage is aggregatable without tenant/principal labels on hot metrics; alerts link to runbooks and release markers. | Define a small SLI set: availability, context latency/error, ingest lag, capture retry age, index lag and restore age; emit bounded internal tenant accounting separately. | Product/operations owners set SLOs, budget semantics and on-call. |
-| Customer and internal operations UX | Not ready | P1 | The console exposes product views for Sessions, Context, Knowledge, Skills and Tools, but there is no current customer operations overview or internal SaaS operator plane. Existing `/metrics` is an infrastructure endpoint, not a tenant-safe monitoring product. | Console tests; domain APIs; Prometheus | Customers cannot distinguish live/failed sessions, context efficiency, Knowledge health, registry drift or quota state in one place; operators lack tenant/region, queue, DB/index, backup, release and incident views. | Customer views disclose only authorised aggregates and show loading/partial/stale/degraded states; internal views show regional/version/queue/DB/provider/backup health with audited support access. | First expose bounded aggregate health APIs and shared status primitives; build customer Overview before any internal support console. | Decide SaaS region model, cost source and support-access authority. |
+| Customer and internal operations UX | Not ready | P1 | The console Operations route composes the existing bounded Sessions, context-runs and Capture list APIs for the selected project. It shows independent loading/empty/partial/failure states, explicit staleness and safe degradation/failure vocabulary without rendering content, private identifiers, separately protected candidate counts or zero-filled context-list aggregates. Existing `/metrics` remains a separate infrastructure endpoint. | Operations console tests; generated public API; Prometheus | The public API does not yet expose dependency/worker/operation, context latency/token, Knowledge/index, Skill/MCP, backup or provider-health aggregates. There is no internal SaaS operator plane. | Customer views disclose only authorised aggregates and show loading/partial/stale/degraded states; internal views show regional/version/queue/DB/provider/backup health with audited support access. | Add only the missing bounded aggregate APIs justified by customer decisions; do not infer them from infrastructure probes or policy-filtered empty pages. Build any internal support console separately. | Decide SaaS region model, cost source and support-access authority. |
 | Runbooks, release markers and support workflow | Not ready | P1 | The Compose guide now documents logical backup, fresh isolated restore, cleanup and interrupted-lock/writer recovery; install and security limits are current. | Deterministic recovery/lifecycle tests exercise the documented command and failure ordering; no live drill | There is no owned production runbook index, live recovery drill, rollback/incident/provider-outage procedure, drill cadence, telemetry release marker or audited support escalation workflow. | Every P0/P1 alert links to a tested runbook; deploy emits version/schema/config markers; quarterly exercises record restore, provider outage, key loss and rollback evidence. | Run the reference recovery guide on disposable hosts, then add production runbooks only as their mechanisms land. | Assign service owner, on-call, support tiers and drill cadence. |
 
 ## Performance and cost

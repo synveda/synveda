@@ -30,6 +30,7 @@ test("the primary navigation is the product, in this order, for everybody", () =
     primaryNav().map((route) => route.label),
     [
       "Home",
+      "Operations",
       "Sessions",
       "Knowledge",
       "New Learnings",

@@ -85,6 +85,7 @@ test("everybody gets the same product navigation, whatever they hold", () => {
     const rendered = shell(actions);
     for (const label of [
       "Home",
+      "Operations",
       "Sessions",
       "Knowledge",
       "New Learnings",

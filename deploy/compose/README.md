@@ -518,7 +518,6 @@ implemented:
   supported development/reference platforms, plus live execution of the
   same-schema product upgrade smoke;
 - one experimental forced-RLS operation/outbox and opaque-ID Apalis canary;
-- a customer-safe Operations route;
 - canonical release/installer cutover and Rauthy deletion after live Keycloak
   browser acceptance;
 
