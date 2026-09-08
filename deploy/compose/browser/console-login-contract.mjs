@@ -4,6 +4,7 @@ const LOGIN_SCOPES = Object.freeze(["openid", "profile", "email"]);
 const OIDC_VALUE = /^[A-Za-z0-9_-]{43}$/;
 const SESSION_STATE = /^[A-Za-z0-9_-]{24}$/;
 const PASSWORD = /^[0-9a-f]{64}$/;
+const TENANT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const AUTHORIZATION_PARAMETERS = Object.freeze([
   "client_id",
   "code_challenge",
@@ -85,6 +86,13 @@ export function validateSettings(appRaw, issuerRaw) {
     authorizationPath: `${issuer.pathname}/protocol/openid-connect/auth`,
     callback: `${app.origin}/auth/callback`,
   });
+}
+
+export function validateTenantId(value) {
+  if (typeof value !== "string" || !TENANT_ID.test(value)) {
+    refuse("configuration");
+  }
+  return value;
 }
 
 function one(search, name, stage) {

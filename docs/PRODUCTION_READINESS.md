@@ -38,9 +38,10 @@ score for the implemented code.
 The current canonical graph has a proxy-only edge, separate Synveda and
 Keycloak databases/roles, production-mode Keycloak, containerized gateway and
 worker, mounted secret files and a private OpenTelemetry Collector. Static
-Compose checks cover eight provider/runtime rows. The direct acceptance command
-and fixed restart matrix are implemented and deterministically tested, but have
-not run against a supported Docker host. Static evidence does not prove DNS,
+Compose checks cover eight provider/runtime rows. The direct acceptance command,
+fixed restart matrix and two-principal public-API team scenario are implemented
+and deterministically tested, but have not run against a supported Docker host.
+Static evidence does not prove DNS,
 TLS, browser login, live database recovery or a running service.
 
 ADR-0105 removed the clean-engine/Colima simulation because it supplied no live

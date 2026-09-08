@@ -5,6 +5,7 @@ import {
   validateAuthorizationUrl,
   validateCallbackUrl,
   validateSettings,
+  validateTenantId,
 } from "./console-login-contract.mjs";
 
 const PASSWORD_FILE = "/run/secrets/keycloak_demo_admin_password";
@@ -78,6 +79,9 @@ export async function runBrowserAcceptance({
     const settings = validateSettings(
       environment.SYNVEDA_BROWSER_APP_URL,
       environment.SYNVEDA_BROWSER_ISSUER,
+    );
+    const expectedTenantId = validateTenantId(
+      environment.SYNVEDA_BOOTSTRAP_TENANT_ID,
     );
     if (typeof chromium?.launch !== "function" || typeof readPassword !== "function") {
       throw new BrowserContractError("configuration");
@@ -200,7 +204,7 @@ export async function runBrowserAcceptance({
     requireCleanRoutes();
 
     const admission = await atStage("administrator-admission", () =>
-      boundedEvaluation(page, async (fetchTimeout) => {
+      boundedEvaluation(page, async ({ fetchTimeout, expectedTenantId }) => {
         const controller = new AbortController();
         const deadline = setTimeout(() => controller.abort(), fetchTimeout);
         try {
@@ -215,13 +219,21 @@ export async function runBrowserAcceptance({
             administrator:
               Array.isArray(value?.capabilities?.role_keys) &&
               value.capabilities.role_keys.includes("administrator"),
+            subjectPresent:
+              typeof value?.subject === "string" && value.subject.length > 0,
+            tenantMatches: value?.tenant?.id === expectedTenantId,
           };
         } finally {
           clearTimeout(deadline);
         }
-      }, FETCH_TIMEOUT, Math.min(timeout, FETCH_TIMEOUT + 1_000)),
+      }, { fetchTimeout: FETCH_TIMEOUT, expectedTenantId }, Math.min(timeout, FETCH_TIMEOUT + 1_000)),
     );
-    if (admission.authenticated !== true || admission.administrator !== true) {
+    if (
+      admission.authenticated !== true ||
+      admission.administrator !== true ||
+      admission.subjectPresent !== true ||
+      admission.tenantMatches !== true
+    ) {
       throw new BrowserContractError("administrator-admission");
     }
     requireCleanRoutes();

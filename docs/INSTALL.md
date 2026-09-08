@@ -81,10 +81,15 @@ not a browser authorization-code exchange. `compose-restart-gateway` performs
 a locked, health-gated restart of only the existing gateway and repeats the
 smoke; the command is not itself browser-session evidence and does not claim
 that an in-flight login survives. `compose-acceptance` adds a fresh browser
-login, the fixed six-service restart matrix, smoke after every restart and a
-second login under one project lock; its exact selectors are documented in
+login and the existing two-principal public-API PulseBoard team scenario before
+the fixed six-service restart matrix. It runs smoke after every restart, then
+repeats login and verifies the existing receipt against live product rows under
+one project lock; its exact selectors are documented in
 [`deploy/compose/README.md`](../deploy/compose/README.md). A live run,
-reference HTTPS, live backup/restore and upgrade acceptance remain open.
+reference HTTPS, live backup/restore and upgrade acceptance remain open. The
+browser checks bind administrator authority to the configured tenant before
+and after the matrix; those identity rows and the PulseBoard rows witness
+persistence across the restarts.
 External PostgreSQL bootstrap deliberately refuses before secret reads or SQL until the
 authenticated-TLS contract is implemented.
 
@@ -740,9 +745,11 @@ synveda demo reset --force
 ```
 
 `--profile team` uses a separately logged-in `bob` credential when one exists,
-or `--bob-credentials <profile>` when explicitly supplied. With no second
-credential it returns a one-time invitation, does not store its token and says
-that clean-session reuse ran as Alice. `--profile governed` selects the
+or `--bob-credentials <profile>` when explicitly supplied. Alice issues a
+one-time workspace invitation and Bob redeems it before the teammate leg; the
+token and accept URL are not stored. With no second credential the command
+returns the invitation and says that clean-session reuse ran as Alice.
+`--profile governed` selects the
 canonical enterprise Configuration on the same binary/schema and reports
 pending review honestly. The first exact canonical Configuration and matching
 binding still create and apply typed VedaFlow changes; this is not an edition

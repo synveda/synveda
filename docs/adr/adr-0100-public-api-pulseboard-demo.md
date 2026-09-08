@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-26
-- **Feature(s)**: CPR-41
+- **Feature(s)**: CPR-41, CPR-45
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
@@ -44,14 +44,17 @@ violate the platform's central governance claim.
    they do not select another binary, schema, route set or runtime branch.
 4. **Alice is the authenticated caller; Bob is never fabricated.** Team mode
    uses a distinct supplied credential profile (or an existing profile named
-   `bob`) and grants that real principal project membership through the public
-   API. Without one, it returns a one-time invitation, strips the secret from
-   local state and runs the clean-session reuse as Alice while explicitly
-   refusing a teammate-verification claim.
+   `bob`). Alice creates a one-time workspace invitation and Bob redeems it
+   through the public API before performing the teammate leg. The token and
+   accept URL are zeroed after use and never enter the receipt. Without Bob,
+   the command returns the one-time invitation and runs clean-session reuse as
+   Alice while explicitly refusing a teammate-verification claim.
 5. **The walkthrough is resumable and reset preserves evidence.** Stable
    per-step idempotency keys and a private, atomically replaced mode-0600 XDG
-   receipt make interrupted runs resumable. The receipt contains only public
-   responses over fixed synthetic content and never persists invitation
+   receipt make completed steps resumable. Invitation issuance deliberately
+   does not persist its bearer token, so an interruption in that one-time step
+   may require revoking and restarting the demo. The receipt contains only
+   public responses over fixed synthetic content and never persists invitation
    tokens or accept URLs. `demo reset --force` archives receipt-owned product
    aggregates through public APIs; immutable revisions, proposals and audit
    history remain. It is not a database reset.
@@ -88,12 +91,13 @@ violate the platform's central governance claim.
 ## Consequences
 
 - Positive: the one-command tour and every adapter/console path share one
-  generated contract and one PDP/VedaFlow/RLS/audit implementation; failures
-  are resumable and governance limitations remain honest.
+  generated contract and one PDP/VedaFlow/RLS/audit implementation; completed
+  steps are resumable and governance limitations remain honest.
 - Negative / accepted trade-offs: installation/login remain explicit
-  prerequisites; real teammate evidence needs a second credential; strict
-  Skill/Tool matrices can leave those demo changes pending until reviewers
-  act; reset intentionally retains historical evidence.
+  prerequisites; real teammate evidence needs a second credential; uncertain
+  one-time invitation issuance may require revocation and a fresh demo; strict
+  Skill/Tool matrices can leave those demo changes pending until reviewers act;
+  reset intentionally retains historical evidence.
 - Reversal trigger: the public application gains a governed first-tenant
   operator-enrolment workflow that can adopt Configuration before ordinary
   login → remove the first-profile outcome rule and use that workflow.

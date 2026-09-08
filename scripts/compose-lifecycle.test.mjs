@@ -289,10 +289,26 @@ case " $* " in
       chmod 600 "$late_final/sentinel"
     fi
     ;;
+  *" run --rm --no-deps --no-TTY "*" product-demo.mjs "*)
+    case " $* " in
+      *" product-demo.mjs seed "*)
+        [ "\${SYNVEDA_FAKE_PRODUCT_SEED_FAIL:-0}" = 0 ] || exit 48
+        ;;
+      *" product-demo.mjs verify "*)
+        [ "\${SYNVEDA_FAKE_PRODUCT_VERIFY_FAIL:-0}" = 0 ] || exit 49
+        ;;
+      *) exit 64 ;;
+    esac
+    ;;
+esac
+volume_key=postgres-data
+case " $* " in
+  *"browser-acceptance-state"*) volume_key=browser-acceptance-state ;;
 esac
 if [ "$1" = volume ] && [ "$2" = ls ]; then
   [ "\${SYNVEDA_FAKE_VOLUME_INVENTORY_ERROR:-0}" = 0 ] || exit 1
-  if grep -q 'docker <volume> <rm>' "$SYNVEDA_FAKE_CALL_LOG"; then
+  if grep -Fq "docker <volume> <rm> <\${SYNVEDA_FAKE_PROJECT}_\${volume_key}>" \
+      "$SYNVEDA_FAKE_CALL_LOG"; then
     [ "\${SYNVEDA_FAKE_POST_REMOVE_INVENTORY_ERROR:-0}" = 0 ] || exit 1
     exit 0
   fi
@@ -302,40 +318,51 @@ if [ "$1" = volume ] && [ "$2" = ls ]; then
   esac
   case "\${SYNVEDA_FAKE_VOLUME_MODE:-absent}:$query" in
     exact:named|exact:labelled|named-only:named)
-      printf '%s_postgres-data\n' "$SYNVEDA_FAKE_PROJECT"
+      printf '%s_%s\n' "$SYNVEDA_FAKE_PROJECT" "$volume_key"
       ;;
     labelled-wrong-name:labelled)
-      printf '%s_foreign-data\n' "$SYNVEDA_FAKE_PROJECT"
+      printf '%s_foreign-%s\n' "$SYNVEDA_FAKE_PROJECT" "$volume_key"
       ;;
   esac
   exit 0
 fi
 if [ "$1" = volume ] && [ "$2" = inspect ]; then
-  case "\${SYNVEDA_FAKE_VOLUME_CONTRACT:-valid}" in
+  volume_contract=\${SYNVEDA_FAKE_VOLUME_CONTRACT:-valid}
+  if [ -n "\${SYNVEDA_FAKE_VOLUME_CONTRACT_KEY:-}" ] &&
+    [ "$SYNVEDA_FAKE_VOLUME_CONTRACT_KEY" != "$volume_key" ]; then
+    volume_contract=valid
+  fi
+  case "$volume_contract" in
     inspect-error) exit 1 ;;
     valid)
-      printf '%s_postgres-data|local|local|null|%s|postgres-data|cpr-45|postgres-data\n' \
-        "$SYNVEDA_FAKE_PROJECT" "$SYNVEDA_FAKE_PROJECT"
+      printf '%s_%s|local|local|null|%s|%s|cpr-45|%s\n' \
+        "$SYNVEDA_FAKE_PROJECT" "$volume_key" "$SYNVEDA_FAKE_PROJECT" \
+        "$volume_key" "$volume_key"
       ;;
     wrong-driver)
-      printf '%s_postgres-data|foreign|local|null|%s|postgres-data|cpr-45|postgres-data\n' \
-        "$SYNVEDA_FAKE_PROJECT" "$SYNVEDA_FAKE_PROJECT"
+      printf '%s_%s|foreign|local|null|%s|%s|cpr-45|%s\n' \
+        "$SYNVEDA_FAKE_PROJECT" "$volume_key" "$SYNVEDA_FAKE_PROJECT" \
+        "$volume_key" "$volume_key"
       ;;
     wrong-scope)
-      printf '%s_postgres-data|local|global|null|%s|postgres-data|cpr-45|postgres-data\n' \
-        "$SYNVEDA_FAKE_PROJECT" "$SYNVEDA_FAKE_PROJECT"
+      printf '%s_%s|local|global|null|%s|%s|cpr-45|%s\n' \
+        "$SYNVEDA_FAKE_PROJECT" "$volume_key" "$SYNVEDA_FAKE_PROJECT" \
+        "$volume_key" "$volume_key"
       ;;
     wrong-options)
-      printf '%s_postgres-data|local|local|{"type":"none"}|%s|postgres-data|cpr-45|postgres-data\n' \
-        "$SYNVEDA_FAKE_PROJECT" "$SYNVEDA_FAKE_PROJECT"
+      printf '%s_%s|local|local|{"type":"none"}|%s|%s|cpr-45|%s\n' \
+        "$SYNVEDA_FAKE_PROJECT" "$volume_key" "$SYNVEDA_FAKE_PROJECT" \
+        "$volume_key" "$volume_key"
       ;;
     drift-after-down)
       if grep -q ' <down>' "$SYNVEDA_FAKE_CALL_LOG"; then
-        printf '%s_postgres-data|foreign|local|null|%s|postgres-data|cpr-45|postgres-data\n' \
-          "$SYNVEDA_FAKE_PROJECT" "$SYNVEDA_FAKE_PROJECT"
+        printf '%s_%s|foreign|local|null|%s|%s|cpr-45|%s\n' \
+          "$SYNVEDA_FAKE_PROJECT" "$volume_key" "$SYNVEDA_FAKE_PROJECT" \
+          "$volume_key" "$volume_key"
       else
-        printf '%s_postgres-data|local|local|null|%s|postgres-data|cpr-45|postgres-data\n' \
-          "$SYNVEDA_FAKE_PROJECT" "$SYNVEDA_FAKE_PROJECT"
+        printf '%s_%s|local|local|null|%s|%s|cpr-45|%s\n' \
+          "$SYNVEDA_FAKE_PROJECT" "$volume_key" "$SYNVEDA_FAKE_PROJECT" \
+          "$volume_key" "$volume_key"
       fi
       ;;
   esac
@@ -1575,6 +1602,94 @@ test("down retains data and reset requires exact confirmation", () => {
   }
 });
 
+test("browser acceptance reset removes its private receipt and credential volume first", () => {
+  const state = fixture();
+  const profiles = {
+    SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+  };
+  try {
+    assert.equal(
+      run(state, "up", profiles, ["--initial-assets", "absent"]).status,
+      0,
+    );
+    writeFileSync(state.log, "");
+    const reset = run(state, "reset", {
+      ...profiles,
+      SYNVEDA_FAKE_VOLUME_MODE: "exact",
+      SYNVEDA_CONFIRM_RESET: state.project,
+    });
+    assert.equal(reset.status, 0, reset.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    const browserRemoval = calls.indexOf(
+      `docker <volume> <rm> <${state.project}_browser-acceptance-state>`,
+    );
+    const dataRemoval = calls.indexOf(
+      `docker <volume> <rm> <${state.project}_postgres-data>`,
+    );
+    assert.ok(browserRemoval >= 0 && dataRemoval > browserRemoval, calls);
+    assert.doesNotMatch(calls, /down> <-v>|prune|system/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("browser acceptance reset refuses a foreign fixture-state volume before shutdown", () => {
+  const state = fixture();
+  const profiles = {
+    SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+  };
+  try {
+    assert.equal(
+      run(state, "up", profiles, ["--initial-assets", "absent"]).status,
+      0,
+    );
+    writeFileSync(state.log, "");
+    const refused = run(state, "reset", {
+      ...profiles,
+      SYNVEDA_FAKE_VOLUME_MODE: "exact",
+      SYNVEDA_FAKE_VOLUME_CONTRACT: "wrong-driver",
+      SYNVEDA_FAKE_VOLUME_CONTRACT_KEY: "browser-acceptance-state",
+      SYNVEDA_CONFIRM_RESET: state.project,
+    });
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.match(
+      refused.stderr,
+      /exact project browser-acceptance-state volume contract was refused/,
+    );
+    assert.doesNotMatch(readFileSync(state.log, "utf8"), / <down>|<volume> <rm>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("browser-profile down refuses a foreign fixture-state volume before shutdown", () => {
+  const state = fixture();
+  const profiles = {
+    SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+  };
+  try {
+    assert.equal(
+      run(state, "up", profiles, ["--initial-assets", "absent"]).status,
+      0,
+    );
+    writeFileSync(state.log, "");
+    const refused = run(state, "down", {
+      ...profiles,
+      SYNVEDA_FAKE_VOLUME_MODE: "exact",
+      SYNVEDA_FAKE_VOLUME_CONTRACT: "wrong-driver",
+      SYNVEDA_FAKE_VOLUME_CONTRACT_KEY: "browser-acceptance-state",
+    });
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.match(
+      refused.stderr,
+      /exact project browser-acceptance-state volume contract was refused/,
+    );
+    assert.doesNotMatch(readFileSync(state.log, "utf8"), / <down>|<volume> <rm>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
 test("reset refuses unavailable, ambiguous, or drifted volume authority before mutation", () => {
   const cases = [
     {
@@ -1585,12 +1700,12 @@ test("reset refuses unavailable, ambiguous, or drifted volume authority before m
     {
       extra: { SYNVEDA_FAKE_VOLUME_MODE: "named-only" },
       status: 78,
-      error: /exact project data volume inventory was refused/,
+      error: /exact project postgres-data volume inventory was refused/,
     },
     {
       extra: { SYNVEDA_FAKE_VOLUME_MODE: "labelled-wrong-name" },
       status: 78,
-      error: /exact project data volume inventory was refused/,
+      error: /exact project postgres-data volume inventory was refused/,
     },
     ...["wrong-driver", "wrong-scope", "wrong-options"].map((contract) => ({
       extra: {
@@ -1598,7 +1713,7 @@ test("reset refuses unavailable, ambiguous, or drifted volume authority before m
         SYNVEDA_FAKE_VOLUME_CONTRACT: contract,
       },
       status: 78,
-      error: /exact project data volume contract was refused/,
+      error: /exact project postgres-data volume contract was refused/,
     })),
     {
       extra: {
@@ -1606,7 +1721,7 @@ test("reset refuses unavailable, ambiguous, or drifted volume authority before m
         SYNVEDA_FAKE_VOLUME_CONTRACT: "inspect-error",
       },
       status: 69,
-      error: /exact project data volume inspection failed/,
+      error: /exact project postgres-data volume inspection failed/,
     },
   ];
 
@@ -1640,7 +1755,10 @@ test("reset preserves authority state when the volume contract changes after shu
       SYNVEDA_FAKE_VOLUME_CONTRACT: "drift-after-down",
     });
     assert.equal(refused.status, 78, refused.stderr);
-    assert.match(refused.stderr, /exact project data volume changed during reset/);
+    assert.match(
+      refused.stderr,
+      /exact project postgres-data volume contract was refused/,
+    );
     assert.equal(existsSync(state.authority), true);
     assert.equal(existsSync(state.gate), true);
     const calls = readFileSync(state.log, "utf8");
@@ -1662,7 +1780,10 @@ test("reset refuses an unavailable post-removal inventory before authority delet
       SYNVEDA_FAKE_POST_REMOVE_INVENTORY_ERROR: "1",
     });
     assert.equal(refused.status, 69, refused.stderr);
-    assert.match(refused.stderr, /inventory was unavailable after removal/);
+    assert.match(
+      refused.stderr,
+      /named project postgres-data volume inventory was unavailable/,
+    );
     assert.equal(existsSync(state.authority), true);
     assert.equal(existsSync(state.gate), true);
   } finally {
@@ -2176,7 +2297,10 @@ test("recovery actions never require or remove development host ownership", () =
 
 test("an acceptance project can recover by preserving data and dropping only the browser one-shot", () => {
   const state = fixture();
-  const browserProfiles = { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance" };
+  const browserProfiles = {
+    SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+    SYNVEDA_FAKE_VOLUME_MODE: "exact",
+  };
   try {
     const started = run(state, "up", browserProfiles, ["--initial-assets", "absent"]);
     assert.equal(started.status, 0, started.stderr);
@@ -2192,6 +2316,14 @@ test("an acceptance project can recover by preserving data and dropping only the
     const up = calls.indexOf(" <up> <--no-build>", down);
     const runtimeSmoke = calls.lastIndexOf("check-runtime-smoke.mjs");
     assert.ok(down >= 0 && up > down && runtimeSmoke > up, calls);
+    assert.match(
+      calls,
+      new RegExp(`docker <volume> <rm> <${state.project}_browser-acceptance-state>`),
+    );
+    assert.doesNotMatch(
+      calls,
+      new RegExp(`docker <volume> <rm> <${state.project}_postgres-data>`),
+    );
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }
@@ -2467,6 +2599,16 @@ test("Compose acceptance holds one project lock across the fixed restart matrix"
       assert.ok(position > previous, calls);
       previous = position;
     }
+    const productSeed =
+      "<run> <--rm> <--no-deps> <--no-TTY> <--entrypoint> <node> " +
+      "<browser-acceptance> <product-demo.mjs> <seed>";
+    const productVerify =
+      "<run> <--rm> <--no-deps> <--no-TTY> <--entrypoint> <node> " +
+      "<browser-acceptance> <product-demo.mjs> <verify>";
+    assert.equal((calls.match(/<product-demo\.mjs>/g) ?? []).length, 2, calls);
+    assert.ok(calls.indexOf(productSeed) >= 0, calls);
+    assert.ok(calls.indexOf(productSeed) < calls.indexOf(restarts[0]), calls);
+    assert.ok(calls.indexOf(productVerify) > previous, calls);
     assert.doesNotMatch(
       calls,
       / <restart>[^\n]*<(?:database-bootstrap|database-preflight|keycloak-database-bootstrap|keycloak-realm-convergence|migrate|tenant-convergence|issuer-diagnostic|browser-acceptance)>/,
@@ -2492,6 +2634,46 @@ test("Compose acceptance holds one project lock across the fixed restart matrix"
       );
       assert.equal((calls.match(identity) ?? []).length, 2, service);
     }
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("a known product seed refusal stops before the fixed restart checks", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  try {
+    const refused = run(state, "acceptance", {
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+      SYNVEDA_FAKE_PRODUCT_SEED_FAIL: "1",
+    });
+    assert.equal(refused.status, 48, refused.stderr);
+    assert.equal(existsSync(lockFile), false);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /<product-demo\.mjs>/);
+    assert.equal((calls.match(/ <restart>/g) ?? []).length, 0, calls);
+    assert.doesNotMatch(calls, /product-demo\.mjs> <(?:start|status)>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("a post-restart product verification refusal is propagated", () => {
+  const state = fixture();
+  try {
+    const refused = run(state, "acceptance", {
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+      SYNVEDA_FAKE_PRODUCT_VERIFY_FAIL: "1",
+    });
+    assert.equal(refused.status, 49, refused.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    assert.equal((calls.match(/ <restart>/g) ?? []).length, 6, calls);
+    assert.match(calls, /<product-demo\.mjs> <seed>/);
+    assert.match(calls, /<product-demo\.mjs> <verify>/);
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }

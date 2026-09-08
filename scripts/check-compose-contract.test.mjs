@@ -1444,6 +1444,7 @@ test("browser acceptance renders one sandboxed secret-minimal fixture", () => {
       ),
       appUrl: "http://app.synveda.test:8080",
       issuer: "http://auth.synveda.test:8080/realms/synveda",
+      bootstrapTenantId: "019b53c0-7c00-7000-8000-000000000045",
     };
     assert.deepEqual(browserAcceptanceFindings(browser, expected), []);
 
@@ -1455,6 +1456,7 @@ test("browser acceptance renders one sandboxed secret-minimal fixture", () => {
       (service) => { service.user = "0:0"; },
       (service) => { service.pids_limit = 512; },
       (service) => { service.tmpfs[0] = "/tmp:rw,size=1g"; },
+      (service) => { service.volumes[0].source = "other-state"; },
       (service) => { service.build.args.HTTP_PROXY = "http://private.invalid"; },
       (service) => { service.security_opt[1] = "seccomp=unconfined"; },
       (service) => { service.ports = [{ published: "9222", target: 9222 }]; },
@@ -1517,6 +1519,7 @@ test("reference browser acceptance is HTTPS, digest-only and build-free", () => 
       ),
       appUrl: "https://app.compose.example",
       issuer: "https://auth.compose.example/realms/synveda",
+      bootstrapTenantId: "019b53c0-7c00-7000-8000-000000000045",
     };
     assert.deepEqual(browserAcceptanceFindings(browser, expected), []);
     assert.equal(model.name, "synveda-reference-acceptance-browser-test");
@@ -1531,7 +1534,8 @@ test("reference browser acceptance is HTTPS, digest-only and build-free", () => 
     const sourceBuild = structuredClone(browser);
     sourceBuild.build = {
       context: ROOT,
-      dockerfile: "deploy/compose/browser/Dockerfile",
+      dockerfile: "deploy/compose/gateway/Dockerfile",
+      target: "browser-acceptance",
       args: { ...CLOSED_CONTAINER_PROXY_ENVIRONMENT },
     };
     assert.ok(

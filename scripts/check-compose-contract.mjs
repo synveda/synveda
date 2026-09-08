@@ -331,6 +331,30 @@ export function composeBuildBoundaryFindings(source) {
   ) {
     findings.push("startup, browser fixtures and restart recovery are not explicitly no-build");
   }
+  const firstRestart = source.indexOf("restart_service_name=postgres");
+  const productSeed = source.lastIndexOf(
+    'run_product_acceptance seed "$@"',
+    firstRestart,
+  );
+  const finalBrowser = source.indexOf('rerun_browser_acceptance "$@"', firstRestart);
+  const productVerify = source.indexOf(
+    'run_product_acceptance verify "$@"',
+    finalBrowser,
+  );
+  if (
+    !(
+      productSeed >= 0 &&
+      productSeed < firstRestart &&
+      firstRestart >= 0 &&
+      finalBrowser > firstRestart &&
+      productVerify > finalBrowser
+    ) ||
+    source.match(/run --rm --no-deps --no-TTY/g)?.length !== 1 ||
+    !/--entrypoint node browser-acceptance product-demo\.mjs \\\n+\s+"\$product_acceptance_phase"/.test(source) ||
+    /product_acceptance_state|product-demo\.mjs\s+(?:start|status)/.test(source)
+  ) {
+    findings.push("public-API product state does not span the restart matrix");
+  }
   return findings;
 }
 
@@ -1136,6 +1160,7 @@ export function browserAcceptanceFindings(browser, expected) {
     "stop_grace_period",
     "tmpfs",
     "user",
+    "volumes",
   ]);
   if (
     !["development", "reference"].includes(expected.runtime) ||
@@ -1158,6 +1183,9 @@ export function browserAcceptanceFindings(browser, expected) {
     ...Object.fromEntries(CONTAINER_PROXY_ENVIRONMENT.map((name) => [name, ""])),
     SYNVEDA_BROWSER_APP_URL: expected.appUrl,
     SYNVEDA_BROWSER_ISSUER: expected.issuer,
+    SYNVEDA_BOOTSTRAP_TENANT_ID: expected.bootstrapTenantId,
+    SYNVEDA_INSECURE_DEVELOPMENT_HTTP:
+      expected.runtime === "development" ? "true" : "false",
   };
   if (!sameJson(browser.environment, expectedEnvironment)) {
     findings.push("browser acceptance public or proxy environment drifted");
@@ -1180,11 +1208,23 @@ export function browserAcceptanceFindings(browser, expected) {
     JSON.stringify(browser.tmpfs) !==
       JSON.stringify(["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"])
   ) findings.push("browser acceptance sandbox or resource boundary drifted");
+  const stateMount = (browser.volumes ?? []).find(
+    (mount) => mount.target === "/var/lib/synveda-browser",
+  );
+  if (
+    !sameJson(stateMount, {
+      type: "volume",
+      source: "browser-acceptance-state",
+      target: "/var/lib/synveda-browser",
+      volume: {},
+    })
+  ) findings.push("browser acceptance state volume drifted");
   if (developmentBuild) {
     if (
       !sameJson(browser.build, {
         context: expected.root,
-        dockerfile: "deploy/compose/browser/Dockerfile",
+        dockerfile: "deploy/compose/gateway/Dockerfile",
+        target: "browser-acceptance",
         args: Object.fromEntries(CONTAINER_PROXY_ENVIRONMENT.map((name) => [name, ""])),
       })
     ) findings.push("browser acceptance development build boundary drifted");
@@ -1193,7 +1233,10 @@ export function browserAcceptanceFindings(browser, expected) {
   }
   if (
     JSON.stringify(secretBindings(browser)) !==
-      JSON.stringify(["keycloak_demo_admin_password:keycloak_demo_admin_password"]) ||
+      JSON.stringify([
+        "keycloak_demo_admin_password:keycloak_demo_admin_password",
+        "keycloak_demo_member_password:keycloak_demo_member_password",
+      ]) ||
     JSON.stringify(dependencyBindings(browser)) !==
       JSON.stringify([
         "gateway:service_healthy:no-restart:required",
@@ -2821,6 +2864,11 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.postgres === "bundled") {
     expectedNonBindTargets.postgres = ["volume:/var/lib/postgresql/data:rw"];
   }
+  if (expected.browser === true) {
+    expectedNonBindTargets["browser-acceptance"] = [
+      "volume:/var/lib/synveda-browser:rw",
+    ];
+  }
   for (const [name, targets] of Object.entries(expectedNonBindTargets)) {
     if (
       JSON.stringify(nonBindMountTargets(services[name] ?? {})) !==
@@ -3156,6 +3204,7 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.browser === true) {
     expectedSecrets["browser-acceptance"] = [
       "keycloak_demo_admin_password:keycloak_demo_admin_password",
+      "keycloak_demo_member_password:keycloak_demo_member_password",
     ];
   }
   if (expected.runtime === "reference") {
@@ -3400,6 +3449,8 @@ export function canonicalComposeFindings(model, expected) {
     expectedEnvironmentKeys["browser-acceptance"] = [
       "SYNVEDA_BROWSER_APP_URL",
       "SYNVEDA_BROWSER_ISSUER",
+      "SYNVEDA_BOOTSTRAP_TENANT_ID",
+      "SYNVEDA_INSECURE_DEVELOPMENT_HTTP",
     ];
   }
   if (expected.postgres === "bundled" || expected.oidc === "bundled") {
@@ -3652,9 +3703,15 @@ export function canonicalComposeFindings(model, expected) {
     if (
       expected.browser === true &&
       services["browser-acceptance"]?.build?.dockerfile !==
-        "deploy/compose/browser/Dockerfile"
+        "deploy/compose/gateway/Dockerfile"
     ) {
       findings.push("browser acceptance does not use the pinned fixture build");
+    }
+    if (
+      expected.browser === true &&
+      services["browser-acceptance"]?.build?.target !== "browser-acceptance"
+    ) {
+      findings.push("browser acceptance does not select the fixture build target");
     }
     const developmentBuilds = [...developmentProductBuilds, "proxy"];
     if (expected.postgres === "bundled") developmentBuilds.push("database-bootstrap");
@@ -3697,9 +3754,13 @@ export function canonicalComposeFindings(model, expected) {
           findings.push(`${name} build enables unsupported ${field}`);
         }
       }
+      const expectedBuildKeys =
+        name === "browser-acceptance"
+          ? ["args", "context", "dockerfile", "target"]
+          : ["args", "context", "dockerfile"];
       if (
         build?.context !== ROOT ||
-        JSON.stringify(keys(build)) !== JSON.stringify(["args", "context", "dockerfile"])
+        JSON.stringify(keys(build)) !== JSON.stringify(expectedBuildKeys)
       ) {
         findings.push(`${name} build context or option set is not closed`);
       }
@@ -3767,6 +3828,28 @@ export function canonicalComposeFindings(model, expected) {
     if (!sameJson(network, expectedNetwork)) {
       findings.push(`${name} IPAM, ownership or isolation contract drifted`);
     }
+  }
+  const expectedVolumes = {};
+  if (expected.postgres === "bundled") {
+    expectedVolumes["postgres-data"] = {
+      name: `${expected.projectName}_postgres-data`,
+      labels: {
+        "com.synveda.contract": "cpr-45",
+        "com.synveda.volume": "postgres-data",
+      },
+    };
+  }
+  if (expected.browser === true) {
+    expectedVolumes["browser-acceptance-state"] = {
+      name: `${expected.projectName}_browser-acceptance-state`,
+      labels: {
+        "com.synveda.contract": "cpr-45",
+        "com.synveda.volume": "browser-acceptance-state",
+      },
+    };
+  }
+  if (!sameJson(model.volumes ?? {}, expectedVolumes)) {
+    findings.push("named volume set differs from the closed deployment contract");
   }
   if (
     JSON.stringify(services["otel-collector"]?.healthcheck?.test) !==

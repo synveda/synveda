@@ -103,6 +103,47 @@ RUN set -eux; \
     find crates -name '*.rs' -newermt '1970-01-01' -exec touch {} +; \
     cargo build --locked --release -p synveda-gateway -p synveda-cli
 
+# Acceptance-only browser fixture. Keeping this as a target in the product
+# Dockerfile lets it copy the exact CLI built above instead of compiling a
+# second drifting client or transferring a bearer between containers. It is
+# selected explicitly by compose.browser-acceptance.dev.yaml; the runtime
+# stage below remains the default product image for every deployment shape.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e AS browser-acceptance
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+
+WORKDIR /workspace
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY deploy/compose/browser/package.json deploy/compose/browser/package.json
+RUN pnpm install --frozen-lockfile --prod --filter @synveda/compose-browser-acceptance...
+COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
+COPY --chmod=0555 deploy/compose/browser/console-login.mjs deploy/compose/browser/product-demo.mjs deploy/compose/browser/
+COPY --chmod=0444 deploy/compose/browser/console-login-runner.mjs deploy/compose/browser/console-login-contract.mjs deploy/compose/browser/product-demo-runner.mjs deploy/compose/browser/product-demo-contract.mjs deploy/compose/browser/
+COPY --chmod=0444 deploy/compose/browser/PLAYWRIGHT-LICENSE deploy/compose/browser/PLAYWRIGHT-NOTICE deploy/compose/browser/seccomp_profile.NOTICE /usr/share/licenses/synveda-browser-acceptance/
+
+# Docker populates a new named volume from this sticky, otherwise empty mount
+# point. The fixture can therefore create private per-UID directories without
+# a root entrypoint or host-bind ownership assumptions on Linux or Desktop.
+RUN install -d -m 01777 /var/lib/synveda-browser
+ENV HOME=/var/lib/synveda-browser/home \
+    XDG_CONFIG_HOME=/var/lib/synveda-browser/home/config \
+    XDG_STATE_HOME=/var/lib/synveda-browser/home/state \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+USER 65532:65532
+WORKDIR /workspace/deploy/compose/browser
+ENTRYPOINT ["node", "console-login.mjs"]
+
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS runtime
 ARG HTTP_PROXY
 ARG http_proxy

@@ -130,10 +130,14 @@ inventory.
    canonical pull-only graph and delete all Rauthy residue.
 
 The direct `make compose-acceptance` gate is implemented. It holds one exact
-project lock from initial asset-absence proof through two browser logins and a
+project lock from initial asset-absence proof through two browser logins, a
 fixed PostgreSQL, Keycloak, Collector, worker, gateway and proxy restart
-matrix. Deterministic lifecycle tests pass; a supported Docker host is still
-required for live evidence.
+matrix, and the public-API team scenario. The scenario uses distinct Alice and
+Bob logins, redeems a workspace invitation, exercises Sessions, Capture,
+Knowledge and context reuse, reopens and checks its active receipt without
+repeating mutations, then verifies that receipt against live rows after the
+restart matrix. Deterministic lifecycle and contract tests pass; a supported
+Docker host is still required for live evidence.
 
 The `make compose-backup` and `make compose-restore-smoke` gates are also
 implemented. Deterministic tests cover writer pause/resume and ordinary
@@ -153,7 +157,7 @@ are implementation evidence rather than a live restore result.
   rules pass; wrong issuer/audience, missing group and expired tokens fail.
 - Gateway, worker, Keycloak, PostgreSQL, proxy and Collector each restart while
   persisted product state remains usable.
-- A workspace, project, member invitation, Session, Capture candidate,
+- A workspace, project, redeemed member invitation, Session, Capture candidate,
   accepted Knowledge item and clean-session context reuse complete through
   public APIs.
 - Gateway and worker roles cannot access Keycloak; the Keycloak role cannot

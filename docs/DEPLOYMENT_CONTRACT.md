@@ -322,10 +322,15 @@ Implemented:
 
 compose-acceptance requires a fresh suffixed bundled project and the exact
 demo/browser profiles. Under one lock and deadline it performs browser login,
-restarts each of the six long-running product/provider services independently,
-runs the full smoke after every restart, and repeats browser login. It leaves
-the successful stack running. compose-reset requires an exact confirmation
-token and retains the project's secrets, issuer document and KMS key. Paired
+seeds the existing two-principal public-API team demo, reopens and checks the
+active receipt, then restarts each of the six long-running product/provider
+services independently and runs the full smoke after every restart. It repeats
+browser login and verifies the existing receipt against live product rows. It
+leaves the successful stack running. Identity admission and the demo rows are
+restart-state witnesses. With the same profiles selected, compose-down removes
+the disposable browser credential-and-receipt volume after exact ownership
+checks while retaining product data; confirmed compose-reset also removes it.
+Reset retains the project's secrets, issuer document and KMS key. Paired
 logical backup/isolated restore are implemented for bundled PostgreSQL and
 bundled Keycloak. External-provider recovery and upgrade smoke remain open.
 Live targets must report an unavailable prerequisite distinctly from a

@@ -272,6 +272,17 @@ impl Api {
         self.send(request, "POST", path).await
     }
 
+    /// Redeem one invitation without ever placing its bearer token in a
+    /// diagnostic. The gateway route carries the credential in the path, so
+    /// callers must use this boundary instead of generic [`Self::post`].
+    pub async fn accept_invite(&self, token: &str) -> Result<Value, String> {
+        let request = self
+            .http
+            .post(format!("{}/v1/invites/{token}/accept", self.base));
+        self.send_secret_path(request, "POST", "/v1/invites/{invite_token}/accept")
+            .await
+    }
+
     /// [`Api::get`] into a typed view.
     pub async fn get_as<T: DeserializeOwned>(&self, path: &str) -> Result<T, String> {
         decode(self.get(path).await?, path)
@@ -316,6 +327,27 @@ impl Api {
         method: &str,
         path: &str,
     ) -> Result<Value, String> {
+        self.send_with_error_policy(request, method, path, true)
+            .await
+    }
+
+    async fn send_secret_path(
+        &self,
+        request: reqwest::RequestBuilder,
+        method: &str,
+        path: &str,
+    ) -> Result<Value, String> {
+        self.send_with_error_policy(request, method, path, false)
+            .await
+    }
+
+    async fn send_with_error_policy(
+        &self,
+        request: reqwest::RequestBuilder,
+        method: &str,
+        path: &str,
+        include_error_body: bool,
+    ) -> Result<Value, String> {
         let response = request
             .bearer_auth(&self.bearer)
             // Every governed verb goes through here, so this one line is
@@ -329,11 +361,14 @@ impl Api {
             .header("x-synveda-client", self.client)
             .send()
             .await
-            .map_err(|err| format!("{method} {}{path}: {err}", self.base))?;
+            .map_err(|err| format!("{method} {}{path}: {}", self.base, err.without_url()))?;
         let status = response.status();
+        if !status.is_success() && !include_error_body {
+            return Err(render_refusal(status, "", false));
+        }
         let body = response.text().await.unwrap_or_default();
         if !status.is_success() {
-            return Err(refusal(status, &body));
+            return Err(render_refusal(status, &body, true));
         }
         if body.is_empty() {
             return Ok(Value::Null);
@@ -356,6 +391,14 @@ fn refusal(status: reqwest::StatusCode, body: &str) -> String {
         // status rather than pretend to know more.
         Err(_) if body.trim().is_empty() => format!("HTTP {status}"),
         Err(_) => format!("HTTP {status}: {}", body.trim()),
+    }
+}
+
+fn render_refusal(status: reqwest::StatusCode, body: &str, include_body: bool) -> String {
+    if include_body {
+        refusal(status, body)
+    } else {
+        format!("HTTP {status}")
     }
 }
 
@@ -394,6 +437,35 @@ mod tests {
         // that forgot to fill the buffer would.
         assert_ne!(parts[1], "0".repeat(32));
         assert_ne!(parts[2], "0".repeat(16));
+    }
+
+    #[tokio::test]
+    async fn invitation_transport_errors_never_render_the_bearer_path() {
+        let token = "synveda_invite_v1.00000000-0000-7000-8000-000000000000.secret";
+        let api = Api {
+            base: "http://[".to_owned(),
+            bearer: "test-bearer".to_owned(),
+            subject: "test-subject".to_owned(),
+            http: reqwest::Client::new(),
+            trace: TraceContext::new().expect("trace context"),
+            client: CLI_CLIENT,
+        };
+
+        let error = api.accept_invite(token).await.expect_err("invalid URL");
+        assert!(!error.contains(token), "invitation token reached: {error}");
+        assert!(error.contains("/v1/invites/{invite_token}/accept"));
+    }
+
+    #[test]
+    fn invitation_http_refusals_discard_an_echoed_bearer() {
+        let token = "synveda_invite_v1.00000000-0000-7000-8000-000000000000.secret";
+        let diagnostic = render_refusal(
+            reqwest::StatusCode::BAD_GATEWAY,
+            &format!("upstream echoed /v1/invites/{token}/accept"),
+            false,
+        );
+        assert_eq!(diagnostic, "HTTP 502 Bad Gateway");
+        assert!(!diagnostic.contains(token));
     }
 
     /// One trace per client, which is one trace per thing the user asked

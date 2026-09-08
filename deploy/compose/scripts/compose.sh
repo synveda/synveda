@@ -2319,6 +2319,98 @@ rerun_browser_acceptance() {
     docker_mutation_phase=
 }
 
+run_product_acceptance() {
+    product_acceptance_phase=$1
+    shift
+    docker_mutation_uncertain=true
+    docker_mutation_phase=compose-product-acceptance-$product_acceptance_phase
+    product_acceptance_status=0
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" run --rm --no-deps --no-TTY \
+        --entrypoint node browser-acceptance product-demo.mjs \
+        "$product_acceptance_phase" || product_acceptance_status=$?
+    case "$product_acceptance_status" in
+        0) ;;
+        124|125) exit "$product_acceptance_status" ;;
+        *)
+            docker_mutation_uncertain=false
+            docker_mutation_phase=
+            exit "$product_acceptance_status"
+            ;;
+    esac
+    docker_mutation_uncertain=false
+    docker_mutation_phase=
+}
+
+volume_format='{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}|{{index .Labels "com.synveda.contract"}}|{{index .Labels "com.synveda.volume"}}'
+inspect_project_volume() {
+    checked_volume_key=$1
+    checked_volume_name=${project}_$checked_volume_key
+    checked_volume_expected_prefix="$checked_volume_name|local|local|"
+    checked_volume_expected_suffix="|$project|$checked_volume_key|cpr-45|$checked_volume_key"
+    capture_bounded_output 30 "$docker_bin" volume ls --quiet \
+        --filter "name=^${checked_volume_name}$" || {
+        inventory_status=$?
+        propagate_bounded_failure "$inventory_status"
+        echo "compose: named project $checked_volume_key volume inventory was unavailable" >&2
+        exit 69
+    }
+    checked_named_volume_candidates=$bounded_output
+    capture_bounded_output 30 "$docker_bin" volume ls --quiet \
+        --filter "label=com.docker.compose.project=$project" \
+        --filter "label=com.docker.compose.volume=$checked_volume_key" || {
+        inventory_status=$?
+        propagate_bounded_failure "$inventory_status"
+        echo "compose: project $checked_volume_key volume inventory was unavailable" >&2
+        exit 69
+    }
+    checked_labelled_volume_candidates=$bounded_output
+    checked_volume_present=false
+    case "$checked_named_volume_candidates:$checked_labelled_volume_candidates" in
+        :) ;;
+        "$checked_volume_name:$checked_volume_name") checked_volume_present=true ;;
+        *)
+            echo "compose: exact project $checked_volume_key volume inventory was refused" >&2
+            exit 78
+            ;;
+    esac
+    if [ "$checked_volume_present" = true ]; then
+        capture_bounded_output 30 "$docker_bin" volume inspect \
+            --format "$volume_format" "$checked_volume_name" || {
+            inspection_status=$?
+            propagate_bounded_failure "$inspection_status"
+            echo "compose: exact project $checked_volume_key volume inspection failed" >&2
+            exit 69
+        }
+        checked_volume_contract=$bounded_output
+        case "$checked_volume_contract" in
+            "$checked_volume_expected_prefix"null"$checked_volume_expected_suffix"|\
+            "$checked_volume_expected_prefix"'{}'"$checked_volume_expected_suffix") ;;
+            *)
+                echo "compose: exact project $checked_volume_key volume contract was refused" >&2
+                exit 78
+                ;;
+        esac
+    fi
+}
+
+remove_project_volume() {
+    removal_volume_key=$1
+    removal_volume_name=${project}_$removal_volume_key
+    docker_mutation_uncertain=true
+    docker_mutation_phase=project-$removal_volume_key-volume-removal
+    run_bounded 30 "$docker_bin" volume rm "$removal_volume_name" >/dev/null || {
+        echo "compose: exact project $removal_volume_key volume removal failed" >&2
+        exit 70
+    }
+    inspect_project_volume "$removal_volume_key"
+    [ "$checked_volume_present" = false ] || {
+        echo "compose: exact project $removal_volume_key volume remains after removal" >&2
+        exit 78
+    }
+    docker_mutation_uncertain=false
+    docker_mutation_phase=
+}
+
 prepare_default_recovery_root() {
     recovery_root=$1
     recovery_root_kind=$2
@@ -2497,6 +2589,7 @@ case "$action" in
         ;;
     acceptance)
         start_compose_graph "$@"
+        run_product_acceptance seed "$@"
 
         restart_service_name=postgres
         restart_stop_seconds=60
@@ -2535,6 +2628,7 @@ case "$action" in
         restart_selected_service "$@"
 
         rerun_browser_acceptance "$@"
+        run_product_acceptance verify "$@"
         echo "canonical Compose acceptance passed for $project; services remain running"
         ;;
     backup)
@@ -2613,14 +2707,29 @@ case "$action" in
     down)
         run_docker_preflight
         prepare_asset_contract "$@"
+        browser_volume_present=false
+        if [ "$browser_acceptance_profile" = true ]; then
+            inspect_project_volume browser-acceptance-state
+            browser_volume_present=$checked_volume_present
+        fi
         docker_mutation_uncertain=true
         docker_mutation_phase=compose-down
         run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
             down --timeout "$lifecycle_timeout"
         prove_assets_stopped
+        if [ "$browser_acceptance_profile" = true ]; then
+            inspect_project_volume browser-acceptance-state
+            [ "$checked_volume_present" = "$browser_volume_present" ] || {
+                echo "compose: exact project browser-acceptance-state volume changed during down" >&2
+                exit 78
+            }
+            if [ "$browser_volume_present" = true ]; then
+                remove_project_volume browser-acceptance-state
+            fi
+        fi
         docker_mutation_uncertain=false
         docker_mutation_phase=
-        echo "canonical Compose services stopped for $project; persistent data retained"
+        echo "canonical Compose services stopped for $project; product data retained"
         ;;
     smoke)
         prepare_asset_contract "$@"
@@ -2654,59 +2763,12 @@ case "$action" in
                 --authority-dir "$database_authority_dir" \
                 --gate-dir "$keycloak_public_gate_dir"
         fi
-        volume_name=${project}_postgres-data
-        volume_format='{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}|{{index .Labels "com.synveda.contract"}}|{{index .Labels "com.synveda.volume"}}'
-        volume_expected_prefix="$volume_name|local|local|"
-        volume_expected_suffix="|$project|postgres-data|cpr-45|postgres-data"
-        list_named_volume() {
-            capture_bounded_output 30 "$docker_bin" volume ls --quiet \
-                --filter "name=^${volume_name}$"
-        }
-        list_labelled_project_volume() {
-            capture_bounded_output 30 "$docker_bin" volume ls --quiet \
-                --filter "label=com.docker.compose.project=$project" \
-                --filter "label=com.docker.compose.volume=postgres-data"
-        }
-        volume_present=false
-        list_named_volume || {
-            inventory_status=$?
-            propagate_bounded_failure "$inventory_status"
-            echo "compose: named project data volume inventory was unavailable" >&2
-            exit 69
-        }
-        named_volume_candidates=$bounded_output
-        list_labelled_project_volume || {
-            inventory_status=$?
-            propagate_bounded_failure "$inventory_status"
-            echo "compose: project data volume inventory was unavailable" >&2
-            exit 69
-        }
-        labelled_volume_candidates=$bounded_output
-        case "$named_volume_candidates:$labelled_volume_candidates" in
-            :) ;;
-            "$volume_name:$volume_name") volume_present=true ;;
-            *)
-                echo "compose: exact project data volume inventory was refused" >&2
-                exit 78
-                ;;
-        esac
-        if [ "$volume_present" = true ]; then
-            capture_bounded_output 30 "$docker_bin" volume inspect \
-                --format "$volume_format" "$volume_name" || {
-                inspection_status=$?
-                propagate_bounded_failure "$inspection_status"
-                echo "compose: exact project data volume inspection failed" >&2
-                exit 69
-            }
-            volume_contract=$bounded_output
-            case "$volume_contract" in
-                "$volume_expected_prefix"null"$volume_expected_suffix"|\
-                "$volume_expected_prefix"'{}'"$volume_expected_suffix") ;;
-                *)
-                    echo "compose: exact project data volume contract was refused" >&2
-                    exit 78
-                    ;;
-            esac
+        inspect_project_volume postgres-data
+        postgres_volume_present=$checked_volume_present
+        browser_volume_present=false
+        if [ "$browser_acceptance_profile" = true ]; then
+            inspect_project_volume browser-acceptance-state
+            browser_volume_present=$checked_volume_present
         fi
         docker_mutation_uncertain=true
         docker_mutation_phase=compose-down-for-reset
@@ -2715,75 +2777,25 @@ case "$action" in
         prove_assets_stopped
         docker_mutation_uncertain=false
         docker_mutation_phase=
-        list_named_volume || {
-            inventory_status=$?
-            propagate_bounded_failure "$inventory_status"
-            echo "compose: named project data volume inventory was unavailable after shutdown" >&2
-            exit 69
+        inspect_project_volume postgres-data
+        [ "$checked_volume_present" = "$postgres_volume_present" ] || {
+            echo "compose: exact project postgres-data volume changed during reset" >&2
+            exit 78
         }
-        named_volume_candidates_after=$bounded_output
-        list_labelled_project_volume || {
-            inventory_status=$?
-            propagate_bounded_failure "$inventory_status"
-            echo "compose: project data volume inventory was unavailable after shutdown" >&2
-            exit 69
-        }
-        labelled_volume_candidates_after=$bounded_output
-        if [ "$volume_present" = true ]; then
-            [ "$named_volume_candidates_after" = "$volume_name" ] && \
-                [ "$labelled_volume_candidates_after" = "$volume_name" ] || {
-                echo "compose: exact project data volume changed during reset" >&2
+        if [ "$browser_acceptance_profile" = true ]; then
+            inspect_project_volume browser-acceptance-state
+            [ "$checked_volume_present" = "$browser_volume_present" ] || {
+                echo "compose: exact project browser-acceptance-state volume changed during reset" >&2
                 exit 78
             }
-            capture_bounded_output 30 "$docker_bin" volume inspect \
-                --format "$volume_format" "$volume_name" || {
-                inspection_status=$?
-                propagate_bounded_failure "$inspection_status"
-                echo "compose: exact project data volume disappeared during reset" >&2
-                exit 70
-            }
-            volume_contract=$bounded_output
-            case "$volume_contract" in
-                "$volume_expected_prefix"null"$volume_expected_suffix"|\
-                "$volume_expected_prefix"'{}'"$volume_expected_suffix") ;;
-                *)
-                    echo "compose: exact project data volume changed during reset" >&2
-                    exit 78
-                    ;;
-            esac
-            docker_mutation_uncertain=true
-            docker_mutation_phase=project-volume-removal
-            run_bounded 30 "$docker_bin" volume rm "$volume_name" >/dev/null || {
-                echo "compose: exact project data volume removal failed" >&2
-                exit 70
-            }
-            list_named_volume || {
-                inventory_status=$?
-                propagate_bounded_failure "$inventory_status"
-                echo "compose: named project data volume inventory was unavailable after removal" >&2
-                exit 69
-            }
-            named_volume_candidates_final=$bounded_output
-            list_labelled_project_volume || {
-                inventory_status=$?
-                propagate_bounded_failure "$inventory_status"
-                echo "compose: project data volume inventory was unavailable after removal" >&2
-                exit 69
-            }
-            labelled_volume_candidates_final=$bounded_output
-            [ -z "$named_volume_candidates_final" ] && \
-                [ -z "$labelled_volume_candidates_final" ] || {
-                echo "compose: exact project data volume remains after reset" >&2
-                exit 78
-            }
-            docker_mutation_uncertain=false
-            docker_mutation_phase=
-        else
-            [ -z "$named_volume_candidates_after" ] && \
-                [ -z "$labelled_volume_candidates_after" ] || {
-                echo "compose: project data volume appeared during reset" >&2
-                exit 78
-            }
+        fi
+        # Remove the credential-bearing fixture state first. If its removal
+        # fails, the product database has not yet been touched.
+        if [ "$browser_volume_present" = true ]; then
+            remove_project_volume browser-acceptance-state
+        fi
+        if [ "$postgres_volume_present" = true ]; then
+            remove_project_volume postgres-data
         fi
         if [ "$oidc_mode" = bundled ]; then
             run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/reset-runtime-state.mjs" \

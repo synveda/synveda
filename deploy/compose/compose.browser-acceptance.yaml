@@ -34,11 +34,21 @@ services:
       <<: *synveda-browser-proxy-closure
       SYNVEDA_BROWSER_APP_URL: ${SYNVEDA_PUBLIC_APP_URL:?set SYNVEDA_PUBLIC_APP_URL}
       SYNVEDA_BROWSER_ISSUER: ${SYNVEDA_OIDC_ISSUER:?set SYNVEDA_OIDC_ISSUER}
+      SYNVEDA_BOOTSTRAP_TENANT_ID: ${SYNVEDA_BOOTSTRAP_TENANT_ID:?set SYNVEDA_BOOTSTRAP_TENANT_ID}
+      SYNVEDA_INSECURE_DEVELOPMENT_HTTP: ${SYNVEDA_INSECURE_DEVELOPMENT_HTTP:?set SYNVEDA_INSECURE_DEVELOPMENT_HTTP}
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+    volumes:
+      - type: volume
+        source: browser-acceptance-state
+        target: /var/lib/synveda-browser
+        volume:
+          nocopy: false
     secrets:
       - source: keycloak_demo_admin_password
         target: keycloak_demo_admin_password
+      - source: keycloak_demo_member_password
+        target: keycloak_demo_member_password
     depends_on:
       gateway:
         condition: service_healthy
@@ -48,3 +58,9 @@ services:
         condition: service_healthy
     networks:
       app-backend: {}
+
+volumes:
+  browser-acceptance-state:
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.volume: browser-acceptance-state

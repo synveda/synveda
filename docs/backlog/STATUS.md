@@ -175,9 +175,11 @@ Unused Temporal runtime assets are deleted.
 
 The earlier clean-engine/Colima receipt and provider fixtures were removed:
 they did not start Docker or establish product evidence. The direct
-fresh-project browser/restart acceptance command is implemented and awaits a
-supported live Docker host. PostgreSQL-native logical backup plus isolated
-database/key restore is also implemented and deterministically tested; its live
+fresh-project browser/restart acceptance command now seeds and verifies the
+real two-principal public-API team scenario across the restart matrix,
+including invitation redemption, and awaits a supported live Docker host.
+PostgreSQL-native logical backup plus
+isolated database/key restore is also implemented and deterministically tested; its live
 Docker run remains pending. Remaining implementation work is one forced-RLS
 skill-validation operation/outbox and its disabled-by-default
 Apalis 0.7.4 leaf adapter, a small observability/Operations slice, and

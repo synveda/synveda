@@ -50,7 +50,7 @@ runtime dependency and is pinned here exactly.
 | `synveda/keycloak:26.7.2-dev` | bundled Keycloak and realm convergence | ours over Apache-2.0 Keycloak | Optimized development output of `deploy/compose/keycloak/Dockerfile`. |
 | `synveda/proxy:2.11.4-dev` | canonical reverse proxy | ours over Apache-2.0 Caddy | Development output of `deploy/compose/proxy/Dockerfile`. |
 | `otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc` | private core Collector | Apache-2.0 | Exact official Collector Contrib runtime; the application emits only OTLP to this private seam. |
-| `synveda/browser-acceptance:1.62.1-dev` | browser-acceptance fixture | Fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Locally built no-capture one-shot; never a product or reference service. Playwright's licence, upstream NOTICE and the seccomp provenance notice are retained in the image. |
+| `synveda/browser-acceptance:1.62.1-dev` | Compose acceptance fixture with the exact Synveda CLI and Playwright | Synveda's licence is not yet selected; fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Locally built no-capture one-shot used by reference acceptance, not a release product service. The CLI is copied from the same source build as the gateway/worker. Playwright's licence, upstream NOTICE and the seccomp provenance notice are retained in the image. |
 | `synveda-db-test-postgres:local` | isolated database acceptance fixture | ours over PostgreSQL-licensed PostgreSQL | Local-only database-test build; never an operator topology. |
 
 ## Images the legacy contributor topology still runs

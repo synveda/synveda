@@ -29,13 +29,16 @@ import {
   validateAuthorizationUrl,
   validateCallbackUrl,
   validateSettings,
+  validateTenantId,
 } from "../deploy/compose/browser/console-login-contract.mjs";
 import { runBrowserAcceptance } from "../deploy/compose/browser/console-login-runner.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DRIVER = join(ROOT, "deploy/compose/browser/console-login.mjs");
 const RUNNER = join(ROOT, "deploy/compose/browser/console-login-runner.mjs");
-const DOCKERFILE = join(ROOT, "deploy/compose/browser/Dockerfile");
+const PRODUCT_DRIVER = join(ROOT, "deploy/compose/browser/product-demo.mjs");
+const PRODUCT_RUNNER = join(ROOT, "deploy/compose/browser/product-demo-runner.mjs");
+const DOCKERFILE = join(ROOT, "deploy/compose/gateway/Dockerfile");
 const MAKEFILE = join(ROOT, "Makefile");
 const SECCOMP = join(ROOT, "deploy/compose/browser/seccomp_profile.json");
 const SECCOMP_NOTICE = join(ROOT, "deploy/compose/browser/seccomp_profile.NOTICE");
@@ -46,6 +49,7 @@ const STATE = "s".repeat(43);
 const NONCE = "n".repeat(43);
 const CHALLENGE = "c".repeat(43);
 const SESSION_STATE = "t".repeat(24);
+const TENANT_ID = "019b53c0-7c00-7000-8000-000000000045";
 const SETTINGS = validateSettings(
   "http://app.synveda.test:8080",
   "http://auth.synveda.test:8080/realms/synveda",
@@ -209,6 +213,14 @@ test("callback, settings and request-origin contracts are exact", () => {
     ["https://app.example:443", "https://auth.example:443/other"],
     ["https://user@app.example", "https://auth.example/realms/synveda"],
   ]) contractFailure(() => validateSettings(app, issuer), "configuration");
+  assert.equal(validateTenantId(TENANT_ID), TENANT_ID);
+  for (const value of [
+    "019b53c0-7c00-6000-8000-000000000045",
+    "019B53C0-7C00-7000-8000-000000000045",
+    "not-a-tenant",
+    "",
+    undefined,
+  ]) contractFailure(() => validateTenantId(value), "configuration");
 });
 
 test("the same browser contract accepts exact reference HTTPS origins", () => {
@@ -370,15 +382,25 @@ test("the demo password reader revalidates and zeroes its opened descriptor", ()
 
 test("the one-shot image and driver forbid capture and TLS bypass surfaces", () => {
   const dockerfile = readFileSync(DOCKERFILE, "utf8");
-  const driver = `${readFileSync(DRIVER, "utf8")}\n${readFileSync(RUNNER, "utf8")}`;
+  const driver = [DRIVER, RUNNER, PRODUCT_DRIVER, PRODUCT_RUNNER]
+    .map((path) => readFileSync(path, "utf8"))
+    .join("\n");
   const makefile = readFileSync(MAKEFILE, "utf8");
   assert.match(
     dockerfile,
-    /^FROM mcr\.microsoft\.com\/playwright:v1\.62\.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e$/m,
+    /^FROM mcr\.microsoft\.com\/playwright:v1\.62\.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e AS browser-acceptance$/m,
   );
   assert.match(dockerfile, /^USER 65532:65532$/m);
   assert.match(dockerfile, /^RUN \/usr\/local\/bin\/assert-build-proxy-closed$/m);
   assert.match(dockerfile, /console-login-runner\.mjs/);
+  assert.match(
+    dockerfile,
+    /^COPY --from=build \/src\/target\/release\/synveda \/usr\/local\/bin\/synveda$/m,
+  );
+  assert.match(
+    dockerfile,
+    /^FROM debian:bookworm-slim@sha256:[0-9a-f]{64} AS runtime$/m,
+  );
   assert.match(
     dockerfile,
     /COPY --chmod=0444 deploy\/compose\/browser\/PLAYWRIGHT-LICENSE deploy\/compose\/browser\/PLAYWRIGHT-NOTICE deploy\/compose\/browser\/seccomp_profile\.NOTICE \/usr\/share\/licenses\/synveda-browser-acceptance\//,
@@ -493,6 +515,7 @@ function fakeBrowserFlow({
   backgroundForeign = false,
   evaluationHang = false,
   cleanupFailure = false,
+  tenantMismatch = false,
 } = {}) {
   let routeHandler;
   let evaluation = 0;
@@ -556,7 +579,12 @@ function fakeBrowserFlow({
       if (evaluationHang) return new Promise(() => {});
       evaluation += 1;
       return evaluation === 1
-        ? { authenticated: true, administrator: true }
+        ? {
+            authenticated: true,
+            administrator: true,
+            subjectPresent: true,
+            tenantMatches: !tenantMismatch,
+          }
         : true;
     },
     close: async () => {
@@ -591,6 +619,7 @@ function runInjected(flow, password, timeout = 60_000) {
     environment: {
       SYNVEDA_BROWSER_APP_URL: "http://app.synveda.test:8080",
       SYNVEDA_BROWSER_ISSUER: "http://auth.synveda.test:8080/realms/synveda",
+      SYNVEDA_BOOTSTRAP_TENANT_ID: TENANT_ID,
     },
     readPassword: () => password,
     timeout,
@@ -625,6 +654,7 @@ test("the injected browser flow refuses missing, duplicate and foreign redirects
     [{ foreign: true }, "network-boundary"],
     [{ backgroundForeign: true }, "network-boundary"],
     [{ invalidCallback: true }, "callback"],
+    [{ tenantMismatch: true }, "administrator-admission"],
   ]) {
     const flow = fakeBrowserFlow(options);
     const password = Buffer.from("b".repeat(64));

@@ -28,7 +28,6 @@ const DOCKERFILES = [
   "deploy/compose/postgres/Dockerfile",
   "deploy/compose/keycloak/Dockerfile",
   "deploy/compose/proxy/Dockerfile",
-  "deploy/compose/browser/Dockerfile",
   "deploy/helm/postgres/Dockerfile",
 ];
 

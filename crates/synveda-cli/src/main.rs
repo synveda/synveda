@@ -414,10 +414,10 @@ enum DemoCommand {
         /// else `default`.
         #[arg(long)]
         credentials: Option<String>,
-        /// A separately logged-in Bob profile for the genuine teammate leg.
-        /// In team mode the command also discovers a stored profile named
-        /// `bob`; otherwise it issues a one-time invitation and runs the clean
-        /// reuse leg as Alice without impersonating another person.
+        /// A separately logged-in Bob profile for the genuine invitation and
+        /// teammate leg. In team mode the command also discovers a stored
+        /// profile named `bob`; otherwise it issues a one-time invitation and
+        /// runs the clean reuse leg as Alice without impersonating another person.
         #[arg(long)]
         bob_credentials: Option<String>,
         /// Print the final manifest summary as JSON.

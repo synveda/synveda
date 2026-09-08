@@ -21,6 +21,7 @@ use chrono::Utc;
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use zeroize::Zeroizing;
 
 use crate::api::Api;
 use crate::credentials;
@@ -106,6 +107,19 @@ impl Receipt {
 
     fn put(&mut self, name: &str, value: Value) -> Result<(), String> {
         self.resources.insert(name.to_owned(), value);
+        self.updated_at = Utc::now().to_rfc3339();
+        save_receipt(self)
+    }
+
+    fn put_pair(
+        &mut self,
+        first_name: &str,
+        first_value: Value,
+        second_name: &str,
+        second_value: Value,
+    ) -> Result<(), String> {
+        self.resources.insert(first_name.to_owned(), first_value);
+        self.resources.insert(second_name.to_owned(), second_value);
         self.updated_at = Utc::now().to_rfc3339();
         save_receipt(self)
     }
@@ -226,6 +240,7 @@ pub async fn status(credential_profile: &str, json_output: bool) -> Result<(), S
         ("workspace", "/v1/workspaces/"),
         ("project", "/v1/projects/"),
         ("first_session", "/v1/sessions/"),
+        ("first_capture", "/v1/capture-batches/"),
         ("reuse_session", "/v1/sessions/"),
         ("current_session", "/v1/sessions/"),
         ("webhook_knowledge", "/v1/knowledge/"),
@@ -545,16 +560,28 @@ async fn prepare_team_member(
             return Err(format!("Bob profile {profile:?} is not provisioned"));
         }
         if receipt.resource("bob_member").is_none() {
-            let project = receipt.require_resource("project")?;
-            let id = required_str(&project, "id")?;
-            let value: Value = alice
+            let workspace = receipt.require_resource("workspace")?;
+            let id = required_str(&workspace, "id")?;
+            let mut created: Value = alice
                 .post_idempotent_as(
-                    &format!("/v1/projects/{id}/members"),
-                    Some(json!({"principal_id": bob.subject, "role": "member"})),
-                    &receipt.key("bob-member"),
+                    &format!("/v1/workspaces/{id}/invites"),
+                    Some(json!({
+                        "role": "member",
+                        "email": "member@demo.synveda.invalid",
+                        "expires_in_secs": 604800
+                    })),
+                    &receipt.key("bob-invite"),
                 )
                 .await?;
-            receipt.put("bob_member", value)?;
+            let token = take_secret_field(&mut created, "token")?;
+            let _accept_url = take_secret_field(&mut created, "accept_url")?;
+            let accepted = bob.accept_invite(token.as_str()).await?;
+            receipt.put_pair(
+                "bob_invite",
+                json!({"invite": created["invite"]}),
+                "bob_member",
+                accepted,
+            )?;
         }
         receipt.put(
             "bob_principal",
@@ -566,7 +593,7 @@ async fn prepare_team_member(
     if receipt.resource("bob_invite").is_none() {
         let workspace = receipt.require_resource("workspace")?;
         let id = required_str(&workspace, "id")?;
-        let created: Value = alice
+        let mut created: Value = alice
             .post_idempotent_as(
                 &format!("/v1/workspaces/{id}/invites"),
                 Some(json!({
@@ -577,10 +604,10 @@ async fn prepare_team_member(
                 &receipt.key("bob-invite"),
             )
             .await?;
-        let token = created["token"].as_str().unwrap_or("<not returned>");
-        let accept_url = created["accept_url"].as_str().unwrap_or("<not returned>");
-        println!("Bob invitation (shown once): {token}");
-        println!("Accept through Bob's own login: {accept_url}");
+        let token = take_secret_field(&mut created, "token")?;
+        let accept_url = take_secret_field(&mut created, "accept_url")?;
+        println!("Bob invitation (shown once): {}", token.as_str());
+        println!("Accept through Bob's own login: {}", accept_url.as_str());
         receipt.put("bob_invite", json!({"invite": created["invite"]}))?;
     } else {
         receipt.notice(
@@ -591,6 +618,13 @@ async fn prepare_team_member(
         "No distinct Bob credential was available; clean-session reuse runs as Alice and no teammate claim is made",
     )?;
     Ok(None)
+}
+
+fn take_secret_field(value: &mut Value, name: &str) -> Result<Zeroizing<String>, String> {
+    match value.get_mut(name).map(Value::take) {
+        Some(Value::String(secret)) if !secret.is_empty() => Ok(Zeroizing::new(secret)),
+        _ => Err(format!("invitation response has no {name}")),
+    }
 }
 
 async fn ensure_first_session(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
@@ -784,7 +818,47 @@ async fn ensure_reuse_context(api: &Api, receipt: &mut Receipt) -> Result<(), St
         {
             return Err("Bob's context leaked Alice's private quick-test preference".to_owned());
         }
+        let rendered = run["rendered"]
+            .as_str()
+            .ok_or_else(|| "the clean reuse context returned no rendered block".to_owned())?;
+        if run["selection_count"].as_i64().unwrap_or_default() < 1
+            || !rendered.contains("provider event ID")
+        {
+            return Err(
+                "the clean reuse context did not select the shared webhook convention".to_owned(),
+            );
+        }
         receipt.put("reuse_context", run)?;
+    }
+    if api.subject != receipt.actor_subject && receipt.resource("private_isolation").is_none() {
+        let session = receipt.require_resource("reuse_session")?;
+        let session_id = required_str(&session, "id")?;
+        let private = receipt.require_resource("private_knowledge")?;
+        let private_id = required_str(&private, "id")?;
+        let result = api
+            .post(
+                &format!("/v1/sessions/{session_id}/knowledge-query"),
+                Some(json!({"query": "test-fast", "limit": 20})),
+            )
+            .await?;
+        let items = result["items"]
+            .as_array()
+            .ok_or_else(|| "private-isolation query returned no items array".to_owned())?;
+        if items
+            .iter()
+            .any(|item| object_id(&item["knowledge"]) == Some(private_id))
+        {
+            return Err("Bob's Knowledge query exposed Alice's private preference".to_owned());
+        }
+        receipt.put(
+            "private_isolation",
+            json!({
+                "session_id": session_id,
+                "private_knowledge_id": private_id,
+                "inspected_count": items.len(),
+                "private_knowledge_absent": true,
+            }),
+        )?;
     }
     Ok(())
 }
@@ -1206,6 +1280,7 @@ fn knowledge_handle(result: &Value) -> Option<Value> {
     Some(json!({
         "id": item_id,
         "revision_id": revision_id,
+        "candidate_id": candidate.get("id"),
         "change_id": candidate.get("resulting_change_id").or_else(|| candidate.get("change_id")),
         "outcome": candidate.get("resulting_outcome").or_else(|| candidate.get("outcome")),
     }))
@@ -1418,7 +1493,8 @@ mod tests {
     #[test]
     fn receipt_never_persists_an_invitation_token_or_secret() {
         let source = include_str!("demo.rs");
-        assert!(source.contains("created[\"token\"]"));
+        assert!(source.contains("take_secret_field(&mut created, \"token\")"));
+        assert!(source.contains("bob.accept_invite(token.as_str())"));
         assert!(source.contains("json!({\"invite\": created[\"invite\"]})"));
         for forbidden in [
             concat!("synveda_", "store"),

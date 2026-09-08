@@ -85,16 +85,24 @@ and console routes, OIDC discovery and the refusal of management/metrics
 routes. It is not a browser-login test.
 
 `make compose-acceptance` is the fresh-project gate. It requires the explicit
-acceptance suffix and private `/24`, runs the real browser login, restarts
-PostgreSQL, Keycloak, Collector, worker, gateway and proxy one at a time, runs
-the full smoke after each, then repeats browser login. One project lock and
-one bounded deadline cover the run. Success leaves the stack running for
-inspection and later recovery/upgrade gates; reset remains separately
-confirmed.
+acceptance suffix and private `/24`, runs the real browser login, then uses two
+real CLI login profiles to seed the existing public-API PulseBoard team
+scenario. This includes Alice issuing and Bob redeeming a one-time workspace
+invitation. A second start reopens and checks the active receipt; it does not
+repeat the mutations. The gate then restarts PostgreSQL, Keycloak, Collector,
+worker, gateway and proxy one at a time, runs the full smoke after each,
+repeats browser login and verifies the existing receipt against live product
+rows. One project lock and one bounded deadline cover the run. The identity
+admission and PulseBoard rows are persisted-state witnesses across the matrix.
+Success leaves the stack running for inspection and later recovery/upgrade
+gates; reset remains separately confirmed.
 
 compose-down stops containers and preserves the PostgreSQL volume and generated
-project inputs. The default ignored state directory is
-deploy/compose/runtime/synveda-development.
+project inputs. When the browser-acceptance profile is selected, down removes
+that profile's disposable credential-and-receipt volume after checking its
+exact ownership; it does not retain login tokens at rest. Confirmed reset with
+the same profiles also removes it when stopping a running project. The default
+ignored state directory is deploy/compose/runtime/synveda-development.
 
 ## Secrets
 
@@ -170,9 +178,9 @@ containers. It requires a real Docker Engine; deterministic fixture tests are
 not live evidence. After inspecting the result, stop and reset that exact
 project, then remove its owned hosts block:
 
-    make compose-down
-    SYNVEDA_CONFIRM_RESET=synveda-development-acceptance-local make compose-reset
-    unset SYNVEDA_COMPOSE_PROFILES
+    SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance make compose-down
+    SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance \
+      SYNVEDA_CONFIRM_RESET=synveda-development-acceptance-local make compose-reset
     SYNVEDA_CONFIRM_HOSTS_REMOVE=remove:127.0.0.1:synveda-development-acceptance-local:app.synveda.test:auth.synveda.test \
       make compose-hosts-remove
 
@@ -270,12 +278,12 @@ Inspect the named Docker project and host process tree; once the recorded owner
 and its children are conclusively gone, remove only
 `/tmp/.synveda-compose-locks-<uid>/<source-project>.lock`. With the original
 profiles still selected, run `make compose-down`; this removes the uncertain
-containers/networks but preserves the PostgreSQL volume and project inputs.
-For the acceptance-project example above, then set
-`SYNVEDA_COMPOSE_PROFILES=demo` (drop only the disposable browser one-shot),
-run `make compose-up`, and require `make compose-smoke` to pass. Never
-recursively remove the lock directory. If process or Docker mutation state is
-uncertain, leave the lock in place and escalate to the host operator.
+containers/networks and the disposable browser credential-and-receipt volume,
+but preserves the PostgreSQL volume and project inputs. For the
+acceptance-project example above, then set `SYNVEDA_COMPOSE_PROFILES=demo`, run
+`make compose-up`, and require `make compose-smoke` to pass. Never recursively
+remove the lock directory. If process or Docker mutation state is uncertain,
+leave the lock in place and escalate to the host operator.
 
 ## Reference HTTPS
 
@@ -363,11 +371,13 @@ lifecycle:
 
     make compose-reset
 
-It acts only on the validated project containers, networks, PostgreSQL volume
-and transient database-authority/Keycloak-gate state. It deliberately retains
-the project's secrets, issuer document and KMS key. Review the target and
-supply the requested confirmation. Use compose-down when database state must
-also be retained.
+It acts only on the validated project containers, networks, PostgreSQL volume,
+profile-selected browser credential-and-receipt volume and transient
+database-authority/Keycloak-gate state. It deliberately retains the project's
+secrets, issuer document and KMS key. Use the same profile selector that
+created profile-owned volumes, review the target and supply the requested
+confirmation. Use compose-down when product/database state must be retained;
+the disposable browser-acceptance credentials are still removed.
 
 ## Current completion gaps
 

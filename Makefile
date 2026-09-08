@@ -396,7 +396,7 @@ check-compose-contract:
 	node --test scripts/check-tls-inputs.test.mjs
 	node --test scripts/manage-hosts-file.test.mjs
 	node --test scripts/check-compose-contract.test.mjs
-	node --test scripts/compose-entrypoints.test.mjs scripts/check-host-resolution.test.mjs scripts/check-network-preflight.test.mjs scripts/check-compose-assets.test.mjs scripts/check-build-proxy-contract.test.mjs scripts/check-local-builder.test.mjs scripts/compose-browser-login.test.mjs scripts/run-with-deadline.test.mjs scripts/check-runtime-smoke.test.mjs scripts/reset-runtime-state.test.mjs scripts/compose-lifecycle.test.mjs scripts/compose-recovery.test.mjs
+	node --test scripts/compose-entrypoints.test.mjs scripts/check-host-resolution.test.mjs scripts/check-network-preflight.test.mjs scripts/check-compose-assets.test.mjs scripts/check-build-proxy-contract.test.mjs scripts/check-local-builder.test.mjs scripts/compose-browser-login.test.mjs scripts/compose-product-demo.test.mjs scripts/run-with-deadline.test.mjs scripts/check-runtime-smoke.test.mjs scripts/reset-runtime-state.test.mjs scripts/compose-lifecycle.test.mjs scripts/compose-recovery.test.mjs
 	node scripts/check-compose-contract.mjs
 
 ts-build:
