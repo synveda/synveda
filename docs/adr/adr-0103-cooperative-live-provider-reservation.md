@@ -1,6 +1,6 @@
 # ADR-0103: Cooperative aggregate live-provider reservation
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0105
 - **Date**: 2026-09-06
 - **Feature(s)**: CPR-45
 - **Deciders**: Synveda maintainers

@@ -1060,7 +1060,7 @@ test("browser acceptance rejects unsafe selectors before Docker mutation", () =>
     },
     {
       extra: { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance,semantic" },
-      diagnostic: /requires exactly the demo,browser-acceptance profiles/,
+      diagnostic: /unsupported profile; allowed: demo,browser-acceptance/,
     },
     {
       extra: { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance,demo" },

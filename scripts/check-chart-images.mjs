@@ -46,7 +46,6 @@ const RELEASE_COMPOSE = "deploy/release/docker-compose.yml";
 const COMPOSE_DIRECTORY = "deploy/compose";
 const COMPOSE_DEFAULTS = `${COMPOSE_DIRECTORY}/.env.example`;
 const LEGACY_COMPOSE = `${COMPOSE_DIRECTORY}/docker-compose.yml`;
-const CLEAN_ENGINE_STATE = `${COMPOSE_DIRECTORY}/scripts/clean-engine-state.mjs`;
 const RELEASE_WORKFLOW = ".github/workflows/release.yml";
 // The per-architecture TEI pins. They are declared here, in the one place
 // that resolves them, and `synveda init` carries the same table for an
@@ -196,18 +195,6 @@ if (releaseWorkflowImages.length !== 5) {
 }
 for (const ref of releaseWorkflowImages) {
   found.set(ref, `${RELEASE_WORKFLOW} (tags:)`);
-}
-
-// The clean-Engine registry is a fixture outside the canonical Compose graph,
-// so its exact pullable digest lives in the receipt generator rather than a
-// service definition. Keep that executable input inside the same inventory.
-const cleanEngineRegistry = read(CLEAN_ENGINE_STATE).match(
-  /const REGISTRY_IMAGE\s*=\s*\n?\s*"([^"\s]+)";/,
-)?.[1];
-if (cleanEngineRegistry === undefined) {
-  fail(`${CLEAN_ENGINE_STATE}: exact registry fixture image was not discovered`);
-} else {
-  found.set(cleanEngineRegistry, `${CLEAN_ENGINE_STATE} (REGISTRY_IMAGE)`);
 }
 
 // ── The check ────────────────────────────────────────────────────────────

@@ -445,11 +445,10 @@ for profile in $profiles; do
     profile_count=$((profile_count + 1))
     case "$profile" in
         "") ;;
-        semantic|observability|apalis-board|backup-test) ;;
         demo) demo_profile=true ;;
         browser-acceptance) browser_acceptance_profile=true ;;
         *)
-            echo "compose: unsupported profile; allowed: semantic,observability,apalis-board,demo,backup-test,browser-acceptance" >&2
+            echo "compose: unsupported profile; allowed: demo,browser-acceptance" >&2
             exit 64
             ;;
     esac

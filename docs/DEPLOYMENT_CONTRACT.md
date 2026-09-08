@@ -1,1847 +1,315 @@
 # Synveda deployment contract
 
-Status: **accepted architecture; implementation open under CPR-45**. This file
-defines the contract the Docker reference, direct binaries and later Helm must
-implement. Until `CPR-45` closes with executable evidence, the existing install
-instructions describe the currently shipped profile and this document is not a
-claim that the reference topology has passed.
+Status: current contract for CPR-45 and ADR-0102, as amended by ADR-0105.
 
-## Contract principles
+This document defines the application/deployment boundary shared by direct
+binary execution, Docker Compose and later Kubernetes packaging. The
+authoritative implementation is the product image, its commands, the
+configuration readers, the database schema and the generated public API.
 
-- There is one Synveda application, schema, public API and governed
-  Configuration model. Deployment shape and provider do not select product
-  editions or domain behavior.
-- Every application read/write still crosses Cedar; forced RLS remains the
-  tenant backstop; governed mutations use VedaFlow and content-free audit.
-- PostgreSQL, OIDC/OAuth 2.0, S3-compatible backup storage, OTLP and OCI are
-  the provider interfaces. Cloud product names do not enter domain crates or
-  public DTOs.
-- Images and commands are immutable inputs recorded with source and deployment
-  digests. A tag alone is not reference acceptance evidence.
-- A health result states only what it tests. Downstream telemetry or optional
-  services never make the application unready.
+## Principles
 
-## Compose file sets
+- Synveda is one application with governed configuration profiles. There are
+  no personal, team or enterprise editions in the runtime.
+- Deployment mechanisms may change how values and files are supplied, but not
+  their meaning.
+- PostgreSQL, OIDC/OAuth 2.0 and OTLP are provider-neutral boundaries.
+- Cedar, forced RLS, VedaFlow and content-free audit remain authoritative in
+  every deployment mode.
+- Docker Compose is the executable single-host reference topology. It is not
+  an HA or disaster-recovery claim.
+- Helm implements this contract with Kubernetes primitives; it is not generated
+  from Compose.
 
-The canonical directory is `deploy/compose/`. Runtime-mode overlays and
-dependency-provider fragments are orthogonal:
+## Canonical Compose assembly
 
-```text
-compose.yaml             provider-neutral proxy, product, migration and Collector graph
-compose.reference.yaml   HTTPS, resource bounds and reference restart policy
-compose.dev.yaml         source builds, explicit HTTP and loopback operator UI
-compose.postgres.dev.yaml local PostgreSQL image build, development only
-compose.keycloak.dev.yaml local optimized Keycloak and database-bootstrap helper builds, development only
-compose.postgres.yaml    bundled PostgreSQL and idempotent role/database bootstrap
-compose.keycloak.yaml    bundled Keycloak, isolated database bootstrap and realm convergence
-compose.keycloak-postgres.yaml             bundled shared-cluster ordering/secret bridge
-compose.demo.yaml       optional secret-file-backed target-realm demo identities
-compose.browser-acceptance.yaml             fresh-project no-capture browser PKCE fixture
-compose.browser-acceptance.dev.yaml         development-only browser fixture build
-compose.external-postgres.yaml             external Synveda database egress bridge
-compose.keycloak-external-postgres.yaml    external Keycloak database egress bridge
-compose.external.yaml    external-provider labels, no provider services
-compose.apalis.yaml      planned experimental routing plus dispatcher/executor; not yet present
-compose.db-test.yaml     isolated database acceptance fixture, not an operator topology
-docker-compose.yml       legacy Rauthy development stack retained only until identity cutover acceptance
-.env.example             non-secret selectors and hostnames only
-configs/                 proxy, Collector, identity and monitoring config
-secrets.example/         filenames and generation instructions, never values
-scripts/                 bounded bootstrap, validation and acceptance helpers
-README.md                exact file-set commands and limitations
-```
+Operators invoke deploy/compose/scripts/compose.sh; they do not select
+fragments by hand. The selector validates the closed runtime/provider matrix
+and assembles these files:
 
-Exactly one runtime overlay is required: `compose.reference.yaml` or
-`compose.dev.yaml`. They are mutually exclusive; a validation script rejects
-their simultaneous use. Provider fragments are then selected independently:
+| File | Responsibility |
+| --- | --- |
+| compose.yaml | provider-neutral proxy, convergence jobs, gateway, worker and Collector |
+| compose.dev.yaml | local builds and loopback HTTP |
+| compose.reference.yaml | bounded reference resources, ports 80/443 and certificate secrets |
+| compose.postgres.yaml | bundled PostgreSQL and Synveda role/database bootstrap |
+| compose.keycloak.yaml | bundled optimized Keycloak and realm convergence |
+| compose.keycloak-postgres.yaml | shared-server bootstrap ordering |
+| compose.external-postgres.yaml | external PostgreSQL mounts and labels |
+| compose.external.yaml | external provider labels |
+| compose.demo.yaml | short-lived demo users |
+| compose.browser-acceptance*.yaml | isolated browser acceptance runner |
 
-| Mode | Required file set after `compose.yaml` |
-|---|---|
-| bundled reference | `compose.reference.yaml`, `compose.postgres.yaml`, `compose.keycloak.yaml`, `compose.keycloak-postgres.yaml` |
-| bundled development | `compose.dev.yaml`, `compose.postgres.dev.yaml`, `compose.keycloak.dev.yaml`, `compose.postgres.yaml`, `compose.keycloak.yaml`, `compose.keycloak-postgres.yaml` |
-| bundled PostgreSQL, external OIDC | one runtime overlay, `compose.postgres.yaml`, `compose.external.yaml` |
-| external PostgreSQL, bundled Keycloak (configuration only) | one runtime overlay, `compose.keycloak.yaml`, `compose.keycloak-external-postgres.yaml`, `compose.external-postgres.yaml`, `compose.external.yaml` |
-| fully external (configuration only while PostgreSQL is external) | one runtime overlay, `compose.external-postgres.yaml`, `compose.external.yaml` |
-
-For every development row, selection inserts `compose.postgres.dev.yaml`
-before the provider fragments when PostgreSQL is bundled and
-`compose.keycloak.dev.yaml` when OIDC is bundled. Reference rows select no
-source-build fragment and require digest-addressed images.
-
-Base `compose.yaml` owns product mounts, database preflight and issuer
-diagnostics. `compose.external.yaml` adds provider labels only and never defines
-a service named `postgres` or `keycloak`; the two external-PostgreSQL bridges
-attach only the required egress. External PostgreSQL rows currently prove
-configuration shape only.
-The database bootstrap refuses before mounted-input reads or `psql` whenever
-`SYNVEDA_POSTGRES_BUNDLED_CLUSTER=false`: the compiled SQLx surface and
-bootstrap transport do not yet have an accepted authenticated-TLS contract.
-Consequently bundled Keycloak with external PostgreSQL and the fully external
-PostgreSQL row are not startable product modes. Their checked configuration
-still requires an explicit topology-specific database-role contract so the
-future implementation cannot infer or silently omit peer databases. Fully
-external OIDC omits Keycloak and its database bootstrap entirely.
-
-Optional services use only these profiles: `semantic`, `observability`,
-`apalis-board`, `demo`, `backup-test` and the fixture-only
-`browser-acceptance`. The browser profile is selectable only with both bundled
-providers, exactly the `demo,browser-acceptance` profile set, a suffixed
-acceptance project and proved initial asset absence. Development selects its
-reviewed source build; reference selects a digest-qualified browser image and
-no development build fragment. It is a disposable acceptance client, never a
-core reference service. Apalis execution is activated by the
-explicit `compose.apalis.yaml` fragment, not a profile: that fragment atomically
-changes the one per-kind routing key and starts its dispatcher/executor. The
-configuration gate rejects a routed kind without its services or those
-services without matching routing. The proxy, gateway, core worker, migration,
-identity diagnostic and Collector are never profile-gated.
-Bundled PostgreSQL and Keycloak are likewise unprofiled when their fragments
-are selected. The repository requires Docker Compose 2.33.1 or newer for
-deterministic `gw_priority` handling and tests
-every row of the table with `docker compose config`, the expected service set,
-ports, secret mounts and dependency graph. Reference and development use fixed
-project names (`synveda-reference` and `synveda-development`); acceptance runs
-use a bounded, validated suffix to isolate resources.
-
-Merge semantics are intentionally simple: base declares no host ports or
-provider service-name dependencies; each runtime overlay owns published ports
-and lifecycle/resource settings for base services only; and each provider
-fragment owns its provider's common non-root/security/restart/resource policy
-plus health dependencies. Provider policy is deliberately identical in
-development and reference so runtime overlays never declare service stubs that
-would accidentally create bundled services in external mode. No override
-relies on list append order.
+Implemented selectors are development or reference,
+bundled or external PostgreSQL and bundled or external OIDC. External
+PostgreSQL is configuration-renderable but canonical start/reset is still
+refused. Demo and browser-acceptance are implemented profiles. Other optional
+profiles are not part of the current executable contract until their services
+and acceptance tests land.
 
 ## Images and commands
 
-Every release environment manifest records the source SHA, deployment-file
-digest, OCI index digest and accepted platform digests.
-
-Release versions use one bounded, Kubernetes-label- and OCI-safe SemVer-shaped
-vocabulary and are validated before they can enter a path, substitution,
-download or workflow output. The source release workflow packages the chart
-and has one closed five-image build plan: product, single-host PostgreSQL,
-CloudNativePG-compatible PostgreSQL, optimized bundled Keycloak and the
-capability-stripped reference proxy. Playwright remains an acceptance fixture,
-and the Collector remains an exact upstream dependency rather than a Synveda
-release image. Helm defaults its product and CloudNativePG images to the
-matching GHCR publication coordinates and `Chart.appVersion`.
-`make check-release-parity` proves the five workflow image/Dockerfile/tag
-tuples, packages the chart twice and renders the exact product/CloudNativePG
-pair without Docker or network access. `make check-chart-images` additionally
-rejects any external deployment Dockerfile base that lacks both a readable tag
-and a full SHA-256 digest. These static gates do not create the required
-environment manifest, capture OCI descriptors, build or publish an artifact,
-or prove that an authenticated client can pull or install one.
-
-The clean-Engine development fixture has a narrower pre-mutation candidate
-manifest. Schema version 1 is canonical JSON under a mode-0700 state root
-outside the repository. The candidate binds the exact commit/tree and both the
-stage-zero tracked-index manifest and actual effective Docker-context manifest.
-The latter hashes portable paths, entry types, permission bits, file sizes and
-bytes, symlink targets and derived directory modes after applying the exact
-ordered `.dockerignore`; included untracked files or empty directories are
-refused. It also binds the actual deployment-input manifest,
-deployment-contract digest, project/suffix, private `/24`, hosts, profiles and
-exact fixture image. Its paired receipt additionally binds the closed provider
-and resource identity. Requested assertions and excluded claims are closed
-vocabularies. It contains no path, machine identity, Docker configuration,
-credential-derived value, secret-file digest, browser state or raw command
-output. The complete run is fsynced under a private random staging directory,
-renamed to its final run name and only then published by a no-replace `active`
-hard link to the immutable mode-0600 `00-plan.json`. The link and run-directory
-device/inode identities use exact 64-bit filesystem values. The receipt hash
-chain is correlation evidence, not a signature or release provenance.
-
-Receipt schema version 6 is an append-only state machine with one exact success
-path: provider create, registry, proxy, zero-read builder, browser, project
-cleanup, provider cleanup and finalization. Each external mutation must first
-publish its closed intent; each result is a closed content-free assertion.
-Failures can transition only to receipt-owned cleanup, and a reported foreign
-collision is removed from cleanup authority even when cleanup itself is
-retried. A preflight provider collision is terminal and grants no cleanup
-authority. Provider success has an explicit evidence class and must bind the
-same operation kind, plan and provider-contract digest as its intent. Version-1
-through version-5 receipts predate this contract and are a hard-cut refusal:
-discard their
-non-mutating preparation state and create a new plan; there is no compatibility
-mode.
-
-All receipt appends and finalization use an append-only, private, content-free
-mutation journal. A permanent v7 `.mutation-slot-SS` binds the closed action,
-exact source receipt/environment endpoints, intended provider receipt, random
-nonce, cooperative process-instance challenge, prior close digest, operation
-kind, contract and canonical plan. A permanent
-`.mutation-operation-SS` is the outer provider-operation settlement. A
-permanent v8 `.mutation-close-SS` binds exact result endpoints, operation
-identity, the slot-owner or newest recovery authority and the outer settlement
-digest.
-Recovery attempts append permanent, gap-free `.mutation-recovery-SS-RR`
-v6 claims whose chain root binds the same operation. These final names are
-never deleted or reused; the next slot is valid only when it binds the prior
-close exactly. Mutation slot v1-v6, recovery/root v1-v5, close v1-v7 and the
-reusable `.mutation-lease` layout are fresh-plan hard-cut refusals. Older
-deterministic state and live-plan artefacts must be reset and regenerated; no
-compatibility translator exists.
-
-Blockers are completed and fsynced under unique private staging names, then
-linked atomically without replacement. Interruption leaves either an inert
-one-link stage or a complete two-link final record. Only staging aliases are
-retired. Immediately before every close link, the publisher re-proves its
-authority, unchanged result endpoints, current operation evidence and exact
-staged inode/bytes. A close whose live pre-link alias is concurrently reconciled
-retries within a fixed bound only after the same checks. An unrelated one-link
-stage confers no authority and cannot block that close; its later final link
-loses to the permanent no-replace name. A live or unidentifiable owner
-serializes writers; PID liveness alone is not adoption or deletion authority.
-Generic receipt append cannot own preflight, provider-create, provider-cleanup
-or finalization evidence.
-
-The internal provider-create seam retains the synchronous closed-data fake as
-rollback. Its controlled path is the lifecycle-unexposed background fake; the
-former detached actor implementation is removed. A canonical
-`background-create-operation-plan.v1` binds the private provider base, evidence
-directory, root key and ownership nonce before the v4 slot and v4 intent become
-durable. The state owner alone publishes `background-create-authority.v1` and
-launches the fixed controller/host-agent chain. The adapter accepts no caller
-function, command, environment, path or provider selector.
-
-The process contract has six synchronous veto-only checkpoints: before create
-authority, root publication, controller spawn, start-decision publication,
-start delivery and provider identity. At state integration, each checkpoint
-reopens the exact slot, operation plan, receipt/source head and complete
-evidence/root frontier. It cannot return authority. Private root,
-configuration, readiness and PID files use fsynced stages plus no-replace hard
-links; sockets begin under a `0177` umask. Controller-readiness and host-agent
-PID records HMAC their complete causal configuration, launch/start, process and
-toolchain identities. Negative probes therefore apply only to the authenticated
-record; PID relabelling and elapsed-lifetime absence are refused. Both children
-open configuration through exact no-follow descriptors. Terminal identity is
-prevalidated only after fresh authenticated host-agent and Engine probes and
-binds the complete static root identity, including device, inode, mode, path
-and UID.
-
-The outer `background-create-settlement.v1` records either
-`complete-identity`/`none` or an `exact-residual` with `evidence-refused` or
-`resource-collision`. No residual with a live or unattested controller or host
-agent can settle. Passing receipt and close bind this outer settlement digest,
-not the inner identity. Source closure is reasserted at intent, all six gates,
-pass and close. A source-obsolete one-link intent stage is retired and closes
-aborted before effect; drift after a complete identity enters
-`execution-failed`.
-
-An unowned provider root is a foreign `ownership-pending` collision. Its root
-identity is observed without inspecting leaves or sockets. The exact collision
-snapshot is reasserted immediately before settlement publication. After that
-settlement is durable, foreign removal or replacement is historical and does
-not invalidate the journal, while all Synveda-owned evidence remains exact.
-
-Recovery confirmation only reads. Acquisition first proves the slot owner and
-newest recovery owner absent, then may reconcile exact mutation-stage aliases,
-rechecks the predecessor bytes and appends an observation-bound v6 claim.
-Recovery never launches, signals, deletes, repairs inner evidence or replays a
-durable controller/start decision. Launch without authenticated controller
-readiness and start without authenticated host-agent PID remain permanently
-unattested; present or unidentifiable processes also block. At most eight
-claims and 64 slots bound the journal. Abandoned append and finalization slots
-remain blocking evidence.
-
-The same inner create protocol remains directly testable in fixture mode.
-Legacy retirement v1 and operation-evidence APIs stay fixture-only and
-`state_integration: not-authorized`. Retirement v2 accepts only the exact
-state-born create chain. The mutation owner supplies a dedicated cleanup plan,
-slot and intent bound to the completed create slot, outer create settlement and
-close, provider identity, source head and exact provider-base/evidence-directory
-identities. It stops through authenticated IPC, applies only individual leaf-
-first unlink/rmdir steps after exact remaining-subset revalidation, fsyncs
-recovered absence, and uses parent-durable append-only plan/progress/settlement
-publication. Unknown/replaced resources, parents and foreign publication stages
-remain blocking. Every destructive or publication frontier is synchronously
-reconstructed and gated from current state; the read-only prefix observation
-binds the expected operation even before its lower plan exists.
-
-The inner retirement settlement grants no result-receipt or close authority.
-The mutation owner publishes a distinct outer cleanup settlement after exact
-completion; receipt v6 and close v8 accept only that digest. Cleanup recovery
-is action-dispatched and binds the latest observation claim, including a
-reserved final settled-prefix refresh when retirement changes the observation.
-An untouched pre-intent recovery may close aborted without effect. Owner close
-requires no claims; a recovered close requires the latest claim. Settled
-history, source closure and completion are reasserted at settlement, receipt
-and the final no-replace close link. This completes the deterministic state-
-born cleanup contract but does not enable a supported provider lifecycle or
-finalization.
-
-Receipt and environment bytes are canonical, fsynced in private staging files
-and linked to their final names without replacement. The current internal
-fixture finalizer emits only `synveda.clean-engine.synthetic-environment.v1`;
-controlled-background-fake evidence is structurally ineligible for it, and
-this schema is not live environment evidence. A future live provider class
-requires a distinct reviewed environment schema. After the mutation slot has
-been safely resolved,
-a partial/noncanonical staging file is discardable; a complete canonical or
-already-linked file is resumed only when it exactly
-reconstructs the next state and otherwise is retained and refused. The
-environment manifest is bound to the canonical planned candidate, exact
-receipt head and ten requested assertions. It is published before the
-state-owned `finalize-passed` receipt and is mandatory thereafter; neither
-failure nor cleanup can publish one.
-
-Receipt cleanup resources are an upper bound, never sufficient deletion
-authority. The executor must revalidate each immutable receipt-owned
-provider/container/network/volume/resolver/path identity immediately before
-removal and preserve any mismatch. Passed cleanup assertions and every
-recorded foreign collision retire that resource from later authority. A
-partially failed multi-resource cleanup must not infer continued ownership from
-the receipt list alone.
-
-`make compose-clean-engine-plan` publishes only that candidate, receipt and a
-non-secret synthetic proxy template; `status` verifies the stored schema and
-`verify` additionally re-proves the clean source closure. These preparation
-targets do not create or adopt an Engine, start the reserved registry, arm a
-builder canary, mutate the resolver or run Compose. Later receipts must bind
-the exact disposable provider/Engine before those actions, and a final
-environment manifest is forbidden until registry, proxy, builder, browser and
-receipt-owned cleanup assertions all pass.
-
-The current executor API, recovery API, process canary and finalizer remain
-internal deterministic seams exercised only by repository tests. No supported
-lifecycle target exposes the test-only phase/recovery fixtures. The
-state-integrated adapter is closed data with a contract-derived hash and bounded
-timings; it accepts no caller-supplied function, path, command, environment or
-provider selector. The state-integrated controlled path invokes only the
-repository-fixed fake child under a short, private, receipt-owned external root.
-Its v5 contract names only repository-owned Node controller/host-agent fixture
-ancestry and exports no live Colima contract, host validator or start
-authorizer. It cannot supply the separate live-provider preparation or
-process-effect boundary.
-`provider/` now contains
-content-free authority, toolchain, controller/start, authenticated endpoint and
-provider-identity evidence, while the run contains a state-owned outer
-settlement. Its receipt class is `controlled-background-fake`. `registry/`,
-`runtime/` and `evidence/` remain empty. There is no Docker/Colima invocation,
-live provider executor or environment manifest. The state owner composes
-retirement v2 through its dedicated cleanup plan, slot, intent, outer
-settlement, action-dispatched recovery, receipt and close. Its inner settlement
-still carries no receipt/close authority, and controlled evidence remains
-ineligible for finalization. The `*WithAuthorityGate` exports are unsupported
-internal composition hooks, not a JavaScript security boundary; owner-UID code
-execution and journal mutation are one trusted-host boundary. This checkpoint
-must not be reported as clean-Engine, Docker, Colima or browser evidence.
-
-### Live-provider preparation input
-
-The separate `synveda.clean-engine.colima-live-requirements.v5` contract is the
-only repository-owned candidate input for a later macOS/arm64 Colima/VZ
-provider. It pins Colima 0.10.3, Lima 2.2.0, their selected extracted runtime
-files and the Colima-core 0.10.4 arm64 Docker disk image by exact release URL,
-size and digest. The staged Lima closure includes the release guest agent at
-`share/lima/lima-guestagent.Linux-aarch64.gz`, the release default template at
-`share/lima/templates/default.yaml`, and a private mutable
-`l/_config/networks.yaml` whose user-v2 gateway is `192.168.5.2`. The command
-pins `--activate=false` and `--port-forwarder grpc`; the latter derives
-`LIMA_SSH_PORT_FORWARDER=false` for Lima children. `/bin/sh` and
-`/usr/sbin/ioreg` are declared exact-OS-build trusted-boundary inputs rather
-than falsely described as staged binaries. Darwin refuses a Unix-socket
-pathname at 104 bytes. The pinned longest Lima socket consumes 80 bytes below
-`LIMA_HOME`, and the closed `/l` segment consumes two, so the canonical
-physical provider root is bounded to 21 UTF-8 bytes: `21 + 2 + 80 = 103`.
-Lexically overlong input is refused before filesystem access, the resolved
-physical path is checked again before traversal, and a short symlink alias
-cannot bypass either the byte budget or the existing canonical-path check. The
-canonical production requirements digest is
-`157bd8b6eaef32ffb57e733bc66420038594f5bb093ede40dcda0cae4770d6a6`.
-It binds the exact v3 predecessor digest
-`409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265`
-as `legacy_preparation_contract_sha256` rather than treating it as current.
-
-`synveda.clean-engine.colima-live-observation.v5` is private per-run evidence.
-It binds exact file and parent identities, a toolchain-only `PATH`, exact host
-build/boot inputs and distinct source and receipt-owned disk files. Its private
-root contains six dedicated mutation namespaces: Colima cache, Colima home,
-Docker config, Lima home, `HOME`, and temporary files. `HOME` is exactly the
-receipt-owned `h` directory and is empty at admission. It is not serialized as
-an environment variable; the private observation binds its directory path and
-identity plus an HMAC, while root and public projections expose no raw private
-`HOME` path. Lima home has the exact two-descendant `_config` and
-`_config/networks.yaml` baseline; the other five namespaces are empty. Colima
-cache and private `HOME` are expected not to be written; Colima home, Docker
-config, Lima home and temp are expected owned mutation surfaces.
-
-The pre-effect root-observation v5 contract recursively samples the exact six-
-namespace baseline twice without following links. It admits at most 64
-descendants in aggregate, 64 entries per directory and depth 32, with bounded
-names, relative identities, symlink targets, per-file and aggregate hashed
-bytes, and elapsed time. Each private descriptor binds type, identity,
-ownership, mode, size, link count, timestamps, depth, parent, directory count
-and content or raw-link-target digest. Public evidence contains only a keyed
-relative-identity-to-descriptor-digest mapping, its sorted identifier set and
-set HMAC; it exposes no raw name, path, target or content. Any unexpected or
-replaced descendant is an opaque `foreign-collision` and is never adopted.
-The observer accepts only a local preselected disk and performs bounded
-streaming hashes; it neither downloads nor executes a process. Raw private
-provider/component/`HOME` paths and fixture/profile identity are absent from
-public projection v5; the declared `/bin/sh` and `/usr/sbin/ioreg` paths remain
-non-private OS-build-bound metadata. Host fields remain preparation inputs, not
-live probes or VZ admission evidence. V1 through v4 requirements, observations,
-root observations and public projections, including falsely relabelled
-two-target evidence, are refused. Downstream v1-named contracts retain their
-names but reject every superseded digest chain.
-
-The closed provider-adapter registry reserves two fresh operation contracts:
-
-- `colima-vz-docker-live-create-v1`, contract digest
-  `bbf65bbb13c58e31e15b040576253b32c1f07a62445d585c8436cc821d845fe4`;
-- `colima-vz-docker-live-cleanup-v1`, contract digest
-  `3fd567d325cb0a6575109f03ddbb8eb0fff7331cd32f5a559c360ce7a4e8182b`.
-
-Their evidence schema names are distinct from every deterministic and
-controlled-background fake schema. Cleanup binds the exact create-contract
-digest, and both contracts bind the production requirements digest. Registry
-digest `4eda07f8bf439f631e1541717e5345fc41ec374c43580c406a129115c8366052`
-selects only an exact action, operation kind, operation-contract digest and
-`colima-vz-docker-live` provider-class tuple.
-
-Exact selection grants no effect authority. The create entry grants only
-`state_planning_authorized` through `mutation-journal-v7-plan-only`; execution,
-provider recovery, lifecycle exposure and finalization remain false. Cleanup
-retains all five capabilities false. The state owner records the create plan as
-an embedded, content-free
-`synveda.clean-engine.colima-live-provider-operation-plan.v1` inside a
-dedicated `provider-plan` mutation slot v7 and owner close v8. That plan binds
-the active run/candidate/head, exact registry resolution, production
-requirements and private observation digest without persisting paths, commands,
-environment, `HOME`, binding material or credentials. It changes no receipt or
-environment and produces no provider evidence.
-
-The plan competes on the same atomic mutation-slot name as the fixed fake, so
-the two cannot both publish. Production planning delegates bounded, read-only
-filesystem observation to the preparation contract before acquisition and at
-close publication; it has no process or network execution surface. A completed
-plan blocks all later mutation and finalization except its exact inert intent
-successor while execution is disabled. An abandoned planning slot can only be
-explicitly closed
-`aborted-before-effect`; this repairs the state journal and is not provider
-recovery. No receipt class, finalizer registration or lifecycle command accepts
-the live operation. Test fixtures can pass a prebuilt production-shaped plan
-through a state test seam without proving production evidence; only the
-production builder derives a plan from a fully revalidated production
-observation. A later live provider still needs causal
-process/socket/Engine/context ownership and dynamic-tree retirement and must not
-reuse the controlled-background fake.
-
-The read-only state owner can project an already validated, newest completed
-owner plan into
-`synveda.clean-engine.colima-live-plan-completion-projection.v1`. The projection
-contains only the slot, close, embedded-plan and preparation-observation
-digests. Only the direct in-memory return reflects the state just read; a
-serialized or reconstructed projection carries no state provenance. Separate
-structural helpers close the internal bindings of
-`synveda.clean-engine.colima-live-effect-intent-candidate.v1`, which states only
-`provider-create` and `requested-not-authorized`, and
-`synveda.clean-engine.colima-live-empty-pre-effect-prefix.v1` projection binds
-the candidate digest and has exactly zero entries. Those helpers authenticate
-neither state nor observation and deliberately accept manufactured or replayed
-structurally valid values. The structures do not inhabit the reserved
-create-evidence schema or assert resource, process, host-agent, Engine, socket
-or context absence.
-
-The state owner composes these values through
-`synveda.clean-engine.colima-live-pre-effect-admission.v1`. The standalone
-observation accepts repository/state and preparation-observation inputs,
-derives the completed plan/projection internally, and rejects caller-supplied
-plan, projection, candidate, prefix, requirements or checkpoints. It validates
-state/source and reconstructs the full production observation twice in
-`S1/O1/S2/O2` order. Both state snapshots and both observation values must be
-identical. The observer pins and revalidates each of the six private namespace
-directories, then no-follow recursively samples the exact bounded baseline
-descriptors. The exact baseline is `observed-pristine`; every additional or
-replaced file, directory, hard link, socket or symlink is an opaque foreign
-collision and suppresses candidate/prefix construction. No collision is
-adopted.
-
-The state owner can durably publish that request only through the distinct
-`provider-intent` successor. Production operation kind
-`colima-live-provider-intent-publication-v1` has contract digest
-`24c8d98eb13962fd7139f72f034b7b4f85b1474eb9b681b8db57f2881bdaed9d`;
-the deterministic fixture uses a different operation kind, schema, evidence
-class and contract digest
-`bf7681827912b6a848525145ffc3a8eebafa1239e68cf6c4ec6184b6045e8d6d`.
-Neither contract is a provider-adapter entry. Both grant only inert state
-publication through `mutation-journal-v7-inert-intent-only`; effect execution,
-receipt publication, provider-effect recovery, cleanup, finalization and
-lifecycle exposure are false.
-
-The publisher establishes an initial canonical pristine-namespace admission and
-requires an exactly equal reconstruction immediately before the slot link,
-after slot acquisition and immediately before the close link. The permanent
-slot v7 contains content-free generic journal metadata; its `operation_plan`
-embeds only the admission, completed provider plan and their digests. The owner
-close v8 commits with result sequence zero and zero
-environment and operation-evidence digests. It creates no receipt, provider,
-registry, runtime, environment or operation-settlement artifact. Collision or
-drift before slot publication leaves no permanent slot; after acquisition it
-closes that generation `aborted-before-effect`. An abandoned intent can only be
-repaired through an explicit all-zero recovery v6 claim and abort close.
-
-The repeated namespace observations are point-in-time evidence, not an atomic
-reservation across the six mutation namespaces and the journal. They do not
-authorize a process, VM, Engine, socket, context or root creation, and a future
-effect owner must perform fresh admission. The bounded supervisor label is
-logical, not a PID, PGID, ownership or liveness claim. Exact completed
-retries return the historical non-authorizing completion without a fresh
-namespace claim. Serialized admission values are never accepted as authority,
-and the supported lifecycle remains `plan|status|verify`.
-
-The successor process-start decision is also durable and inert. Production
-operation kind
-`colima-live-provider-start-decision-publication-v1` has contract digest
-`358eb1f8be6d3ee632df8d262239c1ab09c9dcd544fb62607d3ed2d242a63e4c`;
-the fixture-only domain has digest
-`8ae81955e5d4ce75b5d1c9f9fe72d0de5ae6d2827e6bc3f746e2c3513f0f6c73`.
-Their production and fixture publication-plan schemas are v2. They bind the
-completed intent slot, close, publication-plan and completed-plan
-projection digests. An `observed-pristine` namespace observation derives only
-`requested-not-executed-not-authorized`; a foreign collision derives no
-candidate. Process start/spawn/signal, adapter/effect execution, root mutation,
-provider/evidence/runtime/receipt/environment publication, provider-effect
-recovery, cleanup, lifecycle and finalization are false. The structures do not
-prove provenance or reserve provider namespaces. State may publish only this
-decision record through `mutation-journal-v7-inert-start-decision-only`; the
-contracts remain absent from the provider-adapter registry.
-
-The state owner reconstructs the completed intent internally and performs a
-fresh `S1/O1/S2/O2` source/namespace observation at the initial, pre-slot-link,
-post-slot-acquisition and pre-close-link boundaries. Every completed-intent
-projection, intent completion/publication plan, embedded operation plan, root
-observation and derived admission must remain byte-identical to the initial
-pristine-namespace value. Production and fixture publishers hard-code their
-class and accept no caller-supplied state, source, plan, projection, candidate,
-historical admission, root result or authority. A pre-CAS collision leaves no
-slot; a post-CAS collision owner-aborts the generation. One hard-link CAS
-writer wins.
-
-The journal grammar is strictly aborted plans followed by one completed owner
-plan, aborted same-class intents followed by one completed owner intent, then
-aborted same-class decisions followed by one completed owner decision. An
-abandoned decision admits only an exact all-zero recovery v6 claim and a
-recovery-authority `aborted-before-effect`
-close; generic provider execution recovery refuses it. Exact completed retries
-validate the observation and fixture-requirements identities, then return the
-historical non-authorizing completion without reading or claiming current
-namespace-pristine state.
-
-Mutation slot v7, close v8, recovery v6 and recovery-root v6 are one full-state
-hard cut. State made with slot v1-v6, close v1-v7 or recovery/root v1-v5 is
-refused and must be reset and regenerated; there is no migration or relabelling.
-The decision writes no process, adapter, provider, evidence, registry, runtime,
-receipt, environment, settlement, lifecycle or finalizer artifact. The
-supported lifecycle remains `plan|status|verify`, and no process-start authority
-exists.
-
-The post-decision process-start-effect admission is a separate read-only
-contract, not another journal operation. The state owner reconstructs the exact
-completed decision and samples current state and namespaces in
-`S1/O1/S2/O2` order. A stable pristine observation produces only a candidate
-with every process, adapter, root, publication, recovery, lifecycle and
-finalization capability false; a stable collision produces `null`. Production
-and fixture schemas remain distinct. The value grants nothing, the explicit
-authorization function always refuses it, and no operation kind, contract
-digest, registry entry, receipt, state slot or persistent artifact is added.
-
-The earlier non-persisted effect-generation prerequisite projection is retained
-as a separate inert review artifact. Its production and fixture projections are
-pinned to `81c496e201dbb75b17470f09d7cad2114d266641ca11cd8fbff25a992584b8da`
-and `a38253aff84b502c683e64413e62b13307f50b05a5a420e3b175bb6c3733a57e`.
-It defines no action, operation kind or operation contract, keeps every
-authority false and is consumed by neither state nor the pure effect grammar.
-Its closed-data preflight retains its own 512-occurrence bound. It is not a
-compatibility or execution path.
-
-A sibling-effect boundary now consumes only that exact deny-only admission.
-Its production `colima-live-provider-effect-v1` operation contract is pinned to
-`e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`.
-Every production capability remains false, its authority model is
-`production-deny-only-no-invoker`, and state imports no production effect tuple
-or production mutation entry point. A separate fixture-only
-`colima-live-fixture-provider-effect-v2` contract is pinned to
-`fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60`;
-it cannot be relabelled as production evidence.
-
-The pure fixture grammar binds the distinct effect witness and fixed marker,
-one start authority and attempt, exactly four authenticated roles, four causal
-edges at depth two, four endpoint/socket identities plus the private Docker-
-context identity and bytes, a quiescence fence, and two identical paged recursive
-inventories over all six mutation namespaces. Those inventories must preserve
-the trusted v5 baseline descriptor map, close physical aliases and hard-link
-groups within one namespace, and leave enough exact directory scaffolding
-capacity for every reserved endpoint and observed resource. Cleanup actions
-are derived from the accepted frontier, recorded through bounded paged
-progress, and bind cleanup settlement, terminal receipt and marker retirement.
-Six closed histories cover pre-attempt retirement, authority-only retirement,
-attempted residual cleanup, uncertain start, normal retirement and a rich
-paged/hard-link retirement. The boundary-owned module has no direct filesystem,
-process or network-executor import, and a tripwire proves construction and
-validation invoke no observation I/O. This in-memory event fixture is distinct
-from the earlier four-process causal fixture.
-
-The clean-engine state owner implements receipt v6, mutation slot v7,
-recovery/root v6 and close v8 as one hard cut. Fixture-only seams persist a
-sequence-bound physical stage, inode-derived effect witness, fixed external
-marker and exact effect events. Before any process attempt they may either
-retire the marker and close with no receipt, or publish a durable attempt fence
-and stop without delivery. One exact process-free fixture adapter may instead
-return `conclusive-not-created`, after which state publishes the ordered
-`start-authority`, `start-attempt`, `launch-edge`, `delivery-result`,
-`create-settlement`, `cleanup-plan-page`, `cleanup-plan`, `cleanup-progress`,
-`cleanup-settlement`, `terminal-receipt`, `completion` history. The staged
-receipt bytes are canonical-byte-identical to the receipt embedded in the
-terminal event. The final receipt path is hard-linked from that staged inode;
-after directory fsync and stage retirement, the one-link final receipt is
-durable before marker unlink, bound provider-root fsync, completion and close.
-Mutation close remains last. The generic receipt API refuses the state-owned
-`provider-effect-retired` phase before slot acquisition.
-
-Fixture recovery proves the slot owner and newest recoverer absent and accepts
-only forward physical/event transitions. Recovery never calls the adapter
-executor; state exact-byte loads the module and recovery validates the durable
-result. Without explicit acknowledgement, an attempt fence before durable
-delivery remains blocked. The test-only acknowledgement path accepts only
-`start-authority`/`start-attempt`, optionally followed by the outer
-`launch-edge`, and hashes the complete content-free frontier, predecessor and
-pending-stage fingerprint into the required local same-UID confirmation. It
-retires no pending stage, or only the exact confirmed inert stage or alias, and
-publishes `uncertain-start` with
-`effect_possible: true`, while retaining the open lease, unchanged receipt
-head and two-link marker/witness. It cannot publish a delivery, cleanup,
-receipt, completion or close and never calls the adapter. A changed
-pre-terminal frontier requires a new confirmation; a durable terminal is
-idempotent on normal retry or crash/restart. This is not human authentication,
-non-repudiation, an atomic physical snapshot or hostile-same-UID rollback
-detection. After conclusive
-delivery, ordinary recovery still revalidates the adapter and exact bindings
-before resuming only the missing suffix. Multiple dead recoverers at one
-frontier are retained and only the newest may publish or close.
-
-The durable acknowledgement vocabulary is exact: disposition
-`acknowledge-indeterminate-effect-possible`, event variant
-`operator-acknowledged-missing-delivery`, reason
-`delivery-record-not-durable`, and confirmation provenance
-`local-same-uid-explicit-confirmation-v1`.
-Receipt-first, marker-first, mismatch, malformed/crossed evidence and physical
-drift fail closed. There is no production effect publisher, registry entry,
-lifecycle exposure, process invocation or live-provider evidence; serialized
-pure values alone do not carry state provenance or select a branch.
-
-The fixture plan is assembled through
-`clean-engine-live-provider-effect-fixture-blueprint.mjs`, a process-free pure
-leaf at schema v3. Its fourth component is the
-`conclusive-adapter`, pinned to contract digest
-`b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681`.
-The projection also binds fixed Node/protocol/role bytes, closed child
-environment, exact role argv/cwd, four role public identities, four endpoint
-paths, Docker-context path/content commitments and the planned
-attempt/quiescence values. State descriptor-reads and source-digest-pins the
-adapter before evaluating those exact bytes, then requires the later component
-manifest to match. All components are opened with no-follow checks and
-re-proved through event, receipt, marker-retirement, close and recovery
-boundaries. Private role seeds and path/challenge commitments derive from the
-private observation binding key; no key or raw path is serialized. No
-persisted receipt/journal generation advances: receipt v6, slot v7,
-recovery/root v6 and close v8 remain unchanged. The process-free blueprint
-advances to v3; the fixture operation contract, fixture `uncertain-start` and
-adapter contract/result advance to v2. The production operation contract and
-digest remain v1 and unchanged.
-
-The adapter has no filesystem, network, process, provider or
-runtime-publication capability and returns only a zero child handle,
-`effect_possible: false` and safe code `not-created`. This adds no image,
-command, port, secret file, persistent volume or supported lifecycle surface.
-It is not runtime endpoint evidence and does not consume the standalone
-four-process harness.
-
-### Cooperative no-spawn reservation
-
-After one completed matching-class start decision, aborted reservation
-generations may precede at most one completed reservation, which must be the
-last journal slot. Production operation kind
-`colima-live-provider-reservation-publication-v1` is pinned to contract digest
-`1dd6bd0e68e2b5991c7dd5f98230ec951ab3fa479746c2c695357f4c8b728ec6`;
-the fixture-only kind
-`colima-live-fixture-provider-reservation-publication-v1` is pinned separately
-to `abb0b37f748540272149140d615e7569873bb204ffcfab14f08da38235542b6b`.
-Neither kind is registered for provider execution or exposed through a
-supported lifecycle command.
-
-The owner publishes the complete v7 reservation slot before filesystem
-mutation, then writes and fsyncs an immutable mode-0600 witness stage. The
-publication plan binds one canonical private provider root, the six fixed
-mutation namespaces and one private state run. All eight directories must have
-distinct identities, be owned by the current UID, retain their required modes
-and reside on one device. One no-replace hard-link CAS at
-`.synveda-clean-engine-provider-reservation` selects the cooperative owner. The
-marker, stage and durable state witness must retain exact bytes, device, inode,
-UID, mode, size and expected link count at each transition.
-
-While the exact two-link marker/witness inode is still held, a fresh observation
-of all six namespaces is bracketed by exact topology checks and must equal the
-bound plan. The owner then publishes the immutable
-`retirement-authorized-without-process` settlement, verifies and retires only
-that marker, fsyncs the provider root, proves the durable witness has one link,
-and closes v8 with the settlement digest. Receipt and environment state do not
-change, and `registry/`, `runtime/`, `provider/` and `evidence/` remain empty.
-
-Dedicated v6 recovery records bounded, content-free topology transitions. It
-may retire an inert stage and abort, finish a partially linked witness, or
-relink the exact standalone witness to the fixed marker before completing the
-same observation, settlement and retirement sequence. Recovery claims bind the
-deterministic witness, settlement and current reachable local topology. Wrong
-type, mode or inode, extra hard links, a foreign marker, backward topology or
-namespace drift blocks; nothing is adopted or cleaned up. This is cooperative
-same-UID exclusion, not protection against hostile same-UID code, which can
-ignore, unlink or replace the marker.
-
-The contract grants only `reservation_recovery_authorized`; process start,
-spawn, signal/group ownership, adapter/provider-effect execution, general root
-mutation, provider/evidence/runtime/receipt/environment publication,
-`provider_recovery_authorized`, cleanup, lifecycle and finalization remain
-false. The accepted process-effect design is a sibling generation directly
-after the exact completed start decision; it must never extend this terminal
-no-spawn reservation or reuse its retired marker and immutable witness. Its
-distinct effect witness must remain held across indivisible start authority
-and effect, complete recursive post-start filesystem settlement, and causal
-ownership and recovery for the outer process, detached Lima hostagent, usernet
-process and SSH ControlMaster before any runtime or lifecycle exposure. Those
-controls, live macOS proxy observation and per-file identity evidence for the
-two OS-build-bound executables are not implemented; live execution remains
-disabled.
-
-An uncatchable pre-publication interruption can retain one or more strictly
-validated `.pending-*` or `.run-*` staging directories. They contain no
-provider, registry, runtime or evidence mutation, have no `active` authority
-and do not block a later plan. `status` and `verify` validate every retained
-staging inventory. A successful final receipt-owned cleanup must remove them
-before an environment manifest may be published. The deterministic finalizer
-enforces that absence, but no live executor invokes it yet. Preparation refuses
-more than eight retained inert staging directories, keeping later validation
-and cleanup work bounded.
-
-| Image role | Required contents | Commands |
-|---|---|---|
-| Synveda product | Current: `synveda`, `synveda-gateway`, `synveda-worker`, `synveda-oidc-diagnostic`; console static bundle and embedded policies. Planned CPR-45: experimental Apalis adapter, disabled by default | Current launcher roles: `gateway`; `worker`; `issuer-diagnostic`; `database-preflight`; `migrate`; `tenant-converge`; `probe gateway\|worker live\|ready`. Planned, not yet shipped: `operation-dispatcher`; `apalis-worker` |
-| PostgreSQL | PostgreSQL 17, pgvector, `btree_gin`, pinned pgBackRest | server entrypoint; database/role bootstrap; `synveda-backup` archive/check/create/verify/expire/restore commands |
-| Keycloak | Official Keycloak 26.7.2 optimized build with PostgreSQL, health and metrics; no added provider/package; reviewed standalone convergence/readback helpers | `kc.sh start --optimized` through a secret-file entrypoint; long-running `synveda-realm-supervise` controller with a bounded generation-fenced `synveda-realm-converge` child |
-| Reverse proxy | Pinned Apache-2.0 Caddy release and reviewed configuration | `caddy run --config /etc/caddy/Caddyfile --adapter caddyfile` |
-| Telemetry | Pinned OTel Collector Contrib | `otelcol-contrib --config=/etc/otelcol/config.yaml` |
-| Optional visibility | Prometheus, Jaeger and Perses at reviewed digests | upstream commands with bounded storage/retention |
-| Experimental executor | Exact same Synveda product image digest; adapter-only `apalis`/`apalis-sql` 0.7.4 dependency | `synveda-container operation-dispatcher`; `synveda-container apalis-worker` |
-| Browser acceptance fixture | Pinned Playwright/Chromium 1.62.1 image, matching `playwright-core`, reviewed upstream seccomp profile and licence; fixture only, never a product image | one non-root `node console-login.mjs` process with no capture output |
-
-The product image has a role-neutral
-`ENTRYPOINT ["/usr/local/bin/synveda-container"]` and defaults to `gateway`.
-The entrypoint validates a closed command vocabulary and immediately `exec`s
-the selected binary; it does not interpret deployment type or print secrets.
-`worker` owns the current core maintenance/capture/indexing work,
-`operation-dispatcher` submits only outbox rows routed to Apalis, and
-`apalis-worker` executes only the declared experimental operation kind. Image
-health is not hard-coded to the gateway: Compose and later Kubernetes attach a
-role-specific probe to each service.
-
-`tenant-converge` delegates to the provider-neutral `synveda tenant converge`
-command. It admits one exact UUIDv7/slug/name tuple through the existing
-migrator-authority, forced-RLS and `tenant.created` audit path, is idempotent
-only for that exact active tenant, and requires encryption-key provisioning to
-succeed. An existing wrapped key is not sufficient: every convergence proves
-current-key unwrap custody, reads the authoritative generation-one KEK
-reference, and serializes one exact content-free provision witness on the
-tenant audit-chain head. The audit crate exposes this as a key-provision-only
-repair operation rather than a generic idempotent append, so ordinary governed
-mutations retain the same-transaction audit rule. The canonical topology runs
-this command as the unprofiled `tenant-convergence` one-shot after migration;
-gateway and worker wait for its exact successful exit.
-
-Capture remains its existing durable aggregate rather than becoming an Apalis
-task. Its current claim is fenced by tenant, batch, process-unique owner and
-attempt number. The core worker renews the lease independently during provider
-calls, re-proves it after preflight before the first provider disclosure,
-abandons results after renewal loss, bounds renewal shutdown, makes the guarded
-terminal transition before candidate writes, and audits an expired exhausted
-attempt. This row-level safety does not by itself prove process drain or
-multi-worker availability; those claims require the worker lifecycle
-acceptance below.
-
-Stateless images run with the validated numeric
-`SYNVEDA_RUNTIME_UID:SYNVEDA_RUNTIME_GID` recorded in the environment manifest;
-the Compose selector defaults these values to the operator's current ids,
-refuses zero and verifies that private directories and mode-0600 files have
-that exact owner. The secret generator must therefore run as the same non-root
-operator that renders the deployment. This lets bind-mounted files remain
-readable without relying on Compose's unimplemented local-secret uid/gid/mode
-remapping. The product image remains compatible with an arbitrary non-root UID
-for later OpenShift packaging.
-Runtime roots are read-only with explicit `/tmp` tmpfs/writable data mounts.
-Base image tags may appear only beside verified digests in build arguments or
-inventories. Apalis does not create a second product image or deployment
-contract.
-
-## Services and ports
-
-Only the reverse proxy publishes host ports in reference mode.
-
-| Service | Container port | Exposure | Health/readiness |
-|---|---:|---|---|
-| reverse proxy | selected development port (default 8080); 80, 443 reference | public reference; loopback-only development | process/config health; upstream probes are separate |
-| gateway | 8120 | private application network | current `/healthz` process and `/readyz` PostgreSQL + schema epoch; reference target adds drain-state withdrawal before shutdown |
-| worker | 8121 | bound to container loopback for self-health only; not host/network published | `/healthz` process; `/readyz` lifecycle, scheduler heartbeat, database/schema and exact runtime-role state; permanent epoch/role drift faults the supervised process; `/metrics` is transitional |
-| PostgreSQL | 5432 | private data networks | `pg_isready` plus schema/role sentinels |
-| Keycloak frontend | 8080 | not host-published; reverse proxy is the only configured public route | public flow is probed through proxy |
-| Keycloak management | 9000 | not host-published or routed; reachable only by private network peers | `/health/started`, `/health/live`, `/health/ready`; metrics private |
-| OTel Collector | 4317, 4318 | private telemetry network | private Collector health extension/internal telemetry |
-| TEI (`semantic`) | 80 | private semantic network | upstream `/health` after model load |
-| Prometheus | 9090 | loopback/operator route only | upstream readiness |
-| Jaeger UI | 16686 | loopback/operator route only | upstream health |
-| Perses | 8080 | loopback/operator route only | upstream health |
-| Apalis board | implementation-defined | operator-only, disabled by default | never a customer/public route |
-
-Development binds explicit HTTP only to loopback. Its validated unprivileged
-port from 1024 through 65535, excluding Caddy's reserved development HTTPS
-convention port 8443, is identical inside and outside the proxy so the browser,
-issuer diagnostic and gateway use one exact issuer authority; a host-only port
-translation is invalid. Reference/playground binds 80/443 and
-requires configured DNS and HTTPS. Certificate-file mode with pre-mutation
-PEM, key, chain, SAN and bounded-validity checks is the only current render;
-ACME remains an unimplemented target mode. PostgreSQL,
-Keycloak management/admin/master realm, worker health, receivers, metrics,
-dashboards, board and backup operations are never public. pgBackRest is
-embedded in the PostgreSQL image for POSIX/S3 repository operation; the
-reference opens no pgBackRest daemon port.
-
-## Service graph and lifecycle
-
-The provider-neutral target graph is deterministic:
-
-```text
-bundled postgres healthy -> database bootstrap complete -> Synveda migrate complete
-external postgres diagnostic ---------------------------> Synveda migrate complete
-Synveda migrate complete -> tenant convergence complete
-
-bundled Keycloak database sentinel -> Keycloak ready -> realm convergence
-realm convergence -> reverse-proxy config healthy -> bundled issuer diagnostic
-external reverse-proxy config healthy + external issuer over application-egress
-                                         -> external issuer diagnostic
-tenant convergence complete + issuer diagnostic complete -> gateway + core worker ready
-gateway ready -> usable app route
-
-Apalis schema migration complete -> operation dispatcher + Apalis executor
-product processes and Keycloak -> Collector -> optional visibility/external OTLP
-```
-
-The current additive checkpoint implements the bundled database bootstrap,
-tenant convergence, fail-closed realm convergence, issuer diagnostic and the
-bounded `up`, `smoke`, gateway-only `restart-gateway`, `down` and
-exact-confirmation `reset` lifecycle. It also implements fresh-project
-browser-acceptance selections for development HTTP and reference HTTPS. Each
-proves every exact project asset absent, starts the normal bundled graph, waits
-for one sandboxed browser container to exit zero and then runs ordinary runtime
-smoke; only development builds from source. Deterministic tests bind the exact
-public and issuer origins, reference certificate and immutable image inputs,
-and the build-free reference graph. They do not execute Docker, DNS, TLS,
-Keycloak or Chromium and are not live clean-start/browser acceptance. The
-external-PostgreSQL bootstrap path
-deliberately stops before runtime startup until authenticated TLS and
-pre-provisioned-provider acceptance are implemented.
-
-Every mutating lifecycle action and authority-file writer holds one private,
-operator-owned lock for the exact Compose project. The lock spans input
-generation, rendered-asset validation and every Docker mutation; children may
-borrow only the exact live ancestor witness. Catchable signals reach the active
-deadline runner and complete process group before re-entrant cleanup. A signal
-during read-only preparation releases the lock only after that group is proved
-gone through a private completion witness. Any failed, timed-out or interrupted
-Docker mutation, unclean child group, missing witness or uncatchable death
-retains a fail-closed lock. An operator may remove it only
-after validating its exact `PROJECT:PID` witness, proving the PID absent,
-revalidating the local Engine and proving no mutation for that project is
-active. Broad or uncertain stale-lock deletion is not an accepted operation.
-
-The whole action consumes one monotonic 240–3600 second elapsed-time budget,
-defaulting to 900 seconds; subprocesses receive only the remaining budget and
-it can never be replenished. A child that ignores termination is killed after a
-five-second grace, followed by a bounded disappearance check; an unproved group
-returns a distinct uncertainty status. Before `up`, the lifecycle compares the
-rendered Compose network driver, options, flags and complete IPAM configuration
-with both the current Engine inventory and the post-validation inventory. It
-refuses overlap, retained-project drift, asset substitution and unexpected
-volumes rather than deleting or silently recreating them.
-
-Every lifecycle that can inspect or mutate Engine state first resolves an exact
-local `unix://` endpoint, pins it in `DOCKER_HOST`, and removes
-`DOCKER_CONTEXT` from its child environment. Context changes after preflight
-therefore cannot redirect later inventory, startup, shutdown or volume removal.
-
-Docker client proxy configuration is not an input to the deployment contract.
-Every canonical service must explicitly define `HTTP_PROXY`, `http_proxy`,
-`HTTPS_PROXY`, `https_proxy`, `NO_PROXY`, `no_proxy`, `FTP_PROXY`, `ftp_proxy`,
-`ALL_PROXY` and `all_proxy` as empty strings. A null or bare value is invalid
-because Compose may remove it before the Docker client supplies defaults.
-Every development-mode build must define the same exact empty build arguments;
-reference mode accepts prebuilt images and contains no build declaration. The
-first `RUN` in every one of the fourteen deployment image stages invokes the same
-closed assertion and refuses any non-empty proxy build argument before network
-or package work. The rendered graph is checked before mutation. A distinct post-create `converged`
-asset state then requires every rendered container, network and volume and
-requires exactly one empty `NAME=` entry for each name in every container's
-`Config.Env`. Missing, non-empty, malformed and duplicate entries fail with a
-content-free diagnostic. `existing` remains recovery-compatible with an absent
-or partial exact project, while `stopped` requires containers and networks to
-be absent. The separate `absent` state is valid for a suffixed development
-acceptance project or the exact reference browser-acceptance selection. It
-requires every exact project container, network and volume to be missing before
-the first build or pull-only reference start.
-
-Development source builds have a separate host-control boundary. A present
-ambient BuildKit, Buildx or Bake selector is refused before any helper or lock,
-including an empty value. Once the local Unix Engine endpoint has been pinned,
-`docker context show` must return exactly `default`. The lifecycle creates a
-fresh mode-0700 `BUILDX_CONFIG` directory outside the repository. Before source
-mutation, a bounded, content-free parser requires `buildx inspect default` to
-report exactly the embedded `docker` driver, one running node named `default`
-and endpoint `default`; remote, container and Kubernetes drivers, second nodes,
-driver options and daemon file/flag extensions are refused. The lifecycle then
-selects `--builder default`, marks project-mutation state uncertain immediately
-before the build. Inspection stdout and stderr are captured only in byte-capped
-memory and discarded without reproduction; the private Buildx state is removed
-on success, failure, timeout or catchable interruption. A successful, cleanly
-settled build clears that phase
-before the separate startup mutation begins. An uncertain build outcome retains
-the exact project lock because daemon-side cache or tag mutation cannot be
-disproved. All subsequent startup and gateway recovery commands use
-`up --no-build`; reference mode is prebuilt and never enters the source-build
-path. Non-build and recovery actions scrub the same ambient selectors. Before
-any helper or lock, the lifecycle also resolves one physical temporary root and
-the effective Docker config directory; a development build refuses either
-location when it is equal to or below the repository. Without explicit
-`DOCKER_CONFIG`, an accessible non-empty `HOME` is required and its prospective
-`.docker` path is checked even when absent. An existing `config.json` must be a
-non-symlinked regular file. These are path-metadata checks; Docker config
-contents are not opened. Hardlinks, bind mounts and hostile same-user path
-replacement remain host-trust limits.
-
-The canonical build child disables optional Compose Bake selection, Docker CLI
-hooks, remote BuildKit selection, Bake environment-variable lookup, implicit
-provenance and Git metadata, while retaining `DOCKER_CONFIG` and
-`DOCKER_AUTH_CONFIG` without parsing, copying or printing them.
-`DOCKER_CONFIG` remains the portable private-registry authentication path;
-raw `DOCKER_AUTH_CONFIG` use depends on the installed Docker client version.
-Compose versions may internally delegate the supplied model to Buildx/Bake;
-the exact local model, default builder and closed environment remain the
-contract. Docker/Compose/Buildx binaries and plugin discovery, credential
-helpers, registry authentication, daemon mirrors, daemon proxy/CA and embedded
-BuildKit policy remain operator-trusted inputs, not isolation claims.
-
-The issuer diagnostic retries retryable OIDC availability through one bounded
-deadline without naming a provider. Database preflight and migration have
-bounded operations but do not poll their dependency. Provider fragments add
-`depends_on` health/completion conditions when the dependency is bundled.
-Gateway and worker are not started until tenant convergence and issuer
-diagnostics succeed. In
-bundled-Keycloak mode the proxy starts only after convergence; in external-OIDC
-mode it may start immediately. Proxy health proves only that Caddy accepted the
-closed route configuration. The product issuer diagnostic, not proxy health,
-proves discovery, exact issuer and usable JWKS. Bundled mode reaches the
-browser-visible issuer through the proxy alias; external mode reaches the
-provider directly over `application-egress` and has no Synveda identity vhost.
-The application route can remain unavailable until gateway readiness. Collector
-or visibility failure never gates product readiness.
-
-Reference long-running services, including the Keycloak convergence
-supervisor, use `restart: unless-stopped`; one-shot migration, database
-bootstrap and issuer-diagnostic jobs use `restart: "no"` and idempotent
-locks/sentinels. Backup jobs will use the same one-shot policy when that slice
-lands. Development defaults to `restart: "no"` so failures remain visible.
-Every long-running process has init/signal forwarding, bounded stop grace,
-PID/resource limits and a tested drain path. The core worker and Apalis
-executor are mutually exclusive for the `skill_validation@1` operation route:
-`SYNVEDA_OPERATION_PROVIDER_SKILL_VALIDATION=postgres` is the default;
-`compose.apalis.yaml` changes that single value to `apalis` and starts the
-dispatcher/executor in the same rendered project. The core worker never claims
-an operation routed to Apalis.
-
-The existing synchronous `POST
-/v1/skills/{id}/versions/{version_id}/tests` contract remains unchanged as the
-experiment's control and rollback. The new provider-neutral operation endpoint
-records operation/outbox state and uses either the core PostgreSQL worker or
-Apalis delivery; both call the same extracted validation function. Removing
-`compose.apalis.yaml` restores PostgreSQL delivery, while the existing
-synchronous route remains usable throughout the experiment.
-
-## Container security baseline
-
-Every reference container, including bootstrap, migration, convergence,
-backup and restore jobs, uses a non-root UID where its upstream image supports
-one, `cap_drop: [ALL]`, `security_opt:
-[no-new-privileges:true]`, a read-only root filesystem, `init: true`, a tmpfs
-for required transient paths, bounded memory/CPU/PIDs, health checks and
-explicit networks. One-shot jobs omit health checks where successful exit is
-their health contract. The only permitted root-at-start exceptions are the
-official PostgreSQL ownership transition during first initialization and a
-no-network volume-initialisation job for exact named volumes. Each drops all
-capabilities then adds only the proved `CHOWN`, `DAC_OVERRIDE`, `FOWNER`,
-`SETGID` and/or `SETUID` subset it needs, has a read-only root and bounded
-resources, and exits before application work starts. Its final server process
-and every application process run non-root with no effective capability.
-
-The topology forbids privileged containers, Docker socket mounts, host network
-or PID/IPC namespaces, host devices, broad host-directory mounts and owner
-database credentials in application containers. Volumes and networks carry
-Compose project/contract labels. Reset and restore scripts enumerate resources
-with those labels, show the exact target set, and require
-`SYNVEDA_CONFIRM_RESET=<project-name>` or
-`SYNVEDA_CONFIRM_RESTORE=<restore-project-name>`; they never resolve a broad
-path or unbounded project prefix.
-
-## Networks
-
-- `public-edge`: reverse proxy only, plus explicit public ingress.
-- `app-backend`: proxy, gateway and issuer diagnostic.
-- `identity-backend`: proxy, Keycloak and the realm-convergence supervisor.
-- `synveda-data`: PostgreSQL, Synveda database bootstrap/preflight/migration,
-  gateway and worker; future backup jobs attach only when implemented.
-- `keycloak-data`: PostgreSQL, Keycloak database bootstrap and Keycloak.
-- `telemetry`: gateway, worker and Collector.
-- `keycloak-management`: Keycloak, the realm-convergence supervisor and
-  Collector; management proof/scrape traffic, with no published port.
-- `application-egress`: issuer diagnostic, gateway and worker; external
-  PostgreSQL mode also attaches database preflight and migration.
-- `identity-egress`: only bundled-Keycloak database bootstrap and Keycloak in
-  the explicit external-PostgreSQL row.
-- `telemetry-egress`: Collector only.
-- Optional isolated `semantic`, `operations` and `restore-test` networks.
-
-Compose consumes one operator-facing `SYNVEDA_COMPOSE_IPV4_POOL=A.B.C.0/24`.
-The selector accepts only a canonical RFC1918 `/24` and derives fixed `/28`
-slots: identity `.0`, public `.16`, application `.32`, Synveda data `.48`,
-Keycloak data `.64`, Keycloak management `.80`, telemetry `.96`, application
-egress `.112`, identity egress `.128` and telemetry egress `.144`. The `.160`,
-`.176` and `.192` slots are reserved for semantic, operations and restore-test;
-three slots remain spare. Every rendered network has an explicit subnet and
-gateway. The intended public or provider-facing attachment has
-`gw_priority: 1` on each multi-homed service; ordinary network `priority` is
-not a default-route control.
-
-Identity uses gateway `+1`, the proxy's sole static address `+2`, and the upper
-`+8/29` dynamic range. This keeps Keycloak and convergence allocations away
-from the trusted proxy address without marking that same address as an IPAM
-auxiliary address. No other service has a static container address.
-
-The baked pool is an unsuffixed development convenience, not a collision-free
-allocation. Reference and acceptance-suffixed projects require an explicit
-pool, and concurrent or retained projects require distinct recorded pools.
-Configuration rendering stays daemon-independent. The lifecycle `up` boundary
-compares numeric CIDR intervals against all Engine networks, accepts only exact
-label-owned same-project reruns, and refuses stale or foreign overlaps without
-deleting anything; Docker network creation remains the final race authority.
-It also requires a local Unix Docker endpoint and Engine 28 or newer before
-relying on loopback publication. Operators must still avoid host/VPN and
-external-dependency routes. Docker Desktop keeps bridge routes inside its VM,
-so host-route inspection alone is insufficient and functional dependency smoke
-tests remain required.
-
-PostgreSQL is the only service joining both data networks in the shared-server
-reference. Gateway and Keycloak never share a data network. Docker networks
-are service-level, not per-port ACLs: a peer on a Keycloak network can reach
-any Keycloak listener, so privacy claims mean no host publication and no proxy
-route; configuration/inspection tests assert both. The proxy owns the
-public application and issuer aliases on the networks that need them so
-gateway and browser use identical issuer bytes without routing the gateway
-through host loopback. Caddy's administration endpoint is disabled. The current
-certificate-file mode mounts only the selected leaf-first fullchain (leaf and
-intermediates, with its trust root omitted) and matching unencrypted private-key
-files read-only. Full semantic validation runs before `config`, `up`, `smoke`
-and gateway restart, but certificate validity never blocks `down` or `reset`.
-Future ACME mode requires a dedicated persistent
-`caddy-data` volume and acceptance before it can be selected.
-`internal: true` removes external container egress; it is not a security
-boundary against an authorised host/Engine operator.
-
-## Persistent data and ownership
-
-| Data | Persistent unit | Owner/lifecycle |
-|---|---|---|
-| PostgreSQL cluster | named data volume | PostgreSQL OS identity; physical backup recovery unit |
-| Synveda database/schema | database inside cluster | Synveda migration owner; runtime gateway/worker roles are non-owner `synveda_app` members |
-| Keycloak database/schema | separate database inside cluster | Keycloak login owns its schema and migrations; no Synveda membership |
-| Experimental Apalis tables | separate `synveda_jobs` database | one-shot Apalis migrator; dispatcher/worker get narrower runtime roles |
-| Backup repository | named POSIX volume or external S3-compatible repository | pgBackRest/operator identity; no application container credential |
-| Synveda KEK/key reference | mounted secret outside PostgreSQL | deployment operator; backed up and restored separately |
-| Keycloak realm/client/group | Keycloak database | converged through supported Admin API; export is not backup |
-| Optional TEI cache | named model cache | derived and replaceable |
-| Optional metrics/traces | bounded named volumes or memory | evaluation only; never system of record |
-
-Database bootstrap revokes default `PUBLIC CONNECT` and `TEMPORARY`, grants
-only intended roles, and tests connection denial in both directions. Owner,
-superuser and `BYPASSRLS` credentials never reach gateway or worker.
-Before any persistent mutation, bootstrap also proves that the PostgreSQL
-owner, Synveda migrator, gateway and worker passwords are pairwise distinct.
-When bundled Keycloak shares that server, the same locked Synveda preflight
-includes the Keycloak database password and proves all five values are
-pairwise distinct; the Keycloak branch independently rechecks owner versus
-Keycloak. Refusals are content-free and external-OIDC mode does not mount a
-Keycloak credential.
-The closed role contract names both `forbidden_databases` (Synveda roles may
-not connect to them) and `isolated_peer_roles` (those roles may not connect
-to the selected Synveda database), so an inherited grant cannot silently
-reopen either edge.
-
-## Migration contract
-
-1. PostgreSQL initialization creates databases and narrowly scoped roles from
-   secret files. CloudNativePG leaves its application database in the exact
-   closed/null-ACL bootstrap state; the shared convergence transaction
-   publishes the explicit terminal ACL before reopening it. Initialization
-   does not run application requests.
-2. `synveda db migrate` runs once under the Synveda migration owner, protected
-   by the existing advisory lock and epoch checks. The current embedded chain
-   is exactly the transactional epoch-3 baseline
-   `0001_context_platform.sql`. If SQLx commits that baseline and its exact
-   checksum but the process exits before the separate marker transaction,
-   restart recognises only the empty marker plus exact sole success ledger,
-   repeats the full authority proof and stamps it. Every partial, additional,
-   failed or checksum-drifted state remains refused.
-3. Gateway and worker start only after the schema sentinel is readable through
-   their ordinary runtime roles. Bootstrap convergence connects through each
-   configured runtime credential and refuses read-only targets, different
-   PostgreSQL cluster identities, database OIDs or live postmaster start
-   markers; a valid epoch alone does not bind one deployment to one live
-   writable database primary. Bundled Keycloak bootstrap atomically publishes
-   a content-free, mode-0600 witness containing its database OID, cluster
-   system identifier and postmaster start. Database preflight reads that same
-   authority directory read-only for all three Synveda credentials. An
-   ordinary PostgreSQL restart makes the witness stale and blocks startup
-   until idempotent Keycloak bootstrap republishes it.
-4. Keycloak owns and automatically migrates only its database. Upgrade first
-   takes a verified backup and follows the pinned release's supported path.
-5. Apalis schema setup is a one-shot migration command; workers never migrate
-   on boot.
-6. Backup tools operate as PostgreSQL/operator identities, never an application
-   database role.
-
-Schema epoch 1, epoch 2 and markerless historical databases remain refused
-with reset guidance. This deployment contract adds no old-data translator.
-
-## Configuration and secret files
-
-Non-secret selectors may be direct environment values. A sensitive setting
-uses `NAME_FILE` with a mounted file. Where a direct form remains for direct
-binary compatibility, setting both forms is a startup error. Files must be
-regular, non-symlinked where the platform can prove it, non-empty, bounded and
-readable only by the target service. Diagnostics name the setting/path but
-never its value.
-
-Compose always uses the file form for sensitive values. Within a container the
-target filename is stable even when the Compose secret object is role-specific;
-for example, gateway's `synveda_gateway_database_url` and worker's
-`synveda_worker_database_url` are each mounted as `/run/secrets/database_url`
-only in their respective service.
-
-Local Compose secret sources are generated beneath
-`runtime/<exact-project>/secrets`, mode `0600`, owned by the validated non-root
-operator UID/GID and guarded by an exact project marker. Re-running `up`
-validates this complete set without rotation. Stateless services run with those
-same numeric ids;
-PostgreSQL's native entrypoint reads its own password before dropping to the
-upstream database UID. The Compose files do not claim `uid`, `gid` or `mode`
-remapping for file-backed secrets. Linux and Docker Desktop acceptance compares
-host and in-container ownership/readability and proves that another service,
-UID and unmounted path cannot read the sentinel. An external secret manager may
-materialise the same per-service paths, but does not change setting meaning.
-
-| Concern | Direct/non-secret key | File key and target |
-|---|---|---|
-| public/listen URL | `SYNVEDA_PUBLIC_URL`, `SYNVEDA_LISTEN_ADDR` | none |
-| process database | `DATABASE_URL` for direct binaries only | `DATABASE_URL_FILE=/run/secrets/database_url` |
-| Apalis queue database | non-secret pool/concurrency settings | `SYNVEDA_APALIS_DATABASE_URL_FILE=/run/secrets/apalis_database_url` |
-| issuer set | issuer file path only | `SYNVEDA_OIDC_ISSUERS_FILE=/etc/synveda/oidc/issuers.json` (sensitive read-only config; credential values forbidden) |
-| issuer directory credential | path reference inside the selected issuer entry | Entra `client_secret_file` or Okta `api_token_file`, each below `/run/secrets/oidc_directory/` |
-| local KMS | `SYNVEDA_KMS_PROVIDER=local` | `SYNVEDA_KMS_KEY_FILE=/run/secrets/kms_key`; `SYNVEDA_KMS_KEY_REF_FILE=/run/secrets/kms_key_ref` |
-| extraction | `SYNVEDA_EXTRACTOR=deterministic|claude|vllm`, `SYNVEDA_EXTRACTOR_MODEL`, `SYNVEDA_ANTHROPIC_BASE_URL`, `SYNVEDA_VLLM_BASE_URL` | `ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key`; current vLLM adapter has no credential setting |
-| embeddings | `SYNVEDA_EMBEDDER=deterministic|tei`, `SYNVEDA_EMBEDDER_MODEL`, `SYNVEDA_TEI_URL` | none in the current TEI adapter |
-| Skill-validation delivery | `SYNVEDA_OPERATION_PROVIDER_SKILL_VALIDATION=postgres|apalis` | queue database files; `apalis` is accepted only with the atomic Apalis Compose fragment |
-| application OTLP | `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317` | none; the private hop is unauthenticated only inside `telemetry` |
-| external OTLP | `SYNVEDA_EXTERNAL_OTLP_ENDPOINT` | `SYNVEDA_EXTERNAL_OTLP_CA_FILE=/run/secrets/otel_ca`; `SYNVEDA_EXTERNAL_OTLP_HEADERS_FILE=/run/secrets/otel_headers` |
-| custom CA | reserved; not accepted by the current application schema | no supported application mount until OIDC/provider clients prove explicit CA loading |
-| outbound proxy | host Node proxy activation is closed, and all canonical container environments and development build arguments explicitly empty the ten Docker proxy names | explicit proxy-file settings remain reserved and rejected until a bounded consumer and no-proxy contract ship |
-| object store | `SYNVEDA_OBJECT_STORE_ENDPOINT`, `SYNVEDA_OBJECT_STORE_REGION`, `SYNVEDA_OBJECT_STORE_BUCKET`, `SYNVEDA_OBJECT_STORE_PATH_STYLE` | `SYNVEDA_OBJECT_STORE_ACCESS_KEY_FILE=/run/secrets/object_store_access_key`; `SYNVEDA_OBJECT_STORE_SECRET_KEY_FILE=/run/secrets/object_store_secret_key`; `SYNVEDA_OBJECT_STORE_SESSION_TOKEN_FILE=/run/secrets/object_store_session_token`; rejected unless an accepted feature enables the interface |
-| SMTP | reserved `SYNVEDA_SMTP_HOST`, `PORT`, `FROM` | reserved `SYNVEDA_SMTP_USERNAME_FILE` and `PASSWORD_FILE`; all are rejected until an accepted consumer exists |
-| reference TLS | `SYNVEDA_TLS_MODE=files` currently; `acme` reserved and rejected, public hostnames | fixed selected-project files `tls_cert` and `tls_key`, mounted only in the proxy at `/run/secrets/tls_cert` and `/run/secrets/tls_key` |
-| Keycloak database | `KC_DB_URL`, `KC_DB_USERNAME` | `KC_DB_PASSWORD_FILE=/run/secrets/keycloak_database_password` |
-| Keycloak bootstrap | none | `KC_BOOTSTRAP_ADMIN_USERNAME_FILE=/run/secrets/keycloak_admin_username`; `KC_BOOTSTRAP_ADMIN_PASSWORD_FILE=/run/secrets/keycloak_admin_password` |
-| Keycloak convergence | direct password values are forbidden | `SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE=/run/secrets/keycloak_convergence_admin_password` |
-| PostgreSQL bootstrap | `POSTGRES_USER`, database/role names | `POSTGRES_PASSWORD_FILE=/run/secrets/postgres_owner_password`; exact role files `/run/secrets/synveda_migrator_password`, `/run/secrets/synveda_gateway_password`, `/run/secrets/synveda_worker_password`, `/run/secrets/keycloak_database_password`, `/run/secrets/apalis_migrator_password`, `/run/secrets/apalis_runtime_password` |
-| backup | `SYNVEDA_BACKUP_REPOSITORY=posix|s3`, `SYNVEDA_BACKUP_POSIX_PATH`, `SYNVEDA_BACKUP_S3_ENDPOINT`, `SYNVEDA_BACKUP_S3_REGION`, `SYNVEDA_BACKUP_S3_BUCKET`, `SYNVEDA_BACKUP_S3_PATH_STYLE` | `SYNVEDA_BACKUP_REPOSITORY_KEY_FILE=/run/secrets/pgbackrest_repository_key`; `SYNVEDA_BACKUP_S3_ACCESS_KEY_FILE=/run/secrets/backup_s3_access_key`; `SYNVEDA_BACKUP_S3_SECRET_KEY_FILE=/run/secrets/backup_s3_secret_key`; `SYNVEDA_BACKUP_S3_SESSION_TOKEN_FILE=/run/secrets/backup_s3_session_token` |
-| Keycloak demo identities | non-secret usernames only under `demo` | `SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE=/run/secrets/keycloak_demo_admin_password`; `SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE=/run/secrets/keycloak_demo_member_password` |
-
-Every Synveda PostgreSQL URL uses the `postgres` or `postgresql` scheme and
-explicitly names its database in the path or effective `dbname` parameter; it
-never inherits a target from `PGDATABASE`. Fragments and query keys not
-understood by the pinned SQLx PostgreSQL driver are refused before the driver
-parses them. This is both fail-closed configuration and a secrecy boundary:
-SQLx 0.8.6 otherwise logs an ignored query key together with its value.
-Diagnostics name only the application-owned setting and never the URL, parser
-detail or query value.
-
-Upstreams without native file support use a reviewed entrypoint that reads
-only its allowlisted `/run/secrets` paths into the child environment, unsets
-temporary shell variables and `exec`s the upstream process. It performs no
-shell tracing and never prints a value. Credentials are forbidden in endpoint
-URLs, Compose labels, health commands and environment manifests.
-
-The target issuer schema hard-cuts the current deployment-level
-`directory_sync.client_secret`/`api_token` values into the file references
-listed above. `issuers.json` may describe provider, tenant binding and file
-path, but parsing fails if it contains a credential value. Per-tenant encrypted
-directory credential aggregates remain the preferred runtime source and are
-unchanged.
-
-Secret visibility is deny-by-default:
-
-| Service/job | Sensitive files it may mount |
-|---|---|
-| PostgreSQL server | PostgreSQL owner password; pgBackRest repository/S3 credentials needed by `archive_command` |
-| database bootstrap | PostgreSQL owner plus the fixed role-password set it converges; the bundled shared-cluster Synveda bootstrap additionally receives the Keycloak database password only to prove the complete set is pairwise distinct |
-| database preflight | all three Synveda migrator/gateway/worker database URL files so it can prove their exact independent authorities; never the PostgreSQL owner password |
-| Synveda migrate | Synveda migration-owner database URL |
-| issuer diagnostic | issuer configuration only; credential values are forbidden in that sensitive mounted file |
-| gateway | gateway runtime database URL, issuer config, Synveda KMS reference/key, only gateway-used provider credentials; application custom-CA loading is not yet supported |
-| core worker | worker runtime database URL, Synveda KMS reference/key, only credentials required by its owned work |
-| Keycloak | Keycloak database password and first-start bootstrap administrator files |
-| Keycloak convergence | first-start bootstrap administrator files and the persistent scoped convergence-identity password; demo user passwords only under `demo` |
-| operation dispatcher | Synveda dispatcher database URL and Apalis runtime database URL; no provider/KMS content secret |
-| Apalis executor | Synveda operation-worker database URL and Apalis runtime database URL; only canary-required key material |
-| Apalis migration | Apalis migration-owner database URL only |
-| Collector | external OTLP CA/auth files only |
-| reverse proxy | TLS certificate/private key or ACME account state, never application/database credentials |
-| backup/restore | database backup operator and repository credentials; recovery verifier alone additionally mounts the restored Synveda KMS key |
-
-No service receives the complete secret set. Owner, bootstrap, migration and
-backup credentials are absent from gateway, core worker, dispatcher and Apalis
-executor containers.
-
-`.env.example` contains no password, token, key, confidential DSN or usable
-demo credential. The generator uses OS entropy, `umask 077`, mode `0600`, and
-prints filenames only. `--if-missing` proves an existing complete project set
-without changing values. Replacement requires both `--force` and the exact
-project confirmation; the old set is preserved as `previous-secrets` and this
-is explicitly not a credential-rotation workflow. Lifecycle reset preserves
-this set, the issuer input and the KMS key; it removes only exact generated
-authority/gate state and the label-proved project PostgreSQL volume.
+| Image | Commands or role |
+| --- | --- |
+| Synveda product | gateway, worker, database-preflight, migrate, tenant-converge, issuer-diagnostic |
+| PostgreSQL 17 + pgvector | bundled database and the bounded database bootstrap |
+| optimized Keycloak 26.7.2 | start --optimized and idempotent realm convergence |
+| Caddy 2.11.4 | public reverse proxy |
+| OpenTelemetry Collector Contrib 0.159.0 | private OTLP receiver |
+| Playwright 1.62.1 | disposable browser acceptance only |
+
+The product image contains both gateway and worker binaries. The selected
+command, not a deployment-specific image or code branch, chooses the process.
+Runtime base images are digest pinned in their Dockerfiles. Development tags
+are local conveniences; reference evidence requires immutable release
+references.
+
+## Service graph
+
+The bundled reference graph is:
+
+    postgres
+    ├── database-bootstrap ── database-preflight ── migrate ── tenant-convergence
+    └── keycloak-database-bootstrap ── keycloak ── keycloak-realm-convergence
+                 └──────────────────── database-preflight
+
+    keycloak-realm-convergence ── proxy ── issuer-diagnostic
+    tenant-convergence + issuer-diagnostic ── gateway
+    tenant-convergence + issuer-diagnostic ── worker
+    gateway + worker ── otel-collector
+
+The bootstrap, preflight, migration, tenant convergence and issuer diagnostic
+services are bounded jobs. Proxy, PostgreSQL, Keycloak, realm convergence,
+gateway, worker and Collector are long-running.
+
+## Ports and health
+
+Only the proxy publishes host ports.
+
+| Mode or service | Contract |
+| --- | --- |
+| development proxy | configured high port, bound to 127.0.0.1 |
+| reference proxy | TCP 80 and 443 |
+| gateway | private port 8120; /healthz, /readyz, /metrics |
+| worker | private loopback port 8121; /healthz, /readyz, /metrics |
+| Keycloak application | private port 8080 |
+| Keycloak management | private port 9000 |
+| OTLP | private ports 4317 and 4318 |
+| Collector health | private loopback port 13133 |
+| PostgreSQL | private port 5432 |
+
+The proxy does not publish application metrics. Keycloak management, worker
+health, Collector receivers and PostgreSQL are never public routes.
+
+## Configuration
+
+The Compose selector validates and derives the runtime settings. Its
+.env.example contains only non-secret defaults and placeholders.
+
+| Setting | Meaning |
+| --- | --- |
+| SYNVEDA_COMPOSE_RUNTIME | development or reference |
+| SYNVEDA_POSTGRES_MODE | bundled or external |
+| SYNVEDA_OIDC_MODE | bundled or external |
+| SYNVEDA_COMPOSE_PROFILES | closed comma-separated optional profile set |
+| SYNVEDA_APP_HOST | browser-visible application DNS name |
+| SYNVEDA_AUTH_HOST | browser-visible bundled issuer DNS name |
+| SYNVEDA_PUBLIC_SCHEME | development http or reference https |
+| SYNVEDA_DEV_HTTP_PORT | loopback development port |
+| SYNVEDA_TLS_MODE | reference currently supports files |
+| SYNVEDA_OIDC_ISSUER | exact external issuer URL |
+| SYNVEDA_OIDC_ISSUERS_FILE | mounted provider-neutral issuer document |
+| SYNVEDA_DATABASE_ROLES_FILE | mounted database role contract |
+| SYNVEDA_COMPOSE_IPV4_POOL | explicit private /24 for reference/evidence |
+| SYNVEDA_PRODUCT_IMAGE | immutable product image reference |
+| SYNVEDA_POSTGRES_IMAGE | immutable bundled PostgreSQL image reference |
+| SYNVEDA_KEYCLOAK_IMAGE | immutable bundled Keycloak image reference |
+| SYNVEDA_CADDY_IMAGE | immutable proxy image reference |
+| SYNVEDA_OTEL_COLLECTOR_IMAGE | immutable Collector image reference |
+| OTEL_EXPORTER_OTLP_ENDPOINT | OTLP/gRPC destination used by application processes |
+
+The application processes receive DATABASE_URL_FILE,
+SYNVEDA_KMS_KEY_FILE, SYNVEDA_KMS_KEY_REF_FILE,
+SYNVEDA_OIDC_ISSUERS_FILE, their listen address and the public URL.
+Standard outbound proxy/custom-CA support is an external-dependency gap; no
+provider-specific value enters a domain crate or public DTO.
+
+Object storage and SMTP are not active runtime dependencies in this reference
+checkpoint. If enabled later, they must be expressed through provider-neutral
+S3-compatible and SMTP settings without changing public or domain contracts.
+
+## Secret files
+
+generate-secrets.sh creates mode-0600 files and refuses overwrite unless the
+operator explicitly requests it. Direct secret environment variables are
+rejected by the selector.
+
+Bundled mode uses these files under the selected secret directory:
+
+- postgres_owner_password
+- synveda_migrator_password
+- synveda_gateway_password
+- synveda_worker_password
+- synveda_migrator_database_url
+- synveda_gateway_database_url
+- synveda_worker_database_url
+- keycloak_database_password
+- keycloak_admin_username
+- keycloak_admin_password
+- keycloak_convergence_admin_password
+- synveda_kms_key
+- synveda_kms_key_ref
+- tls_cert and tls_key in reference mode
+- demo credentials only when the demo profile is selected
+
+The Keycloak entrypoint reads upstream-required values from mounted files,
+exports them only to its child, and execs Keycloak without printing them.
+Secrets must not appear in Compose YAML, committed .env files, image layers,
+logs or environment manifests.
+
+## PostgreSQL ownership and persistent data
+
+One bundled PostgreSQL server may host both products, but isolation is
+database- and role-based:
+
+- synveda is owned/migrated through the Synveda bootstrap and migrator roles;
+- gateway and worker use separate least-privilege runtime roles;
+- keycloak is owned by a dedicated keycloak login;
+- Synveda runtime roles cannot connect to the Keycloak database;
+- Keycloak has no privilege on Synveda data.
+
+The postgres-data named volume is the bundled persistent database state.
+Issuer projection, database authority and public realm gates are bounded
+operator-owned runtime files, not independent data stores. The Synveda KMS key
+is separate recovery material and must be protected with the database backup.
+
+Migration ownership remains separate: Synveda runs migrate; Keycloak owns its
+schema lifecycle. Keycloak realm export is not a database backup.
 
 ## OIDC contract
 
-- The issuer URL is an exact immutable value reachable from browser, gateway,
-  CLI flow, discovery, JWKS, token exchange and callback handling.
-- Development uses `app.synveda.test` and `auth.synveda.test` with explicit
-  host mapping and Docker aliases. `.localhost` is not used between network
-  namespaces: RFC 6761 section 6.3 reserves it for loopback in each resolver,
-  so a gateway container may resolve its own loopback rather than the proxy.
-  A Docker alias cannot be accepted as a portable override of that rule. The
-  host resolver diagnostic requires exactly `127.0.0.1`, with no additional or
-  IPv6 answer, before lifecycle mutation. Cross-platform container resolution
-  remains part of clean Linux and Docker Desktop acceptance.
-  The canonical host-file manager targets literal `/etc/hosts`, owns at most
-  one exact marked development block, and refuses unmarked aliases, foreign or
-  malformed markers and drift. A root-only adjacent recovery record plus a
-  raw-content-free ownership record make exact install/remove completion
-  inspectable. The supported target is root-owned, single-link, exact mode
-  `0644`, and both it and the physical parent are ACL-free. That preflight runs
-  before stage bytes; Linux requires fixed root-controlled `getfacl`. The
-  ownership record contains a digest of the already world-readable target and
-  is mode `0644`; the full recovery record is root-owned mode `0600` and
-  ACL-free. The root command uses a fixed root-owned, non-writable, ACL-free Node
-  runtime/path and the repository helper under an empty
-  environment; this narrows accidental inputs but still requires a clean,
-  reviewed checkout because its owner can modify the executed code.
-  The fixed `/usr/bin` and `/bin` privilege, identity and ACL-inspection tools
-  are host-OS trusted-computing-base inputs, not repository-attested artifacts.
-  Development ownership is checked
-  before the first Docker endpoint query and again with the resolver check.
-  `down` and confirmed `reset` remain independent recovery paths and never
-  remove host-wide state. External OIDC owns only the application mapping;
-  reference mode owns none. Same-inode descriptor mutation appends or truncates
-  only the terminal block, preserving unrelated bytes, inode, POSIX metadata,
-  xattrs, security labels and file flags. ACL-bearing and noncanonical-mode
-  targets are refused. A killed append can leave only
-  an exact strict prefix until a newly confirmed install/remove recovers it;
-  this is not an old-or-new or universal power-loss guarantee. Modification and
-  change timestamps, exclusion of an unrelated root editor, and immutable,
-  bind-mounted, network or externally managed files are outside the contract.
-  Reference/playground uses operator DNS and HTTPS.
-- Authorization code flow, state, nonce and PKCE S256 are mandatory. Implicit
-  and resource-owner password grants are disabled.
-- The bundled client explicitly retains Keycloak's issuer and session-state
-  authorization-response parameters. Browser acceptance permits exactly one
-  callback carrying `code`, the exact issuer `iss`, Keycloak 26.7.2's exact
-  24-character unpadded `session_state`, and the original exact `state`; a
-  missing, duplicate or additional parameter is refused before continuation.
-- Discovery must return the exact issuer, S256 support and an allowed signing
-  algorithm. Synveda allow-lists RS256/384/512 and validates signature,
-  issuer, audience, time claims, subject and configured tenant binding.
-- Discovery cannot prove client-registration-specific token-endpoint
-  behaviour. The diagnostic therefore does not infer public-client support
-  from `token_endpoint_auth_methods_supported`; a real authorization-code
-  exchange is required before a provider is claimed conforming.
-- The public client has exact redirect URI/origin and an explicit
-  `synveda-api` audience mapper. `sub` is mandatory. Email/name follow the current JIT
-  validation contract. The configured group claim is optional for generic
-  authentication: absence maps to an empty set and can never seed the first
-  administrator.
-- `synveda-admins` is a one-time, race-safe initial-administrator signal only.
-  Later authority is a governed Synveda grant; provider roles never become
-  application roles.
-- The bundled identity route forwards only discovery; authorization, token,
-  JWKS and logout endpoints; logout confirmation; realm login actions; realm
-  account pages; and required `/resources/*` assets. Other realm paths,
-  `/admin`, the master realm, health, metrics and management remain private.
-- External OIDC mounts the same issuer schema and runs the same gateway image.
-  It renders no Synveda identity host or bundled-provider route. Provider
-  support is earned by the common conformance suite, not its name.
-- The deployment diagnostic accepts exactly one configured issuer and requires
-  its tenant binding to be the static
-  `SYNVEDA_BOOTSTRAP_TENANT_ID`. A different tenant, routing/domain mapping or
-  additional issuer is refused before the gateway starts. This is a reference
-  bootstrap constraint, not provider-specific tenant authority.
+Synveda consumes standard discovery, authorization-code flow with PKCE S256,
+JWKS and exact issuer/audience/algorithm validation. The application contains
+no Keycloak-specific authorization branch.
 
-The bundled provider is realm `synveda` with public client `synveda`.
-Standard flow and PKCE method S256 are enabled; direct-access grants, implicit
-flow, client service accounts and client secrets are disabled. Its only
-redirect is `${SYNVEDA_PUBLIC_URL}/auth/callback` and its only web origin is
-the exact public origin. The CLI continues through the gateway's bounded
-loopback handoff; the IdP never accepts a wildcard loopback redirect. The
-`groups` protocol mapper emits the leaf name `synveda-admins`, which the
-provider-neutral group parser recognises, and an access-token-only audience
-mapper emits `synveda-api`. `synveda-admins` is a bootstrap group, not an
-application-role catalogue. The optional `demo` overlay extends the same
-generation-fenced convergence job and owns `synveda-demo-admin` plus
-`synveda-demo-member`. Passwords arrive only through their two mounted files;
-direct values are refused. Convergence resets the owned users' credentials,
-removes direct Keycloak roles and unexpected groups, proves the bootstrap group
-contains only the administrator, and refuses to adopt a same-named user without
-the exact ownership attributes. A subsequent convergence without `demo`
-deletes only those exactly owned users while the realm is closed. This
-deterministic boundary makes a real browser exchange possible but is not itself
-browser-login acceptance or proof that the password avoids an update prompt.
+Bundled mode provisions realm synveda, public PKCE clients, required claims
+and the synveda-admins seed group. That group is used only for first
+administrator admission; Synveda grants and Cedar remain authoritative.
 
-The fixture-only browser image is attached only to `app-backend`, receives no
-public port, writable volume or Docker socket, and runs read-only as the
-selected non-root runtime identity with all capabilities dropped,
-`no-new-privileges`, bounded PIDs/CPU/memory/shared-memory and the exact
-vendored Playwright 1.62.1 sandbox profile. Its route gate permits only the
-selected application origin plus the exact Keycloak authorization endpoint,
-realm login actions and static resources; it refuses `userinfo`, account,
-foreign-origin and fragment-bearing requests. The driver records no page
-content, screenshot, HAR, trace, video, browser storage, credential, code,
-token or cookie. It reads only the demo administrator password through a
-bounded mode/uid/link/inode-revalidated no-follow descriptor, zeroes the raw
-and returned buffers, proves administrator admission through aggregate
-`whoami` booleans, signs out and exports only a fixed success/failure line.
-The wrapper accepts the result only after the exact one-shot container exits
-zero. Live platform evidence for the mounted secret's effective uid/mode and
-the complete exchange remains open.
+The issuer string is identical in discovery, tokens and application
+configuration. Proxy network aliases make the browser-visible authority
+resolvable inside the Compose network. External mode omits Keycloak and uses
+the same issuer document and diagnostic.
 
-The optimized image carries one exact Keycloak 26.7.2 user-profile document:
-the four upstream built-in attributes and only the two optional Synveda demo
-ownership attributes. The marker attributes are single-valued, admin-view and
-admin-edit only, with exact length and option validators. The document omits
-`unmanagedAttributePolicy`; missing/null is the disabled state in the pinned
-26.7.2 implementation, whose enum has no literal `DISABLED`. Convergence first
-proves the complete profile before trusting marker inventory. Repair closes
-and proves the realm closed, performs a full no-merge profile PUT, and proves
-the exact readback before any marker-based create, update or delete. When the
-initial profile was non-exact and markers exist after repair, convergence
-refuses operator/reset recovery instead of adopting or deleting identities
-whose provenance cannot be trusted. Fast-path publication repeats the exact
-profile proof.
+## Reverse proxy and TLS
 
-Keycloak is built from the official 26.7.2 image with `--db=postgres`, health
-and metrics, and no preview feature/provider. It runs only
-`start --optimized`. Runtime sets a full fixed `KC_HOSTNAME`, private HTTP on
-8080 behind the proxy, management port 9000, `KC_PROXY_HEADERS=xforwarded` and
-an explicit `KC_PROXY_TRUSTED_ADDRESSES` containing only the proxy's derived
-fixed identity-network address as one `/32`. The non-secret
-`SYNVEDA_COMPOSE_IPV4_POOL` is validated before all network addresses are
-derived; the identity dynamic range excludes the proxy and no other service may
-declare a static address. The
-reference limit is 2 GiB memory and its documented host minimum includes that
-bound. The exact upstream manifest digest and each built platform digest are
-release inputs; a version tag without captured digest cannot pass acceptance.
+Development is explicitly insecure HTTP on loopback with .test hostnames.
+Reference mode requires operator DNS, HTTPS and mounted certificate/key files.
+ACME automation is not yet implemented.
 
-Reference realm defaults are a five-minute access token, 30-minute SSO idle,
-eight-hour SSO maximum, refresh-token rotation with zero reuse, offline access
-disabled for the public client, brute-force detection enabled, login/user
-events retained for seven days, and admin events recorded without
-representations. Development may explicitly relax TLS for its HTTP origin;
-reference/playground requires external TLS. Changes to these values are
-versioned convergence input, not mutable console folklore.
+The proxy overwrites forwarding headers and strips caller-supplied identity and
+distributed-tracing headers. It bounds headers, request bodies and upstream
+timeouts. The bundled identity virtual host exposes only the realm discovery,
+authorization, token, key, logout, account, login-action and static-resource
+paths; administration and management remain private.
 
-The public proxy allowlists the exact discovery, authorization, token, JWKS,
-logout, logout-confirmation, login-action, account and static-resource paths
-required by the login/account flow. It rejects every other realm path,
-`/admin/*`, `/realms/master/*`, health, metrics and management paths. The
-browser administration console has no host mapping or supported route in
-reference mode. No interactive Keycloak administration surface or canonical
-operator command is accepted yet; convergence owns the required realm state.
-Any later operator route requires its own authenticated boundary. A long-lived
-supervisor uses supported Admin APIs and mounted administrator files to launch
-one bounded, idempotent convergence child for each Keycloak process generation,
-verify the resulting managed projection and monitor management readiness. It
-never treats realm export as backup.
+## Worker and operations
 
-The shared marker used by Caddy is a fail-closed startup/readiness sequencing
-aid, not an authorization boundary against the Keycloak process: Keycloak and
-the supervisor deliberately share its writer identity. Before every Keycloak
-start, the entrypoint atomically selects a fresh empty generation and withdraws
-the previous marker. A convergence child captures that exact generation and
-may publish only while it remains current; the supervisor withdraws readiness
-on startup, shutdown, failed convergence or lost management readiness and
-retires old generations. Convergence validates the complete candidate file
-before its atomic rename, so Caddy never observes an unvalidated or stale-child
-publication candidate. A compromised identity service could still mint
-accepted identities or alter this shared gate, so the mechanism is process-
-generation sequencing and availability evidence, not authentication isolation.
-The canonical gateway-only restart action refuses an already degraded graph,
-requires the existing gateway's exact container identity, then restarts it
-under the project lock. It allows 120 seconds for the restart-acceptance health
-check without recreating the container, while the one non-replenishing
-lifecycle deadline reserves 40 seconds for all postflight checks plus five
-seconds for orchestration. It requires the full container identity to remain
-unchanged and repeats the complete public/private smoke. A missing pre-restart
-identity aborts without mutation; a missing or changed post-restart identity
-retains the fail-closed uncertainty lock. Live browser-session survival through
-that action remains required; other service restarts and dependency-loss
-acceptance remain open.
+Gateway and worker are separate long-running processes with distinct database
+credentials, readiness and shutdown bounds. Existing capture and maintenance
+work owned by the worker must not move back into the gateway.
 
-Convergence retires the temporary bootstrap administrator by exact user ID and
-retains one narrowly scoped master-realm identity for idempotent repair after
-restart. Its direct role set is exactly the three management roles on the
-master realm's `synveda-realm` client plus direct
-`master-realm:view-users`. Keycloak expands that read-only audit concession to
-the effective `view-users`, `query-users` and `query-groups` role closure.
-The latter is a read-only self-audit concession: it can view all master-realm
-user and group metadata, so convergence proves the complete master user
-inventory is exactly the temporary bootstrap identity plus the permanent
-identity before retirement, and exactly the permanent identity afterwards.
-It also proves the permanent user's security-relevant identity projection
-(ID, username, enabled state, email-verification state, empty attributes and
-required actions, and no service-account or user-storage federation link), no
-external-identity links visible through Keycloak's Admin API, one password
-credential, no groups, no realm roles, exactly four direct client roles and
-the exact six-role effective closure on every first, no-op and restart run.
-Keycloak filters links whose identity-provider
-alias no longer exists, so that API cannot disprove an orphaned provider-owned database row;
-operator-side master-realm/database mutation is an explicit residual rather
-than an exact-empty claim. Non-authoritative profile metadata outside the
-enumerated projection is likewise not claimed to be absent.
+The experimental Apalis canary is not implemented yet. Its completion contract
+is one non-destructive Skill validation operation, a provider-neutral
+operation/attempt/outbox model with forced RLS, opaque task payloads and a leaf
+adapter. The existing execution path remains the default and rollback.
+Apalis identifiers or status vocabulary must not enter core crates or the
+public API.
 
-The permanent identity has no supported public route. A short-lived
-`admin-cli` OpenID direct grant is validated for exact issuer, subject,
-audience, exact scope membership, bounded token timing and public-key
-signature. The response `session_state` and access/ID `sid` values must be one
-identical Keycloak 26.7.2 secure session identifier: exactly 24 unpadded
-URL-safe Base64 characters derived from the provider's 18-byte session-ID
-generator. User, client, role and credential resource identifiers remain
-UUIDs. Target-realm access and the enumerated master user/credential reads must
-succeed. Keycloak 26.7.2's default fine-grained-admin-v2 evaluator must refuse
-the filtered `admin-cli` client query with 403, proving that the identity lacks
-master client-list authority; master client-session statistics, realm/user
-creation, self-update and role-mapping mutation must likewise return 403.
-Keycloak deliberately permits every
-master admin role to read a reduced master-realm representation and general
-provider/feature/theme/crypto server metadata; those version-sensitive bodies
-are neither fetched nor treated as an absence oracle. The management surface
-remains private, the master realm remains dedicated, and this concession must
-be reassessed before adding other master users or custom providers. The helper
-checks the exact nine-field outer token contract, then decodes the returned
-internal refresh JWT as a pinned shape/drift check. That check requires the
-HS512/JWT header, `Refresh` type, default provider, exact issuer/client/session
-bindings, and the seven-scope refresh set: the three visible response scopes
-plus Keycloak's hidden default `web-origins`, `acr`, `roles` and `basic`
-scopes. The fresh dedicated master realm has refresh rotation disabled, so the
-exact ten-claim projection excludes `reuse_id`, `aud_x` and `sub`; any operator
-or version drift fails closed. The check binds the 1800-second refresh lifetime
-to the access token and correlates `exp - refresh_expires_in` to the bounded
-request/response window. Its HS512 payload cannot be verified through the
-public JWKS and decoded internal claims are never an authorisation input. The
-helper then revokes the refresh token, proves refresh refusal, and
-revokes any replacement refresh token returned by a contradictory success
-response. Each failure is reduced to a closed, content-free stage label:
-`token-envelope` ends before cleanup is possible, while `token-contract` and
-`refresh-contract` run only inside the cleanup guard. Probe inputs exist only
-in the Java child's command-scoped environment. Captured stdout content is
-never read; stderr is read only after its exact 39-byte bound is proved and is
-accepted only when it equals the fixed refusal line. Neither captured stream is
-emitted. Normal cleanup verifies deletion, while a deletion failure maps to
-`runtime-output` and the final convergence cleanup retries removal. A
-session cleanup failure overrides the earlier proof stage. No custom proof
-client exists. This is an explicit reference-deployment security surface, not
-a Synveda application client or domain-authorisation mechanism. Cleanup is
-established immediately after a bounded HTTP-200 JSON object yields one
-syntactically usable refresh token and before either exact token contract.
-An oversize, malformed, duplicate-key or unextractable response cannot supply a
-safe token to revoke; server-side session expiry is the bounded residual for
-that pre-extraction failure.
+Temporal has no executable consumer and is not part of this deployment.
 
-Each exact persisted `kcadm` password-session configuration is likewise
-revoked and refresh-refused before overwrite or deletion. A closure failure
-withdraws the readiness marker, attempts target-realm quarantine, deletes the
-container-local credential material and requires server-side session expiry;
-the convergence container tmpfs is not a durable recovery channel. A killed CLI can also
-receive a server session before it persists the refresh token. Local file
-inspection cannot close or disprove either residual, so acceptance does not
-claim zero administrative sessions. The 210-second Compose stop grace exceeds
-the 56-second maximum deferred foreground proof plus the 110-second worst-case
-cleanup bound with explicit margin.
+## Telemetry
 
-The common conformance suite proves discovery, byte-exact issuer, PKCE S256,
-JWKS rotation, accepted algorithm, audience, callback and first-admin signal;
-it rejects wrong issuer, wrong audience, disallowed algorithm,
-expired/not-yet-valid tokens and untrusted forwarded headers. A valid token
-with a missing/empty group claim authenticates as an ordinary identity but is
-proved unable to seed administration. It repeats login after Keycloak, proxy
-and gateway restarts. Provider-specific success cannot replace any negative
-case.
+Application processes emit traces through OTLP to the private Collector. The
+Collector applies memory limiting and batching and currently terminates traces
+at a no-op exporter. Application metrics are available only on private
+Prometheus endpoints.
 
-## Reverse proxy and trust boundary
+External OTLP export, a bounded local observability backend and the
+customer-safe Operations route remain open CPR-45 slices. No prompt, message,
+Knowledge body, credential or unbounded tenant/user label may enter telemetry.
 
-The proxy accepts only configured hosts; removes the standard `Forwarded`
-header, every incoming `X-Forwarded-*` variant and `X-Real-IP` before installing
-its exact `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` and
-`X-Forwarded-Port`; strips untrusted identity and `X-Original-*` headers; and removes
-untrusted `traceparent`, `tracestate`, `baggage`, B3, Jaeger and OpenTracing
-variants. It bounds body size, header size, upstream timeout and idle lifetime.
-Reference TLS currently uses a bounded leaf-first PEM chain and matching
-unencrypted key. The chain contains the leaf and intermediates but omits its
-self-signed trust root. Every supplied certificate must parse, form one unique
-ordered adjacent-signature chain and remain valid through the current lifecycle
-deadline. Bundled mode requires DNS SAN coverage for both application and
-identity hostnames, while external OIDC requires only the application hostname.
-Conventional one-label wildcards are accepted; CN fallback, partial wildcards
-and multi-label wildcards are refused. This is not PKIX trust, revocation, DNS
-ownership or served-endpoint evidence. ACME, renewal/expiry monitoring,
-secure-header public-route acceptance and cookie-origin browser acceptance
-remain open. Proxy configuration never turns a header into a principal.
+## Backup and restore
 
-Every host-side Node validator starts through
-`deploy/compose/scripts/run-node-closed`, which removes ambient Node/OpenSSL
-trust activation and executes Node with `--use-bundled-ca`. Reference
-`config`, `up`, `smoke` and `restart-gateway` refuse before the first Node
-process and project lock when any of these variables is present, including an
-empty value: `NODE_OPTIONS`, `NODE_EXTRA_CA_CERTS`,
-`NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_USE_SYSTEM_CA`,
-`NODE_USE_ENV_PROXY`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `OPENSSL_CONF`,
-`OPENSSL_CONF_INCLUDE`, `OPENSSL_MODULES` or `OPENSSL_ENGINES`. Development and
-recovery actions remove those variables from their children instead of making
-teardown depend on trust configuration.
-Generic proxy URL variables remain outside this trust-input set, but cannot
-affect the host probe because Node proxy activation is removed. Reference
-runtime smoke independently requires HTTPS schemes for its application and
-issuer URLs; it fetches the issuer only in bundled-OIDC mode. This
-closes ambient host trust for deterministic evidence; it does not implement an
-explicit custom CA, proxy transport, PKIX ownership/revocation check or browser
-trust contract.
+Backup/restore is not implemented in the current graph. The minimal reference
+completion is:
 
-The separate Docker-create boundary closes proxy auto-injection in every
-canonical service with the ten explicit empty runtime variables described
-above. Development builds close the corresponding implicit build arguments.
-Static tests cover every selected provider/runtime row; exact-container
-inspection proves the created runtime metadata after startup. A clean live run
-with a private synthetic Docker client proxy configuration, canary remote
-builder state and private-registry authentication remains required as
-acceptance evidence. It must prove the source reaches only the pinned local
-default builder; image history is not treated as proof of build-time absence.
+- PostgreSQL 17 pg_dump custom-format backups of both synveda and keycloak;
+- separately protected Synveda KMS-key recovery material;
+- an operator-owned local-filesystem target;
+- integrity checks and restore into fresh, isolated volumes/network;
+- verification of Keycloak data, Synveda data, role isolation, audit
+  continuity, correct-key decryption and wrong-key failure.
 
-## Operation and worker contract
+This first establishes logical recovery validation. Bounded WAL/PITR and
+S3-compatible target acceptance remain open CPR-45 slices. Even after those
+pass, off-host retention policy, recurring drills and owned RPO/RTO remain
+production work and no disaster-recovery claim follows.
 
-Gateway serves synchronous APIs and in one tenant transaction records the
-Synveda operation, immutable authorization evidence, idempotency key and outbox
-row. The provider-neutral operation stores tenant, requester principal
-reference, closed kind and version, request digest/preconditions, requested and
-authorised state, policy/profile evidence references, progress, attempts, next
-retry, cancellation, terminal/dead-letter state, safe error code and audit
-references. It never stores a bearer token or provider credential.
+## Lifecycle commands
 
-Queue payloads contain only an envelope version, tenant ID, Synveda operation
-ID and content-free correlation value. The worker treats every field as
-untrusted, opens an ordinary tenant-scoped forced-RLS transaction, resolves the
-operation, and verifies its immutable tenant, kind/version, authorisation
-state, request digest/preconditions, cancellation state and current attempt
-fence. Cross-tenant IDs and malformed envelopes fail uniformly without
-resource-existence disclosure.
+Implemented:
 
-Cedar still decides worker reads and writes. Its execution action authorises a
-narrow worker service identity to consume the immutable capability represented
-by an already-authorised operation of an assigned kind. The worker does not
-rerun the requester's potentially changed grant, substitute its own domain
-authority or reinterpret the original command. Cancellation is an explicit
-operation transition. The domain effect passes through its normal
-Cedar/VedaFlow/store/audit path with that operation capability; only the
-current fenced attempt may commit the one effect and terminal state.
+    make compose-config
+    make compose-secrets
+    make compose-issuer
+    make compose-hosts-plan
+    make compose-hosts-install
+    make compose-resolver-check
+    make compose-up
+    make compose-browser-acceptance
+    make compose-smoke
+    make compose-restart-gateway
+    make compose-down
+    make compose-reset
 
-Dispatch claims use `FOR UPDATE SKIP LOCKED`, unique leases/fences and bounded
-expiries. Submit/ack uncertainty is duplicate delivery by design. A dispatcher
-may resubmit an uncertain envelope; idempotency and the attempt fence, not an
-Apalis acknowledgement, decide whether an effect may commit. Apalis task IDs
-and statuses remain adapter-private and never enter public APIs, audit actions
-or telemetry labels.
+compose-reset requires an exact confirmation token. It deletes only the
+validated containers, networks, PostgreSQL volume and transient authority/gate
+state; it retains the project's secrets, issuer document and KMS key. A thin
+compose-acceptance target, paired backup/restore targets and upgrade smoke
+remain to be implemented. Live targets must report an unavailable prerequisite
+distinctly from a passing test.
 
-The initial operation kind is `skill_validation`, version `1`, and invokes the
-existing inert `validation_sandbox` Skill test. Inline execution is the default
-and rollback path. Stable exact pins are `apalis = 0.7.4` and
-`apalis-sql = 0.7.4`; 1.0 is release-candidate, stable 0.7.4 does not provide
-Synveda's business idempotency/fencing/attempt state, and its undeclared MSRV
-is an explicit build gate. Core/public crates import no Apalis type.
+## Security and network boundary
 
-Acceptance injects: commit then dispatcher crash; submission then
-acknowledgement-write failure; duplicate dispatch; two dispatchers; two
-workers; executor SIGTERM; transient retry; terminal failure; cancellation;
-restart recovery; cross-tenant operation ID; malformed payload; stale fence;
-and rollback to inline. Each case asserts one effect or no effect as required,
-ordinary RLS/PDP/audit evidence, content-free payloads and bounded retry.
+Services use explicit networks, non-root users where upstream images permit,
+read-only roots where compatible, dropped capabilities, no-new-privileges,
+PID/resource bounds and Tini/Compose init handling. No service is privileged,
+and no service mounts the Docker socket. Application runtime services never
+receive owner database credentials; only the database server and bounded
+bootstrap/recovery jobs may receive them.
 
-## OpenTelemetry contract
+Internal networks isolate application, Synveda data, Keycloak data, identity
+management and telemetry. Explicit egress networks exist only for components
+that require discovery/export access.
 
-The current gateway and core worker emit traces over OTLP/gRPC. The worker's
-Prometheus `/metrics` listener is loopback-private, but the gateway's
-unauthenticated `/metrics` route shares its application listener and is exposed
-by the transitional Compose host port and Helm ingress. That is an explicit
-pre-reference gap, not private monitoring evidence. The reference target cuts
-application metrics over to OTLP/gRPC, so gateway, core worker, operation
-dispatcher and Apalis executor have the private Collector as their only
-telemetry egress seam. Keycloak metrics are scraped only on its private
-management network. The Collector, not an application process, exposes a
-private Prometheus exporter for the optional local backend. Current application
-`/metrics` surfaces are transitional cutover seams, not part of the reference
-target. Health endpoints remain separate from telemetry.
+## Supported modes and limits
 
-The Collector owns receiver limits, memory limiting, attribute
-allowlisting/redaction, sampling, batching, bounded queues/retry and external
-OTLP TLS/auth. Backend outage never changes gateway/worker readiness. Product
-logs are bounded structured stdout without content; external log forwarding,
-when configured, terminates at the Collector contract and requires no domain
-code branch.
+The completed and live-validated target is intended for local development,
+demonstrations and a controlled single-host evaluation. The current
+implementation remains validation-pending and does not establish:
 
-Telemetry excludes request bodies, prompts, messages, Knowledge, Skill files,
-credentials, provider response bodies, raw paths, database statements and
-arbitrary error text. Metric labels use closed vocabularies and never tenant,
-principal, resource/operation ID, endpoint, model, worker ID or authored name.
-The public proxy discards incoming trace/baggage headers and each public request
-starts a new trusted trace context; internal propagation is allowlisted.
-Local visibility has bounded storage/retention and is an evaluation tool, not
-an SLO/on-call claim.
+- high availability or tolerance of host loss;
+- zero-downtime upgrades;
+- production SaaS readiness;
+- multi-region operation;
+- enterprise compliance certification;
+- complete disaster recovery.
 
-The `observability` profile uses pinned Prometheus, Jaeger and Perses images and
-ships provisioned views for gateway latency/errors, worker last-seen,
-operation/outbox age, retries/terminal failures, PostgreSQL errors, Keycloak
-readiness/login failures, Session delivery, Capture and Knowledge-index lag,
-context latency/token counts, Skill/MCP test failures and backup age/result.
-The UI is loopback-only in development and available only through an
-authenticated operator route in reference mode. Retention and disk limits are
-finite; no dashboard is evidence of an SLO or high availability.
-
-## Customer-safe Operations surface
-
-The console `Operations` route consumes generated public-API types only. Its
-API is tenant-scoped, RLS-protected and independently Cedar-authorised for each
-aggregate. It returns bounded status vocabularies, timestamps, durations,
-counts and public Synveda operation IDs; it does not query Prometheus, Keycloak
-administration or Apalis tables from the browser.
-
-The surface covers dependency status; recent operations, progress,
-retry/dead-letter state and worker last-seen; recent Sessions; context latency
-and token counts; Capture lag; Knowledge freshness/conflict/index health;
-unhealthy Skill and MCP tests; latest backup/restore-test status; and degraded
-external providers. Infrastructure jobs may submit only signed-internal,
-content-free check results through a narrow service identity and audited
-action. Loading, empty, degraded, stale and failed states are explicit and
-tested.
-
-It never returns raw Session/Knowledge/Skill/Tool content, prompts, secrets,
-provider bodies, denied-resource counts, cross-tenant totals, Keycloak admin
-data, database/queue credentials or Apalis task IDs. This customer view is not
-the complete hosted-SaaS support or operator console.
-
-## Object and backup storage
-
-Synveda's current application object store is PostgreSQL-backed VedaFlow. This
-contract does not falsely claim an external S3 application object store.
-S3-compatible configuration delivered by CPR-45 is the pgBackRest repository
-interface:
-endpoint, region, bucket, path style, mounted CA and mounted credentials. A
-future application object-store provider must receive its own accepted domain
-contract without cloud-specific DTOs.
-
-The exact reference tool is pgBackRest 2.59.1 (MIT). It is built into the
-pinned PostgreSQL image and exposed through a versioned, deployment-neutral
-`synveda-backup` command contract. PostgreSQL `archive_command` invokes
-`synveda-backup archive-push`; operator backup commands execute in the database
-container or an isolated restore job and require no pgBackRest daemon/listener.
-The deterministic repository is a local POSIX named volume encrypted by
-pgBackRest. Optional S3-compatible storage uses the same commands and evidence
-schema. The repository cipher key and Synveda KEK are separate and neither is
-stored in the recovery manifest.
-
-## Backup and restore commands
-
-`synveda-backup` has the closed commands `check`, `archive-push`, `create`,
-`verify`, `status`, `expire` and `restore`. `create` accepts `full|diff|incr`;
-the Compose acceptance always begins with a full backup. `restore` requires an
-explicit target directory/volume and restore point and refuses a running source
-cluster. Make targets are wrappers over this same interface, not an alternate
-backup implementation:
-
-- `make compose-backup` validates secret files, creates/checks the stanza
-  idempotently, forces a WAL switch, takes a full backup, verifies repository
-  and archive, and writes a content-free environment/recovery manifest.
-- `make compose-restore-smoke` requires
-  `SYNVEDA_CONFIRM_RESTORE=<restore-project-name>`, restores to freshly labelled
-  volumes and an isolated network, boots the exact backed-up versions, then
-  proves both databases, cross-role denial, schema epoch, forced RLS, Keycloak
-  login, a governed public product lifecycle, Knowledge/index integrity, an
-  encrypted tenant-secret open with the correct Synveda KEK, explicit failure
-  with a wrong KEK, and frozen audit-prefix continuity. Current Knowledge rows
-  are not described as application-envelope encrypted; backup-repository
-  encryption and tenant-secret envelope encryption are distinct claims.
-- PITR acceptance commits markers in both databases, restores to points before
-  and after them, and verifies the expected paired cluster state. Destructive
-  recovery never targets the source volume and cleanup names only resolved,
-  labelled restore-test resources.
-- `expire` runs only after the newest retained full chain has passed repository
-  verification and an isolated restore test under the same environment
-  manifest. Retention is versioned and bounded; an operator can always decline
-  expiration.
-
-The recovery manifest records source SHA, OCI/deployment digests, pgBackRest
-version/stanza/backup label, PostgreSQL system identifier, database identities,
-WAL coordinates, timestamps and the Synveda KMS key reference. It contains no
-password, repository cipher key, KEK, bearer token, content or Keycloak realm
-export. The KEK and repository key have a separately documented custody and
-recovery path.
-
-A shared PostgreSQL server is one physical recovery unit. Separate Synveda and
-Keycloak RPO/PITR requires separate clusters. Same-host POSIX backup is portable
-validation evidence, not host-loss disaster recovery.
-
-## Restart, upgrade and rollback
-
-The future `upgrade-from.json` under the canonical Compose test fixtures is the
-sole N-1 test input.
-Before acceptance it must contain literal prior test-build source SHA,
-deployment digest, product/PostgreSQL/Keycloak image and platform digests,
-schema epoch/migration head, Keycloak version, and configuration-schema
-version. `previous`, mutable tags and a fixture built from the current SHA are
-rejected. The planned CPR-45 fixture is an earlier, cleanly accepted Compose
-test build with Keycloak 26.7.1 and schema epoch 3 before the forward operations
-migration; it is test evidence, not a released-version support promise.
-
-`make compose-upgrade-smoke` performs planned maintenance in this order:
-
-1. boot the exact N-1 fixture, converge it twice, create governed sentinel
-   state in both databases, and capture its labelled volume identities;
-2. take and isolated-restore-test a joint backup plus Synveda key bundle;
-3. stop public ingress, drain/stop gateway and workers, then stop Keycloak;
-4. start the same PostgreSQL major/storage image, upgrade Keycloak only along
-   the documented 26.7.1 → 26.7.2 path, and re-run realm convergence;
-5. run the new Synveda migration exactly once under its migration owner, then
-   start core/experimental workers, gateway and proxy in dependency order;
-6. prove volume identities, role denial, issuer/login/CLI flow, tenant data,
-   Session/Knowledge/audit sentinels, operation recovery and configuration
-   validation, then prove a third convergence run is a no-op.
-
-The restart matrix separately sends a graceful restart to proxy, gateway,
-core worker, PostgreSQL, Keycloak and Collector, plus dispatcher/Apalis
-executor/visibility services when enabled. After each restart it checks the
-service-specific drain/recovery property and repeats the relevant public
-lifecycle; a container merely returning to `running` is insufficient.
-
-Compatible rollback is allowed only when the environment manifests prove that
-neither Synveda nor Keycloak persisted a forward migration. Otherwise the
-launcher refuses the old image with exact restore guidance. Keycloak database
-downgrade is never attempted: rollback restores the paired pre-upgrade cluster,
-repository/key material and exact old images. Synveda epoch-1/epoch-2,
-markerless and unknown migration heads remain refused rather than translated.
-There is no zero-downtime claim.
-
-The full governed product lifecycle runs in both explicit development HTTP and
-reference HTTPS modes. External-OIDC mode renders and runs its diagnostics
-deterministically; a live provider is recorded unavailable unless actual
-credentials and reachability exist.
-
-## Runtime residue gate
-
-`make check-deploy` already requires Temporal runtime markers to remain absent
-from canonical and contributor Compose, the release manifest, rendered Helm,
-the contributor smoke script, the Makefile, Rust/npm dependency manifests and
-the retired configuration directory. Comment-only architectural statements and
-bitemporal domain language do not trip that semantic check. The contributor
-lifecycle removes orphaned containers from this fixed project without deleting
-volumes; it does not remove databases left in an upgraded PostgreSQL volume.
-
-After identity cutover, the planned `make check-runtime-residue` requires zero
-active Rauthy service/image/config/environment/dependency/script/fixture/support
-references. It scans runtime source, `Cargo.toml`/lockfiles, Make/scripts,
-active deploy/release assets, README/install/security/architecture docs and
-generated client/support contracts. Historical `docs/adr/**` decision records
-are the only broad path allowlist; the gate's own encoded search vocabulary and
-explicit negative-test fixtures are narrow line allowlists. The delivered
-CPR-45 brief is removed under normal backlog discipline. Historical prose may
-say why a component was removed, but cannot make it selectable, documented as
-supported or present in a rendered service graph.
-
-## Supported dependency modes
-
-| Dependency | Bundled reference | External mode contract | Claim boundary while CPR-45 is open |
-|---|---|---|---|
-| PostgreSQL | PostgreSQL 17 + pgvector + pgBackRest | mounted DSN/CA and schema/migration ownership | external TLS support remains unclaimed until SQLx verify-full tests pass |
-| OIDC | Keycloak 26.7.2 | issuer JSON file; custom CA/proxy remain open | only providers passing a live code exchange and conformance are named supported |
-| telemetry | private Collector, optional local backends | Collector exporter to external OTLP | application configuration is unchanged |
-| backup storage | encrypted POSIX volume | S3-compatible endpoint/region/bucket | backup interface only, not application object storage |
-| embeddings | deterministic or optional TEI | configured HTTP provider | exact model/platform evidence is separate |
-| extraction | deterministic, Claude or vLLM seam | configured endpoint/key file | live model claim requires credentialed evidence |
-| registry | public OCI refs at digests | private registry prefix, CA and pull credentials | offline support needs a verified no-network bundle |
-
-Configuration-schema tests may validate unavailable external modes. They are
-not substitutes for live provider support evidence.
-
-## Single-host limits
-
-The reference has one host, one public proxy, one gateway, one core worker and
-one PostgreSQL server. Restart policies reduce manual recovery time but do not
-survive host or volume loss. Neither gateway nor worker is HA. Login/handoff and
-some caches remain process-local until their separate scale feature lands.
-There is no zero-downtime upgrade, multi-region routing, certified compliance,
-owned RPO/RTO, general rate-limit/quota plane, complete tenant lifecycle,
-24-hour mixed soak or general client-support claim.
-
-Allowed labels are `development`, `reference` and `playground`. Never label
-this topology HA, production SaaS, host-loss resilient, disaster-recovery
-complete or enterprise certified.
-
-## Future Helm mapping
-
-| Contract concept | Compose reference | Later Kubernetes/OpenShift implementation |
-|---|---|---|
-| public edge | Caddy service, 80/443 | Ingress/Gateway API/OpenShift Route and customer certificate |
-| gateway/worker | separate services from one image | separate Deployments with probes/drain and replicas only after OPS-7 |
-| migration/convergence | one-shot migration and bounded long-running Keycloak convergence controller | migration remains a Job; convergence needs a controller/operator or a generation-fenced reconciliation design, never an application init shortcut |
-| PostgreSQL | shared server, isolated DBs/roles | external PostgreSQL or CloudNativePG; Keycloak Operator/external DB as selected |
-| secrets | mounted Compose files | External Secrets/Vault/CSI/projected Secrets and customer KMS |
-| networks | explicit bridge networks | default-deny NetworkPolicies and reviewed ingress/egress |
-| telemetry | private Collector | Collector/agent with external OTLP egress |
-| backup | `synveda-backup` in the PostgreSQL container plus isolated restore job | a Job invokes the same `synveda-backup` command for a self-managed/CNPG data plane; an external managed database is explicitly externally owned until an adapter preserves the same command/evidence contract |
-| identity | bundled Keycloak or external OIDC | customer IdP or Keycloak Operator; no domain change |
-| persistence | named volumes | storage classes/PVCs with arbitrary-UID and SELinux evidence |
-| supply chain | digest manifest | signed OCI chart/images, private registry and offline verified bundle |
-
-OpenShift arbitrary UID, seccomp, service-account token suppression, PDB,
-topology spread, private registry, offline installation, NetworkPolicies,
-backup operator, FIPS and customer KMS remain later acceptance work. Helm is
-not mechanically generated from Compose.
+Before promotion, Helm must map the same image commands to Deployments/Jobs,
+Secrets or external secret managers, Services/Ingress, NetworkPolicies,
+security contexts, PVC/external PostgreSQL, external OIDC, external OTLP and
+operator-owned backup facilities. Multi-replica prerequisites, disruption
+budgets, topology spread, OpenShift arbitrary UID, offline/private-registry
+distribution, customer CA/proxy, KMS and FIPS requirements remain explicit
+promotion gaps.

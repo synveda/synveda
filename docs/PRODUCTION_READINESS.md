@@ -1,6 +1,6 @@
 # Production readiness
 
-Assessment date: 2026-09-07. Scope: the current context-platform checkout as a
+Assessment date: 2026-09-08. Scope: the current context-platform checkout as a
 service for individuals and small teams. Passing repository gates establishes
 repeatable behaviour; it does not establish availability, recoverability,
 supportability or a releasable supply chain.
@@ -28,309 +28,35 @@ score for the implemented code.
 
 ## Docker reference programme
 
-| Scope | Current status | Exit evidence | Explicit residual limit |
+| Scope | Status | Exit evidence | Limit |
 |---|---|---|---|
-| Development Compose | Not ready | Canonical render plus clean-volume HTTP login/product lifecycle on a supported desktop Docker platform | Development HTTP and loopback/operator exposure are not reference security evidence. |
-| Single-host reference | Not ready | Clean Linux and desktop runs of proxy-only HTTPS, Keycloak, gateway/worker, Collector, governed product lifecycle, backup/PITR, isolated database+key restore, restart and tested-version upgrade | One host/server, planned maintenance and same-host-backup risk; no HA or DR claim. |
-| External dependency shape | Not assessed | Same image, deterministic configuration tests and live conformance for each provider actually named | External PostgreSQL is currently render-only and bootstrap refuses before inputs/SQL because neither bootstrap nor compiled SQLx has an accepted authenticated-TLS path; schema/configuration evidence is not provider support. |
-| Hosted playground promotion | Not ready | Exact pullable artifact manifest, off-host recovery, custody, basic abuse/lifecycle controls, alerts and runbooks in addition to reference acceptance | May remain single-host only when host-loss and maintenance limits are explicit. |
-| Private-beta SaaS promotion | Not ready | All P0s plus multi-replica correctness, durable worker reliability, lifecycle/isolation, load/soak, supportability and supply-chain evidence | Docker reference evidence is necessary but not sufficient. |
+| Development Compose | Not ready | Clean-volume browser login and product lifecycle on a supported Docker Desktop platform | Explicit loopback HTTP; no reference security claim |
+| Single-host reference | Not ready | Linux and desktop HTTPS runs, restart matrix, joint database/key restore, bounded S3/WAL recovery, Apalis canary and Operations visibility | One host; planned interruption; no HA, owned RPO/RTO or DR |
+| External OIDC | Not assessed | Same product image boots against a named conformant provider | Configuration-only evidence is not provider support |
+| Hosted promotion | Not ready | Published artifacts, off-host recovery, custody, abuse controls and runbooks | Compose evidence is necessary, not sufficient |
 
-CPR-45 retains self-cleaning database-authority evidence and eight isolated
-exact-role CPR demo passes from the pre-revision-2 source closure, plus current
-reviewed deterministic Compose contracts
-([CPR-45](backlog/CPR-45.md)). The current revision-2 tree now has four freshly
-measured authority fingerprints, 657 validated SQLx records and a passing
-complete dual-cluster exact-role database gate, including ordinary workspace,
-serial administrator/drift and epoch/reset suites with exact cleanup. A fresh
-deterministic authentic-frame lifecycle also passes and self-cleans through
-the independently reviewed collision-resistant fixture allocator; the
-complete repository CI and current deployment contracts pass. This is not the
-installed proprietary-client test or live canonical browser/Compose
-acceptance.
-The current additive implementation now has a bounded, exact-project-locked
-canonical lifecycle; complete network/IPAM and asset preflight; containerized
-gateway/worker; a private Collector; exact static-tenant issuer diagnostics;
-pre-mutation reference PEM/key/chain/SAN/validity checks; and an optimized
-Keycloak image with closed realm/demo/user-profile convergence. Deterministic
-source tests also prove that reference host validators refuse ambient
-Node/OpenSSL trust activation before their first process or lock and run with
-Node's explicit bundled CA set. These tests and image self-tests establish
-those contracts. Deterministic rendered-model and lifecycle tests also prove
-that every canonical runtime service and development build explicitly closes
-Docker client proxy injection and that converged container inspection rejects
-runtime drift without disclosing values. Development builds now also refuse
-ambient BuildKit/Buildx/Bake routing before helpers or locking, pin an explicit
-local default builder behind fresh private state and separate the build from
-all no-build startup/recovery commands while preserving registry authentication
-opaquely. Their path boundary also refuses a Docker config directory or
-lifecycle temporary root inside the source context. Development resolver
-ownership now has a reversible same-inode host-file helper and deterministic
-collision, drift, strict-prefix interruption and recovery evidence; elevation
-still trusts a clean operator-writable checkout, and ownership is checked
-before Docker contact, while recovery actions remain independent. The selected
-mapping has not been installed or browser/container-validated, so this closes
-no live-readiness criterion. Current source does add a pinned, sandboxed,
-non-root Playwright 1.62.1 one-shot with a no-capture route/secret boundary,
-exact PKCE request and callback checks, administrator admission/logout, and a
-fresh-project initial-asset absence gate. Deterministic model, lifecycle and
-injected-browser tests now select both development HTTP and reference HTTPS;
-the reference row binds exact certificate and digest-image inputs and contains
-no source build. This remains rendered-model and fake-lifecycle evidence: it
-proves no DNS, TLS, container, Keycloak exchange or browser trust and closes no
-readiness criterion. The browser container has not executed and its
-effective mounted-secret ownership has not been proved on a supported Docker
-platform. The source now requires one running embedded `docker` builder at the
-default endpoint and can publish/revalidate a canonical content-free candidate
-binding the clean source, deployment inputs and exact fixture selection. It
-binds both the tracked index and actual effective Docker context and prepares a
-private non-secret synthetic proxy template, but creates no provider, registry,
-canary or live evidence. No clean live run has yet exercised either the
-ACL/default-ACL and SELinux/xattr/file-flag contract on Linux or a private
-synthetic Docker client proxy configuration, canary remote builder and private
-registry. Current ACL exploit and metadata-retention evidence is macOS plus
-deterministic Linux grammar coverage. This is not public PKIX/browser trust,
-explicit custom-CA/proxy support, a clean-volume login or recovery evidence.
-One append-only version-6 receipt machine now enforces closed intent/results,
-collision-preserving failure branches, no-replace publication and an exact
-success-only synthetic manifest. Receipt v1 through v5, mutation slot v1 through
-v6, recovery/root v1 through v5 and close v1 through v7 are direct hard-cut
-refusals. Slot v7 binds source/result predecessors plus operation kind,
-contract and plan; recovery v6 binds a fresh observation; close v8 binds the
-outer operation settlement.
-Final journal names are never deleted or reused, and generic append cannot own
-preflight, provider-create, provider-cleanup or finalization.
+The current canonical graph has a proxy-only edge, separate Synveda and
+Keycloak databases/roles, production-mode Keycloak, containerized gateway and
+worker, mounted secret files and a private OpenTelemetry Collector. Static
+Compose checks cover eight provider/runtime rows. They do not prove DNS, TLS,
+browser login, database recovery or a running service.
 
-The synchronous deterministic fake remains rollback. The superseded actor
-path is removed. The lifecycle-unexposed controlled background fake is now
-state-born: plan, slot and intent precede root mutation, and the outer owner
-reasserts the exact journal/source/frontier at all six create/root/controller/
-start/identity checkpoints. The inner v4 contract has HMAC-bound child
-identities, fsynced no-replace evidence, restrictive socket creation, fresh
-socket authentication and static root identity. Same-byte inode changes,
-source drift and causal-prefix mutation fail closed.
+ADR-0105 removed the clean-engine/Colima simulation because it supplied no live
+Docker evidence. The remaining CPR-45 work is direct Compose/browser and
+restart acceptance, PostgreSQL-native full logical backup plus isolated
+database/key restore followed by bounded S3-compatible/WAL-PITR acceptance,
+one disabled-by-default Apalis 0.7.4 `skill_validation@1` canary behind
+forced-RLS operation/outbox state, minimal local observability/Operations,
+upgrade/rollback and external-dependency acceptance. Rauthy remains only until
+current-source Keycloak acceptance passes; then it is deleted without a
+compatibility mode.
 
-An immutable outer settlement admits only complete identity, an exact residual
-without live/unattested processes, or a preserved foreign-root collision.
-Passing receipt and close bind that settlement, not the inner identity.
-Recovery confirmation is read-only; acquisition follows owner-absence proof
-and never launches, signals, deletes, repairs evidence or replays controller/
-start. State tests retain controller-without-readiness and start-without-PID as
-permanently unattested. Collision settlement remains valid across later foreign
-root removal/replacement while Synveda evidence stays exact.
-
-Legacy retirement v1 remains fixture-only. The mutation-state owner now
-composes the distinct retirement-v2 seam through a dedicated cleanup plan,
-slot and intent bound to the completed state-born create settlement and close,
-immutable provider identity, source head and live parent-directory identities.
-Its exact synchronous state gates cover authenticated stop, every leaf-first
-removal, recovered absence, publication mutation and final consumption. The
-inner retirement settlement still grants no result-receipt or close authority;
-only the distinct outer cleanup settlement can bind the controlled cleanup pass
-and close.
-
-Action-dispatched recovery is observation-bound: an untouched pre-intent slot
-can abort without effect, while an executing recovery reserves capacity and
-publishes a latest settled-prefix claim before its outer settlement. Owner and
-recovery close authority are disjoint, settled history cannot regress, and
-completed retirement is reasserted at close publication. Internal authority
-callbacks are not a JavaScript security boundary. This is fixed-fake trusted-
-owner POSIX evidence only: no supported lifecycle target exposes the fixtures,
-there is no Docker/Colima mutation or live environment manifest, and the
-controlled evidence is ineligible for finalization. Supported live cleanup and
-finalization therefore remain refused.
-
-The controlled-background contract v5 binds only its repository-owned Node
-fixture ancestry and has no live-named preparation or authorization API. Its
-two-role controller/host-agent evidence cannot be substituted for the separate
-four-role live process-effect prerequisite.
-
-The next provider-input boundary is deterministic but remains deliberately
-non-executing. A separate live-preparation requirements record pins exact
-official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4 disk artifacts. Its
-v5 private observation binds the upstream-correct Lima guest-agent/default-
-template layout, private network baseline, staged and dynamically selected
-helper identities, closed environment paths, host build/boot inputs and
-distinct source/receipt-owned disk identities. Six receipt-owned mutation
-namespaces isolate Colima cache/home, Docker config, Lima home, `HOME`, and
-temporary files. `HOME` is an empty private namespace; Lima home has exactly
-the `_config` and `_config/networks.yaml` baseline descendants. Each baseline
-is recursively no-follow sampled twice under a 64-descendant aggregate bound.
-Public evidence contains only keyed opaque relative identities, descriptor
-digests and a set HMAC; raw names, paths, targets and content remain private,
-and unexpected descendants are opaque collisions rather than adopted state.
-Its canonical physical provider root is capped at 21
-UTF-8 bytes, keeping the pinned longest Lima Unix-socket path at 103 bytes,
-below Darwin's 104-byte refusal threshold. Both the lexical input and resolved
-physical path are bounded before traversal. V1 through v4 evidence is refused. The
-observer has no child-process API. The pinned
-command disables Docker-context activation and uses the gRPC port forwarder;
-`/bin/sh` and `/usr/sbin/ioreg` remain declared OS-build-bound inputs rather
-than live per-file evidence. A separate closed registry reserves distinct live
-create and cleanup operation contracts and evidence schema names, selects only their exact
-action/kind/contract/class tuples and binds both to the production requirements
-digest. Create now grants state planning only; execution, provider recovery,
-lifecycle exposure and finalization remain false, while cleanup remains wholly
-deny-only. The registry still imports no state, receipt, process or fake-provider
-path.
-
-The state owner embeds one content-free live operation plan in a dedicated
-mutation slot v7 and close v8. It binds the active candidate/head, exact registry
-resolution, production requirements and private observation digest. The same
-slot CAS serializes it against fake-provider mutation; completion changes no
-receipt or environment, writes no provider evidence and blocks every later
-mutation except the exact inert intent, which may then be followed by its exact
-decision. An abandoned slot can only be recovered by an explicit effect-free
-abort. This is not a live OS probe,
-provider start, Docker Engine identity, cleanup or environment-manifest result,
-so no readiness status changes.
-
-A state projection reduces the newest completed owner plan to its slot, close,
-embedded-plan and preparation-observation digests. Separate structural helpers
-derive only a `provider-create` request marked `requested-not-authorized` and a
-zero-entry logical pre-effect prefix; serialized values carry no state or
-observation provenance. The state owner publishes them only through distinct
-`provider-intent` and `provider-start-decision` journal actions, with production
-and fixture operation kinds, contracts, schemas and evidence classes kept
-separate. The decision publication plan is v2 and may state only
-`requested-not-executed-not-authorized`.
-
-Each publisher reconstructs complete state/source/namespace admission initially,
-immediately before the slot link, after slot acquisition and immediately before
-the close link. Every canonical admission must equal the initial pristine
-baseline. A successful owner close changes no receipt or environment, writes no
-provider or operation evidence and grants no effect authority. Collisions and
-drift abort before effect; abandoned slots can only acquire an all-zero recovery
-v6 claim and an `aborted-before-effect` close. Generic provider recovery refuses
-inert decisions. The ordered journal permits aborted plan, intent and decision
-generations before each matching owner completion. Completed retries return the
-historical non-authorizing result and make no fresh namespace claim. This adds
-deterministic inert-state evidence only—not a live provider, process, VM,
-Engine, socket, context, cleanup, finalization or readiness result.
-
-A subsequent read-only seam reconstructs the exact completed
-decision and repeats current state/namespace observation in `S1/O1/S2/O2` order.
-Stable pristine namespaces yield only a deny-only process-effect candidate with
-every authority flag false; stable collision yields no candidate. It adds no journal
-action, operation contract, registry row, receipt or persistent artifact, and
-its authorization entry point always refuses. This closes only the
-post-decision observation shape; it is not process, provider, recovery or
-readiness evidence.
-
-A sibling-effect boundary now binds that exact admission. Its
-production `colima-live-provider-effect-v1` contract digest is
-`e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`;
-the class-separated `colima-live-fixture-provider-effect-v2` digest is
-`fffed74545de0af992fbcdcf38f0ea7d203864755c1f63c24251a537e66b4b60`.
-Production uses `production-deny-only-no-invoker`, keeps every capability false
-and has no production state publisher, recovery entry point, registry row or
-lifecycle command.
-
-The earlier non-persisted prerequisite projection remains a separate inert
-review artifact with no action, operation kind or contract. It retains its own
-512-occurrence preflight and is consumed by neither state nor the pure effect
-grammar.
-
-The fixture-only grammar validates the distinct witness/marker, start authority
-and attempt, exact four-role causal graph, four authenticated endpoint/socket
-identities, Docker context, quiescence, two equal paged recursive inventories,
-trusted v5 baseline descriptors, intra-namespace hard-link closure, exact
-directory capacity, derived cleanup, terminal receipt and marker retirement.
-Its closed-history and pure-effect suites cover success, residual, uncertain
-and pre-attempt branches without invoking filesystem observation, process or
-network execution. This in-memory event fixture is distinct from the earlier
-four-process causal fixture.
-
-Receipt v6, slot v7, recovery/root v6 and close v8 form one persisted hard cut.
-A test-only state seam publishes a sequence-bound stage, inode-derived witness,
-fixed marker and exact events. It can close after verified zero-receipt
-pre-attempt retirement, stop at an attempt fence without delivery, or consume
-one exact process-free `conclusive-not-created` adapter result. That attempted
-branch publishes, in order, `start-authority`, `start-attempt`, `launch-edge`,
-`delivery-result`, `create-settlement`, `cleanup-plan-page`, `cleanup-plan`,
-`cleanup-progress`, `cleanup-settlement`, `terminal-receipt` and `completion`.
-The staged receipt bytes are canonical-byte-identical to the receipt embedded
-in the terminal event. The final receipt path is hard-linked from that staged
-inode; after directory fsync and stage retirement, the one-link final receipt
-is durable before marker unlink, bound provider-root fsync, completion and
-close. Mutation close is last.
-
-The fixture state publisher derives its plan through process-free blueprint v3.
-Its fourth component binds a state-owned `conclusive-adapter` with contract
-digest `b476c4f4c9258943fff3745abfc622e822684f95fa0b72d1a311a9cc86bed681`.
-Exact Node/protocol/role/adapter hashes are read through no-follow descriptors;
-the loaded adapter source is snapshotted at module initialization and must equal
-the later component manifest. The closed environment, role argv/cwd, Ed25519
-public identities, endpoint paths and attempt/quiescence commitments remain
-bound without persisting private keys or paths. The adapter returns only
-`conclusive-not-created`, a zero child handle, `effect_possible: false` and
-safe code `not-created`; it has no filesystem, network, process, provider or
-runtime-publication capability.
-
-Without an explicit missing-delivery acknowledgement, attempted recovery
-remains blocked before an exact durable delivery event. Recovery never calls
-the adapter executor; state exact-byte loads the module and validates a durable
-result before following the conclusive path. The fixture-only alternative
-accepts only the exact authority/attempt prefix, optionally followed by the
-outer launch edge. A local same-UID caller confirms a digest of the complete
-content-free frontier and pending-stage statement. State retires no pending
-stage, or only the exact confirmed inert stage or alias; it publishes a
-recovery claim and terminates at
-`uncertain-start` with `effect_possible: true`; it leaves the two-link
-marker/witness, lease and receipt head unchanged and publishes no delivery,
-cleanup, receipt, completion or close. A pre-terminal crash that changes the
-durable frontier requires a newly derived confirmation; a durable terminal is
-idempotent on normal retry or crash/restart. This is not authenticated human
-approval, non-repudiation, an atomic physical snapshot or protection against
-hostile same-UID rollback.
-
-Separately, ADR-0103's mutually exclusive terminal no-spawn sibling adds one
-deterministic cooperative reservation and performs no provider process action.
-A v7 slot precedes a private fsynced witness. One fixed no-replace provider-root
-hard-link CAS binds the exact state run and all six namespace identities on one
-device. While the exact two-link marker/witness inode remains held, a bracketed
-fresh namespace observation must match the plan before immutable retirement
-authorization is published. The exact marker is then retired, its parent
-fsynced, the one-link witness proved and close v8 bound to the settlement
-digest. Receipt, environment, provider, runtime and evidence state remain
-unchanged in that sibling.
-
-Dedicated v6 recovery can retire an inert stage, complete partial witness
-publication, or relink an exact standalone witness before settlement. Recovery
-history binds the deterministic witness, settlement and reachable local
-topology. Replacement, extra links, wrong type/mode/inode, backward topology or
-namespace drift blocks. Concurrent state bases sharing the provider root admit
-exactly one CAS winner. Crash-boundary, recovery, malformed-settlement and
-tamper tests are deterministic no-spawn evidence only. The marker coordinates
-cooperative same-UID owners and is not protection against hostile same-UID
-code. `reservation_recovery_authorized` does not grant provider-effect recovery.
-
-Real process execution remains blocked. ADR-0104's sibling generation branches
-directly from the exact completed start decision and must not extend the
-terminal no-spawn reservation or reuse its evidence. The fixture now proves
-the conclusively-not-created attempted tail and a distinct acknowledged
-missing-delivery terminal. Authenticated live causal
-identity/recovery for the outer process, detached Lima hostagent, usernet and
-SSH ControlMaster, recursive post-start inventory and endpoint/quiescence
-evidence remain open. Live
-macOS proxy observation and individual OS-executable identity evidence also
-remain open. No persisted receipt/journal generation advances: receipt v6,
-slot v7, recovery/root v6 and close v8 remain unchanged. The process-free
-blueprint advances to v3; the fixture operation contract, fixture
-`uncertain-start` and adapter contract/result advance to v2. The production
-operation contract and digest remain v1 and unchanged.
-
-Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
-Consequently this evidence improves the boundary without changing readiness.
-One frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
-bootstrap, optimized
-Keycloak, realm convergence, issuer metadata, Collector, worker and gateway
-startup for its exact historical source/image closure. That private run is
-exploratory rather than durable acceptance: current source has diverged, no
-committed environment manifest attests it, and it did not perform a browser
-code exchange, clean Linux or reference-HTTPS lifecycle, product scenario,
-recovery or upgrade. The statuses
-and `Not ready` verdict therefore do not change.
+Initial logical backup is controlled single-host recovery evidence only. It
+does not close the production P0. The later bounded S3/WAL feature checks still
+do not establish owned encrypted off-host retention, RPO/RTO or recurring
+drills. OpenTelemetry traces establish the core seam; the bounded local backend
+and customer-safe Operations route remain CPR-45 work, while a general
+dashboard/support platform remains later supportability work.
 
 ## Runtime and availability
 
@@ -348,9 +74,9 @@ and `Not ready` verdict therefore do not change.
 | Browser, CLI and service-token lifecycle | Conditional | P1 | Console sessions are sealed in Postgres with a 12-hour cap (`crates/synveda-gateway/src/auth.rs:327-405`); CLI refresh exists (`crates/synveda-gateway/src/auth.rs:92-114`); service tokens require a bounded `iat`/`exp` lifetime (`crates/synveda-gateway/src/authz.rs:216-220,622-639`). | OIDC, console-session, CLI-login and service-identity tests | No general access-token revocation list, device binding or revocation-within-bound guarantee; refresh-token rotation depends on the IdP. Synveda has scoped service identities and provisioning credentials, not a general-purpose API-key product. | Revoked user/service credentials fail every API within 30 seconds; rotated refresh tokens cannot replay; session inventory/revoke is audited; service identity disable remains immediate. | AUTH-6: persist revocations by issuer/token identifier, add session inventory/revoke and exercise rotation/replay. | IdP must expose usable revocation/rotation claims; owner decides device-bound requirements. |
 | Federated identity uniqueness | Not ready | P1 | JIT login resolves by `(tenant_id, subject)` (`crates/synveda-gateway/src/provision.rs:130-155`; `crates/synveda-store/src/identities.rs:120-139`), and the schema enforces that pair without issuer (`crates/synveda-store/migrations/0001_context_platform.sql:2945-2960,5205-5209`). Multiple issuers are configurable. | Single-issuer OIDC/JIT tests; MEM-7 remains open | Two trusted issuers may issue the same `sub`, collapsing distinct people onto one principal scope, grants and private Knowledge. No admission constraint proves one issuer per tenant. | Either identity keys include canonical issuer plus subject end to end, or tenant admission rejects a second issuer; collision, relink, revoke and directory-projection tests prove no authority transfer. | MEM-7: define the issuer-qualified stable identity key and a hard-cut/update path, or enforce and test the narrower one-issuer product contract. | Identity owner chooses multi-issuer support, link proof/recovery and existing-identity treatment. |
 | Rate limits, quotas and abuse controls | Not ready | P1 | The request router applies tenant resolution and per-handler PDP checks (`crates/synveda-gateway/src/app.rs:199-245`), but no general rate-limit layer or quota store appears in that assembly. SCIM maps a pre-existing `RateLimited` error to 429 (`crates/synveda-gateway/src/scim/mod.rs:140-158`), but its credential verifier contains no limiter (`crates/synveda-gateway/src/scim/mod.rs:232-293`). | HTTP request counters/latency; domain input bounds | No per-tenant/principal/IP request limits, ingest/token/storage quotas, concurrency budgets or abuse alarms. Input caps and a response taxonomy do not bound request frequency or tenant cost. | Adversarial load proves independent tenant/principal limits, fair queuing and bounded DB/provider work; responses use stable 429 envelopes and auditable quota changes without denied-resource count leakage. | Add a small policy-neutral limiter at the authenticated boundary plus durable tenant quota/configuration counters; start with session-event bytes/rate and context concurrency. | Product owner must set plans/quotas and support override rules; deployment chooses distributed limiter storage. |
-| RLS, PDP and cross-tenant isolation | Conditional | P1 | Tenant tables enable and force RLS and requests set tenant context before Cedar decisions (`docs/SECURITY.md:11-31`). The adversarial inventory pins forced-RLS, identifier-oracle, principal privacy, context side-channel and VedaFlow evidence (`scripts/check-context-security.mjs:13-40`). | `make check-context-security`; `crates/synveda-store/tests/rls.rs`; `crates/synveda-gateway/tests/foundation_audit.rs`; deterministic and 10k security gates | Strong current evidence covers named boundaries, but TEN-6's continuous API fuzzing remains open; DB superuser, host, compromised gateway and compromised worker are outside the boundary (`docs/SECURITY.md:144-145`). | Every tenant table is forced-RLS; direct-SQL and public-API generated probes cover all authenticated operations nightly with zero cross-tenant disclosures; changed routes enter the inventory automatically. | Extend the current route catalogue/security generator rather than creating a parallel harness; add restore-shaped and owner-role cases. | Security owner must define supported adversary and frequency/retention of nightly evidence. |
+| RLS, PDP and cross-tenant isolation | Conditional | P1 | Tenant tables enable and force RLS and requests set tenant context before Cedar decisions (`docs/SECURITY.md:11-31`). The adversarial inventory pins forced-RLS, identifier-oracle, principal privacy, context side-channel and VedaFlow evidence (`scripts/check-context-security.mjs:13-40`). | `make check-context-security`; `crates/synveda-store/tests/rls.rs`; `crates/synveda-gateway/tests/foundation_audit.rs`; deterministic and 10k security gates | Strong current evidence covers named boundaries, but TEN-6's continuous API fuzzing remains open; DB superuser, host, compromised gateway and compromised worker are outside the boundary (`docs/SECURITY.md:247-248`). | Every tenant table is forced-RLS; direct-SQL and public-API generated probes cover all authenticated operations nightly with zero cross-tenant disclosures; changed routes enter the inventory automatically. | Extend the current route catalogue/security generator rather than creating a parallel harness; add restore-shaped and owner-role cases. | Security owner must define supported adversary and frequency/retention of nightly evidence. |
 | Tenant provisioning, suspension, export and erasure | Not ready | P1 | Storage explicitly supports admit and resolve only (`crates/synveda-store/src/tenants.rs:1-5`); suspended tenants fail resolution (`crates/synveda-gateway/src/tenant.rs:265-289`). Sealed export has no re-import or tenant-erasure claim (`docs/INSTALL.md:815-819`). | Tenant-resolution tests; sealed-export tests; Knowledge-level forget tests | No complete public tenant suspend/resume administration, portable re-import, ordered populated-tenant erasure or destruction certificate. Deployment reset is not tenant erasure. | A populated tenant can be suspended, exported, restored into a fresh instance, erased with zero tenant references, and given a verifiable content-free destruction certificate; interruption resumes safely. | Re-cut TEN-5 against epoch 3: inventory all tenant FKs, durable ordered lifecycle state machine, restore format/version check and erasure verification. | Legal/privacy owner defines retention, holds and certificate semantics. |
-| Directory integrations and support access | Not ready | P1 | SCIM and bounded Entra/Okta pull implementations exist, but live Entra/Okta evidence is explicitly absent (`docs/SECURITY.md:167-170`). Break-glass/local authority is documented as an operator exception (`docs/SECURITY.md:11-15`). | Directory fixtures and gateway/store tests; content-free audit chain | No live vendor tenant verification, provider-degradation SLO, audited time-bound support-access workflow or tested break-glass recovery/rotation ceremony. | Each claimed provider passes create/update/group/remove/disable/rate-limit recovery live; support access is requested, approved, expiring and chained; break-glass drill closes and rotates credentials. | Keep SCIM and pull on one projection; add provider-specific live suites and a narrowly scoped support grant workflow. | Requires real vendor tenants/credentials and an owner-approved support/break-glass policy. |
+| Directory integrations and support access | Not ready | P1 | SCIM and bounded Entra/Okta pull implementations exist, but live Entra/Okta evidence is explicitly absent (`docs/SECURITY.md:263-264`). Bounded bootstrap/operator authority is documented as an exception (`docs/SECURITY.md:20-21`). | Directory fixtures and gateway/store tests; content-free audit chain | No live vendor tenant verification, provider-degradation SLO, audited time-bound support-access workflow or tested break-glass recovery/rotation ceremony. | Each claimed provider passes create/update/group/remove/disable/rate-limit recovery live; support access is requested, approved, expiring and chained; break-glass drill closes and rotates credentials. | Keep SCIM and pull on one projection; add provider-specific live suites and a narrowly scoped support grant workflow. | Requires real vendor tenants/credentials and an owner-approved support/break-glass policy. |
 
 ## Data durability
 
@@ -359,8 +85,8 @@ and `Not ready` verdict therefore do not change.
 | Backups, PITR, restore drills, RPO and RTO | Not ready | P0 | The Helm values deliberately contain no backup stanza (`deploy/helm/synveda/values.yaml:106-125`); OPS-5 requires a PITR playbook and tested RPO/RTO (`docs/backlog/OPS-5.md:13-19`). | None for production backup/restore; database tests create disposable databases, not recovery evidence | No scheduled backup, object-store retention, WAL archive, PITR, restore validation, RPO/RTO or recurring drill. One storage failure can exceed any unstated recovery objective. | Encrypted backups and WAL archive restore a production-shaped cluster to a chosen point; current schema, Knowledge heads/index rebuild and audit chain verify; measured RPO/RTO meet documented targets in a recurring drill. | OPS-5: CNPG backup/object-store configuration, restore job, post-restore verifier and monthly isolated drill. | Owner selects region/object store, retention, RPO/RTO, key custody and cost. |
 | Schema migration, upgrade and rollback | Not ready | P1 | The current pre-1.0 epoch refuses old databases instead of migrating them (`docs/INSTALL.md:834-850`); the release installer replaces artifacts only and is not an accepted deployment upgrade (`docs/INSTALL.md:782-796`). Helm uses `Recreate` (`deploy/helm/synveda/templates/gateway.yaml:14-16`). | Epoch/hard-cut checks; migration tests; `make check-deploy` | No supported Docker reference upgrade, data-preserving old-epoch upgrade, release compatibility window, rollback procedure or zero-downtime database/application ordering. | An N-1 production-shaped backup upgrades to N, validates contract/data/audit, and either rolls application/schema back within a declared window or restores by a measured procedure; incompatible builds refuse before serving. | Define the first post-1.0 compatibility policy, expand migration fixtures, and add an upgrade/rollback CI environment. | Product owner decides pre-1.0 reset policy end date and supported release window. |
 | Index reconstruction, re-embedding and plan stability | Not ready | P1 | Embeddings retain model and dimension and graph/search can fall back; current dense-query planning can switch after prepared-statement reuse, documented in CTX-7 (`docs/backlog/CTX-7.md:3-13`). | `make eval-retrieval`; ANN/latency benchmarks; Knowledge index metrics | No production rebuild runbook/SLO or generation cutover evidence; dense plan choice is not stable; 1M/5M/20M filtered scale is not established. | Rebuild from restored Postgres creates a named generation, serves old generation until atomic cutover, reports lag, and meets measured recall/latency at representative tenant sizes; execution 1 and 6 use the chosen plan. | Close CTX-7 first, then add resumable generation rebuild/cutover and restore drill coverage. | Choose supported embedding models/dimensions and maximum tenant corpus. |
-| Audit restoration, WORM, SIEM and legal hold | Not ready | P1 | The chain is tamper-evident and content-minimised, not WORM (`docs/SECURITY.md:45-47,146-147`). AUD-3 and AUD-4 remain scheduled signed export and SIEM work (`docs/backlog/AUD-3.md:13-19`; `docs/backlog/AUD-4.md:13-19`). | Audit append/verify metrics; API/export verification tests | A DB superuser can delete the chain; no external anchor/object lock, continuous SIEM stream, restored-chain drill or tenant/legal-hold extension. | Frozen-head export verifies offline from object-locked storage; restored DB verifies the same prefix; SIEM delivery is retryable/idempotent and monitored; holds prevent governed erasure where policy requires. | Build one durable audit export/outbox feeding object lock and OTLP/CEF, reusing canonical hash inputs. | Compliance owner chooses WORM target, retention, hold and SIEM schema. |
-| Data export, retention and erasure coverage | Conditional | P1 | Knowledge forget removes authorised plaintext/embeddings/source payloads and retains content-free evidence (`docs/SECURITY.md:128-132`); the sealed tenant export includes Knowledge history and audit but is memory-resident and has no import (`docs/INSTALL.md:815-819`). | Knowledge lifecycle/erasure tests; sealed-export tests | Erasure is aggregate-specific, legal hold is incomplete, full tenant restoration is absent, and large exports are not streamed with a production size/duration envelope. | Property tests inventory every content-bearing table; erasure/hold outcomes are complete and retryable; export streams within byte/time bounds and imports into a clean tenant with identical canonical evidence. | Complete TEN-5 around a versioned streaming archive; keep Knowledge forget as the lower-level primitive. | Privacy owner defines subject/tenant scope and required evidence retention. |
+| Audit restoration, WORM, SIEM and legal hold | Not ready | P1 | The chain is tamper-evident and content-minimised, not WORM (`docs/SECURITY.md:18-19,249-250`). AUD-3 and AUD-4 remain scheduled signed export and SIEM work (`docs/backlog/AUD-3.md:13-19`; `docs/backlog/AUD-4.md:13-19`). | Audit append/verify metrics; API/export verification tests | A DB superuser can delete the chain; no external anchor/object lock, continuous SIEM stream, restored-chain drill or tenant/legal-hold extension. | Frozen-head export verifies offline from object-locked storage; restored DB verifies the same prefix; SIEM delivery is retryable/idempotent and monitored; holds prevent governed erasure where policy requires. | Build one durable audit export/outbox feeding object lock and OTLP/CEF, reusing canonical hash inputs. | Compliance owner chooses WORM target, retention, hold and SIEM schema. |
+| Data export, retention and erasure coverage | Conditional | P1 | Knowledge forget removes authorised plaintext/embeddings/source payloads and retains content-free evidence (`docs/SECURITY.md:62-66`); the sealed tenant export includes Knowledge history and audit but is memory-resident and has no import (`docs/INSTALL.md:815-819`). | Knowledge lifecycle/erasure tests; sealed-export tests | Erasure is aggregate-specific, legal hold is incomplete, full tenant restoration is absent, and large exports are not streamed with a production size/duration envelope. | Property tests inventory every content-bearing table; erasure/hold outcomes are complete and retryable; export streams within byte/time bounds and imports into a clean tenant with identical canonical evidence. | Complete TEN-5 around a versioned streaming archive; keep Knowledge forget as the lower-level primitive. | Privacy owner defines subject/tenant scope and required evidence retention. |
 
 ## Security and supply chain
 
@@ -370,15 +96,15 @@ and `Not ready` verdict therefore do not change.
 | Inbound transport and Kubernetes workload isolation | Not ready | P1 | Helm accepts an `http://` public URL (`deploy/helm/synveda/templates/_helpers.tpl:111-122`) and ingress TLS is optional (`deploy/helm/synveda/values.yaml:96-104`). Gateway, worker and install pods now explicitly disable ServiceAccount-token automount, but the chart has no NetworkPolicy. | Helm render/lint and static workload-contract checks; current live kind acceptance has not been run | No production profile proves encrypted external transport or bounded ingress/egress, and current workload-token wiring lacks live negative evidence. | A production render requires HTTPS or an explicitly tested trusted TLS terminator, disables unused token automount, applies default-deny NetworkPolicies with named dependencies, and passes login/context while plaintext ingress, Kubernetes credential access and undeclared egress fail. | Add a production values contract and explicit ingress/egress policies; extend current kind acceptance with token and network negative probes. | Operator chooses ingress/TLS/DNS/egress endpoints, certificate ownership and any genuine Kubernetes API need. |
 | Release signing, SBOM and provenance | Not ready | P1 | Release produces SHA256SUMS but states that artifacts are unsigned (`.github/workflows/release.yml:361-369,442-443`). No SBOM, signature or attestation step is present in the release workflow. | Release workflow dry run; checksum verification in installer | Checksums detect transfer corruption but do not authenticate the builder; no SBOM, SLSA-style provenance, notarisation or revocation process. | Each archive/image/chart has an SBOM, identity-bound signature and verifiable build attestation; installer verifies before replacing files; compromised-key revocation is documented and tested. | Add CycloneDX/SPDX generation, keyless or managed signing for artifacts/images, provenance attestations and macOS notarisation. | Legal/security owner must choose publisher identity, signing custody and notarisation accounts. |
 | Key plane, rotation and secret custody | Not ready | P0 | Gateway and worker build the same fail-closed KMS contract through the shared bounded direct/file configuration loader (`crates/synveda-gateway/src/runtime_config.rs`). Helm statically mounts distinct migrator, gateway and worker database credentials, but still injects issuer/KMS material into both runtime processes as Secret-backed environment variables. Its executable contract check rejects missing wiring without rendering plaintext. The prior live kind login predates this database-authority wiring and is not evidence for the current chart. Local tenant-key rotation/re-encryption exists under the install guide's key-management section. | Store/CLI/config tests; `make chart-lint`; static Helm contract; key-open/rotation metrics | Current Helm startup/sign-in and credential wiring have not been live-proven; the chart has not cut issuer/KMS delivery over to the mounted-file contract, and no production-shaped run proves secret-value rotation, restart and joint database/KEK restore. There is no cloud KMS/HSM/customer-managed provider, automated KEK rotation or owned custody ceremony. | A fresh Helm install signs in, stores/rotates/opens a tenant secret, restarts and restores from backup without plaintext key in values/rendered output; KEK loss and wrong-key cases fail visibly. | Convert Helm issuer/KMS delivery to file mounts, extend kind acceptance through key use, rotation, restart and restore, then implement a separately reviewed custody provider and ceremony selected by the owner. | Owner must choose custody provider, Secret delivery, backup and rotation policy. |
-| SSRF, archive traversal and bounded external input | Conditional | P2 | Request bodies inherit a 2 MiB ceiling and riskier DTO/import readers add tighter bounds (`docs/SECURITY.md:110-113`). OKF remote import rejects private addresses and redirects (`docs/SECURITY.md:165-166`); directory clients have 5s connect/30s request timeouts (`crates/synveda-identity/src/directory/mod.rs:385-400`). | `make check-context-security`; OKF, directory and archive tests | Tenant export/open still assembles or reads whole archives in memory; egress allowlists/network policy and decompression/streaming resource telemetry are not production-proven. | Boundary tests cover redirects, DNS rebinding, symlinks, file count, expanded bytes, slow bodies and cancellation; archive/export memory stays bounded under the maximum supported tenant. | Stream the local archive format with a hard byte limit; deploy egress NetworkPolicies and retain the existing URL validation. | Deployment owner defines allowed egress and maximum archive/tenant size. |
-| MCP, Tool, Skill and prompt-poisoning boundary | Conditional | P1 | Gateway Tool tests are discovery-only; it never launches imported stdio commands or proxies arbitrary tool calls (`docs/SECURITY.md:41-44,160-164`). Skill validation executes no bundle code; Configuration narrows external providers (`crates/synveda-types/src/configuration.rs:410-426`). | Tool/Skill/OKF tests; `make check-context-security`; security evaluation | No MCP OAuth execution proxy, enterprise egress policy, artifact signature/revocation feed or live poisoning red-team evidence. Local client stdio runs in the user's trust domain. | Revoked Skill/Tool versions disappear at the next resolution; signed provenance and exact version are visible; remote discovery/OAuth obeys scope/egress/timeout budgets; poisoning corpus stays at zero leakage/unauthorised invocation. | Keep discovery and invocation separate; add signature/revocation metadata first, then design OAuth execution only with a concrete client need. | Security/product owner decides whether Synveda ever proxies execution and which signature authorities are trusted. |
-| Vulnerability and incident response | Not ready | P1 | `docs/SECURITY.md` is an implementation boundary and adversarial inventory, not a vulnerability-reporting policy or incident runbook (`docs/SECURITY.md:1-7,142-170`). | Security gates and audit chain | No published reporting channel/SLA, severity/triage process, credential-compromise playbook, customer notification process or practiced incident exercise. | A report has a private intake, owner, SLA and disclosure policy; a tabletop rotates signing/KEK/provider credentials, preserves evidence and produces customer-safe communication. | Add root `SECURITY.md` policy plus concise incident/credential-compromise runbooks linked to release and operations evidence. | Legal/security owner supplies contact, disclosure SLA and notification obligations. |
+| SSRF, archive traversal and bounded external input | Conditional | P2 | Request bodies inherit a 2 MiB ceiling and riskier DTO/import readers add tighter bounds (`docs/SECURITY.md:51-54`). OKF remote import rejects private addresses and redirects (`docs/SECURITY.md:261-262`); directory clients have 5s connect/30s request timeouts (`crates/synveda-identity/src/directory/mod.rs:385-400`). | `make check-context-security`; OKF, directory and archive tests | Tenant export/open still assembles or reads whole archives in memory; egress allowlists/network policy and decompression/streaming resource telemetry are not production-proven. | Boundary tests cover redirects, DNS rebinding, symlinks, file count, expanded bytes, slow bodies and cancellation; archive/export memory stays bounded under the maximum supported tenant. | Stream the local archive format with a hard byte limit; deploy egress NetworkPolicies and retain the existing URL validation. | Deployment owner defines allowed egress and maximum archive/tenant size. |
+| MCP, Tool, Skill and prompt-poisoning boundary | Conditional | P1 | Gateway Tool tests are discovery-only; it never launches imported stdio commands or proxies arbitrary tool calls (`docs/SECURITY.md:25-27,259-262`). Skill validation executes no bundle code; Configuration narrows external providers (`crates/synveda-types/src/configuration.rs:410-426`). | Tool/Skill/OKF tests; `make check-context-security`; security evaluation | No MCP OAuth execution proxy, enterprise egress policy, artifact signature/revocation feed or live poisoning red-team evidence. Local client stdio runs in the user's trust domain. | Revoked Skill/Tool versions disappear at the next resolution; signed provenance and exact version are visible; remote discovery/OAuth obeys scope/egress/timeout budgets; poisoning corpus stays at zero leakage/unauthorised invocation. | Keep discovery and invocation separate; add signature/revocation metadata first, then design OAuth execution only with a concrete client need. | Security/product owner decides whether Synveda ever proxies execution and which signature authorities are trusted. |
+| Vulnerability and incident response | Not ready | P1 | `docs/SECURITY.md` is an implementation boundary and adversarial inventory, not a vulnerability-reporting policy or incident runbook (`docs/SECURITY.md:1-6`). | Security gates and audit chain | No published reporting channel/SLA, severity/triage process, credential-compromise playbook, customer notification process or practiced incident exercise. | A report has a private intake, owner, SLA and disclosure policy; a tabletop rotates signing/KEK/provider credentials, preserves evidence and produces customer-safe communication. | Add root `SECURITY.md` policy plus concise incident/credential-compromise runbooks linked to release and operations evidence. | Legal/security owner supplies contact, disclosure SLA and notification obligations. |
 
 ## Observability and supportability
 
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |
 |---|---|---|---|---|---|---|---|---|
-| Traces, metrics, logs and sensitive-content defaults | Conditional | P1 | The telemetry module installs OTLP tracing and Prometheus (`crates/synveda-gateway/src/telemetry.rs:212-280,292-336`) and describes PDP, Capture, audit and key signals (`crates/synveda-gateway/src/telemetry.rs:363-382,412-452,485-506`); planner metrics are emitted by the context API (`crates/synveda-gateway/src/context_api.rs:74-81,1897-2019`). Security tests pin content-minimised audit and adapter redaction (`docs/SECURITY.md:65-103`). The worker metrics listener is loopback-private. | `/metrics`; OTel exporter; observability and redaction tests | The unauthenticated gateway `/metrics` route shares its main listener and is exposed by current Compose host publishing and Helm ingress. Transitional Compose also publishes the Jaeger UI and OTLP receivers on host interfaces. There is no production Collector/retention profile, log schema/version contract, end-to-end dropped-telemetry alarm or documented sensitive-field allowlist for support export. | A production-shaped outage/error can be traced gateway-to-store/provider without payloads; application metrics leave only through a private Collector; telemetry loss is alerted; a fixture scan proves secrets/session/Knowledge bodies absent from default exports. | Remove the gateway scrape route and transitional telemetry host ports while shipping the private Collector/dashboard profile and a machine-checked telemetry field policy; add release markers. | Owner chooses telemetry backend, region and retention. |
+| Traces, metrics, logs and sensitive-content defaults | Conditional | P1 | The telemetry module installs OTLP tracing and Prometheus (`crates/synveda-gateway/src/telemetry.rs:212-280,292-336`) and describes PDP, Capture, audit and key signals (`crates/synveda-gateway/src/telemetry.rs:363-382,412-452,485-506`); planner metrics are emitted by the context API (`crates/synveda-gateway/src/context_api.rs:74-81,1897-2019`). Security tests pin content-minimised audit and adapter redaction (`docs/SECURITY.md:218-243`). The worker metrics listener is loopback-private. | `/metrics`; OTel exporter; observability and redaction tests | The unauthenticated gateway `/metrics` route shares its main listener. Canonical Caddy returns 404 for it; the legacy contributor direct gateway port and transitional Helm ingress can still expose it. The legacy contributor stack also publishes Jaeger UI and OTLP receivers. There is no production Collector/retention profile, log schema/version contract, end-to-end dropped-telemetry alarm or documented sensitive-field allowlist for support export. | A production-shaped outage/error can be traced gateway-to-store/provider without payloads; application metrics leave only through a private Collector; telemetry loss is alerted; a fixture scan proves secrets/session/Knowledge bodies absent from default exports. | Remove the legacy gateway scrape route and telemetry host ports while shipping the private Collector/dashboard profile and a machine-checked telemetry field policy; add release markers. | Owner chooses telemetry backend, region and retention. |
 | SLOs, alerts, usage, quota and cost | Not ready | P1 | Request latency and context-token histograms exist (`crates/synveda-gateway/src/telemetry.rs:18-32,292-327`); eval reports p50/p95 and tokens (`crates/synveda-eval/src/report.rs:590-610`). | Eval baselines; raw Prometheus metrics | No availability/error-budget SLOs, alert thresholds, queue-age/index-lag/provider-health alerts, per-tenant usage/quota model or cardinality-reviewed cost dashboard. | Published SLOs have recording/alert rules and synthetic checks; per-tenant usage is aggregatable without tenant/principal labels on hot metrics; alerts link to runbooks and release markers. | Define a small SLI set: availability, context latency/error, ingest lag, capture retry age, index lag and restore age; emit bounded internal tenant accounting separately. | Product/operations owners set SLOs, budget semantics and on-call. |
 | Customer and internal operations UX | Not ready | P1 | The console exposes product views for Sessions, Context, Knowledge, Skills and Tools, but there is no current customer operations overview or internal SaaS operator plane. Existing `/metrics` is an infrastructure endpoint, not a tenant-safe monitoring product. | Console tests; domain APIs; Prometheus | Customers cannot distinguish live/failed sessions, context efficiency, Knowledge health, registry drift or quota state in one place; operators lack tenant/region, queue, DB/index, backup, release and incident views. | Customer views disclose only authorised aggregates and show loading/partial/stale/degraded states; internal views show regional/version/queue/DB/provider/backup health with audited support access. | First expose bounded aggregate health APIs and shared status primitives; build customer Overview before any internal support console. | Decide SaaS region model, cost source and support-access authority. |
 | Runbooks, release markers and support workflow | Not ready | P1 | Install and security limits are documented, but backup/restore, rollback, incident, provider-outage and audited support workflows remain absent or open. | None as an exercised operations suite | No owned runbook index, drill cadence, release marker in telemetry or support escalation workflow. | Every P0/P1 alert links to a tested runbook; deploy emits version/schema/config markers; quarterly exercises record restore, provider outage, key loss and rollback evidence. | Add a concise operations index after the corresponding mechanisms exist; exercise through disposable environments. | Assign service owner, on-call, support tiers and drill cadence. |
