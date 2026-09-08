@@ -27,6 +27,7 @@ const PROJECT_LOCK = join(ROOT, "deploy/compose/scripts/project-lock.sh");
 const SECRET_GENERATOR = join(ROOT, "deploy/compose/scripts/generate-secrets.sh");
 const ISSUER_GENERATOR = join(ROOT, "deploy/compose/scripts/generate-issuer.sh");
 const DIGEST = `sha256:${"1".repeat(64)}`;
+const CANDIDATE_DIGEST = `sha256:${"2".repeat(64)}`;
 const HOST_TRUST_CONTROLS = [
   "NODE_OPTIONS",
   "NODE_EXTRA_CA_CERTS",
@@ -255,8 +256,36 @@ fake_restart_identity() {
       fi
       ;;
   esac
-  printf '%064d\n' 0
+  case "$restart_identity_service" in
+    gateway) printf '%064d\n' 0 ;;
+    worker) printf '%064d\n' 4 ;;
+    postgres) printf '%064d\n' 5 ;;
+    keycloak) printf '%064d\n' 6 ;;
+    otel-collector) printf '%064d\n' 7 ;;
+    proxy) printf '%064d\n' 8 ;;
+    *) exit 98 ;;
+  esac
 }
+fake_product_image_id() {
+  fake_image_reference=$1
+  if [ "\${SYNVEDA_FAKE_SAME_PRODUCT_IMAGE_ID:-0}" = 1 ] ||
+    [ "$fake_image_reference" = "\${SYNVEDA_FAKE_STARTING_PRODUCT_IMAGE:-}" ]; then
+    printf 'sha256:%064d\n' 3
+  elif [ "$fake_image_reference" = "\${SYNVEDA_FAKE_CANDIDATE_PRODUCT_IMAGE:-}" ]; then
+    printf 'sha256:%064d\n' 4
+  else
+    exit 98
+  fi
+}
+if [ "$1" = image ] && [ "$2" = inspect ]; then
+  fake_product_image_id "$5"
+  exit 0
+fi
+if [ "$1" = image ] && [ "$2" = pull ]; then
+  [ "\${SYNVEDA_FAKE_UPGRADE_PULL_FAIL:-0}" = 0 ] || exit 52
+  [ "$3" = "\${SYNVEDA_FAKE_CANDIDATE_PRODUCT_IMAGE:-}" ] || exit 98
+  exit 0
+fi
 case " $* " in
   *" ps "*" --quiet "*" browser-acceptance "*)
     case "\${SYNVEDA_FAKE_BROWSER_ID_MODE:-exact}" in
@@ -274,6 +303,28 @@ case " $* " in
   *" ps "*" --quiet "*" worker "*) fake_restart_identity worker; exit 0 ;;
   *" ps "*" --quiet "*" proxy "*) fake_restart_identity proxy; exit 0 ;;
 esac
+if [ "$1" = container ] && [ "$2" = inspect ]; then
+  case "$5" in
+    0000000000000000000000000000000000000000000000000000000000000000)
+      fake_upgrade_service=gateway
+      ;;
+    0000000000000000000000000000000000000000000000000000000000000004)
+      fake_upgrade_service=worker
+      ;;
+    *) exit 98 ;;
+  esac
+  fake_upgrade_reference=$SYNVEDA_PRODUCT_IMAGE
+  fake_upgrade_id=$(fake_product_image_id "$fake_upgrade_reference")
+  case "\${SYNVEDA_FAKE_UPGRADE_RUNTIME_MODE:-valid}" in
+    valid) ;;
+    wrong-reference) fake_upgrade_reference=registry.invalid/product@${DIGEST} ;;
+    wrong-id) fake_upgrade_id=sha256:$(printf '%064d' 9) ;;
+    *) exit 98 ;;
+  esac
+  printf '%s|%s|%s|%s|%s|False\n' "$5" "$fake_upgrade_id" \
+    "$fake_upgrade_reference" "$SYNVEDA_FAKE_PROJECT" "$fake_upgrade_service"
+  exit 0
+fi
 if [ "$1" = container ] && [ "$2" = wait ]; then
   [ "\${SYNVEDA_FAKE_BROWSER_WAIT_ERROR:-0}" = 0 ] || exit 44
   printf '%s\n' "\${SYNVEDA_FAKE_BROWSER_EXIT:-0}"
@@ -300,9 +351,20 @@ case " $* " in
         ;;
       *" product-demo.mjs verify "*)
         [ "\${SYNVEDA_FAKE_PRODUCT_VERIFY_FAIL:-0}" = 0 ] || exit 49
+        upgrade_transition_count=$(grep -c \
+          ' <up> <--no-build> <--pull> <never> <--detach> <--wait> .* <gateway> <worker>' \
+          "$SYNVEDA_FAKE_CALL_LOG" || true)
+        if [ -n "\${SYNVEDA_FAKE_UPGRADE_VERIFY_FAIL_AT:-}" ] &&
+          [ "$SYNVEDA_FAKE_UPGRADE_VERIFY_FAIL_AT" = "$upgrade_transition_count" ]; then
+          exit 49
+        fi
         ;;
       *) exit 64 ;;
     esac
+    ;;
+  *" run --rm --no-deps --no-TTY --pull never migrate migration-check "*)
+    printf 'compatibility-image <%s>\n' "$SYNVEDA_PRODUCT_IMAGE" >> "$SYNVEDA_FAKE_CALL_LOG"
+    [ "\${SYNVEDA_FAKE_UPGRADE_COMPATIBILITY_FAIL:-0}" = 0 ] || exit 50
     ;;
 esac
 volume_key=postgres-data
@@ -390,6 +452,20 @@ case " $* " in
     case " $* " in
       *" --no-deps --force-recreate browser-acceptance "*)
         [ "\${SYNVEDA_FAKE_BROWSER_UP_FAIL:-0}" = 0 ] || exit 43
+        ;;
+    esac
+    case " $* " in
+      *" --pull never "*" --force-recreate gateway worker "*)
+        printf 'product-image <%s>\n' "$SYNVEDA_PRODUCT_IMAGE" >> "$SYNVEDA_FAKE_CALL_LOG"
+        upgrade_transition_count=$(grep -c \
+          ' <up> <--no-build> <--pull> <never> <--detach> <--wait> .* <gateway> <worker>' \
+          "$SYNVEDA_FAKE_CALL_LOG" || true)
+        [ "\${SYNVEDA_FAKE_UPGRADE_UP_FAIL_AT:-0}" != "$upgrade_transition_count" ] || \
+          exit 51
+        case "\${SYNVEDA_FAKE_UPGRADE_UP_FAIL_FROM:-0}" in
+          0) ;;
+          *) [ "$upgrade_transition_count" -lt "$SYNVEDA_FAKE_UPGRADE_UP_FAIL_FROM" ] || exit 51 ;;
+        esac
         ;;
     esac
     if [ "\${SYNVEDA_FAKE_BLOCK_UP:-0}" = 1 ]; then
@@ -680,6 +756,18 @@ function prepareReferenceFixture(state) {
   writeFileSync(join(state.secrets, "tls_key"), tls.privateKey, { mode: 0o600 });
   chmodSync(join(state.secrets, "tls_cert"), 0o600);
   chmodSync(join(state.secrets, "tls_key"), 0o600);
+}
+
+function upgradeEnvironment() {
+  const starting = `registry.lifecycle.example/synveda/product-starting@${DIGEST}`;
+  const candidate = `registry.lifecycle.example/synveda/product-candidate@${CANDIDATE_DIGEST}`;
+  return {
+    SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+    SYNVEDA_PRODUCT_STARTING_IMAGE: starting,
+    SYNVEDA_PRODUCT_IMAGE: candidate,
+    SYNVEDA_FAKE_STARTING_PRODUCT_IMAGE: starting,
+    SYNVEDA_FAKE_CANDIDATE_PRODUCT_IMAGE: candidate,
+  };
 }
 
 function prepareExternalPostgresFixture(state) {
@@ -2829,6 +2917,153 @@ test("gateway restart is locked, health-gated, and smoke-checked on both sides",
     assert.doesNotMatch(calls, /<restart>[^\n]*<900>/);
     assert.doesNotMatch(calls, /<restart>[^\n]*<(postgres|keycloak|worker|proxy|otel-collector)>/);
   } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("reference upgrade smoke checks and leaves starting to candidate to starting to candidate", () => {
+  const state = fixture("reference");
+  prepareReferenceFixture(state);
+  const upgrade = upgradeEnvironment();
+  try {
+    const result = run(state, "upgrade-smoke", upgrade);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /same-schema product upgrade smoke passed/);
+    assert.match(result.stdout, /candidate gateway and worker remain running/);
+
+    const calls = readFileSync(state.log, "utf8");
+    assert.equal(
+      (calls.match(/<image> <pull>/g) ?? []).length,
+      1,
+      calls,
+    );
+    assert.match(
+      calls,
+      new RegExp(`compatibility-image <${upgrade.SYNVEDA_PRODUCT_IMAGE}>`),
+    );
+    assert.equal((calls.match(/<migration-check>/g) ?? []).length, 1, calls);
+    const transitions = [...calls.matchAll(/^product-image <([^>]+)>$/gm)].map(
+      (match) => match[1],
+    );
+    assert.deepEqual(transitions, [
+      upgrade.SYNVEDA_PRODUCT_IMAGE,
+      upgrade.SYNVEDA_PRODUCT_STARTING_IMAGE,
+      upgrade.SYNVEDA_PRODUCT_IMAGE,
+    ]);
+    assert.equal((calls.match(/<product-demo\.mjs> <verify>/g) ?? []).length, 4, calls);
+    assert.equal(
+      (calls.match(/<--force-recreate> <browser-acceptance>/g) ?? []).length,
+      4,
+      calls,
+    );
+    assert.equal(
+      (calls.match(
+        /<up> <--no-build> <--pull> <never> <--detach> <--wait> <--wait-timeout> <3600> <--no-deps> <--force-recreate> <gateway> <worker>/g,
+      ) ?? []).length,
+      3,
+      calls,
+    );
+    assert.doesNotMatch(calls, / <restart>| <down>|<volume> <rm>/);
+    assert.doesNotMatch(
+      calls,
+      /<--force-recreate> <(?:postgres|keycloak|otel-collector|proxy|migrate|tenant-convergence)>/,
+    );
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("upgrade compatibility refusal leaves the starting product and releases the lock", () => {
+  const state = fixture("reference");
+  prepareReferenceFixture(state);
+  const upgrade = upgradeEnvironment();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  try {
+    const refused = run(state, "upgrade-smoke", {
+      ...upgrade,
+      SYNVEDA_FAKE_UPGRADE_COMPATIBILITY_FAIL: "1",
+    });
+    assert.equal(refused.status, 50, refused.stderr);
+    assert.equal(existsSync(lockFile), false);
+    const calls = readFileSync(state.log, "utf8");
+    assert.equal((calls.match(/compatibility-image/g) ?? []).length, 1, calls);
+    assert.doesNotMatch(calls, /^product-image/m);
+    assert.doesNotMatch(calls, /<force-recreate> <gateway> <worker>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("upgrade smoke refuses two digest references resolving to one image before transition", () => {
+  const state = fixture("reference");
+  prepareReferenceFixture(state);
+  const upgrade = upgradeEnvironment();
+  try {
+    const refused = run(state, "upgrade-smoke", {
+      ...upgrade,
+      SYNVEDA_FAKE_SAME_PRODUCT_IMAGE_ID: "1",
+    });
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.match(refused.stderr, /resolve to one image/);
+    const calls = readFileSync(state.log, "utf8");
+    assert.doesNotMatch(calls, /<migration-check>|^product-image/m);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("a failed rollback transition restores the last verified candidate", () => {
+  const state = fixture("reference");
+  prepareReferenceFixture(state);
+  const upgrade = upgradeEnvironment();
+  try {
+    const failed = run(state, "upgrade-smoke", {
+      ...upgrade,
+      SYNVEDA_FAKE_UPGRADE_UP_FAIL_AT: "2",
+    });
+    assert.equal(failed.status, 51, failed.stderr);
+    assert.match(failed.stderr, /restored the last verified product image/);
+    const transitions = [
+      ...readFileSync(state.log, "utf8").matchAll(/^product-image <([^>]+)>$/gm),
+    ].map((match) => match[1]);
+    assert.deepEqual(transitions, [
+      upgrade.SYNVEDA_PRODUCT_IMAGE,
+      upgrade.SYNVEDA_PRODUCT_STARTING_IMAGE,
+      upgrade.SYNVEDA_PRODUCT_IMAGE,
+    ]);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("failed upgrade recovery retains the exact project lock", () => {
+  const state = fixture("reference");
+  prepareReferenceFixture(state);
+  const upgrade = upgradeEnvironment();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  let marker;
+  try {
+    const failed = run(state, "upgrade-smoke", {
+      ...upgrade,
+      SYNVEDA_FAKE_UPGRADE_UP_FAIL_FROM: "1",
+    });
+    assert.equal(failed.status, 51, failed.stderr);
+    assert.match(failed.stderr, /recovery to the last verified product image failed/);
+    assert.match(failed.stderr, /Docker mutation state is uncertain/);
+    marker = readFileSync(lockFile, "utf8");
+    assert.equal(marker, `${state.project}:${failed.pid}\n`);
+  } finally {
+    if (marker !== undefined && existsSync(lockFile) && readFileSync(lockFile, "utf8") === marker) {
+      rmSync(lockFile);
+    }
     rmSync(state.scratch, { recursive: true, force: true });
   }
 });

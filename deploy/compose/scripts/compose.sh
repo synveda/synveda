@@ -8,13 +8,13 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|backup|restore-smoke|smoke|restart-gateway|down|reset}" >&2
+    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|backup|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset}" >&2
     exit 64
 }
 
 action=${1:-}
 case "$action" in
-    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|backup|restore-smoke|smoke|restart-gateway|down|reset) ;;
+    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|backup|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset) ;;
     *) usage ;;
 esac
 shift
@@ -64,7 +64,7 @@ browser_acceptance_profile=false
 observability_profile=false
 lifecycle_default_timeout=900
 if [ "$action" = acceptance ] || [ "$action" = backup ] || \
-    [ "$action" = restore-smoke ]; then
+    [ "$action" = restore-smoke ] || [ "$action" = upgrade-smoke ]; then
     lifecycle_default_timeout=3600
 fi
 lifecycle_timeout=${SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS:-$lifecycle_default_timeout}
@@ -99,7 +99,8 @@ if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_EXTRA_CA_CERTS+x}" = x ] || \
 fi
 case "$runtime:$action:$ambient_node_trust" in
     reference:config:true|reference:up:true|reference:acceptance:true|reference:smoke:true|\
-    reference:backup:true|reference:restore-smoke:true|reference:restart-gateway:true)
+    reference:backup:true|reference:restore-smoke:true|reference:upgrade-smoke:true|\
+    reference:restart-gateway:true)
         echo "compose: ambient host trust configuration is not accepted for reference evidence" >&2
         exit 78
         ;;
@@ -484,7 +485,7 @@ if [ "$browser_acceptance_profile" = true ]; then
         exit 64
     }
     case "$action" in
-        config|up|acceptance|backup|restore-smoke|smoke|down|reset) ;;
+        config|up|acceptance|backup|restore-smoke|upgrade-smoke|smoke|down|reset) ;;
         *)
             echo "compose: browser acceptance is unavailable for this lifecycle action" >&2
             exit 64
@@ -498,6 +499,21 @@ fi
 if [ "$action" = restore-smoke ] && [ "$browser_acceptance_profile" != true ]; then
     echo "compose: restore smoke requires exactly the demo,browser-acceptance profiles" >&2
     exit 64
+fi
+if [ "$action" = upgrade-smoke ]; then
+    [ "$runtime" = reference ] || {
+        echo "compose: upgrade smoke is restricted to the reference runtime" >&2
+        exit 64
+    }
+    [ "$postgres_mode" = bundled ] && [ "$oidc_mode" = bundled ] || {
+        echo "compose: upgrade smoke requires bundled PostgreSQL and bundled OIDC" >&2
+        exit 64
+    }
+    [ "$browser_acceptance_profile" = true ] && [ "$profile_count" -eq 2 ] && \
+        [ "$demo_profile" = true ] || {
+        echo "compose: upgrade smoke requires exactly the demo,browser-acceptance profiles" >&2
+        exit 64
+    }
 fi
 if { [ "$action" = acceptance ] || [ "$action" = restore-smoke ] || \
     [ "$action" = reset ]; } && [ "$postgres_mode" = external ]; then
@@ -670,7 +686,7 @@ if [ "$browser_acceptance_profile" = true ]; then
 fi
 
 case "$action" in
-    up|acceptance|backup|restore-smoke|down|smoke|restart-gateway|reset)
+    up|acceptance|backup|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset)
         # Hold one exact-project exclusion across authority-file generation and
         # every Docker mutation. Child generators verify and borrow this lock.
         # shellcheck source=deploy/compose/scripts/project-lock.sh
@@ -1118,10 +1134,10 @@ if [ "$action" = resolver-check ]; then
     exit 0
 fi
 case "$action" in
-    up|acceptance|backup|smoke|restart-gateway) run_hosts_ownership_preflight ;;
+    up|acceptance|backup|upgrade-smoke|smoke|restart-gateway) run_hosts_ownership_preflight ;;
 esac
 case "$action" in
-    up|acceptance|backup|restore-smoke|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
+    up|acceptance|backup|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
 esac
 
 compose_ipv4_pool_set=${SYNVEDA_COMPOSE_IPV4_POOL+x}
@@ -1609,7 +1625,7 @@ if [ "$runtime" = reference ]; then
     require_private_file "$secret_dir/tls_cert" tls_cert
     require_private_file "$secret_dir/tls_key" tls_key
     case "$action" in
-        config|up|acceptance|backup|restore-smoke|smoke|restart-gateway)
+        config|up|acceptance|backup|restore-smoke|upgrade-smoke|smoke|restart-gateway)
             set_remaining_lifecycle_seconds
             set -- "$script_dir/check-tls-inputs.mjs" \
                 --cert-file "$secret_dir/tls_cert" \
@@ -1843,6 +1859,16 @@ else
 fi
 
 product_image=${SYNVEDA_PRODUCT_IMAGE:-synveda/product:dev}
+candidate_product_image=
+starting_product_image_set=${SYNVEDA_PRODUCT_STARTING_IMAGE+x}
+if [ "$action" = upgrade-smoke ]; then
+    candidate_product_image=$product_image
+    starting_product_image=${SYNVEDA_PRODUCT_STARTING_IMAGE:-}
+    product_image=$starting_product_image
+elif [ -n "${starting_product_image_set:-}" ]; then
+    echo "compose: SYNVEDA_PRODUCT_STARTING_IMAGE is accepted only for upgrade smoke" >&2
+    exit 64
+fi
 postgres_image=${SYNVEDA_POSTGRES_IMAGE:-synveda/postgres:17.11-dev}
 keycloak_image=${SYNVEDA_KEYCLOAK_IMAGE:-synveda/keycloak:26.7.2-dev}
 caddy_image=${SYNVEDA_CADDY_IMAGE:-synveda/proxy:2.11.4-dev}
@@ -1873,6 +1899,16 @@ for image_reference in "$product_image" "$postgres_image" "$keycloak_image" \
         exit 64
     }
 done
+if [ "$action" = upgrade-smoke ]; then
+    valid_image_reference "$candidate_product_image" || {
+        echo "compose: candidate product image must use the closed OCI reference character set" >&2
+        exit 64
+    }
+    [ "$candidate_product_image" != "$product_image" ] || {
+        echo "compose: starting and candidate product image references must differ" >&2
+        exit 64
+    }
+fi
 if [ "$observability_profile" = true ]; then
     valid_image_reference "$prometheus_image" || {
         echo "compose: Prometheus image must use the closed OCI reference character set" >&2
@@ -1902,6 +1938,12 @@ if [ "$runtime" = reference ]; then
         echo "compose: reference product image must use an OCI sha256 digest" >&2
         exit 64
     }
+    if [ "$action" = upgrade-smoke ]; then
+        digest_image "$candidate_product_image" || {
+            echo "compose: candidate product image must use an OCI sha256 digest" >&2
+            exit 64
+        }
+    fi
     if [ "$postgres_mode" = bundled ] || [ "$oidc_mode" = bundled ]; then
         digest_image "$postgres_image" || {
             echo "compose: reference PostgreSQL server/client image must use an OCI sha256 digest" >&2
@@ -2188,11 +2230,20 @@ for profile in $profiles; do
 done
 IFS=$old_ifs
 
-prepare_asset_contract() {
-    asset_config_file=$(mktemp "$lifecycle_temp_root/synveda-compose-assets.XXXXXX") || exit 70
-    chmod 600 "$asset_config_file"
+render_asset_contract() {
+    if [ -z "$asset_config_file" ]; then
+        asset_config_file=$(mktemp "$lifecycle_temp_root/synveda-compose-assets.XXXXXX") || \
+            return 70
+        chmod 600 "$asset_config_file" || return 70
+    else
+        : > "$asset_config_file" || return 70
+    fi
     run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
         config --format json > "$asset_config_file"
+}
+
+prepare_asset_contract() {
+    render_asset_contract "$@"
     if [ "$initial_asset_state" = absent ]; then
         prove_assets_absent
     else
@@ -2259,9 +2310,15 @@ prepare_local_build_boundary() {
 }
 
 run_runtime_smoke() {
-    status_file=$(mktemp "$lifecycle_temp_root/synveda-compose-status.XXXXXX") || exit 70
+    status_file=$(mktemp "$lifecycle_temp_root/synveda-compose-status.XXXXXX") || return 70
+    runtime_smoke_status=0
     run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-        ps --all --format json > "$status_file"
+        ps --all --format json > "$status_file" || runtime_smoke_status=$?
+    if [ "$runtime_smoke_status" -ne 0 ]; then
+        rm -f -- "$status_file" 2>/dev/null || true
+        status_file=
+        return "$runtime_smoke_status"
+    fi
     set -- "$script_dir/check-runtime-smoke.mjs" \
         --status-file "$status_file" --runtime "$runtime" \
         --postgres "$postgres_mode" --oidc "$oidc_mode" \
@@ -2271,9 +2328,12 @@ run_runtime_smoke() {
     if [ "$observability_profile" = true ]; then
         set -- "$@" --prometheus-url "http://127.0.0.1:$prometheus_port"
     fi
-    run_bounded "$lifecycle_timeout" "$node_runner" "$@"
-    rm -f -- "$status_file"
+    run_bounded "$lifecycle_timeout" "$node_runner" "$@" || runtime_smoke_status=$?
+    if ! rm -f -- "$status_file"; then
+        [ "$runtime_smoke_status" -ne 0 ] || runtime_smoke_status=70
+    fi
     status_file=
+    return "$runtime_smoke_status"
 }
 
 wait_for_browser_acceptance() {
@@ -2441,8 +2501,11 @@ restart_selected_service() {
 rerun_browser_acceptance() {
     docker_mutation_uncertain=true
     docker_mutation_phase=compose-browser-recheck
+    browser_acceptance_status=0
     run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-        up --no-build --detach --no-deps --force-recreate browser-acceptance
+        up --no-build --detach --no-deps --force-recreate browser-acceptance || \
+        browser_acceptance_status=$?
+    [ "$browser_acceptance_status" -eq 0 ] || return "$browser_acceptance_status"
     browser_acceptance_status=0
     wait_for_browser_acceptance "$@" || browser_acceptance_status=$?
     case "$browser_acceptance_status" in
@@ -2450,13 +2513,13 @@ rerun_browser_acceptance() {
         78)
             docker_mutation_uncertain=false
             docker_mutation_phase=
-            exit 78
+            return 78
             ;;
-        *) exit "$browser_acceptance_status" ;;
+        *) return "$browser_acceptance_status" ;;
     esac
-    prove_assets_converged
-    run_resolver_preflight
-    run_runtime_smoke "$@"
+    prove_assets_converged || return $?
+    run_resolver_preflight || return $?
+    run_runtime_smoke "$@" || return $?
     docker_mutation_uncertain=false
     docker_mutation_phase=
 }
@@ -2472,15 +2535,215 @@ run_product_acceptance() {
         "$product_acceptance_phase" || product_acceptance_status=$?
     case "$product_acceptance_status" in
         0) ;;
-        124|125) exit "$product_acceptance_status" ;;
+        124|125) return "$product_acceptance_status" ;;
         *)
             docker_mutation_uncertain=false
             docker_mutation_phase=
-            exit "$product_acceptance_status"
+            return "$product_acceptance_status"
             ;;
     esac
     docker_mutation_uncertain=false
     docker_mutation_phase=
+}
+
+resolve_product_image_id() {
+    resolved_product_image_id=
+    image_reference_to_resolve=$1
+    capture_bounded_output 60 "$docker_bin" image inspect \
+        --format '{{.Id}}' "$image_reference_to_resolve" || return $?
+    resolved_product_image_id=$bounded_output
+    case "$resolved_product_image_id" in
+        sha256:????????????????????????????????????????????????????????????????) ;;
+        *)
+            echo "compose: product image identity was malformed" >&2
+            return 78
+            ;;
+    esac
+    case "${resolved_product_image_id#sha256:}" in
+        *[!0-9a-f]*)
+            echo "compose: product image identity was malformed" >&2
+            return 78
+            ;;
+    esac
+}
+
+verify_upgrade_service_image() {
+    upgrade_service=$1
+    expected_image_reference=$2
+    expected_image_id=$3
+    shift 3
+    capture_bounded_output 30 "$docker_bin" "$@" \
+        ps --all --quiet --no-trunc "$upgrade_service" || return $?
+    upgrade_container_id=$bounded_output
+    case "$upgrade_container_id" in
+        ????????????????????????????????????????????????????????????????) ;;
+        *)
+            echo "compose: exact $upgrade_service container identity was refused" >&2
+            return 78
+            ;;
+    esac
+    case "$upgrade_container_id" in
+        *[!0-9a-f]*)
+            echo "compose: exact $upgrade_service container identity was refused" >&2
+            return 78
+            ;;
+    esac
+    capture_bounded_output 30 "$docker_bin" container inspect --format \
+        '{{.Id}}|{{.Image}}|{{.Config.Image}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.oneoff"}}' \
+        "$upgrade_container_id" || return $?
+    expected_upgrade_identity="$upgrade_container_id|$expected_image_id|$expected_image_reference|$project|$upgrade_service|False"
+    [ "$bounded_output" = "$expected_upgrade_identity" ] || {
+        echo "compose: exact $upgrade_service runtime image identity was refused" >&2
+        return 78
+    }
+}
+
+verify_upgrade_product_images() {
+    expected_image_reference=$1
+    expected_image_id=$2
+    shift 2
+    verify_upgrade_service_image gateway "$expected_image_reference" \
+        "$expected_image_id" "$@" || return $?
+    verify_upgrade_service_image worker "$expected_image_reference" \
+        "$expected_image_id" "$@"
+}
+
+prove_no_project_oneoffs() {
+    capture_bounded_output 30 "$docker_bin" container ls --all --quiet \
+        --filter "label=com.docker.compose.project=$project" \
+        --filter 'label=com.docker.compose.oneoff=True' || return $?
+    [ -z "$bounded_output" ] || {
+        echo "compose: an upgrade compatibility one-shot remains" >&2
+        return 78
+    }
+}
+
+select_upgrade_product_image() {
+    product_image=$1
+    SYNVEDA_PRODUCT_IMAGE=$product_image
+    export SYNVEDA_PRODUCT_IMAGE
+    shift
+    render_asset_contract "$@"
+}
+
+verify_upgrade_checkpoint() {
+    checkpoint_image_reference=$1
+    checkpoint_image_id=$2
+    shift 2
+    prove_assets_converged || return $?
+    verify_upgrade_product_images "$checkpoint_image_reference" \
+        "$checkpoint_image_id" "$@" || return $?
+    run_resolver_preflight || return $?
+    run_runtime_smoke "$@" || return $?
+    rerun_browser_acceptance "$@" || return $?
+    docker_mutation_uncertain=true
+    docker_mutation_phase=$upgrade_checkpoint_phase
+    run_product_acceptance verify "$@"
+}
+
+transition_upgrade_product_image() {
+    transition_image_reference=$1
+    transition_image_id=$2
+    transition_name=$3
+    shift 3
+    previous_image_reference=$last_verified_product_image
+    previous_image_id=$last_verified_product_image_id
+
+    select_upgrade_product_image "$transition_image_reference" "$@" || return $?
+    docker_mutation_uncertain=true
+    docker_mutation_phase=compose-upgrade-$transition_name
+    transition_status=0
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --pull never --detach --wait \
+        --wait-timeout "$lifecycle_timeout" --no-deps --force-recreate \
+        gateway worker || transition_status=$?
+    if [ "$transition_status" -eq 0 ]; then
+        upgrade_checkpoint_phase=compose-upgrade-$transition_name-checkpoint
+        verify_upgrade_checkpoint "$transition_image_reference" \
+            "$transition_image_id" "$@" || transition_status=$?
+    fi
+    if [ "$transition_status" -eq 0 ]; then
+        last_verified_product_image=$transition_image_reference
+        last_verified_product_image_id=$transition_image_id
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+        return 0
+    fi
+    case "$transition_status" in
+        124|125) return "$transition_status" ;;
+    esac
+
+    echo "compose: $transition_name failed; restoring the last verified product image" >&2
+    docker_mutation_uncertain=true
+    docker_mutation_phase=compose-upgrade-$transition_name-recovery
+    recovery_status=0
+    select_upgrade_product_image "$previous_image_reference" "$@" || recovery_status=$?
+    if [ "$recovery_status" -eq 0 ]; then
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+            up --no-build --pull never --detach --wait \
+            --wait-timeout "$lifecycle_timeout" --no-deps --force-recreate \
+            gateway worker || recovery_status=$?
+    fi
+    if [ "$recovery_status" -eq 0 ]; then
+        upgrade_checkpoint_phase=compose-upgrade-$transition_name-recovery-checkpoint
+        verify_upgrade_checkpoint "$previous_image_reference" \
+            "$previous_image_id" "$@" || recovery_status=$?
+    fi
+    if [ "$recovery_status" -eq 0 ]; then
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+        echo "compose: restored the last verified product image after $transition_name failure" >&2
+        return "$transition_status"
+    fi
+    echo "compose: recovery to the last verified product image failed" >&2
+    return "$transition_status"
+}
+
+run_upgrade_smoke() {
+    prepare_asset_contract "$@"
+    resolve_product_image_id "$starting_product_image" || return $?
+    starting_product_image_id=$resolved_product_image_id
+    last_verified_product_image=$starting_product_image
+    last_verified_product_image_id=$starting_product_image_id
+    upgrade_checkpoint_phase=compose-upgrade-starting-checkpoint
+    verify_upgrade_checkpoint "$starting_product_image" \
+        "$starting_product_image_id" "$@" || return $?
+
+    run_bounded "$lifecycle_timeout" "$docker_bin" image pull \
+        "$candidate_product_image" || return $?
+    resolve_product_image_id "$candidate_product_image" || return $?
+    candidate_product_image_id=$resolved_product_image_id
+    [ "$candidate_product_image_id" != "$starting_product_image_id" ] || {
+        echo "compose: starting and candidate product references resolve to one image" >&2
+        return 78
+    }
+
+    select_upgrade_product_image "$candidate_product_image" "$@" || return $?
+    docker_mutation_uncertain=true
+    docker_mutation_phase=compose-upgrade-compatibility-check
+    compatibility_status=0
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        run --rm --no-deps --no-TTY --pull never migrate migration-check || \
+        compatibility_status=$?
+    case "$compatibility_status" in
+        124|125) return "$compatibility_status" ;;
+    esac
+    prove_no_project_oneoffs || return $?
+    docker_mutation_uncertain=false
+    docker_mutation_phase=
+    if [ "$compatibility_status" -ne 0 ]; then
+        select_upgrade_product_image "$starting_product_image" "$@" || return $?
+        verify_upgrade_product_images "$starting_product_image" \
+            "$starting_product_image_id" "$@" || return $?
+        return "$compatibility_status"
+    fi
+
+    transition_upgrade_product_image "$candidate_product_image" \
+        "$candidate_product_image_id" candidate-first "$@" || return $?
+    transition_upgrade_product_image "$starting_product_image" \
+        "$starting_product_image_id" starting-rollback "$@" || return $?
+    transition_upgrade_product_image "$candidate_product_image" \
+        "$candidate_product_image_id" candidate-final "$@"
 }
 
 volume_format='{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}|{{index .Labels "com.synveda.contract"}}|{{index .Labels "com.synveda.volume"}}'
@@ -2845,6 +3108,11 @@ case "$action" in
         run_restore_smoke "$@"
         echo "canonical Compose restore smoke passed for $project from $recovery_source_project/$backup_id"
         echo "restored services remain private and running for inspection"
+        ;;
+    upgrade-smoke)
+        run_upgrade_smoke "$@"
+        echo "canonical Compose same-schema product upgrade smoke passed for $project"
+        echo "candidate gateway and worker remain running; providers and volumes were not transitioned"
         ;;
     down)
         run_docker_preflight

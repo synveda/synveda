@@ -433,7 +433,10 @@ test("the one-shot image and driver forbid capture and TLS bypass surfaces", () 
     "utf8",
   );
   assert.match(referenceDriver, /case "\$\{1:-acceptance\}" in/);
-  assert.match(referenceDriver, /acceptance\|backup\|restore-smoke\)/);
+  assert.match(
+    referenceDriver,
+    /acceptance\|backup\|restore-smoke\|upgrade-smoke\)/,
+  );
   assert.match(
     referenceDriver,
     /exec "\$\(dirname "\$0"\)\/\.\.\/deploy\/compose\/scripts\/compose\.sh" "\$action"/,

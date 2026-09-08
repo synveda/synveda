@@ -482,7 +482,7 @@ export function composeBuildBoundaryFindings(source) {
   }
   const noBuildUps = source.match(/\bup --no-build\b/g) ?? [];
   if (
-    noBuildUps.length !== 13 ||
+    noBuildUps.length !== 15 ||
     !source.includes("--force-recreate --scale browser-acceptance=0") ||
     !/up --no-build --detach --no-deps --force-recreate \\\n+\s+browser-acceptance/.test(source) ||
     !/set -- "\$@" up --no-build --detach --wait \\\n+\s+--wait-timeout/.test(source) ||
@@ -510,8 +510,11 @@ export function composeBuildBoundaryFindings(source) {
       finalBrowser > firstRestart &&
       productVerify > finalBrowser
     ) ||
-    source.match(/run --rm --no-deps --no-TTY/g)?.length !== 1 ||
+    source.match(/run --rm --no-deps --no-TTY/g)?.length !== 2 ||
     !/--entrypoint node browser-acceptance product-demo\.mjs \\\n+\s+"\$product_acceptance_phase"/.test(source) ||
+    !source.includes(
+      "run --rm --no-deps --no-TTY --pull never migrate migration-check",
+    ) ||
     /product_acceptance_state|product-demo\.mjs\s+(?:start|status)/.test(source)
   ) {
     findings.push("public-API product state does not span the restart matrix");

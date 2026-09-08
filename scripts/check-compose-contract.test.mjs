@@ -2211,6 +2211,7 @@ test("host validators start through one closed Node trust boundary", () => {
     "acceptance",
     "backup",
     "restore-smoke",
+    "upgrade-smoke",
     "smoke",
     "restart-gateway",
   ]) {

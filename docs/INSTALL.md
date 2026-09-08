@@ -86,7 +86,7 @@ the fixed six-service restart matrix. It runs smoke after every restart, then
 repeats login and verifies the existing receipt against live product rows under
 one project lock; its exact selectors are documented in
 [`deploy/compose/README.md`](../deploy/compose/README.md). A live run,
-reference HTTPS, live backup/restore and upgrade acceptance remain open. The
+reference HTTPS, live backup/restore and live upgrade acceptance remain open. The
 browser checks bind administrator authority to the configured tenant before
 and after the matrix; those identity rows and the PulseBoard rows witness
 persistence across the restarts.
@@ -915,19 +915,34 @@ remain OPS-5 work.
 
 ## Upgrading
 
-There is no accepted Docker reference upgrade path yet. Re-running the release
-installer replaces the downloaded CLI, gateway/worker binaries, console and
-transitional profile, but it is not evidence that a database, issuer or
-running service was upgraded. Do not follow it with implicit `synveda init`.
+The Docker reference has a bounded same-schema product-image upgrade smoke.
+Start with a reference project that has already passed browser/product
+acceptance, keep its exact DNS, TLS, provider-image and network selectors, and
+set distinct immutable product images:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
+export SYNVEDA_COMPOSE_RUNTIME=reference
+export SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance
+export SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-local
+export SYNVEDA_COMPOSE_IPV4_POOL=10.231.45.0/24
+export SYNVEDA_PRODUCT_STARTING_IMAGE=registry.example/synveda/product@sha256:<starting-digest>
+export SYNVEDA_PRODUCT_IMAGE=registry.example/synveda/product@sha256:<candidate-digest>
+make compose-upgrade-smoke
 ```
 
-No transitional operator path substitutes for deployment validation. The
-accepted reference upgrade/rollback smoke test remains CPR-45 work and must
-cover the binaries, schema migration, role contract, issuer and rollback
-limits together; zero downtime is not claimed.
+The candidate performs a read-only current-schema and database-authority check
+before either runtime process changes. The lifecycle then proves candidate,
+starting-image rollback and final candidate by image-transitioning only gateway
+and worker; it reruns the disposable browser-acceptance service while repeating
+exact image, smoke, Keycloak login and persisted product checks. Success leaves
+the candidate running. A recoverable failure restores
+the last fully verified image and still returns failure; uncertain mutation
+retains the project lock.
+
+This check does not migrate schema, PostgreSQL or Keycloak and does not prove a
+general N-1 window, provider downgrade, Helm parity or zero downtime. Re-running
+the artifact installer is also not deployment upgrade evidence. Those broader
+requirements remain OPS-6 work.
 
 ### If the upgrade refuses to start: the schema epoch
 
@@ -1133,7 +1148,8 @@ or prove artifact publication or pulls. The implemented
 `make compose-acceptance` command requires a supported live Docker host; its
 deterministic tests are not a browser-login or clean-lifecycle claim.
 Logical backup/restore and the bounded local metrics profile are implemented
-and deterministically tested, but their live execution, upgrade and
+and deterministically tested. The same-schema product upgrade lifecycle is
+also implemented and deterministically tested, but live recovery/upgrade and
 desktop/Linux parity remain unproved.
 
 The Docker reference may be called validated only after

@@ -130,7 +130,8 @@ visibility, not the customer-safe Operations route.
    `operation_outbox` schema/API for `skill_validation@1` under forced RLS.
 3. Add the exact-pinned Apalis leaf adapter and optional Compose fragment.
 4. Add the customer-safe Operations route.
-5. Add same-schema product upgrade/rollback acceptance.
+5. Run the implemented same-schema product upgrade/rollback acceptance on a
+   supported reference host.
 6. Run current-source development and reference acceptance on Linux and one
    Docker Desktop platform.
 7. After the Keycloak gate passes, replace release/install assets with the
@@ -189,8 +190,9 @@ are implementation evidence rather than a live restore result.
 - The optional local backend shows bounded content-free gateway, worker,
   operation and recovery telemetry; Operations shows only authorised
   tenant-safe aggregates and all loading/degraded states.
-- Upgrade from the previous test build preserves volumes and data, permits only
-  a declared compatible rollback and refuses an unsafe rollback.
+- A digest-addressed current-schema application upgrade preserves volumes and
+  product evidence through candidate, starting rollback and final candidate;
+  incompatible candidates refuse before the runtime transition.
 - Confirmed reset removes only the exact Compose project's resources.
 - No active Temporal or, after identity cutover, Rauthy residue remains.
 

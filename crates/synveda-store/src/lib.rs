@@ -94,6 +94,56 @@ pub async fn migrate(pool: &PgPool, database_roles: &runtime_role::DatabaseRoles
     migrate_reporting(pool, database_roles).await.map(|_| ())
 }
 
+/// Checks whether this candidate build can serve the existing database,
+/// without running the SQLx migrator or changing persistent database state.
+///
+/// The candidate uses the same migrator login as the deployment migration
+/// phase so it can prove the complete role, ACL, extension, routine, trigger
+/// and forced-RLS catalogue. After session normalization, the compatibility
+/// catalogue, marker and ledger proof occurs in one database-enforced
+/// read-only, repeatable-read transaction. A mismatch tells the operator to
+/// retain the running image; it never emits reset guidance.
+#[tracing::instrument(name = "store.migrate.check", skip_all, err(Display))]
+pub async fn check_migration_compatibility(
+    pool: &PgPool,
+    database_roles: &runtime_role::DatabaseRoles,
+) -> Result<epoch::SchemaMetadata> {
+    let mut connection = pool.acquire().await.map_err(|error| Error::Storage {
+        message: format!("acquire candidate compatibility connection: {error}"),
+    })?;
+    runtime_role::initialize_product_session_connection(&mut connection).await?;
+    let mut compatibility = connection
+        .begin_with("begin isolation level repeatable read read only")
+        .await
+        .map_err(|error| Error::Storage {
+            message: format!("begin read-only candidate compatibility snapshot: {error}"),
+        })?;
+    runtime_role::configure_authority_snapshot_connection(&mut compatibility).await?;
+
+    let checked = async {
+        runtime_role::verify_migrator_read_only_connection(
+            &mut compatibility,
+            database_roles,
+        )
+        .await?;
+        epoch::verify_embedded_baseline_connection(&mut compatibility)
+            .await
+            .map_err(|_| Error::Invalid {
+                message: "candidate image does not match the existing database schema contract; keep the currently running image; the database was not changed"
+                    .to_owned(),
+            })
+    }
+    .await;
+
+    compatibility
+        .rollback()
+        .await
+        .map_err(|error| Error::Storage {
+            message: format!("finish read-only candidate compatibility snapshot: {error}"),
+        })?;
+    checked
+}
+
 /// [`migrate`], returning the epoch marker it produced. The reset path prints
 /// it; everything else has no use for it and calls `migrate`.
 pub async fn migrate_reporting(

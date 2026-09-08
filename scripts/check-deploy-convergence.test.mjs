@@ -553,7 +553,7 @@ test("the product launcher rejects an unknown role without interpretation", () =
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    "usage: synveda-container {gateway|worker|issuer-diagnostic|database-preflight|migrate|tenant-converge|probe {gateway|worker} {live|ready}}\n",
+    "usage: synveda-container {gateway|worker|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe {gateway|worker} {live|ready}}\n",
   );
 });
 
@@ -569,6 +569,10 @@ test("the product launcher dispatches every implemented role exactly", () => {
         "exec /bin/echo issuer-diagnostic",
       )
       .replace("exec /usr/local/bin/synveda db preflight", "exec /bin/echo database-preflight")
+      .replace(
+        "exec /usr/local/bin/synveda db migrate --check",
+        "exec /bin/echo migration-check",
+      )
       .replace("exec /usr/local/bin/synveda db migrate", "exec /bin/echo migrate")
       .replace("exec /usr/local/bin/synveda tenant converge", "exec /bin/echo tenant-converge")
       .replace("exec /usr/bin/curl \\\n", "exec /bin/echo curl \\\n");
@@ -580,6 +584,7 @@ test("the product launcher dispatches every implemented role exactly", () => {
       [["issuer-diagnostic"], "issuer-diagnostic\n"],
       [["database-preflight"], "database-preflight\n"],
       [["migrate"], "migrate\n"],
+      [["migration-check"], "migration-check\n"],
       [
         ["tenant-converge"],
         "tenant-converge --id 019b53c0-7c00-7000-8000-000000000045 --slug reference --name Reference Tenant\n",

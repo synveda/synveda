@@ -5,10 +5,10 @@ runs the gateway and worker as separate processes with PostgreSQL, bundled
 Keycloak, a reverse proxy and a private OpenTelemetry Collector. Optional
 settings add a bounded local Prometheus operator view or external trace export.
 
-It supports development and reference configuration. Logical backup and
-isolated restore commands are implemented, but live browser, reference-HTTPS,
-recovery and upgrade evidence is still required before this implementation can
-be called validated for controlled single-host use. It is not an HA,
+It supports development and reference configuration. Logical backup, isolated
+restore and same-schema product upgrade commands are implemented, but live
+browser, reference-HTTPS, recovery and upgrade evidence is still required
+before this implementation can be called validated for controlled single-host use. It is not an HA,
 disaster-recovery, hosted-SaaS or enterprise-certification claim.
 
 Use deploy/compose/scripts/compose.sh through the Make targets. Do not assemble
@@ -313,6 +313,44 @@ acceptance-project example above, then set `SYNVEDA_COMPOSE_PROFILES=demo`, run
 remove the lock directory. If process or Docker mutation state is uncertain,
 leave the lock in place and escalate to the host operator.
 
+## Same-schema product upgrade smoke
+
+`make compose-upgrade-smoke` exercises a bounded application-image change
+against an already accepted reference project. It requires bundled PostgreSQL
+and Keycloak, the exact `demo,browser-acceptance` profiles, a project suffix,
+reference TLS inputs and immutable image digests. Keep every ordinary
+reference selector identical to the running project and set:
+
+    export SYNVEDA_COMPOSE_RUNTIME=reference
+    export SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-local
+    export SYNVEDA_COMPOSE_IPV4_POOL=10.231.45.0/24
+    export SYNVEDA_PRODUCT_STARTING_IMAGE=registry.example/synveda/product@sha256:<starting-digest>
+    export SYNVEDA_PRODUCT_IMAGE=registry.example/synveda/product@sha256:<candidate-digest>
+    make compose-upgrade-smoke
+
+The references must resolve to different local image IDs. Under one project
+lock and deadline, the command proves the running starting image, public
+smoke, Keycloak browser login and existing product receipt. It pulls the
+candidate by exact digest and runs `synveda db migrate --check` in a read-only
+repeatable-read transaction. That check verifies the current schema epoch,
+embedded migration ledger, database authority and forced-RLS catalogue without
+running the SQLx migrator or changing persistent database state.
+
+Only the long-running product services gateway and worker are
+image-transitioned; the disposable browser-acceptance service is rerun at
+each checkpoint. The command verifies candidate, starting rollback and final
+candidate in turn; every checkpoint repeats exact container image identity,
+public smoke, browser login and the existing product receipt. Success leaves
+the candidate running. An ordinary failed transition
+attempts to restore the last fully verified image but still returns failure.
+A timeout, signal uncertainty or failed restoration retains the exact-project
+lock for operator inspection.
+
+This is planned-interruption, current-schema application compatibility
+evidence. It does not upgrade PostgreSQL, Keycloak, volumes or schema; it does
+not establish a general N-1 support window, downgrade safety, zero downtime or
+Helm/release parity. Those remain OPS-6 work.
+
 ## Reference HTTPS
 
 Reference mode publishes public traffic only on ports 80 and 443 and requires
@@ -477,12 +515,12 @@ The following work remains before the Docker reference can be called
 implemented:
 
 - live execution of the paired logical backup and isolated restore on the
-  supported development/reference platforms;
+  supported development/reference platforms, plus live execution of the
+  same-schema product upgrade smoke;
 - one experimental forced-RLS operation/outbox and opaque-ID Apalis canary;
 - a customer-safe Operations route;
 - canonical release/installer cutover and Rauthy deletion after live Keycloak
   browser acceptance;
-- deterministic same-schema upgrade/rollback checks.
 
 A general dashboard platform, ACME, HA, Helm promotion, signed provenance,
 S3/WAL-PITR recovery and enterprise controls remain later production work.

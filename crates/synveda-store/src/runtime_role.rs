@@ -451,6 +451,23 @@ pub async fn database_identity(pool: &PgPool) -> Result<DatabaseIdentity> {
 pub async fn database_identity_connection(
     connection: &mut PgConnection,
 ) -> Result<DatabaseIdentity> {
+    database_identity_for_transaction(connection, false).await
+}
+
+/// Proves that the compatibility check runs against a writable primary while
+/// its candidate-owned transaction is itself database-enforced read-only.
+pub(crate) async fn verify_read_only_primary_connection(
+    connection: &mut PgConnection,
+) -> Result<()> {
+    database_identity_for_transaction(connection, true)
+        .await
+        .map(|_| ())
+}
+
+async fn database_identity_for_transaction(
+    connection: &mut PgConnection,
+    expect_read_only: bool,
+) -> Result<DatabaseIdentity> {
     let identity = sqlx::query!(
         r#"select pg_catalog.current_database() as "database!",
                   control.system_identifier::text as "cluster_system_identifier!",
@@ -466,9 +483,14 @@ pub async fn database_identity_connection(
     .fetch_one(&mut *connection)
     .await
     .map_err(|error| authority_sql_error("read runtime database target identity", error))?;
-    if identity.in_recovery || identity.transaction_read_only {
+    if identity.in_recovery || identity.transaction_read_only != expect_read_only {
         return Err(Error::Invalid {
-            message: "runtime database target must be a writable PostgreSQL primary".to_owned(),
+            message: if expect_read_only {
+                "candidate compatibility must use a read-only transaction on a writable PostgreSQL primary"
+                    .to_owned()
+            } else {
+                "runtime database target must be a writable PostgreSQL primary".to_owned()
+            },
         });
     }
     Ok(DatabaseIdentity {
@@ -792,6 +814,15 @@ pub async fn verify_capability_role_connection(
     database_roles: &DatabaseRoles,
 ) -> Result<()> {
     verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_connection(connection, database_roles).await
+}
+
+/// Full post-migration role, ACL and executable catalogue proof after the
+/// caller has independently established the transaction's session mode.
+async fn verify_capability_catalog_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<()> {
     verify_administrative_membership_catalog(connection, database_roles).await?;
     verify_capability_shape_connection(connection, database_roles).await?;
     verify_expected_runtime_catalog(connection, database_roles.runtime()).await?;
@@ -3164,6 +3195,25 @@ async fn verify_selected_migrator(
     } else {
         verify_capability_prerequisites_connection(connection, database_roles).await?;
     }
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Candidate-image authority proof for a transaction already established as
+/// read-only on the primary. It deliberately reuses the same catalogue checks
+/// as migration without making the writable-session assertion.
+pub(crate) async fn verify_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_connection(connection, database_roles).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+async fn verify_selected_migrator_catalog(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
     let facts = sqlx::query!(
         r#"select current_user as "name!", session_user as "session_name!",
                   role.rolcanlogin as "can_login!",

@@ -57,7 +57,7 @@ their services and acceptance tests land.
 
 | Image | Commands or role |
 | --- | --- |
-| Synveda product | gateway, worker, database-preflight, migrate, tenant-converge, issuer-diagnostic |
+| Synveda product | gateway, worker, database-preflight, migrate, migration-check, tenant-converge, issuer-diagnostic |
 | PostgreSQL 17 + pgvector | bundled database, bounded bootstrap and logical backup/restore entrypoints |
 | optimized Keycloak 26.7.2 | start --optimized and idempotent realm convergence |
 | Caddy 2.11.4 | public reverse proxy |
@@ -147,6 +147,7 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_BOOTSTRAP_TENANT_ID | UUIDv7 bound into backup and required unchanged at restore |
 | SYNVEDA_COMPOSE_IPV4_POOL | explicit private /24 for reference/evidence |
 | SYNVEDA_PRODUCT_IMAGE | immutable product image reference |
+| SYNVEDA_PRODUCT_STARTING_IMAGE | upgrade-smoke-only immutable starting product image reference |
 | SYNVEDA_POSTGRES_IMAGE | immutable bundled PostgreSQL image reference |
 | SYNVEDA_KEYCLOAK_IMAGE | immutable bundled Keycloak image reference |
 | SYNVEDA_CADDY_IMAGE | immutable proxy image reference |
@@ -373,6 +374,7 @@ Implemented:
     make compose-acceptance
     make compose-backup
     make compose-restore-smoke
+    make compose-upgrade-smoke
     make compose-smoke
     make compose-restart-gateway
     make compose-down
@@ -395,6 +397,20 @@ product graph; its deterministic wiring tests do not constitute a live
 provider result. External-provider recovery and upgrade smoke remain open.
 Live targets must report an unavailable prerequisite distinctly from a passing
 test.
+
+compose-upgrade-smoke is the bounded reference-mode application-image check.
+It requires an existing suffixed bundled project, the exact demo/browser
+profiles and distinct digest-addressed starting and candidate product images.
+The candidate first verifies the current epoch, embedded SQLx ledger and full
+migrator authority in one read-only repeatable-read transaction. The lifecycle
+then image-transitions only gateway and worker through candidate, starting
+rollback and final candidate checkpoints, while rerunning the disposable
+browser-acceptance service. Each checkpoint proves exact image reference
+and image ID, public smoke, Keycloak browser login and the existing product
+receipt. Ordinary failure restores the last fully verified image when that can
+be proved; uncertain mutation retains the project lock. This does not migrate
+schema or providers and is not general N-1, downgrade or zero-downtime
+evidence.
 
 ## Security and network boundary
 

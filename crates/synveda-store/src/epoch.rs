@@ -312,6 +312,29 @@ pub async fn verify_connection(
     }
 }
 
+/// Proves that the current marker and SQLx ledger are the exact immutable
+/// baseline embedded in this candidate build.
+///
+/// Upgrade checking calls this only inside a database-enforced read-only,
+/// repeatable-read transaction. Unlike migration preflight, this function
+/// never repairs an interrupted stamp. Its caller maps every mismatch to
+/// non-destructive guidance: the candidate must not replace the running image.
+pub(crate) async fn verify_embedded_baseline_connection(
+    connection: &mut PgConnection,
+) -> Result<SchemaMetadata, SchemaEpochError> {
+    let metadata = verify_connection(connection).await?;
+    let [migration] = crate::MIGRATOR.migrations.as_ref() else {
+        return Err(embedded_baseline_mismatch());
+    };
+    if migration.no_tx
+        || metadata.migration_head != format!("{:04}", migration.version)
+        || !exact_applied_baseline_without_marker(connection).await?
+    {
+        return Err(embedded_baseline_mismatch());
+    }
+    Ok(metadata)
+}
+
 /// Refuses to migrate a database that has a schema but no epoch marker.
 ///
 /// Run before the migrator, so a refused database is left byte for byte as it
@@ -534,6 +557,12 @@ fn malformed_shape() -> SchemaEpochError {
 
 fn malformed_values() -> SchemaEpochError {
     SchemaEpochError::Malformed("the marker values are invalid".to_owned())
+}
+
+fn embedded_baseline_mismatch() -> SchemaEpochError {
+    SchemaEpochError::Malformed(
+        "the current marker and migration ledger do not match the embedded baseline".to_owned(),
+    )
 }
 
 fn storage(error: sqlx::Error) -> synveda_types::Error {

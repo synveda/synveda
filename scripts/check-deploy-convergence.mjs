@@ -1666,6 +1666,7 @@ export function productLauncherFindings(source) {
     "issuer-diagnostic",
     "database-preflight",
     "migrate",
+    "migration-check",
     "tenant-converge",
     "????????-????-7???-[89ab]???-????????????",
     "*",
@@ -1690,7 +1691,7 @@ export function productLauncherFindings(source) {
   }
   const roleMatches = [
     ...active.matchAll(
-      /^ {4}(gateway|worker|issuer-diagnostic|database-preflight|migrate|tenant-converge|probe|\*)\)[ \t]*$/gm,
+      /^ {4}(gateway|worker|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe|\*)\)[ \t]*$/gm,
     ),
   ];
   const labels = roleMatches.map(
@@ -1704,6 +1705,7 @@ export function productLauncherFindings(source) {
       "issuer-diagnostic",
       "database-preflight",
       "migrate",
+      "migration-check",
       "tenant-converge",
       "probe",
       "*",
@@ -1725,6 +1727,7 @@ export function productLauncherFindings(source) {
   const issuerDiagnostic = roleBlock("issuer-diagnostic").replace(/\\\r?\n\s*/g, " ");
   const databasePreflight = roleBlock("database-preflight");
   const migrate = roleBlock("migrate");
+  const migrationCheck = roleBlock("migration-check");
   const tenantConverge = roleBlock("tenant-converge").replace(/\\\r?\n\s*/g, " ");
   const probe = roleBlock("probe").replace(/\\\r?\n\s*/g, " ");
   const unknown = roleBlock("*").replace(/\s+/g, " ").trim();
@@ -1762,6 +1765,12 @@ export function productLauncherFindings(source) {
   }
   if (!migrate.includes("exec /usr/local/bin/synveda db migrate")) {
     findings.push("migrate role does not exec the migration command");
+  }
+  if (!migrationCheck.includes('[ "$#" -eq 1 ] || usage')) {
+    findings.push("migration-check role does not enforce exact arity");
+  }
+  if (!migrationCheck.includes("exec /usr/local/bin/synveda db migrate --check")) {
+    findings.push("migration-check role does not exec the read-only compatibility command");
   }
   if (!tenantConverge.includes('[ "$#" -eq 1 ] || usage')) {
     findings.push("tenant-converge role does not enforce exact arity");

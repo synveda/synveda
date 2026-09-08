@@ -325,6 +325,25 @@ async fn tenant_count(pool: &PgPool) -> i64 {
         .expect("count tenants")
 }
 
+async fn migration_ledger(
+    pool: &PgPool,
+) -> Vec<(
+    i64,
+    String,
+    chrono::DateTime<chrono::Utc>,
+    bool,
+    Vec<u8>,
+    i64,
+)> {
+    sqlx::query_as(
+        "select version, description, installed_on, success, checksum, execution_time \
+           from _sqlx_migrations order by version",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read migration ledger")
+}
+
 /// Removes the marker while leaving product data in place. This is the shape
 /// a pre-epoch database presents to the guard; the migration ledger is left
 /// deliberately irrelevant because preflight must refuse before sqlx reads it.
@@ -520,6 +539,114 @@ fn a_current_epoch_database_starts_normally_and_keeps_its_provenance() {
                 .expect("resolve")
                 .is_some()
         );
+        pool.close().await;
+    });
+}
+
+/// The image-transition gate reads the complete current contract under a
+/// database-enforced read-only snapshot and preserves both product and
+/// migration evidence byte-for-byte.
+#[test]
+fn candidate_compatibility_accepts_the_exact_baseline_without_writes() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("migrate");
+        let tenant = admit_a_tenant(&pool).await;
+        let metadata_before = epoch::verify(&pool).await.expect("current metadata");
+        let ledger_before = migration_ledger(&pool).await;
+
+        let checked = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect("the embedded candidate matches the current baseline");
+
+        assert_eq!(checked, metadata_before);
+        assert_eq!(epoch::verify(&pool).await.unwrap(), metadata_before);
+        assert_eq!(migration_ledger(&pool).await, ledger_before);
+        assert!(
+            synveda_store::tenants::by_id(&pool, tenant)
+                .await
+                .expect("resolve preserved tenant")
+                .is_some()
+        );
+        pool.close().await;
+    });
+}
+
+/// A candidate never turns ledger drift into migration or reset advice. It
+/// refuses, leaves the drift for the operator to investigate, and preserves
+/// the tenant whose running image was already serving.
+#[test]
+fn candidate_compatibility_refuses_ledger_drift_without_writes_or_reset_advice() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("migrate");
+        admit_a_tenant(&pool).await;
+        sqlx::query(
+            "update _sqlx_migrations \
+             set checksum = pg_catalog.decode(pg_catalog.repeat('00', 48), 'hex')",
+        )
+        .execute(&pool)
+        .await
+        .expect("drift the candidate ledger");
+        let metadata_before = epoch::read(&pool).await.expect("read current marker");
+        let ledger_before = migration_ledger(&pool).await;
+
+        let error = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect_err("candidate must refuse a drifted ledger");
+        let message = error.to_string();
+        assert!(
+            message.contains("keep the currently running image"),
+            "{message}"
+        );
+        assert!(message.contains("database was not changed"), "{message}");
+        assert!(!message.contains(RESET_COMMAND), "{message}");
+        assert_eq!(epoch::read(&pool).await.unwrap(), metadata_before);
+        assert_eq!(migration_ledger(&pool).await, ledger_before);
+        assert_eq!(tenant_count(&pool).await, 1);
+        pool.close().await;
+    });
+}
+
+/// The marker head is diagnostic during ordinary startup but exact during an
+/// image transition: a candidate must bind it to its sole embedded baseline.
+#[test]
+fn candidate_compatibility_refuses_a_wrong_marker_head_without_writes() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("migrate");
+        admit_a_tenant(&pool).await;
+        sqlx::query("update schema_metadata set migration_head = '9999'")
+            .execute(&pool)
+            .await
+            .expect("drift the marker head");
+        let metadata_before = epoch::read(&pool).await.expect("read drifted marker");
+        let ledger_before = migration_ledger(&pool).await;
+
+        let error = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect_err("candidate must refuse a marker for another migration head");
+        let message = error.to_string();
+        assert!(
+            message.contains("keep the currently running image"),
+            "{message}"
+        );
+        assert!(!message.contains(RESET_COMMAND), "{message}");
+        assert_eq!(epoch::read(&pool).await.unwrap(), metadata_before);
+        assert_eq!(migration_ledger(&pool).await, ledger_before);
+        assert_eq!(tenant_count(&pool).await, 1);
         pool.close().await;
     });
 }

@@ -1422,8 +1422,12 @@ enum AuditCommand {
 enum DbCommand {
     /// Prove migrator, gateway and worker files select one writable database.
     Preflight,
-    /// Apply all pending migrations to DATABASE_URL or DATABASE_URL_FILE.
-    Migrate,
+    /// Apply migrations, or check candidate compatibility without writes.
+    Migrate {
+        /// Verify the existing schema/authority contract without migrating.
+        #[arg(long)]
+        check: bool,
+    },
     /// Verify one restored tenant's audit chain and KMS custody without writes.
     RecoveryVerify {
         /// Tenant whose restored chain and wrapped key must be readable.
@@ -2245,13 +2249,20 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Db(DbCommand::Preflight) => database_preflight::run().await,
-        Command::Db(DbCommand::Migrate) => {
+        Command::Db(DbCommand::Migrate { check }) => {
             let pool = connect().await?;
             let database_roles = init::database_roles()?;
-            synveda_store::migrate(&pool, &database_roles)
-                .await
-                .map_err(|err| err.to_string())?;
-            eprintln!("migrations applied");
+            if check {
+                synveda_store::check_migration_compatibility(&pool, &database_roles)
+                    .await
+                    .map_err(|err| err.to_string())?;
+                eprintln!("candidate database compatibility verified without writes");
+            } else {
+                synveda_store::migrate(&pool, &database_roles)
+                    .await
+                    .map_err(|err| err.to_string())?;
+                eprintln!("migrations applied");
+            }
             Ok(())
         }
         Command::Db(DbCommand::RecoveryVerify {
@@ -3477,6 +3488,19 @@ mod hard_cut_tests {
             error.to_string().contains("unexpected argument '--demo'"),
             "unexpected clap refusal: {error}"
         );
+    }
+
+    #[test]
+    fn migration_check_is_the_only_non_mutating_migrate_mode() {
+        Cli::try_parse_from(["synveda", "db", "migrate"])
+            .expect("ordinary migration remains available");
+        Cli::try_parse_from(["synveda", "db", "migrate", "--check"])
+            .expect("candidate compatibility mode must parse");
+
+        let error = Cli::try_parse_from(["synveda", "db", "migrate", "--dry-run"])
+            .err()
+            .expect("an imprecise migration alias must be refused");
+        assert!(error.to_string().contains("--dry-run"), "{error}");
     }
 
     #[test]

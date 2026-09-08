@@ -180,12 +180,14 @@ real two-principal public-API team scenario across the restart matrix,
 including invitation redemption, and awaits a supported live Docker host.
 PostgreSQL-native logical backup plus
 isolated database/key restore is also implemented and deterministically tested; its live
-Docker run remains pending. Remaining implementation work is one forced-RLS
-skill-validation operation/outbox and its disabled-by-default
-Apalis 0.7.4 leaf adapter, a customer-safe Operations route and same-schema
-upgrade/rollback acceptance. Executable external PostgreSQL plus external
-OIDC and public-PKI external OTLP wiring are deterministically implemented but
-still await live provider evidence. A bounded private Collector-to-
+Docker run remains pending. Same-schema application-image upgrade/rollback is
+implemented with a read-only candidate compatibility check and deterministic
+failure recovery; its live reference run remains pending. Remaining
+implementation work is one forced-RLS
+skill-validation operation/outbox and its disabled-by-default Apalis 0.7.4 leaf
+adapter and a customer-safe Operations route. Executable external PostgreSQL
+plus external OIDC and public-PKI external OTLP wiring are deterministically
+implemented but still await live provider evidence. A bounded private Collector-to-
 Prometheus profile is implemented with loopback-only operator access and
 deterministic lifecycle evidence. Current-source Linux and Docker Desktop
 browser acceptance must pass before the legacy Rauthy paths are deleted.

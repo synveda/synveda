@@ -1252,6 +1252,7 @@ mod tests {
 
     #[test]
     fn a_registry_path_expands_home_and_environment_variables() {
+        let _guard = crate::testing::ENV.blocking_lock();
         let home = home().expect("HOME");
         assert_eq!(
             expand("~/.cursor/mcp.json").expect("expand"),
