@@ -39,6 +39,7 @@ import {
   keycloakRealmSupervisorFindings,
   makeComposeFixture,
   masterClientAuthorityFindings,
+  prometheusConfigFindings,
   reviewedKeycloakSourceFindings,
 } from "./check-compose-contract.mjs";
 
@@ -613,11 +614,48 @@ test("the Collector health contract is loopback-only and self-probing", () => {
   const scalarFindings = collectorConfigFindings(scalar);
   assert.ok(
     scalarFindings.includes(
-      "Collector healthy response is not the content-free nop pipeline config",
+      "Collector healthy response does not match the selected pipeline contract",
     ),
   );
   assert.ok(
     scalarFindings.includes("Collector unhealthy response is not the closed empty object"),
+  );
+
+  const observable = readFileSync(
+    join(COMPOSE, "configs/otel/collector.observability.yaml"),
+    "utf8",
+  );
+  assert.deepEqual(collectorConfigFindings(observable, true), []);
+  assert.ok(
+    collectorConfigFindings(
+      observable.replace("targets: [worker:8121]", "targets: [worker:9999]"),
+      true,
+    ).includes("Collector metrics fan-in drifted"),
+  );
+  for (const additive of [
+    observable.replace(
+      "            - targets: [worker:8121]\n",
+      "            - targets: [worker:8121]\n            - targets: [attacker.invalid:9090]\n",
+    ),
+    `${observable}\nexporters:\n  otlphttp/foreign:\n    endpoint: https://attacker.invalid\n`,
+  ]) {
+    assert.ok(
+      collectorConfigFindings(additive, true).includes(
+        "Collector observability configuration is not the closed reviewed grammar",
+      ),
+    );
+  }
+  const prometheus = readFileSync(
+    join(COMPOSE, "configs/prometheus/prometheus.yaml"),
+    "utf8",
+  );
+  assert.deepEqual(prometheusConfigFindings(prometheus), []);
+  assert.ok(
+    prometheusConfigFindings(
+      prometheus.replace("otel-collector:8889", "gateway:8120"),
+    ).includes(
+      "Prometheus scrape configuration drifted from the private Collector-only target",
+    ),
   );
 });
 
@@ -2470,7 +2508,7 @@ test("the selector rejects unsafe shape before invoking Docker", () => {
       ["SYNVEDA_OIDC_MODE", "rauthy", "bundled|external"],
       ["SYNVEDA_COMPOSE_PROFILES", "deployed", "unsupported profile"],
       ["SYNVEDA_COMPOSE_PROFILES", "semantic", "unsupported profile"],
-      ["SYNVEDA_COMPOSE_PROFILES", "observability", "unsupported profile"],
+      ["SYNVEDA_COMPOSE_PROFILES", "metrics", "unsupported profile"],
       ["SYNVEDA_COMPOSE_PROFILES", "apalis-board", "unsupported profile"],
       ["SYNVEDA_COMPOSE_PROFILES", "backup-test", "unsupported profile"],
       ["SYNVEDA_RUNTIME_UID", "0", "non-zero decimal integers"],
@@ -6927,7 +6965,14 @@ test("model findings reject privilege, port, command and secret regressions", ()
           },
         ],
         build: { dockerfile: "deploy/compose/proxy/Dockerfile" },
-        ports: [{ host_ip: "127.0.0.1", published: "8080", target: 8080 }],
+        ports: [
+          {
+            host_ip: "127.0.0.1",
+            protocol: "tcp",
+            published: "8080",
+            target: 8080,
+          },
+        ],
         networks: {
           "app-backend": { aliases: ["app.synveda.test"] },
           "public-edge": { gw_priority: 1 },
@@ -6963,7 +7008,6 @@ test("model findings reject privilege, port, command and secret regressions", ()
           },
         ],
         networks: {
-          "keycloak-management": {},
           telemetry: {},
           "telemetry-egress": { gw_priority: 1 },
         },
@@ -6972,7 +7016,6 @@ test("model findings reject privilege, port, command and secret regressions", ()
     networks: {
       "app-backend": network("app-backend", true),
       "application-egress": network("application-egress"),
-      "keycloak-management": network("keycloak-management", true),
       "public-edge": network("public-edge"),
       "synveda-data": network("synveda-data", true),
       telemetry: network("telemetry", true),
@@ -7099,6 +7142,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
   bundled.networks["identity-backend"] = network("identity-backend", true);
   bundled.networks["identity-egress"] = network("identity-egress");
   bundled.networks["keycloak-data"] = network("keycloak-data", true);
+  bundled.networks["keycloak-management"] = network("keycloak-management", true);
   bundled.services["database-preflight"].environment.SYNVEDA_DATABASE_REQUIRED_PEER =
     "keycloak";
   bundled.services["database-preflight"].environment.SYNVEDA_DATABASE_PEER_WITNESS_FILE =
@@ -7643,7 +7687,11 @@ test("model findings reject privilege, port, command and secret regressions", ()
   base.services.gateway.environment.DATABASE_URL = "not-allowed";
   const findings = canonicalComposeFindings(base, expected);
   assert.ok(findings.includes("gateway is privileged"));
-  assert.ok(findings.includes("a non-proxy service publishes a host port"));
+  assert.ok(
+    findings.includes(
+      "a service publishes a port outside the public proxy or loopback operator UI",
+    ),
+  );
   assert.ok(findings.includes("migrate command drifted"));
   assert.ok(findings.includes("gateway receives direct secret DATABASE_URL"));
 });

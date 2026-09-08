@@ -330,7 +330,6 @@ services:
       retries: 3
     networks:
       telemetry: {}
-      keycloak-management: {}
       telemetry-egress:
         gw_priority: 1
 

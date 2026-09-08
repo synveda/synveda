@@ -94,6 +94,85 @@ const COLLECTOR_HEALTH_BODY = JSON.stringify({
   exporters: { nop: {} },
   service: { pipelines: { traces: { receivers: ["nop"], exporters: ["nop"] } } },
 });
+const COLLECTOR_OBSERVABILITY_HEALTH_BODY = JSON.stringify({
+  pipelines: ["metrics", "traces"],
+  status: "ok",
+});
+const COLLECTOR_OBSERVABILITY_CONFIG = `extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+    response_body:
+      healthy: '{"pipelines":["metrics","traces"],"status":"ok"}'
+      unhealthy: '{}'
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 4
+      http:
+        endpoint: 0.0.0.0:4318
+  prometheus:
+    config:
+      global:
+        scrape_interval: 15s
+        scrape_timeout: 5s
+      scrape_configs:
+        - job_name: synveda-gateway
+          honor_labels: false
+          static_configs:
+            - targets: [gateway:8120]
+        - job_name: synveda-worker
+          honor_labels: false
+          static_configs:
+            - targets: [worker:8121]
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 96
+  batch:
+    send_batch_size: 512
+    send_batch_max_size: 1024
+    timeout: 5s
+
+exporters:
+  nop: {}
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    send_timestamps: true
+    metric_expiration: 5m
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      level: basic
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [nop]
+    metrics:
+      receivers: [prometheus]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+`;
+const PROMETHEUS_CONFIG = `global:
+  scrape_interval: 15s
+  scrape_timeout: 5s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: synveda-collector
+    honor_labels: false
+    static_configs:
+      - targets: [otel-collector:8889]
+`;
 
 const CORE_SECRETS = [
   "synveda_migrator_database_url",
@@ -1248,13 +1327,16 @@ export function browserAcceptanceFindings(browser, expected) {
   return findings;
 }
 
-export function collectorConfigFindings(config) {
+export function collectorConfigFindings(config, observability = false) {
   const findings = [];
   if (!config.includes("extensions:\n  health_check:\n    endpoint: 127.0.0.1:13133\n")) {
     findings.push("Collector health endpoint is not container-loopback-only");
   }
-  if (!config.includes(`    response_body:\n      healthy: '${COLLECTOR_HEALTH_BODY}'\n`)) {
-    findings.push("Collector healthy response is not the content-free nop pipeline config");
+  const healthBody = observability
+    ? COLLECTOR_OBSERVABILITY_HEALTH_BODY
+    : COLLECTOR_HEALTH_BODY;
+  if (!config.includes(`    response_body:\n      healthy: '${healthBody}'\n`)) {
+    findings.push("Collector healthy response does not match the selected pipeline contract");
   }
   if (!config.includes("      unhealthy: '{}'\n")) {
     findings.push("Collector unhealthy response is not the closed empty object");
@@ -1262,7 +1344,30 @@ export function collectorConfigFindings(config) {
   if (!config.includes("service:\n  extensions: [health_check]\n")) {
     findings.push("Collector health extension is not enabled");
   }
+  const metricsMarkers = [
+    "  prometheus:\n    config:\n      global:\n        scrape_interval: 15s\n        scrape_timeout: 5s\n",
+    "        - job_name: synveda-gateway\n          honor_labels: false\n          static_configs:\n            - targets: [gateway:8120]\n",
+    "        - job_name: synveda-worker\n          honor_labels: false\n          static_configs:\n            - targets: [worker:8121]\n",
+    "  prometheus:\n    endpoint: 0.0.0.0:8889\n    send_timestamps: true\n    metric_expiration: 5m\n",
+    "    metrics:\n      receivers: [prometheus]\n      processors: [memory_limiter, batch]\n      exporters: [prometheus]\n",
+  ];
+  if (observability) {
+    for (const marker of metricsMarkers) {
+      if (!config.includes(marker)) findings.push("Collector metrics fan-in drifted");
+    }
+    if (config !== COLLECTOR_OBSERVABILITY_CONFIG) {
+      findings.push("Collector observability configuration is not the closed reviewed grammar");
+    }
+  } else if (metricsMarkers.some((marker) => config.includes(marker))) {
+    findings.push("base Collector unexpectedly enables the local metrics fan-in");
+  }
   return findings;
+}
+
+export function prometheusConfigFindings(config) {
+  return config === PROMETHEUS_CONFIG
+    ? []
+    : ["Prometheus scrape configuration drifted from the private Collector-only target"];
 }
 
 export function caddyTrustBoundaryFindings(config) {
@@ -2288,6 +2393,7 @@ export function canonicalComposeFindings(model, expected) {
     );
   }
   if (expected.browser === true) expectedServices.push("browser-acceptance");
+  if (expected.observability === true) expectedServices.push("prometheus");
   if (JSON.stringify(keys(services)) !== JSON.stringify(sorted(expectedServices))) {
     findings.push("service set does not match the selected provider row");
   }
@@ -2307,40 +2413,76 @@ export function canonicalComposeFindings(model, expected) {
     if ((service.configs ?? []).length > 0) {
       findings.push(`${name} mounts an unreviewed Compose config`);
     }
-    if (name === "browser-acceptance") {
-      if (JSON.stringify(service.profiles) !== JSON.stringify(["browser-acceptance"])) {
-        findings.push("browser-acceptance profile gate drifted");
+    if (name === "browser-acceptance" || name === "prometheus") {
+      const expectedProfile = name === "browser-acceptance" ? name : "observability";
+      if (JSON.stringify(service.profiles) !== JSON.stringify([expectedProfile])) {
+        findings.push(`${name} profile gate drifted`);
       }
     } else if (service.profiles !== undefined) {
       findings.push(`${name} is unexpectedly profile-gated`);
     }
-    if (name !== "postgres" && service.user !== expected.runtimeUser) {
+    const expectedUser = name === "prometheus" ? "65532:65532" : expected.runtimeUser;
+    if (name !== "postgres" && service.user !== expectedUser) {
       findings.push(`${name} runtime UID:GID differs from the validated secret owner`);
     }
   }
 
   const ports = publishedPorts(model);
-  if (ports.some(({ service }) => service !== "proxy")) {
-    findings.push("a non-proxy service publishes a host port");
+  if (
+    ports.some(
+      ({ service, host_ip }) =>
+        service !== "proxy" &&
+        !(expected.observability === true && service === "prometheus" && host_ip === "127.0.0.1"),
+    )
+  ) {
+    findings.push("a service publishes a port outside the public proxy or loopback operator UI");
   }
-  const portShape = ports.map(({ host_ip, published, target }) => ({
-    host_ip: host_ip ?? null,
-    published: String(published),
-    target,
-  }));
+  const portShape = ports
+    .map(({ service, host_ip, protocol, published, target }) => ({
+      service,
+      host_ip: host_ip ?? null,
+      protocol,
+      published: String(published),
+      target,
+    }))
+    .sort((left, right) => left.service.localeCompare(right.service));
   const expectedPorts =
     expected.runtime === "development"
       ? [
           {
+            service: "proxy",
             host_ip: "127.0.0.1",
+            protocol: "tcp",
             published: String(expected.publicPort),
             target: expected.publicPort,
           },
         ]
       : [
-          { host_ip: null, published: "80", target: 80 },
-          { host_ip: null, published: "443", target: 443 },
+          {
+            service: "proxy",
+            host_ip: null,
+            protocol: "tcp",
+            published: "80",
+            target: 80,
+          },
+          {
+            service: "proxy",
+            host_ip: null,
+            protocol: "tcp",
+            published: "443",
+            target: 443,
+          },
         ];
+  if (expected.observability === true) {
+    expectedPorts.push({
+      service: "prometheus",
+      host_ip: "127.0.0.1",
+      protocol: "tcp",
+      published: String(expected.prometheusPort),
+      target: 9090,
+    });
+  }
+  expectedPorts.sort((left, right) => left.service.localeCompare(right.service));
   if (JSON.stringify(portShape) !== JSON.stringify(expectedPorts)) {
     findings.push("proxy port exposure does not match the runtime mode");
   }
@@ -2380,6 +2522,9 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.browser === true) {
     expectedImages["browser-acceptance"] = expected.browserImage;
   }
+  if (expected.observability === true) {
+    expectedImages.prometheus = expected.prometheusImage;
+  }
   for (const [name, image] of Object.entries(expectedImages)) {
     if (services[name]?.image !== image) findings.push(`${name} image reference drifted`);
   }
@@ -2398,6 +2543,16 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.oidc === "bundled") commands.keycloak = ["start", "--optimized"];
   if (expected.oidc === "bundled") {
     commands["keycloak-realm-convergence"] = ["synveda-realm-supervise"];
+  }
+  if (expected.observability === true) {
+    commands.prometheus = [
+      "--config.file=/etc/prometheus/prometheus.yaml",
+      "--storage.tsdb.path=/prometheus",
+      "--storage.tsdb.retention.time=72h",
+      "--storage.tsdb.retention.size=1GB",
+      "--query.timeout=30s",
+      "--web.listen-address=0.0.0.0:9090",
+    ];
   }
   for (const [name, command] of Object.entries(commands)) {
     if (JSON.stringify(services[name]?.command) !== JSON.stringify(command)) {
@@ -2498,6 +2653,20 @@ export function canonicalComposeFindings(model, expected) {
       start_period: "15s",
     };
   }
+  if (expected.observability === true) {
+    expectedHealthchecks.prometheus = {
+      test: [
+        "CMD",
+        "/bin/promtool",
+        "check",
+        "ready",
+        "--url=http://127.0.0.1:9090",
+      ],
+      interval: "10s",
+      timeout: "5s",
+      retries: 12,
+    };
+  }
   for (const name of expectedServices) {
     const actual = services[name]?.healthcheck;
     const healthcheck = expectedHealthchecks[name];
@@ -2539,6 +2708,33 @@ export function canonicalComposeFindings(model, expected) {
   }
   if (services.worker?.stop_grace_period !== "1m25s") {
     findings.push("worker stop grace is shorter than its bounded drain");
+  }
+  if (expected.observability === true) {
+    const prometheus = services.prometheus ?? {};
+    if (
+      prometheus.labels?.["com.synveda.contract"] !== "cpr-45" ||
+      prometheus.pids_limit !== 128 ||
+      normalizedByteSize(prometheus.mem_limit) !== 512 * 1024 ** 2 ||
+      Number(prometheus.cpus) !== 1 ||
+      prometheus.stop_grace_period !== "30s" ||
+      JSON.stringify(prometheus.tmpfs) !==
+        JSON.stringify(["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"])
+    ) {
+      findings.push("Prometheus resource and private-tmpfs boundary drifted");
+    }
+    const dataMount = (prometheus.volumes ?? []).find(
+      (mount) => mount.target === "/prometheus",
+    );
+    if (
+      !sameJson(dataMount, {
+        type: "volume",
+        source: "prometheus-data",
+        target: "/prometheus",
+        volume: {},
+      })
+    ) {
+      findings.push("Prometheus state volume drifted");
+    }
   }
   if (services.gateway?.healthcheck?.test?.at(-1) !== "ready") {
     findings.push("gateway health does not use readiness");
@@ -2831,6 +3027,9 @@ export function canonicalComposeFindings(model, expected) {
     "/run/secrets/oidc_directory:ro",
   ];
   expectedBindTargets["otel-collector"] = ["/etc/otelcol/config.yaml:ro"];
+  if (expected.observability === true) {
+    expectedBindTargets.prometheus = ["/etc/prometheus/prometheus.yaml:ro"];
+  }
   if (expected.postgres === "bundled") {
     expectedBindTargets["database-bootstrap"] = [
       "/run/secrets/database_roles.json:ro",
@@ -2868,6 +3067,9 @@ export function canonicalComposeFindings(model, expected) {
     expectedNonBindTargets["browser-acceptance"] = [
       "volume:/var/lib/synveda-browser:rw",
     ];
+  }
+  if (expected.observability === true) {
+    expectedNonBindTargets.prometheus = ["volume:/prometheus:rw"];
   }
   for (const [name, targets] of Object.entries(expectedNonBindTargets)) {
     if (
@@ -2908,6 +3110,11 @@ export function canonicalComposeFindings(model, expected) {
       "/etc/otelcol/config.yaml": expected.collectorConfig,
     },
   };
+  if (expected.observability === true) {
+    expectedBindSources.prometheus = {
+      "/etc/prometheus/prometheus.yaml": expected.prometheusConfig,
+    };
+  }
   if (expected.postgres === "bundled") {
     expectedBindSources["database-bootstrap"] = {
       "/run/secrets/database_roles.json": expected.databaseRolesFile,
@@ -3124,6 +3331,11 @@ export function canonicalComposeFindings(model, expected) {
       "gateway:service_healthy:no-restart:required",
       "keycloak-realm-convergence:service_healthy:no-restart:required",
       "proxy:service_healthy:no-restart:required",
+    ];
+  }
+  if (expected.observability === true) {
+    expectedDependencies.prometheus = [
+      "otel-collector:service_healthy:no-restart:required",
     ];
   }
   if (expected.postgres === "bundled" && expected.oidc === "bundled") {
@@ -3445,6 +3657,10 @@ export function canonicalComposeFindings(model, expected) {
     ],
     "otel-collector": [],
   };
+  if (expected.observability === true) {
+    expectedEnvironmentKeys.worker.push("SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH");
+    expectedEnvironmentKeys.prometheus = [];
+  }
   if (expected.browser === true) {
     expectedEnvironmentKeys["browser-acceptance"] = [
       "SYNVEDA_BROWSER_APP_URL",
@@ -3539,6 +3755,15 @@ export function canonicalComposeFindings(model, expected) {
       findings.push(`${name} environment key set drifted`);
     }
   }
+  const expectedWorkerListen =
+    expected.observability === true ? "0.0.0.0:8121" : "127.0.0.1:8121";
+  if (
+    services.worker?.environment?.SYNVEDA_WORKER_LISTEN_ADDR !== expectedWorkerListen ||
+    services.worker?.environment?.SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH !==
+      (expected.observability === true ? "true" : undefined)
+  ) {
+    findings.push("worker private health-listener boundary drifted");
+  }
   if (expected.browser === true) {
     findings.push(
       ...browserAcceptanceFindings(services["browser-acceptance"] ?? {}, {
@@ -3568,7 +3793,6 @@ export function canonicalComposeFindings(model, expected) {
     migrate: { "synveda-data": {} },
     "tenant-convergence": { "synveda-data": {} },
     "otel-collector": {
-      "keycloak-management": {},
       telemetry: {},
       "telemetry-egress": { gw_priority: 1 },
     },
@@ -3586,6 +3810,9 @@ export function canonicalComposeFindings(model, expected) {
   };
   if (expected.browser === true) {
     expectedNetworks["browser-acceptance"] = { "app-backend": {} };
+  }
+  if (expected.observability === true) {
+    expectedNetworks.prometheus = { telemetry: {} };
   }
   if (expected.postgres === "external") {
     expectedNetworks["database-preflight"]["application-egress"] = { gw_priority: 1 };
@@ -3790,7 +4017,6 @@ export function canonicalComposeFindings(model, expected) {
   const expectedNetworkNames = [
     "app-backend",
     "application-egress",
-    "keycloak-management",
     "public-edge",
     "synveda-data",
     "telemetry",
@@ -3800,7 +4026,7 @@ export function canonicalComposeFindings(model, expected) {
     expectedNetworkNames.push("keycloak-data");
   }
   if (expected.oidc === "bundled") {
-    expectedNetworkNames.push("identity-backend");
+    expectedNetworkNames.push("identity-backend", "keycloak-management");
   }
   if (expected.postgres === "external" && expected.oidc === "bundled") {
     expectedNetworkNames.push("identity-egress");
@@ -3848,6 +4074,15 @@ export function canonicalComposeFindings(model, expected) {
       },
     };
   }
+  if (expected.observability === true) {
+    expectedVolumes["prometheus-data"] = {
+      name: `${expected.projectName}_prometheus-data`,
+      labels: {
+        "com.synveda.contract": "cpr-45",
+        "com.synveda.volume": "prometheus-data",
+      },
+    };
+  }
   if (!sameJson(model.volumes ?? {}, expectedVolumes)) {
     findings.push("named volume set differs from the closed deployment contract");
   }
@@ -3872,7 +4107,7 @@ export function canonicalComposeFindings(model, expected) {
 function render(fixture, expected) {
   const output = join(
     fixture.scratch,
-    `${expected.runtime}-${expected.postgres}-${expected.oidc}${expected.demo === true ? "-demo" : ""}${expected.browser === true ? "-browser" : ""}.json`,
+    `${expected.runtime}-${expected.postgres}-${expected.oidc}${expected.demo === true ? "-demo" : ""}${expected.browser === true ? "-browser" : ""}${expected.observability === true ? "-observability" : ""}.json`,
   );
   const reference = expected.runtime === "reference";
   expected.publicPort = reference ? 443 : (expected.devPort ?? 8080);
@@ -3913,6 +4148,9 @@ function render(fixture, expected) {
     : "synveda/proxy:2.11.4-dev";
   expected.otelCollectorImage =
     "otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc";
+  expected.prometheusImage =
+    "prom/prometheus:v3.13.3-distroless@sha256:2e9a8ad75536755572d703e645fcc39c8104d9f0215d49d613db35194b0d8bc2";
+  expected.prometheusPort = 9090;
   expected.browserImage = reference
     ? `registry.compose.example/synveda/browser-acceptance@${DIGEST}`
     : "synveda/browser-acceptance:1.62.1-dev";
@@ -3935,7 +4173,16 @@ function render(fixture, expected) {
       ? `configs/caddy/identity.${reference ? "reference" : "dev"}.caddy`
       : "configs/caddy/identity.external.caddy",
   );
-  expected.collectorConfig = join(COMPOSE, "configs/otel/collector.yaml");
+  expected.collectorConfig = join(
+    COMPOSE,
+    expected.observability === true
+      ? "configs/otel/collector.observability.yaml"
+      : "configs/otel/collector.yaml",
+  );
+  expected.prometheusConfig = join(
+    COMPOSE,
+    "configs/prometheus/prometheus.yaml",
+  );
   expected.databaseRolesFile = join(
     COMPOSE,
     "configs/database",
@@ -3965,6 +4212,10 @@ function render(fixture, expected) {
     ]),
     fixture,
   );
+  const selectedProfiles = [];
+  if (expected.demo === true) selectedProfiles.push("demo");
+  if (expected.browser === true) selectedProfiles.push("browser-acceptance");
+  if (expected.observability === true) selectedProfiles.push("observability");
   const environment = composeEnvironment(fixture, {
     SYNVEDA_COMPOSE_RUNTIME: expected.runtime,
     SYNVEDA_POSTGRES_MODE: expected.postgres,
@@ -3978,15 +4229,21 @@ function render(fixture, expected) {
     SYNVEDA_KEYCLOAK_IMAGE: expected.keycloakImage,
     SYNVEDA_CADDY_IMAGE: expected.caddyImage,
     SYNVEDA_OTEL_COLLECTOR_IMAGE: expected.otelCollectorImage,
+    ...(selectedProfiles.length === 0
+      ? {}
+      : { SYNVEDA_COMPOSE_PROFILES: selectedProfiles.join(",") }),
     ...(expected.browser === true
       ? {
-          SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
           SYNVEDA_COMPOSE_PROJECT_SUFFIX: "acceptance-browser",
           SYNVEDA_BROWSER_IMAGE: expected.browserImage,
         }
-      : expected.demo === true
-        ? { SYNVEDA_COMPOSE_PROFILES: "demo" }
-        : {}),
+      : {}),
+    ...(expected.observability === true
+      ? {
+          SYNVEDA_PROMETHEUS_IMAGE: expected.prometheusImage,
+          SYNVEDA_PROMETHEUS_PORT: String(expected.prometheusPort),
+        }
+      : {}),
   });
   expected.issuerFile = realpathSync(environment.SYNVEDA_OIDC_ISSUERS_FILE);
   expected.oidcDirectorySecrets = realpathSync(
@@ -4032,6 +4289,7 @@ function checkStaticInputs() {
     "compose.demo.yaml",
     "compose.browser-acceptance.yaml",
     "compose.browser-acceptance.dev.yaml",
+    "compose.observability.yaml",
     "compose.backup.yaml",
     "compose.restore.yaml",
     "compose.external.yaml",
@@ -4120,6 +4378,22 @@ function checkStaticInputs() {
   assert.match(collector, /exporters:\n  nop: \{\}/);
   assert.doesNotMatch(collector, /debug:|logging:/);
   assert.doesNotMatch(collector, /^\s+address:/m);
+
+  const observableCollector = readFileSync(
+    join(COMPOSE, "configs/otel/collector.observability.yaml"),
+    "utf8",
+  );
+  assert.deepEqual(collectorConfigFindings(observableCollector, true), []);
+  assert.match(observableCollector, /memory_limiter:/);
+  assert.match(observableCollector, /batch:/);
+  assert.doesNotMatch(observableCollector, /debug:|logging:/);
+  assert.doesNotMatch(observableCollector, /^\s+address:/m);
+  assert.deepEqual(
+    prometheusConfigFindings(
+      readFileSync(join(COMPOSE, "configs/prometheus/prometheus.yaml"), "utf8"),
+    ),
+    [],
+  );
 
   const keycloak = readFileSync(join(COMPOSE, "keycloak/Dockerfile"), "utf8");
   assert.match(
@@ -4311,6 +4585,57 @@ export function main() {
       [],
       `development/demo: ${demoFindings.join("; ")}`,
     );
+    for (const [runtime, postgres, oidc] of [
+      ["development", "bundled", "bundled"],
+      ["reference", "external", "external"],
+    ]) {
+      const observabilityExpected = {
+        runtime,
+        postgres,
+        oidc,
+        observability: true,
+      };
+      const observability = render(fixture, observabilityExpected);
+      const observabilityFindings = canonicalComposeFindings(
+        observability,
+        observabilityExpected,
+      );
+      assert.deepEqual(
+        observabilityFindings,
+        [],
+        `${runtime}/${postgres}/${oidc}/observability: ${observabilityFindings.join("; ")}`,
+      );
+      assert.deepEqual(
+        render(fixture, observabilityExpected),
+        observability,
+        `${runtime}/${postgres}/${oidc}/observability render is not deterministic`,
+      );
+      const udpOperatorPort = structuredClone(observability);
+      udpOperatorPort.services.prometheus.ports[0].protocol = "udp";
+      assert.ok(
+        canonicalComposeFindings(udpOperatorPort, observabilityExpected).includes(
+          "proxy port exposure does not match the runtime mode",
+        ),
+        `${runtime}/${postgres}/${oidc}/observability accepted a UDP operator port`,
+      );
+      const publicOperatorPort = structuredClone(observability);
+      publicOperatorPort.services.prometheus.ports[0].host_ip = "0.0.0.0";
+      assert.ok(
+        canonicalComposeFindings(publicOperatorPort, observabilityExpected).includes(
+          "a service publishes a port outside the public proxy or loopback operator UI",
+        ),
+        `${runtime}/${postgres}/${oidc}/observability accepted a public operator port`,
+      );
+      const unownedWorkerListener = structuredClone(observability);
+      delete unownedWorkerListener.services.worker.environment
+        .SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH;
+      assert.ok(
+        canonicalComposeFindings(unownedWorkerListener, observabilityExpected).includes(
+          "worker private health-listener boundary drifted",
+        ),
+        `${runtime}/${postgres}/${oidc}/observability accepted an unowned worker listener`,
+      );
+    }
     for (const runtime of ["development", "reference"]) {
       const browserExpected = {
         runtime,
@@ -4334,8 +4659,8 @@ export function main() {
     }
     console.log(
       `canonical Compose static shape validates: ${rows}/8 deterministic provider/runtime rows, ` +
-        "one bundled demo profile, two sandboxed browser-acceptance rows, one exact custom development issuer port, role-scoped file secrets, " +
-        "isolated networks, reverse-proxy-only host ports and closed runtime/build proxy injection; " +
+        "one bundled demo profile, two private observability rows, two sandboxed browser-acceptance rows, one exact custom development issuer port, role-scoped file secrets, " +
+        "isolated networks, public proxy plus optional loopback operator ports and closed runtime/build proxy injection; " +
         "live clean-start and browser acceptance execution remain pending",
     );
   } finally {

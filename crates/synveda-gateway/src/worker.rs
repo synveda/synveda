@@ -114,12 +114,17 @@ async fn run_process(
     let health = WorkerHealth::new(gate.clone(), metrics);
     let listen_addr =
         std::env::var("SYNVEDA_WORKER_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8121".to_owned());
-    let listen_addr = listen_addr
-        .parse::<std::net::SocketAddr>()
-        .map_err(|_| "SYNVEDA_WORKER_LISTEN_ADDR must be an IP socket address")?;
-    if !listen_addr.ip().is_loopback() {
-        return Err("SYNVEDA_WORKER_LISTEN_ADDR must use a loopback address".into());
-    }
+    let allow_non_loopback_health = match std::env::var("SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH")
+    {
+        Ok(value) => parse_allow_non_loopback_health(Some(&value))?,
+        Err(std::env::VarError::NotPresent) => false,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(
+                "SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH must be exactly true or false".into(),
+            );
+        }
+    };
+    let listen_addr = parse_listen_addr(&listen_addr, allow_non_loopback_health)?;
     let listener = tokio::net::TcpListener::bind(&listen_addr).await?;
     let (health_stop_tx, health_stop_rx) = oneshot::channel();
     let mut health_task = tokio::spawn(serve_health(listener, health.clone(), health_stop_rx));
@@ -335,6 +340,30 @@ async fn run_process(
     }
     tracing::info!("core worker stopped cleanly");
     Ok(())
+}
+
+fn parse_allow_non_loopback_health(value: Option<&str>) -> Result<bool, &'static str> {
+    match value {
+        None | Some("false") => Ok(false),
+        Some("true") => Ok(true),
+        Some(_) => Err("SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH must be exactly true or false"),
+    }
+}
+
+fn parse_listen_addr(
+    value: &str,
+    allow_non_loopback_health: bool,
+) -> Result<std::net::SocketAddr, &'static str> {
+    let address = value
+        .parse::<std::net::SocketAddr>()
+        .map_err(|_| "SYNVEDA_WORKER_LISTEN_ADDR must be an IP socket address")?;
+    if !address.ip().is_loopback() && (!allow_non_loopback_health || !address.ip().is_unspecified())
+    {
+        return Err(
+            "SYNVEDA_WORKER_LISTEN_ADDR must use loopback unless the private health-listener relaxation admits an unspecified address",
+        );
+    }
+    Ok(address)
 }
 
 fn generation_cleanup_error(
@@ -868,6 +897,41 @@ async fn worker_readyz(State(state): State<WorkerHealth>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_listener_accepts_only_local_or_deployment_owned_interfaces() {
+        for value in ["127.0.0.1:8121", "[::1]:8121"] {
+            assert_eq!(
+                parse_listen_addr(value, false)
+                    .expect("accepted loopback")
+                    .port(),
+                8121
+            );
+        }
+        for value in ["0.0.0.0:8121", "[::]:8121"] {
+            assert!(parse_listen_addr(value, false).is_err());
+            assert_eq!(
+                parse_listen_addr(value, true)
+                    .expect("accepted deployment listener")
+                    .port(),
+                8121
+            );
+        }
+        assert_eq!(
+            parse_listen_addr("192.0.2.10:8121", true),
+            Err(
+                "SYNVEDA_WORKER_LISTEN_ADDR must use loopback unless the private health-listener relaxation admits an unspecified address"
+            )
+        );
+        assert_eq!(
+            parse_listen_addr("worker:8121", false),
+            Err("SYNVEDA_WORKER_LISTEN_ADDR must be an IP socket address")
+        );
+        assert_eq!(parse_allow_non_loopback_health(None), Ok(false));
+        assert_eq!(parse_allow_non_loopback_health(Some("false")), Ok(false));
+        assert_eq!(parse_allow_non_loopback_health(Some("true")), Ok(true));
+        assert!(parse_allow_non_loopback_health(Some("TRUE")).is_err());
+    }
 
     #[test]
     fn signal_cleanup_preserves_generation_failures() {

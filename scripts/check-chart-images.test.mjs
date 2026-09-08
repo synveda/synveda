@@ -34,6 +34,7 @@ test("canonical Compose image selectors resolve only through checked defaults", 
   );
   assert.ok(files.includes("compose.yaml"));
   assert.ok(files.includes("compose.browser-acceptance.yaml"));
+  assert.ok(files.includes("compose.observability.yaml"));
   assert.ok(files.includes("compose.db-test.yaml"));
   assert.ok(!files.includes("docker-compose.yml"));
 
@@ -41,6 +42,11 @@ test("canonical Compose image selectors resolve only through checked defaults", 
     composeImageReferences(
       readFileSync(join(COMPOSE_DIRECTORY, name), "utf8"),
       defaults,
+    ),
+  );
+  assert.ok(
+    references.includes(
+      "prom/prometheus:v3.13.3-distroless@sha256:2e9a8ad75536755572d703e645fcc39c8104d9f0215d49d613db35194b0d8bc2",
     ),
   );
   assert.ok(

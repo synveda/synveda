@@ -88,8 +88,9 @@ diagnostic, gateway, worker and Collector services. Bundled fragments add
 PostgreSQL, database bootstrap, Keycloak database bootstrap, Keycloak and realm
 convergence.
 
-Only the proxy publishes ports: loopback development HTTP or reference 80/443.
-PostgreSQL, Keycloak management, worker health and OTLP remain private.
+Only the proxy publishes public ports: loopback development HTTP or reference
+80/443. The optional Prometheus UI binds to host loopback. PostgreSQL, Keycloak
+management, worker health, application metrics and OTLP remain private.
 Long-running services are non-root where their upstream permits it, drop
 capabilities, use read-only roots and have bounded health/restart behavior.
 
@@ -114,6 +115,13 @@ optional directory pull. PostgreSQL remains the authority for their existing
 leased work. Temporal runtime assets have been removed after a no-consumer
 inventory.
 
+The optional observability profile is now implemented with a closed Collector
+metrics fan-in and digest-pinned Prometheus. It publishes only a loopback
+operator UI, applies 72-hour/1-GB TSDB block-retention thresholds rather than a
+disk quota, and deterministically pins the gateway-authority/worker-readiness
+smoke contract, lifecycle and exact reset ownership. It is infrastructure
+visibility, not the customer-safe Operations route.
+
 ### Remaining implementation slices
 
 1. Run the implemented logical database backup, isolated restore and KMS-key
@@ -121,9 +129,8 @@ inventory.
 2. Add the minimal `operation`, `operation_attempt` and
    `operation_outbox` schema/API for `skill_validation@1` under forced RLS.
 3. Add the exact-pinned Apalis leaf adapter and optional Compose fragment.
-4. Add the bounded local observability profile and customer-safe Operations
-   route.
-5. Add upgrade/rollback and external-dependency contract acceptance.
+4. Add the customer-safe Operations route and external OTLP exporter.
+5. Add upgrade/rollback and executable external-PostgreSQL contract acceptance.
 6. Run current-source development and reference acceptance on Linux and one
    Docker Desktop platform.
 7. After the Keycloak gate passes, replace release/install assets with the

@@ -182,8 +182,10 @@ PostgreSQL-native logical backup plus
 isolated database/key restore is also implemented and deterministically tested; its live
 Docker run remains pending. Remaining implementation work is one forced-RLS
 skill-validation operation/outbox and its disabled-by-default
-Apalis 0.7.4 leaf adapter, a small observability/Operations slice, and
-upgrade/external-dependency acceptance. Current-source Linux and Docker Desktop
+Apalis 0.7.4 leaf adapter, a customer-safe Operations route, external OTLP,
+and upgrade/external-PostgreSQL acceptance. A bounded private Collector-to-
+Prometheus profile is implemented with loopback-only operator access and
+deterministic lifecycle evidence. Current-source Linux and Docker Desktop
 browser acceptance must pass before the legacy Rauthy paths are deleted.
 Feature-local recovery evidence does not establish DR or owned RPO/RTO; no HA,
 SaaS, signing or Helm-production claim follows. S3/WAL-PITR and encrypted

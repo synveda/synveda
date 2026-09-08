@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 5s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: synveda-collector
+    honor_labels: false
+    static_configs:
+      - targets: [otel-collector:8889]

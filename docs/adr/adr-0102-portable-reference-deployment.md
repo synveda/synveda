@@ -44,8 +44,9 @@ contract with Kubernetes-native resources; it is not generated from Compose.
 
 The reference graph contains a reverse proxy, PostgreSQL, production-mode
 Keycloak, a gateway, a separate worker and a private OpenTelemetry Collector.
-Only the reverse proxy publishes host ports. Development may use explicit
-loopback HTTP; reference/playground mode uses HTTPS and real DNS.
+Only the reverse proxy publishes public host ports. The optional local metrics
+profile may publish its operator UI on host loopback only. Development may use
+explicit loopback HTTP; reference/playground mode uses HTTPS and real DNS.
 
 Keycloak replaces Rauthy after the existing browser and issuer conformance gate
 passes. Synveda remains a generic OIDC/OAuth 2.0 authorization-code plus PKCE

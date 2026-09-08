@@ -132,8 +132,9 @@ The reference graph applies:
 - init/signal handling and bounded shutdown;
 - no privileged containers and no Docker socket mount.
 
-Only Caddy publishes ports. PostgreSQL, gateway/worker metrics, worker health,
-Keycloak management, OTLP receivers and recovery services are private.
+Only Caddy publishes public ports. The optional Prometheus operator UI binds to
+host loopback only. PostgreSQL, gateway/worker metrics, worker health, Keycloak
+management, OTLP receivers and recovery services are private.
 Separate networks isolate the public edge, application, Synveda data, Keycloak
 data/management and telemetry. Only discovery/export components join explicit
 egress networks.
@@ -172,7 +173,11 @@ mode and must then be deleted rather than retained as a compatibility path.
 
 The private worker readiness surface proves schema epoch, exact role, writable
 primary, initial policy convergence, process lifecycle and supervisor
-heartbeat. A heartbeat is not proof that each work loop progressed.
+heartbeat. Its direct-binary default accepts only loopback. The observability
+overlay must set the exact non-loopback relaxation before an unspecified bind
+is accepted, publishes no worker port and attaches no new network. Any other
+address or flag value fails startup. A heartbeat is not proof that each work
+loop progressed.
 
 The experimental Apalis canary is still open. It may be accepted only with:
 
@@ -196,9 +201,13 @@ credentials or unbounded tenant/principal labels. Caller-supplied trace and
 baggage headers are stripped at the edge.
 
 Gateway and worker traces use OTLP to a private Collector with memory limiting
-and batching. The Collector currently terminates traces at a no-op exporter;
-application metrics remain private Prometheus endpoints. Useful bounded local
-or external export is an open implementation gap.
+and batching. The Collector currently terminates traces at a no-op exporter.
+The optional observability profile uses a closed Collector configuration to
+scrape only the private gateway and worker metrics endpoints, then exposes one
+private fan-in to a digest-pinned Prometheus with 72-hour/1-GB TSDB
+block-retention thresholds and a loopback-only UI. Those thresholds are not a
+disk quota. It carries no tenant-safe Operations or production monitoring claim.
+External OTLP export remains an open implementation gap.
 
 ## Backup boundary
 

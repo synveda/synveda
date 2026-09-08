@@ -2,7 +2,8 @@
 
 This directory is Synveda's canonical single-host deployment for CPR-45. It
 runs the gateway and worker as separate processes with PostgreSQL, bundled
-Keycloak, a reverse proxy and a private OpenTelemetry Collector.
+Keycloak, a reverse proxy and a private OpenTelemetry Collector. An optional
+profile adds a bounded local Prometheus operator view.
 
 It supports development and reference configuration. Logical backup and
 isolated restore commands are implemented, but live browser, reference-HTTPS,
@@ -103,6 +104,32 @@ that profile's disposable credential-and-receipt volume after checking its
 exact ownership; it does not retain login tokens at rest. Confirmed reset with
 the same profiles also removes it when stopping a running project. The default
 ignored state directory is deploy/compose/runtime/synveda-development.
+
+## Optional local metrics
+
+The observability profile adds one private metrics path without changing the
+application telemetry contract:
+
+    export SYNVEDA_COMPOSE_PROFILES=observability
+    make compose-up
+    make compose-smoke
+
+The Collector scrapes the gateway and worker privately. Prometheus reads only
+the Collector fan-in and publishes its operator UI at
+`http://127.0.0.1:${SYNVEDA_PROMETHEUS_PORT:-9090}`. Smoke requires the gateway
+authority and worker readiness gauges to equal one and the worker heartbeat to
+be no more than five seconds old, all from samples newer than the smoke start.
+The profile applies 72-hour and 1-GB TSDB block-retention thresholds (whichever
+triggers first). WAL, head-block and compaction overhead mean this is not a
+volume or disk quota. The disposable `prometheus-data` volume is not part of
+product recovery.
+
+Use the same profile selector for `make compose-down` or confirmed
+`make compose-reset`. Down preserves the metrics volume; reset validates and
+removes it before the product database volume. On a remote host, reach the UI
+only through an operator-controlled loopback tunnel. This profile is separate
+from `compose-acceptance`, is not the tenant-safe Operations page, and carries
+no production monitoring or alerting claim.
 
 ## Secrets
 
@@ -287,9 +314,9 @@ leave the lock in place and escalate to the host operator.
 
 ## Reference HTTPS
 
-Reference mode publishes only ports 80 and 443 and requires real operator DNS,
-an explicit private /24, mounted certificate files and immutable image
-references:
+Reference mode publishes public traffic only on ports 80 and 443 and requires
+real operator DNS, an explicit private /24, mounted certificate files and
+immutable image references. The optional metrics UI remains loopback-only:
 
     export SYNVEDA_COMPOSE_RUNTIME=reference
     export SYNVEDA_PUBLIC_SCHEME=https
@@ -351,13 +378,15 @@ configuration render is not a live external-database claim.
 ## Network and edge contract
 
 The selector divides one operator-selected private /24 into fixed internal and
-egress networks and refuses foreign overlap. Only Caddy publishes host ports.
+egress networks and refuses foreign overlap. Only Caddy publishes public host
+ports; the optional Prometheus operator UI binds only to host loopback.
 
 The proxy removes caller-supplied Forwarded, X-Forwarded-*, X-Real-IP,
 identity, original-path and tracing/baggage headers before adding its own
 bounded forwarding values. It applies request-body, header and upstream
-timeouts. PostgreSQL, Keycloak management, worker health, metrics, OTLP
-receivers, recovery jobs and operator UIs remain private.
+timeouts. PostgreSQL, Keycloak management, worker health, application metrics,
+OTLP receivers and recovery jobs remain private. Prometheus is the only
+profile-owned operator UI and is loopback-only.
 
 Containers use non-root users where supported, read-only roots where
 compatible, dropped capabilities, no-new-privileges, PID/resource bounds and
@@ -372,7 +401,7 @@ lifecycle:
     make compose-reset
 
 It acts only on the validated project containers, networks, PostgreSQL volume,
-profile-selected browser credential-and-receipt volume and transient
+profile-selected browser credential-and-receipt or Prometheus volume and transient
 database-authority/Keycloak-gate state. It deliberately retains the project's
 secrets, issuer document and KMS key. Use the same profile selector that
 created profile-owned volumes, review the target and supply the requested
@@ -387,7 +416,7 @@ implemented:
 - live execution of the paired logical backup and isolated restore on the
   supported development/reference platforms;
 - one experimental forced-RLS operation/outbox and opaque-ID Apalis canary;
-- a bounded local telemetry backend and customer-safe Operations route;
+- a customer-safe Operations route and external OTLP export;
 - canonical release/installer cutover and Rauthy deletion after live Keycloak
   browser acceptance;
 - deterministic upgrade/rollback and external-dependency contract checks.

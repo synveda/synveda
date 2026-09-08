@@ -365,17 +365,22 @@ RUN cargo build --release
 
 test("the product image is role-neutral and non-root", () => {
   const current = readFileSync(PRODUCT_DOCKERFILE, "utf8");
+  const finalUser = "USER 65532:65532\nSTOPSIGNAL SIGTERM";
+  assert.ok(current.includes(finalUser));
   assert.deepEqual(productImageFindings(current), []);
   assert.ok(
     productImageFindings(current.replace("cargo build --locked", "cargo build")).includes(
       "release Cargo builds are not exactly two locked invocations",
     ),
   );
-  assert.deepEqual(productImageFindings(current.replace("65532:65532", "root")), [
-    "final runtime user is not an explicit non-zero UID:GID",
-  ]);
+  assert.deepEqual(
+    productImageFindings(current.replace(finalUser, "USER root\nSTOPSIGNAL SIGTERM")),
+    ["final runtime user is not an explicit non-zero UID:GID"],
+  );
   assert.ok(
-    productImageFindings(current.replace("65532:65532", "0:65532")).includes(
+    productImageFindings(
+      current.replace(finalUser, "USER 0:65532\nSTOPSIGNAL SIGTERM"),
+    ).includes(
       "final runtime user is not an explicit non-zero UID:GID",
     ),
   );
@@ -405,7 +410,7 @@ test("the product image is role-neutral and non-root", () => {
   );
   assert.ok(
     productImageFindings(
-      current.replace(
+      current.replaceAll(
         "COPY --from=build /src/target/release/synveda /usr/local/bin/synveda",
         "# COPY --from=build /src/target/release/synveda /usr/local/bin/synveda",
       ),

@@ -49,7 +49,7 @@ it does not substitute for the still-open restore and failover evidence.
 | ORM/queries | **sqlx** (compile-time checked SQL — auditability again) |
 | Embeddings serving | Optional **text-embeddings-inference** serving BGE-M3 for the measured dense path. Production model support, generation cutover and re-embedding remain open. |
 | Summarisation/extraction LLM | Pluggable: Claude API, or self-hosted via vLLM for air-gapped; behind `Extractor` trait |
-| Observability | Current OpenTelemetry traces, a loopback-private worker Prometheus surface and an unauthenticated gateway Prometheus route that still shares the public listener; the accepted CPR-45 target (implementation open) removes application scrape routes and sends telemetry through a private Collector with optional bounded Prometheus/Jaeger/Perses evaluation visibility |
+| Observability | OpenTelemetry remains the application trace contract. Canonical Compose keeps application metrics off public proxy routes and optionally uses a closed private Collector scrape/fan-in with a digest-pinned, loopback-only Prometheus UI and 72-hour/1-GB TSDB block-retention thresholds (not a disk quota). External OTLP export and the customer-safe Operations route remain open. |
 | Packaging | Accepted CPR-45 target (implementation open): one product image/configuration contract and Docker Compose as the single-host reference. Later Helm implements the same contract and currently enforces one gateway and one core-worker replica. |
 
 ### 1.4 Explicit non-choices

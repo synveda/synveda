@@ -5,8 +5,10 @@ import {
   boundedResponseBody,
   parseComposePs,
   parseArguments,
+  prometheusQueryHasSeries,
   referenceHostTrustFindings,
   runtimeStateFindings,
+  waitForLocalMetrics,
 } from "../deploy/compose/scripts/check-runtime-smoke.mjs";
 
 const hostTrustEnvironment = [
@@ -59,6 +61,8 @@ function smokeArguments(runtime, appUrl, issuer) {
     "--oidc",
     "bundled",
     "--browser",
+    "false",
+    "--observability",
     "false",
     "--app-url",
     appUrl,
@@ -166,7 +170,12 @@ test("Compose ps accepts array and newline-delimited JSON", () => {
 });
 
 test("bundled topology requires every convergence and healthy process", () => {
-  const selection = { postgres: "bundled", oidc: "bundled", browser: "false" };
+  const selection = {
+    postgres: "bundled",
+    oidc: "bundled",
+    browser: "false",
+    observability: "false",
+  };
   assert.deepEqual(runtimeStateFindings(healthyRows(), selection), []);
 
   const failed = healthyRows().map((row) =>
@@ -199,11 +208,21 @@ test("external provider rows reject bundled provider residue", () => {
       ].includes(Service),
   );
   assert.deepEqual(
-    runtimeStateFindings(external, { postgres: "external", oidc: "external", browser: "false" }),
+    runtimeStateFindings(external, {
+      postgres: "external",
+      oidc: "external",
+      browser: "false",
+      observability: "false",
+    }),
     [],
   );
   assert.ok(
-    runtimeStateFindings(healthyRows(), { postgres: "external", oidc: "external", browser: "false" }).includes(
+    runtimeStateFindings(healthyRows(), {
+      postgres: "external",
+      oidc: "external",
+      browser: "false",
+      observability: "false",
+    }).includes(
       "Compose service status set differs from the selected topology",
     ),
   );
@@ -214,7 +233,12 @@ test("browser acceptance is an exact successful one-shot in either bundled runti
     ...healthyRows(),
     { Service: "browser-acceptance", State: "exited", ExitCode: 0, Health: "" },
   ];
-  const selection = { postgres: "bundled", oidc: "bundled", browser: "true" };
+  const selection = {
+    postgres: "bundled",
+    oidc: "bundled",
+    browser: "true",
+    observability: "false",
+  };
   assert.deepEqual(runtimeStateFindings(browserRows, selection), []);
   assert.match(
     runtimeStateFindings(healthyRows(), selection)[0],
@@ -245,6 +269,99 @@ test("browser acceptance is an exact successful one-shot in either bundled runti
   const external = [...reference];
   external[external.indexOf("bundled")] = "external";
   assert.equal(parseArguments(external), undefined);
+});
+
+test("observability requires one loopback backend and healthy service", () => {
+  const args = smokeArguments(
+    "development",
+    "http://app.synveda.test:8080",
+    "http://auth.synveda.test:8080/realms/synveda",
+  );
+  args[args.indexOf("false", args.indexOf("--observability"))] = "true";
+  assert.equal(parseArguments(args), undefined);
+  args.push("--prometheus-url", "http://127.0.0.1:9090");
+  assert.ok(parseArguments(args));
+
+  const disabledWithUrl = smokeArguments(
+    "development",
+    "http://app.synveda.test:8080",
+    "http://auth.synveda.test:8080/realms/synveda",
+  );
+  disabledWithUrl.push("--prometheus-url", "http://127.0.0.1:9090");
+  assert.equal(parseArguments(disabledWithUrl), undefined);
+
+  for (const refused of [
+    "http://0.0.0.0:9090",
+    "http://localhost:9090",
+    "https://127.0.0.1:9090",
+    "http://127.0.0.1:80",
+  ]) {
+    const changed = [...args];
+    changed[changed.indexOf("http://127.0.0.1:9090")] = refused;
+    assert.equal(parseArguments(changed), undefined);
+  }
+
+  const rows = [
+    ...healthyRows(),
+    { Service: "prometheus", State: "running", ExitCode: 0, Health: "healthy" },
+  ];
+  const selection = {
+    postgres: "bundled",
+    oidc: "bundled",
+    browser: "false",
+    observability: "true",
+  };
+  assert.deepEqual(runtimeStateFindings(rows, selection), []);
+  assert.match(runtimeStateFindings(healthyRows(), selection)[0], /service status set differs/);
+});
+
+test("Prometheus responses prove a non-empty vector without exposing values", () => {
+  assert.equal(
+    prometheusQueryHasSeries({
+      status: "success",
+      data: { resultType: "vector", result: [{ metric: {}, value: [1, "1"] }] },
+    }),
+    true,
+  );
+  assert.equal(
+    prometheusQueryHasSeries({
+      status: "success",
+      data: { resultType: "vector", result: [] },
+    }),
+    false,
+  );
+  assert.equal(prometheusQueryHasSeries({ status: "error" }), false);
+  for (const malformed of [
+    undefined,
+    null,
+    {},
+    { status: "success", data: { resultType: "matrix", result: [{}] } },
+    { status: "success", data: { resultType: "vector", result: {} } },
+  ]) {
+    assert.equal(prometheusQueryHasSeries(malformed), false);
+  }
+});
+
+test("local metric smoke requires all three samples after this smoke started", async () => {
+  const originalFetch = globalThis.fetch;
+  const queries = [];
+  globalThis.fetch = async (source) => {
+    queries.push(new URL(source).searchParams.get("query"));
+    return new Response(JSON.stringify({
+      status: "success",
+      data: { resultType: "vector", result: [{ metric: {}, value: [1, "1"] }] },
+    }), { status: 200 });
+  };
+  try {
+    await waitForLocalMetrics("http://127.0.0.1:9090", 1_700_000_000);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(queries, [
+    "(synveda_gateway_authority_ready == 1) and timestamp(synveda_gateway_authority_ready) >= 1700000000",
+    "(synveda_worker_ready == 1) and timestamp(synveda_worker_ready) >= 1700000000",
+    "(synveda_worker_heartbeat_age_seconds <= 5) and timestamp(synveda_worker_heartbeat_age_seconds) >= 1700000000",
+  ]);
 });
 
 test("public response bodies are bounded before parsing", async () => {

@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const MAX_STATUS_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 5_000;
+const METRICS_WAIT_MS = 45_000;
+const METRICS_POLL_MS = 1_000;
 const HOST_TRUST_ENVIRONMENT = Object.freeze([
   "NODE_OPTIONS",
   "NODE_EXTRA_CA_CERTS",
@@ -31,7 +33,7 @@ export function parseComposePs(source) {
   }
 }
 
-export function runtimeStateFindings(rows, { postgres, oidc, browser }) {
+export function runtimeStateFindings(rows, { postgres, oidc, browser, observability }) {
   const oneShots = new Set([
     "database-preflight",
     "issuer-diagnostic",
@@ -49,6 +51,7 @@ export function runtimeStateFindings(rows, { postgres, oidc, browser }) {
     longRunning.add("keycloak-realm-convergence");
   }
   if (browser === "true") oneShots.add("browser-acceptance");
+  if (observability === "true") longRunning.add("prometheus");
   const expected = new Set([...oneShots, ...longRunning]);
   const findings = [];
   const observed = new Map();
@@ -122,8 +125,10 @@ export function parseArguments(argv) {
     "--postgres",
     "--oidc",
     "--browser",
+    "--observability",
     "--app-url",
     "--issuer",
+    "--prometheus-url",
   ]);
   if ([...values.keys()].some((key) => !allowed.has(key))) return undefined;
   const selection = Object.fromEntries([...values].map(([key, value]) => [key.slice(2), value]));
@@ -132,10 +137,22 @@ export function parseArguments(argv) {
   if (!["bundled", "external"].includes(selection.postgres)) return undefined;
   if (!["bundled", "external"].includes(selection.oidc)) return undefined;
   if (!["true", "false"].includes(selection.browser)) return undefined;
+  if (!["true", "false"].includes(selection.observability)) return undefined;
   if (
     selection.browser === "true" &&
     (selection.postgres !== "bundled" || selection.oidc !== "bundled")
   ) return undefined;
+  if (
+    (selection.observability === "true") !==
+    (selection["prometheus-url"] !== undefined)
+  ) return undefined;
+  if (selection.observability === "true") {
+    const match = /^http:\/\/127\.0\.0\.1:([1-9]\d{3,4})$/.exec(
+      selection["prometheus-url"],
+    );
+    const port = Number(match?.[1]);
+    if (match === null || port < 1024 || port > 65535) return undefined;
+  }
   try {
     const app = new URL(selection["app-url"]);
     const issuer = new URL(selection.issuer);
@@ -153,6 +170,63 @@ export function parseArguments(argv) {
     return undefined;
   }
   return selection;
+}
+
+export function prometheusQueryHasSeries(document) {
+  return (
+    document?.status === "success" &&
+    document?.data?.resultType === "vector" &&
+    Array.isArray(document?.data?.result) &&
+    document.data.result.length > 0
+  );
+}
+
+async function queryPrometheus(baseUrl, query) {
+  const response = await fetch(
+    `${baseUrl}/api/v1/query?query=${encodeURIComponent(query)}`,
+    {
+      redirect: "manual",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      headers: { "user-agent": "synveda-compose-smoke/1" },
+    },
+  );
+  if (response.status !== 200) return false;
+  const body = await boundedResponseBody(response, MAX_STATUS_BYTES);
+  let document;
+  try {
+    document = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+  } catch {
+    return false;
+  }
+  return prometheusQueryHasSeries(document);
+}
+
+export async function waitForLocalMetrics(
+  baseUrl,
+  freshAfterSeconds = Math.floor(Date.now() / 1_000),
+) {
+  if (!Number.isSafeInteger(freshAfterSeconds) || freshAfterSeconds <= 0) {
+    throw new Error("local metrics freshness boundary is invalid");
+  }
+  const queries = [
+    `(synveda_gateway_authority_ready == 1) and timestamp(synveda_gateway_authority_ready) >= ${freshAfterSeconds}`,
+    `(synveda_worker_ready == 1) and timestamp(synveda_worker_ready) >= ${freshAfterSeconds}`,
+    `(synveda_worker_heartbeat_age_seconds <= 5) and timestamp(synveda_worker_heartbeat_age_seconds) >= ${freshAfterSeconds}`,
+  ];
+  const deadline = Date.now() + METRICS_WAIT_MS;
+  while (Date.now() <= deadline) {
+    try {
+      const visible = await Promise.all(
+        queries.map((query) => queryPrometheus(baseUrl, query)),
+      );
+      if (visible.every(Boolean)) return;
+    } catch {
+      // Startup scrape races are expected; only the bounded final result is
+      // surfaced, never a response body or metric value.
+    }
+    await new Promise((resolve) => setTimeout(resolve, METRICS_POLL_MS));
+  }
+  throw new Error("local metrics visibility probe failed");
 }
 
 async function probe(url, expectedStatus, stage) {
@@ -271,6 +345,15 @@ export async function main(argv = process.argv.slice(2)) {
         404,
         "identity master realm refusal probe failed",
       );
+    }
+    if (selection.observability === "true") {
+      const prometheusUrl = selection["prometheus-url"];
+      await probe(
+        `${prometheusUrl}/-/ready`,
+        200,
+        "local metrics backend readiness probe failed",
+      );
+      await waitForLocalMetrics(prometheusUrl);
     }
   } catch (error) {
     const stage = error instanceof Error ? error.message : "public endpoint probe failed";

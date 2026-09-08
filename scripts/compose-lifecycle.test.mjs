@@ -304,6 +304,7 @@ esac
 volume_key=postgres-data
 case " $* " in
   *"browser-acceptance-state"*) volume_key=browser-acceptance-state ;;
+  *"prometheus-data"*) volume_key=prometheus-data ;;
 esac
 if [ "$1" = volume ] && [ "$2" = ls ]; then
   [ "\${SYNVEDA_FAKE_VOLUME_INVENTORY_ERROR:-0}" = 0 ] || exit 1
@@ -634,6 +635,8 @@ function environment(state, extra = {}) {
           SYNVEDA_CADDY_IMAGE: `registry.lifecycle.example/synveda/proxy@${DIGEST}`,
           SYNVEDA_BROWSER_IMAGE:
             `registry.lifecycle.example/synveda/browser-acceptance@${DIGEST}`,
+          SYNVEDA_PROMETHEUS_IMAGE:
+            `registry.lifecycle.example/synveda/prometheus@${DIGEST}`,
         }
       : {}),
     ...extra,
@@ -1597,6 +1600,119 @@ test("down retains data and reset requires exact confirmation", () => {
       new RegExp(`docker <volume> <rm> <${state.project}_postgres-data>`),
     );
     assert.doesNotMatch(calls, /down> <-v>|prune|system/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("observability selects one private overlay and routes exact smoke evidence", () => {
+  const state = fixture();
+  const profile = { SYNVEDA_COMPOSE_PROFILES: "observability" };
+  try {
+    const up = run(state, "up", profile);
+    assert.equal(up.status, 0, up.stderr);
+    let calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /compose\.observability\.yaml>/);
+    assert.match(calls, /<--profile> <observability>/);
+
+    writeFileSync(state.log, "");
+    const smoke = run(state, "smoke", profile);
+    assert.equal(smoke.status, 0, smoke.stderr);
+    calls = readFileSync(state.log, "utf8");
+    assert.match(
+      calls,
+      /check-runtime-smoke\.mjs>.*<--observability> <true>.*<--prometheus-url> <http:\/\/127\.0\.0\.1:9090>/,
+    );
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("observability refuses an unpinned image and unsafe operator ports", () => {
+  for (const [extra, diagnostic] of [
+    [
+      { SYNVEDA_PROMETHEUS_IMAGE: "prom/prometheus:v3.13.3-distroless" },
+      /Prometheus image must use an OCI sha256 digest/,
+    ],
+    [{ SYNVEDA_PROMETHEUS_PORT: "80" }, /1024 through 65535 distinct/],
+    [{ SYNVEDA_PROMETHEUS_PORT: "08080" }, /canonical integer/],
+    [{ SYNVEDA_PROMETHEUS_PORT: "8080" }, /1024 through 65535 distinct/],
+    [{ SYNVEDA_PROMETHEUS_PORT: "65536" }, /1024 through 65535 distinct/],
+  ]) {
+    const state = fixture();
+    try {
+      const preparedEnvironment = environment(state, {
+        SYNVEDA_COMPOSE_PROFILES: "observability",
+      });
+      for (const script of [SECRET_GENERATOR, ISSUER_GENERATOR]) {
+        const prepared = spawnSync(script, ["--if-missing"], {
+          cwd: ROOT,
+          env: preparedEnvironment,
+          encoding: "utf8",
+        });
+        assert.equal(prepared.status, 0, prepared.stderr);
+      }
+      const refused = run(state, "config", {
+        SYNVEDA_COMPOSE_PROFILES: "observability",
+        ...extra,
+      });
+      assert.equal(refused.status, 64, refused.stderr);
+      assert.match(refused.stderr, diagnostic);
+      assert.equal(existsSync(state.log), false, "refused input reached Docker");
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("observability down retains metrics and confirmed reset removes them before data", () => {
+  const state = fixture();
+  const profile = { SYNVEDA_COMPOSE_PROFILES: "observability" };
+  try {
+    assert.equal(run(state, "up", profile).status, 0);
+    writeFileSync(state.log, "");
+    const down = run(state, "down", {
+      ...profile,
+      SYNVEDA_FAKE_VOLUME_MODE: "exact",
+    });
+    assert.equal(down.status, 0, down.stderr);
+    assert.doesNotMatch(readFileSync(state.log, "utf8"), /<volume> <rm>/);
+
+    writeFileSync(state.log, "");
+    const reset = run(state, "reset", {
+      ...profile,
+      SYNVEDA_FAKE_VOLUME_MODE: "exact",
+      SYNVEDA_CONFIRM_RESET: state.project,
+    });
+    assert.equal(reset.status, 0, reset.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    const metricsRemoval = calls.indexOf(
+      `docker <volume> <rm> <${state.project}_prometheus-data>`,
+    );
+    const dataRemoval = calls.indexOf(
+      `docker <volume> <rm> <${state.project}_postgres-data>`,
+    );
+    assert.ok(metricsRemoval >= 0 && dataRemoval > metricsRemoval, calls);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("observability down refuses post-stop metrics-volume drift", () => {
+  const state = fixture();
+  const profile = { SYNVEDA_COMPOSE_PROFILES: "observability" };
+  try {
+    assert.equal(run(state, "up", profile).status, 0);
+    writeFileSync(state.log, "");
+    const refused = run(state, "down", {
+      ...profile,
+      SYNVEDA_FAKE_VOLUME_MODE: "exact",
+      SYNVEDA_FAKE_VOLUME_CONTRACT: "drift-after-down",
+      SYNVEDA_FAKE_VOLUME_CONTRACT_KEY: "prometheus-data",
+    });
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.match(refused.stderr, /exact project prometheus-data volume contract was refused/);
+    assert.doesNotMatch(readFileSync(state.log, "utf8"), /<volume> <rm>/);
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }

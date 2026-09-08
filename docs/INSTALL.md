@@ -93,6 +93,16 @@ persistence across the restarts.
 External PostgreSQL bootstrap deliberately refuses before secret reads or SQL until the
 authenticated-TLS contract is implemented.
 
+For optional local infrastructure metrics, set
+`SYNVEDA_COMPOSE_PROFILES=observability` for `compose-up`, `compose-smoke` and
+the matching down/reset command. The private Collector scrapes gateway and
+worker readiness into a digest-pinned Prometheus whose UI is available only on
+host loopback (port 9090 by default). Its TSDB blocks use 72-hour and 1-GB
+retention thresholds, whichever triggers first; WAL/head/compaction overhead
+means that policy is not a disk quota. This is not the customer-safe Operations
+page or production monitoring;
+the full profile contract and tunnel guidance are in the Compose README.
+
 Reference certificate-file preparation and its executable ordering are defined
 in [`deploy/compose/README.md`](../deploy/compose/README.md). The lifecycle
 preflights a leaf-first leaf-and-intermediate fullchain with the trust root
@@ -1118,8 +1128,9 @@ behavior against fresh PostgreSQL fixtures. These checks do not build an image
 or prove artifact publication or pulls. The implemented
 `make compose-acceptance` command requires a supported live Docker host; its
 deterministic tests are not a browser-login or clean-lifecycle claim.
-Logical backup/restore is implemented and deterministically tested, but its
-live execution, upgrade and desktop/Linux parity remain unproved.
+Logical backup/restore and the bounded local metrics profile are implemented
+and deterministically tested, but their live execution, upgrade and
+desktop/Linux parity remain unproved.
 
 The Docker reference may be called validated only after
 `make compose-acceptance`, `make compose-backup`, `make compose-restore-smoke`

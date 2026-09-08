@@ -60,6 +60,7 @@ oidc_mode=${SYNVEDA_OIDC_MODE:-bundled}
 profiles=${SYNVEDA_COMPOSE_PROFILES:-}
 demo_profile=false
 browser_acceptance_profile=false
+observability_profile=false
 lifecycle_default_timeout=900
 if [ "$action" = acceptance ] || [ "$action" = backup ] || \
     [ "$action" = restore-smoke ]; then
@@ -448,8 +449,9 @@ for profile in $profiles; do
         "") ;;
         demo) demo_profile=true ;;
         browser-acceptance) browser_acceptance_profile=true ;;
+        observability) observability_profile=true ;;
         *)
-            echo "compose: unsupported profile; allowed: demo,browser-acceptance" >&2
+            echo "compose: unsupported profile; allowed: demo,browser-acceptance,observability" >&2
             exit 64
             ;;
     esac
@@ -1756,6 +1758,7 @@ keycloak_image=${SYNVEDA_KEYCLOAK_IMAGE:-synveda/keycloak:26.7.2-dev}
 caddy_image=${SYNVEDA_CADDY_IMAGE:-synveda/proxy:2.11.4-dev}
 otel_image=${SYNVEDA_OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc}
 browser_image=${SYNVEDA_BROWSER_IMAGE:-synveda/browser-acceptance:1.62.1-dev}
+prometheus_image=${SYNVEDA_PROMETHEUS_IMAGE:-prom/prometheus:v3.13.3-distroless@sha256:2e9a8ad75536755572d703e645fcc39c8104d9f0215d49d613db35194b0d8bc2}
 valid_image_reference() {
     case "$1" in
         ''|*[!A-Za-z0-9_./:@+-]*) return 1 ;;
@@ -1780,6 +1783,12 @@ for image_reference in "$product_image" "$postgres_image" "$keycloak_image" \
         exit 64
     }
 done
+if [ "$observability_profile" = true ]; then
+    valid_image_reference "$prometheus_image" || {
+        echo "compose: Prometheus image must use the closed OCI reference character set" >&2
+        exit 64
+    }
+fi
 if [ "$browser_acceptance_profile" = true ]; then
     valid_image_reference "$browser_image" || {
         echo "compose: browser acceptance image must use the closed OCI reference character set" >&2
@@ -1830,6 +1839,20 @@ digest_image "$otel_image" || {
     echo "compose: Collector image must use an OCI sha256 digest" >&2
     exit 64
 }
+if [ "$observability_profile" = true ]; then
+    digest_image "$prometheus_image" || {
+        echo "compose: Prometheus image must use an OCI sha256 digest" >&2
+        exit 64
+    }
+    prometheus_port=${SYNVEDA_PROMETHEUS_PORT:-9090}
+    valid_runtime_id "$prometheus_port" && [ "$prometheus_port" -ge 1024 ] && \
+        [ "$prometheus_port" -le 65535 ] && [ "$prometheus_port" -ne "$public_port" ] || {
+        echo "compose: SYNVEDA_PROMETHEUS_PORT must be a canonical integer from 1024 through 65535 distinct from the public port" >&2
+        exit 64
+    }
+else
+    prometheus_port=
+fi
 keycloak_database_url=
 keycloak_database_url_set=${SYNVEDA_KEYCLOAK_DATABASE_URL+x}
 if [ "$oidc_mode" = bundled ]; then
@@ -1978,6 +2001,12 @@ export SYNVEDA_KEYCLOAK_DATABASE_URL=$keycloak_database_url
 export SYNVEDA_KEYCLOAK_SSL_REQUIRED=$keycloak_ssl_required
 export SYNVEDA_CADDY_IMAGE=$caddy_image
 export SYNVEDA_OTEL_COLLECTOR_IMAGE=$otel_image
+if [ "$observability_profile" = true ]; then
+    export SYNVEDA_PROMETHEUS_IMAGE=$prometheus_image
+    export SYNVEDA_PROMETHEUS_PORT=$prometheus_port
+else
+    unset SYNVEDA_PROMETHEUS_IMAGE SYNVEDA_PROMETHEUS_PORT
+fi
 if [ "$browser_acceptance_profile" = true ]; then
     export SYNVEDA_BROWSER_IMAGE=$browser_image
     export SYNVEDA_BROWSER_SECCOMP_PROFILE=$browser_seccomp_profile
@@ -2036,6 +2065,9 @@ if [ "$browser_acceptance_profile" = true ]; then
     if [ "$runtime" = development ]; then
         set -- "$@" -f "$compose_dir/compose.browser-acceptance.dev.yaml"
     fi
+fi
+if [ "$observability_profile" = true ]; then
+    set -- "$@" -f "$compose_dir/compose.observability.yaml"
 fi
 if [ "$action" = backup ]; then
     set -- "$@" -f "$compose_dir/compose.backup.yaml"
@@ -2128,7 +2160,11 @@ run_runtime_smoke() {
         --status-file "$status_file" --runtime "$runtime" \
         --postgres "$postgres_mode" --oidc "$oidc_mode" \
         --browser "$browser_acceptance_profile" \
+        --observability "$observability_profile" \
         --app-url "$public_app_url" --issuer "$oidc_issuer"
+    if [ "$observability_profile" = true ]; then
+        set -- "$@" --prometheus-url "http://127.0.0.1:$prometheus_port"
+    fi
     run_bounded "$lifecycle_timeout" "$node_runner" "$@"
     rm -f -- "$status_file"
     status_file=
@@ -2712,6 +2748,11 @@ case "$action" in
             inspect_project_volume browser-acceptance-state
             browser_volume_present=$checked_volume_present
         fi
+        prometheus_volume_present=false
+        if [ "$observability_profile" = true ]; then
+            inspect_project_volume prometheus-data
+            prometheus_volume_present=$checked_volume_present
+        fi
         docker_mutation_uncertain=true
         docker_mutation_phase=compose-down
         run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
@@ -2726,6 +2767,13 @@ case "$action" in
             if [ "$browser_volume_present" = true ]; then
                 remove_project_volume browser-acceptance-state
             fi
+        fi
+        if [ "$observability_profile" = true ]; then
+            inspect_project_volume prometheus-data
+            [ "$checked_volume_present" = "$prometheus_volume_present" ] || {
+                echo "compose: exact project prometheus-data volume changed during down" >&2
+                exit 78
+            }
         fi
         docker_mutation_uncertain=false
         docker_mutation_phase=
@@ -2770,6 +2818,11 @@ case "$action" in
             inspect_project_volume browser-acceptance-state
             browser_volume_present=$checked_volume_present
         fi
+        prometheus_volume_present=false
+        if [ "$observability_profile" = true ]; then
+            inspect_project_volume prometheus-data
+            prometheus_volume_present=$checked_volume_present
+        fi
         docker_mutation_uncertain=true
         docker_mutation_phase=compose-down-for-reset
         run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
@@ -2789,10 +2842,20 @@ case "$action" in
                 exit 78
             }
         fi
+        if [ "$observability_profile" = true ]; then
+            inspect_project_volume prometheus-data
+            [ "$checked_volume_present" = "$prometheus_volume_present" ] || {
+                echo "compose: exact project prometheus-data volume changed during reset" >&2
+                exit 78
+            }
+        fi
         # Remove the credential-bearing fixture state first. If its removal
         # fails, the product database has not yet been touched.
         if [ "$browser_volume_present" = true ]; then
             remove_project_volume browser-acceptance-state
+        fi
+        if [ "$prometheus_volume_present" = true ]; then
+            remove_project_volume prometheus-data
         fi
         if [ "$postgres_volume_present" = true ]; then
             remove_project_volume postgres-data

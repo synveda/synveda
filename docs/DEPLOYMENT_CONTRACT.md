@@ -39,15 +39,16 @@ and assembles these files:
 | compose.external.yaml | external provider labels |
 | compose.demo.yaml | short-lived demo users |
 | compose.browser-acceptance*.yaml | isolated browser acceptance runner |
+| compose.observability.yaml | optional private Collector metrics fan-in and loopback Prometheus UI |
 | compose.backup.yaml | private, profile-gated logical backup one-shot |
 | compose.restore.yaml | private isolated restore and key-verification one-shots |
 
 Implemented selectors are development or reference,
 bundled or external PostgreSQL and bundled or external OIDC. External
 PostgreSQL is configuration-renderable but canonical start/reset is still
-refused. Demo and browser-acceptance are implemented profiles. Other optional
-profiles are not part of the current executable contract until their services
-and acceptance tests land.
+refused. Demo, browser-acceptance and observability are implemented profiles.
+Other optional profiles are not part of the current executable contract until
+their services and acceptance tests land.
 
 ## Images and commands
 
@@ -58,6 +59,7 @@ and acceptance tests land.
 | optimized Keycloak 26.7.2 | start --optimized and idempotent realm convergence |
 | Caddy 2.11.4 | public reverse proxy |
 | OpenTelemetry Collector Contrib 0.159.0 | private OTLP receiver |
+| Prometheus 3.13.3 distroless | optional bounded local metrics store and loopback operator UI |
 | Playwright 1.62.1 | disposable browser acceptance only |
 
 The product image contains both gateway and worker binaries. The selected
@@ -86,6 +88,7 @@ The bundled reference graph is:
     tenant-convergence + issuer-diagnostic ── gateway
     tenant-convergence + issuer-diagnostic ── worker
     gateway + worker ── otel-collector
+    observability: gateway + worker metrics ── otel-collector ── prometheus
 
 The bootstrap, preflight, migration, tenant convergence, issuer diagnostic and
 recovery services are bounded jobs. Proxy, PostgreSQL, Keycloak, realm
@@ -93,22 +96,26 @@ convergence, gateway, worker and Collector are long-running.
 
 ## Ports and health
 
-Only the proxy publishes host ports.
+Only the proxy publishes public host ports. The optional observability profile
+also publishes its Prometheus operator UI on host loopback.
 
 | Mode or service | Contract |
 | --- | --- |
 | development proxy | configured high port, bound to 127.0.0.1 |
 | reference proxy | TCP 80 and 443 |
 | gateway | private port 8120; /healthz, /readyz, /metrics |
-| worker | private loopback port 8121; /healthz, /readyz, /metrics |
+| worker | private loopback port 8121 by default; observability explicitly binds it on private Compose networks without publishing it; /healthz, /readyz, /metrics |
 | Keycloak application | private port 8080 |
 | Keycloak management | private port 9000 |
 | OTLP | private ports 4317 and 4318 |
 | Collector health | private loopback port 13133 |
+| Prometheus UI | optional port 9090 by default, bound to 127.0.0.1 |
 | PostgreSQL | private port 5432 |
 
 The proxy does not publish application metrics. Keycloak management, worker
-health, Collector receivers and PostgreSQL are never public routes.
+health, Collector receivers and PostgreSQL are never public routes. Prometheus
+is an operator endpoint, not a customer route; remote inspection requires an
+operator-controlled loopback tunnel.
 
 ## Configuration
 
@@ -136,6 +143,9 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_KEYCLOAK_IMAGE | immutable bundled Keycloak image reference |
 | SYNVEDA_CADDY_IMAGE | immutable proxy image reference |
 | SYNVEDA_OTEL_COLLECTOR_IMAGE | immutable Collector image reference |
+| SYNVEDA_PROMETHEUS_IMAGE | exact digest-pinned optional Prometheus image |
+| SYNVEDA_PROMETHEUS_PORT | optional loopback operator port |
+| SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH | false by default; exact true permits only an unspecified worker health bind for a deployment-owned private network |
 | OTEL_EXPORTER_OTLP_ENDPOINT | OTLP/gRPC destination used by application processes |
 | SYNVEDA_BACKUP_ID | optional explicit immutable logical-backup identifier |
 | SYNVEDA_RESTORE_SOURCE_PROJECT | exact source project recorded by the recovery set |
@@ -193,7 +203,11 @@ database- and role-based:
 - Synveda runtime roles cannot connect to the Keycloak database;
 - Keycloak has no privilege on Synveda data.
 
-The postgres-data named volume is the bundled persistent database state.
+The postgres-data named volume is the bundled persistent database state. The
+optional prometheus-data volume is disposable operational history, bounded to
+72-hour and 1-GB TSDB block-retention thresholds (whichever triggers first).
+Those thresholds are not a volume quota because WAL, head-block and compaction
+data can use additional space; the volume is not part of product recovery.
 Issuer projection, database authority and public realm gates are bounded
 operator-owned runtime files, not independent data stores. The Synveda KMS key
 is separate recovery material and must be protected with the database backup.
@@ -255,12 +269,18 @@ Temporal has no executable consumer and is not part of this deployment.
 
 Application processes emit traces through OTLP to the private Collector. The
 Collector applies memory limiting and batching and currently terminates traces
-at a no-op exporter. Application metrics are available only on private
-Prometheus endpoints.
+at a no-op exporter. With the optional observability profile, the Collector
+also scrapes the private gateway and worker metrics endpoints and exposes one
+private fan-in target to Prometheus. Smoke requires gateway authority ready,
+worker ready and a fresh worker heartbeat from samples newer than the smoke
+start. Prometheus applies 72-hour and 1-GB TSDB block-retention thresholds,
+whichever triggers first, and exposes only a loopback operator UI. This is a
+block-retention policy, not a disk quota.
 
-External OTLP export, a bounded local observability backend and the
-customer-safe Operations route remain open CPR-45 slices. No prompt, message,
-Knowledge body, credential or unbounded tenant/user label may enter telemetry.
+External OTLP export and the customer-safe Operations route remain open CPR-45
+slices. The local backend is infrastructure visibility, not the tenant-safe
+Operations product. No prompt, message, Knowledge body, credential or
+unbounded tenant/user label may enter telemetry.
 
 ## Backup and restore
 
