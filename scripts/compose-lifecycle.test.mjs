@@ -186,6 +186,32 @@ if [ "$1" = buildx ] && [ "$2" = inspect ]; then
   fi
   exit 0
 fi
+fake_restart_identity() {
+  restart_identity_service=$1
+  if [ "$restart_identity_service" = gateway ]; then
+    restart_identity_mode=\${SYNVEDA_FAKE_GATEWAY_ID_MODE:-stable}
+  elif [ -z "\${SYNVEDA_FAKE_RESTART_ID_SERVICE:-}" ] ||
+    [ "\${SYNVEDA_FAKE_RESTART_ID_SERVICE:-}" = "$restart_identity_service" ]; then
+    restart_identity_mode=\${SYNVEDA_FAKE_RESTART_ID_MODE:-stable}
+  else
+    restart_identity_mode=stable
+  fi
+  case "$restart_identity_mode" in
+    missing) return 0 ;;
+    post-missing)
+      if grep -q " <restart> .* <$restart_identity_service>" "$SYNVEDA_FAKE_CALL_LOG"; then
+        return 0
+      fi
+      ;;
+    replaced)
+      if grep -q " <restart> .* <$restart_identity_service>" "$SYNVEDA_FAKE_CALL_LOG"; then
+        printf '%064d\n' 1
+        return 0
+      fi
+      ;;
+  esac
+  printf '%064d\n' 0
+}
 case " $* " in
   *" ps "*" --quiet "*" browser-acceptance "*)
     case "\${SYNVEDA_FAKE_BROWSER_ID_MODE:-exact}" in
@@ -196,22 +222,12 @@ case " $* " in
     esac
     exit 0
     ;;
-  *" ps "*" --quiet "*" gateway "*)
-    if [ "\${SYNVEDA_FAKE_GATEWAY_ID_MODE:-stable}" = missing ]; then
-      exit 0
-    fi
-    if [ "\${SYNVEDA_FAKE_GATEWAY_ID_MODE:-stable}" = post-missing ] &&
-      grep -q ' <restart>' "$SYNVEDA_FAKE_CALL_LOG"; then
-      exit 0
-    fi
-    if [ "\${SYNVEDA_FAKE_GATEWAY_ID_MODE:-stable}" = replaced ] &&
-      grep -q ' <restart>' "$SYNVEDA_FAKE_CALL_LOG"; then
-      printf '%064d\n' 1
-    else
-      printf '%064d\n' 0
-    fi
-    exit 0
-    ;;
+  *" ps "*" --quiet "*" gateway "*) fake_restart_identity gateway; exit 0 ;;
+  *" ps "*" --quiet "*" postgres "*) fake_restart_identity postgres; exit 0 ;;
+  *" ps "*" --quiet "*" keycloak "*) fake_restart_identity keycloak; exit 0 ;;
+  *" ps "*" --quiet "*" otel-collector "*) fake_restart_identity otel-collector; exit 0 ;;
+  *" ps "*" --quiet "*" worker "*) fake_restart_identity worker; exit 0 ;;
+  *" ps "*" --quiet "*" proxy "*) fake_restart_identity proxy; exit 0 ;;
 esac
 if [ "$1" = container ] && [ "$2" = wait ]; then
   [ "\${SYNVEDA_FAKE_BROWSER_WAIT_ERROR:-0}" = 0 ] || exit 44
@@ -1923,6 +1939,115 @@ test("an uncertain gateway restart retains the exact project lock", () => {
     const blocked = run(state, "restart-gateway");
     assert.equal(blocked.status, 75, blocked.stderr);
     assert.doesNotMatch(readFileSync(state.log, "utf8"), /--no-recreate/);
+  } finally {
+    if (marker !== undefined && existsSync(lockFile) && readFileSync(lockFile, "utf8") === marker) {
+      rmSync(lockFile);
+    }
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("Compose acceptance holds one project lock across the fixed restart matrix", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  try {
+    const accepted = run(state, "acceptance", {
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+    });
+    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.match(accepted.stdout, /canonical Compose acceptance passed/);
+    assert.match(accepted.stdout, /services remain running/);
+    assert.equal(existsSync(lockFile), false);
+
+    const calls = readFileSync(state.log, "utf8");
+    const restarts = [
+      " <restart> <--no-deps> <--timeout> <60> <postgres>",
+      " <restart> <--no-deps> <--timeout> <45> <keycloak>",
+      " <restart> <--no-deps> <--timeout> <15> <otel-collector>",
+      " <restart> <--no-deps> <--timeout> <85> <worker>",
+      " <restart> <--no-deps> <--timeout> <30> <gateway>",
+      " <restart> <--no-deps> <--timeout> <15> <proxy>",
+    ];
+    let previous = -1;
+    for (const restart of restarts) {
+      const position = calls.indexOf(restart);
+      assert.ok(position > previous, calls);
+      previous = position;
+    }
+    assert.doesNotMatch(
+      calls,
+      / <restart>[^\n]*<(?:database-bootstrap|database-preflight|keycloak-database-bootstrap|keycloak-realm-convergence|migrate|tenant-convergence|issuer-diagnostic|browser-acceptance)>/,
+    );
+    assert.match(
+      calls,
+      /<--no-recreate> <postgres> <keycloak> <keycloak-realm-convergence> <otel-collector> <worker> <gateway> <proxy>/,
+    );
+    assert.match(
+      calls,
+      /<--no-recreate> <keycloak> <keycloak-realm-convergence> <otel-collector> <worker> <gateway> <proxy>/,
+    );
+    assert.equal((calls.match(/check-runtime-smoke\.mjs/g) ?? []).length, 8);
+    assert.equal(
+      (calls.match(/<up> <--no-build> <--detach> <--no-deps> <--force-recreate> <browser-acceptance>/g) ?? []).length,
+      2,
+    );
+    assert.equal((calls.match(/docker <container> <wait>/g) ?? []).length, 2);
+    for (const service of ["postgres", "keycloak", "otel-collector", "worker", "gateway", "proxy"]) {
+      const identity = new RegExp(
+        `<ps> <--all> <--quiet> <--no-trunc> <${service}>`,
+        "g",
+      );
+      assert.equal((calls.match(identity) ?? []).length, 2, service);
+    }
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("Compose acceptance refuses a non-browser or non-fresh invocation before Docker", () => {
+  for (const extra of [
+    { SYNVEDA_COMPOSE_PROFILES: "demo" },
+    {
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+      SYNVEDA_COMPOSE_PROJECT_SUFFIX: "",
+    },
+  ]) {
+    const state = fixture();
+    try {
+      const refused = run(state, "acceptance", extra);
+      assert.equal(refused.status, 64, refused.stderr);
+      assert.equal(existsSync(state.log), false);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("Compose acceptance stops on replaced restart identity and retains the lock", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  let marker;
+  try {
+    const refused = run(state, "acceptance", {
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+      SYNVEDA_FAKE_RESTART_ID_SERVICE: "worker",
+      SYNVEDA_FAKE_RESTART_ID_MODE: "replaced",
+    });
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.match(refused.stderr, /worker container identity changed during restart/);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, / <restart>[^\n]*<worker>/);
+    assert.doesNotMatch(calls, / <restart>[^\n]*<(?:gateway|proxy)>/);
+    marker = readFileSync(lockFile, "utf8");
+    assert.equal(marker, `${state.project}:${refused.pid}\n`);
   } finally {
     if (marker !== undefined && existsSync(lockFile) && readFileSync(lockFile, "utf8") === marker) {
       rmSync(lockFile);

@@ -26,7 +26,9 @@ Synveda will validate the reference deployment by invoking the canonical
 Docker Compose graph directly against an already-running supported engine.
 Acceptance begins with an empty, uniquely named Compose project, runs the real
 Keycloak browser flow and product smoke path, exercises bounded restarts, and
-ends with an explicitly confirmed project-scoped reset.
+leaves a successful stack running for inspection and subsequent recovery or
+upgrade gates. Destructive reset remains a separate, explicitly confirmed
+project-scoped action.
 
 The clean-engine receipt, Colima-provider, reservation and four-process fixture
 subsystem is removed. ADR-0103 and ADR-0104 are superseded. Their provider

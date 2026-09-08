@@ -321,16 +321,15 @@ export function composeBuildBoundaryFindings(source) {
   }
   const noBuildUps = source.match(/\bup --no-build\b/g) ?? [];
   if (
-    noBuildUps.length !== 4 ||
+    noBuildUps.length !== 5 ||
     !source.includes("--force-recreate --scale browser-acceptance=0") ||
+    !/up --no-build --detach --no-deps --force-recreate \\\n+\s+browser-acceptance/.test(source) ||
+    !/set -- "\$@" up --no-build --detach --wait \\\n+\s+--wait-timeout/.test(source) ||
     !source.includes(
-      [
-        "up --no-build --detach --no-deps --force-recreate \\",
-        "                browser-acceptance",
-      ].join("\n"),
+      'up --no-build --detach --no-deps --force-recreate browser-acceptance',
     )
   ) {
-    findings.push("startup, browser fixture and gateway recovery are not explicitly no-build");
+    findings.push("startup, browser fixtures and restart recovery are not explicitly no-build");
   }
   return findings;
 }

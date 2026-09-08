@@ -83,6 +83,14 @@ compose-smoke checks the expected services and completed jobs, public health
 and console routes, OIDC discovery and the refusal of management/metrics
 routes. It is not a browser-login test.
 
+`make compose-acceptance` is the fresh-project gate. It requires the explicit
+acceptance suffix and private `/24`, runs the real browser login, restarts
+PostgreSQL, Keycloak, Collector, worker, gateway and proxy one at a time, runs
+the full smoke after each, then repeats browser login. One project lock and
+one bounded deadline cover the run. Success leaves the stack running for
+inspection and later recovery/upgrade gates; reset remains separately
+confirmed.
+
 compose-down stops containers and preserves the PostgreSQL volume and generated
 project inputs. The default ignored state directory is
 deploy/compose/runtime/synveda-development.
@@ -153,8 +161,7 @@ Then select and install the acceptance project:
       make compose-hosts-install
     make compose-hosts-status
     make compose-resolver-check
-    export SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance
-    make compose-browser-acceptance
+    make compose-acceptance
 
 It exercises real authorization-code login, PKCE S256, issuer/audience claims
 and first-administrator admission through the same proxy authority used by
@@ -273,7 +280,6 @@ also be retained.
 The following work remains before the Docker reference can be called
 implemented:
 
-- a thin required compose-acceptance target and restart matrix;
 - paired logical backups of Synveda and Keycloak, isolated restore with the
   Synveda KMS key, and the bounded S3-compatible/WAL recovery path;
 - one experimental forced-RLS operation/outbox and opaque-ID Apalis canary;

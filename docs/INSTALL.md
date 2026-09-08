@@ -80,8 +80,11 @@ bundled authorities and keeps gateway and worker in separate containers.
 not a browser authorization-code exchange. `compose-restart-gateway` performs
 a locked, health-gated restart of only the existing gateway and repeats the
 smoke; the command is not itself browser-session evidence and does not claim
-that an in-flight login survives. Clean browser login, reference HTTPS,
-backup/restore and upgrade acceptance remain open. External PostgreSQL
+that an in-flight login survives. `compose-acceptance` adds a fresh browser
+login, the fixed six-service restart matrix, smoke after every restart and a
+second login under one project lock; its exact selectors are documented in
+[`deploy/compose/README.md`](../deploy/compose/README.md). A live run, reference
+HTTPS, backup/restore and upgrade acceptance remain open. External PostgreSQL
 bootstrap deliberately refuses before secret reads or SQL until the
 authenticated-TLS contract is implemented.
 
@@ -1086,11 +1089,12 @@ network. The installer applies the same version vocabulary before downloads or
 temporary paths. `make db-test` proves exact
 database bootstrap, preflight, migration, forced RLS and authority drift
 behavior against fresh PostgreSQL fixtures. These checks do not build an image
-or prove artifact publication or pulls, a browser login, clean canonical
-Compose lifecycle, backup/restore, upgrade or desktop/Linux parity.
+or prove artifact publication or pulls. The implemented
+`make compose-acceptance` command requires a supported live Docker host; its
+deterministic tests are not a browser-login or clean-lifecycle claim.
+Backup/restore, upgrade and desktop/Linux parity remain unproved.
 
 The Docker reference may be called validated only after
-`make compose-acceptance`, `make compose-backup`,
-`make compose-restore-smoke` and `make compose-upgrade-smoke` exist and pass
-with the Keycloak issuer path. Until then the verdict remains “Docker reference
-implementation incomplete.”
+`make compose-acceptance`, `make compose-backup`, `make compose-restore-smoke`
+and `make compose-upgrade-smoke` pass with the Keycloak issuer path. Until then
+the verdict remains “Docker reference implementation incomplete.”

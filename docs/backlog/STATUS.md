@@ -174,9 +174,11 @@ worker processes, mounted secret files and a private OpenTelemetry Collector.
 Unused Temporal runtime assets are deleted.
 
 The earlier clean-engine/Colima receipt and provider fixtures were removed:
-they did not start Docker or establish product evidence. Remaining work is the
-thin live Compose/restart gate, PostgreSQL-native full backup plus isolated
-database/key restore followed by bounded S3-compatible/WAL-PITR acceptance,
+they did not start Docker or establish product evidence. The direct
+fresh-project browser/restart acceptance command is implemented and awaits a
+supported live Docker host. Remaining implementation work is PostgreSQL-native
+full backup plus isolated database/key restore followed by bounded
+S3-compatible/WAL-PITR acceptance,
 one forced-RLS skill-validation operation/outbox and its disabled-by-default
 Apalis 0.7.4 leaf adapter, a small observability/Operations slice, and
 upgrade/external-dependency acceptance. Current-source Linux and Docker Desktop

@@ -402,6 +402,14 @@ test("the one-shot image and driver forbid capture and TLS bypass surfaces", () 
     makefile,
     /^compose-browser-acceptance:\n\tSYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance deploy\/compose\/scripts\/compose\.sh up --initial-assets absent$/m,
   );
+  assert.match(
+    makefile,
+    /^compose-acceptance:\n\tSYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance demos\/cpr-45-docker-reference\.sh$/m,
+  );
+  assert.match(
+    readFileSync(join(ROOT, "demos/cpr-45-docker-reference.sh"), "utf8"),
+    /exec "\$\(dirname "\$0"\)\/\.\.\/deploy\/compose\/scripts\/compose\.sh" acceptance/,
+  );
 });
 
 test("the vendored Playwright sandbox profile is exact, default-deny and licensed", () => {

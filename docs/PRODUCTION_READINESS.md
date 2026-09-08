@@ -31,20 +31,23 @@ score for the implemented code.
 | Scope | Status | Exit evidence | Limit |
 |---|---|---|---|
 | Development Compose | Not ready | Clean-volume browser login and product lifecycle on a supported Docker Desktop platform | Explicit loopback HTTP; no reference security claim |
-| Single-host reference | Not ready | Linux and desktop HTTPS runs, restart matrix, joint database/key restore, bounded S3/WAL recovery, Apalis canary and Operations visibility | One host; planned interruption; no HA, owned RPO/RTO or DR |
+| Single-host reference | Not ready | Linux and desktop HTTPS runs with the restart matrix, joint database/key restore, bounded S3/WAL recovery, Apalis canary and Operations visibility | One host; planned interruption; no HA, owned RPO/RTO or DR |
 | External OIDC | Not assessed | Same product image boots against a named conformant provider | Configuration-only evidence is not provider support |
 | Hosted promotion | Not ready | Published artifacts, off-host recovery, custody, abuse controls and runbooks | Compose evidence is necessary, not sufficient |
 
 The current canonical graph has a proxy-only edge, separate Synveda and
 Keycloak databases/roles, production-mode Keycloak, containerized gateway and
 worker, mounted secret files and a private OpenTelemetry Collector. Static
-Compose checks cover eight provider/runtime rows. They do not prove DNS, TLS,
-browser login, database recovery or a running service.
+Compose checks cover eight provider/runtime rows. The direct acceptance command
+and fixed restart matrix are implemented and deterministically tested, but have
+not run against a supported Docker host. Static evidence does not prove DNS,
+TLS, browser login, database recovery or a running service.
 
 ADR-0105 removed the clean-engine/Colima simulation because it supplied no live
-Docker evidence. The remaining CPR-45 work is direct Compose/browser and
-restart acceptance, PostgreSQL-native full logical backup plus isolated
-database/key restore followed by bounded S3-compatible/WAL-PITR acceptance,
+Docker evidence. Direct Compose/browser and restart acceptance now awaits its
+Linux and Docker Desktop runs. Remaining implementation work is
+PostgreSQL-native full logical backup plus isolated database/key restore
+followed by bounded S3-compatible/WAL-PITR acceptance,
 one disabled-by-default Apalis 0.7.4 `skill_validation@1` canary behind
 forced-RLS operation/outbox state, minimal local observability/Operations,
 upgrade/rollback and external-dependency acceptance. Rauthy remains only until

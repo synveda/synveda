@@ -2116,7 +2116,7 @@ test("host validators start through one closed Node trust boundary", () => {
   assert.match(runner, /exec node --use-bundled-ca "\$@"/);
   assert.match(
     selector,
-    /reference:config:true\|reference:up:true\|reference:smoke:true\|\\\n\s+reference:restart-gateway:true\)/,
+    /reference:config:true\|reference:up:true\|reference:acceptance:true\|reference:smoke:true\|\\\n\s+reference:restart-gateway:true\)/,
   );
   const detection = selector.indexOf("ambient_node_trust=false");
   const refusal = selector.indexOf("ambient host trust configuration is not accepted");
@@ -2166,8 +2166,8 @@ test("canonical build routing is explicit, local, private-state and no-build aft
     source.replace('rm -rf -- "$buildx_config_dir"', 'rm -f -- "$buildx_config_dir"'),
     source.replace("docker_mutation_phase=compose-build", "docker_mutation_phase="),
     source.replace(
-      "docker_mutation_phase=compose-build\n            docker_mutation_uncertain=true",
-      "docker_mutation_phase=compose-build\n            docker_mutation_uncertain=false",
+      "docker_mutation_phase=compose-build\n        docker_mutation_uncertain=true",
+      "docker_mutation_phase=compose-build\n        docker_mutation_uncertain=false",
     ),
   ];
   for (const mutant of mutants) {

@@ -8,18 +8,21 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|smoke|restart-gateway|down|reset}" >&2
+    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|smoke|restart-gateway|down|reset}" >&2
     exit 64
 }
 
 action=${1:-}
 case "$action" in
-    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|smoke|restart-gateway|down|reset) ;;
+    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|smoke|restart-gateway|down|reset) ;;
     *) usage ;;
 esac
 shift
 output=
 initial_asset_state=existing
+if [ "$action" = acceptance ]; then
+    initial_asset_state=absent
+fi
 if [ "$action" = config ]; then
     case "${1:-}" in
         "") ;;
@@ -57,22 +60,15 @@ oidc_mode=${SYNVEDA_OIDC_MODE:-bundled}
 profiles=${SYNVEDA_COMPOSE_PROFILES:-}
 demo_profile=false
 browser_acceptance_profile=false
-lifecycle_timeout=${SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS:-900}
-# The gateway declares a 30-second stop grace in compose.yaml. Leave bounded
-# client and postflight margins around that daemon-side contract rather than
-# handing the daemon the unrelated whole-lifecycle budget.
-gateway_restart_stop_seconds=30
-gateway_restart_runner_seconds=45
-gateway_restart_health_seconds=120
-gateway_restart_health_runner_seconds=125
-gateway_restart_postflight_reserve_seconds=40
-gateway_restart_orchestration_margin_seconds=5
-gateway_restart_required_seconds=$((
-    gateway_restart_runner_seconds +
-    gateway_restart_health_runner_seconds +
-    gateway_restart_postflight_reserve_seconds +
-    gateway_restart_orchestration_margin_seconds
-))
+lifecycle_default_timeout=900
+if [ "$action" = acceptance ]; then
+    lifecycle_default_timeout=3600
+fi
+lifecycle_timeout=${SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS:-$lifecycle_default_timeout}
+# Restart waits use each service's declared stop grace plus fixed client and
+# postflight margins rather than handing Docker the whole lifecycle budget.
+restart_postflight_reserve_seconds=40
+restart_orchestration_margin_seconds=5
 
 case "$lifecycle_timeout" in
     ''|0|0*|*[!0-9]*)
@@ -99,7 +95,7 @@ if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_EXTRA_CA_CERTS+x}" = x ] || \
     ambient_node_trust=true
 fi
 case "$runtime:$action:$ambient_node_trust" in
-    reference:config:true|reference:up:true|reference:smoke:true|\
+    reference:config:true|reference:up:true|reference:acceptance:true|reference:smoke:true|\
     reference:restart-gateway:true)
         echo "compose: ambient host trust configuration is not accepted for reference evidence" >&2
         exit 78
@@ -154,7 +150,8 @@ if [ "${COMPOSE_BAKE+x}" = x ] || \
     [ "${BUILDX_DEFAULT_POLICY+x}" = x ]; then
     ambient_build_control=true
 fi
-if [ "$runtime" = development ] && [ "$action" = up ] && \
+if [ "$runtime" = development ] && \
+    { [ "$action" = up ] || [ "$action" = acceptance ]; } && \
     [ "$ambient_build_control" = true ]; then
     echo "compose: ambient host build configuration is not accepted for development builds" >&2
     exit 78
@@ -199,7 +196,8 @@ lifecycle_temp_root=$(CDPATH= cd "$lifecycle_temp_root" 2>/dev/null && pwd -P) |
     echo "compose: lifecycle temporary root was unavailable" >&2
     exit 70
 }
-if [ "$runtime" = development ] && [ "$action" = up ]; then
+if [ "$runtime" = development ] && \
+    { [ "$action" = up ] || [ "$action" = acceptance ]; }; then
     case "$lifecycle_temp_root" in
         "$repo_root"|"$repo_root"/*)
             echo "compose: lifecycle temporary root is not accepted inside the build context" >&2
@@ -470,16 +468,20 @@ if [ "$browser_acceptance_profile" = true ]; then
         exit 64
     }
     case "$action" in
-        config|up|smoke|down|reset) ;;
+        config|up|acceptance|smoke|down|reset) ;;
         *)
             echo "compose: browser acceptance is unavailable for this lifecycle action" >&2
             exit 64
             ;;
     esac
 fi
-if { [ "$action" = up ] || [ "$action" = reset ]; } && \
+if [ "$action" = acceptance ] && [ "$browser_acceptance_profile" != true ]; then
+    echo "compose: acceptance requires exactly the demo,browser-acceptance profiles" >&2
+    exit 64
+fi
+if { [ "$action" = up ] || [ "$action" = acceptance ] || [ "$action" = reset ]; } && \
     [ "$postgres_mode" = external ]; then
-    echo "compose: canonical start/reset is unavailable for external PostgreSQL in this checkpoint" >&2
+    echo "compose: canonical start/acceptance/reset is unavailable for external PostgreSQL in this checkpoint" >&2
     exit 69
 fi
 
@@ -539,14 +541,15 @@ if [ "$browser_acceptance_profile" = true ]; then
         echo "compose: browser acceptance requires a suffixed acceptance project" >&2
         exit 64
     }
-    if [ "$action" = up ] && [ "$initial_asset_state" != absent ]; then
+    if { [ "$action" = up ] || [ "$action" = acceptance ]; } && \
+        [ "$initial_asset_state" != absent ]; then
         echo "compose: browser acceptance up requires --initial-assets absent" >&2
         exit 64
     fi
 fi
 
 case "$action" in
-    up|down|smoke|restart-gateway|reset)
+    up|acceptance|down|smoke|restart-gateway|reset)
         # Hold one exact-project exclusion across authority-file generation and
         # every Docker mutation. Child generators verify and borrow this lock.
         # shellcheck source=deploy/compose/scripts/project-lock.sh
@@ -950,10 +953,10 @@ if [ "$action" = resolver-check ]; then
     exit 0
 fi
 case "$action" in
-    up|smoke|restart-gateway) run_hosts_ownership_preflight ;;
+    up|acceptance|smoke|restart-gateway) run_hosts_ownership_preflight ;;
 esac
 case "$action" in
-    up|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
+    up|acceptance|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
 esac
 
 compose_ipv4_pool_set=${SYNVEDA_COMPOSE_IPV4_POOL+x}
@@ -1106,7 +1109,7 @@ for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABA
     }
 done
 
-if [ "$action" = up ]; then
+if [ "$action" = up ] || [ "$action" = acceptance ]; then
     run_resolver_preflight
     run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/check-network-preflight.mjs" \
         --project "$project" --pool "$compose_ipv4_pool" --docker-bin "$docker_bin"
@@ -1312,7 +1315,7 @@ if [ "$runtime" = reference ]; then
     require_private_file "$secret_dir/tls_cert" tls_cert
     require_private_file "$secret_dir/tls_key" tls_key
     case "$action" in
-        config|up|smoke|restart-gateway)
+        config|up|acceptance|smoke|restart-gateway)
             set_remaining_lifecycle_seconds
             set -- "$script_dir/check-tls-inputs.mjs" \
                 --cert-file "$secret_dir/tls_cert" \
@@ -1905,26 +1908,148 @@ wait_for_browser_acceptance() {
     esac
 }
 
-capture_gateway_container_identity() {
-    gateway_identity_status=0
+capture_restart_container_identity() {
+    restart_identity_status=0
     capture_bounded_output 30 "$docker_bin" "$@" \
-        ps --all --quiet --no-trunc gateway || gateway_identity_status=$?
-    if [ "$gateway_identity_status" -ne 0 ]; then
-        propagate_bounded_failure "$gateway_identity_status"
-        echo "compose: exact gateway container identity was unavailable" >&2
+        ps --all --quiet --no-trunc "$restart_service_name" || restart_identity_status=$?
+    if [ "$restart_identity_status" -ne 0 ]; then
+        propagate_bounded_failure "$restart_identity_status"
+        echo "compose: exact $restart_service_name container identity was unavailable" >&2
         return 69
     fi
-    gateway_container_identity=$bounded_output
-    if [ "${#gateway_container_identity}" -ne 64 ]; then
-        echo "compose: exact gateway container identity was refused" >&2
+    restart_container_identity=$bounded_output
+    if [ "${#restart_container_identity}" -ne 64 ]; then
+        echo "compose: exact $restart_service_name container identity was refused" >&2
         return 78
     fi
-    case "$gateway_container_identity" in
+    case "$restart_container_identity" in
         *[!0-9a-f]*)
-            echo "compose: exact gateway container identity was refused" >&2
+            echo "compose: exact $restart_service_name container identity was refused" >&2
             return 78
             ;;
     esac
+}
+
+start_compose_graph() {
+    prepare_asset_contract "$@"
+    if [ "$runtime" = development ]; then
+        prepare_local_build_boundary
+        docker_mutation_phase=compose-build
+        docker_mutation_uncertain=true
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+            build --builder default
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+    fi
+    docker_mutation_uncertain=true
+    docker_mutation_phase=compose-up
+    if [ "$browser_acceptance_profile" = true ]; then
+        # Converge the normal graph before running the unreferenced one-shot.
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+            up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+            --force-recreate --scale browser-acceptance=0
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+            up --no-build --detach --no-deps --force-recreate \
+            browser-acceptance
+        browser_acceptance_status=0
+        wait_for_browser_acceptance "$@" || browser_acceptance_status=$?
+        case "$browser_acceptance_status" in
+            0) ;;
+            78)
+                docker_mutation_uncertain=false
+                docker_mutation_phase=
+                exit 78
+                ;;
+            *) exit "$browser_acceptance_status" ;;
+        esac
+    else
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+            up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+            --force-recreate
+    fi
+    asset_convergence_status=0
+    prove_assets_converged || asset_convergence_status=$?
+    case "$asset_convergence_status" in
+        0) ;;
+        78)
+            docker_mutation_uncertain=false
+            docker_mutation_phase=
+            exit 78
+            ;;
+        *) exit "$asset_convergence_status" ;;
+    esac
+    docker_mutation_uncertain=false
+    docker_mutation_phase=
+    if [ "$browser_acceptance_profile" = true ]; then
+        run_resolver_preflight
+        run_runtime_smoke "$@"
+    fi
+}
+
+wait_for_restart_recovery() {
+    set -- "$@" up --no-build --detach --wait \
+        --wait-timeout "$restart_health_seconds" --no-deps --no-recreate
+    for restart_recovery_service in $restart_recovery_services; do
+        set -- "$@" "$restart_recovery_service"
+    done
+    run_bounded "$restart_health_runner_seconds" "$docker_bin" "$@"
+}
+
+restart_selected_service() {
+    capture_restart_container_identity "$@"
+    restart_container_identity_before=$restart_container_identity
+    restart_runner_seconds=$((restart_stop_seconds + 15))
+    restart_health_runner_seconds=$((restart_health_seconds + 5))
+    restart_required_seconds=$((
+        restart_runner_seconds +
+        restart_health_runner_seconds +
+        restart_postflight_reserve_seconds +
+        restart_orchestration_margin_seconds
+    ))
+    set_remaining_lifecycle_seconds
+    [ "$lifecycle_remaining" -ge "$restart_required_seconds" ] || {
+        echo "compose: insufficient lifecycle budget remains for a bounded $restart_service_name restart" >&2
+        exit 124
+    }
+    docker_mutation_uncertain=true
+    docker_mutation_phase=compose-restart-$restart_service_name
+    run_bounded "$restart_runner_seconds" "$docker_bin" "$@" \
+        restart --no-deps --timeout "$restart_stop_seconds" "$restart_service_name"
+    wait_for_restart_recovery "$@"
+    prove_assets_converged
+    run_resolver_preflight
+    run_runtime_smoke "$@"
+    capture_restart_container_identity "$@"
+    [ "$restart_container_identity" = "$restart_container_identity_before" ] || {
+        echo "compose: $restart_service_name container identity changed during restart" >&2
+        exit 78
+    }
+    docker_mutation_uncertain=false
+    docker_mutation_phase=
+    echo "canonical Compose $restart_service_name restart passed for $project"
+}
+
+rerun_browser_acceptance() {
+    docker_mutation_uncertain=true
+    docker_mutation_phase=compose-browser-recheck
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --no-deps --force-recreate browser-acceptance
+    browser_acceptance_status=0
+    wait_for_browser_acceptance "$@" || browser_acceptance_status=$?
+    case "$browser_acceptance_status" in
+        0) ;;
+        78)
+            docker_mutation_uncertain=false
+            docker_mutation_phase=
+            exit 78
+            ;;
+        *) exit "$browser_acceptance_status" ;;
+    esac
+    prove_assets_converged
+    run_resolver_preflight
+    run_runtime_smoke "$@"
+    docker_mutation_uncertain=false
+    docker_mutation_phase=
 }
 
 case "$action" in
@@ -1938,66 +2063,50 @@ case "$action" in
         echo "canonical Compose configuration valid for $project ($postgres_mode PostgreSQL, $oidc_mode OIDC)"
         ;;
     up)
-        prepare_asset_contract "$@"
-        if [ "$runtime" = development ]; then
-            prepare_local_build_boundary
-            docker_mutation_phase=compose-build
-            docker_mutation_uncertain=true
-            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-                build --builder default
-            docker_mutation_uncertain=false
-            docker_mutation_phase=
-        fi
-        docker_mutation_uncertain=true
-        docker_mutation_phase=compose-up
-        if [ "$browser_acceptance_profile" = true ]; then
-            # An unreferenced one-shot is not portable through Compose's
-            # `up --wait` classification. Converge the normal graph with the
-            # fixture scaled to zero, then start exactly that already-built
-            # service without recreating its proved-ready dependencies.
-            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-                up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
-                --force-recreate --scale browser-acceptance=0
-            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-                up --no-build --detach --no-deps --force-recreate \
-                browser-acceptance
-            browser_acceptance_status=0
-            wait_for_browser_acceptance "$@" || browser_acceptance_status=$?
-            case "$browser_acceptance_status" in
-                0) ;;
-                78)
-                    docker_mutation_uncertain=false
-                    docker_mutation_phase=
-                    exit 78
-                    ;;
-                *) exit "$browser_acceptance_status" ;;
-            esac
-        else
-            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-                up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
-                --force-recreate
-        fi
-        asset_convergence_status=0
-        prove_assets_converged || asset_convergence_status=$?
-        case "$asset_convergence_status" in
-            0) ;;
-            78)
-                # The Docker mutation completed and exact immutable container
-                # inspection proved a deterministic contract violation. Leave
-                # the project recoverable through down or force-recreate.
-                docker_mutation_uncertain=false
-                docker_mutation_phase=
-                exit 78
-                ;;
-            *) exit "$asset_convergence_status" ;;
-        esac
-        docker_mutation_uncertain=false
-        docker_mutation_phase=
-        if [ "$browser_acceptance_profile" = true ]; then
-            run_resolver_preflight
-            run_runtime_smoke "$@"
-        fi
+        start_compose_graph "$@"
         echo "canonical Compose services converged for $project"
+        ;;
+    acceptance)
+        start_compose_graph "$@"
+
+        restart_service_name=postgres
+        restart_stop_seconds=60
+        restart_health_seconds=300
+        restart_recovery_services='postgres keycloak keycloak-realm-convergence otel-collector worker gateway proxy'
+        restart_selected_service "$@"
+
+        restart_service_name=keycloak
+        restart_stop_seconds=45
+        restart_health_seconds=300
+        restart_recovery_services='keycloak keycloak-realm-convergence otel-collector worker gateway proxy'
+        restart_selected_service "$@"
+
+        restart_service_name=otel-collector
+        restart_stop_seconds=15
+        restart_health_seconds=120
+        restart_recovery_services=otel-collector
+        restart_selected_service "$@"
+
+        restart_service_name=worker
+        restart_stop_seconds=85
+        restart_health_seconds=120
+        restart_recovery_services=worker
+        restart_selected_service "$@"
+
+        restart_service_name=gateway
+        restart_stop_seconds=30
+        restart_health_seconds=120
+        restart_recovery_services=gateway
+        restart_selected_service "$@"
+
+        restart_service_name=proxy
+        restart_stop_seconds=15
+        restart_health_seconds=120
+        restart_recovery_services=proxy
+        restart_selected_service "$@"
+
+        rerun_browser_acceptance "$@"
+        echo "canonical Compose acceptance passed for $project; services remain running"
         ;;
     down)
         run_docker_preflight
@@ -2024,36 +2133,11 @@ case "$action" in
         run_resolver_preflight
         # Refuse to turn a pre-existing degraded graph into restart evidence.
         run_runtime_smoke "$@"
-        capture_gateway_container_identity "$@"
-        gateway_container_identity_before=$gateway_container_identity
-        set_remaining_lifecycle_seconds
-        [ "$lifecycle_remaining" -ge "$gateway_restart_required_seconds" ] || {
-            echo "compose: insufficient lifecycle budget remains for a bounded gateway restart" >&2
-            exit 124
-        }
-        docker_mutation_uncertain=true
-        docker_mutation_phase=compose-restart-gateway
-        run_bounded "$gateway_restart_runner_seconds" "$docker_bin" "$@" \
-            restart --no-deps --timeout "$gateway_restart_stop_seconds" gateway
-        # `restart` does not wait for health. Reuse the exact rendered graph
-        # without recreating the container and let Compose enforce its health
-        # contract before the public smoke is repeated.
-        run_bounded "$gateway_restart_health_runner_seconds" "$docker_bin" "$@" \
-            up --no-build --detach --wait --wait-timeout "$gateway_restart_health_seconds" \
-            --no-deps --no-recreate gateway
-        # Repeat the same captured asset, resolver and runtime checks after the
-        # mutation. The pre-mutation render remains the comparison authority.
-        prove_assets_converged
-        run_resolver_preflight
-        run_runtime_smoke "$@"
-        capture_gateway_container_identity "$@"
-        [ "$gateway_container_identity" = "$gateway_container_identity_before" ] || {
-            echo "compose: gateway container identity changed during restart" >&2
-            exit 78
-        }
-        docker_mutation_uncertain=false
-        docker_mutation_phase=
-        echo "canonical Compose gateway restart passed for $project"
+        restart_service_name=gateway
+        restart_stop_seconds=30
+        restart_health_seconds=120
+        restart_recovery_services=gateway
+        restart_selected_service "$@"
         ;;
     reset)
         [ "${SYNVEDA_CONFIRM_RESET:-}" = "$project" ] || {

@@ -309,7 +309,7 @@ test("the wrapper validates startup evidence but never TLS-validity-blocks teard
   const actionEnd = source.indexOf("esac", validation);
   const branch = source.slice(actionCase, actionEnd);
   assert.ok(actionCase >= 0 && validation > actionCase && actionEnd > validation);
-  assert.match(branch, /config\|up\|smoke\|restart-gateway\)/);
+  assert.match(branch, /config\|up\|acceptance\|smoke\|restart-gateway\)/);
   assert.doesNotMatch(branch, /down|reset/);
   assert.ok(
     validation < source.indexOf('capture_bounded_output 30 "$docker_bin" compose version'),

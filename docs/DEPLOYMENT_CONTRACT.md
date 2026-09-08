@@ -268,17 +268,20 @@ Implemented:
     make compose-resolver-check
     make compose-up
     make compose-browser-acceptance
+    make compose-acceptance
     make compose-smoke
     make compose-restart-gateway
     make compose-down
     make compose-reset
 
-compose-reset requires an exact confirmation token. It deletes only the
-validated containers, networks, PostgreSQL volume and transient authority/gate
-state; it retains the project's secrets, issuer document and KMS key. A thin
-compose-acceptance target, paired backup/restore targets and upgrade smoke
-remain to be implemented. Live targets must report an unavailable prerequisite
-distinctly from a passing test.
+compose-acceptance requires a fresh suffixed bundled project and the exact
+demo/browser profiles. Under one lock and deadline it performs browser login,
+restarts each of the six long-running product/provider services independently,
+runs the full smoke after every restart, and repeats browser login. It leaves
+the successful stack running. compose-reset requires an exact confirmation
+token and retains the project's secrets, issuer document and KMS key. Paired
+backup/restore targets and upgrade smoke remain to be implemented. Live targets
+must report an unavailable prerequisite distinctly from a passing test.
 
 ## Security and network boundary
 

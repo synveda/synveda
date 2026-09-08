@@ -116,21 +116,24 @@ inventory.
 
 ### Remaining implementation slices
 
-1. Add `make compose-acceptance` as a thin wrapper around the existing real
-   browser fixture and a bounded gateway/worker/Keycloak/PostgreSQL/proxy/
-   Collector restart matrix.
-2. Add full logical database backup plus isolated restore and KMS-key checks,
+1. Add full logical database backup plus isolated restore and KMS-key checks,
    then the bounded S3-compatible and WAL/PITR path.
-3. Add the minimal `operation`, `operation_attempt` and
+2. Add the minimal `operation`, `operation_attempt` and
    `operation_outbox` schema/API for `skill_validation@1` under forced RLS.
-4. Add the exact-pinned Apalis leaf adapter and optional Compose fragment.
-5. Add the bounded local observability profile and customer-safe Operations
+3. Add the exact-pinned Apalis leaf adapter and optional Compose fragment.
+4. Add the bounded local observability profile and customer-safe Operations
    route.
-6. Add upgrade/rollback and external-dependency contract acceptance.
-7. Run current-source development and reference acceptance on Linux and one
+5. Add upgrade/rollback and external-dependency contract acceptance.
+6. Run current-source development and reference acceptance on Linux and one
    Docker Desktop platform.
-8. After the Keycloak gate passes, replace release/install assets with the
+7. After the Keycloak gate passes, replace release/install assets with the
    canonical pull-only graph and delete all Rauthy residue.
+
+The direct `make compose-acceptance` gate is implemented. It holds one exact
+project lock from initial asset-absence proof through two browser logins and a
+fixed PostgreSQL, Keycloak, Collector, worker, gateway and proxy restart
+matrix. Deterministic lifecycle tests pass; a supported Docker host is still
+required for live evidence.
 
 ## Acceptance criteria
 
