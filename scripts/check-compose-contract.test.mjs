@@ -2114,10 +2114,23 @@ test("host validators start through one closed Node trust boundary", () => {
     assert.ok(runner.includes(name), `${name} is not scrubbed`);
   }
   assert.match(runner, /exec node --use-bundled-ca "\$@"/);
-  assert.match(
-    selector,
-    /reference:config:true\|reference:up:true\|reference:acceptance:true\|reference:smoke:true\|\\\n\s+reference:restart-gateway:true\)/,
-  );
+  const referenceTrustStart = selector.indexOf('case "$runtime:$action:$ambient_node_trust" in');
+  const referenceTrustEnd = selector.indexOf("esac", referenceTrustStart);
+  const referenceTrust = selector.slice(referenceTrustStart, referenceTrustEnd);
+  for (const action of [
+    "config",
+    "up",
+    "acceptance",
+    "backup",
+    "restore-smoke",
+    "smoke",
+    "restart-gateway",
+  ]) {
+    assert.ok(
+      referenceTrust.includes(`reference:${action}:true`),
+      `reference ${action} does not reject ambient host trust`,
+    );
+  }
   const detection = selector.indexOf("ambient_node_trust=false");
   const refusal = selector.indexOf("ambient host trust configuration is not accepted");
   const firstNode = selector.indexOf('lifecycle_started_at=$("$node_runner"');

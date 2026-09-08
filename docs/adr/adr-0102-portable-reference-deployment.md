@@ -15,9 +15,10 @@ that scaffolding is a compatibility contract.
 
 ADR-0105 also narrows initial recovery evidence to PostgreSQL 17 logical full
 backup and isolated restore for the Synveda and Keycloak databases plus the
-separately supplied KMS key. The bounded S3-compatible and WAL/PITR path then
-completes CPR-45 recovery acceptance. Owned RPO/RTO, off-host retention policy
-and recurring production drills remain OPS-5 work.
+separately supplied KMS key/reference and surviving Keycloak convergence
+credential. That is the Docker-reference recovery contract. S3-compatible
+encrypted retention, WAL/PITR, owned RPO/RTO, off-host retention policy and
+recurring production drills remain OPS-5 work.
 
 ## Context
 

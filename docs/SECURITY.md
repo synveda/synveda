@@ -202,18 +202,36 @@ or external export is an open implementation gap.
 
 ## Backup boundary
 
-Recovery is not implemented in the current graph. The first slice requires
-logical PostgreSQL backups of both Synveda and Keycloak and separately
-protected Synveda KMS-key recovery material. Restore must occur into fresh
-isolated volumes/network and prove both databases, role isolation, audit
-continuity, correct-key decryption and wrong-key failure. CPR-45 then adds its
-bounded S3-compatible and WAL/PITR acceptance.
+Bundled-provider recovery uses writer-paused PostgreSQL 17 custom archives for
+the Synveda and Keycloak databases. Synveda uses the bounded cluster-owner
+recovery identity because forced RLS prevents an ordinary runtime role from
+producing a complete archive; Keycloak uses its dedicated database owner.
+Gateway, worker and Keycloak writers are paused, but independently connected
+database writers are not fenced and the two dumps are not one cross-database
+transaction.
+
+The KMS key/reference and surviving Keycloak convergence password are copied
+to a separate, canonically non-overlapping mode-0700 recovery root and SHA-256
+linked to the database manifest. The archives and recovery secrets are
+sensitive and are not encrypted by this tool. The hashes detect accidental alteration, not
+malicious replacement; they are neither signatures nor an authenticated
+manifest.
+
+Restore requires an exact source/backup/fresh-target confirmation and exact
+source tenant and PostgreSQL image identity before Docker mutation. It uses a
+fresh private volume/network, installs the recovered secrets into that target,
+reconverges the database authorities, then verifies the tenant and complete
+audit chain through the ordinary gateway database role before normal tenant
+convergence. It opens the current tenant data key, requires the exact
+cryptographic refusal under a synthetic wrong key, and only then starts the
+normal graph and completes browser login. Opening that key does not mean
+Knowledge bodies are application-encrypted.
 
 A backup on the same host is recovery-validation evidence, not disaster
-recovery. Logical pg_dump/pg_restore does not itself prove WAL/PITR or
-S3-compatible transfer, and the later bounded feature checks do not prove
-owned off-host retention or RPO/RTO. Keycloak realm export is not a database
-backup.
+recovery. Logical `pg_dump`/`pg_restore` does not provide WAL/PITR, encrypted
+off-host retention, S3 transfer, scheduling, RPO/RTO or recurring restore
+drills; those remain OPS-5 production work. Keycloak realm export is not a
+database backup.
 
 ## Adversarial evidence inventory
 

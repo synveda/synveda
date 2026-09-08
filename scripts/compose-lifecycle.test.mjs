@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -127,6 +128,46 @@ function fixture(runtimeKind = "development") {
   const bin = join(scratch, "bin");
   mkdirSync(bin, { mode: 0o700 });
   const log = join(scratch, "calls.log");
+  const fakeDatabaseBackup = join(bin, "fake-database-backup");
+  executable(
+    fakeDatabaseBackup,
+    `#!${process.execPath}
+const { createHash } = require("node:crypto");
+const { chmodSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const directory = process.env.SYNVEDA_BACKUP_STAGING_DIR;
+const project = process.env.SYNVEDA_BACKUP_PROJECT;
+const backupId = process.env.SYNVEDA_BACKUP_ID;
+const tenantId = process.env.SYNVEDA_BOOTSTRAP_TENANT_ID;
+const postgresImage = process.env.SYNVEDA_POSTGRES_IMAGE;
+if (!directory || !project || !backupId || !tenantId || !postgresImage) process.exit(64);
+const writePrivate = (name, value) => {
+  const path = join(directory, name);
+  writeFileSync(path, value, { mode: 0o600 });
+  chmodSync(path, 0o600);
+  return Buffer.from(value);
+};
+const synveda = writePrivate("synveda.dump", "fake synveda archive\\n");
+const keycloak = writePrivate("keycloak.dump", "fake keycloak archive\\n");
+const digest = (value) => createHash("sha256").update(value).digest("hex");
+const manifest = {
+  format: "synveda-logical-backup-v1",
+  backup_id: backupId,
+  source_project: project,
+  tenant_id: tenantId,
+  postgres_image: postgresImage,
+  server_version_num: 170011,
+  cluster_system_identifier: "7612345678901234567",
+  start_lsn: "0/16B6C50",
+  end_lsn: "0/16B6D20",
+  started_at: "2026-09-08T12:00:00Z",
+  completed_at: "2026-09-08T12:00:01Z",
+  synveda: { bytes: synveda.length, sha256: digest(synveda) },
+  keycloak: { bytes: keycloak.length, sha256: digest(keycloak) },
+};
+writePrivate("manifest.json", JSON.stringify(manifest) + "\\n");
+`,
+  );
   const fakeDocker = join(bin, "docker");
   executable(
     fakeDocker,
@@ -234,6 +275,21 @@ if [ "$1" = container ] && [ "$2" = wait ]; then
   printf '%s\n' "\${SYNVEDA_FAKE_BROWSER_EXIT:-0}"
   exit 0
 fi
+case " $* " in
+  *" stop --timeout 210 gateway worker keycloak-realm-convergence keycloak "*)
+    [ "\${SYNVEDA_FAKE_BACKUP_STOP_FAIL:-0}" = 0 ] || exit 46
+    ;;
+  *" run --rm --no-deps database-backup "*)
+    [ "\${SYNVEDA_FAKE_BACKUP_FAIL:-0}" = 0 ] || exit 47
+    ${JSON.stringify(fakeDatabaseBackup)}
+    if [ "\${SYNVEDA_FAKE_LATE_DATABASE_FINAL:-0}" = 1 ]; then
+      late_final=$SYNVEDA_DATABASE_BACKUP_ROOT/$SYNVEDA_BACKUP_ID
+      mkdir -m 700 -- "$late_final"
+      printf 'winning recovery set\n' > "$late_final/sentinel"
+      chmod 600 "$late_final/sentinel"
+    fi
+    ;;
+esac
 if [ "$1" = volume ] && [ "$2" = ls ]; then
   [ "\${SYNVEDA_FAKE_VOLUME_INVENTORY_ERROR:-0}" = 0 ] || exit 1
   if grep -q 'docker <volume> <rm>' "$SYNVEDA_FAKE_CALL_LOG"; then
@@ -590,6 +646,28 @@ function prepareReferenceFixture(state) {
   writeFileSync(join(state.secrets, "tls_key"), tls.privateKey, { mode: 0o600 });
   chmodSync(join(state.secrets, "tls_cert"), 0o600);
   chmodSync(join(state.secrets, "tls_key"), 0o600);
+}
+
+function recoveryRoots(state) {
+  const database = join(state.scratch, "database-backups");
+  const secrets = join(state.scratch, "recovery-secrets");
+  for (const directory of [database, secrets]) {
+    mkdirSync(directory, { mode: 0o700 });
+    chmodSync(directory, 0o700);
+  }
+  return {
+    database,
+    secrets,
+    environment: {
+      SYNVEDA_DATABASE_BACKUP_ROOT: database,
+      SYNVEDA_RECOVERY_SECRETS_ROOT: secrets,
+    },
+  };
+}
+
+function privateDirectoryForLifecycleTest(path) {
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+  chmodSync(path, 0o700);
 }
 
 function ambientHostTrust(sentinel = "cpr45-private-host-trust-sentinel") {
@@ -1688,6 +1766,394 @@ test("up distinguishes owned status, endpoint pin, full resolution, and mutation
   }
 });
 
+test("logical backup stops writers, publishes a linked recovery set, resumes, and smokes", () => {
+  const state = fixture();
+  const roots = recoveryRoots(state);
+  const backupId = "lifecycle-success";
+  try {
+    assert.equal(run(state, "up").status, 0);
+    const kms = readFileSync(join(state.secrets, "synveda_kms_key"), "utf8").trim();
+    const convergence = readFileSync(
+      join(state.secrets, "keycloak_convergence_admin_password"),
+      "utf8",
+    ).trim();
+    writeFileSync(state.log, "");
+    const result = run(state, "backup", {
+      ...roots.environment,
+      SYNVEDA_BACKUP_ID: backupId,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    const preflight = calls.indexOf("check-runtime-smoke.mjs");
+    const stop = calls.indexOf(
+      " <stop> <--timeout> <210> <gateway> <worker> <keycloak-realm-convergence> <keycloak>",
+    );
+    const dump = calls.indexOf(" <run> <--rm> <--no-deps> <database-backup>", stop);
+    const resume = calls.indexOf(
+      " <up> <--no-build> <--detach> <--wait> <--wait-timeout>",
+      dump,
+    );
+    const postflight = calls.indexOf("check-runtime-smoke.mjs", resume);
+    assert.ok(
+      preflight >= 0 && stop > preflight && dump > stop && resume > dump && postflight > resume,
+      calls,
+    );
+    assert.deepEqual(
+      readdirSync(join(roots.database, backupId)).sort(),
+      ["keycloak.dump", "manifest.json", "synveda.dump"],
+    );
+    assert.deepEqual(
+      readdirSync(join(roots.secrets, backupId)).sort(),
+      [
+        "keycloak_convergence_admin_password",
+        "manifest.json",
+        "synveda_kms_key",
+        "synveda_kms_key_ref",
+      ],
+    );
+    assert.doesNotMatch(`${result.stdout}${result.stderr}${calls}`, new RegExp(`${kms}|${convergence}`));
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("logical backup always attempts writer resumption after ordinary stop or dump failure", () => {
+  for (const failure of ["stop", "dump"]) {
+    const state = fixture();
+    const roots = recoveryRoots(state);
+    try {
+      assert.equal(run(state, "up").status, 0);
+      writeFileSync(state.log, "");
+      const result = run(state, "backup", {
+        ...roots.environment,
+        SYNVEDA_BACKUP_ID: `lifecycle-${failure}-failure`,
+        ...(failure === "stop"
+          ? { SYNVEDA_FAKE_BACKUP_STOP_FAIL: "1" }
+          : { SYNVEDA_FAKE_BACKUP_FAIL: "1" }),
+      });
+      assert.equal(result.status, failure === "stop" ? 46 : 47, result.stderr);
+      assert.match(result.stderr, /publication did not complete/);
+      const calls = readFileSync(state.log, "utf8");
+      const stop = calls.indexOf(" <stop> <--timeout> <210>");
+      const dump = calls.indexOf(" <run> <--rm> <--no-deps> <database-backup>");
+      const resume = calls.indexOf(
+        " <up> <--no-build> <--detach> <--wait> <--wait-timeout>",
+        stop,
+      );
+      assert.ok(stop >= 0 && resume > stop, calls);
+      if (failure === "stop") assert.equal(dump, -1, calls);
+      else assert.ok(dump > stop && resume > dump, calls);
+      assert.equal(existsSync(join(roots.database, `lifecycle-${failure}-failure`)), false);
+      assert.equal(existsSync(join(roots.secrets, `lifecycle-${failure}-failure`)), false);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("logical backup never nests into a destination that appears during publication", () => {
+  const state = fixture();
+  const roots = recoveryRoots(state);
+  const backupId = "late-destination";
+  try {
+    assert.equal(run(state, "up").status, 0);
+    writeFileSync(state.log, "");
+    const result = run(state, "backup", {
+      ...roots.environment,
+      SYNVEDA_BACKUP_ID: backupId,
+      SYNVEDA_FAKE_LATE_DATABASE_FINAL: "1",
+    });
+    assert.equal(result.status, 73, result.stderr);
+    assert.match(result.stderr, /destination appeared before publication/);
+    assert.match(result.stderr, /publication did not complete/);
+    assert.deepEqual(
+      readdirSync(join(roots.database, backupId)),
+      ["sentinel"],
+      "the winning destination was modified or received a nested stage",
+    );
+    assert.equal(
+      readFileSync(join(roots.database, backupId, "sentinel"), "utf8"),
+      "winning recovery set\n",
+    );
+    assert.equal(existsSync(join(roots.secrets, backupId)), true);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(
+      calls,
+      / <up> <--no-build> <--detach> <--wait> <--wait-timeout> <3600> <--no-recreate> <keycloak> <keycloak-realm-convergence> <worker> <gateway>/,
+    );
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("restore confirmation is refused before target generation, locking, or Docker", () => {
+  const state = fixture();
+  const roots = recoveryRoots(state);
+  try {
+    const result = run(state, "restore-smoke", {
+      ...roots.environment,
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+      SYNVEDA_RESTORE_SOURCE_PROJECT: "synveda-development-acceptance-source",
+      SYNVEDA_BACKUP_ID: "refused-restore",
+    });
+    assert.equal(result.status, 64, result.stderr);
+    assert.match(result.stderr, /requires SYNVEDA_CONFIRM_RESTORE=/);
+    assert.equal(existsSync(state.log), false);
+    assert.equal(existsSync(state.secrets), false);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("restore refuses a target tenant that is not the backed-up source tenant", () => {
+  const source = fixture();
+  const target = fixture();
+  const roots = recoveryRoots(source);
+  const backupId = "tenant-mismatch";
+  try {
+    assert.equal(run(source, "up").status, 0);
+    const backedUp = run(source, "backup", {
+      ...roots.environment,
+      SYNVEDA_BACKUP_ID: backupId,
+    });
+    assert.equal(backedUp.status, 0, backedUp.stderr);
+    const refused = run(target, "restore-smoke", {
+      ...roots.environment,
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+      SYNVEDA_RESTORE_SOURCE_PROJECT: source.project,
+      SYNVEDA_BACKUP_ID: backupId,
+      SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7000-8000-000000000046",
+      SYNVEDA_CONFIRM_RESTORE: `${source.project}:${backupId}:${target.project}`,
+    });
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.match(refused.stderr, /database manifest values were refused/);
+    const calls = existsSync(target.log) ? readFileSync(target.log, "utf8") : "";
+    assert.doesNotMatch(calls, / <config>| <build>| <up>| <run>/);
+  } finally {
+    rmSync(target.scratch, { recursive: true, force: true });
+    rmSync(source.scratch, { recursive: true, force: true });
+  }
+});
+
+test("restore refusal preserves every existing target recovery credential", () => {
+  const source = fixture();
+  const target = fixture();
+  const roots = recoveryRoots(source);
+  const backupId = "existing-target-refusal";
+  try {
+    assert.equal(run(source, "up").status, 0);
+    const backedUp = run(source, "backup", {
+      ...roots.environment,
+      SYNVEDA_BACKUP_ID: backupId,
+    });
+    assert.equal(backedUp.status, 0, backedUp.stderr);
+    assert.equal(run(target, "up").status, 0);
+    const names = [
+      "synveda_kms_key",
+      "synveda_kms_key_ref",
+      "keycloak_convergence_admin_password",
+    ];
+    const before = new Map(
+      names.map((name) => [name, readFileSync(join(target.secrets, name))]),
+    );
+    writeFileSync(target.log, "");
+
+    const refused = run(target, "restore-smoke", {
+      ...roots.environment,
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+      SYNVEDA_RESTORE_SOURCE_PROJECT: source.project,
+      SYNVEDA_BACKUP_ID: backupId,
+      SYNVEDA_CONFIRM_RESTORE: `${source.project}:${backupId}:${target.project}`,
+      SYNVEDA_FAKE_ABSENT_ASSET_STATUS: "78",
+    });
+    assert.equal(refused.status, 78, refused.stderr);
+    for (const name of names) {
+      assert.deepEqual(
+        readFileSync(join(target.secrets, name)),
+        before.get(name),
+        `${name} changed before target absence was proved`,
+      );
+    }
+    const calls = readFileSync(target.log, "utf8");
+    assert.match(calls, /check-compose-assets\.mjs>.*<--state> <absent>/);
+    assert.doesNotMatch(calls, / <build>| <up>| <run>/);
+  } finally {
+    rmSync(target.scratch, { recursive: true, force: true });
+    rmSync(source.scratch, { recursive: true, force: true });
+  }
+});
+
+test("recovery roots are separated and repository-safe after physical canonicalization", () => {
+  for (const scenario of ["overlap", "repository"]) {
+    const state = fixture();
+    const physical = join(state.scratch, "physical-recovery");
+    const aliasA = join(state.scratch, "alias-a");
+    const aliasB = join(state.scratch, "alias-b");
+    const repositoryDirectory = join(
+      ROOT,
+      `.cpr45-recovery-root-${randomBytes(8).toString("hex")}`,
+    );
+    try {
+      assert.equal(run(state, "up").status, 0);
+      writeFileSync(state.log, "");
+      privateDirectoryForLifecycleTest(physical);
+      privateDirectoryForLifecycleTest(join(physical, "database"));
+      privateDirectoryForLifecycleTest(join(physical, "database", "secrets"));
+      symlinkSync(physical, aliasA);
+      let databaseRoot = join(aliasA, "database");
+      let secretRoot;
+      if (scenario === "overlap") {
+        symlinkSync(physical, aliasB);
+        secretRoot = join(aliasB, "database", "secrets");
+      } else {
+        privateDirectoryForLifecycleTest(repositoryDirectory);
+        symlinkSync(ROOT, aliasB);
+        secretRoot = join(aliasB, repositoryDirectory.slice(ROOT.length + 1));
+      }
+      const refused = run(state, "backup", {
+        SYNVEDA_DATABASE_BACKUP_ROOT: databaseRoot,
+        SYNVEDA_RECOVERY_SECRETS_ROOT: secretRoot,
+        SYNVEDA_BACKUP_ID: `canonical-${scenario}`,
+      });
+      assert.equal(refused.status, 78, `${scenario}: ${refused.stderr}`);
+      assert.match(
+        refused.stderr,
+        scenario === "overlap"
+          ? /canonical database and recovery-secret roots must not overlap/
+          : /canonical recovery roots inside the repository must use deploy\/compose\/backups/,
+      );
+      const calls = existsSync(state.log) ? readFileSync(state.log, "utf8") : "";
+      assert.doesNotMatch(calls, / <stop>|database-backup/);
+    } finally {
+      rmSync(repositoryDirectory, { recursive: true, force: true });
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("logical recovery fails closed for external PostgreSQL or OIDC", () => {
+  for (const action of ["backup", "restore-smoke"]) {
+    for (const [name, value] of [
+      ["SYNVEDA_POSTGRES_MODE", "external"],
+      ["SYNVEDA_OIDC_MODE", "external"],
+    ]) {
+      const state = fixture();
+      try {
+        const result = run(state, action, {
+          SYNVEDA_COMPOSE_PROFILES:
+            action === "restore-smoke" ? "demo,browser-acceptance" : "",
+          [name]: value,
+        });
+        assert.equal(
+          result.status,
+          69,
+          `${action}/${name}: ${result.stderr}`,
+        );
+        assert.match(
+          result.stderr,
+          /logical recovery currently requires bundled/,
+        );
+        assert.equal(existsSync(state.log), false);
+      } finally {
+        rmSync(state.scratch, { recursive: true, force: true });
+      }
+    }
+  }
+});
+
+test("isolated restore verifies recovered state before graph convergence and browser login", () => {
+  const source = fixture();
+  const target = fixture();
+  const roots = recoveryRoots(source);
+  const backupId = "lifecycle-restore";
+  try {
+    assert.equal(run(source, "up").status, 0);
+    const backedUp = run(source, "backup", {
+      ...roots.environment,
+      SYNVEDA_BACKUP_ID: backupId,
+    });
+    assert.equal(backedUp.status, 0, backedUp.stderr);
+    const recoveredSecrets = join(roots.secrets, backupId);
+    writeFileSync(target.log, "");
+    const restored = run(target, "restore-smoke", {
+      ...roots.environment,
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+      SYNVEDA_RESTORE_SOURCE_PROJECT: source.project,
+      SYNVEDA_BACKUP_ID: backupId,
+      SYNVEDA_CONFIRM_RESTORE: `${source.project}:${backupId}:${target.project}`,
+    });
+    assert.equal(restored.status, 0, restored.stderr);
+    for (const name of [
+      "synveda_kms_key",
+      "synveda_kms_key_ref",
+      "keycloak_convergence_admin_password",
+    ]) {
+      assert.equal(
+        readFileSync(join(target.secrets, name), "utf8"),
+        readFileSync(join(recoveredSecrets, name), "utf8"),
+        `${name} was not installed into the restored target`,
+      );
+    }
+    const calls = readFileSync(target.log, "utf8");
+    const firstSynvedaBootstrap = calls.indexOf(
+      " <up> <--no-build> <--detach> <--wait> <--wait-timeout> <3600> <--force-recreate> <database-bootstrap>",
+    );
+    const firstKeycloakBootstrap = calls.indexOf(
+      " <up> <--no-build> <--detach> <--wait> <--wait-timeout> <3600> <--force-recreate> <keycloak-database-bootstrap>",
+      firstSynvedaBootstrap,
+    );
+    const databaseRestore = calls.indexOf(
+      " <run> <--rm> <--no-deps> <database-restore>",
+      firstKeycloakBootstrap,
+    );
+    const secondSynvedaBootstrap = calls.indexOf(
+      " <up> <--no-build> <--detach> <--wait> <--wait-timeout> <3600> <--force-recreate> <database-bootstrap>",
+      firstSynvedaBootstrap + 1,
+    );
+    const secondKeycloakBootstrap = calls.indexOf(
+      " <up> <--no-build> <--detach> <--wait> <--wait-timeout> <3600> <--force-recreate> <keycloak-database-bootstrap>",
+      firstKeycloakBootstrap + 1,
+    );
+    const correctKey = calls.indexOf(
+      " <run> <--rm> <--no-deps> <recovery-verify>",
+      secondKeycloakBootstrap,
+    );
+    const wrongKey = calls.indexOf(
+      " <run> <--rm> <--no-deps> <recovery-key-refusal>",
+      correctKey,
+    );
+    const graph = calls.indexOf(
+      " <up> <--no-build> <--detach> <--wait> <--wait-timeout> <3600> <--no-recreate> <--scale> <browser-acceptance=0>",
+      wrongKey,
+    );
+    const browser = calls.indexOf(
+      " <up> <--no-build> <--detach> <--no-deps> <--force-recreate> <browser-acceptance>",
+      graph,
+    );
+    assert.ok(
+      firstSynvedaBootstrap >= 0 && firstKeycloakBootstrap > firstSynvedaBootstrap &&
+        databaseRestore > firstKeycloakBootstrap &&
+        secondSynvedaBootstrap > databaseRestore &&
+        secondKeycloakBootstrap > secondSynvedaBootstrap &&
+        correctKey > secondKeycloakBootstrap && wrongKey > correctKey &&
+        graph > wrongKey && browser > graph,
+      calls,
+    );
+    assert.match(calls, /compose\.restore\.yaml/);
+    const secretSentinels = [
+      "synveda_kms_key",
+      "keycloak_convergence_admin_password",
+    ].map((name) => readFileSync(join(recoveredSecrets, name), "utf8").trim());
+    assert.doesNotMatch(
+      `${restored.stdout}${restored.stderr}${calls}`,
+      new RegExp(secretSentinels.join("|")),
+    );
+  } finally {
+    rmSync(target.scratch, { recursive: true, force: true });
+    rmSync(source.scratch, { recursive: true, force: true });
+  }
+});
+
 test("recovery actions never require or remove development host ownership", () => {
   const state = fixture();
   try {
@@ -1703,6 +2169,29 @@ test("recovery actions never require or remove development host ownership", () =
     });
     assert.equal(reset.status, 0, reset.stderr);
     assert.doesNotMatch(readFileSync(state.log, "utf8"), /manage-hosts-file\.mjs/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("an acceptance project can recover by preserving data and dropping only the browser one-shot", () => {
+  const state = fixture();
+  const browserProfiles = { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance" };
+  try {
+    const started = run(state, "up", browserProfiles, ["--initial-assets", "absent"]);
+    assert.equal(started.status, 0, started.stderr);
+    writeFileSync(state.log, "");
+    const stopped = run(state, "down", browserProfiles);
+    assert.equal(stopped.status, 0, stopped.stderr);
+    const resumed = run(state, "up", { SYNVEDA_COMPOSE_PROFILES: "demo" });
+    assert.equal(resumed.status, 0, resumed.stderr);
+    const smoke = run(state, "smoke", { SYNVEDA_COMPOSE_PROFILES: "demo" });
+    assert.equal(smoke.status, 0, smoke.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    const down = calls.indexOf(" <down> <--timeout> <900>");
+    const up = calls.indexOf(" <up> <--no-build>", down);
+    const runtimeSmoke = calls.lastIndexOf("check-runtime-smoke.mjs");
+    assert.ok(down >= 0 && up > down && runtimeSmoke > up, calls);
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }

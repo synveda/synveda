@@ -1,0 +1,278 @@
+#!/bin/sh
+# CPR-45: stage one writer-quiesced logical backup of both product databases.
+set +x
+set -eu
+
+LC_ALL=C
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL PATH
+umask 077
+
+usage() {
+    echo "usage: synveda-logical-backup backup" >&2
+    exit 64
+}
+
+[ "$#" -eq 1 ] && [ "$1" = backup ] || usage
+
+project=${SYNVEDA_BACKUP_PROJECT:-}
+backup_id=${SYNVEDA_BACKUP_ID:-}
+tenant_id=${SYNVEDA_BACKUP_TENANT_ID:-}
+postgres_image=${SYNVEDA_BACKUP_POSTGRES_IMAGE:-}
+case "$project" in
+    synveda-development|synveda-reference|\
+    synveda-development-acceptance-[a-z0-9]*|\
+    synveda-reference-acceptance-[a-z0-9]*) ;;
+    *) echo "logical-backup: source project was refused" >&2; exit 64 ;;
+esac
+case "$project" in
+    *[!a-z0-9-]*|*-|*--*)
+        echo "logical-backup: source project was refused" >&2
+        exit 64
+        ;;
+esac
+case "$backup_id" in
+    [a-z0-9]*) ;;
+    *) echo "logical-backup: backup id was refused" >&2; exit 64 ;;
+esac
+case "$backup_id" in
+    *[!a-z0-9-]*|*-|*--*)
+        echo "logical-backup: backup id was refused" >&2
+        exit 64
+        ;;
+esac
+[ "${#backup_id}" -le 64 ] || {
+    echo "logical-backup: backup id was refused" >&2
+    exit 64
+}
+case "$tenant_id" in
+    ????????-????-7???-[89ab]???-????????????) ;;
+    *) echo "logical-backup: source tenant UUIDv7 was refused" >&2; exit 64 ;;
+esac
+case "$tenant_id" in
+    *[!0-9a-f-]*) echo "logical-backup: source tenant UUIDv7 was refused" >&2; exit 64 ;;
+esac
+case "$postgres_image" in
+    ''|*[!A-Za-z0-9_./:@+-]*)
+        echo "logical-backup: PostgreSQL image reference was refused" >&2
+        exit 64
+        ;;
+esac
+
+output=/backup
+mode_of() {
+    stat -c '%a' "$1"
+}
+owner_of() {
+    stat -c '%u' "$1"
+}
+size_of() {
+    stat -c '%s' "$1"
+}
+[ ! -L "$output" ] && [ -d "$output" ] && \
+    [ "$(mode_of "$output")" = 700 ] && \
+    [ "$(owner_of "$output")" = "$(id -u)" ] || {
+    echo "logical-backup: output directory metadata was refused" >&2
+    exit 78
+}
+for existing in "$output"/.[!.]* "$output"/..?* "$output"/*; do
+    [ -e "$existing" ] || [ -L "$existing" ] || continue
+    echo "logical-backup: output directory must be empty" >&2
+    exit 78
+done
+
+read_password() {
+    password_path=$1
+    password_label=$2
+    [ ! -L "$password_path" ] && [ -f "$password_path" ] || {
+        echo "logical-backup: $password_label credential file was refused" >&2
+        exit 78
+    }
+    password_bytes=$(size_of "$password_path") || {
+        echo "logical-backup: $password_label credential file was refused" >&2
+        exit 78
+    }
+    case "$password_bytes" in
+        ''|*[!0-9]*)
+            echo "logical-backup: $password_label credential file was refused" >&2
+            exit 78
+            ;;
+    esac
+    [ "$password_bytes" -ge 2 ] && [ "$password_bytes" -le 4096 ] || {
+        echo "logical-backup: $password_label credential file was refused" >&2
+        exit 78
+    }
+    password_value=
+    IFS= read -r password_value < "$password_path" || :
+    case "$password_value" in
+        ''|*[!A-Za-z0-9._~-]*)
+            echo "logical-backup: $password_label credential file was refused" >&2
+            exit 78
+            ;;
+    esac
+    [ "$password_bytes" -eq "$((${#password_value} + 1))" ] || {
+        echo "logical-backup: $password_label credential file was refused" >&2
+        exit 78
+    }
+    printf '%s' "$password_value"
+}
+
+owner_password=$(read_password /run/secrets/postgres_owner_password owner)
+keycloak_password=$(read_password /run/secrets/keycloak_database_password keycloak)
+[ "$owner_password" != "$keycloak_password" ] || {
+    echo "logical-backup: database credentials were not isolated" >&2
+    exit 78
+}
+
+pgpass=/tmp/synveda-backup.pgpass
+synveda_temp=$output/.synveda.dump.$$
+keycloak_temp=$output/.keycloak.dump.$$
+manifest_temp=$output/.manifest.json.$$
+cleanup() {
+    cleanup_status=$?
+    trap '' HUP INT TERM
+    trap - EXIT
+    rm -f -- "$pgpass" "$synveda_temp" "$keycloak_temp" "$manifest_temp"
+    unset owner_password keycloak_password
+    exit "$cleanup_status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+printf 'postgres:5432:synveda:synveda_owner:%s\n' "$owner_password" > "$pgpass"
+printf 'postgres:5432:keycloak:keycloak:%s\n' "$keycloak_password" >> "$pgpass"
+printf 'postgres:5432:postgres:synveda_owner:%s\n' "$owner_password" >> "$pgpass"
+chmod 600 "$pgpass"
+unset owner_password keycloak_password
+PGPASSFILE=$pgpass
+PGCONNECT_TIMEOUT=10
+PGAPPNAME=synveda-logical-backup
+export PGPASSFILE PGCONNECT_TIMEOUT PGAPPNAME
+unset PGDATABASE PGHOST PGHOSTADDR PGOPTIONS PGPASSWORD PGPORT PGSERVICE \
+    PGSERVICEFILE PGSSLCERT PGSSLCRL PGSSLKEY PGSSLMODE PGSSLROOTCERT PGUSER
+
+case "$(pg_dump --version)" in
+    'pg_dump (PostgreSQL) 17.'*) ;;
+    *) echo "logical-backup: PostgreSQL 17 pg_dump is required" >&2; exit 69 ;;
+esac
+
+cluster_record() {
+    psql -X -qAt --no-password \
+        --host=postgres --port=5432 --username=synveda_owner --dbname=postgres \
+        --command="select current_setting('server_version_num'), system_identifier::text, pg_current_wal_lsn()::text from pg_control_system()"
+}
+
+valid_lsn() {
+    lsn_left=${1%%/*}
+    lsn_right=${1#*/}
+    [ -n "$lsn_left" ] && [ -n "$lsn_right" ] && \
+        [ "$lsn_left/$lsn_right" = "$1" ] || return 1
+    case "$lsn_left" in *[!0-9A-F]*) return 1 ;; esac
+    case "$lsn_right" in *[!0-9A-F]*) return 1 ;; esac
+}
+
+before=$(cluster_record) || {
+    echo "logical-backup: PostgreSQL metadata was unavailable" >&2
+    exit 69
+}
+old_ifs=$IFS
+IFS='|'
+set -- $before
+IFS=$old_ifs
+[ "$#" -eq 3 ] || {
+    echo "logical-backup: PostgreSQL metadata was malformed" >&2
+    exit 78
+}
+server_version_num=$1
+cluster_system_identifier=$2
+start_lsn=$3
+case "$server_version_num" in
+    ''|*[!0-9]*) echo "logical-backup: PostgreSQL metadata was malformed" >&2; exit 78 ;;
+esac
+[ "$server_version_num" -ge 170000 ] && [ "$server_version_num" -lt 180000 ] || {
+    echo "logical-backup: PostgreSQL metadata was malformed" >&2
+    exit 78
+}
+case "$cluster_system_identifier" in
+    ''|*[!0-9]*) echo "logical-backup: PostgreSQL metadata was malformed" >&2; exit 78 ;;
+esac
+[ "${#cluster_system_identifier}" -ge 10 ] && \
+    [ "${#cluster_system_identifier}" -le 24 ] && valid_lsn "$start_lsn" || {
+    echo "logical-backup: PostgreSQL metadata was malformed" >&2
+    exit 78
+}
+started_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+dump_database() {
+    database=$1
+    username=$2
+    destination=$3
+    pg_dump \
+        --host=postgres \
+        --port=5432 \
+        --username="$username" \
+        --dbname="$database" \
+        --format=custom \
+        --create \
+        --no-password \
+        --lock-wait-timeout=10s \
+        --file="$destination"
+    [ ! -L "$destination" ] && [ -f "$destination" ] && \
+        [ "$(owner_of "$destination")" = "$(id -u)" ] && \
+        [ "$(size_of "$destination")" -gt 0 ] || {
+        echo "logical-backup: $database archive was refused" >&2
+        exit 78
+    }
+    chmod 600 "$destination"
+    pg_restore --list "$destination" >/dev/null
+}
+
+dump_database synveda synveda_owner "$synveda_temp"
+dump_database keycloak keycloak "$keycloak_temp"
+
+after=$(cluster_record) || {
+    echo "logical-backup: PostgreSQL metadata was unavailable after dump" >&2
+    exit 69
+}
+old_ifs=$IFS
+IFS='|'
+set -- $after
+IFS=$old_ifs
+[ "$#" -eq 3 ] && [ "$1" = "$server_version_num" ] && \
+    [ "$2" = "$cluster_system_identifier" ] || {
+    echo "logical-backup: PostgreSQL generation changed during dump" >&2
+    exit 78
+}
+end_lsn=$3
+valid_lsn "$end_lsn" || {
+    echo "logical-backup: PostgreSQL metadata was malformed after dump" >&2
+    exit 78
+}
+completed_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+synveda_bytes=$(size_of "$synveda_temp")
+keycloak_bytes=$(size_of "$keycloak_temp")
+synveda_sha256=$(sha256sum "$synveda_temp" | awk '{print $1}')
+keycloak_sha256=$(sha256sum "$keycloak_temp" | awk '{print $1}')
+case "$synveda_bytes:$keycloak_bytes:$synveda_sha256:$keycloak_sha256" in
+    *[!0-9a-f:]*) echo "logical-backup: archive digest metadata was malformed" >&2; exit 78 ;;
+esac
+[ "${#synveda_sha256}" -eq 64 ] && [ "${#keycloak_sha256}" -eq 64 ] || {
+    echo "logical-backup: archive digest metadata was malformed" >&2
+    exit 78
+}
+
+mv "$synveda_temp" "$output/synveda.dump"
+synveda_temp=
+mv "$keycloak_temp" "$output/keycloak.dump"
+keycloak_temp=
+printf '%s\n' \
+    "{\"format\":\"synveda-logical-backup-v1\",\"backup_id\":\"$backup_id\",\"source_project\":\"$project\",\"tenant_id\":\"$tenant_id\",\"postgres_image\":\"$postgres_image\",\"server_version_num\":$server_version_num,\"cluster_system_identifier\":\"$cluster_system_identifier\",\"start_lsn\":\"$start_lsn\",\"end_lsn\":\"$end_lsn\",\"started_at\":\"$started_at\",\"completed_at\":\"$completed_at\",\"synveda\":{\"bytes\":$synveda_bytes,\"sha256\":\"$synveda_sha256\"},\"keycloak\":{\"bytes\":$keycloak_bytes,\"sha256\":\"$keycloak_sha256\"}}" \
+    > "$manifest_temp"
+chmod 600 "$manifest_temp"
+mv "$manifest_temp" "$output/manifest.json"
+manifest_temp=
+
+echo "logical backup staged for $project as $backup_id"

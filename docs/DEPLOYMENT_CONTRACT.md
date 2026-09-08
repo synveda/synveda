@@ -39,6 +39,8 @@ and assembles these files:
 | compose.external.yaml | external provider labels |
 | compose.demo.yaml | short-lived demo users |
 | compose.browser-acceptance*.yaml | isolated browser acceptance runner |
+| compose.backup.yaml | private, profile-gated logical backup one-shot |
+| compose.restore.yaml | private isolated restore and key-verification one-shots |
 
 Implemented selectors are development or reference,
 bundled or external PostgreSQL and bundled or external OIDC. External
@@ -52,7 +54,7 @@ and acceptance tests land.
 | Image | Commands or role |
 | --- | --- |
 | Synveda product | gateway, worker, database-preflight, migrate, tenant-converge, issuer-diagnostic |
-| PostgreSQL 17 + pgvector | bundled database and the bounded database bootstrap |
+| PostgreSQL 17 + pgvector | bundled database, bounded bootstrap and logical backup/restore entrypoints |
 | optimized Keycloak 26.7.2 | start --optimized and idempotent realm convergence |
 | Caddy 2.11.4 | public reverse proxy |
 | OpenTelemetry Collector Contrib 0.159.0 | private OTLP receiver |
@@ -63,6 +65,13 @@ command, not a deployment-specific image or code branch, chooses the process.
 Runtime base images are digest pinned in their Dockerfiles. Development tags
 are local conveniences; reference evidence requires immutable release
 references.
+
+The restore overlay invokes
+`synveda db recovery-verify --tenant <uuid> [--expect-key-refusal]` directly as
+a private one-shot. It is a read-only post-restore verifier, not a public API
+or a long-running product role. The PostgreSQL image exposes only the fixed
+`synveda-logical-backup backup` and `synveda-logical-restore restore`
+entrypoints for the two recovery one-shots.
 
 ## Service graph
 
@@ -78,9 +87,9 @@ The bundled reference graph is:
     tenant-convergence + issuer-diagnostic ── worker
     gateway + worker ── otel-collector
 
-The bootstrap, preflight, migration, tenant convergence and issuer diagnostic
-services are bounded jobs. Proxy, PostgreSQL, Keycloak, realm convergence,
-gateway, worker and Collector are long-running.
+The bootstrap, preflight, migration, tenant convergence, issuer diagnostic and
+recovery services are bounded jobs. Proxy, PostgreSQL, Keycloak, realm
+convergence, gateway, worker and Collector are long-running.
 
 ## Ports and health
 
@@ -120,6 +129,7 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_OIDC_ISSUER | exact external issuer URL |
 | SYNVEDA_OIDC_ISSUERS_FILE | mounted provider-neutral issuer document |
 | SYNVEDA_DATABASE_ROLES_FILE | mounted database role contract |
+| SYNVEDA_BOOTSTRAP_TENANT_ID | UUIDv7 bound into backup and required unchanged at restore |
 | SYNVEDA_COMPOSE_IPV4_POOL | explicit private /24 for reference/evidence |
 | SYNVEDA_PRODUCT_IMAGE | immutable product image reference |
 | SYNVEDA_POSTGRES_IMAGE | immutable bundled PostgreSQL image reference |
@@ -127,6 +137,11 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_CADDY_IMAGE | immutable proxy image reference |
 | SYNVEDA_OTEL_COLLECTOR_IMAGE | immutable Collector image reference |
 | OTEL_EXPORTER_OTLP_ENDPOINT | OTLP/gRPC destination used by application processes |
+| SYNVEDA_BACKUP_ID | optional explicit immutable logical-backup identifier |
+| SYNVEDA_RESTORE_SOURCE_PROJECT | exact source project recorded by the recovery set |
+| SYNVEDA_CONFIRM_RESTORE | exact source-project:backup-id:target-project approval |
+| SYNVEDA_DATABASE_BACKUP_ROOT | absolute private database-archive root |
+| SYNVEDA_RECOVERY_SECRETS_ROOT | separate absolute private recovery-secret root |
 
 The application processes receive DATABASE_URL_FILE,
 SYNVEDA_KMS_KEY_FILE, SYNVEDA_KMS_KEY_REF_FILE,
@@ -182,6 +197,14 @@ The postgres-data named volume is the bundled persistent database state.
 Issuer projection, database authority and public realm gates are bounded
 operator-owned runtime files, not independent data stores. The Synveda KMS key
 is separate recovery material and must be protected with the database backup.
+
+Logical recovery writes two separate operator-owned roots. Each backup ID has
+a mode-0700 database-archive directory containing `synveda.dump`,
+`keycloak.dump` and `manifest.json`, and a mode-0700 recovery-secret directory
+containing `synveda_kms_key`, `synveda_kms_key_ref`,
+`keycloak_convergence_admin_password` and its linked `manifest.json`. These
+are sensitive persistent operator data, not container volumes or image
+contents.
 
 Migration ownership remains separate: Synveda runs migrate; Keycloak owns its
 schema lifecycle. Keycloak realm export is not a database backup.
@@ -241,20 +264,41 @@ Knowledge body, credential or unbounded tenant/user label may enter telemetry.
 
 ## Backup and restore
 
-Backup/restore is not implemented in the current graph. The minimal reference
-completion is:
+The bundled-provider reference implements one operator-invoked logical
+recovery path. `compose-backup` verifies the running graph, pauses the gateway,
+worker and Keycloak writers, then uses the PostgreSQL 17 tools paired with the
+server to create custom-format archives of the `synveda` and `keycloak`
+databases. Synveda is dumped through the bounded cluster-owner recovery
+identity because forced RLS prevents an ordinary runtime role from producing a
+complete archive; Keycloak is dumped through its dedicated database owner.
+The writers are resumed and rechecked before success is reported.
 
-- PostgreSQL 17 pg_dump custom-format backups of both synveda and keycloak;
-- separately protected Synveda KMS-key recovery material;
-- an operator-owned local-filesystem target;
-- integrity checks and restore into fresh, isolated volumes/network;
-- verification of Keycloak data, Synveda data, role isolation, audit
-  continuity, correct-key decryption and wrong-key failure.
+The database pair and separately stored KMS key, KMS reference and surviving
+Keycloak convergence credential are SHA-256 linked and never overwritten.
+`compose-restore-smoke` requires an exact
+`source-project:backup-id:fresh-target-project` confirmation. It verifies the
+pair, restores it into a new private PostgreSQL volume and network, reconverges
+the database authorities, then verifies the restored tenant and complete audit
+chain through the ordinary gateway database role before normal tenant
+convergence can create product state. It opens the current tenant data key with
+the recovered KMS key, proves that a synthetic wrong key receives the exact
+authenticated-decryption refusal, converges the normal identity/application
+graph and runs browser acceptance. The target is left private and running for
+inspection.
 
-This first establishes logical recovery validation. Bounded WAL/PITR and
-S3-compatible target acceptance remain open CPR-45 slices. Even after those
-pass, off-host retention policy, recurring drills and owned RPO/RTO remain
-production work and no disaster-recovery claim follows.
+This is a planned-interruption, same-PostgreSQL-17 logical recovery check. The
+restore smoke deliberately requires the exact PostgreSQL image reference
+recorded by backup; it is not a general archive-compatibility promise. The
+two database dumps are not one cross-database transaction, so application
+writers are paused; independently connected writers are outside that pause.
+Logical archives and recovery secrets are sensitive and are not encrypted by
+this tool. Their hashes detect accidental change but are not signatures or an
+authenticated manifest. The check opens the restored tenant data key; it does
+not claim that Knowledge bodies are application-encrypted.
+
+WAL archive/PITR, S3-compatible transfer, scheduling, retention, off-host
+custody, recurring drills and owned RPO/RTO remain open production work. A
+same-host copy is recovery-validation evidence, not disaster recovery.
 
 ## Lifecycle commands
 
@@ -269,6 +313,8 @@ Implemented:
     make compose-up
     make compose-browser-acceptance
     make compose-acceptance
+    make compose-backup
+    make compose-restore-smoke
     make compose-smoke
     make compose-restart-gateway
     make compose-down
@@ -280,8 +326,10 @@ restarts each of the six long-running product/provider services independently,
 runs the full smoke after every restart, and repeats browser login. It leaves
 the successful stack running. compose-reset requires an exact confirmation
 token and retains the project's secrets, issuer document and KMS key. Paired
-backup/restore targets and upgrade smoke remain to be implemented. Live targets
-must report an unavailable prerequisite distinctly from a passing test.
+logical backup/isolated restore are implemented for bundled PostgreSQL and
+bundled Keycloak. External-provider recovery and upgrade smoke remain open.
+Live targets must report an unavailable prerequisite distinctly from a
+passing test.
 
 ## Security and network boundary
 

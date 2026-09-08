@@ -4,10 +4,11 @@ This directory is Synveda's canonical single-host deployment for CPR-45. It
 runs the gateway and worker as separate processes with PostgreSQL, bundled
 Keycloak, a reverse proxy and a private OpenTelemetry Collector.
 
-It supports development and reference configuration. Live browser,
-reference-HTTPS, recovery and upgrade evidence is still required before this
-implementation can be called validated for controlled single-host use. It is
-not an HA, disaster-recovery, hosted-SaaS or enterprise-certification claim.
+It supports development and reference configuration. Logical backup and
+isolated restore commands are implemented, but live browser, reference-HTTPS,
+recovery and upgrade evidence is still required before this implementation can
+be called validated for controlled single-host use. It is not an HA,
+disaster-recovery, hosted-SaaS or enterprise-certification claim.
 
 Use deploy/compose/scripts/compose.sh through the Make targets. Do not assemble
 Compose fragments manually.
@@ -183,6 +184,99 @@ Reinstall its hosts block only when continuing development:
       make compose-hosts-install
     make compose-resolver-check
 
+## Logical backup and isolated restore
+
+Recovery currently supports the bundled PostgreSQL and bundled Keycloak modes
+only. Keep the exact source runtime, project suffix, profiles, hosts and image
+selectors used to start the stack. If the source uses a non-default
+`SYNVEDA_BOOTSTRAP_TENANT_ID`, retain that exact UUID for backup and restore;
+the manifest binds it and a mismatch is refused. A backup verifies and smokes
+the running graph, pauses the gateway, worker and Keycloak writers, creates separate
+PostgreSQL 17 custom archives, snapshots the KMS key/reference and surviving
+Keycloak convergence credential into a separate root, resumes the writers and
+smokes again:
+
+    export SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance
+    export SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-local
+    export SYNVEDA_COMPOSE_IPV4_POOL=10.231.45.0/24
+    export SYNVEDA_BACKUP_ID=20260908-reference-1
+    make compose-backup
+
+If `SYNVEDA_BACKUP_ID` is omitted, the lifecycle uses a UTC-second identifier.
+An ID is immutable and is never overwritten. Default mode-0700 roots are:
+
+    deploy/compose/backups/database/<source-project>/<backup-id>
+    deploy/compose/backups/secrets/<source-project>/<backup-id>
+
+Both roots are ignored by Git and the image build context, but they still live
+on the same host. For operator storage, set absolute existing mode-0700
+`SYNVEDA_DATABASE_BACKUP_ROOT` and `SYNVEDA_RECOVERY_SECRETS_ROOT` paths owned
+by the runtime UID/GID. They must be canonically non-overlapping with one
+another and with active project inputs. Preserve both roots: the second
+contains the KMS key and Keycloak credential needed to use the database pair.
+
+Restore always targets a new suffixed project and private `/24`. It refuses
+in-place recovery and requires the exact source, backup ID and derived target
+project in one confirmation:
+
+    export SYNVEDA_RESTORE_SOURCE_PROJECT=synveda-development-acceptance-local
+    export SYNVEDA_BACKUP_ID=20260908-reference-1
+    export SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-restore1
+    export SYNVEDA_COMPOSE_IPV4_POOL=10.231.46.0/24
+    export SYNVEDA_CONFIRM_RESTORE=synveda-development-acceptance-local:20260908-reference-1:synveda-development-acceptance-restore1
+    make compose-restore-smoke
+
+The command verifies both linked sets and the exact PostgreSQL image reference
+before Docker mutation. It installs the recovered KMS key/reference and
+Keycloak convergence password into the fresh target's normal secret set,
+restores both databases, rebuilds planner statistics and reruns the existing
+database authorities. Before tenant convergence can create product state, it
+verifies the source bootstrap tenant and full audit chain through the ordinary
+gateway database role, opens its current tenant data key, and proves an
+unrelated key gets the expected cryptographic refusal. It then converges the
+normal graph and completes the private browser login. The proxy publishes no
+host port in this mode. Success leaves the target running for inspection.
+
+For a reference-HTTPS restore, select `reference` and the target suffix first,
+run `make compose-secrets`, and install the target certificate files exactly as
+described below before invoking the restore. The source recovery manifests
+must still match the selected immutable PostgreSQL image.
+
+To remove the isolated target, retain its target suffix, private pool and
+profiles, then use the ordinary exact-project commands:
+
+    make compose-down
+    SYNVEDA_CONFIRM_RESET=synveda-development-acceptance-restore1 make compose-reset
+
+Reset removes the restored volume but deliberately retains the target secret
+set. Remove retained inputs separately only after confirming they are no
+longer needed.
+
+This is a planned-interruption logical recovery check, not an online backup or
+cross-database atomic snapshot. It pauses only the canonical application
+writers; independently connected database writers are not fenced. The
+archives and recovery-secret set are sensitive and are not encrypted by this
+tool. SHA-256 links detect accidental alteration, not malicious replacement,
+and are not signatures. The KMS check proves tenant-data-key unwrap; Synveda
+does not claim application-level encryption of Knowledge bodies. Same-host
+storage is validation evidence, not disaster recovery. Scheduling, encrypted
+off-host retention, S3 transfer, WAL/PITR, RPO/RTO and recurring drills remain
+OPS-5 production work.
+
+If interruption reports that the exact-project lock was retained during
+writer stop or backup, assume the four writers may still be stopped. Do not
+delete the lock while its recorded PID or a bounded lifecycle child is alive.
+Inspect the named Docker project and host process tree; once the recorded owner
+and its children are conclusively gone, remove only
+`/tmp/.synveda-compose-locks-<uid>/<source-project>.lock`. With the original
+profiles still selected, run `make compose-down`; this removes the uncertain
+containers/networks but preserves the PostgreSQL volume and project inputs.
+For the acceptance-project example above, then set
+`SYNVEDA_COMPOSE_PROFILES=demo` (drop only the disposable browser one-shot),
+run `make compose-up`, and require `make compose-smoke` to pass. Never
+recursively remove the lock directory. If process or Docker mutation state is
+uncertain, leave the lock in place and escalate to the host operator.
+
 ## Reference HTTPS
 
 Reference mode publishes only ports 80 and 443 and requires real operator DNS,
@@ -280,14 +374,15 @@ also be retained.
 The following work remains before the Docker reference can be called
 implemented:
 
-- paired logical backups of Synveda and Keycloak, isolated restore with the
-  Synveda KMS key, and the bounded S3-compatible/WAL recovery path;
+- live execution of the paired logical backup and isolated restore on the
+  supported development/reference platforms;
 - one experimental forced-RLS operation/outbox and opaque-ID Apalis canary;
 - a bounded local telemetry backend and customer-safe Operations route;
 - canonical release/installer cutover and Rauthy deletion after live Keycloak
   browser acceptance;
 - deterministic upgrade/rollback and external-dependency contract checks.
 
-A general dashboard platform, ACME, HA, Helm promotion, signed provenance and
-enterprise controls remain later work. Same-host backup and optional S3/PITR
-acceptance do not establish disaster recovery or an owned RPO/RTO.
+A general dashboard platform, ACME, HA, Helm promotion, signed provenance,
+S3/WAL-PITR recovery and enterprise controls remain later production work.
+Same-host logical recovery does not establish disaster recovery or an owned
+RPO/RTO.

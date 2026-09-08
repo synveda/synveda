@@ -16,8 +16,10 @@ Synveda has one application runtime, schema and public API, but it does not yet
 have complete current-source evidence for a portable single-host installation.
 The canonical Compose graph exists, while the installed release profile and
 legacy contributor loop still carry Rauthy. Backup/restore and the experimental
-Apalis canary are not implemented, and clean-volume Keycloak browser
-acceptance has not run on the current source.
+Apalis canary have not both completed: logical backup/isolated restore is now
+implemented and deterministically tested, while its live run and the Apalis
+canary remain open. Clean-volume Keycloak browser acceptance has not run on
+the current source.
 
 Static configuration checks are useful but do not prove that a user can sign
 in, use the product, restart it, back it up or restore it.
@@ -56,8 +58,6 @@ recovery, production SaaS or enterprise certification evidence.
   never reported as pass.
 - Add a PostgreSQL-native full logical backup of both databases and an isolated
   restore using separately supplied KMS key material.
-- Add a portable S3-compatible target and WAL/PITR acceptance without claiming
-  owned production RPO/RTO.
 - Add one forced-RLS `skill_validation@1` operation/outbox and an optional
   leaf Apalis adapter. Keep the ordinary PostgreSQL execution path as rollback.
 - Keep OpenTelemetry as the application interface and add one bounded optional
@@ -116,8 +116,8 @@ inventory.
 
 ### Remaining implementation slices
 
-1. Add full logical database backup plus isolated restore and KMS-key checks,
-   then the bounded S3-compatible and WAL/PITR path.
+1. Run the implemented logical database backup, isolated restore and KMS-key
+   checks on the supported development/reference hosts.
 2. Add the minimal `operation`, `operation_attempt` and
    `operation_outbox` schema/API for `skill_validation@1` under forced RLS.
 3. Add the exact-pinned Apalis leaf adapter and optional Compose fragment.
@@ -135,6 +135,14 @@ fixed PostgreSQL, Keycloak, Collector, worker, gateway and proxy restart
 matrix. Deterministic lifecycle tests pass; a supported Docker host is still
 required for live evidence.
 
+The `make compose-backup` and `make compose-restore-smoke` gates are also
+implemented. Deterministic tests cover writer pause/resume and ordinary
+failure, non-overwriting publication, linked archive/secret manifests, source
+tenant and image binding, fresh-target refusal, secret preservation, authority
+reconvergence, browser/verifier ordering and wrong-key refusal. They have not
+run against a real Docker/PostgreSQL/Keycloak stack in this checkout, so they
+are implementation evidence rather than a live restore result.
+
 ## Acceptance criteria
 
 - `docker compose config` validates every supported selector using no secret
@@ -150,10 +158,11 @@ required for live evidence.
   public APIs.
 - Gateway and worker roles cannot access Keycloak; the Keycloak role cannot
   connect to Synveda; forced RLS remains enabled for tenant data.
-- A full backup contains both databases and no plaintext credential. An
-  isolated restore with the matching KMS key opens encrypted data and verifies
-  the audit chain; a wrong key fails closed. The optional S3 target and
-  WAL/PITR path pass their bounded configuration and recovery checks.
+- A full backup contains both databases and keeps its KMS key/reference and
+  Keycloak convergence credential in a separate protected set. An isolated
+  restore binds the source tenant, completes Keycloak browser login, verifies
+  the audit chain, opens the tenant data key, and fails closed under a wrong
+  key without claiming application-encrypted Knowledge.
 - The default PostgreSQL worker and optional Apalis adapter execute the same
   bounded skill validation once under duplicate dispatch, restart and
   cancellation tests. Queue payloads contain only operation ID/version.
@@ -199,5 +208,6 @@ confirmed project and never overwrites the source deployment.
 Live completion needs a supported Docker Engine, Linux and one Docker Desktop
 host, browser trust for the selected development/reference issuer, and a
 database-capable environment for SQLx metadata and forced-RLS acceptance.
-Production PITR/off-host retention remains OPS-5; release signing/provenance
+Production S3/WAL-PITR, encrypted off-host retention and recurring recovery
+drills remain OPS-5; release signing/provenance
 and published artifact verification remain production-readiness work.

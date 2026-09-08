@@ -1424,6 +1424,15 @@ enum DbCommand {
     Preflight,
     /// Apply all pending migrations to DATABASE_URL or DATABASE_URL_FILE.
     Migrate,
+    /// Verify one restored tenant's audit chain and KMS custody without writes.
+    RecoveryVerify {
+        /// Tenant whose restored chain and wrapped key must be readable.
+        #[arg(long)]
+        tenant: TenantId,
+        /// Require the supplied key to be cryptographically refused.
+        #[arg(long)]
+        expect_key_refusal: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2244,6 +2253,13 @@ async fn run(cli: Cli) -> Result<(), String> {
                 .map_err(|err| err.to_string())?;
             eprintln!("migrations applied");
             Ok(())
+        }
+        Command::Db(DbCommand::RecoveryVerify {
+            tenant,
+            expect_key_refusal,
+        }) => {
+            let pool = connect_current_epoch().await?;
+            keys::verify_recovery(&pool, tenant, expect_key_refusal).await
         }
         Command::Reset { database, force } => reset::reset(reset::Plan { database, force }).await,
         Command::Tenant(TenantCommand::Create {
@@ -3375,13 +3391,12 @@ pub(crate) async fn record_break_glass(
 
 /// [`connect`], then the schema epoch guard (CPR-2, ADR-0069).
 ///
-/// Every store-level command goes through this. They open `DATABASE_URL` or
-/// `DATABASE_URL_FILE` directly and write with the owner role — which makes
-/// them the one family of verbs that could quietly succeed against a database
-/// from before the context-platform cut, writing new-model rows beside
-/// old-model ones with nothing in the process to notice. The two that do not
-/// are the two that cannot: `db migrate`, which creates the epoch, and `reset`,
-/// which is what a refusal tells you to run.
+/// Every store-level command except migration and reset goes through this.
+/// Most operator mutations intentionally receive an owner URL; the read-only
+/// recovery verifier deliberately receives the ordinary gateway URL. Either
+/// could otherwise act on a database from before the context-platform cut
+/// without noticing its model. `db migrate` creates the epoch, while `reset`
+/// is the destructive remedy named by a refusal.
 async fn connect_current_epoch() -> Result<sqlx::PgPool, String> {
     let pool = connect().await?;
     synveda_store::epoch::verify(&pool)
@@ -3524,6 +3539,28 @@ mod hard_cut_tests {
             validate_deployment_tenant_admission(deployment_id, "synveda-demo", &"A".repeat(129))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn recovery_verification_has_one_tenant_scoped_command_shape() {
+        for extra in [None, Some("--expect-key-refusal")] {
+            let mut args = vec![
+                "synveda",
+                "db",
+                "recovery-verify",
+                "--tenant",
+                "019b53c0-7c00-7000-8000-000000000045",
+            ];
+            if let Some(argument) = extra {
+                args.push(argument);
+            }
+            Cli::try_parse_from(args).expect("documented recovery verification must parse");
+        }
+
+        let error = Cli::try_parse_from(["synveda", "db", "recovery-verify"])
+            .err()
+            .expect("recovery verification always requires an explicit tenant");
+        assert!(error.to_string().contains("--tenant"), "{error}");
     }
 
     #[test]

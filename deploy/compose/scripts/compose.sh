@@ -8,19 +8,19 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|smoke|restart-gateway|down|reset}" >&2
+    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|backup|restore-smoke|smoke|restart-gateway|down|reset}" >&2
     exit 64
 }
 
 action=${1:-}
 case "$action" in
-    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|smoke|restart-gateway|down|reset) ;;
+    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|backup|restore-smoke|smoke|restart-gateway|down|reset) ;;
     *) usage ;;
 esac
 shift
 output=
 initial_asset_state=existing
-if [ "$action" = acceptance ]; then
+if [ "$action" = acceptance ] || [ "$action" = restore-smoke ]; then
     initial_asset_state=absent
 fi
 if [ "$action" = config ]; then
@@ -61,7 +61,8 @@ profiles=${SYNVEDA_COMPOSE_PROFILES:-}
 demo_profile=false
 browser_acceptance_profile=false
 lifecycle_default_timeout=900
-if [ "$action" = acceptance ]; then
+if [ "$action" = acceptance ] || [ "$action" = backup ] || \
+    [ "$action" = restore-smoke ]; then
     lifecycle_default_timeout=3600
 fi
 lifecycle_timeout=${SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS:-$lifecycle_default_timeout}
@@ -96,7 +97,7 @@ if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_EXTRA_CA_CERTS+x}" = x ] || \
 fi
 case "$runtime:$action:$ambient_node_trust" in
     reference:config:true|reference:up:true|reference:acceptance:true|reference:smoke:true|\
-    reference:restart-gateway:true)
+    reference:backup:true|reference:restore-smoke:true|reference:restart-gateway:true)
         echo "compose: ambient host trust configuration is not accepted for reference evidence" >&2
         exit 78
         ;;
@@ -151,7 +152,8 @@ if [ "${COMPOSE_BAKE+x}" = x ] || \
     ambient_build_control=true
 fi
 if [ "$runtime" = development ] && \
-    { [ "$action" = up ] || [ "$action" = acceptance ]; } && \
+    { [ "$action" = up ] || [ "$action" = acceptance ] || \
+        [ "$action" = restore-smoke ]; } && \
     [ "$ambient_build_control" = true ]; then
     echo "compose: ambient host build configuration is not accepted for development builds" >&2
     exit 78
@@ -197,7 +199,8 @@ lifecycle_temp_root=$(CDPATH= cd "$lifecycle_temp_root" 2>/dev/null && pwd -P) |
     exit 70
 }
 if [ "$runtime" = development ] && \
-    { [ "$action" = up ] || [ "$action" = acceptance ]; }; then
+    { [ "$action" = up ] || [ "$action" = acceptance ] || \
+        [ "$action" = restore-smoke ]; }; then
     case "$lifecycle_temp_root" in
         "$repo_root"|"$repo_root"/*)
             echo "compose: lifecycle temporary root is not accepted inside the build context" >&2
@@ -453,6 +456,11 @@ for profile in $profiles; do
 done
 IFS=$old_ifs
 
+if { [ "$action" = backup ] || [ "$action" = restore-smoke ]; } && \
+    { [ "$postgres_mode" != bundled ] || [ "$oidc_mode" != bundled ]; }; then
+    echo "compose: logical recovery currently requires bundled PostgreSQL and bundled OIDC" >&2
+    exit 69
+fi
 if [ "$demo_profile" = true ] && \
     { [ "$postgres_mode" != bundled ] || [ "$oidc_mode" != bundled ]; }; then
     echo "compose: demo profile requires bundled PostgreSQL and bundled OIDC" >&2
@@ -468,7 +476,7 @@ if [ "$browser_acceptance_profile" = true ]; then
         exit 64
     }
     case "$action" in
-        config|up|acceptance|smoke|down|reset) ;;
+        config|up|acceptance|backup|restore-smoke|smoke|down|reset) ;;
         *)
             echo "compose: browser acceptance is unavailable for this lifecycle action" >&2
             exit 64
@@ -479,7 +487,12 @@ if [ "$action" = acceptance ] && [ "$browser_acceptance_profile" != true ]; then
     echo "compose: acceptance requires exactly the demo,browser-acceptance profiles" >&2
     exit 64
 fi
-if { [ "$action" = up ] || [ "$action" = acceptance ] || [ "$action" = reset ]; } && \
+if [ "$action" = restore-smoke ] && [ "$browser_acceptance_profile" != true ]; then
+    echo "compose: restore smoke requires exactly the demo,browser-acceptance profiles" >&2
+    exit 64
+fi
+if { [ "$action" = up ] || [ "$action" = acceptance ] || \
+    [ "$action" = restore-smoke ] || [ "$action" = reset ]; } && \
     [ "$postgres_mode" = external ]; then
     echo "compose: canonical start/acceptance/reset is unavailable for external PostgreSQL in this checkpoint" >&2
     exit 69
@@ -523,6 +536,100 @@ if [ -n "$suffix" ]; then
     esac
     project=$project-$suffix
 fi
+
+backup_id=
+recovery_source_project=
+database_backup_root=
+recovery_secrets_root=
+database_backup_dir=
+recovery_secrets_dir=
+if [ "$action" = backup ] || [ "$action" = restore-smoke ]; then
+    if [ "$action" = backup ]; then
+        recovery_source_project=$project
+        backup_id=${SYNVEDA_BACKUP_ID:-$(date -u '+%Y%m%d-%H%M%S')}
+    else
+        recovery_source_project=${SYNVEDA_RESTORE_SOURCE_PROJECT:-}
+        backup_id=${SYNVEDA_BACKUP_ID:-}
+    fi
+    case "$recovery_source_project" in
+        synveda-development|synveda-reference|\
+        synveda-development-acceptance-[a-z0-9]*|\
+        synveda-reference-acceptance-[a-z0-9]*) ;;
+        *) echo "compose: recovery source project was refused" >&2; exit 64 ;;
+    esac
+    case "$recovery_source_project" in
+        *[!a-z0-9-]*|*-|*--*)
+            echo "compose: recovery source project was refused" >&2
+            exit 64
+            ;;
+    esac
+    [ "${#recovery_source_project}" -le 74 ] || {
+        echo "compose: recovery source project was refused" >&2
+        exit 64
+    }
+    case "$backup_id" in
+        [a-z0-9]*) ;;
+        *) echo "compose: backup id was refused" >&2; exit 64 ;;
+    esac
+    case "$backup_id" in
+        *[!a-z0-9-]*|*-|*--*) echo "compose: backup id was refused" >&2; exit 64 ;;
+    esac
+    [ "${#backup_id}" -le 64 ] || {
+        echo "compose: backup id was refused" >&2
+        exit 64
+    }
+    if [ "$action" = restore-smoke ] && [ "$recovery_source_project" = "$project" ]; then
+        echo "compose: restore target must differ from the backup source project" >&2
+        exit 64
+    fi
+    if [ "$action" = restore-smoke ] && [ "${SYNVEDA_CONFIRM_RESTORE:-}" != \
+        "$recovery_source_project:$backup_id:$project" ]; then
+        echo "compose: restore smoke requires SYNVEDA_CONFIRM_RESTORE=$recovery_source_project:$backup_id:$project" >&2
+        exit 64
+    fi
+
+    default_database_backup_root=$compose_dir/backups/database/$recovery_source_project
+    default_recovery_secrets_root=$compose_dir/backups/secrets/$recovery_source_project
+    database_backup_root=${SYNVEDA_DATABASE_BACKUP_ROOT:-$default_database_backup_root}
+    recovery_secrets_root=${SYNVEDA_RECOVERY_SECRETS_ROOT:-$default_recovery_secrets_root}
+    for recovery_path in "$database_backup_root" "$recovery_secrets_root"; do
+        case "$recovery_path" in
+            /*) ;;
+            *) echo "compose: recovery roots must be absolute paths" >&2; exit 64 ;;
+        esac
+        case "$recovery_path" in
+            *//*|*/./*|*/../*|*/.|*/..|*[[:space:]]*)
+                echo "compose: recovery root path was refused" >&2
+                exit 64
+                ;;
+        esac
+        case "$recovery_path" in
+            "$repo_root"|"$repo_root"/*)
+                case "$recovery_path" in
+                    "$compose_dir/backups"/*) ;;
+                    *)
+                        echo "compose: in-repository recovery roots must use deploy/compose/backups" >&2
+                        exit 78
+                        ;;
+                esac
+                ;;
+        esac
+    done
+    case "$database_backup_root" in
+        "$recovery_secrets_root"|"$recovery_secrets_root"/*)
+            echo "compose: database and recovery-secret roots must not overlap" >&2
+            exit 78
+            ;;
+    esac
+    case "$recovery_secrets_root" in
+        "$database_backup_root"|"$database_backup_root"/*)
+            echo "compose: database and recovery-secret roots must not overlap" >&2
+            exit 78
+            ;;
+    esac
+    database_backup_dir=$database_backup_root/$backup_id
+    recovery_secrets_dir=$recovery_secrets_root/$backup_id
+fi
 if [ "$initial_asset_state" = absent ]; then
     [ -n "$suffix" ] || {
         echo "compose: initial absence requires a suffixed development or reference browser-acceptance project" >&2
@@ -541,7 +648,8 @@ if [ "$browser_acceptance_profile" = true ]; then
         echo "compose: browser acceptance requires a suffixed acceptance project" >&2
         exit 64
     }
-    if { [ "$action" = up ] || [ "$action" = acceptance ]; } && \
+    if { [ "$action" = up ] || [ "$action" = acceptance ] || \
+        [ "$action" = restore-smoke ]; } && \
         [ "$initial_asset_state" != absent ]; then
         echo "compose: browser acceptance up requires --initial-assets absent" >&2
         exit 64
@@ -549,7 +657,7 @@ if [ "$browser_acceptance_profile" = true ]; then
 fi
 
 case "$action" in
-    up|acceptance|down|smoke|restart-gateway|reset)
+    up|acceptance|backup|restore-smoke|down|smoke|restart-gateway|reset)
         # Hold one exact-project exclusion across authority-file generation and
         # every Docker mutation. Child generators verify and borrow this lock.
         # shellcheck source=deploy/compose/scripts/project-lock.sh
@@ -558,6 +666,8 @@ case "$action" in
         asset_config_file=
         status_file=
         buildx_config_dir=
+        restore_wrong_key_file=
+        recovery_secret_install_temp=
         docker_mutation_uncertain=false
         docker_mutation_phase=
         compose_signal() {
@@ -597,6 +707,14 @@ case "$action" in
             fi
             if [ -n "$buildx_config_dir" ] && \
                 ! rm -rf -- "$buildx_config_dir" 2>/dev/null; then
+                [ "$cleanup_status" -ne 0 ] || cleanup_status=70
+            fi
+            if [ -n "$restore_wrong_key_file" ] && \
+                ! rm -f -- "$restore_wrong_key_file" 2>/dev/null; then
+                [ "$cleanup_status" -ne 0 ] || cleanup_status=70
+            fi
+            if [ -n "$recovery_secret_install_temp" ] && \
+                ! rm -f -- "$recovery_secret_install_temp" 2>/dev/null; then
                 [ "$cleanup_status" -ne 0 ] || cleanup_status=70
             fi
             if [ -n "$bounded_capture_file" ] && \
@@ -953,10 +1071,10 @@ if [ "$action" = resolver-check ]; then
     exit 0
 fi
 case "$action" in
-    up|acceptance|smoke|restart-gateway) run_hosts_ownership_preflight ;;
+    up|acceptance|backup|smoke|restart-gateway) run_hosts_ownership_preflight ;;
 esac
 case "$action" in
-    up|acceptance|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
+    up|acceptance|backup|restore-smoke|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
 esac
 
 compose_ipv4_pool_set=${SYNVEDA_COMPOSE_IPV4_POOL+x}
@@ -1109,8 +1227,13 @@ for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABA
     }
 done
 
-if [ "$action" = up ] || [ "$action" = acceptance ]; then
-    run_resolver_preflight
+if [ "$action" = up ] || [ "$action" = acceptance ] || \
+    [ "$action" = restore-smoke ]; then
+    if [ "$action" = restore-smoke ]; then
+        run_docker_preflight
+    else
+        run_resolver_preflight
+    fi
     run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/check-network-preflight.mjs" \
         --project "$project" --pool "$compose_ipv4_pool" --docker-bin "$docker_bin"
     run_bounded "$lifecycle_timeout" env \
@@ -1287,6 +1410,112 @@ require_private_file() {
     }
 }
 
+canonical_recovery_root() {
+    recovery_root_candidate=$1
+    recovery_root_default=$2
+    recovery_root_label=$3
+    if [ -e "$recovery_root_candidate" ] || [ -L "$recovery_root_candidate" ]; then
+        require_private_directory "$recovery_root_candidate" "$recovery_root_label"
+        CDPATH= cd "$recovery_root_candidate" && pwd -P
+        return
+    fi
+    [ "$action" = backup ] && [ "$recovery_root_candidate" = "$recovery_root_default" ] || {
+        echo "compose: $recovery_root_label root is unavailable" >&2
+        exit 73
+    }
+    printf '%s\n' "$recovery_root_candidate"
+}
+
+paths_overlap() {
+    case "$1" in
+        "$2"|"$2"/*) return 0 ;;
+    esac
+    case "$2" in
+        "$1"/*) return 0 ;;
+    esac
+    return 1
+}
+
+if [ "$action" = backup ] || [ "$action" = restore-smoke ]; then
+    database_backup_root=$(canonical_recovery_root \
+        "$database_backup_root" "$default_database_backup_root" database-backup)
+    recovery_secrets_root=$(canonical_recovery_root \
+        "$recovery_secrets_root" "$default_recovery_secrets_root" recovery-secrets)
+    for recovery_root in "$database_backup_root" "$recovery_secrets_root"; do
+        case "$recovery_root" in
+            "$repo_root"|"$repo_root"/*)
+                case "$recovery_root" in
+                    "$compose_dir/backups"/*) ;;
+                    *)
+                        echo "compose: canonical recovery roots inside the repository must use deploy/compose/backups" >&2
+                        exit 78
+                        ;;
+                esac
+                ;;
+        esac
+    done
+    paths_overlap "$database_backup_root" "$recovery_secrets_root" && {
+        echo "compose: canonical database and recovery-secret roots must not overlap" >&2
+        exit 78
+    }
+    database_backup_dir=$database_backup_root/$backup_id
+    recovery_secrets_dir=$recovery_secrets_root/$backup_id
+    for recovery_root in "$database_backup_root" "$recovery_secrets_root"; do
+        for protected_path in "$secret_dir" "$issuer_parent"; do
+            paths_overlap "$recovery_root" "$protected_path" || continue
+            echo "compose: recovery roots must not overlap active project inputs" >&2
+            exit 78
+        done
+        if [ "$oidc_mode" = bundled ]; then
+            for protected_path in "$database_authority_dir" "$keycloak_public_gate_dir"; do
+                paths_overlap "$recovery_root" "$protected_path" || continue
+                echo "compose: recovery roots must not overlap active project inputs" >&2
+                exit 78
+            done
+        fi
+    done
+fi
+
+if [ "$action" = restore-smoke ]; then
+    run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/recovery-set.mjs" verify \
+        --database-dir "$database_backup_dir" \
+        --secrets-dir "$recovery_secrets_dir" \
+        --project "$recovery_source_project" \
+        --backup-id "$backup_id" \
+        --tenant-id "$bootstrap_tenant_id" \
+        --postgres-image "${SYNVEDA_POSTGRES_IMAGE:-synveda/postgres:17.11-dev}"
+fi
+
+install_recovered_secret() {
+    recovered_name=$1
+    recovered_source=$recovery_secrets_dir/$recovered_name
+    recovered_target=$secret_dir/$recovered_name
+    require_private_file "$recovered_source" "recovered_$recovered_name"
+    require_private_file "$recovered_target" "target_$recovered_name"
+    recovery_secret_install_temp=$(mktemp \
+        "$secret_dir/.recovery-install-${recovered_name}.XXXXXX") || {
+        echo "compose: recovered secret could not be staged" >&2
+        exit 70
+    }
+    chmod 600 "$recovery_secret_install_temp"
+    cp "$recovered_source" "$recovery_secret_install_temp" || {
+        echo "compose: recovered secret could not be staged" >&2
+        exit 70
+    }
+    chmod 600 "$recovery_secret_install_temp"
+    require_private_file "$recovery_secret_install_temp" "staged_$recovered_name"
+    cmp -s -- "$recovered_source" "$recovery_secret_install_temp" || {
+        echo "compose: recovered secret copy did not verify" >&2
+        exit 70
+    }
+    mv -f -- "$recovery_secret_install_temp" "$recovered_target" || {
+        echo "compose: recovered secret could not be installed" >&2
+        exit 70
+    }
+    recovery_secret_install_temp=
+    require_private_file "$recovered_target" "installed_$recovered_name"
+}
+
 for name in synveda_migrator_database_url synveda_gateway_database_url \
     synveda_worker_database_url synveda_kms_key synveda_kms_key_ref; do
     require_private_file "$secret_dir/$name" "$name"
@@ -1315,7 +1544,7 @@ if [ "$runtime" = reference ]; then
     require_private_file "$secret_dir/tls_cert" tls_cert
     require_private_file "$secret_dir/tls_key" tls_key
     case "$action" in
-        config|up|acceptance|smoke|restart-gateway)
+        config|up|acceptance|backup|restore-smoke|smoke|restart-gateway)
             set_remaining_lifecycle_seconds
             set -- "$script_dir/check-tls-inputs.mjs" \
                 --cert-file "$secret_dir/tls_cert" \
@@ -1330,6 +1559,22 @@ if [ "$runtime" = reference ]; then
     esac
 fi
 require_private_file "$issuer_file" issuer_configuration
+
+if [ "$action" = restore-smoke ]; then
+    restore_wrong_key_file=$(mktemp "$lifecycle_temp_root/synveda-restore-wrong-key.XXXXXX") || {
+        echo "compose: wrong-key verification input could not be created" >&2
+        exit 70
+    }
+    chmod 600 "$restore_wrong_key_file"
+    while :; do
+        openssl rand -hex 32 > "$restore_wrong_key_file" || {
+            echo "compose: wrong-key verification input could not be created" >&2
+            exit 70
+        }
+        cmp -s -- "$restore_wrong_key_file" "$secret_dir/synveda_kms_key" || break
+    done
+    require_private_file "$restore_wrong_key_file" wrong_recovery_kms_key
+fi
 
 [ ! -L "$database_roles_file" ] && [ -f "$database_roles_file" ] || {
     echo "compose: database role contract file is missing or is a symlink" >&2
@@ -1739,6 +1984,22 @@ if [ "$browser_acceptance_profile" = true ]; then
 else
     unset SYNVEDA_BROWSER_IMAGE SYNVEDA_BROWSER_SECCOMP_PROFILE
 fi
+if [ "$action" = backup ]; then
+    export SYNVEDA_BACKUP_PROJECT=$project
+    export SYNVEDA_BACKUP_ID=$backup_id
+    # The recovery service is profile-gated and absent from the source asset
+    # inventory. Give Compose a closed placeholder until the real fresh stage
+    # is created immediately before the one-shot runs.
+    export SYNVEDA_BACKUP_STAGING_DIR=$database_backup_dir
+else
+    unset SYNVEDA_BACKUP_PROJECT
+fi
+if [ "$action" = restore-smoke ]; then
+    export SYNVEDA_RESTORE_DATABASE_DIR=$database_backup_dir
+    export SYNVEDA_RESTORE_WRONG_KMS_KEY_FILE=$restore_wrong_key_file
+else
+    unset SYNVEDA_RESTORE_DATABASE_DIR SYNVEDA_RESTORE_WRONG_KMS_KEY_FILE
+fi
 
 set -- compose --project-directory "$compose_dir" \
     --env-file "$compose_dir/.env.example" -p "$project" \
@@ -1775,6 +2036,12 @@ if [ "$browser_acceptance_profile" = true ]; then
     if [ "$runtime" = development ]; then
         set -- "$@" -f "$compose_dir/compose.browser-acceptance.dev.yaml"
     fi
+fi
+if [ "$action" = backup ]; then
+    set -- "$@" -f "$compose_dir/compose.backup.yaml"
+fi
+if [ "$action" = restore-smoke ]; then
+    set -- "$@" -f "$compose_dir/compose.restore.yaml"
 fi
 old_ifs=$IFS
 IFS=,
@@ -2052,6 +2319,168 @@ rerun_browser_acceptance() {
     docker_mutation_phase=
 }
 
+prepare_default_recovery_root() {
+    recovery_root=$1
+    recovery_root_kind=$2
+    recovery_root_default=$3
+    if [ -e "$recovery_root" ] || [ -L "$recovery_root" ]; then
+        require_private_directory "$recovery_root" "$recovery_root_kind"
+        return
+    fi
+    [ "$recovery_root" = "$recovery_root_default" ] || {
+        echo "compose: custom $recovery_root_kind root must already exist" >&2
+        exit 73
+    }
+    recovery_shared_root=$compose_dir/backups
+    recovery_kind_root=$recovery_shared_root/$(basename "$(dirname "$recovery_root")")
+    for recovery_directory in "$recovery_shared_root" "$recovery_kind_root" "$recovery_root"; do
+        if [ -e "$recovery_directory" ] || [ -L "$recovery_directory" ]; then
+            require_private_directory "$recovery_directory" "$recovery_root_kind"
+        else
+            mkdir -m 700 "$recovery_directory" || {
+                echo "compose: $recovery_root_kind root could not be created" >&2
+                exit 73
+            }
+            require_private_directory "$recovery_directory" "$recovery_root_kind"
+        fi
+    done
+}
+
+stage_recovery_directories() {
+    prepare_default_recovery_root \
+        "$database_backup_root" database-backup "$default_database_backup_root"
+    prepare_default_recovery_root \
+        "$recovery_secrets_root" recovery-secrets "$default_recovery_secrets_root"
+    [ ! -e "$database_backup_dir" ] && [ ! -L "$database_backup_dir" ] && \
+        [ ! -e "$recovery_secrets_dir" ] && [ ! -L "$recovery_secrets_dir" ] || {
+        echo "compose: backup id already exists; recovery sets are never overwritten" >&2
+        exit 73
+    }
+    database_backup_stage=$(mktemp -d "$database_backup_root/.${backup_id}.XXXXXX") || {
+        echo "compose: database backup staging directory could not be created" >&2
+        exit 73
+    }
+    recovery_secrets_stage=$(mktemp -d "$recovery_secrets_root/.${backup_id}.XXXXXX") || {
+        echo "compose: recovery-secret staging directory could not be created" >&2
+        exit 73
+    }
+    chmod 700 "$database_backup_stage" "$recovery_secrets_stage"
+    require_private_directory "$database_backup_stage" database-backup-staging
+    require_private_directory "$recovery_secrets_stage" recovery-secret-staging
+    SYNVEDA_BACKUP_STAGING_DIR=$database_backup_stage
+    export SYNVEDA_BACKUP_STAGING_DIR
+}
+
+publish_recovery_directory() {
+    publish_stage=$1
+    publish_final=$2
+    shift 2
+    if ! mkdir -m 700 -- "$publish_final" 2>/dev/null; then
+        echo "compose: recovery destination appeared before publication; refusing overwrite" >&2
+        return 73
+    fi
+    chmod 700 "$publish_final" || return 73
+    [ ! -L "$publish_final" ] && [ -d "$publish_final" ] && \
+        [ "$(mode_of "$publish_final")" = 700 ] && \
+        [ "$(owner_of "$publish_final")" = "$runtime_uid" ] && \
+        [ "$(group_of "$publish_final")" = "$runtime_gid" ] || {
+        echo "compose: reserved recovery destination metadata was refused" >&2
+        return 73
+    }
+    for publish_name in "$@"; do
+        publish_source=$publish_stage/$publish_name
+        publish_target=$publish_final/$publish_name
+        [ ! -L "$publish_source" ] && [ -f "$publish_source" ] && \
+            [ ! -e "$publish_target" ] && [ ! -L "$publish_target" ] || {
+            echo "compose: staged recovery inventory was refused during publication" >&2
+            return 73
+        }
+        mv -- "$publish_source" "$publish_target" || return 73
+    done
+    for publish_remaining in \
+        "$publish_stage"/.[!.]* "$publish_stage"/..?* "$publish_stage"/*; do
+        [ -e "$publish_remaining" ] || [ -L "$publish_remaining" ] || continue
+        echo "compose: staged recovery inventory was incomplete during publication" >&2
+        return 73
+    done
+    rmdir -- "$publish_stage" || return 73
+}
+
+resume_backup_writers() {
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+        --no-recreate keycloak keycloak-realm-convergence worker gateway
+}
+
+run_restore_smoke() {
+    prepare_asset_contract "$@"
+    # Never replace target credentials until the exact Compose asset inventory
+    # has proved that this is a fresh project. The restored database contains
+    # keys wrapped by the source KEK and the surviving scoped Keycloak
+    # authority's password hash, so install that exact three-file set into the
+    # target's normal secret directory before the first Docker mutation.
+    install_recovered_secret synveda_kms_key
+    install_recovered_secret synveda_kms_key_ref
+    install_recovered_secret keycloak_convergence_admin_password
+    while cmp -s -- "$restore_wrong_key_file" "$secret_dir/synveda_kms_key"; do
+        openssl rand -hex 32 > "$restore_wrong_key_file" || {
+            echo "compose: wrong-key verification input could not be created" >&2
+            exit 70
+        }
+    done
+    require_private_file "$restore_wrong_key_file" wrong_recovery_kms_key
+    if [ "$runtime" = development ]; then
+        prepare_local_build_boundary
+        docker_mutation_phase=compose-restore-build
+        docker_mutation_uncertain=true
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" build --builder default
+    fi
+    docker_mutation_phase=compose-restore-bootstrap
+    docker_mutation_uncertain=true
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" postgres
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+        --force-recreate database-bootstrap
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+        --force-recreate keycloak-database-bootstrap
+
+    docker_mutation_phase=compose-database-restore
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        run --rm --no-deps database-restore
+
+    # The restore recreates both databases and therefore their OIDs. Re-run
+    # the existing authority convergence instead of duplicating role or
+    # witness SQL in the recovery path.
+    docker_mutation_phase=compose-restore-authority
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+        --force-recreate database-bootstrap
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+        --force-recreate keycloak-database-bootstrap
+
+    # Prove the archived tenant, audit prefix and wrapped tenant key before the
+    # normal graph can run tenant convergence or create any new product row.
+    docker_mutation_phase=compose-restore-verification
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        run --rm --no-deps recovery-verify
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        run --rm --no-deps recovery-key-refusal
+
+    docker_mutation_phase=compose-restore-start
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+        --no-recreate --scale browser-acceptance=0
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --no-deps --force-recreate browser-acceptance
+    wait_for_browser_acceptance "$@"
+    prove_assets_converged
+    docker_mutation_uncertain=false
+    docker_mutation_phase=
+}
+
 case "$action" in
     config)
         if [ -n "$output" ]; then
@@ -2107,6 +2536,79 @@ case "$action" in
 
         rerun_browser_acceptance "$@"
         echo "canonical Compose acceptance passed for $project; services remain running"
+        ;;
+    backup)
+        prepare_asset_contract "$@"
+        prove_assets_converged
+        run_resolver_preflight
+        run_runtime_smoke "$@"
+        stage_recovery_directories
+
+        backup_status=0
+        docker_mutation_uncertain=true
+        docker_mutation_phase=compose-backup-writer-stop
+        run_bounded 230 "$docker_bin" "$@" \
+            stop --timeout 210 gateway worker keycloak-realm-convergence keycloak || \
+            backup_status=$?
+
+        if [ "$backup_status" -eq 0 ]; then
+            docker_mutation_phase=compose-logical-backup
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                run --rm --no-deps database-backup || backup_status=$?
+        fi
+        if [ "$backup_status" -eq 0 ]; then
+            run_bounded 30 "$node_runner" "$script_dir/recovery-set.mjs" snapshot-secrets \
+                --key-file "$secret_dir/synveda_kms_key" \
+                --key-ref-file "$secret_dir/synveda_kms_key_ref" \
+                --keycloak-convergence-password-file \
+                "$secret_dir/keycloak_convergence_admin_password" \
+                --database-manifest "$database_backup_stage/manifest.json" \
+                --output-dir "$recovery_secrets_stage" \
+                --project "$project" --backup-id "$backup_id" || backup_status=$?
+        fi
+        if [ "$backup_status" -eq 0 ]; then
+            run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/recovery-set.mjs" verify \
+                --database-dir "$database_backup_stage" \
+                --secrets-dir "$recovery_secrets_stage" \
+                --project "$project" --backup-id "$backup_id" \
+                --tenant-id "$bootstrap_tenant_id" \
+                --postgres-image "$postgres_image" || backup_status=$?
+        fi
+        if [ "$backup_status" -eq 0 ]; then
+            publish_recovery_directory "$recovery_secrets_stage" \
+                "$recovery_secrets_dir" manifest.json synveda_kms_key \
+                synveda_kms_key_ref keycloak_convergence_admin_password || \
+                backup_status=$?
+        fi
+        if [ "$backup_status" -eq 0 ]; then
+            publish_recovery_directory "$database_backup_stage" \
+                "$database_backup_dir" manifest.json synveda.dump keycloak.dump || \
+                backup_status=$?
+        fi
+
+        docker_mutation_phase=compose-backup-writer-resume
+        resume_status=0
+        resume_backup_writers "$@" || resume_status=$?
+        [ "$resume_status" -eq 0 ] || exit "$resume_status"
+        if [ "$backup_status" -ne 0 ]; then
+            docker_mutation_uncertain=false
+            docker_mutation_phase=
+            echo "compose: logical backup publication did not complete; staging or one unpaired final path may remain and restore will refuse it" >&2
+            exit "$backup_status"
+        fi
+        prove_assets_converged
+        run_resolver_preflight
+        run_runtime_smoke "$@"
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+        echo "canonical Compose logical backup $backup_id published for $project"
+        echo "database: $database_backup_dir"
+        echo "recovery secrets: $recovery_secrets_dir"
+        ;;
+    restore-smoke)
+        run_restore_smoke "$@"
+        echo "canonical Compose restore smoke passed for $project from $recovery_source_project/$backup_id"
+        echo "restored services remain private and running for inspection"
         ;;
     down)
         run_docker_preflight

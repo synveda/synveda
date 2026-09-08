@@ -10,7 +10,9 @@ gateway remains the authority boundary.
 
 > **Production status: not ready.** The context-platform behaviour has strong
 > deterministic, tenancy and product evidence, but release artefact parity,
-> backup/PITR and key-custody restore evidence are P0 gaps. The gateway is also
+> production backup/PITR and key-custody ceremony evidence are P0 gaps. The
+> Docker reference has deterministic logical recovery tests, not a live or
+> production restore drill. The gateway is also
 > single-replica and restart-shaped. See
 > [Production readiness](docs/PRODUCTION_READINESS.md) for evidence and exit
 > criteria. Passing CI is not a production-readiness claim.

@@ -176,15 +176,17 @@ Unused Temporal runtime assets are deleted.
 The earlier clean-engine/Colima receipt and provider fixtures were removed:
 they did not start Docker or establish product evidence. The direct
 fresh-project browser/restart acceptance command is implemented and awaits a
-supported live Docker host. Remaining implementation work is PostgreSQL-native
-full backup plus isolated database/key restore followed by bounded
-S3-compatible/WAL-PITR acceptance,
-one forced-RLS skill-validation operation/outbox and its disabled-by-default
+supported live Docker host. PostgreSQL-native logical backup plus isolated
+database/key restore is also implemented and deterministically tested; its live
+Docker run remains pending. Remaining implementation work is one forced-RLS
+skill-validation operation/outbox and its disabled-by-default
 Apalis 0.7.4 leaf adapter, a small observability/Operations slice, and
 upgrade/external-dependency acceptance. Current-source Linux and Docker Desktop
 browser acceptance must pass before the legacy Rauthy paths are deleted.
 Feature-local recovery evidence does not establish DR or owned RPO/RTO; no HA,
-SaaS, signing or Helm-production claim follows.
+SaaS, signing or Helm-production claim follows. S3/WAL-PITR and encrypted
+off-host retention remain OPS-5 production work rather than Docker-reference
+completion work.
 
 ## Unscheduled — not listed in the Sequencing section
 

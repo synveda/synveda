@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-backup compose-restore-smoke compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait --remove-orphans
@@ -64,6 +64,12 @@ compose-browser-acceptance:
 
 compose-acceptance:
 	SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance demos/cpr-45-docker-reference.sh
+
+compose-backup:
+	demos/cpr-45-docker-reference.sh backup
+
+compose-restore-smoke:
+	SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance demos/cpr-45-docker-reference.sh restore-smoke
 
 compose-smoke:
 	deploy/compose/scripts/compose.sh smoke
@@ -390,7 +396,7 @@ check-compose-contract:
 	node --test scripts/check-tls-inputs.test.mjs
 	node --test scripts/manage-hosts-file.test.mjs
 	node --test scripts/check-compose-contract.test.mjs
-	node --test scripts/compose-entrypoints.test.mjs scripts/check-host-resolution.test.mjs scripts/check-network-preflight.test.mjs scripts/check-compose-assets.test.mjs scripts/check-build-proxy-contract.test.mjs scripts/check-local-builder.test.mjs scripts/compose-browser-login.test.mjs scripts/run-with-deadline.test.mjs scripts/check-runtime-smoke.test.mjs scripts/reset-runtime-state.test.mjs scripts/compose-lifecycle.test.mjs
+	node --test scripts/compose-entrypoints.test.mjs scripts/check-host-resolution.test.mjs scripts/check-network-preflight.test.mjs scripts/check-compose-assets.test.mjs scripts/check-build-proxy-contract.test.mjs scripts/check-local-builder.test.mjs scripts/compose-browser-login.test.mjs scripts/run-with-deadline.test.mjs scripts/check-runtime-smoke.test.mjs scripts/reset-runtime-state.test.mjs scripts/compose-lifecycle.test.mjs scripts/compose-recovery.test.mjs
 	node scripts/check-compose-contract.mjs
 
 ts-build:

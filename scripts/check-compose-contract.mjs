@@ -252,7 +252,7 @@ export function composeBuildBoundaryFindings(source) {
   ) {
     findings.push("lifecycle temporary state is not physically outside the build context");
   }
-  if (source.match(/mktemp[^\n]*\$lifecycle_temp_root/g)?.length !== 5) {
+  if (source.match(/mktemp[^\n]*\$lifecycle_temp_root/g)?.length !== 6) {
     findings.push("lifecycle temporary files do not share the validated root");
   }
   if (!source.includes('mktemp -d "$lifecycle_temp_root/synveda-compose-buildx.XXXXXX"')) {
@@ -321,7 +321,7 @@ export function composeBuildBoundaryFindings(source) {
   }
   const noBuildUps = source.match(/\bup --no-build\b/g) ?? [];
   if (
-    noBuildUps.length !== 5 ||
+    noBuildUps.length !== 13 ||
     !source.includes("--force-recreate --scale browser-acceptance=0") ||
     !/up --no-build --detach --no-deps --force-recreate \\\n+\s+browser-acceptance/.test(source) ||
     !/set -- "\$@" up --no-build --detach --wait \\\n+\s+--wait-timeout/.test(source) ||
@@ -3949,6 +3949,8 @@ function checkStaticInputs() {
     "compose.demo.yaml",
     "compose.browser-acceptance.yaml",
     "compose.browser-acceptance.dev.yaml",
+    "compose.backup.yaml",
+    "compose.restore.yaml",
     "compose.external.yaml",
     "compose.external-postgres.yaml",
   ].map((name) => readFileSync(join(COMPOSE, name), "utf8"));

@@ -50,7 +50,8 @@ The completion programme remains deliberately bounded:
 - reverse proxy, PostgreSQL, production-mode Keycloak, gateway, worker and a
   private OpenTelemetry Collector;
 - PostgreSQL-native full logical backup and isolated restore of both product
-  databases, with the Synveda KMS key supplied and verified separately;
+  databases, with the Synveda KMS key/reference and surviving Keycloak
+  convergence credential supplied and verified separately;
 - one disabled-by-default `skill_validation@1` operation delivered through an
   exact-pinned Apalis 0.7.4 leaf adapter;
 - a minimal optional local observability profile and customer-safe Operations
@@ -62,9 +63,9 @@ The completion programme remains deliberately bounded:
 Logical backup is the initial portable recovery mechanism. It uses the
 PostgreSQL 17 `pg_dump`/`pg_restore` tools already paired with the server. It
 does not claim WAL archiving, point-in-time recovery, disaster recovery or an
-off-host copy. CPR-45 subsequently adds the portable S3-compatible target and
-WAL/PITR path required by its original acceptance contract; owned RPO/RTO and
-recurring production recovery drills remain OPS-5 work.
+off-host copy. S3-compatible encrypted retention, WAL/PITR, owned RPO/RTO and
+recurring production recovery drills remain OPS-5 work; they are not required
+to call the narrower Docker reference implementation complete.
 
 OpenTelemetry traces through the private Collector establish the core
 application seam. CPR-45 still includes one bounded optional local backend and
@@ -82,8 +83,8 @@ platform or the complete SaaS support console.
    because it is the shortest path to browser, restart and recovery evidence
    from the actual deployment.
 4. **Implement physical recovery before logical restore** — rejected as the
-   first recovery slice. Portable logical restore lands first, followed by the
-   bounded WAL/PITR and S3-compatible contract already required by CPR-45.
+   reference recovery path. Portable logical restore is sufficient for the
+   single-host implementation; physical recovery belongs to OPS-5.
 
 ## Consequences
 
@@ -95,9 +96,9 @@ platform or the complete SaaS support console.
   independently removable slices.
 - Negative / accepted trade-off: a working supported container engine is an
   explicit prerequisite and its installation is outside Synveda.
-- Negative / accepted trade-off: bounded S3-compatible and WAL/PITR acceptance
-  still does not establish disaster recovery, owned RPO/RTO, HA, SaaS
-  readiness, signed releases or Helm production readiness.
+- Negative / accepted trade-off: this reference does not establish WAL/PITR,
+  disaster recovery, owned RPO/RTO, HA, SaaS readiness, signed releases or
+  Helm production readiness.
 - Reversal trigger: if direct Compose cannot produce repeatable clean-volume
   acceptance on Linux and one Docker Desktop platform, the reference remains
   unvalidated; a smaller supported platform matrix is documented rather than

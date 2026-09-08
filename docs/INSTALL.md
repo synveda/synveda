@@ -83,9 +83,9 @@ smoke; the command is not itself browser-session evidence and does not claim
 that an in-flight login survives. `compose-acceptance` adds a fresh browser
 login, the fixed six-service restart matrix, smoke after every restart and a
 second login under one project lock; its exact selectors are documented in
-[`deploy/compose/README.md`](../deploy/compose/README.md). A live run, reference
-HTTPS, backup/restore and upgrade acceptance remain open. External PostgreSQL
-bootstrap deliberately refuses before secret reads or SQL until the
+[`deploy/compose/README.md`](../deploy/compose/README.md). A live run,
+reference HTTPS, live backup/restore and upgrade acceptance remain open.
+External PostgreSQL bootstrap deliberately refuses before secret reads or SQL until the
 authenticated-TLS contract is implemented.
 
 Reference certificate-file preparation and its executable ordering are defined
@@ -846,7 +846,8 @@ same mutually exclusive direct/file KMS settings; canonical Compose mounts a
 mode-0600 key file. The deployment must generate, retain and back up that key
 separately from PostgreSQL, since every tenant key in the database is wrapped
 by it. Canonical Compose generates and retains the project-scoped file but has
-not yet passed the required joint database/key restore acceptance. The
+only deterministic joint database/key restore evidence; the live recovery
+gate has not run on a supported Docker host. The
 console ships with release artifacts; from a checkout it needs
 `pnpm --filter @synveda/console build` first, and without a bundle the route
 404s rather than failing boot, because a static asset must not be a dependency
@@ -872,6 +873,24 @@ The shipped provider is the local `SYNVEDA_KMS_KEY` boundary. Keep it outside
 the database and back it up. The provider interface leaves room for later
 custody integrations, but this release does not support cloud KMS, an HSM,
 customer-managed keys or secret-manager resolution inside the gateway.
+
+## Backing up and restoring the Compose reference
+
+`make compose-backup` and `make compose-restore-smoke` implement the bundled
+PostgreSQL/Keycloak logical recovery path. Restore is never in place: it needs
+an exact confirmation and a fresh suffixed project/private network, then leaves
+that target private and running for inspection. The exact selectors, commands,
+storage roots, reference-TLS preparation, cleanup and interrupted-lock recovery
+procedure are in
+[`deploy/compose/README.md`](../deploy/compose/README.md#logical-backup-and-isolated-restore).
+
+Keep the database archives and separate KMS/reference/Keycloak convergence
+credential set together under operator protection. They are sensitive and are
+not encrypted by the recovery command. Their SHA-256 linkage detects accidental
+change, not malicious replacement. This check is a same-version PostgreSQL 17,
+planned-interruption restore validation; it is not WAL/PITR, an online atomic
+backup, off-host retention, disaster recovery or an RPO/RTO commitment. Those
+remain OPS-5 work.
 
 ## Upgrading
 
@@ -1092,7 +1111,8 @@ behavior against fresh PostgreSQL fixtures. These checks do not build an image
 or prove artifact publication or pulls. The implemented
 `make compose-acceptance` command requires a supported live Docker host; its
 deterministic tests are not a browser-login or clean-lifecycle claim.
-Backup/restore, upgrade and desktop/Linux parity remain unproved.
+Logical backup/restore is implemented and deterministically tested, but its
+live execution, upgrade and desktop/Linux parity remain unproved.
 
 The Docker reference may be called validated only after
 `make compose-acceptance`, `make compose-backup`, `make compose-restore-smoke`

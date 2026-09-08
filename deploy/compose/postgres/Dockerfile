@@ -46,6 +46,8 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --chmod=0555 deploy/compose/postgres/synveda-database-bootstrap /usr/local/bin/synveda-database-bootstrap
+COPY --chmod=0555 deploy/compose/postgres/synveda-logical-backup /usr/local/bin/synveda-logical-backup
+COPY --chmod=0555 deploy/compose/postgres/synveda-logical-restore /usr/local/bin/synveda-logical-restore
 COPY --from=snapshot-builder --chmod=0555 /usr/local/bin/synveda-input-snapshot /usr/local/bin/synveda-input-snapshot
 RUN printf 'snapshot-probe\n' > /tmp/synveda-snapshot-input \
     && /usr/local/bin/synveda-input-snapshot \

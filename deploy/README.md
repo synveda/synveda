@@ -16,9 +16,11 @@ freshness or Skill/Tool advertisement.
 
 - `compose/` contains the additive canonical Docker reference graph and its
   executable `up`, `smoke`, full `acceptance`, gateway-only `restart-gateway`,
-  `down` and exact-confirmation `reset` lifecycle.
+  paired logical `backup`/fresh private `restore-smoke`, `down` and
+  exact-confirmation `reset` lifecycle.
   Deterministic lifecycle tests are implementation evidence, not a validated
-  reference claim: clean-volume browser/Keycloak acceptance is still open.
+  reference claim: clean-volume browser/Keycloak and recovery acceptance are
+  still open.
   The separate `make dev-up` contributor stack retains Rauthy residue and is
   not the reference product lifecycle. Its unused Temporal services are gone.
 - `release/` is the pull-only transitional artifact manifest installed under
