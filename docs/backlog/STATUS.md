@@ -185,7 +185,10 @@ implemented with a read-only candidate compatibility check and deterministic
 failure recovery; its live reference run remains pending. Remaining
 implementation work is one forced-RLS
 skill-validation operation/outbox and its disabled-by-default Apalis 0.7.4 leaf
-adapter. The customer-safe Operations route is implemented from bounded
+adapter. The synchronous rollback path now resolves concurrent same-key Skill
+tests through a freshly authorised winner and commits only one run/audit; its
+database-backed concurrency test awaits the same fixture as the operation
+schema. The customer-safe Operations route is implemented from bounded
 generated public APIs and explicitly marks unavailable signals. Executable
 external PostgreSQL plus external OIDC and public-PKI external OTLP wiring are
 deterministically implemented but still await live provider evidence. A

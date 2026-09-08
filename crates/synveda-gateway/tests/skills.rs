@@ -562,33 +562,68 @@ async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
     assert_eq!(status, StatusCode::OK, "{replay}");
     assert_eq!(replay["id"], usage["id"]);
 
-    let (status, tested) = call(
-        &world.app,
-        Method::POST,
-        &format!("/v1/skills/{skill_id}/versions/{version_v2}/tests"),
-        &world.alice,
-        Some(json!({"harness": "validation_sandbox"})),
-        Some("validate-code-review-v2"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{tested}");
-    assert_eq!(tested["outcome"], "passed");
-    assert_eq!(tested["evidence"]["executes_bundle_code"], false);
+    let test_uri = format!("/v1/skills/{skill_id}/versions/{version_v2}/tests");
+    let test_body = json!({"harness": "validation_sandbox"});
+    let (tested_left, tested_right) = tokio::join!(
+        call(
+            &world.app,
+            Method::POST,
+            &test_uri,
+            &world.alice,
+            Some(test_body.clone()),
+            Some("validate-code-review-v2"),
+        ),
+        call(
+            &world.app,
+            Method::POST,
+            &test_uri,
+            &world.alice,
+            Some(test_body),
+            Some("validate-code-review-v2"),
+        )
+    );
+    let test_statuses = [tested_left.0, tested_right.0];
     assert_eq!(
-        tested["evidence"]["declared_tools_are_authorization"],
+        test_statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CREATED)
+            .count(),
+        1,
+        "one concurrent Skill test creates the result: {test_statuses:?}; left={}; right={}",
+        tested_left.1,
+        tested_right.1,
+    );
+    assert_eq!(
+        test_statuses
+            .iter()
+            .filter(|status| **status == StatusCode::OK)
+            .count(),
+        1,
+        "the concurrent duplicate replays: {test_statuses:?}; left={}; right={}",
+        tested_left.1,
+        tested_right.1,
+    );
+    assert_eq!(tested_left.1["id"], tested_right.1["id"]);
+    assert_eq!(tested_left.1["outcome"], "passed");
+    assert_eq!(tested_left.1["evidence"]["executes_bundle_code"], false);
+    assert_eq!(
+        tested_left.1["evidence"]["declared_tools_are_authorization"],
         false
     );
-    let (status, test_replay) = call(
-        &world.app,
-        Method::POST,
-        &format!("/v1/skills/{skill_id}/versions/{version_v2}/tests"),
-        &world.alice,
-        Some(json!({"harness": "validation_sandbox"})),
-        Some("validate-code-review-v2"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{test_replay}");
-    assert_eq!(test_replay["id"], tested["id"]);
+    let (status, test_runs) =
+        call(&world.app, Method::GET, &test_uri, &world.alice, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{test_runs}");
+    let run_ids = test_runs["runs"]
+        .as_array()
+        .expect("test runs")
+        .iter()
+        .map(|run| run["id"].as_str().expect("test run id"))
+        .collect::<Vec<_>>();
+    assert_eq!(run_ids.len(), 1, "one row per idempotency key: {test_runs}");
+    assert_eq!(
+        run_ids[0],
+        tested_left.1["id"].as_str().expect("concurrent run id")
+    );
 
     let (status, rollback_change) = call(
         &world.app,
@@ -703,6 +738,14 @@ async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
             "missing {required} in {actions:?}"
         );
     }
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| action.as_str() == "skill.test.recorded")
+            .count(),
+        1,
+        "the losing idempotency transaction must not retain an audit event: {actions:?}"
+    );
     let untyped_terminal: i64 = sqlx::query_scalar!(
         r#"select count(*) as "count!" from audit_log
            where tenant_id = $1

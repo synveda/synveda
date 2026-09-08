@@ -148,6 +148,12 @@ hand-edited. Apalis transport tables belong in a separate disposable queue
 database because Synveda intentionally refuses extra schemas and migration
 ledger rows in its authoritative database.
 
+The retained synchronous Skill-validation route remains the rollback path. Its
+same-key creation race now resolves the committed winner only after repeating
+Skill read/write authorization; the losing transaction retains neither a test
+row nor an audit event. The PostgreSQL-backed concurrent assertion is compiled
+but still needs the database fixture before it becomes live evidence.
+
 The direct `make compose-acceptance` gate is implemented. It holds one exact
 project lock from initial asset-absence proof through two browser logins, a
 fixed PostgreSQL, Keycloak, Collector, worker, gateway and proxy restart
