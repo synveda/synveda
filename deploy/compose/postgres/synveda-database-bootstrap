@@ -85,7 +85,7 @@ case "$target" in
             echo "database-bootstrap: private input snapshot directory is unavailable" >&2
             exit 70
         }
-        chmod 700 "$snapshot_dir"
+        chmod u=rwx,go=,a-s "$snapshot_dir"
         snapshot_dir_owned=true
         SYNVEDA_DATABASE_BOOTSTRAP_SHARED_SNAPSHOTS=1
         export SYNVEDA_DATABASE_BOOTSTRAP_SHARED_SNAPSHOTS
@@ -103,7 +103,7 @@ case "$target" in
                 echo "database-bootstrap: private input snapshot directory is unavailable" >&2
                 exit 70
             }
-            chmod 700 "$snapshot_dir"
+            chmod u=rwx,go=,a-s "$snapshot_dir"
             snapshot_dir_owned=true
         fi
         ;;

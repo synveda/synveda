@@ -4108,11 +4108,16 @@ test("database convergence passes runtime passwords only as COPY data", () => {
     const secrets = join(scratch, "secrets");
     const authority = join(scratch, "authority");
     const bin = join(scratch, "bin");
+    const snapshotParent = join(scratch, "snapshot-parent");
     const calls = join(scratch, "psql-calls");
     const sql = join(scratch, "psql-input");
     writeFileSync(calls, "", { mode: 0o600 });
     writeFileSync(sql, "", { mode: 0o600 });
-    execFileSync("mkdir", ["-m", "700", secrets, authority, bin]);
+    execFileSync("mkdir", ["-m", "700", secrets, authority, bin, snapshotParent]);
+    if (process.platform === "linux") {
+      chmodSync(snapshotParent, 0o2700);
+      assert.equal(statSync(snapshotParent).mode & 0o7000, 0o2000);
+    }
 
     const values = {
       postgres_bootstrap_password: "cpr45-bootstrap\\password:sentinel",
@@ -4183,6 +4188,14 @@ esac
 input=$(sed -n '1,1200p')
 printf '%s\n' "$input" >> "$SYNVEDA_TEST_PSQL_INPUT"
 case "$input" in
+  *'\\! /usr/local/bin/synveda-database-bootstrap validate-synveda-passwords'*)
+    "$SYNVEDA_TEST_DATABASE_BOOTSTRAP" validate-synveda-passwords || exit $?
+    ;;
+  *'\\! /usr/local/bin/synveda-database-bootstrap validate-keycloak-password'*)
+    "$SYNVEDA_TEST_DATABASE_BOOTSTRAP" validate-keycloak-password || exit $?
+    ;;
+esac
+case "$input" in
   *"select control.system_identifier::text"*"pg_control_system"*)
     printf '7536657783470215051\n'
     exit 0
@@ -4250,7 +4263,7 @@ exec "$@"
 	    ]);
 	    chmodSync(fakeSnapshot, 0o700);
 
-	    const snapshotDirectory = join(scratch, "database-bootstrap-snapshots");
+	    const snapshotDirectory = join(snapshotParent, "database-bootstrap-snapshots");
 	    const bootstrap = join(scratch, "synveda-database-bootstrap");
 	    writeFileSync(
 	      bootstrap,
@@ -4269,6 +4282,7 @@ exec "$@"
       SYNVEDA_TEST_PSQL_CALLS: calls,
       SYNVEDA_TEST_PSQL_INPUT: sql,
       SYNVEDA_TEST_EXPECTED_PGPASS_FILE: expectedPgpass,
+      SYNVEDA_TEST_DATABASE_BOOTSTRAP: bootstrap,
       SYNVEDA_DATABASE_BOOTSTRAP_PRIVATE_DIR: secrets,
       SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
       SYNVEDA_DATABASE_ROLES_FILE: roleContract,
@@ -4860,6 +4874,11 @@ test("database authority helper contracts are copied and fail closed", () => {
   );
 
   const databaseBootstrap = readFileSync(DATABASE_BOOTSTRAP, "utf8");
+  assert.equal(
+    occurrenceCount(databaseBootstrap, 'chmod u=rwx,go=,a-s "$snapshot_dir"'),
+    2,
+    "each private snapshot-directory creation must clear inherited special bits",
+  );
   const keycloakHandoff = databaseBootstrap.slice(
     databaseBootstrap.indexOf("-- Keycloak shares the cluster only after"),
     databaseBootstrap.indexOf("-- MUTATION BOUNDARY: every persistent Keycloak"),
