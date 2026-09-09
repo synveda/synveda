@@ -826,7 +826,7 @@ mod tests {
             Err(_) => {
                 eprintln!(
                     "skipping frozen verification test: DATABASE_URL is not set \
-                     (run `make dev-up` then `make db-test`)"
+                     (run `make db-test`)"
                 );
                 return None;
             }

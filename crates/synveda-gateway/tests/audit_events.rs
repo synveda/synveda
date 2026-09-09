@@ -176,7 +176,7 @@ fn database_url() -> Option<String> {
     if url.is_none() {
         eprintln!(
             "skipping AUD-1 event tests: DATABASE_URL is not set \
-             (run `make dev-up` then `make db-test`)"
+             (run `make db-test`)"
         );
     }
     url

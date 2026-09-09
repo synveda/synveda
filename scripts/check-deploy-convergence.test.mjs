@@ -40,7 +40,6 @@ function shellFunctionSource(source, name) {
 
 import {
   authorityFingerprintFixtureFindings,
-  contributorPostgresBuildFindings,
   dbTestNetworkReservationFindings,
   developmentInitdbFindings,
   demoFixtureFindings,
@@ -93,9 +92,6 @@ const EVAL_RUN = fileURLToPath(new URL("../evals/run.sh", import.meta.url));
 const EVAL_LONGMEMEVAL_RUN = fileURLToPath(
   new URL("../evals/run-longmemeval.sh", import.meta.url),
 );
-const CONTRIBUTOR_COMPOSE = fileURLToPath(
-  new URL("../deploy/compose/docker-compose.yml", import.meta.url),
-);
 const POSTGRES_DOCKERFILE = fileURLToPath(
   new URL("../deploy/compose/postgres/Dockerfile", import.meta.url),
 );
@@ -129,14 +125,13 @@ test("Temporal runtime markers are rejected without matching temporal domain lan
   assert.deepEqual(temporalRuntimeResidueFindings([], true), ["deploy/compose/temporal"]);
 });
 
-test("the contributor lifecycle converges retired containers without deleting volumes", () => {
+test("the retired contributor lifecycle is absent and retrieval owns its fixture", () => {
   const makefile = readFileSync(MAKEFILE, "utf8");
-  assert.match(
-    makefile,
-    /^dev-up:\n\t\$\(COMPOSE\) up --build --detach --wait --remove-orphans$/m,
-  );
-  assert.match(makefile, /^dev-down:\n\t\$\(COMPOSE\) down --remove-orphans$/m);
-  const lifecycle = makefile.match(/^dev-up:\n[\s\S]*?^smoke:/m)?.[0] ?? "";
+  assert.doesNotMatch(makefile, /^(?:dev-up|dev-down|smoke):/m);
+  assert.match(makefile, /^RETRIEVAL_COMPOSE = docker compose -p synveda-retrieval-eval /m);
+  const lifecycle = makefile.match(/^eval-retrieval:\n[\s\S]*?(?=^\S|\Z)/m)?.[0] ?? "";
+  assert.match(lifecycle, /--profile semantic up --detach --wait tei/);
+  assert.match(lifecycle, /--profile semantic down --remove-orphans/);
   assert.doesNotMatch(lifecycle, /(?:^|\s)(?:-v|--volumes)(?:\s|$)/);
 });
 
@@ -831,23 +826,11 @@ test("the release PostgreSQL build uses the repository-root context", () => {
   );
 });
 
-test("the contributor PostgreSQL build selects one development-only target", () => {
-  const compose = readFileSync(CONTRIBUTOR_COMPOSE, "utf8");
+test("the development PostgreSQL image keeps its isolated init target", () => {
   const dockerfile = readFileSync(POSTGRES_DOCKERFILE, "utf8");
   const initdb = readFileSync(DEVELOPMENT_INITDB, "utf8");
-  assert.deepEqual(contributorPostgresBuildFindings(compose), []);
   assert.deepEqual(postgresImageTargetFindings(dockerfile), []);
   assert.deepEqual(developmentInitdbFindings(initdb), []);
-
-  assert.deepEqual(
-    contributorPostgresBuildFindings(
-      compose.replace(
-        "    build:\n      context: ../..\n      dockerfile: deploy/compose/postgres/Dockerfile\n      target: development\n",
-        "    build: ./postgres\n",
-      ),
-    ),
-    ["contributor PostgreSQL build does not select the repo-root development target"],
-  );
   assert.ok(
     postgresImageTargetFindings(
       dockerfile.replace("FROM runtime AS reference", "FROM runtime AS removed-reference"),

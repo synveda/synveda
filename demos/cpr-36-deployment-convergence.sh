@@ -2,15 +2,12 @@
 # CPR-36: local, release and Helm deployment shapes converge on one runtime.
 set -eu
 
-. "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "cpr36" "CPR-36 — one context platform across deployment shapes"
+cd "$(dirname "$0")/.."
+
+echo "==> CPR-36 — one context platform across deployment shapes"
 
 make check-deploy
-cargo run -q -p synveda-cli --bin synveda -- db migrate
-cargo test -p synveda-cli \
-  init::tests::compose_gateway_login_is_rls_enforced \
-  -- --exact --nocapture --test-threads=1
-cargo test -p synveda-store --test epoch -- --nocapture
-cargo test -p synveda-gateway --test openapi -- --nocapture
+make db-test
 
-demo_finish
+echo ""
+echo "CPR-36 deployment convergence: current contract and exact-role evidence pass."

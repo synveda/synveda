@@ -158,7 +158,7 @@ async fn world() -> Option<World> {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         eprintln!(
             "skipping the AUTH-5 directory sync suite: DATABASE_URL is not set \
-             (run `make dev-up` then `make db-test`)"
+             (run `make db-test`)"
         );
         return None;
     };

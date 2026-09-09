@@ -45,12 +45,11 @@ const HELPERS = "deploy/helm/synveda/templates/_helpers.tpl";
 const RELEASE_COMPOSE = "deploy/release/docker-compose.yml";
 const COMPOSE_DIRECTORY = "deploy/compose";
 const COMPOSE_DEFAULTS = `${COMPOSE_DIRECTORY}/.env.example`;
-const LEGACY_COMPOSE = `${COMPOSE_DIRECTORY}/docker-compose.yml`;
+const RETRIEVAL_COMPOSE = "evals/compose.retrieval.yaml";
 const RELEASE_WORKFLOW = ".github/workflows/release.yml";
-// The per-architecture TEI pins. They are declared here, in the one place
-// that resolves them, and `synveda init` carries the same table for an
-// installed operator who has no Makefile — so this is where the inventory
-// learns about the arm64 build, which no compose file names.
+// The per-architecture TEI pins are isolated to the live retrieval fixture.
+// The Makefile chooses the architecture-specific image; the fixture carries
+// the amd64 default so its complete image surface remains statically visible.
 const MAKEFILE = "Makefile";
 const problems = [];
 const fail = (message) => problems.push(message);
@@ -158,15 +157,12 @@ for (const name of composeFiles) {
   }
 }
 
-// The contributor `make dev-up` stack remains executable until CPR-45 deletes
-// its Rauthy residue. It is not canonical, but exclusion from the reference
-// graph cannot make its pulled and locally built images invisible.
 try {
-  for (const ref of composeImageReferences(read(LEGACY_COMPOSE), composeDefaults)) {
-    found.set(ref, `${LEGACY_COMPOSE} (legacy image:)`);
+  for (const ref of composeImageReferences(read(RETRIEVAL_COMPOSE), composeDefaults)) {
+    found.set(ref, `${RETRIEVAL_COMPOSE} (image:)`);
   }
 } catch (error) {
-  fail(`${LEGACY_COMPOSE}: ${error?.code ?? "legacy image selector could not be resolved"}`);
+  fail(`${RETRIEVAL_COMPOSE}: ${error?.code ?? "image selector could not be resolved"}`);
 }
 
 // ── The per-architecture TEI pins ────────────────────────────────────────

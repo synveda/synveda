@@ -328,7 +328,6 @@ test("every deployment Compose build supplies the exact empty proxy arguments", 
       "deploy/compose/compose.dev.yaml",
       "deploy/compose/compose.keycloak.dev.yaml",
       "deploy/compose/compose.postgres.dev.yaml",
-      "deploy/compose/docker-compose.yml",
     ],
   );
   for (const { path, source } of files) {

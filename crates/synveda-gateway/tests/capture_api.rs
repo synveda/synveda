@@ -141,7 +141,7 @@ async fn admitted_tenant(pack: &str) -> Option<(AppState, TenantId)> {
         Err(_) => {
             eprintln!(
                 "skipping CPR-18 capture API test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }

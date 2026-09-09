@@ -44,7 +44,7 @@ fn db() -> Option<&'static Db> {
             Err(_) => {
                 eprintln!(
                     "skipping tamper tests: DATABASE_URL is not set \
-                     (run `make dev-up` then `make db-test`)"
+                     (run `make db-test`)"
                 );
                 return None;
             }

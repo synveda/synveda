@@ -266,29 +266,13 @@ IdP's `synveda-admins` group gets an `administrator` grant at the tenant root â€
 that is the one-time operator door. Any earlier governed root-administrator
 grant consumes the same marker. The marker survives revocation, so neither
 that revocation nor a later group login reopens IdP authority; later
-administrators must receive governed Synveda grants. A fresh tenant
-admitted with `synveda tenant create` for dev-token use has no IdP group
-to read, so seed the same row by hand, once, at the store level (CPR-7
-deleted `role bind` with the bindings; this is its replacement, as SQL,
-because a governed route that hands out the first authority in a tenant
-is the shortcut past the policy engine ADR-0055 refuses â€” where that
-grant *should* come from is admission's, and it is recorded as standing
-work rather than solved):
-
-```sh
-docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
-  psql -U synveda -d synveda -c "
-  insert into scopes (id, tenant_id, kind, slug, display_name)
-  values (gen_random_uuid(), '<tenant id>', 'tenant', '<slug>', '<name>');
-  insert into scope_grants
-        (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source)
-  select gen_random_uuid(), tenant_id, id, 'principal', '<subject>',
-         'administrator', 'automation'
-  from scopes where tenant_id = '<tenant id>' and kind = 'tenant';"
-```
-
-Every grant after the first goes through `/v1/admin/grants` under the
-PDP.
+administrators must receive governed Synveda grants. A fresh tenant admitted
+with `synveda tenant create` for dev-token use has no IdP group to read and
+therefore does not acquire administrator authority implicitly. Use the
+deployment-owned tenant convergence command for deterministic local fixtures,
+or admit the first administrator through the configured OIDC group. Every
+later grant goes through `/v1/admin/grants` under the PDP. Direct SQL is not an
+application bootstrap or authorization interface.
 
 ## Governed runtime configuration
 

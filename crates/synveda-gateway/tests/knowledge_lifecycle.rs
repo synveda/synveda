@@ -95,7 +95,7 @@ async fn admitted_tenant() -> Option<(AppState, Tenant)> {
         Err(_) => {
             eprintln!(
                 "skipping CPR-16 Knowledge lifecycle test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }

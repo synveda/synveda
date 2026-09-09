@@ -76,7 +76,7 @@ async fn world() -> Option<World> {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         eprintln!(
             "skipping the CNSL-2 explorer suite: DATABASE_URL is not set \
-             (run `make dev-up` then `make db-test`)"
+             (run `make db-test`)"
         );
         return None;
     };

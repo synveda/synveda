@@ -214,7 +214,7 @@ async fn harness() -> Option<Harness> {
         Err(_) => {
             eprintln!(
                 "skipping the Claude lifecycle harness: DATABASE_URL is not set \
-                 (run `make dev-up` then `make claude-acceptance`)"
+                 (run `make claude-acceptance`)"
             );
             return None;
         }

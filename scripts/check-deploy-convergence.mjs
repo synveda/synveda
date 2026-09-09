@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// CPR-36 / ADR-0095: one application runtime across host, Compose and Helm.
-// This check is intentionally database- and daemon-free. It renders the two
-// Compose shapes and Helm, inspects the generated public contract, and builds
-// the release profile twice so an upgrade-shaped stale file cannot survive.
+// CPR-36 / ADR-0095: one application runtime across Compose and Helm. This
+// check is database- and daemon-free: it inspects the generated public
+// contract, Helm and release replacement without retaining old runtime graphs.
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -128,19 +127,6 @@ export function releasePostgresBuildFindings(source) {
     findings.push("release PostgreSQL build does not select the reference target");
   }
   return findings;
-}
-
-export function contributorPostgresBuildFindings(source) {
-  const postgres = serviceBlock(`\n${source}`, "postgres");
-  if (!postgres) return ["contributor PostgreSQL service is missing"];
-  const expected =
-    "    build:\n" +
-    "      context: ../..\n" +
-    "      dockerfile: deploy/compose/postgres/Dockerfile\n" +
-    "      target: development\n";
-  return postgres.includes(expected)
-    ? []
-    : ["contributor PostgreSQL build does not select the repo-root development target"];
 }
 
 export function postgresImageTargetFindings(source) {
@@ -2142,9 +2128,7 @@ function checkTemporalRuntimeResidue() {
   }
   const findings = temporalRuntimeResidueFindings(
     [
-      ["deploy/compose/docker-compose.yml", read("deploy/compose/docker-compose.yml")],
       ["deploy/release/docker-compose.yml", read("deploy/release/docker-compose.yml")],
-      ["scripts/smoke.sh", read("scripts/smoke.sh")],
       ["Makefile", read("Makefile")],
       ...composeSources,
       ...dependencyPaths.map((path) => [path, read(path)]),
@@ -2452,7 +2436,6 @@ function checkReleaseUpgradeShape() {
 
 export function main() {
   checkTemporalRuntimeResidue();
-  checkCompose("deploy/compose/docker-compose.yml", false);
   checkCompose("deploy/release/docker-compose.yml", true);
   checkHelm();
   checkProductImageInputs();
@@ -2460,8 +2443,8 @@ export function main() {
   checkReleaseNotes();
   checkReleaseUpgradeShape();
   console.log(
-    "deployment convergence holds: 2 Compose renders, Helm render, product image inputs, " +
-      "current OpenAPI, distinct Compose/Helm runtime DSNs, three-role Helm preflight and " +
+    "deployment convergence holds: canonical Compose contract, Helm render, product image inputs, " +
+      "current OpenAPI, distinct runtime DSNs, three-role Helm preflight and " +
       "repeatable release replacement",
   );
 }

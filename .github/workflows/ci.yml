@@ -229,18 +229,9 @@ jobs:
   # and a job that answered both would report neither: OPS-8 asks whether a
   # stranger can install this, and OPS-9 asks what they see once they have.
   #
-  # It runs against a dev stack rather than a packaged release — the demo's
-  # own header says why, and `package-release.sh` covers the part this
-  # leaves out by asserting the bundle carries the seeder, executable and
-  # syntactically valid.
-  #
-  # This job's prerequisites are explicit because its first run had two that
-  # were not, and both were invisible on the laptop it was written on: the
-  # `postgres` image (compose skips a `build:` when the image is already
-  # present, so a missing build context only surfaces where `make dev-up` has
-  # never run) and the console bundle. That is OPS-8's own recorded finding —
-  # "a machine where `node_modules` had made it invisible" — arriving a second
-  # time, which is the argument for this job existing rather than against it.
+  # It runs against the same fresh exact-role database fixture as current
+  # feature demos. The release-install gate separately owns packaged-reference
+  # acceptance; this job measures only the authenticated product experience.
   beta-demo:
     runs-on: ubuntu-latest
     timeout-minutes: 30

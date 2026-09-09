@@ -1,0 +1,52 @@
+# EVAL-4 only: isolated BGE-M3 provider for the live semantic-quality run.
+# This is not a second Synveda deployment topology; the evaluation harness owns
+# its exact-role PostgreSQL fixture independently.
+name: synveda-retrieval-eval
+
+services:
+  tei:
+    profiles: [semantic]
+    image: ${SYNVEDA_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1}
+    command: ["--model-id", "BAAI/bge-m3", "--max-batch-tokens", "4096", "--auto-truncate"]
+    environment:
+      HF_HOME: /data
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 512
+    restart: "no"
+    stop_grace_period: 30s
+    mem_limit: 8g
+    cpus: 4.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=256m
+    volumes:
+      - type: volume
+        source: tei-cache
+        target: /data
+        volume:
+          nocopy: false
+    ports:
+      - target: 80
+        published: ${SYNVEDA_TEI_PORT:-8110}
+        host_ip: 127.0.0.1
+        protocol: tcp
+    healthcheck:
+      test: [CMD, curl, -fsS, http://127.0.0.1:80/health]
+      interval: 10s
+      timeout: 5s
+      retries: 180
+    networks:
+      evaluation: {}
+
+networks:
+  evaluation:
+    name: synveda-retrieval-eval
+
+volumes:
+  tei-cache:
+    name: synveda-retrieval-eval-tei-cache
+    labels:
+      com.synveda.contract: eval-4
+      com.synveda.volume: tei-cache

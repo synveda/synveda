@@ -16,7 +16,7 @@
 //!
 //! These tests need a live Postgres; they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database); run them locally with
-//! `make dev-up` then `make db-test`. Isolation is by freshly minted UUIDv7
+//! `make db-test`. Isolation is by freshly minted UUIDv7
 //! tenants, so a shared dev database is fine.
 
 #[path = "support/tenant_fixture.rs"]
@@ -52,7 +52,7 @@ fn db() -> Option<&'static Db> {
             Err(_) => {
                 eprintln!(
                     "skipping anchor tests: DATABASE_URL is not set \
-                     (run `make dev-up` then `make db-test`)"
+                     (run `make db-test`)"
                 );
                 return None;
             }

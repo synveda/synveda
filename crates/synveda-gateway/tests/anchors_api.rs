@@ -120,7 +120,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         Err(_) => {
             eprintln!(
                 "skipping anchor API test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }

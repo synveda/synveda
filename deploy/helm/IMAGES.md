@@ -54,19 +54,6 @@ runtime dependency and is pinned here exactly.
 | `synveda/browser-acceptance:1.62.1-dev` | Compose acceptance fixture with the exact Synveda CLI and Playwright | Synveda's licence is not yet selected; fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Locally built no-capture one-shot used by reference acceptance, not a release product service. The CLI is copied from the same source build as the gateway/worker. Playwright's licence, upstream NOTICE and the seccomp provenance notice are retained in the image. |
 | `synveda-db-test-postgres:local` | isolated database acceptance fixture | ours over PostgreSQL-licensed PostgreSQL | Local-only database-test build; never an operator topology. |
 
-## Images the legacy contributor topology still runs
-
-`make dev-up` remains executable during the bounded Keycloak cutover. It is
-not the canonical reference graph, and its Rauthy service is deletion residue
-rather than a supported-provider claim. The inventory keeps that current
-executable surface visible until identity replacement acceptance permits its
-removal.
-
-| Image | Where | Licence | Why it is here |
-|---|---|---|---|
-| `synveda/dev-postgres:17` | legacy contributor PostgreSQL | ours over PostgreSQL-licensed PostgreSQL | Local build output used only by the pre-cutover contributor topology. |
-| `synveda/gateway:dev` | legacy contributor gateway and worker | ours | Local product build output used only by the pre-cutover contributor topology. |
-
 ## Planned release image set
 
 `deploy/release/docker-compose.yml`, the bundle `scripts/install.sh` unpacks

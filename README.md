@@ -109,17 +109,21 @@ here.
 
 ## Try it locally
 
-For source development you need the pinned Rust toolchain, Node/pnpm, Docker and
-GNU Make:
+The canonical local deployment needs Docker Engine 28+, Docker Compose 2.33.1+,
+Node.js 22+, OpenSSL and GNU Make. Configure the development hostnames first as
+described in [deploy/compose/README.md](deploy/compose/README.md), then use the
+same lifecycle exercised by the Docker reference:
 
 ```sh
-make dev-up
-make smoke
-make dev-down
+make compose-config
+make compose-up
+make compose-smoke
+make compose-down
 ```
 
-The first start builds the Postgres image and may download the optional BGE-M3
-embedding model. Named volumes persist until explicitly removed.
+The gateway, worker, production-mode Keycloak, PostgreSQL, reverse proxy and
+private OpenTelemetry Collector all run in containers. Named volumes persist
+until the explicitly confirmed `make compose-reset` operation.
 
 For the installed local profile and its key-custody warning, follow
 [docs/INSTALL.md](docs/INSTALL.md). Release archives are currently unsigned;

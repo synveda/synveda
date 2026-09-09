@@ -184,7 +184,7 @@ async fn admitted(pack: &str) -> Option<World> {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         eprintln!(
             "skipping CPR-31 relaxation API test: DATABASE_URL is not set \
-             (run `make dev-up` then `make db-test`)"
+             (run `make db-test`)"
         );
         return None;
     };

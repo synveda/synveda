@@ -235,7 +235,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         Err(_) => {
             eprintln!(
                 "skipping MEM-2 redaction test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }

@@ -1,34 +1,19 @@
 # Mirrors .github/workflows/ci.yml exactly — `make ci` locally == CI green.
-# dev-up/dev-down/smoke manage the docker-compose dev environment (FND-2);
-# state persists in named volumes — wipe with `$(COMPOSE) down -v`.
 
-COMPOSE = docker compose -f deploy/compose/docker-compose.yml
-
-# The TEI image is per-architecture (deploy/compose/docker-compose.yml
-# explains why). Upstream ships a versioned amd64 release and an unversioned
+# The isolated EVAL-4 TEI image is per architecture. Upstream ships a
+# versioned amd64 release and an unversioned
 # arm64 build, so the arm64 side is pinned by commit; both serve BGE-M3 and
 # agree to float32 rounding. Override SYNVEDA_TEI_IMAGE to pin something
-# else.
+# else. This fixture is not a Synveda deployment topology.
 TEI_IMAGE_amd64  = ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1
 TEI_IMAGE_x86_64 = $(TEI_IMAGE_amd64)
 TEI_IMAGE_arm64  = ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-sha-4150561
 TEI_IMAGE_aarch64 = $(TEI_IMAGE_arm64)
 SYNVEDA_TEI_IMAGE ?= $(or $(TEI_IMAGE_$(shell uname -m)),$(TEI_IMAGE_amd64))
 export SYNVEDA_TEI_IMAGE
-# Dev-compose credentials (FND-2); tests that need Postgres read DATABASE_URL
-# and skip when it is unset — CI runs without a database.
-DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
+RETRIEVAL_COMPOSE = docker compose -p synveda-retrieval-eval -f evals/compose.retrieval.yaml
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-backup compose-restore-smoke compose-upgrade-smoke compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
-
-dev-up:
-	$(COMPOSE) up --build --detach --wait --remove-orphans
-
-dev-down:
-	$(COMPOSE) down --remove-orphans
-
-smoke:
-	bash scripts/smoke.sh
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-backup compose-restore-smoke compose-upgrade-smoke compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 # CPR-45's canonical topology renders the closed runtime/provider matrix and
 # optional profiles without starting or pulling images.
@@ -100,13 +85,15 @@ eval:
 # hash embedder's geometry carries none by construction and the two sets
 # of numbers are not comparable. Unlike the live-*extraction* half this
 # one **is** on the nightly: BGE-M3 is served locally from an image and a
-# model id written in deploy/compose/docker-compose.yml, so it changes
-# when someone edits that file — which is someone changing the code, and
+# model id written in evals/compose.retrieval.yaml, so it changes when someone
+# edits that fixture — which is someone changing the code, and
 # the thing ADR-0028 decision 6 asked a nightly failure to mean.
 eval-retrieval:
-	$(COMPOSE) up --detach --wait tei
+	@set -eu; \
+	$(RETRIEVAL_COMPOSE) --profile semantic up --detach --wait tei; \
+	trap '$(RETRIEVAL_COMPOSE) --profile semantic down --remove-orphans' EXIT HUP INT TERM; \
 	SYNVEDA_EMBEDDER=tei \
-	SYNVEDA_TEI_URL=$${SYNVEDA_TEI_URL:-http://localhost:8110} \
+	SYNVEDA_TEI_URL=$${SYNVEDA_TEI_URL:-http://127.0.0.1:8110} \
 	EVAL_DENSE_RETRIEVAL=1 \
 	EVAL_BASELINE=evals/baseline-retrieval.json sh evals/run.sh
 

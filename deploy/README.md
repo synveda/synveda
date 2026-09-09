@@ -24,8 +24,8 @@ freshness or Skill/Tool advertisement.
   Deterministic lifecycle tests are implementation evidence, not a validated
   reference claim: clean-volume browser/Keycloak and recovery acceptance are
   still open.
-  The separate `make dev-up` contributor stack retains Rauthy residue and is
-  not the reference product lifecycle. Its unused Temporal services are gone.
+  This is also the only source-development product topology. Evaluation-only
+  dependencies use isolated fixtures and do not define another Synveda stack.
 - `release/` is the pull-only transitional artifact manifest installed under
   `~/.synveda/profile`. It is retained for cutover evidence but is no longer
   advertised as a turnkey single-host install.

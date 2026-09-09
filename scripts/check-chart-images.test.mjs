@@ -56,14 +56,14 @@ test("canonical Compose image selectors resolve only through checked defaults", 
   );
   assert.ok(references.includes("synveda/browser-acceptance:1.62.1-dev"));
 
-  const legacy = composeImageReferences(
-    readFileSync(join(COMPOSE_DIRECTORY, "docker-compose.yml"), "utf8"),
+  const retrieval = composeImageReferences(
+    readFileSync("evals/compose.retrieval.yaml", "utf8"),
     defaults,
   );
   assert.ok(!readdirSync(COMPOSE_DIRECTORY).includes("temporal"));
-  assert.ok(legacy.includes("synveda/dev-postgres:17"));
-  assert.ok(legacy.includes("synveda/gateway:dev"));
-  assert.ok(!legacy.some((reference) => reference.startsWith("temporalio/")));
+  assert.deepEqual(retrieval, [
+    "ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1",
+  ]);
 });
 
 test("Compose image selector mutants cannot hide a missing or ambient value", () => {

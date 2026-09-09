@@ -186,7 +186,7 @@ async fn admitted_world() -> Option<World> {
         Err(_) => {
             eprintln!(
                 "skipping CPR-20 context tests: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }

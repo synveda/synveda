@@ -16,7 +16,7 @@
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database); run them locally with
-//! `make dev-up` then `make db-test`.
+//! `make db-test`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -303,7 +303,7 @@ async fn a_scope_move_governs_the_very_next_decision() {
         Err(_) => {
             eprintln!(
                 "skipping cedar entity sync test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return;
         }

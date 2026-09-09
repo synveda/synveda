@@ -65,7 +65,7 @@ async fn db() -> Option<PgPool> {
         Err(_) => {
             eprintln!(
                 "skipping policy pack tests: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }

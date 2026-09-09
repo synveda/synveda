@@ -451,7 +451,7 @@ async fn admitted_tenant() -> Option<(String, TenantId)> {
         Err(_) => {
             eprintln!(
                 "skipping ADPT-1 CLI login DB test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }

@@ -138,7 +138,7 @@ async fn world() -> Option<World> {
         Err(_) => {
             eprintln!(
                 "skipping PRMT-1 prompt test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }
