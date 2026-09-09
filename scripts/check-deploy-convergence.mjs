@@ -1880,10 +1880,22 @@ export function helmContractFindings(rendered) {
     cluster?.indexOf(
       "revoke connect, temporary on database postgres, template1 from public",
     ) ?? -1;
+  const closedApplicationDatabase =
+    cluster?.indexOf(
+      "create database synveda with owner synveda_migrator template template0 encoding 'UTF8' allow_connections false",
+    ) ?? -1;
   const applicationInit = cluster?.indexOf("postInitApplicationSQL:") ?? -1;
-  if (!(postInit >= 0 && postInit < publicRevoke && applicationInit === -1)) {
+  if (
+    !(
+      postInit >= 0 &&
+      postInit < publicRevoke &&
+      publicRevoke < closedApplicationDatabase &&
+      applicationInit === -1
+    ) ||
+    /create extension if not exists (?:vector|btree_gin)/.test(cluster ?? "")
+  ) {
     findings.push(
-      "CloudNativePG does not close PUBLIC maintenance-database access or still creates extensions as the application owner",
+      "CloudNativePG does not close maintenance-database access and create the application database closed before handoff, or still creates extensions as the application owner",
     );
   }
   if (!gateway) findings.push("gateway Deployment is missing");

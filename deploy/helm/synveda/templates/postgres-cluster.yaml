@@ -27,13 +27,14 @@ spec:
       # The shared cluster authority proof is deliberately first. PostgreSQL
       # grants PUBLIC CONNECT to these maintenance databases by default; the
       # required install Job refuses that cross-database path and must not be
-      # asked to repair it after its read-only guard. CNPG also creates the
-      # application database with a default/null ACL; close it before the Job
-      # so the shared bootstrap sees its only recoverable initial state and
-      # transactionally publishes the terminal explicit ACL before reopening.
+      # asked to repair it after its read-only guard. CNPG creates the
+      # application role before postInitSQL, but normally creates its database
+      # afterwards. Create that database explicitly in the same closed/null-ACL
+      # state expected by the shared bootstrap; PostgreSQL refuses closing the
+      # current database from postInitApplicationSQL.
       postInitSQL:
         - revoke connect, temporary on database postgres, template1 from public;
-        - alter database {{ include "synveda.dbName" . }} allow_connections false;
+        - create database {{ include "synveda.dbName" . }} with owner {{ include "synveda.migratorRole" . }} template template0 encoding 'UTF8' allow_connections false;
       # Extension binaries are image inputs only. The required install Job
       # creates and proves the exact extension versions as its declared
       # bootstrap administrator; CNPG's application-owner hook must not create

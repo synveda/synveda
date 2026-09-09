@@ -148,6 +148,7 @@ spec:
       owner: synveda_migrator
       postInitSQL:
         - revoke connect, temporary on database postgres, template1 from public;
+        - create database synveda with owner synveda_migrator template template0 encoding 'UTF8' allow_connections false;
 ---
 kind: ConfigMap
 metadata:
@@ -288,7 +289,15 @@ test("the Helm database authority matrix fails closed", () => {
         "        - revoke connect, temporary on database postgres, template1 from public;",
         "        - revoke connect, temporary on database postgres, template1 from public;\n      postInitApplicationSQL:\n        - create extension if not exists vector;",
       ),
-      "CloudNativePG does not close PUBLIC maintenance-database access or still creates extensions as the application owner",
+      "CloudNativePG does not close maintenance-database access and create the application database closed before handoff, or still creates extensions as the application owner",
+    ],
+    [
+      "application database closed before it exists",
+      HELM_DATABASE_CONTRACT.replace(
+        "        - create database synveda with owner synveda_migrator template template0 encoding 'UTF8' allow_connections false;",
+        "        - alter database synveda allow_connections false;",
+      ),
+      "CloudNativePG does not close maintenance-database access and create the application database closed before handoff, or still creates extensions as the application owner",
     ],
     [
       "gateway app credential",

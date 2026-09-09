@@ -113,7 +113,7 @@ requireMarkers("CloudNativePG Cluster", cluster, [
   "owner: synveda_migrator",
   "enableSuperuserAccess: true",
   "revoke connect, temporary on database postgres, template1 from public",
-  "alter database synveda allow_connections false",
+  "create database synveda with owner synveda_migrator template template0 encoding 'UTF8' allow_connections false",
 ]);
 forbidMarkers("CloudNativePG Cluster", cluster, [
   "postInitApplicationSQL:",
@@ -125,10 +125,12 @@ const publicRevoke = cluster.indexOf(
   "revoke connect, temporary on database postgres, template1 from public",
 );
 const closedApplicationDatabase = cluster.indexOf(
-  "alter database synveda allow_connections false",
+  "create database synveda with owner synveda_migrator template template0 encoding 'UTF8' allow_connections false",
 );
 if (!(postInit >= 0 && postInit < publicRevoke && publicRevoke < closedApplicationDatabase)) {
-  throw new Error("CloudNativePG must close maintenance-database PUBLIC ACLs during init");
+  throw new Error(
+    "CloudNativePG must close maintenance-database PUBLIC ACLs and create the application database closed during init",
+  );
 }
 
 const productImage = containerImage(gateway, "gateway");
