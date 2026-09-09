@@ -56,6 +56,8 @@ spec:
               value: 0.0.0.0:8120
             - name: SYNVEDA_PUBLIC_URL
               value: {{ .Values.gateway.publicUrl | quote }}
+            - name: SYNVEDA_INSECURE_DEVELOPMENT_HTTP
+              value: {{ .Values.gateway.insecureDevelopmentHttp | quote }}
             - name: SYNVEDA_DB_MAX_CONNECTIONS
               value: {{ .Values.gateway.dbMaxConnections | quote }}
             - name: SYNVEDA_OIDC_ISSUERS

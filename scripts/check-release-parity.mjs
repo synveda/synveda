@@ -341,6 +341,13 @@ export function helmAcceptanceFindings(demo, clientPod) {
   if (!clientPod.includes("image: ghcr.io/synveda/gateway:__IMAGE_TAG__")) {
     findings.push("Helm acceptance client does not use the chart product coordinate");
   }
+  if (
+    !clientPod.includes(
+      '- name: SYNVEDA_INSECURE_DEVELOPMENT_HTTP\n          value: "true"',
+    )
+  ) {
+    findings.push("Helm acceptance client does not explicitly admit its disposable HTTP origin");
+  }
   return findings;
 }
 

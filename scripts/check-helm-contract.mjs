@@ -144,6 +144,7 @@ requireMarkers("gateway", gateway, [
   "value: /run/secrets/synveda-gateway/database_url",
   "- name: SYNVEDA_DATABASE_ROLES_FILE",
   "value: /etc/synveda/database/roles.json",
+  '- name: SYNVEDA_INSECURE_DEVELOPMENT_HTTP\n              value: "false"',
   "name: database-roles",
   "mountPath: /etc/synveda/database",
   "secretName: synveda-gateway-db",
@@ -356,6 +357,18 @@ if (
   throw new Error("custom worker pod grace must derive as shutdownSeconds + 10");
 }
 
+const developmentHttp = render([
+  "--set-string",
+  "gateway.publicUrl=http://synveda.example.test",
+  "--set",
+  "gateway.insecureDevelopmentHttp=true",
+]);
+requireSuccess("explicit development HTTP chart", developmentHttp);
+const developmentGateway = resource(developmentHttp.stdout, "Deployment", "gateway");
+requireMarkers("explicit development HTTP gateway", developmentGateway, [
+  '- name: SYNVEDA_INSECURE_DEVELOPMENT_HTTP\n              value: "true"',
+]);
+
 for (const [component, document] of [
   ["gateway", gateway],
   ["worker", worker],
@@ -374,6 +387,21 @@ for (const [component, document] of [
 }
 
 for (const [name, expected, args] of [
+  [
+    "implicit plaintext public URL",
+    "plaintext gateway.publicUrl requires gateway.insecureDevelopmentHttp=true",
+    ["--set-string", "gateway.publicUrl=http://synveda.example.test"],
+  ],
+  [
+    "string development HTTP relaxation",
+    "gateway.insecureDevelopmentHttp must be a boolean",
+    ["--set-string", "gateway.insecureDevelopmentHttp=true"],
+  ],
+  [
+    "HTTPS with development HTTP relaxation",
+    "gateway.insecureDevelopmentHttp must remain false",
+    ["--set", "gateway.insecureDevelopmentHttp=true"],
+  ],
   ["missing KMS Secret", "kms.existingSecret is required", ["--set-string", "kms.existingSecret="]],
   [
     "missing gateway database Secret",

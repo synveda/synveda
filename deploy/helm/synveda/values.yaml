@@ -41,6 +41,12 @@ gateway:
   # that reads like a bug. Required.
   publicUrl: ""
 
+  # Explicitly admits plaintext application and OIDC origins for disposable
+  # development/test deployments. Leave false for HTTPS reference and hosted
+  # deployments. The chart refuses HTTP without this opt-in and refuses this
+  # opt-in when publicUrl is HTTPS.
+  insecureDevelopmentHttp: false
+
   # Operator-owned Secret with two distinct keys:
   #
   #   DATABASE_URL  postgres://synveda_gateway:<password>@<rw-service>:5432/synveda

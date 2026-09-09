@@ -94,6 +94,15 @@ silent if the chart rendered it anyway.
 {{- if not (or (hasPrefix "http://" .Values.gateway.publicUrl) (hasPrefix "https://" .Values.gateway.publicUrl)) -}}
 {{- fail (printf "gateway.publicUrl must be an absolute http(s) URL, got %q" .Values.gateway.publicUrl) -}}
 {{- end -}}
+{{- if not (kindIs "bool" .Values.gateway.insecureDevelopmentHttp) -}}
+{{- fail "gateway.insecureDevelopmentHttp must be a boolean" -}}
+{{- end -}}
+{{- if and (hasPrefix "http://" .Values.gateway.publicUrl) (not .Values.gateway.insecureDevelopmentHttp) -}}
+{{- fail "plaintext gateway.publicUrl requires gateway.insecureDevelopmentHttp=true; use HTTPS outside an explicitly disposable development/test deployment" -}}
+{{- end -}}
+{{- if and (hasPrefix "https://" .Values.gateway.publicUrl) .Values.gateway.insecureDevelopmentHttp -}}
+{{- fail "gateway.insecureDevelopmentHttp must remain false when gateway.publicUrl uses HTTPS" -}}
+{{- end -}}
 {{- if hasSuffix "/" .Values.gateway.publicUrl -}}
 {{- fail (printf "gateway.publicUrl must not end in a slash, got %q — the gateway appends its own paths" .Values.gateway.publicUrl) -}}
 {{- end -}}

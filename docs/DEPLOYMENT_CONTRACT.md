@@ -148,6 +148,7 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_AUTH_HOST | browser-visible bundled issuer DNS name |
 | SYNVEDA_PUBLIC_SCHEME | development http or reference https |
 | SYNVEDA_DEV_HTTP_PORT | loopback development port |
+| SYNVEDA_INSECURE_DEVELOPMENT_HTTP | exact `true` admits plaintext application/OIDC origins only for explicit development or disposable tests; Helm maps `gateway.insecureDevelopmentHttp` to this and defaults false |
 | SYNVEDA_TLS_MODE | reference currently supports files |
 | SYNVEDA_OIDC_ISSUER | exact external issuer URL |
 | SYNVEDA_OIDC_ISSUERS_FILE | mounted provider-neutral issuer document |

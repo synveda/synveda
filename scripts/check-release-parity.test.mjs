@@ -315,6 +315,13 @@ test("kind acceptance builds and loads the chart's exact image coordinates", () 
       client,
     ],
     [demo, client.replace("ghcr.io/synveda/gateway", "synveda/gateway")],
+    [
+      demo,
+      client.replace(
+        "SYNVEDA_INSECURE_DEVELOPMENT_HTTP",
+        "SYNVEDA_INSECURE_DEVELOPMENT_HTTP_REMOVED",
+      ),
+    ],
   ]) {
     assert.ok(helmAcceptanceFindings(demoMutant, clientMutant).length > 0);
   }

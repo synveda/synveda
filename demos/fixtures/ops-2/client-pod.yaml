@@ -35,6 +35,8 @@ spec:
       env:
         - name: SYNVEDA_GATEWAY
           value: http://synveda.synveda-test.svc.cluster.local:8120
+        - name: SYNVEDA_INSECURE_DEVELOPMENT_HTTP
+          value: "true"
         - name: HOME
           value: /home/tester
         - name: WORK_DIR
