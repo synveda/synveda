@@ -2320,9 +2320,13 @@ function checkProductImageInputs() {
   }
   const helmPostgresRelative = "deploy/helm/postgres/Dockerfile";
   const helmPostgresImage = read(helmPostgresRelative);
-  const helmPgvectorPin = "postgresql-17-pgvector=0.8.6-1.pgdg11+1";
+  const helmPgvectorPin =
+    "test \"$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)\" = 'ii  0.8.6-1.pgdg12+1';";
   if (helmPostgresImage.split(helmPgvectorPin).length - 1 !== 1) {
-    fail(`${helmPostgresRelative} does not install exactly ${helmPgvectorPin}`);
+    fail(`${helmPostgresRelative} does not verify its base pgvector package exactly`);
+  }
+  if (/\bapt-get\b/.test(helmPostgresImage)) {
+    fail(`${helmPostgresRelative} must not mutate the pinned CNPG base through apt`);
   }
   const initdbFindings = developmentInitdbFindings(
     read("deploy/compose/postgres/development-initdb.sql"),

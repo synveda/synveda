@@ -4920,14 +4920,14 @@ test("database authority helper contracts are copied and fail closed", () => {
       assert.ok(image.slice(development, reference).includes(developmentCopy));
       assert.doesNotMatch(image.slice(reference), /docker-entrypoint-initdb\.d|development-initdb\.sql/);
     }
-    const expectedBuilder = isHelmImage
-      ? "FROM rust:1.96.0-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f AS snapshot-builder"
-      : "FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS snapshot-builder";
+    const expectedBuilder =
+      "FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS snapshot-builder";
     assert.equal(occurrenceCount(image, expectedBuilder), 1);
     const expectedPgvector = isHelmImage
-      ? "postgresql-17-pgvector=0.8.6-1.pgdg11+1"
+      ? "test \"$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)\" = 'ii  0.8.6-1.pgdg12+1';"
       : "postgresql-17-pgvector=0.8.6-1.pgdg12+1";
     assert.equal(occurrenceCount(image, expectedPgvector), 1);
+    if (isHelmImage) assert.doesNotMatch(image, /\bapt-get\b/);
     assert.doesNotMatch(image, /apt-get install[^\n]*(?:gcc|libc6-dev)/);
     for (const line of [
       "COPY --chmod=0555 deploy/compose/postgres/synveda-database-bootstrap /usr/local/bin/synveda-database-bootstrap",
@@ -4954,7 +4954,7 @@ test("database authority helper contracts are copied and fail closed", () => {
 	  const helmPostgres = readFileSync(join(ROOT, "deploy/helm/postgres/Dockerfile"), "utf8");
 	  assert.match(
 	    helmPostgres,
-	    /ARG CNPG_BASE=ghcr\.io\/cloudnative-pg\/postgresql:17@sha256:fa6e2b2e14d19a109cc142cf857d328420bb7f1656b08c96e08be377692247ab/,
+	    /ARG CNPG_BASE=ghcr\.io\/cloudnative-pg\/postgresql:17\.11-202608310816-standard-bookworm@sha256:e8ffaff9d17011fb71f264d857c3b4c54cb86ed0443a4ecb0298cb96be708d4e/,
 	  );
 });
 

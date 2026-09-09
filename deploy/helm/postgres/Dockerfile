@@ -1,13 +1,14 @@
 # Postgres for the Kubernetes deployment (OPS-2; CPR-36, ADR-0095).
 #
-# CloudNativePG's base image plus pgvector, the only non-core extension used
-# by the epoch-3 schema. This is the same extension shape as the single-node
-# image: bounded graph expansion and capture work leasing use ordinary SQL.
+# CloudNativePG's standard image already carries pgvector, the only non-core
+# extension used by the epoch-3 schema. This is the same extension shape as
+# the single-node image: bounded graph expansion and capture work leasing use
+# ordinary SQL.
 
-ARG CNPG_BASE=ghcr.io/cloudnative-pg/postgresql:17@sha256:fa6e2b2e14d19a109cc142cf857d328420bb7f1656b08c96e08be377692247ab
-# Compile against Debian 11's glibc because the pinned CloudNativePG image is
-# bullseye-based. The final-stage probe below enforces this ABI boundary.
-FROM rust:1.96.0-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f AS snapshot-builder
+ARG CNPG_BASE=ghcr.io/cloudnative-pg/postgresql:17.11-202608310816-standard-bookworm@sha256:e8ffaff9d17011fb71f264d857c3b4c54cb86ed0443a4ecb0298cb96be708d4e
+# Compile against Debian 12's glibc to match the pinned CloudNativePG image.
+# The final-stage probe below enforces this ABI boundary.
+FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS snapshot-builder
 ARG HTTP_PROXY
 ARG http_proxy
 ARG HTTPS_PROXY
@@ -43,17 +44,14 @@ ARG all_proxy
 COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
 RUN /usr/local/bin/assert-build-proxy-closed
 
-# The base runs as uid 26. apt and `make install` need root; the image has
-# to go back, or the operator's own entrypoint fails on a permission it
-# expects to have.
+# The base runs as uid 26. Installing Synveda's read-only support files needs
+# root; the image returns to uid 26 before the operator starts it.
 USER root
 
 RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends postgresql-17-pgvector=0.8.6-1.pgdg11+1; \
+    test "$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)" = 'ii  0.8.6-1.pgdg12+1'; \
     test -x /usr/bin/timeout; \
-    install -d -m 0555 /usr/local/share/synveda; \
-    rm -rf /var/lib/apt/lists/*
+    install -d -m 0555 /usr/local/share/synveda;
 
 # One audited, content-free database bootstrap command is shared with the
 # canonical Compose PostgreSQL image. Build this Dockerfile from the repository

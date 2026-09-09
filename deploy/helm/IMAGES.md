@@ -112,9 +112,8 @@ selection for deterministic packaging evidence only.
 
 | Image | Built into | Licence | Notes |
 |---|---|---|---|
-| `ghcr.io/cloudnative-pg/postgresql:17@sha256:fa6e2b2e14d19a109cc142cf857d328420bb7f1656b08c96e08be377692247ab` | enterprise-postgres | Apache-2.0 (CNPG) over PostgreSQL-licensed Postgres | Exact multi-architecture CNPG PostgreSQL 17 base; the helper is executed again in this final image. |
-| `rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc` | gateway, Compose PostgreSQL and Keycloak mounted-input helper build stages | MIT/Apache-2.0 toolchain; build-only system compiler | Matches `rust-toolchain.toml`; also provides the digest-pinned native C compiler so no mutable apt compiler packages enter helper builds. |
-| `rust:1.96.0-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f` | CloudNativePG mounted-input helper build stage | MIT/Apache-2.0 toolchain; build-only system compiler | Matches the Debian 11 glibc ABI in the pinned CloudNativePG final image; a final-stage execution probe rejects ABI drift. |
+| `ghcr.io/cloudnative-pg/postgresql:17.11-202608310816-standard-bookworm@sha256:e8ffaff9d17011fb71f264d857c3b4c54cb86ed0443a4ecb0298cb96be708d4e` | enterprise-postgres | Apache-2.0 (CNPG) over PostgreSQL-licensed Postgres and extensions | Exact multi-architecture CNPG PostgreSQL 17.11 standard Bookworm base. It already contains pgvector; the derivative verifies that package and adds only Synveda's support files. |
+| `rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc` | gateway, Compose PostgreSQL, Keycloak and CloudNativePG mounted-input helper build stages | MIT/Apache-2.0 toolchain; build-only system compiler | Matches `rust-toolchain.toml` and the Debian 12 runtime ABI; also provides the digest-pinned native C compiler so no mutable apt compiler packages enter helper builds. |
 | `node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5` | gateway console stage | MIT | Builds the console bundle. Never in the runtime stage. |
 | `debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171` | gateway runtime stage | various, all Debian-main | Runtime: `ca-certificates` for OIDC discovery, `curl` for the healthcheck. |
 | `postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0` | Compose PostgreSQL image | PostgreSQL | Exact multi-architecture upstream PostgreSQL 17.11 base for the bundled reference database. |
@@ -144,14 +143,14 @@ bar, not none.
 | `node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5` | `demos/fixtures/ops-2/client-pod.yaml` | MIT | Plays the browser half of `synveda login`. |
 | CloudNativePG operator | applied by the demo, version pinned in it | Apache-2.0 | Installed separately by design; the chart renders a `Cluster` for it. |
 
-## Extensions compiled into `synveda/enterprise-postgres`
+## Extensions available in `synveda/enterprise-postgres`
 
 Not images, and not covered by `cargo-deny` either, so they are recorded
 in the same place:
 
 | Extension | Version | Licence |
 |---|---|---|
-| pgvector | PGDG `postgresql-17-pgvector` | PostgreSQL |
+| pgvector | PGDG `postgresql-17-pgvector` 0.8.6-1.pgdg12+1, supplied by the pinned CNPG base | PostgreSQL |
 
 Epoch 3 uses no other Postgres extension. Bounded graph expansion, capture
 leasing and durable operations use ordinary tenant-bound tables.
