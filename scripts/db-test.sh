@@ -871,7 +871,7 @@ if [ "$fast_fixture" = true ]; then
         status=64
       fi
       if [ "$status" -eq 0 ]; then
-        env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+        env -u SYNVEDA_DB_TEST_SECRETS_DIR -u SYNVEDA_DB_TEST_TASK \
           SYNVEDA_EXACT_ROLE_DEMO=1 \
           SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
           SQLX_OFFLINE=true \

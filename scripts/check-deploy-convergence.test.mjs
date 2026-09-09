@@ -2413,6 +2413,10 @@ test("shared demos execute through the fresh exact-role fixture", () => {
       'scripts/cargo-with-database-url-file sh "$demo_script" "$@"',
       'sh "$demo_script" "$@"',
     ),
+    dbTest.replace(
+      "env -u SYNVEDA_DB_TEST_SECRETS_DIR -u SYNVEDA_DB_TEST_TASK",
+      "env -u SYNVEDA_DB_TEST_SECRETS_DIR",
+    ),
   ]) {
     assert.notDeepEqual(demoFixtureFindings(mutated, harness, ci), []);
   }

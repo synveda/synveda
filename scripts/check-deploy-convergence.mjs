@@ -201,7 +201,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "6320b76e60c9709c25f8148c51833a36ee2e2b60a44a1f8a13e059f8140e4dd8"
+    "93e42ffb6a3af9f5f0f585230869172ab5648c7e94c85a0774d13317997b64d1"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }
@@ -1084,6 +1084,7 @@ export function demoFixtureFindings(dbTest, demoHarness, ciWorkflow) {
       ? dbTest.slice(dispatchStart, dispatchEnd)
       : "";
   for (const marker of [
+    "env -u SYNVEDA_DB_TEST_SECRETS_DIR -u SYNVEDA_DB_TEST_TASK",
     "SYNVEDA_EXACT_ROLE_DEMO=1",
     "SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file",
     "SQLX_OFFLINE=true",
