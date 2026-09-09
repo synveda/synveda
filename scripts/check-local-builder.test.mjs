@@ -35,6 +35,7 @@ function fixture(content = valid, mode = 0o600) {
   const root = mkdtempSync(join(tmpdir(), "synveda-builder-check-"));
   const input = join(root, "inspect.txt");
   writeFileSync(input, content, { mode });
+  chmodSync(input, mode);
   return { root, input };
 }
 
