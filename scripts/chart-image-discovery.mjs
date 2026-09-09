@@ -91,10 +91,10 @@ export function helmComputedImageReferences(source) {
   ];
   for (const [, body] of definitions) {
     const computed = body.match(
-      /default \(printf "([^"\s]+):%s" \.Chart\.AppVersion\) \.Values\.[A-Za-z0-9.]+/,
+      /default \(printf "([^"\s]+):([^"\s%]*)%s" \.Chart\.AppVersion\) \.Values\.[A-Za-z0-9.]+/,
     );
     if (computed === null) continue;
-    const repository = computed[1];
+    const [, repository, tagPrefix] = computed;
     if (
       repository.includes("$") ||
       repository.includes("@") ||
@@ -104,7 +104,13 @@ export function helmComputedImageReferences(source) {
     ) {
       refuse("helm-computed-image-repository");
     }
-    references.push(`${repository}:<appVersion>`);
+    if (
+      tagPrefix !== "" &&
+      !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(tagPrefix)
+    ) {
+      refuse("helm-computed-image-tag-prefix");
+    }
+    references.push(`${repository}:${tagPrefix}<appVersion>`);
   }
   return references;
 }
@@ -112,9 +118,9 @@ export function helmComputedImageReferences(source) {
 export function releaseWorkflowImageReferences(source) {
   return [
     ...source.matchAll(
-      /^\s*tags:\s+(ghcr\.io\/synveda\/[a-z0-9]+(?:[._-][a-z0-9]+)*):\$\{\{ needs\.version\.outputs\.version \}\}-\$\{\{ matrix\.arch \}\}\s*$/gm,
+      /^\s*tags:\s+(ghcr\.io\/synveda\/[a-z0-9]+(?:[._-][a-z0-9]+)*):((?:[A-Za-z0-9_][A-Za-z0-9_.-]*)?)\$\{\{ needs\.version\.outputs\.version \}\}-\$\{\{ matrix\.arch \}\}\s*$/gm,
     ),
-  ].map(([, repository]) => `${repository}:<version>`);
+  ].map(([, repository, tagPrefix]) => `${repository}:${tagPrefix}<version>`);
 }
 
 export function isDigestPinnedExternalImage(reference) {

@@ -311,7 +311,7 @@ jobs:
           file: deploy/helm/postgres/Dockerfile
           platforms: ${{ matrix.platform }}
           push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: ghcr.io/synveda/enterprise-postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          tags: ghcr.io/synveda/enterprise-postgres:17.11-synveda-${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=enterprise-postgres-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=enterprise-postgres-${{ matrix.arch }}
       - name: Bundled Keycloak
@@ -404,13 +404,19 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ needs.version.outputs.version }}"
-          for image in gateway postgres enterprise-postgres keycloak proxy; do
+          for image in gateway postgres keycloak proxy; do
             docker buildx imagetools create \
               --tag "ghcr.io/synveda/$image:$version" \
               "ghcr.io/synveda/$image:$version-amd64" \
               "ghcr.io/synveda/$image:$version-arm64"
             docker buildx imagetools inspect "ghcr.io/synveda/$image:$version"
           done
+          cnpg_tag="17.11-synveda-$version"
+          docker buildx imagetools create \
+            --tag "ghcr.io/synveda/enterprise-postgres:$cnpg_tag" \
+            "ghcr.io/synveda/enterprise-postgres:$cnpg_tag-amd64" \
+            "ghcr.io/synveda/enterprise-postgres:$cnpg_tag-arm64"
+          docker buildx imagetools inspect "ghcr.io/synveda/enterprise-postgres:$cnpg_tag"
       - name: Publish
         if: needs.version.outputs.publish == 'true'
         env:
@@ -444,7 +450,7 @@ jobs:
 
           Images: \`ghcr.io/synveda/gateway:${{ needs.version.outputs.version }}\`,
           \`ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}\`, and
-          \`ghcr.io/synveda/enterprise-postgres:${{ needs.version.outputs.version }}\`.
+          \`ghcr.io/synveda/enterprise-postgres:17.11-synveda-${{ needs.version.outputs.version }}\`.
           The bundled reference dependencies are
           \`ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}\` and
           \`ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}\`.

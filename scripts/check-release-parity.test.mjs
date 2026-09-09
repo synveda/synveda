@@ -165,8 +165,8 @@ test("release workflow scopes authority and binds the chart plus five images", (
     ),
     current.replace("- name: Bundled Keycloak", "- name: Omitted Keycloak"),
     current.replace(
-      "for image in gateway postgres enterprise-postgres keycloak proxy; do",
-      "for image in gateway postgres enterprise-postgres keycloak; do",
+      "for image in gateway postgres keycloak proxy; do",
+      "for image in gateway postgres keycloak; do",
     ),
     current.replace(
       "          - arch: arm64\n            platform: linux/arm64\n            runs-on: ubuntu-24.04-arm\n",
@@ -211,12 +211,12 @@ test("release workflow scopes authority and binds the chart plus five images", (
       "      - name: Join the per-architecture image tags\n",
     ),
     current.replace(
-      '          version="${{ needs.version.outputs.version }}"\n          for image in gateway postgres enterprise-postgres keycloak proxy; do',
-      "          version=latest\n          for image in gateway postgres enterprise-postgres keycloak proxy; do",
+      '          version="${{ needs.version.outputs.version }}"\n          for image in gateway postgres keycloak proxy; do',
+      "          version=latest\n          for image in gateway postgres keycloak proxy; do",
     ),
     current.replace(
-      '          version="${{ needs.version.outputs.version }}"\n          for image in gateway postgres enterprise-postgres keycloak proxy; do',
-      '          version="${{ needs.version.outputs.version }}"\n          version=latest\n          for image in gateway postgres enterprise-postgres keycloak proxy; do',
+      '          version="${{ needs.version.outputs.version }}"\n          for image in gateway postgres keycloak proxy; do',
+      '          version="${{ needs.version.outputs.version }}"\n          version=latest\n          for image in gateway postgres keycloak proxy; do',
     ),
     current.replace(
       '--tag "ghcr.io/synveda/$image:$version"',
@@ -226,6 +226,7 @@ test("release workflow scopes authority and binds the chart plus five images", (
       '"ghcr.io/synveda/$image:$version-arm64"',
       '"ghcr.io/synveda/$image:$version-amd64"',
     ),
+    current.replace('cnpg_tag="17.11-synveda-$version"', 'cnpg_tag="$version"'),
     current.replace("sha256sum synveda-*.tar.gz synveda-*.tgz", "sha256sum synveda-*.tar.gz"),
     current.replace('"synveda-$version.tgz"; do', '"synveda-plugin-$version.tar.gz"; do'),
     current.replace(
@@ -255,7 +256,10 @@ test("workspace and chart default to one versioned GHCR image pair", () => {
     current.with(2, current[2].replace('  image: ""', "  image: latest")),
     current.with(
       3,
-      current[3].replace("ghcr.io/synveda/enterprise-postgres:%s", "synveda/postgres:17"),
+      current[3].replace(
+        "ghcr.io/synveda/enterprise-postgres:17.11-synveda-%s",
+        "synveda/postgres:17-%s",
+      ),
     ),
     current.with(3, current[3].replace('trimAll "-._"', 'trimSuffix "-"')),
     current.with(
@@ -298,7 +302,7 @@ test("kind acceptance builds and loads the chart's exact image coordinates", () 
     [demo.replace("ghcr.io/synveda/gateway:$IMAGE_TAG", "synveda/gateway:$IMAGE_TAG"), client],
     [
       demo.replace(
-        "ghcr.io/synveda/enterprise-postgres:$IMAGE_TAG",
+        "ghcr.io/synveda/enterprise-postgres:17.11-synveda-$IMAGE_TAG",
         "synveda/enterprise-postgres:17",
       ),
       client,

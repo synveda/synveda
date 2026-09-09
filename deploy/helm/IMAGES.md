@@ -82,7 +82,7 @@ evidence that any tag or digest was published.
 |---|---|---|---|
 | `ghcr.io/synveda/gateway:<version>` | `gateway`, retained profile | ours | The product image also used by the chart. The profile lifecycle is withdrawn during CPR-45 and is not a default install. |
 | `ghcr.io/synveda/postgres:<version>` | `postgres` | ours (see bases) | Postgres 17 with pgvector, from `deploy/compose/postgres/Dockerfile`. The same epoch-3 extension shape is used by dev, release and Helm. |
-| `ghcr.io/synveda/enterprise-postgres:<version>` | Helm/CloudNativePG release input | ours (see bases) | The CloudNativePG data-plane image built from `deploy/helm/postgres/Dockerfile`; the chart expresses the same version as `<appVersion>`. |
+| `ghcr.io/synveda/enterprise-postgres:17.11-synveda-<version>` | Helm/CloudNativePG release input | ours (see bases) | The CloudNativePG data-plane image built from `deploy/helm/postgres/Dockerfile`; its tag begins with the real PostgreSQL version required for direct `imageName` validation and retains the Synveda release version as its suffix. |
 | `ghcr.io/synveda/keycloak:<version>` | bundled reference identity provider | ours over Apache-2.0 Keycloak | The optimized production-mode Keycloak image built from `deploy/compose/keycloak/Dockerfile`; it adds no provider-specific product authority. |
 | `ghcr.io/synveda/proxy:<version>` | reference reverse proxy | ours over Apache-2.0 Caddy | The Caddy image built from `deploy/compose/proxy/Dockerfile` with its inherited file capability removed before non-root runtime. |
 | `ghcr.io/sebadob/rauthy:0.35.2` | `rauthy` | Apache-2.0 | Cutover residue in the withdrawn release profile; not a current provider claim. |
@@ -105,7 +105,7 @@ selection for deterministic packaging evidence only.
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
 | `ghcr.io/synveda/gateway:<appVersion>` | `image.repository` | ours | The product. Both binaries: the gateway serves, the CLI migrates and issues SCIM credentials. Built from `deploy/compose/gateway/Dockerfile`; the release workflow is configured to join its native amd64/arm64 builds under this GHCR coordinate. |
-| `ghcr.io/synveda/enterprise-postgres:<appVersion>` | default `postgres.image` | ours (see bases) | Postgres for CloudNativePG plus pgvector and the shared content-free database bootstrap command. Built from the repository root with `deploy/helm/postgres/Dockerfile`; the release workflow is configured to join its native amd64/arm64 builds under the same application version. |
+| `ghcr.io/synveda/enterprise-postgres:17.11-synveda-<appVersion>` | default `postgres.image` | ours (see bases) | Postgres for CloudNativePG plus pgvector and the shared content-free database bootstrap command. Built from the repository root with `deploy/helm/postgres/Dockerfile`; the leading version satisfies CloudNativePG's direct-image contract and the release workflow joins native amd64/arm64 builds under the paired Synveda application suffix. |
 | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1` | `tei.image`, optional | **read on every bump** | The embedder, when `embedder: tei` and `tei.enabled`. Serves BAAI/bge-m3, whose weights are a separate licence from the server's. |
 
 ## Base images we build on

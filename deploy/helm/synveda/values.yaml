@@ -119,9 +119,12 @@ ingress:
 # renders a Cluster for an operator that is already there.
 postgres:
   # Built from deploy/helm/postgres/Dockerfile: the CNPG base plus pgvector.
-  # Empty means ghcr.io/synveda/enterprise-postgres:<Chart.appVersion>, so the
-  # product and database images are one release unit. An operator may still
-  # supply an exact registry reference (preferably a digest) explicitly.
+  # Empty means
+  # ghcr.io/synveda/enterprise-postgres:17.11-synveda-<Chart.appVersion>.
+  # CloudNativePG requires a direct image tag to begin with its PostgreSQL
+  # version; the Synveda release remains paired in the suffix. An operator may
+  # still supply an exact registry reference (preferably the version-bearing
+  # tag plus a digest) explicitly.
   # Epoch 3 has no queue or graph-extension dependency.
   image: ""
   instances: 3

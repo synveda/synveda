@@ -37,7 +37,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "synveda.postgresImage" -}}
-{{- default (printf "ghcr.io/synveda/enterprise-postgres:%s" .Chart.AppVersion) .Values.postgres.image -}}
+{{- default (printf "ghcr.io/synveda/enterprise-postgres:17.11-synveda-%s" .Chart.AppVersion) .Values.postgres.image -}}
 {{- end -}}
 
 {{- define "synveda.serviceAccountName" -}}

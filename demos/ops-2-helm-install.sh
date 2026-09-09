@@ -51,7 +51,9 @@ FIXTURES=demos/fixtures/ops-2
 IMAGE_TAG=$(awk -F'"' '/^appVersion:/{print $2; exit}' deploy/helm/synveda/Chart.yaml)
 [ -n "$IMAGE_TAG" ] || { echo "no appVersion in deploy/helm/synveda/Chart.yaml" >&2; exit 1; }
 PRODUCT_IMAGE="ghcr.io/synveda/gateway:$IMAGE_TAG"
-CNPG_IMAGE="ghcr.io/synveda/enterprise-postgres:$IMAGE_TAG"
+# CloudNativePG derives compatibility from the leading PostgreSQL version in a
+# direct image tag. The suffix still binds the image to this application build.
+CNPG_IMAGE="ghcr.io/synveda/enterprise-postgres:17.11-synveda-$IMAGE_TAG"
 KEEP=${KEEP:-0}
 REUSE=${REUSE:-0}
 SECRET_SCRATCH=""
