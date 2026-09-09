@@ -1582,7 +1582,7 @@ reconcile_client_scopes() {
                 admin_quiet "$authority_config" "$scope_kind-scope-delete" \
                     delete "$scope_endpoint/$scope_id" -r "$realm"
                 ;;
-            profile=missing|email=missing)
+            basic=missing|profile=missing|email=missing)
                 scope_name=${scope_entry%=missing}
                 admin_to_file "$authority_config" "$state_dir/global-scopes.json" \
                     global-scopes-read get client-scopes -r "$realm"
@@ -1592,7 +1592,7 @@ reconcile_client_scopes() {
                 admin_quiet "$authority_config" "$scope_kind-scope-add" \
                     update "$scope_endpoint/$scope_id" -r "$realm" -n
                 ;;
-            profile=*|email=*)
+            basic=*|profile=*|email=*)
                 scope_id=${scope_entry#*=}
                 is_uuid "$scope_id" || exit 70
                 ;;
@@ -1604,11 +1604,17 @@ reconcile_client_scopes() {
         get "$scope_endpoint" -r "$realm"
     project_to_file "$scope_report" "$scope_kind-scopes-verify" \
         scope-ids "$scope_json" "$scope_kind"
+    basic_seen=false
     profile_seen=false
     email_seen=false
     while IFS= read -r scope_entry; do
         [ -n "$scope_entry" ] || continue
         case "$scope_kind:$scope_entry" in
+            default:basic=*)
+                scope_id=${scope_entry#basic=}
+                is_uuid "$scope_id" || exit 70
+                basic_seen=true
+                ;;
             default:profile=*)
                 scope_id=${scope_entry#profile=}
                 is_uuid "$scope_id" || exit 70
@@ -1623,7 +1629,8 @@ reconcile_client_scopes() {
         esac
     done < "$scope_report"
     if [ "$scope_kind" = default ]; then
-        [ "$profile_seen" = true ] && [ "$email_seen" = true ] || exit 70
+        [ "$basic_seen" = true ] && [ "$profile_seen" = true ] && \
+            [ "$email_seen" = true ] || exit 70
     fi
 }
 

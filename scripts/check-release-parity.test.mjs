@@ -296,33 +296,79 @@ test("all local release consumers validate before deriving filesystem state", ()
 test("kind acceptance builds and loads the chart's exact image coordinates", () => {
   const demo = read("demos/ops-2-helm-install.sh");
   const client = read("demos/fixtures/ops-2/client-pod.yaml");
-  assert.deepEqual(helmAcceptanceFindings(demo, client), []);
+  const keycloak = read("demos/fixtures/ops-2/keycloak.yaml");
+  assert.deepEqual(helmAcceptanceFindings(demo, client, keycloak), []);
 
-  for (const [demoMutant, clientMutant] of [
-    [demo.replace("ghcr.io/synveda/gateway:$IMAGE_TAG", "synveda/gateway:$IMAGE_TAG"), client],
+  for (const [demoMutant, clientMutant, keycloakMutant] of [
+    [
+      demo.replace("ghcr.io/synveda/gateway:$IMAGE_TAG", "synveda/gateway:$IMAGE_TAG"),
+      client,
+      keycloak,
+    ],
     [
       demo.replace(
         "ghcr.io/synveda/enterprise-postgres:17.11-synveda-$IMAGE_TAG",
         "synveda/enterprise-postgres:17",
       ),
       client,
+      keycloak,
     ],
     [
       demo.replace(
-        'kind load docker-image --name "$CLUSTER" "$PRODUCT_IMAGE" "$CNPG_IMAGE"',
+        'kind load docker-image --name "$CLUSTER" "$PRODUCT_IMAGE" "$CNPG_IMAGE" "$KEYCLOAK_IMAGE"',
         'kind load docker-image --name "$CLUSTER" "$PRODUCT_IMAGE"',
       ),
       client,
+      keycloak,
     ],
-    [demo, client.replace("ghcr.io/synveda/gateway", "synveda/gateway")],
+    [
+      demo.replace("ghcr.io/synveda/keycloak:$IMAGE_TAG", "synveda/keycloak:$IMAGE_TAG"),
+      client,
+      keycloak,
+    ],
+    [demo, client.replace("ghcr.io/synveda/gateway", "synveda/gateway"), keycloak],
     [
       demo,
       client.replace(
         "SYNVEDA_INSECURE_DEVELOPMENT_HTTP",
         "SYNVEDA_INSECURE_DEVELOPMENT_HTTP_REMOVED",
       ),
+      keycloak,
+    ],
+    [
+      demo,
+      client.replace("secretName: ops2-keycloak", "secretName: missing-keycloak"),
+      keycloak,
+    ],
+    [
+      demo,
+      client,
+      keycloak.replace('args: ["synveda-realm-supervise"]', 'args: ["start-dev"]'),
+    ],
+    [
+      demo,
+      client,
+      keycloak.replace('args: ["start", "--optimized"]', 'args: ["start-dev"]'),
+    ],
+    [
+      demo,
+      client,
+      keycloak.replace("KC_DB_PASSWORD_FILE", "KC_DB_PASSWORD"),
+    ],
+    [
+      demo,
+      client,
+      keycloak.replace(
+        "              - { key: keycloak_demo_member_password, path: keycloak_demo_member_password }\n        - name: server-secrets",
+        "              - { key: postgres_owner_password, path: postgres_owner_password }\n        - name: server-secrets",
+      ),
+    ],
+    [
+      demo,
+      client,
+      keycloak.replace("publishNotReadyAddresses: true", "publishNotReadyAddresses: false"),
     ],
   ]) {
-    assert.ok(helmAcceptanceFindings(demoMutant, clientMutant).length > 0);
+    assert.ok(helmAcceptanceFindings(demoMutant, clientMutant, keycloakMutant).length > 0);
   }
 });

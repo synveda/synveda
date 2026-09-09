@@ -1,0 +1,322 @@
+# Disposable external-OIDC fixture for the Helm contract (OPS-2, CPR-45).
+# It reuses the exact optimized Keycloak image and realm convergence shipped by
+# the Compose reference. Keycloak owns a physically separate PostgreSQL
+# instance here; the Helm chart continues to consume only generic OIDC.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-postgres-init
+  namespace: synveda-test
+data:
+  01-keycloak.sql: |
+    \set ON_ERROR_STOP on
+    set password_encryption = 'scram-sha-256';
+    create role keycloak with login inherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+    create temporary table pg_temp.keycloak_credential (
+      secret text not null
+    );
+    \copy pg_temp.keycloak_credential(secret) from '/run/secrets/keycloak_database_password'
+    select 1 / case when count(*) = 1
+      and bool_and(octet_length(secret) between 32 and 4096)
+      and bool_and(secret ~ '^[A-Za-z0-9._~-]+$')
+      then 1 else 0 end
+      from pg_temp.keycloak_credential;
+    do $credential$
+    declare
+      database_password text;
+    begin
+      select secret into strict database_password from pg_temp.keycloak_credential;
+      execute format('alter role keycloak password %L valid until ''infinity''', database_password);
+    exception when others then
+      raise exception using errcode = 'P0001', message = 'Keycloak credential setup was refused';
+    end
+    $credential$;
+    create database keycloak with owner keycloak template template0 encoding 'UTF8';
+    revoke connect, temporary on database keycloak from public;
+    revoke connect, temporary on database postgres from public;
+    revoke connect, temporary on database template1 from public;
+    \connect keycloak
+    revoke create on schema public from public;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-postgres
+  namespace: synveda-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak-postgres
+  template:
+    metadata:
+      labels:
+        app: keycloak-postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+          env:
+            - { name: POSTGRES_USER, value: postgres }
+            - { name: POSTGRES_DB, value: postgres }
+            - { name: POSTGRES_PASSWORD_FILE, value: /run/secrets/postgres_owner_password }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "postgres"]
+            periodSeconds: 3
+            failureThreshold: 60
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "postgres"]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+            - { name: source-secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: run
+          emptyDir:
+            medium: Memory
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi
+        - name: source-secrets
+          secret:
+            secretName: ops2-keycloak
+            defaultMode: 288
+            items:
+              - { key: postgres_owner_password, path: postgres_owner_password }
+              - { key: keycloak_database_password, path: keycloak_database_password }
+        - name: init
+          configMap:
+            name: keycloak-postgres-init
+            defaultMode: 292
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-postgres
+  namespace: synveda-test
+spec:
+  selector:
+    app: keycloak-postgres
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: synveda-test
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-private-inputs
+          image: ghcr.io/synveda/keycloak:__IMAGE_TAG__
+          imagePullPolicy: Never
+          command: ["/bin/bash", "-p", "-ec"]
+          args:
+            - |
+              umask 077
+              mkdir -p /server-secrets /convergence-secrets /gate/keycloak-public-gate
+              chmod u=rwx,go=,a-s /gate/keycloak-public-gate
+              cp /source/keycloak_database_password /server-secrets/keycloak_database_password
+              cp /source/keycloak_admin_username /server-secrets/keycloak_admin_username
+              cp /source/keycloak_admin_password /server-secrets/keycloak_admin_password
+              cp /source/keycloak_admin_username /convergence-secrets/keycloak_admin_username
+              cp /source/keycloak_admin_password /convergence-secrets/keycloak_admin_password
+              cp /source/keycloak_convergence_admin_password /convergence-secrets/keycloak_convergence_admin_password
+              cp /source/keycloak_demo_admin_password /convergence-secrets/keycloak_demo_admin_password
+              cp /source/keycloak_demo_member_password /convergence-secrets/keycloak_demo_member_password
+              chmod 0600 /server-secrets/* /convergence-secrets/*
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - { name: source-secrets, mountPath: /source, readOnly: true }
+            - { name: server-secrets, mountPath: /server-secrets }
+            - { name: convergence-secrets, mountPath: /convergence-secrets }
+            - { name: gate, mountPath: /gate }
+      containers:
+        - name: keycloak
+          image: ghcr.io/synveda/keycloak:__IMAGE_TAG__
+          imagePullPolicy: Never
+          args: ["start", "--optimized"]
+          env:
+            - { name: KC_DB, value: postgres }
+            - { name: KC_DB_URL, value: "jdbc:postgresql://keycloak-postgres:5432/keycloak" }
+            - { name: KC_DB_USERNAME, value: keycloak }
+            - { name: KC_DB_PASSWORD_FILE, value: /run/secrets/keycloak_database_password }
+            - { name: KC_BOOTSTRAP_ADMIN_USERNAME_FILE, value: /run/secrets/keycloak_admin_username }
+            - { name: KC_BOOTSTRAP_ADMIN_PASSWORD_FILE, value: /run/secrets/keycloak_admin_password }
+            - { name: KC_HEALTH_ENABLED, value: "true" }
+            - { name: KC_METRICS_ENABLED, value: "true" }
+            - { name: KC_HTTP_ENABLED, value: "true" }
+            - { name: KC_HTTP_PORT, value: "8080" }
+            - { name: KC_HTTP_MANAGEMENT_PORT, value: "9000" }
+            - { name: KC_HOSTNAME, value: "http://keycloak.synveda-test.svc.cluster.local:8080" }
+            - { name: KC_HOSTNAME_STRICT, value: "true" }
+            - { name: KC_CACHE, value: local }
+            - { name: KC_LOG_LEVEL_ORG_KEYCLOAK_SERVICES, value: warn }
+            - { name: SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH, value: /run/synveda/keycloak-public-gate }
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: management, containerPort: 9000 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          startupProbe:
+            exec:
+              command: ["/opt/keycloak/bin/synveda-keycloak-health", "local"]
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["/opt/keycloak/bin/synveda-keycloak-health", "local"]
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["/opt/keycloak/bin/synveda-keycloak-health", "local"]
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - { name: server-secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: gate, mountPath: /run/synveda }
+            - { name: keycloak-tmp, mountPath: /opt/keycloak/data/tmp }
+            - { name: server-tmp, mountPath: /tmp }
+        - name: realm-convergence
+          image: ghcr.io/synveda/keycloak:__IMAGE_TAG__
+          imagePullPolicy: Never
+          args: ["synveda-realm-supervise"]
+          env:
+            - { name: KC_BOOTSTRAP_ADMIN_USERNAME_FILE, value: /run/secrets/keycloak_admin_username }
+            - { name: KC_BOOTSTRAP_ADMIN_PASSWORD_FILE, value: /run/secrets/keycloak_admin_password }
+            - { name: SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE, value: /run/secrets/keycloak_convergence_admin_password }
+            - { name: SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE, value: /run/secrets/keycloak_demo_admin_password }
+            - { name: SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE, value: /run/secrets/keycloak_demo_member_password }
+            - { name: SYNVEDA_KEYCLOAK_DEMO_ENABLED, value: "true" }
+            - { name: SYNVEDA_PUBLIC_APP_URL, value: "http://synveda.synveda-test.svc.cluster.local:8120" }
+            - { name: SYNVEDA_PUBLIC_AUTH_URL, value: "http://keycloak.synveda-test.svc.cluster.local:8080" }
+            - { name: SYNVEDA_KEYCLOAK_SSL_REQUIRED, value: NONE }
+            - { name: SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH, value: /run/synveda/keycloak-public-gate }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            exec:
+              command: ["/opt/keycloak/bin/synveda-generation-gate", "ready"]
+            periodSeconds: 3
+            failureThreshold: 60
+          resources:
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - { name: convergence-secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: gate, mountPath: /run/synveda }
+            - { name: convergence-tmp, mountPath: /tmp }
+      volumes:
+        - name: source-secrets
+          secret:
+            secretName: ops2-keycloak
+            defaultMode: 288
+            items:
+              - { key: keycloak_database_password, path: keycloak_database_password }
+              - { key: keycloak_admin_username, path: keycloak_admin_username }
+              - { key: keycloak_admin_password, path: keycloak_admin_password }
+              - { key: keycloak_convergence_admin_password, path: keycloak_convergence_admin_password }
+              - { key: keycloak_demo_admin_password, path: keycloak_demo_admin_password }
+              - { key: keycloak_demo_member_password, path: keycloak_demo_member_password }
+        - name: server-secrets
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Ki
+        - name: convergence-secrets
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Ki
+        - name: gate
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: keycloak-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 128Mi
+        - name: server-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: convergence-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: synveda-test
+spec:
+  # Realm convergence is part of pod readiness and reaches this stable private
+  # name, so the server endpoint must exist while the pod is still converging.
+  publishNotReadyAddresses: true
+  selector:
+    app: keycloak
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+    - { name: management, port: 9000, targetPort: management }

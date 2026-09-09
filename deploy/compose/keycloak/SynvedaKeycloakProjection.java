@@ -512,7 +512,10 @@ public final class SynvedaKeycloakProjection {
         text(node, "baseUrl", appUrl + "/console/");
         stringSet(node, "redirectUris", Set.of(appUrl + "/auth/callback"));
         stringSet(node, "webOrigins", Set.of(appUrl));
-        stringSet(node, "defaultClientScopes", Set.of("email", "profile"));
+        // Keycloak's built-in `basic` scope owns the standard OIDC `sub`
+        // mapper. Removing it produces an access token that cannot identify
+        // its subject even though the ID token remains valid.
+        stringSet(node, "defaultClientScopes", Set.of("basic", "email", "profile"));
         stringSet(node, "optionalClientScopes", Set.of());
         JsonNode attributes = node.path("attributes");
         requireObject(attributes);
@@ -954,7 +957,7 @@ public final class SynvedaKeycloakProjection {
     private static void scopeIds(JsonNode node, String kind) {
         requireArray(node);
         List<String> desiredOrder = switch (kind) {
-            case "default" -> List.of("email", "profile");
+            case "default" -> List.of("basic", "email", "profile");
             case "optional" -> List.of();
             default -> throw new IllegalArgumentException();
         };

@@ -58,10 +58,31 @@ refuse target-realm "$test_dir/master-realm.json"
 
 client_app=http://app.synveda.test:8080
 printf '%s\n' \
-    '{"clientId":"synveda","enabled":true,"protocol":"openid-connect","publicClient":true,"bearerOnly":false,"standardFlowEnabled":true,"implicitFlowEnabled":false,"directAccessGrantsEnabled":false,"serviceAccountsEnabled":false,"authorizationServicesEnabled":false,"consentRequired":false,"fullScopeAllowed":false,"frontchannelLogout":true,"rootUrl":"http://app.synveda.test:8080","baseUrl":"http://app.synveda.test:8080/console/","redirectUris":["http://app.synveda.test:8080/auth/callback"],"webOrigins":["http://app.synveda.test:8080"],"defaultClientScopes":["email","profile"],"optionalClientScopes":[],"attributes":{"pkce.code.challenge.method":"S256","use.refresh.tokens":"true","client_credentials.use_refresh_token":"false","dpop.bound.access.tokens":"false","exclude.session.state.from.auth.response":"false","exclude.issuer.from.auth.response":"false","realm_client":"false","backchannel.logout.session.required":"true","backchannel.logout.revoke.offline.tokens":"false","client.secret.creation.time":"1"}}' \
+    '{"clientId":"synveda","enabled":true,"protocol":"openid-connect","publicClient":true,"bearerOnly":false,"standardFlowEnabled":true,"implicitFlowEnabled":false,"directAccessGrantsEnabled":false,"serviceAccountsEnabled":false,"authorizationServicesEnabled":false,"consentRequired":false,"fullScopeAllowed":false,"frontchannelLogout":true,"rootUrl":"http://app.synveda.test:8080","baseUrl":"http://app.synveda.test:8080/console/","redirectUris":["http://app.synveda.test:8080/auth/callback"],"webOrigins":["http://app.synveda.test:8080"],"defaultClientScopes":["basic","email","profile"],"optionalClientScopes":[],"attributes":{"pkce.code.challenge.method":"S256","use.refresh.tokens":"true","client_credentials.use_refresh_token":"false","dpop.bound.access.tokens":"false","exclude.session.state.from.auth.response":"false","exclude.issuer.from.auth.response":"false","realm_client":"false","backchannel.logout.session.required":"true","backchannel.logout.revoke.offline.tokens":"false","client.secret.creation.time":"1"}}' \
     > "$test_dir/client.json"
 test_name=client-callback-contract
 accept '' client "$test_dir/client.json" "$client_app"
+sed 's/"basic",//' "$test_dir/client.json" > "$test_dir/client-no-sub-scope.json"
+test_name=client-sub-scope-refusal
+refuse client "$test_dir/client-no-sub-scope.json" "$client_app"
+printf '%s\n' \
+    '[{"id":"00000000-0000-4000-8000-000000000003","name":"profile"},{"id":"00000000-0000-4000-8000-000000000001","name":"basic"},{"id":"00000000-0000-4000-8000-000000000002","name":"email"}]' \
+    > "$test_dir/default-scopes.json"
+test_name=default-client-scopes
+accept 'basic=00000000-0000-4000-8000-000000000001
+email=00000000-0000-4000-8000-000000000002
+profile=00000000-0000-4000-8000-000000000003' \
+    scope-ids "$test_dir/default-scopes.json" default
+printf '%s\n' \
+    '[{"id":"00000000-0000-4000-8000-000000000003","name":"profile"},{"id":"00000000-0000-4000-8000-000000000002","name":"email"}]' \
+    > "$test_dir/default-scopes-without-basic.json"
+# The projection reports a missing standard subject scope instead of silently
+# treating an unusable access-token contract as converged.
+test_name=default-client-sub-scope-missing
+accept 'basic=missing
+email=00000000-0000-4000-8000-000000000002
+profile=00000000-0000-4000-8000-000000000003' \
+    scope-ids "$test_dir/default-scopes-without-basic.json" default
 sed 's/"exclude.issuer.from.auth.response":"false"/"exclude.issuer.from.auth.response":"true"/' \
     "$test_dir/client.json" > "$test_dir/client-excludes-issuer.json"
 test_name=client-issuer-response-refusal

@@ -139,7 +139,8 @@ bar, not none.
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
-| `ghcr.io/sebadob/rauthy:0.35.2` | `demos/fixtures/ops-2/idp.yaml` | Apache-2.0 | The test issuer, at a Service DNS name. Same version the dev compose runs. |
+| `ghcr.io/synveda/keycloak:<appVersion>` | `demos/fixtures/ops-2/keycloak.yaml` | ours over Apache-2.0 Keycloak | The same optimized production-mode image as the reference deployment, at a private Service DNS name. |
+| `postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0` | `demos/fixtures/ops-2/keycloak.yaml` | PostgreSQL | Disposable physically separate database proving the Helm fixture does not place Keycloak tables or authority in Synveda's CloudNativePG cluster. |
 | `node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5` | `demos/fixtures/ops-2/client-pod.yaml` | MIT | Plays the browser half of `synveda login`. |
 | CloudNativePG operator | applied by the demo, version pinned in it | Apache-2.0 | Installed separately by design; the chart renders a `Cluster` for it. |
 

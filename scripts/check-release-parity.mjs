@@ -315,10 +315,11 @@ export function versionBoundaryFindings(shared, installer, packagers) {
   return findings;
 }
 
-export function helmAcceptanceFindings(demo, clientPod) {
+export function helmAcceptanceFindings(demo, clientPod, keycloakFixture) {
   const findings = [];
   for (const [name, marker] of [
     ["product coordinate", 'PRODUCT_IMAGE="ghcr.io/synveda/gateway:$IMAGE_TAG"'],
+    ["Keycloak coordinate", 'KEYCLOAK_IMAGE="ghcr.io/synveda/keycloak:$IMAGE_TAG"'],
     [
       "CloudNativePG coordinate",
       'CNPG_IMAGE="ghcr.io/synveda/enterprise-postgres:17.11-synveda-$IMAGE_TAG"',
@@ -332,8 +333,12 @@ export function helmAcceptanceFindings(demo, clientPod) {
       'docker build -t "$CNPG_IMAGE" -f deploy/helm/postgres/Dockerfile .',
     ],
     [
+      "Keycloak build",
+      'docker build -t "$KEYCLOAK_IMAGE" -f deploy/compose/keycloak/Dockerfile .',
+    ],
+    [
       "kind image load",
-      'kind load docker-image --name "$CLUSTER" "$PRODUCT_IMAGE" "$CNPG_IMAGE"',
+      'kind load docker-image --name "$CLUSTER" "$PRODUCT_IMAGE" "$CNPG_IMAGE" "$KEYCLOAK_IMAGE"',
     ],
   ]) {
     if (!demo.includes(marker)) findings.push(`Helm acceptance ${name} has drifted`);
@@ -347,6 +352,47 @@ export function helmAcceptanceFindings(demo, clientPod) {
     )
   ) {
     findings.push("Helm acceptance client does not explicitly admit its disposable HTTP origin");
+  }
+  if (!clientPod.includes("secretName: ops2-keycloak")) {
+    findings.push("Helm acceptance client does not mount the Keycloak demo credential Secret");
+  }
+  for (const [name, marker] of [
+    ["optimized Keycloak image", "image: ghcr.io/synveda/keycloak:__IMAGE_TAG__"],
+    ["production-mode Keycloak command", 'args: ["start", "--optimized"]'],
+    ["isolated Keycloak database", "name: keycloak-postgres"],
+    ["file-only PostgreSQL owner credential", "POSTGRES_PASSWORD_FILE"],
+    ["file-only Keycloak database credential", "KC_DB_PASSWORD_FILE"],
+    ["realm supervisor", 'args: ["synveda-realm-supervise"]'],
+    ["generation-fence reachability", "publishNotReadyAddresses: true"],
+    [
+      "exact issuer host",
+      'KC_HOSTNAME, value: "http://keycloak.synveda-test.svc.cluster.local:8080"',
+    ],
+  ]) {
+    if (!keycloakFixture.includes(marker)) {
+      findings.push(`Helm acceptance Keycloak ${name} has drifted`);
+    }
+  }
+  if ((keycloakFixture.match(/image: ghcr\.io\/synveda\/keycloak:__IMAGE_TAG__/g) ?? []).length !== 3) {
+    findings.push("Helm acceptance does not use one Keycloak image for preparation, server and convergence");
+  }
+  const runtimeSecretVolume = keycloakFixture.match(
+    /        - name: source-secrets\n          secret:\n            secretName: ops2-keycloak\n            defaultMode: 288\n            items:\n(?:              - \{[^\n]+\}\n)+(?=        - name: server-secrets)/,
+  )?.[0] ?? "";
+  for (const key of [
+    "keycloak_database_password",
+    "keycloak_admin_username",
+    "keycloak_admin_password",
+    "keycloak_convergence_admin_password",
+    "keycloak_demo_admin_password",
+    "keycloak_demo_member_password",
+  ]) {
+    if (!runtimeSecretVolume.includes(`- { key: ${key}, path: ${key} }`)) {
+      findings.push(`Helm acceptance Keycloak init cannot read ${key}`);
+    }
+  }
+  if (runtimeSecretVolume.includes("postgres_owner_password")) {
+    findings.push("Helm acceptance Keycloak init can read the PostgreSQL owner credential");
   }
   return findings;
 }
@@ -474,6 +520,7 @@ export function main() {
     ...helmAcceptanceFindings(
       read("demos/ops-2-helm-install.sh"),
       read("demos/fixtures/ops-2/client-pod.yaml"),
+      read("demos/fixtures/ops-2/keycloak.yaml"),
     ),
   ];
   if (!version) findings.push("workspace release version is missing");

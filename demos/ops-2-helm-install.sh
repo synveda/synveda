@@ -51,6 +51,7 @@ FIXTURES=demos/fixtures/ops-2
 IMAGE_TAG=$(awk -F'"' '/^appVersion:/{print $2; exit}' deploy/helm/synveda/Chart.yaml)
 [ -n "$IMAGE_TAG" ] || { echo "no appVersion in deploy/helm/synveda/Chart.yaml" >&2; exit 1; }
 PRODUCT_IMAGE="ghcr.io/synveda/gateway:$IMAGE_TAG"
+KEYCLOAK_IMAGE="ghcr.io/synveda/keycloak:$IMAGE_TAG"
 # CloudNativePG derives compatibility from the leading PostgreSQL version in a
 # direct image tag. The suffix still binds the image to this application build.
 CNPG_IMAGE="ghcr.io/synveda/enterprise-postgres:17.11-synveda-$IMAGE_TAG"
@@ -88,7 +89,6 @@ diagnostics() {
 }
 
 cleanup() {
-  [ -n "${PORT_FORWARD_PID:-}" ] && kill "$PORT_FORWARD_PID" 2>/dev/null || true
   if [ -n "$SECRET_SCRATCH" ] && [ -d "$SECRET_SCRATCH" ]; then
     rm -rf -- "$SECRET_SCRATCH"
   fi
@@ -125,12 +125,12 @@ echo "==> building the product image (this is the slow part; layers cache)"
 docker build -t "$PRODUCT_IMAGE" -f deploy/compose/gateway/Dockerfile .
 echo "==> building the enterprise Postgres image (CNPG base + pgvector)"
 docker build -t "$CNPG_IMAGE" -f deploy/helm/postgres/Dockerfile .
-echo "==> loading both into the cluster"
-kind load docker-image --name "$CLUSTER" "$PRODUCT_IMAGE" "$CNPG_IMAGE"
-# Two multi-stage Rust builds leave a build cache the size of the images
-# themselves, on a runner that then has to hold a Postgres cluster's
-# volumes. Reclaiming it is free here and is the difference between a
-# scheduled pod and a Pending one.
+echo "==> building the optimized Keycloak image"
+docker build -t "$KEYCLOAK_IMAGE" -f deploy/compose/keycloak/Dockerfile .
+echo "==> loading the exact release-coordinate images into the cluster"
+kind load docker-image --name "$CLUSTER" "$PRODUCT_IMAGE" "$CNPG_IMAGE" "$KEYCLOAK_IMAGE"
+# Multi-stage image builds leave a large cache on a runner that must still
+# hold two database planes. The images themselves are already loaded in kind.
 docker builder prune --force >/dev/null 2>&1 || true
 
 # ── the operator ─────────────────────────────────────────────────────────
@@ -150,33 +150,72 @@ kubectl wait --for=condition=Available --timeout=300s \
   -n cnpg-system deployment/cnpg-controller-manager ||
   fail "the CloudNativePG operator never became available"
 
-# ── the test issuer ──────────────────────────────────────────────────────
-echo "==> the test issuer (Rauthy, at a Service DNS name)"
-kubectl apply -f "$FIXTURES/idp.yaml" >/dev/null
-kubectl rollout status -n "$NS" deployment/idp --timeout=300s ||
-  fail "the test issuer never became ready"
-
-# Administration over a port-forward; the *login* is what has to happen
-# inside the cluster, and does.
-kubectl port-forward -n "$NS" svc/idp 18080:8080 >/dev/null 2>&1 &
-PORT_FORWARD_PID=$!
-for _ in $(seq 1 60); do
-  curl -fsS http://127.0.0.1:18080/auth/v1/health >/dev/null 2>&1 && break
-  sleep 1
-done
-curl -fsS http://127.0.0.1:18080/auth/v1/health >/dev/null 2>&1 ||
-  fail "could not reach the test issuer over the port-forward"
-
 PUBLIC_URL=http://synveda.synveda-test.svc.cluster.local:8120
-echo "==> provisioning the client, the admin group and one operator"
-ISSUER=$(node "$FIXTURES/idp-bootstrap.mjs" http://127.0.0.1:18080 "$PUBLIC_URL") ||
-  fail "could not provision the test issuer"
-echo "    issuer, as the discovery document states it: $ISSUER"
+AUTH_URL=http://keycloak.synveda-test.svc.cluster.local:8080
+ISSUER=$AUTH_URL/realms/synveda
 
-# ── the chart ────────────────────────────────────────────────────────────
-echo "==> the disposable key plane"
+# ── private inputs and the test issuer ───────────────────────────────────
+kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 umask 077
 SECRET_SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/synveda-ops2-secrets.XXXXXX")
+
+echo "==> the disposable Keycloak secret plane"
+if kubectl get secret ops2-keycloak -n "$NS" >/dev/null 2>&1; then
+  echo "    preserving the existing Keycloak Secret"
+else
+  printf '%s' 'synveda-bootstrap' > "$SECRET_SCRATCH/keycloak_admin_username"
+  for secret_name in postgres_owner_password keycloak_database_password \
+    keycloak_admin_password keycloak_convergence_admin_password \
+    keycloak_demo_admin_password keycloak_demo_member_password; do
+    openssl rand -hex 32 > "$SECRET_SCRATCH/$secret_name"
+  done
+  chmod 0600 "$SECRET_SCRATCH"/*
+  kubectl create secret generic ops2-keycloak -n "$NS" \
+    --from-file=postgres_owner_password="$SECRET_SCRATCH/postgres_owner_password" \
+    --from-file=keycloak_database_password="$SECRET_SCRATCH/keycloak_database_password" \
+    --from-file=keycloak_admin_username="$SECRET_SCRATCH/keycloak_admin_username" \
+    --from-file=keycloak_admin_password="$SECRET_SCRATCH/keycloak_admin_password" \
+    --from-file=keycloak_convergence_admin_password="$SECRET_SCRATCH/keycloak_convergence_admin_password" \
+    --from-file=keycloak_demo_admin_password="$SECRET_SCRATCH/keycloak_demo_admin_password" \
+    --from-file=keycloak_demo_member_password="$SECRET_SCRATCH/keycloak_demo_member_password" >/dev/null
+fi
+
+echo "==> Keycloak with its isolated PostgreSQL database"
+sed "s/__IMAGE_TAG__/$IMAGE_TAG/g" "$FIXTURES/keycloak.yaml" | kubectl apply -f - >/dev/null
+kubectl rollout status -n "$NS" deployment/keycloak-postgres --timeout=300s ||
+  fail "the Keycloak database never became ready"
+kubectl rollout status -n "$NS" deployment/keycloak --timeout=600s ||
+  fail "Keycloak realm convergence never became ready" \
+    "$(kubectl logs -n "$NS" deployment/keycloak --all-containers --tail=80 2>&1 || true)"
+
+KEYCLOAK_PG_POD=$(kubectl get pods -n "$NS" -l app=keycloak-postgres \
+  -o jsonpath='{.items[0].metadata.name}') || fail "no Keycloak database pod to ask"
+KEYCLOAK_ROLE_FACTS=$(kubectl exec -n "$NS" "$KEYCLOAK_PG_POD" -- \
+  psql -U postgres -d postgres -tAc \
+  "select role.rolcanlogin, role.rolinherit, role.rolsuper,
+          role.rolcreatedb, role.rolcreaterole, role.rolreplication,
+          role.rolbypassrls,
+          exists (select 1 from pg_database database
+                   where database.datname = 'keycloak'
+                     and database.datdba = role.oid),
+          (select count(*) = 1 from pg_database database
+            where database.datdba = role.oid)
+     from pg_roles role where role.rolname = 'keycloak'" \
+  2>/dev/null | tr -d '\r ') || fail "could not inspect the Keycloak database role"
+[ "$KEYCLOAK_ROLE_FACTS" = "t|t|f|f|f|f|f|t|t" ] ||
+  fail "the Keycloak database role is elevated or does not own only its database: $KEYCLOAK_ROLE_FACTS"
+KEYCLOAK_ISOLATION=$(kubectl exec -n "$NS" "$KEYCLOAK_PG_POD" -- \
+  psql -U postgres -d postgres -tAc \
+  "select count(*) filter (where rolname like 'synveda%') from pg_roles;
+   select count(*) from pg_database where datname = 'synveda';" \
+  2>/dev/null | tr '\n' '|' | sed 's/|$//' | tr -d '\r ') ||
+  fail "could not verify the isolated Keycloak database catalogue"
+[ "$KEYCLOAK_ISOLATION" = "0|0" ] ||
+  fail "the Keycloak database plane contains Synveda roles or data: $KEYCLOAK_ISOLATION"
+echo "    non-superuser Keycloak owner; no Synveda role or database"
+
+# ── the chart ────────────────────────────────────────────────────────────
+echo "==> the disposable Synveda key plane"
 if kubectl get secret synveda-kms -n "$NS" >/dev/null 2>&1; then
   echo "    preserving the existing KMS Secret"
 else
@@ -257,6 +296,15 @@ done
   "$(kubectl logs -n "$NS" -l app.kubernetes.io/component=install -c tenant --tail=20 2>&1 || true)"
 echo "    tenant $TENANT_ID"
 
+SYNVEDA_KEYCLOAK_RESIDUE=$(kubectl exec -n "$NS" "$PG_POD" -c postgres -- \
+  psql -U postgres -d synveda -tAc \
+  "select count(*) from pg_roles where rolname = 'keycloak';
+   select count(*) from pg_database where datname = 'keycloak';" \
+  2>/dev/null | tr '\n' '|' | sed 's/|$//' | tr -d '\r ') ||
+  fail "could not verify the Synveda database catalogue"
+[ "$SYNVEDA_KEYCLOAK_RESIDUE" = "0|0" ] ||
+  fail "the external-OIDC Helm data plane contains Keycloak authority: $SYNVEDA_KEYCLOAK_RESIDUE"
+
 echo "==> the trust entry, now that there is a tenant to bind it to"
 kubectl create secret generic synveda-oidc -n "$NS" \
   --from-literal=SYNVEDA_OIDC_ISSUERS="[{\"issuer\":\"$ISSUER\",\"client_id\":\"synveda\",\"audience\":\"synveda-api\",\"tenant\":{\"static\":{\"tenant_id\":\"$TENANT_ID\"}}}]" \
@@ -269,6 +317,55 @@ kubectl rollout status -n "$NS" deployment/synveda --timeout=600s ||
 kubectl rollout status -n "$NS" deployment/synveda-worker --timeout=600s ||
   fail "the core worker never became ready" \
     "$(kubectl logs -n "$NS" deployment/synveda-worker --all-containers --tail=50 2>&1 || true)"
+
+echo "==> Keycloak restart and idempotent realm reconvergence"
+kubectl rollout restart -n "$NS" deployment/keycloak >/dev/null
+kubectl rollout status -n "$NS" deployment/keycloak --timeout=600s ||
+  fail "Keycloak did not reconverge after restart" \
+    "$(kubectl logs -n "$NS" deployment/keycloak --all-containers --tail=80 2>&1 || true)"
+DISCOVERY=$(kubectl exec -n "$NS" deployment/synveda -- \
+  curl --disable --noproxy '*' -fsS --connect-timeout 3 --max-time 10 \
+  "$ISSUER/.well-known/openid-configuration") ||
+  fail "the gateway container could not reach Keycloak discovery after restart"
+DISCOVERY_FACTS=$(printf '%s' "$DISCOVERY" | node -e '
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { input += chunk; });
+  process.stdin.on("end", () => {
+    try {
+      const document = JSON.parse(input);
+      process.stdout.write(`${document.issuer}\n${document.jwks_uri}`);
+    } catch (_) {
+      process.exitCode = 1;
+    }
+  });
+') || fail "Keycloak discovery was not valid JSON"
+OBSERVED_ISSUER=$(printf '%s\n' "$DISCOVERY_FACTS" | sed -n '1p')
+JWKS_URI=$(printf '%s\n' "$DISCOVERY_FACTS" | sed -n '2p')
+[ "$OBSERVED_ISSUER" = "$ISSUER" ] ||
+  fail "Keycloak discovery published the wrong issuer: $OBSERVED_ISSUER"
+[ "$JWKS_URI" = "$ISSUER/protocol/openid-connect/certs" ] ||
+  fail "Keycloak discovery published an unexpected JWKS URI: $JWKS_URI"
+JWKS=$(kubectl exec -n "$NS" deployment/synveda -- \
+  curl --disable --noproxy '*' -fsS --connect-timeout 3 --max-time 10 "$JWKS_URI") ||
+  fail "the gateway container could not reach the Keycloak JWKS"
+printf '%s' "$JWKS" | node -e '
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { input += chunk; });
+  process.stdin.on("end", () => {
+    try {
+      const document = JSON.parse(input);
+      if (!Array.isArray(document.keys) ||
+          !document.keys.some((key) => key.kty === "RSA" && key.alg === "RS256" && key.use === "sig")) {
+        process.exitCode = 1;
+      }
+    } catch (_) {
+      process.exitCode = 1;
+    }
+  });
+' || fail "Keycloak exposed no RS256 signing key"
+echo "    exact issuer and RS256 JWKS survived restart"
 
 # ── assertion 3, first because it is cheap and unconditional ─────────────
 # The backstop. Decision 2 is worth nothing if the chart can be

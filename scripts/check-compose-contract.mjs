@@ -34,7 +34,7 @@ const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   ],
   [
     "keycloak/SynvedaKeycloakProjection.java",
-    "12c9bc06fa3811bbc989769528267aa33a67f0150711bc6b5340366c7278032e",
+    "def438c114730f33fca924a1480f24e09155ef496a7efc934d4f229c6f242c75",
   ],
   [
     "keycloak/SynvedaKeycloakProjectionSelfTest.java",
@@ -42,7 +42,7 @@ const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   ],
   [
     "keycloak/synveda-projection-self-test",
-    "cf63c2c323824953fbd4382bd821fcd64a787a02e7c22a245a9c5df3d03d22ed",
+    "7cfa8642a07737d44ef6325e8c12b8ea7fab8091d1fd20a2675d4749f0f596ae",
   ],
   [
     "keycloak/synveda-authority-stage",
@@ -66,7 +66,7 @@ const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   ],
   [
     "keycloak/synveda-realm-converge",
-    "119176825496bf2cd2b3841c6a55f562476d10ccff9f03a7dcb61b687aa046f9",
+    "0a2db127b3d500860a8a9574e2ed440e033e150d2e5b2d57496b2f490feec9d2",
   ],
   [
     "keycloak/synveda-generation-gate",
