@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            update operation_attempts\n            set state = 'retry_scheduled', completed_at = now(),\n                heartbeat_at = now(), safe_error_code = 'lease_expired'\n            where tenant_id = $1 and operation_id = $2\n              and attempt_number = $3 and state = 'running'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "40ba3c8a25453517e390c70c819857b724cb6aa652553f8f95931a9a7bf65d7b"
+}

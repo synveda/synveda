@@ -2230,8 +2230,8 @@ async fn verify_extension_fingerprint(connection: &mut PgConnection) -> Result<(
 // grantors are checked relationally above so provider-assigned migrator names
 // do not change the contract.
 const APPLICATION_ACL_FINGERPRINT: &str =
-    "c35da4e5e77eb8969a23f612ca75b9953ea2f8937018ec4cf099905235eddbf6";
-const APPLICATION_ACL_ROW_COUNT: usize = 334;
+    "dce84b7316dc131a089c544a99649fb0096d235a6c88ccaadc63cf55f3d5e22b";
+const APPLICATION_ACL_ROW_COUNT: usize = 355;
 
 async fn verify_application_acl_fingerprint(connection: &mut PgConnection) -> Result<()> {
     let actual = application_acl_fingerprint(connection).await?;
@@ -2351,8 +2351,8 @@ async fn application_acl_fingerprint(connection: &mut PgConnection) -> Result<St
 // An exact row count and per-definition byte ceiling make the catalogue read
 // bounded even after hostile owner-level drift.
 const ROUTINE_CATALOG_FINGERPRINT: &str =
-    "8591bcfffbda3ec7b3908009816280b32d7127a429b6615d23276d3ee921b114";
-const ROUTINE_CATALOG_ROW_COUNT: usize = 67;
+    "1254f5a3d309db75aa1810ad74049cd9c78733050eb53145520b29a4d43d5733";
+const ROUTINE_CATALOG_ROW_COUNT: usize = 69;
 const ROUTINE_DEFINITION_MAX_BYTES: i32 = 131_072;
 const ROUTINE_CONFIGURATION_MAX_ITEMS: i32 = 32;
 const ROUTINE_CONFIGURATION_ITEM_MAX_BYTES: i32 = 4096;
@@ -2481,8 +2481,8 @@ async fn routine_catalog_fingerprint(
 // `pg_get_triggerdef`, so that state and provider-neutral ownership bits are
 // hashed separately from the deparsed definition.
 const TRIGGER_CATALOG_FINGERPRINT: &str =
-    "7602373bfa190dd5183cea75a69055f3f9354168b8ab5bd2bb2e4e8b8d14a32e";
-const TRIGGER_CATALOG_ROW_COUNT: usize = 108;
+    "e028d5a71bdfacbb4e9f98f165287af5014da6a02a21b8872087e6a8aae15946";
+const TRIGGER_CATALOG_ROW_COUNT: usize = 112;
 const TRIGGER_DEFINITION_MAX_BYTES: i32 = 16_384;
 const TRIGGER_ARGUMENT_MAX_COUNT: i16 = 128;
 
@@ -2604,8 +2604,8 @@ async fn trigger_catalog_fingerprint(
 }
 
 const RLS_CATALOG_FINGERPRINT: &str =
-    "eab620d633e874a6fa8c3c468b3d0ab51b8380e70a4df1a0103b97c1166e98be";
-const RLS_CATALOG_ROW_COUNT: usize = 90;
+    "e8ec8c2d85845cd47834b01229946e517d11f6dcc208ceb2a9150159266e39ea";
+const RLS_CATALOG_ROW_COUNT: usize = 92;
 const TENANT_HELPER_SOURCE: &str =
     "\n    select nullif(current_setting('synveda.tenant_id', true), '')::uuid\n";
 

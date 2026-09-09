@@ -64,6 +64,8 @@ function smokeArguments(runtime, appUrl, issuer) {
     "false",
     "--observability",
     "false",
+    "--apalis",
+    "false",
     "--app-url",
     appUrl,
     "--issuer",
@@ -313,6 +315,36 @@ test("observability requires one loopback backend and healthy service", () => {
   };
   assert.deepEqual(runtimeStateFindings(rows, selection), []);
   assert.match(runtimeStateFindings(healthyRows(), selection)[0], /service status set differs/);
+});
+
+test("experimental Apalis requires its private migration and healthy processes", () => {
+  const args = smokeArguments(
+    "development",
+    "http://app.synveda.test:8080",
+    "http://auth.synveda.test:8080/realms/synveda",
+  );
+  args[args.indexOf("false", args.indexOf("--apalis"))] = "true";
+  assert.ok(parseArguments(args));
+
+  const rows = [
+    ...healthyRows(),
+    { Service: "apalis-migrate", State: "exited", ExitCode: 0, Health: "" },
+    { Service: "apalis-postgres", State: "running", ExitCode: 0, Health: "healthy" },
+    { Service: "apalis-worker", State: "running", ExitCode: 0, Health: "healthy" },
+  ];
+  const selection = {
+    postgres: "bundled",
+    oidc: "bundled",
+    browser: "false",
+    observability: "false",
+    apalis: "true",
+  };
+  assert.deepEqual(runtimeStateFindings(rows, selection), []);
+  assert.match(runtimeStateFindings(healthyRows(), selection)[0], /service status set differs/);
+
+  const external = [...args];
+  external[external.indexOf("bundled")] = "external";
+  assert.equal(parseArguments(external), undefined);
 });
 
 test("Prometheus responses prove a non-empty vector without exposing values", () => {

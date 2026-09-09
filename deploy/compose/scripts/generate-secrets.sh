@@ -178,14 +178,41 @@ reject_directory_overlap "$authority_dir" "$gate_dir" \
 . "$script_dir/project-lock.sh"
 secret_stage=
 demo_stage=
+apalis_stage=
+apalis_extension_committed=false
+published_apalis_files=
+publishing_apalis_name=
+rollback_published_apalis() {
+    [ "$apalis_extension_committed" = false ] && [ -n "$apalis_stage" ] || return 0
+    for rollback_name in $published_apalis_files $publishing_apalis_name; do
+        rollback_source=$apalis_stage/$rollback_name
+        rollback_target=$secret_dir/$rollback_name
+        if [ ! -e "$rollback_target" ] && [ ! -L "$rollback_target" ]; then
+            continue
+        fi
+        [ -f "$rollback_source" ] && [ ! -L "$rollback_target" ] && \
+            [ -f "$rollback_target" ] && \
+            [ "$(identity_of "$rollback_target" 2>/dev/null || true)" = \
+                "$(identity_of "$rollback_source" 2>/dev/null || true)" ] && \
+            rm -f -- "$rollback_target" || return 1
+    done
+}
 generate_secrets_cleanup() {
     cleanup_status=$?
     trap '' HUP INT TERM
     trap - EXIT
+    if ! rollback_published_apalis; then
+        cleanup_status=73
+    fi
     if [ -n "$demo_stage" ]; then
         rm -f -- "$demo_stage/keycloak_demo_admin_password" \
             "$demo_stage/keycloak_demo_member_password" 2>/dev/null || true
         rmdir -- "$demo_stage" 2>/dev/null || true
+    fi
+    if [ -n "$apalis_stage" ]; then
+        rm -f -- "$apalis_stage/apalis_owner_password" \
+            "$apalis_stage/apalis_runtime_password" 2>/dev/null || true
+        rmdir -- "$apalis_stage" 2>/dev/null || true
     fi
     if [ -n "$secret_stage" ]; then
         rmdir -- "$secret_stage/oidc-directory" 2>/dev/null || true
@@ -218,9 +245,12 @@ synveda_gateway_database_url
 synveda_worker_database_url
 synveda_kms_key
 synveda_kms_key_ref'
+apalis_files='apalis_owner_password
+apalis_runtime_password'
 demo_files='keycloak_demo_admin_password
 keycloak_demo_member_password'
 files="$base_files
+$apalis_files
 $demo_files"
 
 validate_secret_inventory() {
@@ -235,6 +265,7 @@ validate_secret_inventory() {
             "$marker_name"|oidc-directory|tls_cert|tls_key|\
             postgres_owner_password|synveda_migrator_password|\
             synveda_gateway_password|synveda_worker_password|\
+            apalis_owner_password|apalis_runtime_password|\
             keycloak_database_password|keycloak_admin_username|\
             keycloak_admin_password|keycloak_convergence_admin_password|\
             synveda_migrator_database_url|synveda_gateway_database_url|\
@@ -323,6 +354,7 @@ existing_secret_set=false
 existing_secret_identity=
 demo_extension_needed=false
 missing_demo_files=
+apalis_extension_needed=false
 if { [ -e "$backup_dir" ] || [ -L "$backup_dir" ]; } && \
     [ ! -e "$secret_dir" ] && [ ! -L "$secret_dir" ]; then
     echo "generate-secrets: preserved previous secret set exists without an active set; explicit recovery is required" >&2
@@ -358,6 +390,36 @@ if [ -e "$secret_dir" ] || [ -L "$secret_dir" ]; then
             exit 73
         }
     done
+    apalis_present=0
+    for name in $apalis_files; do
+        candidate=$secret_dir/$name
+        if [ -e "$candidate" ] || [ -L "$candidate" ]; then
+            [ ! -L "$candidate" ] && [ -f "$candidate" ] && \
+                [ "$(mode_of "$candidate")" = 600 ] && \
+                [ "$(owner_of "$candidate")" = "$(id -u)" ] || {
+                echo "generate-secrets: existing Apalis secret extension is unsafe" >&2
+                exit 73
+            }
+            apalis_present=$((apalis_present + 1))
+        fi
+    done
+    [ "$apalis_present" -ne 1 ] || {
+        echo "generate-secrets: existing Apalis secret extension is unsafe" >&2
+        exit 73
+    }
+    if [ "$apalis_present" -eq 2 ] && \
+        cmp -s -- "$secret_dir/apalis_owner_password" \
+            "$secret_dir/apalis_runtime_password"; then
+        echo "generate-secrets: existing Apalis secret extension is unsafe" >&2
+        exit 73
+    fi
+    if [ "$apalis_present" -eq 0 ]; then
+        [ "$if_missing" -eq 1 ] || [ "$force" -eq 1 ] || {
+            echo "generate-secrets: refusing to replace an existing secret set" >&2
+            exit 73
+        }
+        [ "$force" -eq 1 ] || apalis_extension_needed=true
+    fi
     demo_present=0
     for name in $demo_files; do
         candidate=$secret_dir/$name
@@ -472,6 +534,70 @@ ensure_private_directory "$gate_dir"
 
 if [ "$existing_secret_set" = true ] && [ "$if_missing" -eq 1 ]; then
     require_unchanged_secret_set
+    if [ "$apalis_extension_needed" = true ]; then
+        apalis_stage=$(mktemp -d "$secret_parent/.synveda-apalis-secret-stage.XXXXXX") || {
+            echo "generate-secrets: Apalis secret staging directory could not be created" >&2
+            exit 73
+        }
+        chmod 700 "$apalis_stage"
+        cleanup_apalis_stage() {
+            [ -n "$apalis_stage" ] || return 0
+            rm -f -- "$apalis_stage/apalis_owner_password" \
+                "$apalis_stage/apalis_runtime_password" 2>/dev/null || return 1
+            rmdir -- "$apalis_stage" 2>/dev/null
+        }
+        for name in $apalis_files; do
+            while :; do
+                openssl rand -hex 32 > "$apalis_stage/$name"
+                chmod 600 "$apalis_stage/$name"
+                collision=false
+                for existing_name in $base_files $demo_files $apalis_files; do
+                    [ "$existing_name" = "$name" ] && continue
+                    existing_path=$secret_dir/$existing_name
+                    [ -f "$existing_path" ] || existing_path=$apalis_stage/$existing_name
+                    if [ -f "$existing_path" ] && \
+                        cmp -s -- "$apalis_stage/$name" "$existing_path"; then
+                        collision=true
+                    fi
+                done
+                [ "$collision" = false ] && break
+            done
+        done
+        for name in $apalis_files; do
+            staged_apalis=$apalis_stage/$name
+            target_apalis=$secret_dir/$name
+            staged_apalis_identity=$(identity_of "$staged_apalis") || exit 73
+            publishing_apalis_name=$name
+            ln "$staged_apalis" "$target_apalis" || {
+                rollback_published_apalis || \
+                    echo "generate-secrets: Apalis secret extension rollback failed" >&2
+                echo "generate-secrets: Apalis secret extension could not be installed" >&2
+                exit 73
+            }
+            published_apalis_files="$published_apalis_files $name"
+            publishing_apalis_name=
+            [ ! -L "$target_apalis" ] && [ -f "$target_apalis" ] && \
+                [ "$(identity_of "$target_apalis" 2>/dev/null || true)" = \
+                    "$staged_apalis_identity" ] && \
+                [ "$(mode_of "$target_apalis")" = 600 ] && \
+                [ "$(owner_of "$target_apalis")" = "$(id -u)" ] || {
+                rollback_published_apalis || \
+                    echo "generate-secrets: Apalis secret extension rollback failed" >&2
+                echo "generate-secrets: Apalis secret extension changed during publication" >&2
+                exit 73
+            }
+        done
+        apalis_extension_committed=true
+        for name in $apalis_files; do
+            rm -f -- "$apalis_stage/$name" || {
+                echo "generate-secrets: Apalis secret staging cleanup failed" >&2
+                exit 73
+            }
+            echo "generated $name"
+        done
+        cleanup_apalis_stage
+        apalis_stage=
+    fi
     if [ "$demo_extension_needed" = true ]; then
         demo_stage=$(mktemp -d "$secret_parent/.synveda-demo-secret-stage.XXXXXX") || {
             echo "generate-secrets: demo secret staging directory could not be created" >&2
@@ -545,6 +671,8 @@ owner_password=$(openssl rand -hex 32)
 migrator_password=$(openssl rand -hex 32)
 gateway_password=$(openssl rand -hex 32)
 worker_password=$(openssl rand -hex 32)
+apalis_owner_password=$(openssl rand -hex 32)
+apalis_runtime_password=$(openssl rand -hex 32)
 keycloak_password=$(openssl rand -hex 32)
 admin_password=$(openssl rand -hex 32)
 convergence_admin_password=$(openssl rand -hex 32)
@@ -565,6 +693,8 @@ write_secret postgres_owner_password "$owner_password"
 write_secret synveda_migrator_password "$migrator_password"
 write_secret synveda_gateway_password "$gateway_password"
 write_secret synveda_worker_password "$worker_password"
+write_secret apalis_owner_password "$apalis_owner_password"
+write_secret apalis_runtime_password "$apalis_runtime_password"
 write_secret keycloak_database_password "$keycloak_password"
 write_secret keycloak_admin_username synveda-bootstrap
 write_secret keycloak_admin_password "$admin_password"
@@ -581,6 +711,7 @@ write_secret synveda_kms_key "$kms_key"
 write_secret synveda_kms_key_ref "local:${kms_ref}"
 
 unset owner_password migrator_password gateway_password worker_password
+unset apalis_owner_password apalis_runtime_password
 unset keycloak_password admin_password convergence_admin_password
 unset demo_admin_password demo_member_password kms_key kms_ref
 

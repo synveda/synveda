@@ -263,6 +263,7 @@ fake_restart_identity() {
     keycloak) printf '%064d\n' 6 ;;
     otel-collector) printf '%064d\n' 7 ;;
     proxy) printf '%064d\n' 8 ;;
+    apalis-worker) printf '%064d\n' 9 ;;
     *) exit 98 ;;
   esac
 }
@@ -300,6 +301,7 @@ case " $* " in
   *" ps "*" --quiet "*" postgres "*) fake_restart_identity postgres; exit 0 ;;
   *" ps "*" --quiet "*" keycloak "*) fake_restart_identity keycloak; exit 0 ;;
   *" ps "*" --quiet "*" otel-collector "*) fake_restart_identity otel-collector; exit 0 ;;
+  *" ps "*" --quiet "*" apalis-worker "*) fake_restart_identity apalis-worker; exit 0 ;;
   *" ps "*" --quiet "*" worker "*) fake_restart_identity worker; exit 0 ;;
   *" ps "*" --quiet "*" proxy "*) fake_restart_identity proxy; exit 0 ;;
 esac
@@ -371,6 +373,7 @@ volume_key=postgres-data
 case " $* " in
   *"browser-acceptance-state"*) volume_key=browser-acceptance-state ;;
   *"prometheus-data"*) volume_key=prometheus-data ;;
+  *"apalis-data"*) volume_key=apalis-data ;;
 esac
 if [ "$1" = volume ] && [ "$2" = ls ]; then
   [ "\${SYNVEDA_FAKE_VOLUME_INVENTORY_ERROR:-0}" = 0 ] || exit 1
@@ -1333,7 +1336,7 @@ test("browser acceptance rejects unsafe selectors before Docker mutation", () =>
   const cases = [
     {
       extra: { SYNVEDA_COMPOSE_PROFILES: "browser-acceptance" },
-      diagnostic: /requires exactly the demo,browser-acceptance profiles/,
+      diagnostic: /requires demo,browser-acceptance and optional apalis only/,
     },
     {
       extra: { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance,semantic" },
@@ -1776,6 +1779,95 @@ test("observability selects one private overlay and routes exact smoke evidence"
       calls,
       /check-runtime-smoke\.mjs>.*<--observability> <true>.*<--prometheus-url> <http:\/\/127\.0\.0\.1:9090>/,
     );
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("experimental Apalis selects only its private process overlay and exact smoke evidence", () => {
+  const state = fixture();
+  const profile = { SYNVEDA_COMPOSE_PROFILES: "apalis" };
+  try {
+    const up = run(state, "up", profile);
+    assert.equal(up.status, 0, up.stderr);
+    let calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /compose\.apalis\.yaml>/);
+    assert.match(calls, /compose\.apalis\.dev\.yaml>/);
+    assert.match(calls, /<--profile> <apalis>/);
+    assert.doesNotMatch(calls, /compose\.observability\.yaml>|compose\.external\.yaml>/);
+
+    writeFileSync(state.log, "");
+    const smoke = run(state, "smoke", profile);
+    assert.equal(smoke.status, 0, smoke.stderr);
+    calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /check-runtime-smoke\.mjs>.*<--apalis> <true>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("experimental Apalis refuses external providers and unproved lifecycle actions", () => {
+  for (const extra of [
+    { SYNVEDA_COMPOSE_PROFILES: "apalis", SYNVEDA_POSTGRES_MODE: "external" },
+    { SYNVEDA_COMPOSE_PROFILES: "apalis", SYNVEDA_OIDC_MODE: "external" },
+  ]) {
+    const state = fixture();
+    try {
+      const refused = run(state, "config", extra);
+      assert.equal(refused.status, 64, refused.stderr);
+      assert.match(refused.stderr, /experimental Apalis requires bundled PostgreSQL and bundled OIDC/);
+      assert.equal(existsSync(state.log), false);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+
+  for (const action of [
+    "backup",
+    "restore-smoke",
+    "upgrade-smoke",
+    "restart-gateway",
+  ]) {
+    const state = fixture();
+    try {
+      const refused = run(state, action, { SYNVEDA_COMPOSE_PROFILES: "apalis" });
+      assert.equal(refused.status, 69, `${action}: ${refused.stderr}`);
+      assert.match(refused.stderr, /experimental Apalis is unavailable for this lifecycle action/);
+      assert.equal(existsSync(state.log), false);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("experimental Apalis down retains its queue and confirmed reset removes it before product data", () => {
+  const state = fixture();
+  const profile = { SYNVEDA_COMPOSE_PROFILES: "apalis" };
+  try {
+    assert.equal(run(state, "up", profile).status, 0);
+    writeFileSync(state.log, "");
+    const down = run(state, "down", {
+      ...profile,
+      SYNVEDA_FAKE_VOLUME_MODE: "exact",
+    });
+    assert.equal(down.status, 0, down.stderr);
+    assert.doesNotMatch(readFileSync(state.log, "utf8"), /<volume> <rm>/);
+
+    writeFileSync(state.log, "");
+    const reset = run(state, "reset", {
+      ...profile,
+      SYNVEDA_FAKE_VOLUME_MODE: "exact",
+      SYNVEDA_CONFIRM_RESET: state.project,
+    });
+    assert.equal(reset.status, 0, reset.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    const queueRemoval = calls.indexOf(
+      `docker <volume> <rm> <${state.project}_apalis-data>`,
+    );
+    const productRemoval = calls.indexOf(
+      `docker <volume> <rm> <${state.project}_postgres-data>`,
+    );
+    assert.ok(queueRemoval >= 0 && productRemoval > queueRemoval, calls);
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }
@@ -3219,6 +3311,50 @@ test("Compose acceptance holds one project lock across the fixed restart matrix"
       );
       assert.equal((calls.match(identity) ?? []).length, 2, service);
     }
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("Compose acceptance executes the Apalis canary and restarts its worker", () => {
+  const state = fixture();
+  try {
+    const accepted = run(state, "acceptance", {
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance,apalis",
+    });
+    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.match(accepted.stdout, /canonical Compose acceptance passed/);
+
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /compose\.apalis\.yaml>/);
+    assert.match(calls, /compose\.apalis\.dev\.yaml>/);
+    const productSeed =
+      "<run> <--rm> <--no-deps> <--no-TTY> <--entrypoint> <node> " +
+      "<browser-acceptance> <product-demo.mjs> <seed>";
+    const apalisRestart =
+      " <restart> <--no-deps> <--timeout> <35> <apalis-worker>";
+    const productVerify =
+      "<run> <--rm> <--no-deps> <--no-TTY> <--entrypoint> <node> " +
+      "<browser-acceptance> <product-demo.mjs> <verify>";
+    const seedPosition = calls.indexOf(productSeed);
+    const restartPosition = calls.indexOf(apalisRestart);
+    const verifyPosition = calls.indexOf(productVerify);
+    assert.ok(
+      seedPosition >= 0 && restartPosition > seedPosition && verifyPosition > restartPosition,
+      calls,
+    );
+    assert.equal((calls.match(/<product-demo\.mjs>/g) ?? []).length, 2, calls);
+    assert.equal((calls.match(/<--apalis> <true>/g) ?? []).length, 9, calls);
+    assert.equal((calls.match(/ <restart>[^\n]*<apalis-worker>/g) ?? []).length, 1, calls);
+    assert.match(
+      calls,
+      /<--no-recreate> <postgres> <keycloak> <keycloak-realm-convergence> <otel-collector> <worker> <gateway> <proxy> <apalis-worker>/,
+    );
+    assert.equal(
+      (calls.match(/<ps> <--all> <--quiet> <--no-trunc> <apalis-worker>/g) ?? []).length,
+      2,
+      calls,
+    );
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }

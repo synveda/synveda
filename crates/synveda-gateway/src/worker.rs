@@ -35,6 +35,39 @@ const HEARTBEAT_STALE_AFTER: Duration = Duration::from_secs(5);
 const CONVERGENCE_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const ABORT_JOIN_RESERVE: Duration = Duration::from_secs(1);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExecutionProvider {
+    Postgres,
+    Apalis,
+}
+
+impl ExecutionProvider {
+    fn from_env() -> Result<Self, &'static str> {
+        match std::env::var("SYNVEDA_EXECUTION_PROVIDER") {
+            Ok(value) => Self::parse(&value),
+            Err(std::env::VarError::NotPresent) => Ok(Self::Postgres),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err("SYNVEDA_EXECUTION_PROVIDER must be exactly postgres or apalis")
+            }
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, &'static str> {
+        match value {
+            "postgres" => Ok(Self::Postgres),
+            "apalis" => Ok(Self::Apalis),
+            _ => Err("SYNVEDA_EXECUTION_PROVIDER must be exactly postgres or apalis"),
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Postgres => "postgres",
+            Self::Apalis => "apalis",
+        }
+    }
+}
+
 /// Initializes telemetry and runs the supervised worker until process
 /// shutdown.
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -87,6 +120,7 @@ async fn run_process(
         runtime_config::bounded_duration_setting("SYNVEDA_WORKER_SHUTDOWN_SECS", 75, 3, 300)?;
     let knowledge_config = knowledge_config_from_env()?;
     let (directory_connectors, directory_config) = directory_config_from_env()?;
+    let execution_provider = ExecutionProvider::from_env()?;
     if directory_config.is_some()
         && directory_connectors.is_empty()
         && matches!(keys.kms(), synveda_crypto::Kms::Disabled)
@@ -101,6 +135,7 @@ async fn run_process(
         embedding_model = embedder.model(),
         db.max_connections = max_connections,
         shutdown_grace_secs = shutdown_grace.as_secs(),
+        execution.provider = execution_provider.as_str(),
         "core worker configuration accepted"
     );
 
@@ -141,6 +176,7 @@ async fn run_process(
         policy_refresh,
         relaxation_interval,
         directory_config,
+        native_skill_validation: execution_provider == ExecutionProvider::Postgres,
         drain_grace: shutdown_grace
             .saturating_sub(ABORT_JOIN_RESERVE)
             .max(Duration::from_millis(1)),
@@ -391,6 +427,7 @@ struct GenerationRuntime {
     policy_refresh: Duration,
     relaxation_interval: Duration,
     directory_config: Option<directory_sync::SyncConfig>,
+    native_skill_validation: bool,
     drain_grace: Duration,
 }
 
@@ -487,6 +524,17 @@ async fn run_authority_generation(
             runtime.pool.clone(),
             Arc::clone(&runtime.pdp),
             runtime.policy_refresh,
+            work_stop_rx.clone(),
+        ),
+    );
+    spawn_governed_named(
+        &mut tasks,
+        "skill-validation",
+        gate.clone(),
+        generation,
+        crate::skill_validation::run(
+            crate::skill_validation::Runtime::new(runtime.pool.clone(), Arc::clone(&runtime.pdp)),
+            runtime.native_skill_validation,
             work_stop_rx.clone(),
         ),
     );
@@ -897,6 +945,26 @@ async fn worker_readyz(State(state): State<WorkerHealth>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn execution_provider_is_closed_and_defaults_are_explicit() {
+        assert_eq!(
+            ExecutionProvider::parse("postgres"),
+            Ok(ExecutionProvider::Postgres)
+        );
+        assert_eq!(
+            ExecutionProvider::parse("apalis"),
+            Ok(ExecutionProvider::Apalis)
+        );
+        for value in ["", "native", "APALIS", "postgres "] {
+            assert_eq!(
+                ExecutionProvider::parse(value),
+                Err("SYNVEDA_EXECUTION_PROVIDER must be exactly postgres or apalis")
+            );
+        }
+        assert_eq!(ExecutionProvider::Postgres.as_str(), "postgres");
+        assert_eq!(ExecutionProvider::Apalis.as_str(), "apalis");
+    }
 
     #[test]
     fn worker_listener_accepts_only_local_or_deployment_owned_interfaces() {

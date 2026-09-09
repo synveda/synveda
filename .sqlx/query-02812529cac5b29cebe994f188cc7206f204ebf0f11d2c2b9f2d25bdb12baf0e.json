@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                update durable_operations\n                set state = 'failed', completed_at = null, lease_owner = null,\n                    lease_expires_at = null,\n                    next_attempt_at = statement_timestamp()\n                        + make_interval(secs => $5::double precision),\n                    last_error_code = $6, result = '{}'::jsonb, updated_at = now()\n                where tenant_id = $1 and id = $2 and state = 'running'\n                  and attempts = $3 and lease_owner = $4\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Float8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "02812529cac5b29cebe994f188cc7206f204ebf0f11d2c2b9f2d25bdb12baf0e"
+}

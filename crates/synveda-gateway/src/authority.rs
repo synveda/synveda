@@ -15,6 +15,7 @@ use tokio::sync::watch;
 
 use crate::runtime_config::{PoolRefusal, PoolRefusalStage};
 use crate::telemetry::{
+    APALIS_WORKER_AUTHORITY_CHECKS_TOTAL, APALIS_WORKER_AUTHORITY_READY,
     GATEWAY_AUTHORITY_CHECKS_TOTAL, GATEWAY_AUTHORITY_READY, WORKER_AUTHORITY_CHECKS_TOTAL,
     WORKER_AUTHORITY_READY,
 };
@@ -377,6 +378,24 @@ impl AuthorityMonitor {
             WORKER_AUTHORITY_READY,
             WORKER_AUTHORITY_CHECKS_TOTAL,
             "synveda-worker",
+        )
+    }
+
+    /// Creates a monitor for the experimental Apalis leaf process.
+    pub fn new_apalis_worker(
+        pool: PgPool,
+        pool_refusal: PoolRefusal,
+        expected_database_role: String,
+        database_roles: synveda_store::runtime_role::DatabaseRoles,
+    ) -> Self {
+        Self::new_for_process(
+            pool,
+            pool_refusal,
+            expected_database_role,
+            database_roles,
+            APALIS_WORKER_AUTHORITY_READY,
+            APALIS_WORKER_AUTHORITY_CHECKS_TOTAL,
+            "synveda-apalis-worker",
         )
     }
 

@@ -63,6 +63,7 @@ COPY rust-toolchain.toml ./
 # directory must exist with a lib target for the resolve to succeed.
 COPY Cargo.toml Cargo.lock ./
 COPY crates/synveda-audit/Cargo.toml       crates/synveda-audit/
+COPY crates/synveda-apalis/Cargo.toml      crates/synveda-apalis/
 COPY crates/synveda-cli/Cargo.toml         crates/synveda-cli/
 COPY crates/synveda-crypto/Cargo.toml      crates/synveda-crypto/
 COPY crates/synveda-eval/Cargo.toml        crates/synveda-eval/
@@ -81,7 +82,8 @@ RUN set -eux; \
       mkdir -p "$crate/src"; \
       : > "$crate/src/lib.rs"; \
     done; \
-    mkdir -p crates/synveda-cli/src crates/synveda-eval/src crates/synveda-gateway/src; \
+    mkdir -p crates/synveda-apalis/src crates/synveda-cli/src crates/synveda-eval/src crates/synveda-gateway/src; \
+    echo 'fn main() {}' > crates/synveda-apalis/src/main.rs; \
     echo 'fn main() {}' > crates/synveda-cli/src/main.rs; \
     echo 'fn main() {}' > crates/synveda-eval/src/main.rs; \
     echo 'fn main() {}' > crates/synveda-gateway/src/main.rs; \
@@ -93,7 +95,7 @@ RUN set -eux; \
 # sqlx macros compile against the committed query cache; this image has no
 # database, exactly like CI.
 ENV SQLX_OFFLINE=true
-RUN cargo build --locked --release -p synveda-gateway -p synveda-cli
+RUN cargo build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
 
 # The real sources. Touching them invalidates only from here down.
 COPY .sqlx .sqlx
@@ -101,7 +103,7 @@ COPY adapters/registry.json adapters/registry.json
 COPY crates crates
 RUN set -eux; \
     find crates -name '*.rs' -newermt '1970-01-01' -exec touch {} +; \
-    cargo build --locked --release -p synveda-gateway -p synveda-cli
+    cargo build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
 
 # Acceptance-only browser fixture. Keeping this as a target in the product
 # Dockerfile lets it copy the exact CLI built above instead of compiling a
@@ -162,7 +164,7 @@ RUN /usr/local/bin/assert-build-proxy-closed
 RUN apt-get update \
  && apt-get install --no-install-recommends --yes ca-certificates curl libssl3 \
  && rm -rf /var/lib/apt/lists/*
-# Three binaries and no data: the Cedar schema, the base layer and all three
+# Product binaries and no mutable data: the Cedar schema, the base layer and all three
 # product packs are `include_str!`d into synveda-policy, so there is no
 # policy directory to ship and no way for the image's policy to differ from
 # the binary's.
@@ -173,6 +175,7 @@ RUN apt-get update \
 # do not rebuild or reinterpret the application for a deployment shape.
 COPY --from=build /src/target/release/synveda-gateway /usr/local/bin/synveda-gateway
 COPY --from=build /src/target/release/synveda-worker /usr/local/bin/synveda-worker
+COPY --from=build /src/target/release/synveda-apalis-worker /usr/local/bin/synveda-apalis-worker
 COPY --from=build /src/target/release/synveda-oidc-diagnostic /usr/local/bin/synveda-oidc-diagnostic
 COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 COPY --chmod=0755 deploy/compose/gateway/synveda-container /usr/local/bin/synveda-container
@@ -186,7 +189,7 @@ ENV HOME=/tmp \
     SYNVEDA_CONSOLE_DIR=/usr/share/synveda/console
 
 WORKDIR /app
-EXPOSE 8120 8121
+EXPOSE 8120 8121 8122
 
 # Compose supplies the operator's validated non-zero UID/GID so mode-0600
 # secret bind mounts remain readable. This default also makes an unconfigured

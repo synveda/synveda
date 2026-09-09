@@ -72,10 +72,22 @@ work is not added to the gateway.
 
 Pinned stable `apalis` and `apalis-sql` 0.7.4 are evaluated only for one
 disabled-by-default `skill_validation@1` operation. A tenant-bound operation
-and outbox row commit together. The adapter receives only operation ID and
-version, imports into no domain/public API crate, and cannot replace Cedar,
-RLS, VedaFlow, audit or the public operation model. The ordinary PostgreSQL
-worker path remains the rollback.
+and outbox row commit together. The adapter receives only an untrusted tenant
+routing identifier, operation ID and version, then rechecks the immutable
+tenant association and current authority under forced RLS. It imports into no
+domain/public API crate and cannot replace Cedar, RLS, VedaFlow, audit or the
+public operation model. Its separate private queue database uses an isolated
+bootstrap owner only for setup and a converged least-privilege runtime role for
+the long-running worker. The ordinary PostgreSQL worker path remains the
+rollback, and queue data is outside product recovery.
+
+Because that database is provider-owned disposable transport state,
+`synveda-apalis` rather than `synveda-store` owns its queue library and bounded
+bootstrap and role-convergence SQL. This is a narrow SQL-placement exception:
+the leaf cannot query Synveda product state or export provider schema or types,
+and deterministic contracts pin its fixed queue authority, least privilege and
+opaque task shape. Its one-shot migrator may use server-side `format(%I, %L)`
+only to quote fixed role identifiers and the mounted credential safely.
 
 Secrets are mounted files or external references. Direct/file ambiguity is a
 startup error, values are never logged, and any upstream entrypoint that must

@@ -55,10 +55,22 @@ synveda-vedaflow = { path = "crates/synveda-vedaflow" }
 synveda-retrieval = { path = "crates/synveda-retrieval" }
 synveda-ingest = { path = "crates/synveda-ingest" }
 synveda-okf = { path = "crates/synveda-okf" }
+synveda-gateway = { path = "crates/synveda-gateway" }
 
 # External dependencies (MIT/Apache-2.0 only in the core path — deny.toml enforces).
 # Object-safe async traits (TokenVerifier went async with AUTH-1, ADR-0010).
 async-trait = "0.1"
+# Experimental leaf transport only. PostgreSQL remains the operation-state
+# authority and the native executor remains the default rollback path.
+apalis = { version = "=0.7.4", default-features = false, features = [
+    "limit",
+    "tracing",
+] }
+apalis-sql = { version = "=0.7.4", default-features = false, features = [
+    "migrate",
+    "postgres",
+    "tokio-comp-native-tls",
+] }
 # The embedded PDP (AUTHZ-1, ADR-0002/ADR-0012): pure Rust, in-process,
 # Apache-2.0, formally verified evaluator.
 cedar-policy = "4"

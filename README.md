@@ -174,17 +174,22 @@ The dependency direction is enforced:
 ```text
 types ← crypto ← {policy, store, identity, audit, vedaflow}
       ← {retrieval, ingest} ← gateway
+gateway/store ← synveda-apalis (optional deployment leaf)
 ```
 
-Adapters depend only on the public API. SQL remains in `synveda-store`, static
-and sqlx compile-time checked. The schema is the single epoch-3
+No core or public-contract crate imports the optional execution leaf. Ordinary
+client adapters depend only on the public API. All Synveda authoritative-schema
+SQL remains in `synveda-store`, static and sqlx compile-time checked. ADR-0102's
+optional Apalis leaf alone owns bounded bootstrap and verification SQL for its
+separate disposable transport database; no core or public crate imports that
+provider boundary. The schema is the single epoch-3
 `0001_context_platform.sql` baseline; pre-cut databases are refused with a
 destructive-reset instruction and no compatibility migrator.
 
 Repository layout:
 
 ```text
-crates/       13 Rust crates: domain, trust, persistence and application layers
+crates/       14 Rust crates: domain, trust, persistence and application layers
 adapters/     client integrations and conformance fixtures
 console/      generated-contract React application
 policies/     Cedar policy packs

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select state, next_dispatch_at, submission_failures\n           from operation_outbox where tenant_id = $1 and operation_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "next_dispatch_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "submission_failures",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "a74012a5b9b30ed693f53bb52ff9a77cd03641859b8e80e158b28f574fb82fe7"
+}

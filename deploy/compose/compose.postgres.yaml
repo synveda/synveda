@@ -23,7 +23,9 @@ services:
     read_only: true
     init: true
     cap_drop: [ALL]
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    # Tini remains root while the image entrypoint drops to the postgres UID;
+    # KILL is required solely to forward the bounded shutdown signal.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     pids_limit: 512
     restart: ${SYNVEDA_COMPOSE_RESTART_POLICY:?set SYNVEDA_COMPOSE_RESTART_POLICY}

@@ -426,7 +426,7 @@ test("the one-shot image and driver forbid capture and TLS bypass surfaces", () 
   );
   assert.match(
     makefile,
-    /^compose-acceptance:\n\tSYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance demos\/cpr-45-docker-reference\.sh$/m,
+    /^compose-acceptance:\n\tSYNVEDA_COMPOSE_PROFILES="\$\$\{SYNVEDA_COMPOSE_PROFILES:-demo,browser-acceptance\}" demos\/cpr-45-docker-reference\.sh$/m,
   );
   const referenceDriver = readFileSync(
     join(ROOT, "demos/cpr-45-docker-reference.sh"),

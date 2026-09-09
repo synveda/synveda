@@ -62,6 +62,7 @@ profiles=${SYNVEDA_COMPOSE_PROFILES:-}
 demo_profile=false
 browser_acceptance_profile=false
 observability_profile=false
+apalis_profile=false
 lifecycle_default_timeout=900
 if [ "$action" = acceptance ] || [ "$action" = backup ] || \
     [ "$action" = restore-smoke ] || [ "$action" = upgrade-smoke ]; then
@@ -457,8 +458,9 @@ for profile in $profiles; do
         demo) demo_profile=true ;;
         browser-acceptance) browser_acceptance_profile=true ;;
         observability) observability_profile=true ;;
+        apalis) apalis_profile=true ;;
         *)
-            echo "compose: unsupported profile; allowed: demo,browser-acceptance,observability" >&2
+            echo "compose: unsupported profile; allowed: demo,browser-acceptance,observability,apalis" >&2
             exit 64
             ;;
     esac
@@ -475,9 +477,25 @@ if [ "$demo_profile" = true ] && \
     echo "compose: demo profile requires bundled PostgreSQL and bundled OIDC" >&2
     exit 64
 fi
+if [ "$apalis_profile" = true ]; then
+    [ "$postgres_mode" = bundled ] && [ "$oidc_mode" = bundled ] || {
+        echo "compose: experimental Apalis requires bundled PostgreSQL and bundled OIDC" >&2
+        exit 64
+    }
+    case "$action" in
+        config|up|acceptance|smoke|down|reset) ;;
+        *)
+            echo "compose: experimental Apalis is unavailable for this lifecycle action" >&2
+            exit 69
+            ;;
+    esac
+fi
 if [ "$browser_acceptance_profile" = true ]; then
-    [ "$profile_count" -eq 2 ] && [ "$demo_profile" = true ] || {
-        echo "compose: browser acceptance requires exactly the demo,browser-acceptance profiles" >&2
+    expected_browser_profile_count=2
+    [ "$apalis_profile" = false ] || expected_browser_profile_count=3
+    [ "$profile_count" -eq "$expected_browser_profile_count" ] && \
+        [ "$demo_profile" = true ] || {
+        echo "compose: browser acceptance requires demo,browser-acceptance and optional apalis only" >&2
         exit 64
     }
     [ "$postgres_mode" = bundled ] && [ "$oidc_mode" = bundled ] || {
@@ -493,7 +511,7 @@ if [ "$browser_acceptance_profile" = true ]; then
     esac
 fi
 if [ "$action" = acceptance ] && [ "$browser_acceptance_profile" != true ]; then
-    echo "compose: acceptance requires exactly the demo,browser-acceptance profiles" >&2
+    echo "compose: acceptance requires demo,browser-acceptance and optional apalis only" >&2
     exit 64
 fi
 if [ "$action" = restore-smoke ] && [ "$browser_acceptance_profile" != true ]; then
@@ -1266,6 +1284,7 @@ esac
 
 for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABASE_URL \
     SYNVEDA_WORKER_DATABASE_URL \
+    SYNVEDA_APALIS_OWNER_PASSWORD SYNVEDA_APALIS_DATABASE_PASSWORD \
     SYNVEDA_KMS_KEY SYNVEDA_KMS_KEY_REF POSTGRES_PASSWORD KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME \
     KC_BOOTSTRAP_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD \
     SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD; do
@@ -1274,6 +1293,8 @@ for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABA
         SYNVEDA_MIGRATOR_DATABASE_URL) present=${SYNVEDA_MIGRATOR_DATABASE_URL+x} ;;
         SYNVEDA_GATEWAY_DATABASE_URL) present=${SYNVEDA_GATEWAY_DATABASE_URL+x} ;;
         SYNVEDA_WORKER_DATABASE_URL) present=${SYNVEDA_WORKER_DATABASE_URL+x} ;;
+        SYNVEDA_APALIS_OWNER_PASSWORD) present=${SYNVEDA_APALIS_OWNER_PASSWORD+x} ;;
+        SYNVEDA_APALIS_DATABASE_PASSWORD) present=${SYNVEDA_APALIS_DATABASE_PASSWORD+x} ;;
         SYNVEDA_KMS_KEY) present=${SYNVEDA_KMS_KEY+x} ;;
         SYNVEDA_KMS_KEY_REF) present=${SYNVEDA_KMS_KEY_REF+x} ;;
         POSTGRES_PASSWORD) present=${POSTGRES_PASSWORD+x} ;;
@@ -1620,6 +1641,10 @@ if [ "$oidc_mode" = bundled ]; then
         require_private_file "$secret_dir/keycloak_demo_member_password" \
             keycloak_demo_member_password
     fi
+fi
+if [ "$apalis_profile" = true ]; then
+    require_private_file "$secret_dir/apalis_owner_password" apalis_owner_password
+    require_private_file "$secret_dir/apalis_runtime_password" apalis_runtime_password
 fi
 if [ "$runtime" = reference ]; then
     require_private_file "$secret_dir/tls_cert" tls_cert
@@ -2217,6 +2242,12 @@ fi
 if [ "$observability_profile" = true ]; then
     set -- "$@" -f "$compose_dir/compose.observability.yaml"
 fi
+if [ "$apalis_profile" = true ]; then
+    set -- "$@" -f "$compose_dir/compose.apalis.yaml"
+    if [ "$runtime" = development ]; then
+        set -- "$@" -f "$compose_dir/compose.apalis.dev.yaml"
+    fi
+fi
 if [ "$action" = backup ]; then
     set -- "$@" -f "$compose_dir/compose.backup.yaml"
 fi
@@ -2324,6 +2355,7 @@ run_runtime_smoke() {
         --postgres "$postgres_mode" --oidc "$oidc_mode" \
         --browser "$browser_acceptance_profile" \
         --observability "$observability_profile" \
+        --apalis "$apalis_profile" \
         --app-url "$public_app_url" --issuer "$oidc_issuer"
     if [ "$observability_profile" = true ]; then
         set -- "$@" --prometheus-url "http://127.0.0.1:$prometheus_port"
@@ -3000,6 +3032,9 @@ case "$action" in
         restart_stop_seconds=60
         restart_health_seconds=300
         restart_recovery_services='postgres keycloak keycloak-realm-convergence otel-collector worker gateway proxy'
+        if [ "$apalis_profile" = true ]; then
+            restart_recovery_services="$restart_recovery_services apalis-worker"
+        fi
         restart_selected_service "$@"
 
         restart_service_name=keycloak
@@ -3019,6 +3054,14 @@ case "$action" in
         restart_health_seconds=120
         restart_recovery_services=worker
         restart_selected_service "$@"
+
+        if [ "$apalis_profile" = true ]; then
+            restart_service_name=apalis-worker
+            restart_stop_seconds=35
+            restart_health_seconds=120
+            restart_recovery_services=apalis-worker
+            restart_selected_service "$@"
+        fi
 
         restart_service_name=gateway
         restart_stop_seconds=30
@@ -3127,6 +3170,11 @@ case "$action" in
             inspect_project_volume prometheus-data
             prometheus_volume_present=$checked_volume_present
         fi
+        apalis_volume_present=false
+        if [ "$apalis_profile" = true ]; then
+            inspect_project_volume apalis-data
+            apalis_volume_present=$checked_volume_present
+        fi
         docker_mutation_uncertain=true
         docker_mutation_phase=compose-down
         run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
@@ -3146,6 +3194,13 @@ case "$action" in
             inspect_project_volume prometheus-data
             [ "$checked_volume_present" = "$prometheus_volume_present" ] || {
                 echo "compose: exact project prometheus-data volume changed during down" >&2
+                exit 78
+            }
+        fi
+        if [ "$apalis_profile" = true ]; then
+            inspect_project_volume apalis-data
+            [ "$checked_volume_present" = "$apalis_volume_present" ] || {
+                echo "compose: exact project apalis-data volume changed during down" >&2
                 exit 78
             }
         fi
@@ -3197,6 +3252,11 @@ case "$action" in
             inspect_project_volume prometheus-data
             prometheus_volume_present=$checked_volume_present
         fi
+        apalis_volume_present=false
+        if [ "$apalis_profile" = true ]; then
+            inspect_project_volume apalis-data
+            apalis_volume_present=$checked_volume_present
+        fi
         docker_mutation_uncertain=true
         docker_mutation_phase=compose-down-for-reset
         run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
@@ -3223,6 +3283,13 @@ case "$action" in
                 exit 78
             }
         fi
+        if [ "$apalis_profile" = true ]; then
+            inspect_project_volume apalis-data
+            [ "$checked_volume_present" = "$apalis_volume_present" ] || {
+                echo "compose: exact project apalis-data volume changed during reset" >&2
+                exit 78
+            }
+        fi
         # Remove the credential-bearing fixture state first. If its removal
         # fails, the product database has not yet been touched.
         if [ "$browser_volume_present" = true ]; then
@@ -3230,6 +3297,9 @@ case "$action" in
         fi
         if [ "$prometheus_volume_present" = true ]; then
             remove_project_volume prometheus-data
+        fi
+        if [ "$apalis_volume_present" = true ]; then
+            remove_project_volume apalis-data
         fi
         if [ "$postgres_volume_present" = true ]; then
             remove_project_volume postgres-data

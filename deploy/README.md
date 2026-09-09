@@ -5,7 +5,9 @@ Compose services and Helm Deployments use the same product commands, schema
 epoch, generated `/v1` contract, embedded Cedar PDP, VedaFlow effects and
 hash-chained audit path (CPR-36, ADR-0095, ADR-0102). The gateway is the public
 request process; the private core worker owns scheduled Capture, Knowledge
-index, relaxation-expiry and optional directory-pull work.
+index, relaxation-expiry and optional directory-pull work. A disabled-by-default
+Apalis leaf can transport one non-executing Skill-validation operation without
+owning its tenant or business state.
 
 `personal`, `team` and `enterprise` are not deployment editions. They are
 canonical Configuration documents copied into immutable governed versions and
@@ -17,7 +19,8 @@ freshness or Skill/Tool advertisement.
 - `compose/` contains the additive canonical Docker reference graph and its
   executable `up`, `smoke`, full `acceptance`, gateway-only `restart-gateway`,
   paired logical `backup`/fresh private `restore-smoke`, `down` and
-  exact-confirmation `reset` lifecycle.
+  exact-confirmation `reset` lifecycle, plus optional observability and Apalis
+  canary profiles.
   Deterministic lifecycle tests are implementation evidence, not a validated
   reference claim: clean-volume browser/Keycloak and recovery acceptance are
   still open.

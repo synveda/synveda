@@ -6,7 +6,7 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: synveda-container {gateway|worker|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe {gateway|worker} {live|ready}}" >&2
+    echo "usage: synveda-container {gateway|worker|apalis-migrate|apalis-worker|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe {gateway|worker|apalis-worker} {live|ready}}" >&2
     exit 64
 }
 
@@ -18,6 +18,14 @@ case "${1:-}" in
     worker)
         [ "$#" -eq 1 ] || usage
         exec /usr/local/bin/synveda-worker
+        ;;
+    apalis-worker)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda-apalis-worker worker
+        ;;
+    apalis-migrate)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda-apalis-worker migrate
         ;;
     issuer-diagnostic)
         [ "$#" -eq 1 ] || usage
@@ -88,6 +96,7 @@ case "${1:-}" in
         case "$2" in
             gateway) port=8120 ;;
             worker) port=8121 ;;
+            apalis-worker) port=8122 ;;
             *) usage ;;
         esac
         case "$3" in

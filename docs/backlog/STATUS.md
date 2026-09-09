@@ -182,14 +182,17 @@ PostgreSQL-native logical backup plus
 isolated database/key restore is also implemented and deterministically tested; its live
 Docker run remains pending. Same-schema application-image upgrade/rollback is
 implemented with a read-only candidate compatibility check and deterministic
-failure recovery; its live reference run remains pending. Remaining
-implementation work is one forced-RLS
-skill-validation operation/outbox and its disabled-by-default Apalis 0.7.4 leaf
-adapter. The synchronous rollback path now resolves concurrent same-key Skill
-tests through a freshly authorised winner and commits only one run/audit; its
-database-backed concurrency test awaits the same fixture as the operation
-schema. The customer-safe Operations route is implemented from bounded
-generated public APIs and explicitly marks unavailable signals. Executable
+failure recovery; its live reference run remains pending. The forced-RLS
+`skill_validation@1` operation, attempt and transactional outbox plus its
+disabled-by-default Apalis 0.7.4 leaf are implemented. The native worker remains
+the rollback, and the optional private queue carries only tenant/operation
+routing identifiers while business state stays in Synveda PostgreSQL. The
+synchronous diagnostic path resolves concurrent same-key Skill tests through a
+freshly authorised winner and commits only one run/audit. Fresh isolated
+exact-role PostgreSQL acceptance now passes the operation/outbox concurrency,
+retry, cancellation, dead-letter and cross-tenant cases; live Apalis transport
+execution remains pending. The customer-safe Operations route now composes four
+bounded generated public APIs and explicitly marks unavailable signals. Executable
 external PostgreSQL plus external OIDC and public-PKI external OTLP wiring are
 deterministically implemented but still await live provider evidence. A
 bounded private Collector-to-Prometheus profile is implemented with
@@ -201,11 +204,10 @@ SaaS, signing or Helm-production claim follows. S3/WAL-PITR and encrypted
 off-host retention remain OPS-5 production work rather than Docker-reference
 completion work.
 
-The remaining operation/outbox slice changes the epoch-3 catalogue and adds
-static SQLx queries. It therefore cannot be landed without the repository's
-fresh PostgreSQL-backed authority-fingerprint and SQLx-prepare generators;
-those generated values must not be hand-edited. The optional Apalis transport
-database remains separate from Synveda's closed authoritative schema.
+Current-source live development/reference, recovery, upgrade and Apalis
+acceptance remain pending. The optional Apalis transport database stays
+separate from Synveda's closed authoritative schema and is not a business-state
+or recovery authority.
 
 ## Unscheduled — not listed in the Sequencing section
 

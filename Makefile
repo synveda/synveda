@@ -30,9 +30,8 @@ dev-down:
 smoke:
 	bash scripts/smoke.sh
 
-# CPR-45's canonical topology renders all eight runtime/provider rows plus the
-# bundled demo and fresh-project browser overlays without starting or pulling
-# images.
+# CPR-45's canonical topology renders the closed runtime/provider matrix and
+# optional profiles without starting or pulling images.
 compose-config: check-compose-contract
 
 compose-secrets:
@@ -63,7 +62,7 @@ compose-browser-acceptance:
 	SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance deploy/compose/scripts/compose.sh up --initial-assets absent
 
 compose-acceptance:
-	SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance demos/cpr-45-docker-reference.sh
+	SYNVEDA_COMPOSE_PROFILES="$${SYNVEDA_COMPOSE_PROFILES:-demo,browser-acceptance}" demos/cpr-45-docker-reference.sh
 
 compose-backup:
 	demos/cpr-45-docker-reference.sh backup

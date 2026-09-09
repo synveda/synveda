@@ -73,6 +73,8 @@ The canonical Compose deployment uses mounted mode-0600 secret files for:
 
 - migrator, gateway and worker PostgreSQL URLs;
 - PostgreSQL/Keycloak bootstrap and runtime passwords;
+- the isolated Apalis queue owner and runtime passwords when its profile is
+  selected;
 - Keycloak bootstrap and convergence administrators;
 - the Synveda KMS key and key reference;
 - TLS private key material;
@@ -133,8 +135,9 @@ The reference graph applies:
 - no privileged containers and no Docker socket mount.
 
 Only Caddy publishes public ports. The optional Prometheus operator UI binds to
-host loopback only. PostgreSQL, gateway/worker metrics, worker health, Keycloak
-management, OTLP receivers and recovery services are private.
+host loopback only. PostgreSQL, the Apalis queue, gateway/worker/Apalis-worker
+metrics and health, Keycloak management, OTLP receivers and recovery services
+are private.
 Separate networks isolate the public edge, application, Synveda data, Keycloak
 data/management and telemetry. Only discovery/export components join explicit
 egress networks.
@@ -179,7 +182,8 @@ is accepted, publishes no worker port and attaches no new network. Any other
 address or flag value fails startup. A heartbeat is not proof that each work
 loop progressed.
 
-The experimental Apalis canary is still open. It may be accepted only with:
+The disabled-by-default Apalis 0.7.4 canary implements only
+`skill_validation@1` with:
 
 - a provider-neutral operation, attempt and transactional outbox model;
 - forced RLS on tenant rows;
@@ -193,6 +197,14 @@ The experimental Apalis canary is still open. It may be accepted only with:
 
 Apalis task IDs, status values and types must remain in a leaf adapter. Apalis
 must never own tenant identity, business state, Cedar decisions or VedaFlow.
+Its payload is limited to an untrusted tenant routing ID, Synveda operation ID
+and operation version; the worker rechecks tenant association and current
+authority in the tenant transaction. A separate private queue database uses an
+isolated bootstrap superuser only for PostgreSQL/setup and a converged
+least-privilege runtime role for the worker. Its volume is transport state, is
+not backed up and can be abandoned by selecting the native worker. Static and
+deterministic acceptance is present; live queue/startup/restart evidence remains
+pending.
 
 ## Telemetry boundary
 
@@ -200,8 +212,9 @@ Logs, spans and metrics must not contain prompts, messages, Knowledge bodies,
 credentials or unbounded tenant/principal labels. Caller-supplied trace and
 baggage headers are stripped at the edge.
 
-Gateway and worker traces use OTLP to a private Collector with memory limiting
-and batching. Discard mode terminates traces at a no-op exporter. External mode
+Gateway, worker and optional Apalis-worker traces use OTLP to a private
+Collector with memory limiting and batching. Discard mode terminates traces at
+a no-op exporter. External mode
 uses public-PKI TLS to one validated OTLP/gRPC DNS authority with bounded
 in-memory queueing and retry. It has no private-CA, authentication-header or
 mTLS contract, and readiness does not prove remote receipt.
@@ -246,6 +259,8 @@ recovery. Logical `pg_dump`/`pg_restore` does not provide WAL/PITR, encrypted
 off-host retention, S3 transfer, scheduling, RPO/RTO or recurring restore
 drills; those remain OPS-5 production work. Keycloak realm export is not a
 database backup.
+The recovery lifecycle refuses the Apalis profile rather than silently treating
+its disposable queue volume as backed up.
 
 ## Adversarial evidence inventory
 
@@ -260,7 +275,7 @@ make check-context-security pins these boundaries:
 | Capture source-event forgery | crates/synveda-gateway/tests/capture_api.rs |
 | Knowledge disclosure and erasure | crates/synveda-gateway/tests/knowledge_lifecycle.rs |
 | context side channels and graph paths | crates/synveda-gateway/tests/context_runs.rs |
-| Skill path safety and inert validation | crates/synveda-types/src/skill.rs and crates/synveda-gateway/tests/skills.rs |
+| Skill path safety, non-executing validation and durable-operation isolation | crates/synveda-types/src/skill.rs, crates/synveda-store/src/operations.rs and crates/synveda-gateway/tests/skills.rs |
 | MCP read-only testing and secret lifecycle | crates/synveda-gateway/src/tool_registry.rs and crates/synveda-gateway/tests/tools.rs |
 | OKF traversal and expansion bounds | crates/synveda-okf/tests/okf_v02.rs |
 | audit content minimisation | crates/synveda-gateway/tests/audit_query.rs |

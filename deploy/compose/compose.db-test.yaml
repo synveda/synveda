@@ -23,7 +23,9 @@ x-postgres: &postgres
   read_only: true
   init: true
   cap_drop: [ALL]
-  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+  # Tini remains root while the image entrypoint drops to the postgres UID;
+  # KILL is required solely to forward the bounded shutdown signal.
+  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
   security_opt: [no-new-privileges:true]
   pids_limit: 512
   restart: "no"
@@ -76,7 +78,9 @@ services:
       args:
         <<: *synveda-build-proxy-closure
     ports:
-      - "127.0.0.1:49152-65535:5432"
+      # Let the runtime reserve an actually free loopback port. A fixed range
+      # can collide with desktop host services outside the Linux VM.
+      - "127.0.0.1::5432"
     volumes:
       - main-data:/var/lib/postgresql/data
     networks:
@@ -147,7 +151,7 @@ services:
       - source: external_provider_password
         target: external_provider_password
     ports:
-      - "127.0.0.1:49152-65535:5432"
+      - "127.0.0.1::5432"
     volumes:
       - lifecycle-data:/var/lib/postgresql/data
     networks:

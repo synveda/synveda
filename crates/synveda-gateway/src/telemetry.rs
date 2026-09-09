@@ -47,6 +47,13 @@ pub const WORKER_AUTHORITY_READY: &str = "synveda_worker_authority_ready";
 /// vocabulary `accepted|unavailable|timeout|refused`.
 pub const WORKER_AUTHORITY_CHECKS_TOTAL: &str = "synveda_worker_authority_checks_total";
 
+/// Experimental Apalis leaf application-plane authority.
+pub const APALIS_WORKER_AUTHORITY_READY: &str = "synveda_apalis_worker_authority_ready";
+
+/// Complete experimental Apalis leaf database-authority checks.
+pub const APALIS_WORKER_AUTHORITY_CHECKS_TOTAL: &str =
+    "synveda_apalis_worker_authority_checks_total";
+
 /// Core-worker readiness: 1 only while the supervisor is running and its
 /// most recent dependency probe accepted the schema and runtime role.
 pub const WORKER_READY: &str = "synveda_worker_ready";
@@ -323,6 +330,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
             &[0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5, 1.0, 2.5],
         )
         .map_err(|err| internal(format!("metric buckets: {err}")))?
+        .set_buckets_for_metric(
+            Matcher::Full(synveda_store::operations::OPERATION_ATTEMPT_SECONDS.to_owned()),
+            &[0.01, 0.05, 0.1, 0.25, 1.0, 5.0, 10.0, 20.0],
+        )
+        .map_err(|err| internal(format!("metric buckets: {err}")))?
         .install_recorder()
         .map_err(|err| internal(format!("prometheus recorder: {err}")))?;
 
@@ -354,9 +366,44 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Complete core-worker database-authority checks by closed outcome"
     );
     metrics::describe_gauge!(
+        APALIS_WORKER_AUTHORITY_READY,
+        "Experimental Apalis leaf application-plane database authority"
+    );
+    metrics::describe_counter!(
+        APALIS_WORKER_AUTHORITY_CHECKS_TOTAL,
+        "Complete experimental Apalis leaf database-authority checks by closed outcome"
+    );
+    metrics::describe_gauge!(
         WORKER_HEARTBEAT_AGE_SECONDS,
         metrics::Unit::Seconds,
         "Age of the core worker supervisor scheduler heartbeat; not per-task progress"
+    );
+    metrics::describe_counter!(
+        synveda_store::operations::OPERATIONS_TOTAL,
+        "Durable Skill-validation operations by closed kind and lifecycle state"
+    );
+    metrics::describe_counter!(
+        synveda_store::operations::OPERATION_ATTEMPTS_TOTAL,
+        "Durable Skill-validation execution attempts by closed kind and outcome"
+    );
+    metrics::describe_histogram!(
+        synveda_store::operations::OPERATION_ATTEMPT_SECONDS,
+        metrics::Unit::Seconds,
+        "Durable Skill-validation execution-attempt latency"
+    );
+    metrics::describe_counter!(
+        synveda_store::operations::OPERATION_SWEEPS_TOTAL,
+        "Durable Skill-validation sweeps by closed outcome"
+    );
+    metrics::describe_gauge!(
+        synveda_store::operations::OPERATION_OLDEST_PENDING_AGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Age of the oldest non-terminal Skill-validation operation across active tenants"
+    );
+    metrics::describe_gauge!(
+        synveda_store::operations::OPERATION_OUTBOX_OLDEST_PENDING_AGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Age of the oldest non-terminal Skill-validation outbox row across active tenants"
     );
     metrics::describe_counter!(
         SCOPE_OPERATIONS_TOTAL,

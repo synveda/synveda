@@ -461,6 +461,15 @@ pub enum AuditAction {
     /// gateway's built-in harness validates and scans; it executes no bundle
     /// script.
     SkillTestRecorded,
+    /// A governed durable operation and its payload-free outbox were committed
+    /// together. Carries only kind/version and target identifiers.
+    OperationRequested,
+    /// A caller cancelled a durable operation before its governed effect
+    /// committed, without exposing provider task identifiers.
+    OperationCancellationRequested,
+    /// A durable operation reached a terminal state. Carries bounded attempt,
+    /// progress and safe error metadata, never adapter task state or content.
+    OperationFinished,
     /// A typed Tool/apply VedaFlow change staged trusted MCP catalogue or
     /// exact-binding intent (CPR-25, ADR-0086). Carries hashes and ids, never
     /// credentials or arbitrary descriptions.
@@ -508,7 +517,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 94] = [
+    pub const ALL: [AuditAction; 97] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -591,6 +600,9 @@ impl AuditAction {
         AuditAction::SkillScanRejected,
         AuditAction::SkillUsageRecorded,
         AuditAction::SkillTestRecorded,
+        AuditAction::OperationRequested,
+        AuditAction::OperationCancellationRequested,
+        AuditAction::OperationFinished,
         AuditAction::ToolChangeOpened,
         AuditAction::ToolChangeApplied,
         AuditAction::ToolChangeRejected,
@@ -692,6 +704,9 @@ impl AuditAction {
             AuditAction::SkillScanRejected => "skill.scan.rejected",
             AuditAction::SkillUsageRecorded => "skill.usage.recorded",
             AuditAction::SkillTestRecorded => "skill.test.recorded",
+            AuditAction::OperationRequested => "operation.requested",
+            AuditAction::OperationCancellationRequested => "operation.cancellation_requested",
+            AuditAction::OperationFinished => "operation.finished",
             AuditAction::ToolChangeOpened => "tool.change.opened",
             AuditAction::ToolChangeApplied => "tool.change.applied",
             AuditAction::ToolChangeRejected => "tool.change.rejected",

@@ -268,6 +268,8 @@ const PROVIDER_SECRETS = [
   "synveda_migrator_password",
   "synveda_gateway_password",
   "synveda_worker_password",
+  "apalis_owner_password",
+  "apalis_runtime_password",
   "keycloak_database_password",
   "keycloak_admin_username",
   "keycloak_admin_password",
@@ -1280,7 +1282,7 @@ function hardeningFindings(name, service) {
   if (!Number.isInteger(service.pids_limit) || service.pids_limit <= 0) {
     findings.push(`${name} has no positive PID bound`);
   }
-  if (name !== "postgres") {
+  if (!new Set(["postgres", "apalis-postgres"]).has(name)) {
     const [uid, gid] = String(service.user ?? "").split(":").map(Number);
     if (!Number.isInteger(uid) || !Number.isInteger(gid) || uid <= 0 || gid <= 0) {
       findings.push(`${name} does not use an explicit non-root UID:GID`);
@@ -1288,9 +1290,9 @@ function hardeningFindings(name, service) {
     if ((service.cap_add ?? []).length > 0) findings.push(`${name} adds capabilities`);
   } else if (
     JSON.stringify(sorted(service.cap_add ?? [])) !==
-    JSON.stringify(sorted(["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]))
+    JSON.stringify(sorted(["CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL", "SETGID", "SETUID"]))
   ) {
-    findings.push("postgres root-at-start capability exception drifted");
+    findings.push(`${name} root-at-start capability exception drifted`);
   }
   return findings;
 }
@@ -2467,6 +2469,12 @@ export function canonicalComposeFindings(model, expected) {
       keycloak_demo_member_password: "keycloak_demo_member_password",
     });
   }
+  if (expected.apalis === true) {
+    Object.assign(expectedTopLevelSecrets, {
+      apalis_owner_password: "apalis_owner_password",
+      apalis_runtime_password: "apalis_runtime_password",
+    });
+  }
   if (expected.runtime === "reference") {
     Object.assign(expectedTopLevelSecrets, {
       synveda_tls_cert: "tls_cert",
@@ -2511,6 +2519,9 @@ export function canonicalComposeFindings(model, expected) {
   }
   if (expected.browser === true) expectedServices.push("browser-acceptance");
   if (expected.observability === true) expectedServices.push("prometheus");
+  if (expected.apalis === true) {
+    expectedServices.push("apalis-migrate", "apalis-postgres", "apalis-worker");
+  }
   if (JSON.stringify(keys(services)) !== JSON.stringify(sorted(expectedServices))) {
     findings.push("service set does not match the selected provider row");
   }
@@ -2530,8 +2541,16 @@ export function canonicalComposeFindings(model, expected) {
     if ((service.configs ?? []).length > 0) {
       findings.push(`${name} mounts an unreviewed Compose config`);
     }
-    if (name === "browser-acceptance" || name === "prometheus") {
-      const expectedProfile = name === "browser-acceptance" ? name : "observability";
+    if (
+      name === "browser-acceptance" ||
+      name === "prometheus" ||
+      name.startsWith("apalis-")
+    ) {
+      const expectedProfile = name === "browser-acceptance"
+        ? name
+        : name === "prometheus"
+          ? "observability"
+          : "apalis";
       if (JSON.stringify(service.profiles) !== JSON.stringify([expectedProfile])) {
         findings.push(`${name} profile gate drifted`);
       }
@@ -2539,7 +2558,7 @@ export function canonicalComposeFindings(model, expected) {
       findings.push(`${name} is unexpectedly profile-gated`);
     }
     const expectedUser = name === "prometheus" ? "65532:65532" : expected.runtimeUser;
-    if (name !== "postgres" && service.user !== expectedUser) {
+    if (!new Set(["postgres", "apalis-postgres"]).has(name) && service.user !== expectedUser) {
       findings.push(`${name} runtime UID:GID differs from the validated secret owner`);
     }
   }
@@ -2611,6 +2630,9 @@ export function canonicalComposeFindings(model, expected) {
     services["tenant-convergence"],
     services.worker,
     services.migrate,
+    ...(expected.apalis === true
+      ? [services["apalis-migrate"], services["apalis-worker"]]
+      : []),
   ].filter(Boolean);
   if (new Set(product.map(({ image }) => image)).size !== 1) {
     findings.push(
@@ -2642,6 +2664,11 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.observability === true) {
     expectedImages.prometheus = expected.prometheusImage;
   }
+  if (expected.apalis === true) {
+    expectedImages["apalis-postgres"] = expected.postgresImage;
+    expectedImages["apalis-migrate"] = expected.productImage;
+    expectedImages["apalis-worker"] = expected.productImage;
+  }
   for (const [name, image] of Object.entries(expectedImages)) {
     if (services[name]?.image !== image) findings.push(`${name} image reference drifted`);
   }
@@ -2670,6 +2697,10 @@ export function canonicalComposeFindings(model, expected) {
       "--query.timeout=30s",
       "--web.listen-address=0.0.0.0:9090",
     ];
+  }
+  if (expected.apalis === true) {
+    commands["apalis-migrate"] = ["apalis-migrate"];
+    commands["apalis-worker"] = ["apalis-worker"];
   }
   for (const [name, command] of Object.entries(commands)) {
     if (JSON.stringify(services[name]?.command) !== JSON.stringify(command)) {
@@ -2784,6 +2815,26 @@ export function canonicalComposeFindings(model, expected) {
       retries: 12,
     };
   }
+  if (expected.apalis === true) {
+    expectedHealthchecks["apalis-postgres"] = {
+      test: ["CMD-SHELL", "pg_isready -U synveda_apalis_owner -d synveda_apalis"],
+      interval: "5s",
+      timeout: "3s",
+      retries: 24,
+    };
+    expectedHealthchecks["apalis-worker"] = {
+      test: [
+        "CMD",
+        "/usr/local/bin/synveda-container",
+        "probe",
+        "apalis-worker",
+        "ready",
+      ],
+      interval: "5s",
+      timeout: "3s",
+      retries: 24,
+    };
+  }
   for (const name of expectedServices) {
     const actual = services[name]?.healthcheck;
     const healthcheck = expectedHealthchecks[name];
@@ -2800,13 +2851,15 @@ export function canonicalComposeFindings(model, expected) {
   }
   const roleContractTarget = "/etc/synveda/database/roles.json";
   const roleContractSources = new Set();
-  for (const name of [
+  const roleContractServices = [
     "database-preflight",
     "gateway",
     "migrate",
     "tenant-convergence",
     "worker",
-  ]) {
+  ];
+  if (expected.apalis === true) roleContractServices.push("apalis-worker");
+  for (const name of roleContractServices) {
     if (services[name]?.environment?.SYNVEDA_DATABASE_ROLES_FILE !== roleContractTarget) {
       findings.push(`${name} database role contract setting drifted`);
     }
@@ -2851,6 +2904,58 @@ export function canonicalComposeFindings(model, expected) {
       })
     ) {
       findings.push("Prometheus state volume drifted");
+    }
+  }
+  if (expected.apalis === true) {
+    const queue = services["apalis-postgres"] ?? {};
+    const migrator = services["apalis-migrate"] ?? {};
+    const worker = services["apalis-worker"] ?? {};
+    if (
+      queue.pids_limit !== 256 ||
+      normalizedByteSize(queue.mem_limit) !== 1024 ** 3 ||
+      Number(queue.cpus) !== 1 ||
+      queue.stop_grace_period !== "45s" ||
+      normalizedByteSize(queue.shm_size) !== 128 * 1024 ** 2 ||
+      JSON.stringify(queue.tmpfs) !==
+        JSON.stringify([
+          "/tmp:rw,noexec,nosuid,nodev,mode=1777,size=32m",
+          "/var/run/postgresql:rw,nosuid,nodev,mode=3775,size=16m",
+        ])
+    ) {
+      findings.push("Apalis queue resource boundary drifted");
+    }
+    if (
+      migrator.pids_limit !== 64 ||
+      normalizedByteSize(migrator.mem_limit) !== 256 * 1024 ** 2 ||
+      Number(migrator.cpus) !== 0.5 ||
+      migrator.restart !== "no" ||
+      JSON.stringify(migrator.tmpfs) !==
+        JSON.stringify(["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=16m"])
+    ) {
+      findings.push("Apalis migrator resource boundary drifted");
+    }
+    if (
+      worker.pids_limit !== 256 ||
+      normalizedByteSize(worker.mem_limit) !== 1024 ** 3 ||
+      Number(worker.cpus) !== 1 ||
+      worker.stop_grace_period !== "35s" ||
+      JSON.stringify(worker.tmpfs) !==
+        JSON.stringify(["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"])
+    ) {
+      findings.push("Apalis worker resource boundary drifted");
+    }
+    const queueData = (queue.volumes ?? []).find(
+      (mount) => mount.target === "/var/lib/postgresql/data",
+    );
+    if (
+      !sameJson(queueData, {
+        type: "volume",
+        source: "apalis-data",
+        target: "/var/lib/postgresql/data",
+        volume: {},
+      })
+    ) {
+      findings.push("Apalis queue volume drifted");
     }
   }
   if (services.gateway?.healthcheck?.test?.at(-1) !== "ready") {
@@ -2986,7 +3091,9 @@ export function canonicalComposeFindings(model, expected) {
   ) {
     findings.push("database target preflight peer requirement differs from the OIDC topology");
   }
-  for (const processName of ["gateway", "worker"]) {
+  const peerBoundProcesses = ["gateway", "worker"];
+  if (expected.apalis === true) peerBoundProcesses.push("apalis-worker");
+  for (const processName of peerBoundProcesses) {
     if (
       services[processName]?.environment?.SYNVEDA_DATABASE_REQUIRED_PEER !==
       (expected.oidc === "bundled" ? "keycloak" : undefined)
@@ -3137,6 +3244,11 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.observability === true) {
     expectedBindTargets.prometheus = ["/etc/prometheus/prometheus.yaml:ro"];
   }
+  if (expected.apalis === true) {
+    expectedBindTargets["apalis-worker"] = [
+      "/etc/synveda/database/roles.json:ro",
+    ];
+  }
   if (expected.postgres === "bundled") {
     expectedBindTargets["database-bootstrap"] = [
       "/run/secrets/database_roles.json:ro",
@@ -3177,6 +3289,11 @@ export function canonicalComposeFindings(model, expected) {
   }
   if (expected.observability === true) {
     expectedNonBindTargets.prometheus = ["volume:/prometheus:rw"];
+  }
+  if (expected.apalis === true) {
+    expectedNonBindTargets["apalis-postgres"] = [
+      "volume:/var/lib/postgresql/data:rw",
+    ];
   }
   for (const [name, targets] of Object.entries(expectedNonBindTargets)) {
     if (
@@ -3220,6 +3337,11 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.observability === true) {
     expectedBindSources.prometheus = {
       "/etc/prometheus/prometheus.yaml": expected.prometheusConfig,
+    };
+  }
+  if (expected.apalis === true) {
+    expectedBindSources["apalis-worker"] = {
+      "/etc/synveda/database/roles.json": expected.databaseRolesFile,
     };
   }
   if (expected.postgres === "bundled") {
@@ -3445,6 +3567,18 @@ export function canonicalComposeFindings(model, expected) {
       "otel-collector:service_healthy:no-restart:required",
     ];
   }
+  if (expected.apalis === true) {
+    expectedDependencies.worker.push(
+      "apalis-migrate:service_completed_successfully:no-restart:required",
+    );
+    expectedDependencies["apalis-migrate"] = [
+      "apalis-postgres:service_healthy:no-restart:required",
+    ];
+    expectedDependencies["apalis-worker"] = [
+      "apalis-migrate:service_completed_successfully:no-restart:required",
+      "tenant-convergence:service_completed_successfully:no-restart:required",
+    ];
+  }
   if (expected.postgres === "bundled" && expected.oidc === "bundled") {
     expectedDependencies["keycloak-database-bootstrap"] = [
       "database-bootstrap:service_completed_successfully:no-restart:required",
@@ -3541,6 +3675,19 @@ export function canonicalComposeFindings(model, expected) {
     expectedSecrets.proxy = [
       "synveda_tls_cert:tls_cert",
       "synveda_tls_key:tls_key",
+    ];
+  }
+  if (expected.apalis === true) {
+    expectedSecrets["apalis-postgres"] = [
+      "apalis_owner_password:apalis_owner_password",
+    ];
+    expectedSecrets["apalis-migrate"] = [
+      "apalis_owner_password:apalis_owner_password",
+      "apalis_runtime_password:apalis_runtime_password",
+    ];
+    expectedSecrets["apalis-worker"] = [
+      "apalis_runtime_password:apalis_runtime_password",
+      "synveda_worker_database_url:database_url",
     ];
   }
   for (const [name, bindings] of Object.entries(expectedSecrets)) {
@@ -3701,6 +3848,8 @@ export function canonicalComposeFindings(model, expected) {
     "SYNVEDA_MIGRATOR_DATABASE_URL",
     "SYNVEDA_GATEWAY_DATABASE_URL",
     "SYNVEDA_WORKER_DATABASE_URL",
+    "SYNVEDA_APALIS_OWNER_PASSWORD",
+    "SYNVEDA_APALIS_DATABASE_PASSWORD",
     "SYNVEDA_KMS_KEY",
     "SYNVEDA_KMS_KEY_REF",
     "POSTGRES_PASSWORD",
@@ -3778,6 +3927,27 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.observability === true) {
     expectedEnvironmentKeys.worker.push("SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH");
     expectedEnvironmentKeys.prometheus = [];
+  }
+  if (expected.apalis === true) {
+    expectedEnvironmentKeys.worker.push("SYNVEDA_EXECUTION_PROVIDER");
+    expectedEnvironmentKeys["apalis-postgres"] = [
+      "POSTGRES_DB",
+      "POSTGRES_PASSWORD_FILE",
+      "POSTGRES_USER",
+    ];
+    expectedEnvironmentKeys["apalis-migrate"] = [
+      "RUST_LOG",
+      "SYNVEDA_APALIS_DATABASE_PASSWORD_FILE",
+      "SYNVEDA_APALIS_OWNER_PASSWORD_FILE",
+    ];
+    expectedEnvironmentKeys["apalis-worker"] = [
+      "DATABASE_URL_FILE",
+      "OTEL_EXPORTER_OTLP_ENDPOINT",
+      "RUST_LOG",
+      "SYNVEDA_APALIS_DATABASE_PASSWORD_FILE",
+      "SYNVEDA_DATABASE_REQUIRED_PEER",
+      "SYNVEDA_DATABASE_ROLES_FILE",
+    ];
   }
   if (expected.browser === true) {
     expectedEnvironmentKeys["browser-acceptance"] = [
@@ -3898,6 +4068,32 @@ export function canonicalComposeFindings(model, expected) {
   ) {
     findings.push("worker private health-listener boundary drifted");
   }
+  if (
+    services.worker?.environment?.SYNVEDA_EXECUTION_PROVIDER !==
+    (expected.apalis === true ? "apalis" : undefined)
+  ) {
+    findings.push("core worker execution-provider selector drifted");
+  }
+  if (
+    expected.apalis === true &&
+    (services["apalis-postgres"]?.environment?.POSTGRES_USER !==
+      "synveda_apalis_owner" ||
+      services["apalis-postgres"]?.environment?.POSTGRES_DB !== "synveda_apalis" ||
+      services["apalis-postgres"]?.environment?.POSTGRES_PASSWORD_FILE !==
+        "/run/secrets/apalis_owner_password" ||
+      services["apalis-migrate"]?.environment?.SYNVEDA_APALIS_OWNER_PASSWORD_FILE !==
+        "/run/secrets/apalis_owner_password" ||
+      services["apalis-migrate"]?.environment
+        ?.SYNVEDA_APALIS_DATABASE_PASSWORD_FILE !==
+        "/run/secrets/apalis_runtime_password" ||
+      services["apalis-worker"]?.environment
+        ?.SYNVEDA_APALIS_DATABASE_PASSWORD_FILE !==
+        "/run/secrets/apalis_runtime_password" ||
+      services["apalis-worker"]?.environment?.DATABASE_URL_FILE !==
+        "/run/secrets/database_url")
+  ) {
+    findings.push("Apalis owner/runtime file-secret boundary drifted");
+  }
   if (expected.browser === true) {
     findings.push(
       ...browserAcceptanceFindings(services["browser-acceptance"] ?? {}, {
@@ -3950,6 +4146,14 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.observability === true) {
     expectedNetworks.prometheus = { telemetry: {} };
   }
+  if (expected.apalis === true) {
+    expectedNetworks["apalis-postgres"] = { "synveda-data": {} };
+    expectedNetworks["apalis-migrate"] = { "synveda-data": {} };
+    expectedNetworks["apalis-worker"] = {
+      "synveda-data": {},
+      telemetry: {},
+    };
+  }
   if (expected.postgres === "external") {
     expectedNetworks["database-preflight"]["application-egress"] = { gw_priority: 1 };
     expectedNetworks.migrate["application-egress"] = { gw_priority: 1 };
@@ -3999,6 +4203,7 @@ export function canonicalComposeFindings(model, expected) {
       "tenant-convergence",
     ]);
     if (expected.browser === true) oneShot.add("browser-acceptance");
+    if (expected.apalis === true) oneShot.add("apalis-migrate");
     for (const [name, service] of Object.entries(services)) {
       if (!oneShot.has(name) && service.restart !== "unless-stopped") {
         findings.push(`${name} lacks the reference restart policy`);
@@ -4035,6 +4240,9 @@ export function canonicalComposeFindings(model, expected) {
       "migrate",
       "tenant-convergence",
     ];
+    if (expected.apalis === true) {
+      developmentProductBuilds.push("apalis-migrate", "apalis-worker");
+    }
     for (const name of developmentProductBuilds) {
       if (services[name]?.build?.dockerfile !== "deploy/compose/gateway/Dockerfile") {
         findings.push(`${name} does not use the development product build`);
@@ -4219,6 +4427,15 @@ export function canonicalComposeFindings(model, expected) {
       },
     };
   }
+  if (expected.apalis === true) {
+    expectedVolumes["apalis-data"] = {
+      name: `${expected.projectName}_apalis-data`,
+      labels: {
+        "com.synveda.contract": "cpr-45",
+        "com.synveda.volume": "apalis-data",
+      },
+    };
+  }
   if (!sameJson(model.volumes ?? {}, expectedVolumes)) {
     findings.push("named volume set differs from the closed deployment contract");
   }
@@ -4351,6 +4568,7 @@ function render(fixture, expected) {
   if (expected.demo === true) selectedProfiles.push("demo");
   if (expected.browser === true) selectedProfiles.push("browser-acceptance");
   if (expected.observability === true) selectedProfiles.push("observability");
+  if (expected.apalis === true) selectedProfiles.push("apalis");
   const environment = composeEnvironment(fixture, {
     SYNVEDA_COMPOSE_RUNTIME: expected.runtime,
     SYNVEDA_POSTGRES_MODE: expected.postgres,
@@ -4436,6 +4654,8 @@ function checkStaticInputs() {
     "compose.browser-acceptance.yaml",
     "compose.browser-acceptance.dev.yaml",
     "compose.observability.yaml",
+    "compose.apalis.yaml",
+    "compose.apalis.dev.yaml",
     "compose.otlp-external.yaml",
     "compose.backup.yaml",
     "compose.restore.yaml",
@@ -4764,6 +4984,26 @@ export function main() {
       [],
       `development/demo: ${demoFindings.join("; ")}`,
     );
+    for (const runtime of ["development", "reference"]) {
+      const apalisExpected = {
+        runtime,
+        postgres: "bundled",
+        oidc: "bundled",
+        apalis: true,
+      };
+      const apalis = render(fixture, apalisExpected);
+      const apalisFindings = canonicalComposeFindings(apalis, apalisExpected);
+      assert.deepEqual(
+        apalisFindings,
+        [],
+        `${runtime}/apalis: ${apalisFindings.join("; ")}`,
+      );
+      assert.deepEqual(
+        render(fixture, apalisExpected),
+        apalis,
+        `${runtime}/apalis render is not deterministic`,
+      );
+    }
     for (const [runtime, postgres, oidc, otlp] of [
       ["development", "bundled", "bundled", "discard"],
       ["development", "bundled", "bundled", "external"],
@@ -4835,7 +5075,7 @@ export function main() {
     }
     console.log(
       `canonical Compose static shape validates: ${rows}/16 deterministic provider/runtime/OTLP rows, ` +
-        "one bundled demo profile, four private observability rows, two sandboxed browser-acceptance rows, one exact custom development issuer port, role-scoped file secrets, " +
+        "one bundled demo profile, two experimental Apalis rows, four private observability rows, two sandboxed browser-acceptance rows, one exact custom development issuer port, role-scoped file secrets, " +
         "isolated networks, public proxy plus optional loopback operator ports and closed runtime/build proxy injection; " +
         "live clean-start and browser acceptance execution remain pending",
     );

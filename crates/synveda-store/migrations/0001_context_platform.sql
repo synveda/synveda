@@ -533,21 +533,137 @@ begin
     if new.tenant_id <> old.tenant_id
        or new.id <> old.id
        or new.kind <> old.kind
-       or new.proposal_id <> old.proposal_id
+       or new.operation_version <> old.operation_version
+       or new.proposal_id is distinct from old.proposal_id
        or new.knowledge_item_id is distinct from old.knowledge_item_id
+       or new.skill_version_id is distinct from old.skill_version_id
+       or new.requested_by_identity_id is distinct from old.requested_by_identity_id
+       or new.authorized_at <> old.authorized_at
        or new.input_hash <> old.input_hash
        or new.created_at <> old.created_at then
         raise exception 'durable operation identity is immutable';
     end if;
-    if old.state in ('succeeded', 'blocked') then
+    if old.state in ('succeeded', 'blocked', 'cancelled', 'dead_lettered') then
         raise exception 'durable operation % is terminal', old.id;
     end if;
+    if new.progress_percent < old.progress_percent then
+        raise exception 'durable operation progress cannot move backwards';
+    end if;
+    if old.cancel_requested_at is not null
+       and new.cancel_requested_at is distinct from old.cancel_requested_at then
+        raise exception 'durable operation cancellation is immutable';
+    end if;
+    if old.kind = 'knowledge_erasure'
+       and new.cancel_requested_at is not null then
+        raise exception 'Knowledge erasure cannot use caller cancellation';
+    end if;
     if not (
-        (old.state = 'pending' and new.state in ('running', 'blocked'))
-        or (old.state = 'running' and new.state in ('succeeded', 'failed', 'blocked'))
-        or (old.state = 'failed' and new.state in ('running', 'blocked'))
+        (old.state = 'pending' and new.state in ('running', 'blocked', 'cancelled', 'dead_lettered'))
+        or (old.state = 'running' and new.state in
+            ('running', 'succeeded', 'failed', 'blocked', 'cancelled', 'dead_lettered'))
+        or (old.state = 'failed' and new.state in ('running', 'blocked', 'cancelled', 'dead_lettered'))
     ) then
         raise exception 'invalid durable operation transition % -> %', old.state, new.state;
+    end if;
+    if new.state = 'running' then
+        if old.state in ('pending', 'failed') and new.attempts <> old.attempts + 1 then
+            raise exception 'a durable operation claim increments attempts exactly once';
+        end if;
+        if old.state = 'running' then
+            if new.attempts = old.attempts then
+                if new.lease_owner <> old.lease_owner then
+                    raise exception 'a durable operation lease owner cannot change during renewal';
+                end if;
+            elsif new.attempts = old.attempts + 1 then
+                if old.lease_expires_at > statement_timestamp() then
+                    raise exception 'a live durable operation lease cannot be reclaimed';
+                end if;
+            else
+                raise exception 'a durable operation reclaim increments attempts exactly once';
+            end if;
+        end if;
+    elsif new.attempts <> old.attempts then
+        raise exception 'durable operation attempts change only on claim';
+    end if;
+    return new;
+end
+$$;
+
+
+--
+-- Name: synveda_operation_attempt_transition(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.synveda_operation_attempt_transition() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+    if new.tenant_id <> old.tenant_id
+       or new.operation_id <> old.operation_id
+       or new.attempt_number <> old.attempt_number
+       or new.worker_id <> old.worker_id
+       or new.started_at <> old.started_at then
+        raise exception 'operation attempt identity is immutable';
+    end if;
+    if old.state <> 'running' then
+        raise exception 'operation attempt is terminal';
+    end if;
+    if not (
+        (new.state = 'running' and new.heartbeat_at >= old.heartbeat_at)
+        or new.state in ('succeeded', 'retry_scheduled', 'cancelled', 'dead_lettered')
+    ) then
+        raise exception 'invalid operation attempt transition % -> %', old.state, new.state;
+    end if;
+    return new;
+end
+$$;
+
+
+--
+-- Name: synveda_operation_outbox_transition(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.synveda_operation_outbox_transition() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+    if new.tenant_id <> old.tenant_id
+       or new.operation_id <> old.operation_id
+       or new.operation_version <> old.operation_version
+       or new.created_at <> old.created_at then
+        raise exception 'operation outbox identity is immutable';
+    end if;
+    if old.state = 'completed' then
+        raise exception 'operation outbox row is terminal';
+    end if;
+    if not (
+        (old.state = 'pending' and new.state = 'claimed')
+        or (old.state = 'claimed' and new.state = 'claimed'
+            and old.lease_expires_at <= statement_timestamp())
+        or (old.state = 'dispatched' and new.state = 'claimed')
+        or (old.state = 'claimed' and new.state in ('pending', 'dispatched'))
+        or (old.state in ('pending', 'dispatched') and new.state = 'pending')
+        or (old.state in ('pending', 'claimed', 'dispatched') and new.state = 'completed')
+    ) then
+        raise exception 'invalid operation outbox transition % -> %', old.state, new.state;
+    end if;
+    if new.state = 'claimed' and new.dispatch_attempts <> old.dispatch_attempts + 1 then
+        raise exception 'an outbox claim increments dispatch attempts exactly once';
+    end if;
+    if new.state <> 'claimed' and new.dispatch_attempts <> old.dispatch_attempts then
+        raise exception 'outbox dispatch attempts change only on claim';
+    end if;
+    if old.state = 'claimed' and new.state = 'pending'
+       and new.submission_failures <> old.submission_failures + 1 then
+        raise exception 'a failed outbox submission increments consecutive failures exactly once';
+    end if;
+    if old.state = 'claimed' and new.state = 'dispatched'
+       and new.submission_failures <> 0 then
+        raise exception 'a successful outbox submission resets consecutive failures';
+    end if;
+    if not (old.state = 'claimed' and new.state in ('pending', 'dispatched'))
+       and new.submission_failures <> old.submission_failures then
+        raise exception 'outbox consecutive failures change only after submission';
     end if;
     return new;
 end
@@ -759,6 +875,7 @@ begin
     update durable_operations
        set state = 'succeeded', completed_at = now(), updated_at = now(),
            lease_owner = null, lease_expires_at = null, last_error_code = null,
+           next_attempt_at = null, progress_percent = 100,
            result = jsonb_build_object('erased', true)
      where tenant_id = wanted_tenant and id = wanted_operation;
 end
@@ -2836,11 +2953,18 @@ CREATE TABLE public.durable_operations (
     tenant_id uuid NOT NULL,
     id uuid NOT NULL,
     kind text NOT NULL,
+    operation_version smallint DEFAULT 1 NOT NULL,
     state text DEFAULT 'pending'::text NOT NULL,
-    proposal_id uuid NOT NULL,
+    proposal_id uuid,
     knowledge_item_id uuid,
+    skill_version_id uuid,
+    requested_by_identity_id uuid,
+    authorized_at timestamp with time zone DEFAULT now() NOT NULL,
     input_hash text NOT NULL,
+    progress_percent smallint DEFAULT 0 NOT NULL,
     attempts integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now(),
+    cancel_requested_at timestamp with time zone,
     lease_owner text,
     lease_expires_at timestamp with time zone,
     last_error_code text,
@@ -2850,17 +2974,76 @@ CREATE TABLE public.durable_operations (
     started_at timestamp with time zone,
     completed_at timestamp with time zone,
     CONSTRAINT durable_operations_attempts_check CHECK ((attempts >= 0)),
-    CONSTRAINT durable_operations_error_check CHECK (((last_error_code IS NULL) OR ((btrim(last_error_code) <> ''::text) AND (char_length(last_error_code) <= 128)))),
+    CONSTRAINT durable_operations_cancellation_check CHECK (((state = 'cancelled'::text) = (cancel_requested_at IS NOT NULL))),
+    CONSTRAINT durable_operations_error_check CHECK (((last_error_code IS NULL) OR (last_error_code ~ '^[a-z][a-z0-9_]{0,63}$'::text))),
     CONSTRAINT durable_operations_input_hash_check CHECK ((input_hash ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT durable_operations_kind_check CHECK ((kind = 'knowledge_erasure'::text)),
+    CONSTRAINT durable_operations_kind_check CHECK ((kind = ANY (ARRAY['knowledge_erasure'::text, 'skill_validation'::text]))),
     CONSTRAINT durable_operations_lease_owner_check CHECK (((lease_owner IS NULL) OR ((btrim(lease_owner) <> ''::text) AND (char_length(lease_owner) <= 255)))),
+    CONSTRAINT durable_operations_operation_version_check CHECK ((operation_version = 1)),
+    CONSTRAINT durable_operations_progress_check CHECK (((progress_percent >= 0) AND (progress_percent <= 100))),
     CONSTRAINT durable_operations_result_object_check CHECK ((jsonb_typeof(result) = 'object'::text)),
     CONSTRAINT durable_operations_result_size_check CHECK ((octet_length((result)::text) <= 16384)),
-    CONSTRAINT durable_operations_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'blocked'::text]))),
-    CONSTRAINT durable_operations_time_check CHECK ((((state = 'pending'::text) AND (started_at IS NULL) AND (completed_at IS NULL) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL)) OR ((state = 'running'::text) AND (started_at IS NOT NULL) AND (completed_at IS NULL) AND (lease_owner IS NOT NULL) AND (lease_expires_at IS NOT NULL)) OR ((state = ANY (ARRAY['succeeded'::text, 'failed'::text, 'blocked'::text])) AND (completed_at IS NOT NULL) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL))))
+    CONSTRAINT durable_operations_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'blocked'::text, 'cancelled'::text, 'dead_lettered'::text]))),
+    CONSTRAINT durable_operations_target_check CHECK (((kind = 'knowledge_erasure'::text AND proposal_id IS NOT NULL AND knowledge_item_id IS NOT NULL AND skill_version_id IS NULL AND requested_by_identity_id IS NULL AND cancel_requested_at IS NULL) OR (kind = 'skill_validation'::text AND proposal_id IS NULL AND knowledge_item_id IS NULL AND skill_version_id IS NOT NULL AND requested_by_identity_id IS NOT NULL))),
+    CONSTRAINT durable_operations_time_check CHECK ((((state = 'pending'::text) AND (started_at IS NULL) AND (completed_at IS NULL) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL) AND (next_attempt_at IS NOT NULL) AND (last_error_code IS NULL) AND (progress_percent = 0)) OR ((state = 'running'::text) AND (started_at IS NOT NULL) AND (completed_at IS NULL) AND (lease_owner IS NOT NULL) AND (lease_expires_at IS NOT NULL) AND (next_attempt_at IS NULL) AND (last_error_code IS NULL) AND (progress_percent < 100)) OR ((state = 'failed'::text) AND (started_at IS NOT NULL) AND (completed_at IS NULL) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL) AND (next_attempt_at IS NOT NULL) AND (last_error_code IS NOT NULL) AND (progress_percent < 100)) OR ((state = 'succeeded'::text) AND (completed_at IS NOT NULL) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL) AND (next_attempt_at IS NULL) AND (last_error_code IS NULL) AND (progress_percent = 100)) OR ((state = 'blocked'::text) AND (completed_at IS NOT NULL) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL) AND (next_attempt_at IS NULL) AND (last_error_code IS NOT NULL)) OR ((state = 'cancelled'::text) AND (completed_at IS NOT NULL) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL) AND (next_attempt_at IS NULL) AND (cancel_requested_at IS NOT NULL)) OR ((state = 'dead_lettered'::text) AND (completed_at IS NOT NULL) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL) AND (next_attempt_at IS NULL) AND (last_error_code IS NOT NULL))))
 );
 
 ALTER TABLE ONLY public.durable_operations FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: operation_attempts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operation_attempts (
+    tenant_id uuid NOT NULL,
+    operation_id uuid NOT NULL,
+    attempt_number integer NOT NULL,
+    worker_id text NOT NULL,
+    state text DEFAULT 'running'::text NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    heartbeat_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    safe_error_code text,
+    CONSTRAINT operation_attempts_number_check CHECK ((attempt_number > 0)),
+    CONSTRAINT operation_attempts_worker_check CHECK (((btrim(worker_id) <> ''::text) AND (char_length(worker_id) <= 255))),
+    CONSTRAINT operation_attempts_error_check CHECK (((safe_error_code IS NULL) OR (safe_error_code ~ '^[a-z][a-z0-9_]{0,63}$'::text))),
+    CONSTRAINT operation_attempts_state_check CHECK ((state = ANY (ARRAY['running'::text, 'succeeded'::text, 'retry_scheduled'::text, 'cancelled'::text, 'dead_lettered'::text]))),
+    CONSTRAINT operation_attempts_time_check CHECK ((((state = 'running'::text) AND (completed_at IS NULL) AND (safe_error_code IS NULL)) OR ((state = 'succeeded'::text) AND (completed_at IS NOT NULL) AND (safe_error_code IS NULL)) OR ((state = 'cancelled'::text) AND (completed_at IS NOT NULL)) OR ((state = ANY (ARRAY['retry_scheduled'::text, 'dead_lettered'::text])) AND (completed_at IS NOT NULL) AND (safe_error_code IS NOT NULL))))
+);
+
+ALTER TABLE ONLY public.operation_attempts FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: operation_outbox; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operation_outbox (
+    tenant_id uuid NOT NULL,
+    operation_id uuid NOT NULL,
+    operation_version smallint NOT NULL,
+    state text DEFAULT 'pending'::text NOT NULL,
+    dispatch_attempts integer DEFAULT 0 NOT NULL,
+    submission_failures integer DEFAULT 0 NOT NULL,
+    lease_owner text,
+    lease_expires_at timestamp with time zone,
+    next_dispatch_at timestamp with time zone DEFAULT now(),
+    last_error_code text,
+    dispatched_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT operation_outbox_version_check CHECK ((operation_version = 1)),
+    CONSTRAINT operation_outbox_attempts_check CHECK ((dispatch_attempts >= 0)),
+    CONSTRAINT operation_outbox_failures_check CHECK ((submission_failures >= 0)),
+    CONSTRAINT operation_outbox_lease_owner_check CHECK (((lease_owner IS NULL) OR ((btrim(lease_owner) <> ''::text) AND (char_length(lease_owner) <= 255)))),
+    CONSTRAINT operation_outbox_error_check CHECK (((last_error_code IS NULL) OR (last_error_code ~ '^[a-z][a-z0-9_]{0,63}$'::text))),
+    CONSTRAINT operation_outbox_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'claimed'::text, 'dispatched'::text, 'completed'::text]))),
+    CONSTRAINT operation_outbox_time_check CHECK ((((state = 'pending'::text) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL) AND (next_dispatch_at IS NOT NULL) AND (completed_at IS NULL)) OR ((state = 'claimed'::text) AND (lease_owner IS NOT NULL) AND (lease_expires_at IS NOT NULL) AND (next_dispatch_at IS NULL) AND (completed_at IS NULL)) OR ((state = 'dispatched'::text) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL) AND (next_dispatch_at IS NULL) AND (dispatched_at IS NOT NULL) AND (completed_at IS NULL)) OR ((state = 'completed'::text) AND (lease_owner IS NULL) AND (lease_expires_at IS NULL) AND (next_dispatch_at IS NULL) AND (completed_at IS NOT NULL))))
+);
+
+ALTER TABLE ONLY public.operation_outbox FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -4124,6 +4307,7 @@ CREATE TABLE public.skill_test_runs (
     id uuid NOT NULL,
     tenant_id uuid NOT NULL,
     version_id uuid NOT NULL,
+    operation_id uuid,
     harness text NOT NULL,
     harness_version text NOT NULL,
     outcome text NOT NULL,
@@ -5143,6 +5327,46 @@ ALTER TABLE ONLY public.directory_sync_state
 
 ALTER TABLE ONLY public.durable_operations
     ADD CONSTRAINT durable_operations_pk PRIMARY KEY (tenant_id, id);
+
+
+--
+-- Name: durable_operations durable_operations_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.durable_operations
+    ADD CONSTRAINT durable_operations_id_unique UNIQUE (id);
+
+
+--
+-- Name: durable_operations durable_operations_skill_target_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.durable_operations
+    ADD CONSTRAINT durable_operations_skill_target_unique UNIQUE (tenant_id, id, skill_version_id);
+
+
+--
+-- Name: durable_operations durable_operations_version_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.durable_operations
+    ADD CONSTRAINT durable_operations_version_unique UNIQUE (tenant_id, id, operation_version);
+
+
+--
+-- Name: operation_attempts operation_attempts_pk; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operation_attempts
+    ADD CONSTRAINT operation_attempts_pk PRIMARY KEY (tenant_id, operation_id, attempt_number);
+
+
+--
+-- Name: operation_outbox operation_outbox_pk; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operation_outbox
+    ADD CONSTRAINT operation_outbox_pk PRIMARY KEY (tenant_id, operation_id);
 
 
 --
@@ -6471,7 +6695,35 @@ CREATE UNIQUE INDEX deployment_keys_current ON public.deployment_keys USING btre
 -- Name: durable_operations_queue; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX durable_operations_queue ON public.durable_operations USING btree (tenant_id, state, created_at, id) WHERE (state = ANY (ARRAY['pending'::text, 'failed'::text]));
+CREATE INDEX durable_operations_queue ON public.durable_operations USING btree (tenant_id, kind, state, next_attempt_at, id) WHERE (state = ANY (ARRAY['pending'::text, 'failed'::text, 'running'::text]));
+
+
+--
+-- Name: durable_operations_expired_leases; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX durable_operations_expired_leases ON public.durable_operations USING btree (tenant_id, kind, lease_expires_at, id) WHERE (state = 'running'::text);
+
+
+--
+-- Name: operation_outbox_queue; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX operation_outbox_queue ON public.operation_outbox USING btree (tenant_id, state, next_dispatch_at, operation_id) WHERE (state = ANY (ARRAY['pending'::text, 'claimed'::text]));
+
+
+--
+-- Name: operation_outbox_expired_leases; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX operation_outbox_expired_leases ON public.operation_outbox USING btree (tenant_id, lease_expires_at, operation_id) WHERE (state = 'claimed'::text);
+
+
+--
+-- Name: operation_outbox_stale_deliveries; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX operation_outbox_stale_deliveries ON public.operation_outbox USING btree (tenant_id, dispatched_at, operation_id) WHERE (state = 'dispatched'::text);
 
 
 --
@@ -7021,6 +7273,13 @@ CREATE INDEX skill_test_runs_by_version ON public.skill_test_runs USING btree (t
 
 
 --
+-- Name: skill_test_runs_operation_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX skill_test_runs_operation_unique ON public.skill_test_runs USING btree (tenant_id, operation_id) WHERE (operation_id IS NOT NULL);
+
+
+--
 -- Name: skill_usage_events_by_binding; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7305,6 +7564,34 @@ CREATE TRIGGER durable_operations_no_delete BEFORE DELETE OR TRUNCATE ON public.
 --
 
 CREATE TRIGGER durable_operations_transition BEFORE UPDATE ON public.durable_operations FOR EACH ROW EXECUTE FUNCTION public.synveda_durable_operation_transition();
+
+
+--
+-- Name: operation_attempts operation_attempts_no_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER operation_attempts_no_delete BEFORE DELETE OR TRUNCATE ON public.operation_attempts FOR EACH STATEMENT EXECUTE FUNCTION public.synveda_vedaflow_immutable();
+
+
+--
+-- Name: operation_attempts operation_attempts_transition; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER operation_attempts_transition BEFORE UPDATE ON public.operation_attempts FOR EACH ROW EXECUTE FUNCTION public.synveda_operation_attempt_transition();
+
+
+--
+-- Name: operation_outbox operation_outbox_no_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER operation_outbox_no_delete BEFORE DELETE OR TRUNCATE ON public.operation_outbox FOR EACH STATEMENT EXECUTE FUNCTION public.synveda_vedaflow_immutable();
+
+
+--
+-- Name: operation_outbox operation_outbox_transition; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER operation_outbox_transition BEFORE UPDATE ON public.operation_outbox FOR EACH ROW EXECUTE FUNCTION public.synveda_operation_outbox_transition();
 
 
 --
@@ -8387,11 +8674,59 @@ ALTER TABLE ONLY public.durable_operations
 
 
 --
+-- Name: durable_operations durable_operations_skill_version_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.durable_operations
+    ADD CONSTRAINT durable_operations_skill_version_fk FOREIGN KEY (tenant_id, skill_version_id) REFERENCES public.skill_versions(tenant_id, id);
+
+
+--
+-- Name: durable_operations durable_operations_requester_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.durable_operations
+    ADD CONSTRAINT durable_operations_requester_fk FOREIGN KEY (tenant_id, requested_by_identity_id) REFERENCES public.identities(tenant_id, id);
+
+
+--
 -- Name: durable_operations durable_operations_tenant_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.durable_operations
     ADD CONSTRAINT durable_operations_tenant_fk FOREIGN KEY (tenant_id) REFERENCES public.tenants(id);
+
+
+--
+-- Name: operation_attempts operation_attempts_operation_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operation_attempts
+    ADD CONSTRAINT operation_attempts_operation_fk FOREIGN KEY (tenant_id, operation_id) REFERENCES public.durable_operations(tenant_id, id);
+
+
+--
+-- Name: operation_attempts operation_attempts_tenant_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operation_attempts
+    ADD CONSTRAINT operation_attempts_tenant_fk FOREIGN KEY (tenant_id) REFERENCES public.tenants(id);
+
+
+--
+-- Name: operation_outbox operation_outbox_operation_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operation_outbox
+    ADD CONSTRAINT operation_outbox_operation_fk FOREIGN KEY (tenant_id, operation_id, operation_version) REFERENCES public.durable_operations(tenant_id, id, operation_version);
+
+
+--
+-- Name: operation_outbox operation_outbox_tenant_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operation_outbox
+    ADD CONSTRAINT operation_outbox_tenant_fk FOREIGN KEY (tenant_id) REFERENCES public.tenants(id);
 
 
 --
@@ -9299,6 +9634,14 @@ ALTER TABLE ONLY public.skill_changes
 
 
 --
+-- Name: skill_test_runs skill_test_runs_operation_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.skill_test_runs
+    ADD CONSTRAINT skill_test_runs_operation_fk FOREIGN KEY (tenant_id, operation_id, version_id) REFERENCES public.durable_operations(tenant_id, id, skill_version_id);
+
+
+--
 -- Name: skill_test_runs skill_test_runs_version_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -9955,6 +10298,34 @@ ALTER TABLE public.durable_operations ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY durable_operations_tenant_isolation ON public.durable_operations USING ((tenant_id = public.synveda_current_tenant())) WITH CHECK ((tenant_id = public.synveda_current_tenant()));
+
+
+--
+-- Name: operation_attempts; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.operation_attempts ENABLE ROW LEVEL SECURITY;
+
+
+--
+-- Name: operation_attempts operation_attempts_tenant_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY operation_attempts_tenant_isolation ON public.operation_attempts USING ((tenant_id = public.synveda_current_tenant())) WITH CHECK ((tenant_id = public.synveda_current_tenant()));
+
+
+--
+-- Name: operation_outbox; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.operation_outbox ENABLE ROW LEVEL SECURITY;
+
+
+--
+-- Name: operation_outbox operation_outbox_tenant_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY operation_outbox_tenant_isolation ON public.operation_outbox USING ((tenant_id = public.synveda_current_tenant())) WITH CHECK ((tenant_id = public.synveda_current_tenant()));
 
 
 --
@@ -11344,6 +11715,139 @@ GRANT UPDATE(started_at) ON TABLE public.durable_operations TO synveda_app;
 --
 
 GRANT UPDATE(completed_at) ON TABLE public.durable_operations TO synveda_app;
+
+
+--
+-- Name: COLUMN durable_operations.progress_percent; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(progress_percent) ON TABLE public.durable_operations TO synveda_app;
+
+
+--
+-- Name: COLUMN durable_operations.next_attempt_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(next_attempt_at) ON TABLE public.durable_operations TO synveda_app;
+
+
+--
+-- Name: COLUMN durable_operations.cancel_requested_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(cancel_requested_at) ON TABLE public.durable_operations TO synveda_app;
+
+
+--
+-- Name: TABLE operation_attempts; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE public.operation_attempts TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_attempts.state; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(state) ON TABLE public.operation_attempts TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_attempts.heartbeat_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(heartbeat_at) ON TABLE public.operation_attempts TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_attempts.completed_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(completed_at) ON TABLE public.operation_attempts TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_attempts.safe_error_code; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(safe_error_code) ON TABLE public.operation_attempts TO synveda_app;
+
+
+--
+-- Name: TABLE operation_outbox; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE public.operation_outbox TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_outbox.state; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(state) ON TABLE public.operation_outbox TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_outbox.dispatch_attempts; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(dispatch_attempts) ON TABLE public.operation_outbox TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_outbox.submission_failures; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(submission_failures) ON TABLE public.operation_outbox TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_outbox.lease_owner; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(lease_owner) ON TABLE public.operation_outbox TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_outbox.lease_expires_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(lease_expires_at) ON TABLE public.operation_outbox TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_outbox.next_dispatch_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(next_dispatch_at) ON TABLE public.operation_outbox TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_outbox.last_error_code; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(last_error_code) ON TABLE public.operation_outbox TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_outbox.dispatched_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(dispatched_at) ON TABLE public.operation_outbox TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_outbox.completed_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(completed_at) ON TABLE public.operation_outbox TO synveda_app;
+
+
+--
+-- Name: COLUMN operation_outbox.updated_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(updated_at) ON TABLE public.operation_outbox TO synveda_app;
 
 
 --

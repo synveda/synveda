@@ -33,7 +33,7 @@ export function parseComposePs(source) {
   }
 }
 
-export function runtimeStateFindings(rows, { postgres, oidc, browser, observability }) {
+export function runtimeStateFindings(rows, { postgres, oidc, browser, observability, apalis }) {
   const oneShots = new Set([
     "database-preflight",
     "issuer-diagnostic",
@@ -52,6 +52,11 @@ export function runtimeStateFindings(rows, { postgres, oidc, browser, observabil
   }
   if (browser === "true") oneShots.add("browser-acceptance");
   if (observability === "true") longRunning.add("prometheus");
+  if (apalis === "true") {
+    oneShots.add("apalis-migrate");
+    longRunning.add("apalis-postgres");
+    longRunning.add("apalis-worker");
+  }
   const expected = new Set([...oneShots, ...longRunning]);
   const findings = [];
   const observed = new Map();
@@ -126,6 +131,7 @@ export function parseArguments(argv) {
     "--oidc",
     "--browser",
     "--observability",
+    "--apalis",
     "--app-url",
     "--issuer",
     "--prometheus-url",
@@ -138,8 +144,13 @@ export function parseArguments(argv) {
   if (!["bundled", "external"].includes(selection.oidc)) return undefined;
   if (!["true", "false"].includes(selection.browser)) return undefined;
   if (!["true", "false"].includes(selection.observability)) return undefined;
+  if (!["true", "false"].includes(selection.apalis)) return undefined;
   if (
     selection.browser === "true" &&
+    (selection.postgres !== "bundled" || selection.oidc !== "bundled")
+  ) return undefined;
+  if (
+    selection.apalis === "true" &&
     (selection.postgres !== "bundled" || selection.oidc !== "bundled")
   ) return undefined;
   if (

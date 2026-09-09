@@ -1666,7 +1666,11 @@ async fn conflicts_are_transitional_governed_and_temporally_queryable() {
         .await
         .expect("create original Knowledge");
     assert_eq!(original_result.outcome, KnowledgeMutationOutcome::Applied);
-    let known_before_challenger = Utc::now();
+    let known_before_challenger = snapshot(&state.pool, tenant.id, original_id)
+        .await
+        .expect("original retained")
+        .item
+        .transaction_from;
     tokio::time::sleep(Duration::from_millis(2)).await;
 
     let (challenger, challenger_id, challenger_revision, _) = create_command(

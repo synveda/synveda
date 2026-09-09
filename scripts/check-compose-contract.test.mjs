@@ -2647,6 +2647,8 @@ test("the selector rejects direct secrets and permissive secret files", () => {
       "SYNVEDA_MIGRATOR_DATABASE_URL",
       "SYNVEDA_GATEWAY_DATABASE_URL",
       "SYNVEDA_WORKER_DATABASE_URL",
+      "SYNVEDA_APALIS_OWNER_PASSWORD",
+      "SYNVEDA_APALIS_DATABASE_PASSWORD",
       "SYNVEDA_KMS_KEY",
       "SYNVEDA_KMS_KEY_REF",
       "POSTGRES_PASSWORD",
@@ -2942,7 +2944,7 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
     const files = readdirSync(secrets)
       .filter((name) => !name.startsWith(".") && statSync(join(secrets, name)).isFile())
       .sort();
-    assert.equal(files.length, 15);
+    assert.equal(files.length, 17);
     for (const name of files) {
       const value = readFileSync(join(secrets, name), "utf8").trim();
       assert.ok(value.length > 0, `${name} is empty`);
@@ -3491,7 +3493,7 @@ test("the secret generator rejects unknown active-set leaves", () => {
   }
 });
 
-test("the secret generator extends a safe pre-demo set without rotation", () => {
+test("the secret generator extends safe optional secret pairs without rotation", () => {
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-secret-extension-")));
   chmodSync(scratch, 0o700);
   const { suffix, project } = randomAcceptanceProject("secretext");
@@ -3511,6 +3513,8 @@ test("the secret generator extends a safe pre-demo set without rotation", () => 
     const prepared = spawnSync(GENERATOR, [], { cwd: ROOT, env, encoding: "utf8" });
     assert.equal(prepared.status, 0, prepared.stderr);
     const kmsBefore = readFileSync(join(secrets, "synveda_kms_key"), "utf8");
+    rmSync(join(secrets, "apalis_owner_password"));
+    rmSync(join(secrets, "apalis_runtime_password"));
     rmSync(join(secrets, "keycloak_demo_admin_password"));
     rmSync(join(secrets, "keycloak_demo_member_password"));
 
@@ -3521,9 +3525,14 @@ test("the secret generator extends a safe pre-demo set without rotation", () => 
     });
     assert.equal(extended.status, 0, extended.stderr);
     assert.equal(readFileSync(join(secrets, "synveda_kms_key"), "utf8"), kmsBefore);
+    const apalisOwner = readFileSync(join(secrets, "apalis_owner_password"), "utf8");
+    const apalisRuntime = readFileSync(join(secrets, "apalis_runtime_password"), "utf8");
     const admin = readFileSync(join(secrets, "keycloak_demo_admin_password"), "utf8");
     const member = readFileSync(join(secrets, "keycloak_demo_member_password"), "utf8");
+    assert.notEqual(apalisOwner, apalisRuntime);
     assert.notEqual(admin, member);
+    assert.ok(!`${extended.stdout}${extended.stderr}`.includes(apalisOwner.trim()));
+    assert.ok(!`${extended.stdout}${extended.stderr}`.includes(apalisRuntime.trim()));
     assert.ok(!`${extended.stdout}${extended.stderr}`.includes(admin.trim()));
     assert.ok(!`${extended.stdout}${extended.stderr}`.includes(member.trim()));
 
@@ -3533,8 +3542,84 @@ test("the secret generator extends a safe pre-demo set without rotation", () => 
       encoding: "utf8",
     });
     assert.equal(rerun.status, 0, rerun.stderr);
+    assert.equal(readFileSync(join(secrets, "apalis_owner_password"), "utf8"), apalisOwner);
+    assert.equal(readFileSync(join(secrets, "apalis_runtime_password"), "utf8"), apalisRuntime);
     assert.equal(readFileSync(join(secrets, "keycloak_demo_admin_password"), "utf8"), admin);
     assert.equal(readFileSync(join(secrets, "keycloak_demo_member_password"), "utf8"), member);
+
+    rmSync(join(secrets, "apalis_runtime_password"));
+    const partial = spawnSync(GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(partial.status, 73);
+    assert.match(partial.stderr, /existing Apalis secret extension is unsafe/);
+    assert.equal(readFileSync(join(secrets, "apalis_owner_password"), "utf8"), apalisOwner);
+    assert.equal(existsSync(join(secrets, "apalis_runtime_password")), false);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("an interrupted Apalis secret extension rolls back the complete pair", () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-apalis-secret-interrupt-")));
+  chmodSync(scratch, 0o700);
+  const { suffix, project } = randomAcceptanceProject("apalisinterrupt");
+  const projectRoot = join(scratch, project);
+  mkdirSync(projectRoot, { mode: 0o700 });
+  const secrets = join(projectRoot, "secrets");
+  const authority = join(projectRoot, "database-authority");
+  const gate = join(projectRoot, "keycloak-public-gate");
+  const bin = join(scratch, "bin");
+  mkdirSync(bin, { mode: 0o700 });
+  const realLn = spawnSync("/bin/sh", ["-c", "command -v ln"], {
+    encoding: "utf8",
+  }).stdout.trim();
+  const fakeLn = join(bin, "ln");
+  writeFileSync(
+    fakeLn,
+    `#!/bin/sh
+set -eu
+"$SYNVEDA_TEST_REAL_LN" "$@"
+target=
+for argument in "$@"; do target=$argument; done
+case "$target" in
+  */apalis_owner_password) kill -TERM "$PPID" ;;
+esac
+`,
+    { mode: 0o700 },
+  );
+  chmodSync(fakeLn, 0o700);
+  const env = {
+    ...process.env,
+    SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
+    SYNVEDA_SECRETS_DIR: secrets,
+    SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
+    SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
+  };
+  try {
+    const prepared = spawnSync(GENERATOR, [], { cwd: ROOT, env, encoding: "utf8" });
+    assert.equal(prepared.status, 0, prepared.stderr);
+    rmSync(join(secrets, "apalis_owner_password"));
+    rmSync(join(secrets, "apalis_runtime_password"));
+
+    const interrupted = spawnSync(GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env: {
+        ...env,
+        PATH: `${bin}:${process.env.PATH}`,
+        SYNVEDA_TEST_REAL_LN: realLn,
+      },
+      encoding: "utf8",
+    });
+    assert.equal(interrupted.status, 143, interrupted.stderr);
+    assert.equal(existsSync(join(secrets, "apalis_owner_password")), false);
+    assert.equal(existsSync(join(secrets, "apalis_runtime_password")), false);
+    assert.equal(
+      readdirSync(projectRoot).some((name) => name.startsWith(".synveda-apalis-secret-stage.")),
+      false,
+    );
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

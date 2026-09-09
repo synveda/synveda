@@ -16,10 +16,9 @@ Synveda has one application runtime, schema and public API, but it does not yet
 have complete current-source evidence for a portable single-host installation.
 The canonical Compose graph exists, while the installed release profile and
 legacy contributor loop still carry Rauthy. Backup/restore and the experimental
-Apalis canary have not both completed: logical backup/isolated restore is now
-implemented and deterministically tested, while its live run and the Apalis
-canary remain open. Clean-volume Keycloak browser acceptance has not run on
-the current source.
+Apalis canary are implemented and deterministically tested, but neither has run
+on a live reference stack. Clean-volume Keycloak browser acceptance has not run
+on the current source.
 
 Static configuration checks are useful but do not prove that a user can sign
 in, use the product, restart it, back it up or restore it.
@@ -94,9 +93,11 @@ management, worker health, application metrics and OTLP remain private.
 Long-running services are non-root where their upstream permits it, drop
 capabilities, use read-only roots and have bounded health/restart behavior.
 
-The product image has the closed commands `gateway`, `worker`,
-`issuer-diagnostic`, `database-preflight`, `migrate` and
-`tenant-converge`. Gateway and worker consume different mounted DSNs.
+The product image has the closed process/operator commands listed in the
+deployment contract: `gateway`, `worker`, `apalis-worker`, `apalis-migrate`,
+`issuer-diagnostic`, `database-preflight`, `migrate`, `migration-check` and
+`tenant-converge`, plus the bounded `probe` health command for each serving
+process. Gateway and worker consume different mounted DSNs.
 Runtime role checks refuse owner, superuser, `BYPASSRLS`, wrong-database and
 authority-drift conditions before work.
 
@@ -120,49 +121,56 @@ metrics fan-in and digest-pinned Prometheus. It publishes only a loopback
 operator UI, applies 72-hour/1-GB TSDB block-retention thresholds rather than a
 disk quota, and deterministically pins the gateway-authority/worker-readiness
 smoke contract, lifecycle and exact reset ownership. It is infrastructure
-visibility, not the customer-safe Operations route. That customer route now
-uses three bounded generated public APIs for policy-visible Sessions, context
-runs and Capture work, keeps their loading and failure states independent and
-states which operational signals are unavailable rather than inferring them.
+visibility, not the customer-safe Operations route. That customer route uses
+four bounded generated public APIs for policy-visible durable operations,
+Sessions, context runs and Capture work, keeps their loading and failure states
+independent and states which operational signals are unavailable rather than
+inferring them.
 
-### Remaining implementation slices
+### Remaining validation and cutover slices
 
 1. Run the implemented logical database backup, isolated restore and KMS-key
    checks on the supported development/reference hosts.
-2. Add the minimal `operation`, `operation_attempt` and
-   `operation_outbox` schema/API for `skill_validation@1` under forced RLS.
-3. Add the exact-pinned Apalis leaf adapter and optional Compose fragment.
-4. Run the implemented same-schema product upgrade/rollback acceptance on a
+2. Run the implemented same-schema product upgrade/rollback acceptance on a
    supported reference host.
-5. Run current-source development and reference acceptance on Linux and one
-   Docker Desktop platform.
-6. After the Keycloak gate passes, replace release/install assets with the
+3. Run current-source development and reference acceptance, including the
+   Apalis canary, on Linux and one Docker Desktop platform.
+4. After the Keycloak gate passes, replace release/install assets with the
    canonical pull-only graph and delete all Rauthy residue.
 
-Slices 2–3 require one fresh disposable PostgreSQL fixture. Changing the
-operation schema alters live-derived application-ACL, routine, trigger and RLS
-fingerprints, while its new static SQLx queries require regenerated metadata.
-The supported generation commands are the repository's `authority-fingerprints`
-and `sqlx-prepare` database-test tasks; neither output may be guessed or
-hand-edited. Apalis transport tables belong in a separate disposable queue
-database because Synveda intentionally refuses extra schemas and migration
-ledger rows in its authoritative database.
+The implemented canary generalises the existing operation ledger for one
+`skill_validation@1` kind and adds forced-RLS attempt and transactional outbox
+rows. Its exact-pinned Apalis 0.7.4 leaf uses a separate private queue database
+because Synveda intentionally refuses extra schemas and migration-ledger rows
+in its authoritative database. The queue owner is an isolated bootstrap
+superuser; the long-running adapter receives only a converged runtime role.
+The task payload contains an untrusted tenant routing identifier, the Synveda
+operation ID and operation version. Tenant association and current authority
+are rechecked inside the normal tenant transaction before execution.
 
-The retained synchronous Skill-validation route remains the rollback path. Its
-same-key creation race now resolves the committed winner only after repeating
-Skill read/write authorization; the losing transaction retains neither a test
-row nor an audit event. The PostgreSQL-backed concurrent assertion is compiled
-but still needs the database fixture before it becomes live evidence.
+The retained synchronous Skill-validation route remains the direct diagnostic
+fallback. Durable operation execution uses the native core worker by default;
+that worker is the transport rollback for the optional Apalis leaf. Both paths
+reuse the same non-executing validation rules. The synchronous route's same-key
+creation race resolves the committed winner only after repeating Skill
+read/write authorization; the losing transaction retains neither a test row
+nor an audit event. A fresh isolated exact-role PostgreSQL run now proves that
+concurrent assertion together with atomic operation/outbox creation, duplicate
+and two-dispatcher fencing, delayed acknowledgement, retry/dead-letter,
+cancellation and cross-tenant refusal. This is live database evidence, not a
+live Apalis or reference-stack result.
 
 The direct `make compose-acceptance` gate is implemented. It holds one exact
 project lock from initial asset-absence proof through two browser logins, a
 fixed PostgreSQL, Keycloak, Collector, worker, gateway and proxy restart
 matrix, and the public-API team scenario. The scenario uses distinct Alice and
 Bob logins, redeems a workspace invitation, exercises Sessions, Capture,
-Knowledge and context reuse, reopens and checks its active receipt without
-repeating mutations, then verifies that receipt against live rows after the
-restart matrix. Deterministic lifecycle and contract tests pass; a supported
-Docker host is still required for live evidence.
+Knowledge and context reuse, creates and polls the durable Skill-validation
+operation, reopens and checks its active receipt without repeating mutations,
+then verifies that receipt against live rows after the restart matrix.
+Selecting the Apalis profile adds its worker restart to the matrix.
+Deterministic lifecycle and contract tests pass; a supported Docker host is
+still required for live evidence.
 
 Executable external PostgreSQL plus external OIDC now uses the same product
 graph with operator-provisioned roles, strict verify-full role URLs and a
@@ -201,7 +209,9 @@ are implementation evidence rather than a live restore result.
   key without claiming application-encrypted Knowledge.
 - The default PostgreSQL worker and optional Apalis adapter execute the same
   bounded skill validation once under duplicate dispatch, restart and
-  cancellation tests. Queue payloads contain only operation ID/version.
+  cancellation tests. Queue payloads contain only the tenant routing ID,
+  operation ID and operation version; the tenant association is independently
+  verified under forced RLS.
 - External OIDC renders and boots without a bundled Keycloak service using the
   same product image.
 - The optional local backend shows bounded content-free gateway, worker,
@@ -237,14 +247,15 @@ not exist. No deterministic test is relabelled as live evidence.
 The canonical graph is additive until current-source Keycloak acceptance
 passes. Rauthy is then deleted in one reviewed cut with no compatibility mode.
 The Apalis fragment is disabled by default; removing it and selecting the
-PostgreSQL operation provider is the rollback. Restore always targets a fresh,
-confirmed project and never overwrites the source deployment.
+PostgreSQL operation provider is the rollback. Its queue volume contains no
+business state and is outside the logical recovery contract. Restore always
+targets a fresh, confirmed project and never overwrites the source deployment.
 
 ## Dependencies
 
-Live completion needs a supported Docker Engine, Linux and one Docker Desktop
-host, browser trust for the selected development/reference issuer, and a
-database-capable environment for SQLx metadata and forced-RLS acceptance.
-Production S3/WAL-PITR, encrypted off-host retention and recurring recovery
-drills remain OPS-5; release signing/provenance
+SQLx metadata and forced-RLS acceptance have run against the repository-owned
+isolated PostgreSQL fixture. Live completion still needs a supported Docker
+Engine, Linux and one Docker Desktop host, and browser trust for the selected
+development/reference issuer. Production S3/WAL-PITR, encrypted off-host
+retention and recurring recovery drills remain OPS-5; release signing/provenance
 and published artifact verification remain production-readiness work.

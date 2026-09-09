@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select\n             (select count(*) from durable_operations\n              where tenant_id = $1 and id = $2) as \"operations!\",\n             (select count(*) from operation_outbox\n              where tenant_id = $1 and operation_id = $2) as \"outbox!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "operations!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "outbox!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "c6f731d13ea155f72f118f4f4ff5d7069af751e07adba0b354d02d329e6a35c9"
+}

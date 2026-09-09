@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update operation_outbox\n        set state = 'dispatched', lease_owner = null, lease_expires_at = null,\n            next_dispatch_at = null,\n            dispatched_at = now(), updated_at = now(), last_error_code = null,\n            submission_failures = 0\n        where tenant_id = $1 and operation_id = $2 and state = 'claimed'\n          and operation_version = $3 and lease_owner = $4 and dispatch_attempts = $5\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int2",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "36d0e2460de3683a868b00db393ce36f7674c827b084ad5d5f49292628c8588c"
+}

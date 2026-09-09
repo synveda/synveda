@@ -29,6 +29,7 @@ use crate::credentials;
 const RECEIPT_VERSION: u32 = 1;
 const RECEIPT_NAME: &str = "pulseboard-demo.json";
 const MAX_CAPTURE_POLLS: usize = 120;
+const MAX_OPERATION_POLLS: usize = 120;
 
 /// The three canonical product profiles. These are copied Configuration
 /// documents, not runtime/deployment branches.
@@ -161,6 +162,7 @@ pub async fn start(
 
     let mut receipt = begin_or_resume(profile, &alice)?;
     if receipt.state == "active" {
+        ensure_skill_validation(&alice, &mut receipt).await?;
         return render(&receipt, json_output);
     }
     eprintln!(
@@ -216,6 +218,7 @@ pub async fn start(
     .await?;
 
     ensure_skill(&alice, &mut receipt).await?;
+    ensure_skill_validation(&alice, &mut receipt).await?;
     ensure_tool(&alice, &mut receipt).await?;
     ensure_okf(&alice, &mut receipt).await?;
     ensure_okf_export(&alice, &mut receipt).await?;
@@ -250,6 +253,7 @@ pub async fn status(credential_profile: &str, json_output: bool) -> Result<(), S
         ("incident_knowledge", "/v1/knowledge/"),
         ("reuse_context", "/v1/context-runs/"),
         ("current_context", "/v1/context-runs/"),
+        ("release_skill_validation", "/v1/operations/"),
     ] {
         if let Some(value) = receipt.resource(name)
             && let Some(id) = object_id(value)
@@ -1043,6 +1047,39 @@ async fn ensure_skill(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
     Ok(())
 }
 
+async fn ensure_skill_validation(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
+    let skill = receipt.require_resource("release_skill")?;
+    match skill["outcome"].as_str() {
+        Some("applied") => {}
+        Some("pending_review") => {
+            receipt.notice(
+                "Release Skill validation remains pending until its governed version is applied",
+            )?;
+            return Ok(());
+        }
+        other => {
+            return Err(format!(
+                "release Skill cannot be validated from governance outcome {other:?}"
+            ));
+        }
+    }
+    let operation = match receipt.resource("release_skill_validation") {
+        Some(operation) => operation.clone(),
+        None => {
+            let skill_id = required_str(&skill, "skill_id")?;
+            let version_id = required_str(&skill, "version_id")?;
+            api.post_idempotent_as(
+                &format!("/v1/skills/{skill_id}/versions/{version_id}/validation-operations"),
+                Some(json!({"harness": "validation_sandbox"})),
+                &receipt.key("release-skill-validation"),
+            )
+            .await?
+        }
+    };
+    let completed = poll_operation(api, &operation).await?;
+    receipt.put("release_skill_validation", completed)
+}
+
 async fn ensure_tool(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
     if receipt.resource("tool_server").is_none() {
         let project = receipt.require_resource("project")?;
@@ -1267,6 +1304,48 @@ async fn poll_capture(api: &Api, batch: &Value) -> Result<Value, String> {
     ))
 }
 
+async fn poll_operation(api: &Api, operation: &Value) -> Result<Value, String> {
+    let id = required_str(operation, "id")?;
+    for _ in 0..MAX_OPERATION_POLLS {
+        let current = api.get(&format!("/v1/operations/{id}")).await?;
+        match current["state"].as_str() {
+            Some("succeeded")
+                if current["progress_percent"].as_u64() == Some(100)
+                    && current["attempts"]
+                        .as_i64()
+                        .is_some_and(|attempts| attempts >= 1)
+                    && current["test_run_id"].as_str().is_some() =>
+            {
+                return Ok(current);
+            }
+            Some("succeeded") => {
+                return Err(format!(
+                    "Skill-validation operation {id} returned incomplete success evidence"
+                ));
+            }
+            Some("pending" | "running" | "failed") => {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Some("blocked" | "cancelled" | "dead_lettered") => {
+                return Err(format!(
+                    "Skill-validation operation {id} ended in {} ({})",
+                    current["state"].as_str().unwrap_or("unknown"),
+                    current["error_code"].as_str().unwrap_or("no_error_code")
+                ));
+            }
+            other => {
+                return Err(format!(
+                    "Skill-validation operation {id} returned state {other:?}"
+                ));
+            }
+        }
+    }
+    Err(format!(
+        "Skill-validation operation {id} did not complete within {} seconds",
+        MAX_OPERATION_POLLS / 2
+    ))
+}
+
 fn knowledge_handle(result: &Value) -> Option<Value> {
     let candidate = result.get("candidate").unwrap_or(result);
     let item_id = candidate
@@ -1341,6 +1420,7 @@ fn render(receipt: &Receipt, json_output: bool) -> Result<(), String> {
         ("capture batch", "first_capture"),
         ("current context", "current_context"),
         ("release Skill", "release_skill"),
+        ("Skill validation", "release_skill_validation"),
         ("MCP server", "tool_server"),
         ("OKF import", "okf_import"),
     ] {

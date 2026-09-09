@@ -51,8 +51,12 @@ describe only current contracts, evidence and open risks.
   consumed at the gateway/CLI boundary. The CLI's local bootstrap exceptions
   and the dependency-free eval crate are enumerated by the checker. Adapters
   and SDKs use the public API.
-- Keep SQL in `synveda-store`. Use sqlx compile-time checked static queries;
-  never construct SQL strings.
+- Keep Synveda authoritative/business-state SQL in `synveda-store`. Use sqlx
+  compile-time checked static queries there; never construct product SQL
+  strings. An accepted ADR may let a replaceable deployment leaf own bounded
+  SQL for its separate, non-authoritative transport datastore. That SQL must
+  not query Synveda product state, leak provider schema or types into core or
+  public crates, or escape deterministic boundary tests.
 - Make items private by default. Export only a real cross-module or cross-crate
   contract; prefer `pub(crate)` to accidental public APIs.
 - Prefer explicit control flow, closed state vocabularies and bounded work.
@@ -146,8 +150,9 @@ proportion to the change and record prerequisites that were unavailable.
 
 ## Repository map
 
-- `crates/` — 13 Rust crates: types, crypto, policy, store, identity, audit,
-  vedaflow, retrieval, ingest, OKF, gateway, CLI and evaluation
+- `crates/` — 14 Rust crates: types, crypto, policy, store, identity, audit,
+  vedaflow, retrieval, ingest, OKF, gateway, CLI, evaluation and the optional
+  Apalis deployment leaf
 - `adapters/` — client adapters; Claude hooks launch the public `synveda mcp`
 - `console/` — React console using only the generated application contract
 - `policies/` — Cedar policy packs

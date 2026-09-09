@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "insert into skill_test_runs\n               (id, tenant_id, version_id, harness, harness_version, outcome,\n                scan_ruleset_version, rubric_version, evidence, created_by)\n           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)\n           returning id, version_id, harness, harness_version, outcome,\n                     scan_ruleset_version, rubric_version, evidence, created_at, created_by",
+  "query": "insert into skill_test_runs\n               (id, tenant_id, version_id, operation_id, harness, harness_version,\n                outcome, scan_ruleset_version, rubric_version, evidence, created_by)\n           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)\n           returning id, version_id, harness, harness_version, outcome,\n                     scan_ruleset_version, rubric_version, evidence, created_at, created_by",
   "describe": {
     "columns": [
       {
@@ -59,6 +59,7 @@
         "Uuid",
         "Uuid",
         "Uuid",
+        "Uuid",
         "Text",
         "Text",
         "Text",
@@ -81,5 +82,5 @@
       false
     ]
   },
-  "hash": "79f6c0f8dabcf02eb497c76b7c1432bdbe7b3b2868ff6a572c317235dc36e4ee"
+  "hash": "f58ee51a084c2332cf0e2e5b2ec836f396d933be6bfead5324dc84456d7de87c"
 }

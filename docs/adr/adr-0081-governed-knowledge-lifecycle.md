@@ -98,11 +98,13 @@ a different head.
 ### 4. Long work uses one reusable durable operation ledger
 
 `durable_operations` is a tenant-bound, forced-RLS job ledger with a typed
-kind, input hash, pending/running/succeeded/failed/blocked lifecycle,
+kind, input hash,
+pending/running/succeeded/failed/blocked/cancelled/dead-lettered lifecycle,
 attempt/lease fields and content-free result metadata. Forget is its first
-consumer. Claiming is compare-and-swap and retry-safe; completion is terminal.
-Later import, re-index, re-encryption and export work reuse this ledger rather
-than inventing noun-specific job tables.
+consumer; CPR-45's non-executing Skill validation is its second and adds the
+provider-neutral attempt/outbox seam. Claiming is compare-and-swap and
+retry-safe; completion is terminal. Later import, re-index, re-encryption and
+export work reuse this ledger rather than inventing noun-specific job tables.
 
 The erasure policy seam returns allow or hold before destructive work. A hold
 leaves the item `erasure_pending`, records the operation `blocked`, and retains

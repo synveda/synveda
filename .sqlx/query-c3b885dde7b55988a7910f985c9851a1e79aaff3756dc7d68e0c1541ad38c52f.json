@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update operation_outbox outbox\n        set state = 'pending', lease_owner = null, lease_expires_at = null,\n            next_dispatch_at = case operation.state\n                when 'pending' then statement_timestamp()\n                when 'failed' then greatest(operation.next_attempt_at, statement_timestamp())\n                when 'running' then greatest(operation.lease_expires_at, statement_timestamp())\n            end,\n            last_error_code = coalesce(operation.last_error_code, $3),\n            updated_at = now()\n        from durable_operations operation\n        where outbox.tenant_id = $1 and outbox.operation_id = $2\n          and outbox.state = 'dispatched'\n          and operation.tenant_id = outbox.tenant_id\n          and operation.id = outbox.operation_id\n          and operation.kind = 'skill_validation'\n          and operation.state in ('pending', 'failed', 'running')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c3b885dde7b55988a7910f985c9851a1e79aaff3756dc7d68e0c1541ad38c52f"
+}

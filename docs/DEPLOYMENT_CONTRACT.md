@@ -41,6 +41,8 @@ and assembles these files:
 | compose.demo.yaml | short-lived demo users |
 | compose.browser-acceptance*.yaml | isolated browser acceptance runner |
 | compose.observability.yaml | optional private Collector metrics fan-in and loopback Prometheus UI |
+| compose.apalis.yaml | optional private Apalis queue, one-shot migration and canary worker |
+| compose.apalis.dev.yaml | development build wiring for the Apalis product commands |
 | compose.backup.yaml | private, profile-gated logical backup one-shot |
 | compose.restore.yaml | private isolated restore and key-verification one-shots |
 
@@ -49,15 +51,17 @@ PostgreSQL, bundled or external OIDC, and discarded or external OTLP traces.
 The executable external-PostgreSQL combination currently requires external
 OIDC and operator-provisioned database roles. Compose applies Synveda schema
 migrations and tenant convergence but does not provision, reset, back up or
-restore that server. Demo, browser-acceptance and observability are implemented profiles.
-Other optional profiles are not part of the current executable contract until
-their services and acceptance tests land.
+restore that server. Demo, browser-acceptance, observability and experimental
+Apalis are implemented profiles. Apalis currently requires bundled PostgreSQL
+and bundled OIDC; backup, restore and upgrade actions refuse that profile.
+The standalone gateway-restart action is also refused; full acceptance owns the
+proved Apalis restart sequence.
 
 ## Images and commands
 
 | Image | Commands or role |
 | --- | --- |
-| Synveda product | gateway, worker, database-preflight, migrate, migration-check, tenant-converge, issuer-diagnostic |
+| Synveda product | gateway, worker, apalis-worker, apalis-migrate, database-preflight, migrate, migration-check, tenant-converge, issuer-diagnostic, and `probe {gateway\|worker\|apalis-worker} {live\|ready}` |
 | PostgreSQL 17 + pgvector | bundled database, bounded bootstrap and logical backup/restore entrypoints |
 | optimized Keycloak 26.7.2 | start --optimized and idempotent realm convergence |
 | Caddy 2.11.4 | public reverse proxy |
@@ -65,8 +69,9 @@ their services and acceptance tests land.
 | Prometheus 3.13.3 distroless | optional bounded local metrics store and loopback operator UI |
 | Playwright 1.62.1 | disposable browser acceptance only |
 
-The product image contains both gateway and worker binaries. The selected
-command, not a deployment-specific image or code branch, chooses the process.
+The product image contains the closed process/operator command set above. The
+selected command, not a deployment-specific image or code branch, chooses the
+process.
 Runtime base images are digest pinned in their Dockerfiles. Development tags
 are local conveniences; reference evidence requires immutable release
 references.
@@ -93,10 +98,13 @@ The bundled reference graph is:
     gateway + worker ── otel-collector
     observability: gateway + worker metrics ── otel-collector ── prometheus
     optional traces: gateway + worker ── otel-collector ── external OTLP
+    apalis: apalis-postgres ── apalis-migrate ── apalis-worker
+                                      tenant-convergence ──┘
 
-The bootstrap, preflight, migration, tenant convergence, issuer diagnostic and
-recovery services are bounded jobs. Proxy, PostgreSQL, Keycloak, realm
-convergence, gateway, worker and Collector are long-running.
+The bootstrap, preflight, migration, tenant convergence, issuer diagnostic,
+Apalis migration and recovery services are bounded jobs. Proxy, PostgreSQL,
+Keycloak, realm convergence, gateway, worker and Collector are long-running;
+the Apalis queue and worker are long-running only when selected.
 
 ## Ports and health
 
@@ -109,12 +117,14 @@ also publishes its Prometheus operator UI on host loopback.
 | reference proxy | TCP 80 and 443 |
 | gateway | private port 8120; /healthz, /readyz, /metrics |
 | worker | private loopback port 8121 by default; observability explicitly binds it on private Compose networks without publishing it; /healthz, /readyz, /metrics |
+| Apalis worker | optional private port 8122; /healthz, /readyz, /metrics |
 | Keycloak application | private port 8080 |
 | Keycloak management | private port 9000 |
 | OTLP | private ports 4317 and 4318 |
 | Collector health | private loopback port 13133 |
 | Prometheus UI | optional port 9090 by default, bound to 127.0.0.1 |
 | PostgreSQL | private port 5432 |
+| Apalis PostgreSQL | optional private port 5432 on the data network only |
 
 The proxy does not publish application metrics. Keycloak management, worker
 health, Collector receivers and PostgreSQL are never public routes. Prometheus
@@ -133,6 +143,7 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_OIDC_MODE | bundled or external |
 | SYNVEDA_OTLP_MODE | discard or external |
 | SYNVEDA_COMPOSE_PROFILES | closed comma-separated optional profile set |
+| SYNVEDA_EXECUTION_PROVIDER | `postgres` by default; the Apalis overlay sets exact `apalis` for Skill validation only |
 | SYNVEDA_APP_HOST | browser-visible application DNS name |
 | SYNVEDA_AUTH_HOST | browser-visible bundled issuer DNS name |
 | SYNVEDA_PUBLIC_SCHEME | development http or reference https |
@@ -185,6 +196,7 @@ Bundled mode uses these files under the selected secret directory:
 - synveda_migrator_password
 - synveda_gateway_password
 - synveda_worker_password
+- apalis_owner_password and apalis_runtime_password
 - synveda_migrator_database_url
 - synveda_gateway_database_url
 - synveda_worker_database_url
@@ -225,6 +237,13 @@ database- and role-based:
 - Keycloak has no privilege on Synveda data.
 
 The postgres-data named volume is the bundled persistent database state. The
+optional apalis-data volume holds disposable transport state only; the Synveda
+operation/outbox rows remain authoritative and this queue volume is not part of
+logical recovery. Selecting the native provider is the rollback if the queue is
+lost or disabled. The isolated Apalis bootstrap owner remains the queue
+cluster's superuser and is mounted only into PostgreSQL and the one-shot
+migrator; the long-running Apalis worker receives only its converged runtime
+role password and the normal Synveda worker DSN. The
 optional prometheus-data volume is disposable operational history, bounded to
 72-hour and 1-GB TSDB block-retention thresholds (whichever triggers first).
 Those thresholds are not a volume quota because WAL, head-block and compaction
@@ -289,26 +308,34 @@ Gateway and worker are separate long-running processes with distinct database
 credentials, readiness and shutdown bounds. Existing capture and maintenance
 work owned by the worker must not move back into the gateway.
 
-The experimental Apalis canary is not implemented yet. Its completion contract
-is one non-destructive Skill validation operation, a provider-neutral
-operation/attempt/outbox model with forced RLS, opaque task payloads and a leaf
-adapter. The existing execution path remains the default and rollback.
-Apalis identifiers or status vocabulary must not enter core crates or the
-public API.
+The experimental Apalis 0.7.4 canary implements only non-executing
+`skill_validation@1`. The operation, attempt and outbox rows are tenant-bound
+under forced RLS and the operation/outbox commit is transactional. The queue
+payload is exactly the untrusted tenant routing hint, Synveda operation ID and
+operation version; the worker re-resolves and re-authorises the immutable
+tenant/Skill association in a tenant transaction before writing through the
+normal executor. Stale acknowledged delivery is resubmitted after a bounded
+timeout, while operation leases and result linkage fence duplicate effects.
+The default PostgreSQL execution path remains the rollback. Apalis task IDs,
+status vocabulary and SQL types stay in the leaf adapter and do not enter core
+crates or the public API.
+The exact stable crates are `apalis` 0.7.4 (MIT OR Apache-2.0) and
+`apalis-sql` 0.7.4 (MIT). They declare no crate MSRV; Synveda validates them
+under its pinned Rust 1.96 toolchain and Cargo Deny policy.
 
 Temporal has no executable consumer and is not part of this deployment.
 
 The customer-safe `/console/operations` route is an application view, not an
 infrastructure or identity-administration surface. For the selected project it
-makes three independent, bounded calls through the generated public API:
-recent Sessions, context runs and Capture batches. Each call retains its own
-PDP/RLS, loading, empty and failure semantics. The view renders only safe
-lifecycle fields and source-event/attempt counts, omits separately protected
-candidate counts and zero-filled context-list aggregates, labels its snapshot
-as potentially stale and states that dependency, worker/operation,
-latency/token, Knowledge/index, Skill/MCP, backup and provider-health
-aggregates are not available rather than inferring them from probes or
-policy-filtered rows.
+makes four independent, bounded calls through the generated public API: recent
+durable operations, Sessions, context runs and Capture batches. Each call
+retains its own PDP/RLS, loading, empty and failure semantics. The view renders
+only safe lifecycle fields, progress and content-free error codes, omits
+separately protected candidate counts and queue-provider identifiers, labels
+its snapshot as potentially stale and states that dependency/worker heartbeat,
+latency/token, Knowledge/index, Skill/MCP, backup and provider-health aggregates
+are not available rather than inferring them from probes or policy-filtered
+rows.
 
 ## Telemetry
 
@@ -369,6 +396,9 @@ not claim that Knowledge bodies are application-encrypted.
 WAL archive/PITR, S3-compatible transfer, scheduling, retention, off-host
 custody, recurring drills and owned RPO/RTO remain open production work. A
 same-host copy is recovery-validation evidence, not disaster recovery.
+The experimental Apalis profile is refused for backup and restore: these
+commands protect authoritative product and identity data, not disposable queue
+transport state.
 
 ## Lifecycle commands
 
@@ -392,15 +422,18 @@ Implemented:
     make compose-reset
 
 compose-acceptance requires a fresh suffixed bundled project and the exact
-demo/browser profiles. Under one lock and deadline it performs browser login,
-seeds the existing two-principal public-API team demo, reopens and checks the
-active receipt, then restarts each of the six long-running product/provider
-services independently and runs the full smoke after every restart. It repeats
-browser login and verifies the existing receipt against live product rows. It
-leaves the successful stack running. Identity admission and the demo rows are
-restart-state witnesses. With the same profiles selected, compose-down removes
-the disposable browser credential-and-receipt volume after exact ownership
-checks while retaining product data; confirmed compose-reset also removes it.
+demo/browser profiles, optionally plus Apalis. Under one lock and deadline it
+performs browser login, seeds the existing two-principal public-API team demo,
+creates and polls one `skill_validation@1` operation, reopens and checks the
+active receipt, then runs the fixed product/provider restart matrix and the full
+smoke after every restart. The normal matrix has six services; selecting Apalis
+adds its worker as a seventh restart while its queue remains running.
+The gate repeats browser login and verifies the existing receipt against live
+product rows. It leaves the successful stack running. Identity admission, the
+operation and the demo rows are restart-state witnesses. With the same profiles
+selected, compose-down removes the disposable browser credential-and-receipt
+volume after exact ownership checks while retaining product data; confirmed
+compose-reset also removes it and any selected Apalis transport volume.
 Reset retains the project's secrets, issuer document and KMS key. Paired
 logical backup/isolated restore are implemented for bundled PostgreSQL and
 bundled Keycloak. External PostgreSQL plus external OIDC can start the same

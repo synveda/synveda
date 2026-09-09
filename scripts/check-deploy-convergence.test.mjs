@@ -553,7 +553,7 @@ test("the product launcher rejects an unknown role without interpretation", () =
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    "usage: synveda-container {gateway|worker|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe {gateway|worker} {live|ready}}\n",
+    "usage: synveda-container {gateway|worker|apalis-migrate|apalis-worker|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe {gateway|worker|apalis-worker} {live|ready}}\n",
   );
 });
 
@@ -564,6 +564,14 @@ test("the product launcher dispatches every implemented role exactly", () => {
     const instrumented = readFileSync(PRODUCT_LAUNCHER, "utf8")
       .replace("exec /usr/local/bin/synveda-gateway", "exec /bin/echo gateway")
       .replace("exec /usr/local/bin/synveda-worker", "exec /bin/echo worker")
+      .replace(
+        "exec /usr/local/bin/synveda-apalis-worker worker",
+        "exec /bin/echo apalis-worker",
+      )
+      .replace(
+        "exec /usr/local/bin/synveda-apalis-worker migrate",
+        "exec /bin/echo apalis-migrate",
+      )
       .replace(
         /exec \/usr\/bin\/timeout \\\n\s+--foreground \\\n\s+--signal=TERM \\\n\s+--kill-after=2s \\\n\s+50s \\\n\s+\/usr\/local\/bin\/synveda-oidc-diagnostic/,
         "exec /bin/echo issuer-diagnostic",
@@ -581,6 +589,8 @@ test("the product launcher dispatches every implemented role exactly", () => {
     const cases = [
       [["gateway"], "gateway\n"],
       [["worker"], "worker\n"],
+      [["apalis-worker"], "apalis-worker\n"],
+      [["apalis-migrate"], "apalis-migrate\n"],
       [["issuer-diagnostic"], "issuer-diagnostic\n"],
       [["database-preflight"], "database-preflight\n"],
       [["migrate"], "migrate\n"],
@@ -609,6 +619,14 @@ test("the product launcher dispatches every implemented role exactly", () => {
       [
         ["probe", "worker", "ready"],
         "curl --disable --noproxy * --fail --silent --show-error --connect-timeout 1 --max-time 2 http://127.0.0.1:8121/readyz\n",
+      ],
+      [
+        ["probe", "apalis-worker", "live"],
+        "curl --disable --noproxy * --fail --silent --show-error --connect-timeout 1 --max-time 2 http://127.0.0.1:8122/healthz\n",
+      ],
+      [
+        ["probe", "apalis-worker", "ready"],
+        "curl --disable --noproxy * --fail --silent --show-error --connect-timeout 1 --max-time 2 http://127.0.0.1:8122/readyz\n",
       ],
     ];
     for (const [args, expected, extraEnvironment = {}] of cases) {

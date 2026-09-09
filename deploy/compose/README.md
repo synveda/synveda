@@ -3,7 +3,8 @@
 This directory is Synveda's canonical single-host deployment for CPR-45. It
 runs the gateway and worker as separate processes with PostgreSQL, bundled
 Keycloak, a reverse proxy and a private OpenTelemetry Collector. Optional
-settings add a bounded local Prometheus operator view or external trace export.
+settings add a bounded local Prometheus operator view, external trace export or
+one experimental Apalis-backed Skill-validation worker.
 
 It supports development and reference configuration. Logical backup, isolated
 restore and same-schema product upgrade commands are implemented, but live
@@ -89,17 +90,19 @@ routes. It is not a browser-login test.
 acceptance suffix and private `/24`, runs the real browser login, then uses two
 real CLI login profiles to seed the existing public-API PulseBoard team
 scenario. This includes Alice issuing and Bob redeeming a one-time workspace
-invitation. A second start reopens and checks the active receipt; it does not
-repeat the mutations. The gate then restarts PostgreSQL, Keycloak, Collector,
-worker, gateway and proxy one at a time, runs the full smoke after each,
-repeats browser login and verifies the existing receipt against live product
-rows. One project lock and one bounded deadline cover the run. The identity
-admission and PulseBoard rows are persisted-state witnesses across the matrix.
+invitation and one durable non-executing Skill validation. A second start
+reopens and checks the active receipt; it does not repeat the mutations. The
+gate then restarts PostgreSQL, Keycloak, Collector, worker, gateway and proxy
+one at a time, runs the full smoke after each, repeats browser login and
+verifies the existing receipt against live product rows. One project lock and
+one bounded deadline cover the run. The identity admission, operation and
+PulseBoard rows are persisted-state witnesses across the matrix.
 Success leaves the stack running for inspection and later recovery/upgrade
 gates; reset remains separately confirmed.
 
-compose-down stops containers and preserves the PostgreSQL volume and generated
-project inputs. When the browser-acceptance profile is selected, down removes
+compose-down stops containers and preserves the PostgreSQL volume, any selected
+Apalis transport volume and generated project inputs. When the
+browser-acceptance profile is selected, down removes
 that profile's disposable credential-and-receipt volume after checking its
 exact ownership; it does not retain login tokens at rest. Confirmed reset with
 the same profiles also removes it when stopping a running project. The default
@@ -131,6 +134,43 @@ only through an operator-controlled loopback tunnel. This profile is separate
 from `compose-acceptance`, is not the tenant-safe Operations page, and carries
 no production monitoring or alerting claim.
 
+## Experimental Apalis canary
+
+The disabled-by-default `apalis` profile changes only the
+`skill_validation@1` execution transport. Synveda's forced-RLS operation,
+attempt and transactional outbox rows remain authoritative; the ordinary core
+worker remains the default rollback path. The profile adds one private
+PostgreSQL queue, one bounded migration job and one private Apalis worker. It
+has no public port or board:
+
+    export SYNVEDA_COMPOSE_PROFILES=apalis
+    make compose-up
+    make compose-smoke
+
+To execute the canary through the full fresh-project gate and include its
+worker in the restart matrix:
+
+    export SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance,apalis
+    make compose-acceptance
+
+The queue payload contains only an untrusted tenant routing identifier, the
+Synveda operation ID and operation version. The worker rechecks tenant
+association and current authority under forced RLS before applying the normal
+Skill-validation effect. Duplicate delivery is fenced by the Synveda
+operation lease and immutable test-result link; stale acknowledged delivery is
+eligible for bounded resubmission.
+
+The queue cluster's bootstrap owner is an isolated superuser used only by its
+PostgreSQL process and one-shot migration service. The long-running worker
+receives only the converged queue runtime password and Synveda's ordinary
+worker DSN. The `apalis-data` volume is disposable transport state and is not
+included in logical backup. Backup, restore, upgrade and standalone gateway
+restart actions refuse this experimental profile. Select the default `postgres`
+provider and stop the profile to roll back; there is no automatic queue
+reconstruction or recovery claim. If a consumer remains unavailable, stale
+deliveries are resubmitted at a bounded rate and may grow the disposable queue;
+disable the profile until the consumer is repaired.
+
 ## Secrets
 
 Generate secrets explicitly when preparing a bundled-PostgreSQL deployment:
@@ -141,7 +181,10 @@ Generate secrets explicitly when preparing a bundled-PostgreSQL deployment:
 The generator writes mode-0600 secret files below a mode-0700 project
 directory, refuses overwrite unless explicitly forced and never prints secret
 values. It refuses external PostgreSQL because those credentials and its CA
-are operator-owned. The checked-in .env.example contains no usable credential.
+are operator-owned. The lifecycle's `--if-missing` preparation adds a missing
+complete Apalis secret pair to a pre-Apalis set without rotating existing
+credentials, but refuses a partial pair. The checked-in .env.example contains
+no usable credential.
 
 Do not put credentials, database URLs, KMS key material or client secrets in
 Compose YAML, a committed environment file, an image layer or a shell command.
@@ -502,24 +545,22 @@ lifecycle:
     make compose-reset
 
 It acts only on the validated project containers, networks, PostgreSQL volume,
-profile-selected browser credential-and-receipt or Prometheus volume and transient
-database-authority/Keycloak-gate state. It deliberately retains the project's
-secrets, issuer document and KMS key. Use the same profile selector that
-created profile-owned volumes, review the target and supply the requested
-confirmation. Use compose-down when product/database state must be retained;
-the disposable browser-acceptance credentials are still removed.
+profile-selected browser credential-and-receipt, Prometheus or Apalis transport
+volume and transient database-authority/Keycloak-gate state. It deliberately
+retains the project's secrets, issuer document and KMS key. Use the same
+profile selector that created profile-owned volumes, review the target and
+supply the requested confirmation. Use compose-down when product/database
+state must be retained; the disposable browser-acceptance credentials are
+still removed.
 
-## Current completion gaps
+## Current validation gaps
 
-The following work remains before the Docker reference can be called
-implemented:
-
-- live execution of the paired logical backup and isolated restore on the
-  supported development/reference platforms, plus live execution of the
-  same-schema product upgrade smoke;
-- one experimental forced-RLS operation/outbox and opaque-ID Apalis canary;
-- canonical release/installer cutover and Rauthy deletion after live Keycloak
-  browser acceptance;
+The Docker reference implementation covers the source and
+deterministic-contract boundary. It still requires live execution of clean
+development and reference HTTPS installs, the restart/Apalis matrix, paired
+logical backup and isolated restore, and same-schema product upgrade on Linux
+and one Docker Desktop platform. Canonical release/installer cutover and Rauthy
+deletion remain gated on that live Keycloak/browser acceptance.
 
 A general dashboard platform, ACME, HA, Helm promotion, signed provenance,
 S3/WAL-PITR recovery and enterprise controls remain later production work.

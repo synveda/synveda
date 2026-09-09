@@ -231,6 +231,19 @@ catalogues. A revision-1 database is refused before SQLx checksum comparison
 with the existing explicit reset guidance. There is no revision-1-to-2 row
 translator or compatibility path.
 
+### 2026-09-08 amendment — provider-neutral operation outbox (CPR-45)
+
+**20. The epoch-3 baseline revision is 3.** The Docker-reference canary
+generalises the existing durable-operation ledger for the closed
+`skill_validation@1` kind, adds forced-RLS attempt and payload-free outbox
+rows, and links at most one immutable Skill test result to an operation. The
+operation, existing idempotency record and outbox commit together. Queue
+providers carry only an untrusted tenant routing identifier, the Synveda
+operation identifier and version; workers recheck the immutable tenant
+association under forced RLS, so the queue does not become schema, tenant or
+business-state authority. Revision-2 databases are refused with the same
+pre-1.0 reset guidance; there is no translator.
+
 ## Options considered
 
 **1. Derive the epoch from `_sqlx_migrations`.** No new table, and the data is

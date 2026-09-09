@@ -1266,6 +1266,7 @@ pub async fn record_test_run<'e, E: PgExecutor<'e>>(
     tenant: TenantId,
     id: SkillTestRunId,
     version_id: SkillVersionId,
+    operation_id: Option<synveda_types::DurableOperationId>,
     harness: SkillTestHarness,
     harness_version: &str,
     outcome: SkillTestOutcome,
@@ -1277,14 +1278,15 @@ pub async fn record_test_run<'e, E: PgExecutor<'e>>(
     let row = sqlx::query_as!(
         TestRunRow,
         r#"insert into skill_test_runs
-               (id, tenant_id, version_id, harness, harness_version, outcome,
-                scan_ruleset_version, rubric_version, evidence, created_by)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+               (id, tenant_id, version_id, operation_id, harness, harness_version,
+                outcome, scan_ruleset_version, rubric_version, evidence, created_by)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
            returning id, version_id, harness, harness_version, outcome,
                      scan_ruleset_version, rubric_version, evidence, created_at, created_by"#,
         id.as_uuid(),
         tenant.as_uuid(),
         version_id.as_uuid(),
+        operation_id.map(|id| id.as_uuid()),
         harness.as_str(),
         harness_version,
         outcome.as_str(),

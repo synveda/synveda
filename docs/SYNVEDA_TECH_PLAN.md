@@ -26,7 +26,7 @@ it does not substitute for the still-open restore and failover evidence.
 | Sparse / lexical | Tenant-bound **Postgres FTS** | PostgreSQL | Lexical rank stays transactionally aligned with current Knowledge revisions; hybrid fusion with pgvector uses RRF in the gateway |
 | Graph | Immutable **KnowledgeRelation** rows in plain Postgres | — | Current ContextRun expansion starts from authorised Knowledge anchors, is bounded to two hops, and re-authorises every endpoint/path. Apache AGE and the Record graph are removed; a different engine requires new evidence and an ADR. |
 | Governed scopes | Plain Postgres (`scopes` + closure table) | — | Five parent-shapes, no organisational rank and no graph DB needed for tenancy |
-| Durable jobs | Leased tenant-bound Postgres tables | PostgreSQL | PostgreSQL remains operation authority. The accepted CPR-45 target (implementation open) adds a general operation/outbox seam and evaluates Apalis on one inert operation; existing job families are not silently reclassified as one complete model. |
+| Durable jobs | Leased tenant-bound Postgres tables | PostgreSQL | PostgreSQL remains operation authority. CPR-45 adds a forced-RLS operation/attempt/outbox seam and evaluates Apalis 0.7.4 on one non-executing Skill validation; existing job families are not silently reclassified as one complete model. |
 | Workflow scheduler | **None in the current target** | — | No executable Temporal consumer exists. CPR-45 deleted the stale deployment residue; a future scheduler must earn a provider-neutral boundary through evidence and an ADR. |
 | Bitemporal versioning | Native tables (`tx_from/tx_to`, `valid_from/valid_to`) + triggers | — | No extension dependency; queryable "as-of" both dimensions |
 
@@ -49,8 +49,8 @@ it does not substitute for the still-open restore and failover evidence.
 | ORM/queries | **sqlx** (compile-time checked SQL — auditability again) |
 | Embeddings serving | Optional **text-embeddings-inference** serving BGE-M3 for the measured dense path. Production model support, generation cutover and re-embedding remain open. |
 | Summarisation/extraction LLM | Pluggable: Claude API, or self-hosted via vLLM for air-gapped; behind `Extractor` trait |
-| Observability | OpenTelemetry remains the application trace contract. Canonical Compose keeps application metrics off public proxy routes and optionally uses a closed private Collector scrape/fan-in with a digest-pinned, loopback-only Prometheus UI and 72-hour/1-GB TSDB block-retention thresholds (not a disk quota). Public-PKI external OTLP export is configured only through that private Collector. The customer-safe Operations route exposes the three currently available policy-visible aggregates and states which signals remain unavailable. Live validation remains open. |
-| Packaging | Accepted CPR-45 target (implementation open): one product image/configuration contract and Docker Compose as the single-host reference. Later Helm implements the same contract and currently enforces one gateway and one core-worker replica. |
+| Observability | OpenTelemetry remains the application trace contract. Canonical Compose keeps application metrics off public proxy routes and optionally uses a closed private Collector scrape/fan-in with a digest-pinned, loopback-only Prometheus UI and 72-hour/1-GB TSDB block-retention thresholds (not a disk quota). Public-PKI external OTLP export is configured only through that private Collector. The customer-safe Operations route exposes four policy-visible aggregates and states which signals remain unavailable. Live validation remains open. |
+| Packaging | CPR-45 implementation, with live validation pending: one product image/configuration contract and Docker Compose as the single-host reference. Later Helm implements the same contract and currently enforces one gateway and one core-worker replica. |
 
 ### 1.4 Explicit non-choices
 

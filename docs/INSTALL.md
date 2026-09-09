@@ -82,13 +82,15 @@ a locked, health-gated restart of only the existing gateway and repeats the
 smoke; the command is not itself browser-session evidence and does not claim
 that an in-flight login survives. `compose-acceptance` adds a fresh browser
 login and the existing two-principal public-API PulseBoard team scenario before
-the fixed six-service restart matrix. It runs smoke after every restart, then
-repeats login and verifies the existing receipt against live product rows under
-one project lock; its exact selectors are documented in
+the fixed six-service restart matrix. The scenario also creates and polls one
+durable non-executing Skill validation. Selecting the experimental Apalis
+profile adds its worker as a seventh restart. The gate runs smoke after every
+restart, then repeats login and verifies the existing receipt against live
+product rows under one project lock; its exact selectors are documented in
 [`deploy/compose/README.md`](../deploy/compose/README.md). A live run,
 reference HTTPS, live backup/restore and live upgrade acceptance remain open. The
 browser checks bind administrator authority to the configured tenant before
-and after the matrix; those identity rows and the PulseBoard rows witness
+and after the matrix; those identity, operation and PulseBoard rows witness
 persistence across the restarts.
 External PostgreSQL plus external OIDC now starts through the same product
 graph when the operator supplies pre-provisioned roles, strict verify-full role
@@ -104,10 +106,22 @@ worker readiness into a digest-pinned Prometheus whose UI is available only on
 host loopback (port 9090 by default). Its TSDB blocks use 72-hour and 1-GB
 retention thresholds, whichever triggers first; WAL/head/compaction overhead
 means that policy is not a disk quota. This is not the customer-safe Operations
-page: `/console/operations` separately presents three bounded, authorised
-project activity lists and explicitly identifies signals the public API cannot
+page: `/console/operations` separately presents four bounded, authorised
+project activity lists, including durable operations, and identifies signals the public API cannot
 yet provide. Neither surface is production monitoring;
 the full profile contract and tunnel guidance are in the Compose README.
+
+The optional `apalis` profile is limited to `skill_validation@1` and requires
+bundled PostgreSQL/OIDC. It adds a private queue database, a one-shot migration
+and a private worker; the native worker remains the default rollback. Run its
+live canary/restart gate with:
+
+```sh
+SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance,apalis make compose-acceptance
+```
+
+Backup, restore, upgrade and standalone gateway restart refuse this
+experimental profile.
 
 Reference certificate-file preparation and its executable ordering are defined
 in [`deploy/compose/README.md`](../deploy/compose/README.md). The lifecycle
@@ -1149,12 +1163,13 @@ behavior against fresh PostgreSQL fixtures. These checks do not build an image
 or prove artifact publication or pulls. The implemented
 `make compose-acceptance` command requires a supported live Docker host; its
 deterministic tests are not a browser-login or clean-lifecycle claim.
-Logical backup/restore and the bounded local metrics profile are implemented
-and deterministically tested. The same-schema product upgrade lifecycle is
-also implemented and deterministically tested, but live recovery/upgrade and
-desktop/Linux parity remain unproved.
+Logical backup/restore, the bounded local metrics profile and the experimental
+Apalis canary are implemented and deterministically tested. The same-schema
+product upgrade lifecycle is also implemented and deterministically tested,
+but live recovery/upgrade/queue execution and desktop/Linux parity remain
+unproved.
 
 The Docker reference may be called validated only after
 `make compose-acceptance`, `make compose-backup`, `make compose-restore-smoke`
 and `make compose-upgrade-smoke` pass with the Keycloak issuer path. Until then
-the verdict remains “Docker reference implementation incomplete.”
+the verdict is “Docker reference implemented; live validation pending.”

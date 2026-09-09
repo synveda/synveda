@@ -1,7 +1,7 @@
 /**
  * Customer-safe operational visibility for one selected project (CPR-45).
  *
- * This page composes three existing generated public APIs. Each API applies
+ * This page composes four generated public APIs. Each API applies
  * its own PDP and forced-RLS decision; the page does not infer tenant totals,
  * call the infrastructure health plane or turn an empty authorised page into
  * a claim that no hidden rows exist.
@@ -18,17 +18,20 @@ import type {
   CaptureBatchView,
   ContextRunListView,
   ContextRunView,
+  OperationListView,
+  OperationView,
   SessionList,
   SessionView,
 } from "./generated/api.js";
 
 const RECENT_LIMIT = "8";
 
-/** The exact three bounded public reads this page makes. */
+/** The exact four bounded public reads this page makes. */
 export function operationsReadPlan(projectId: string, scopeId: string) {
   const sessions = { scope_id: scopeId, project_id: projectId, limit: RECENT_LIMIT };
   const contextRuns = { project_id: projectId, limit: RECENT_LIMIT };
   const captureBatches = { project_id: projectId, limit: RECENT_LIMIT };
+  const operations = { project_id: projectId, limit: RECENT_LIMIT };
   return {
     sessions: {
       key: `operations/${projectId}/sessions/${JSON.stringify(sessions)}`,
@@ -41,6 +44,10 @@ export function operationsReadPlan(projectId: string, scopeId: string) {
     captureBatches: {
       key: `operations/${projectId}/capture-batches/${JSON.stringify(captureBatches)}`,
       query: captureBatches,
+    },
+    operations: {
+      key: `operations/${projectId}/durable/${JSON.stringify(operations)}`,
+      query: operations,
     },
   };
 }
@@ -76,10 +83,14 @@ function ProjectOperations({ projectId, scopeId }: { projectId: string; scopeId:
   const captureBatches = useQuery(plan.captureBatches.key, () =>
     request("list_capture_batches", { query: plan.captureBatches.query }),
   );
+  const operations = useQuery(plan.operations.key, () =>
+    request("list_operations", { query: plan.operations.query }),
+  );
   const refreshSessions = useRefresh(plan.sessions.key);
   const refreshContextRuns = useRefresh(plan.contextRuns.key);
   const refreshCaptureBatches = useRefresh(plan.captureBatches.key);
-  const loadedTimes = [sessions, contextRuns, captureBatches].flatMap((entry) =>
+  const refreshOperations = useRefresh(plan.operations.key);
+  const loadedTimes = [sessions, contextRuns, captureBatches, operations].flatMap((entry) =>
     entry.status === "ready" ? [entry.loadedAt] : [],
   );
   const latestLoadedAt = loadedTimes.length > 0 ? Math.max(...loadedTimes) : null;
@@ -98,12 +109,24 @@ function ProjectOperations({ projectId, scopeId }: { projectId: string; scopeId:
               refreshSessions();
               refreshContextRuns();
               refreshCaptureBatches();
+              refreshOperations();
             }}
           >
             Refresh all
           </button>
         </p>
       </div>
+
+      <section>
+        <h2>Recent durable operations</h2>
+        <Loaded<OperationListView>
+          entry={operations}
+          what="recent durable operations"
+          onRetry={refreshOperations}
+        >
+          {(body) => <OperationRows rows={body.operations} />}
+        </Loaded>
+      </section>
 
       <section>
         <h2>Recent sessions</h2>
@@ -140,6 +163,41 @@ function ProjectOperations({ projectId, scopeId }: { projectId: string; scopeId:
 
       <UnavailableSignals />
     </>
+  );
+}
+
+function OperationRows({ rows }: { rows: OperationView[] }) {
+  if (rows.length === 0) {
+    return (
+      <p className="muted">
+        No policy-visible recent durable operations were returned for this project.
+      </p>
+    );
+  }
+  return (
+    <ul className="sessions">
+      {rows.map((operation) => (
+        <li key={operation.id}>
+          <div className="row">
+            <strong>Skill validation</strong>{" "}
+            <span className={`tag ${statusTone(operation.state)}`}>{operation.state}</span>
+            <div className="muted">
+              {operation.progress_percent}% · {operation.attempts} attempt
+              {operation.attempts === 1 ? "" : "s"} · requested {whenOf(operation.created_at)}
+              {operation.completed_at ? ` · completed ${whenOf(operation.completed_at)}` : ""}
+              {operation.next_attempt_at
+                ? ` · retry due ${whenOf(operation.next_attempt_at)}`
+                : ""}
+            </div>
+            {operation.error_code ? (
+              <div className="banner warning" role="status">
+                Safe failure code: {operation.error_code}
+              </div>
+            ) : null}
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -243,12 +301,15 @@ function statusTone(status: string): string {
   switch (status) {
     case "completed":
     case "ended":
+    case "succeeded":
       return "done";
     case "active":
     case "running":
       return "active";
     case "failed":
     case "abandoned":
+    case "dead_lettered":
+    case "cancelled":
       return "warn";
     default:
       return "";
@@ -265,7 +326,7 @@ function UnavailableSignals() {
       </p>
       <ul>
         <li>dependency health and degraded external providers;</li>
-        <li>worker last-seen and durable operation retry or dead-letter state;</li>
+        <li>worker last-seen;</li>
         <li>context latency and token aggregates;</li>
         <li>Knowledge freshness/index health and unhealthy Skill or MCP tests; and</li>
         <li>latest backup and isolated-restore result.</li>

@@ -1,0 +1,28 @@
+[package]
+name = "synveda-apalis"
+description = "Experimental Apalis transport leaf for Synveda Skill validation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "synveda-apalis-worker"
+path = "src/main.rs"
+
+[dependencies]
+synveda-gateway = { workspace = true }
+synveda-policy = { workspace = true }
+synveda-store = { workspace = true }
+synveda-types = { workspace = true }
+
+apalis = { workspace = true }
+apalis-sql = { workspace = true }
+axum = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt-multi-thread", "signal", "sync"] }
+tracing = { workspace = true }

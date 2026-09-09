@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select state from durable_operations\n           where tenant_id = $1 and id = $2 and kind = 'skill_validation'\n           for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "82b02720c223961d494c0901bbc47dafbb898b65704c8a3360e209604e5a4ad6"
+}

@@ -1,0 +1,161 @@
+# CPR-45 / ADR-0102: disabled-by-default experimental Skill-validation transport.
+# Synveda PostgreSQL remains authoritative; this private database contains only
+# opaque queue references and may be abandoned by selecting the native worker.
+
+x-synveda-apalis-proxy-closure: &synveda-apalis-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+services:
+  worker:
+    environment:
+      SYNVEDA_EXECUTION_PROVIDER: apalis
+    depends_on:
+      apalis-migrate:
+        condition: service_completed_successfully
+
+  apalis-postgres:
+    profiles: [apalis]
+    image: ${SYNVEDA_POSTGRES_IMAGE:?set SYNVEDA_POSTGRES_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
+    environment:
+      <<: *synveda-apalis-proxy-closure
+      POSTGRES_USER: synveda_apalis_owner
+      POSTGRES_DB: synveda_apalis
+      POSTGRES_PASSWORD_FILE: /run/secrets/apalis_owner_password
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    # Tini remains root while the image entrypoint drops to the postgres UID;
+    # KILL is required solely to forward the bounded shutdown signal.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    restart: ${SYNVEDA_COMPOSE_RESTART_POLICY:?set SYNVEDA_COMPOSE_RESTART_POLICY}
+    stop_grace_period: 45s
+    shm_size: 128m
+    mem_limit: 1g
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=32m
+      - /var/run/postgresql:rw,nosuid,nodev,mode=3775,size=16m
+    secrets:
+      - source: apalis_owner_password
+        target: apalis_owner_password
+    volumes:
+      - type: volume
+        source: apalis-data
+        target: /var/lib/postgresql/data
+        volume:
+          nocopy: false
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U synveda_apalis_owner -d synveda_apalis]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    networks:
+      synveda-data: {}
+
+  apalis-migrate:
+    profiles: [apalis]
+    image: ${SYNVEDA_PRODUCT_IMAGE:?set SYNVEDA_PRODUCT_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
+    user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
+    command: [apalis-migrate]
+    environment:
+      <<: *synveda-apalis-proxy-closure
+      SYNVEDA_APALIS_OWNER_PASSWORD_FILE: /run/secrets/apalis_owner_password
+      SYNVEDA_APALIS_DATABASE_PASSWORD_FILE: /run/secrets/apalis_runtime_password
+      RUST_LOG: ${RUST_LOG:-info}
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=16m
+    depends_on:
+      apalis-postgres:
+        condition: service_healthy
+    secrets:
+      - source: apalis_owner_password
+        target: apalis_owner_password
+      - source: apalis_runtime_password
+        target: apalis_runtime_password
+    networks:
+      synveda-data: {}
+
+  apalis-worker:
+    profiles: [apalis]
+    image: ${SYNVEDA_PRODUCT_IMAGE:?set SYNVEDA_PRODUCT_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
+    user: "${SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID}"
+    command: [apalis-worker]
+    environment:
+      <<: *synveda-apalis-proxy-closure
+      DATABASE_URL_FILE: /run/secrets/database_url
+      SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
+      SYNVEDA_DATABASE_REQUIRED_PEER: keycloak
+      SYNVEDA_APALIS_DATABASE_PASSWORD_FILE: /run/secrets/apalis_runtime_password
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      RUST_LOG: ${RUST_LOG:-info}
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    restart: ${SYNVEDA_COMPOSE_RESTART_POLICY}
+    stop_grace_period: 35s
+    mem_limit: 1g
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+    depends_on:
+      apalis-migrate:
+        condition: service_completed_successfully
+      tenant-convergence:
+        condition: service_completed_successfully
+    secrets:
+      - source: synveda_worker_database_url
+        target: database_url
+      - source: apalis_runtime_password
+        target: apalis_runtime_password
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_ROLES_FILE:?set SYNVEDA_DATABASE_ROLES_FILE}
+        target: /etc/synveda/database/roles.json
+        read_only: true
+    healthcheck:
+      test: [CMD, /usr/local/bin/synveda-container, probe, apalis-worker, ready]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    networks:
+      synveda-data: {}
+      telemetry: {}
+
+volumes:
+  apalis-data:
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.volume: apalis-data
+
+secrets:
+  apalis_owner_password:
+    file: ${SYNVEDA_SECRETS_DIR:?set SYNVEDA_SECRETS_DIR}/apalis_owner_password
+  apalis_runtime_password:
+    file: ${SYNVEDA_SECRETS_DIR}/apalis_runtime_password

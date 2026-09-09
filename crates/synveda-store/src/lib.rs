@@ -54,6 +54,7 @@ pub mod knowledge_conflicts;
 pub mod knowledge_freshness;
 pub mod knowledge_lifecycle;
 pub mod knowledge_search;
+pub mod operations;
 pub mod packs;
 pub mod policy_assignments;
 pub mod policy_packs;

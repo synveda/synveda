@@ -108,7 +108,8 @@ platform or the complete SaaS support console.
 
 This decision changes deployment acceptance only. It does not alter Cedar,
 forced RLS, VedaFlow, audit, tenant identity or the public API. The Apalis task
-payload remains an opaque operation reference; Synveda's tenant-bound
-operation row is authoritative. Backup credentials are never mounted into the
+payload remains an opaque tenant-routing and operation reference; the worker
+rechecks that association and Synveda's tenant-bound operation row is
+authoritative. Backup credentials are never mounted into the
 gateway, worker or telemetry containers. KMS material is mounted read-only only
 into the product processes whose cryptographic work requires it.

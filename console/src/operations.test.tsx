@@ -16,6 +16,7 @@ import type {
   CaptureBatchView,
   ContextRunView,
   MeView,
+  OperationView,
   ProjectView,
   SessionView,
   WorkspaceView,
@@ -164,9 +165,28 @@ function captureBatch(): CaptureBatchView {
   };
 }
 
+function operation(state: OperationView["state"] = "dead_lettered"): OperationView {
+  const retrying = state === "failed";
+  return {
+    id: "operation-1",
+    kind: "skill_validation",
+    operation_version: 1,
+    state,
+    skill_id: "PRIVATE-SKILL-ID",
+    skill_version_id: "PRIVATE-SKILL-VERSION-ID",
+    progress_percent: state === "succeeded" ? 100 : 0,
+    attempts: 3,
+    next_attempt_at: retrying ? "2026-09-08T10:07:00Z" : undefined,
+    error_code: state === "dead_lettered" ? "retry_exhausted" : retrying ? "dependency_unavailable" : undefined,
+    created_at: "2026-09-08T10:06:00Z",
+    updated_at: "2026-09-08T10:06:02Z",
+    completed_at: retrying ? undefined : "2026-09-08T10:06:02Z",
+  };
+}
+
 beforeEach(() => cache.clear());
 
-test("the page makes exactly three bounded generated public reads", () => {
+test("the page makes exactly four bounded generated public reads", () => {
   assert.equal(
     describe("list_sessions", { query: plan.sessions.query }).path,
     `/sessions?scope_id=${PROJECT_SCOPE}&project_id=${PROJECT_ID}&limit=8`,
@@ -178,6 +198,10 @@ test("the page makes exactly three bounded generated public reads", () => {
   assert.equal(
     describe("list_capture_batches", { query: plan.captureBatches.query }).path,
     `/capture-batches?project_id=${PROJECT_ID}&limit=8`,
+  );
+  assert.equal(
+    describe("list_operations", { query: plan.operations.query }).path,
+    `/operations?project_id=${PROJECT_ID}&limit=8`,
   );
 });
 
@@ -193,10 +217,12 @@ test("loading and unavailable signal boundaries are explicit", () => {
   assert.match(text, /Reading recent sessions/);
   assert.match(text, /Reading recent context runs/);
   assert.match(text, /Reading recent Capture work/);
+  assert.match(text, /Reading recent durable operations/);
   assert.match(text, /Refresh all/);
   assert.match(text, /Sections may have different fetch times and can already be stale/);
   assert.match(text, /Not available through the public API yet/);
-  assert.match(text, /worker last-seen and durable operation retry or dead-letter state/);
+  assert.match(text, /worker last-seen/);
+  assert.doesNotMatch(text, /durable operation retry or dead-letter state/);
   assert.match(text, /latest backup and isolated-restore result/);
 });
 
@@ -204,11 +230,13 @@ test("empty authorised pages remain three separate honest answers", async () => 
   await seed(plan.sessions.key, ok({ sessions: [], next_cursor: null }));
   await seed(plan.contextRuns.key, ok({ runs: [], next_cursor: null }));
   await seed(plan.captureBatches.key, ok({ batches: [], next_cursor: null }));
+  await seed(plan.operations.key, ok({ operations: [], next_cursor: null }));
 
   const { text } = render();
   assert.match(text, /No policy-visible recent sessions were returned/);
   assert.match(text, /No policy-visible recent context runs were returned/);
   assert.match(text, /No policy-visible recent Capture work was returned/);
+  assert.match(text, /No policy-visible recent durable operations were returned/);
   assert.match(text, /Latest response loaded \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
   assert.match(text, /can already be stale/);
   assert.doesNotMatch(text, /nothing happened|no sessions exist|tenant total/i);
@@ -221,11 +249,15 @@ test("one failed section does not hide the other authorised activity", async () 
     message: "temporary context dependency failure",
   });
   await seed(plan.captureBatches.key, ok({ batches: [captureBatch()], next_cursor: null }));
+  await seed(plan.operations.key, ok({ operations: [operation("failed")], next_cursor: null }));
 
   const { markup, text } = render();
   assert.match(text, /claude-code/);
   assert.match(text, /temporary context dependency failure/);
   assert.match(text, /2 frozen events · 3 attempts/);
+  assert.match(text, /Safe failure code: dependency_unavailable/);
+  assert.match(text, /Skill validation failed/);
+  assert.match(text, /retry due 2026-09-08 10:07 UTC/);
   assert.match(text, /Safe failure code: dependency_unavailable/);
   assert.match(markup, /href="\/console\/sessions\/session-1"/);
 });
@@ -234,6 +266,10 @@ test("degraded context is visible without content, identifiers or zeroed list fi
   await seed(plan.sessions.key, ok({ sessions: [session()], next_cursor: null }));
   await seed(plan.contextRuns.key, ok({ runs: [contextRun()], next_cursor: null }));
   await seed(plan.captureBatches.key, ok({ batches: [captureBatch()], next_cursor: null }));
+  await seed(
+    plan.operations.key,
+    ok({ operations: [operation("succeeded")], next_cursor: null }),
+  );
 
   const { markup, text } = render();
   assert.match(text, /Context composition completed degraded/);
@@ -272,6 +308,8 @@ test("degraded context is visible without content, identifiers or zeroed list fi
     "99004",
     "99005",
     "99006",
+    "PRIVATE-SKILL-ID",
+    "PRIVATE-SKILL-VERSION-ID",
   ]) {
     assert.ok(!markup.includes(privateValue), `${privateValue} was rendered`);
   }

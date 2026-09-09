@@ -2,7 +2,7 @@
 // Enforces the crate layering rule (seed §8; synveda-vedaflow added by tech plan §5,
 // synveda-crypto by TEN-4/ADR-0064 decision 13):
 //
-//   types ← crypto ← {policy, store, identity, audit, vedaflow} ← retrieval/ingest ← gateway
+//   types ← crypto ← {policy, store, identity, audit, vedaflow} ← retrieval/ingest ← gateway ← adapter leaves
 //
 // Nothing imports upward. Fails if any synveda crate declares a dependency on a
 // synveda crate outside its allowed set, or if a workspace crate is unknown here
@@ -61,6 +61,15 @@ const ALLOWED = {
     "synveda-retrieval",
     "synveda-ingest",
     "synveda-okf",
+  ],
+  // Experimental queue transports are replaceable process leaves. They may
+  // call the gateway's narrow execution seam; no domain or public-API crate
+  // may import an Apalis package (CPR-45, ADR-0102).
+  "synveda-apalis": [
+    "synveda-types",
+    "synveda-policy",
+    "synveda-store",
+    "synveda-gateway",
   ],
   // The CLI is a client of the gateway API, plus direct store/identity access
   // for the dev-bootstrap commands (db migrate, tenant create, token issue)
@@ -129,6 +138,12 @@ for (const pkg of metadata.packages) {
     ) {
       console.error(
         `FAIL: ${pkg.name} -> ${dep.name} violates the layering rule (seed §8)`,
+      );
+      failed = true;
+    }
+    if (dep.name.startsWith("apalis") && pkg.name !== "synveda-apalis") {
+      console.error(
+        `FAIL: ${pkg.name} -> ${dep.name} bypasses the experimental adapter leaf`,
       );
       failed = true;
     }

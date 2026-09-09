@@ -1663,6 +1663,8 @@ export function productLauncherFindings(source) {
   const expectedCaseLabels = [
     "gateway",
     "worker",
+    "apalis-worker",
+    "apalis-migrate",
     "issuer-diagnostic",
     "database-preflight",
     "migrate",
@@ -1680,6 +1682,7 @@ export function productLauncherFindings(source) {
     "probe",
     "gateway",
     "worker",
+    "apalis-worker",
     "*",
     "live",
     "ready",
@@ -1691,7 +1694,7 @@ export function productLauncherFindings(source) {
   }
   const roleMatches = [
     ...active.matchAll(
-      /^ {4}(gateway|worker|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe|\*)\)[ \t]*$/gm,
+      /^ {4}(gateway|worker|apalis-worker|apalis-migrate|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe|\*)\)[ \t]*$/gm,
     ),
   ];
   const labels = roleMatches.map(
@@ -1702,6 +1705,8 @@ export function productLauncherFindings(source) {
     JSON.stringify([
       "gateway",
       "worker",
+      "apalis-worker",
+      "apalis-migrate",
       "issuer-diagnostic",
       "database-preflight",
       "migrate",
@@ -1724,6 +1729,8 @@ export function productLauncherFindings(source) {
   };
   const gateway = roleBlock("gateway");
   const worker = roleBlock("worker");
+  const apalisWorker = roleBlock("apalis-worker");
+  const apalisMigrate = roleBlock("apalis-migrate");
   const issuerDiagnostic = roleBlock("issuer-diagnostic").replace(/\\\r?\n\s*/g, " ");
   const databasePreflight = roleBlock("database-preflight");
   const migrate = roleBlock("migrate");
@@ -1743,6 +1750,18 @@ export function productLauncherFindings(source) {
   }
   if (!worker.includes("exec /usr/local/bin/synveda-worker")) {
     findings.push("worker role does not exec the worker binary");
+  }
+  if (!apalisWorker.includes('[ "$#" -eq 1 ] || usage')) {
+    findings.push("Apalis worker role does not enforce exact arity");
+  }
+  if (!apalisWorker.includes("exec /usr/local/bin/synveda-apalis-worker worker")) {
+    findings.push("Apalis worker role does not exec the adapter worker command");
+  }
+  if (!apalisMigrate.includes('[ "$#" -eq 1 ] || usage')) {
+    findings.push("Apalis migrator role does not enforce exact arity");
+  }
+  if (!apalisMigrate.includes("exec /usr/local/bin/synveda-apalis-worker migrate")) {
+    findings.push("Apalis migrator role does not exec the adapter migration command");
   }
   if (!issuerDiagnostic.includes('[ "$#" -eq 1 ] || usage')) {
     findings.push("issuer-diagnostic role does not enforce exact arity");
@@ -1790,6 +1809,9 @@ export function productLauncherFindings(source) {
   }
   if (!/worker\)\s+port=8121\s+;;/.test(probe)) {
     findings.push("worker probe does not select the fixed 8121 port");
+  }
+  if (!/apalis-worker\)\s+port=8122\s+;;/.test(probe)) {
+    findings.push("Apalis worker probe does not select the fixed 8122 port");
   }
   if (!/live\)\s+path=healthz\s+;;/.test(probe)) {
     findings.push("live probe does not select /healthz");

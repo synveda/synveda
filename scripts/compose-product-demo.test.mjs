@@ -43,6 +43,8 @@ const RESOURCE_NAMES = [
   "private_isolation",
   "current_session",
   "current_context",
+  "release_skill",
+  "release_skill_validation",
 ];
 const STATUS_NAMES = [
   "workspace",
@@ -55,6 +57,7 @@ const STATUS_NAMES = [
   "private_knowledge",
   "reuse_context",
   "current_context",
+  "release_skill_validation",
 ];
 
 const uuid = (value) =>
@@ -106,6 +109,10 @@ function receipt() {
     reuseContext: uuid(18),
     currentSession: uuid(19),
     currentContext: uuid(20),
+    releaseSkill: uuid(24),
+    releaseSkillVersion: uuid(25),
+    releaseSkillValidation: uuid(26),
+    releaseSkillTestRun: uuid(27),
   };
   const workspace = {
     id: ids.workspace,
@@ -236,6 +243,22 @@ function receipt() {
         ids.currentSession,
         "PulseBoard public requests use the W3C traceparent header.",
       ),
+      release_skill: {
+        outcome: "applied",
+        skill_id: ids.releaseSkill,
+        version_id: ids.releaseSkillVersion,
+      },
+      release_skill_validation: {
+        id: ids.releaseSkillValidation,
+        kind: "skill_validation",
+        operation_version: 1,
+        state: "succeeded",
+        skill_id: ids.releaseSkill,
+        skill_version_id: ids.releaseSkillVersion,
+        progress_percent: 100,
+        attempts: 1,
+        test_run_id: ids.releaseSkillTestRun,
+      },
     },
   };
 }
@@ -307,6 +330,10 @@ function status() {
       current_context: {
         status: "visible",
         value: detail(resources.current_context, [sharedSelection]),
+      },
+      release_skill_validation: {
+        status: "visible",
+        value: { ...resources.release_skill_validation },
       },
     },
   };
@@ -400,6 +427,7 @@ test("the product receipt requires the real team, Capture, Knowledge and reuse l
     },
     (value) => { value.resources.reuse_context.rendered = "test-fast"; },
     (value) => { value.resources.private_isolation.private_knowledge_absent = false; },
+    (value) => { value.resources.release_skill_validation.state = "dead_lettered"; },
   ]) {
     const mutant = receipt();
     mutate(mutant);
@@ -415,6 +443,7 @@ test("the product receipt requires the real team, Capture, Knowledge and reuse l
         value.receipt.resources.private_knowledge.id;
     },
     (value) => { value.live.first_session.value.status = "active"; },
+    (value) => { value.live.release_skill_validation.value.test_run_id = uuid(99); },
   ]) {
     const mutant = status();
     mutate(mutant);

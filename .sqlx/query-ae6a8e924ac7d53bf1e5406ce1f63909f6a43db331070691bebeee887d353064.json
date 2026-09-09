@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select operation.state as operation_state, outbox.state as outbox_state\n        from durable_operations operation\n        join operation_outbox outbox\n          on outbox.tenant_id = operation.tenant_id\n         and outbox.operation_id = operation.id\n         and outbox.operation_version = operation.operation_version\n        where operation.tenant_id = $1 and operation.id = $2\n          and operation.kind = 'skill_validation'\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "operation_state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "outbox_state",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ae6a8e924ac7d53bf1e5406ce1f63909f6a43db331070691bebeee887d353064"
+}

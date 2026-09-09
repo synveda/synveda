@@ -272,6 +272,10 @@ define_routes! {
         GET crate::skills::list_tests,
         POST crate::skills::run_test,
     ],
+    "/v1/skills/{id}/versions/{version_id}/validation-operations" => [POST crate::operations::create_skill_validation],
+    "/v1/operations" => [GET crate::operations::list],
+    "/v1/operations/{id}" => [GET crate::operations::get],
+    "/v1/operations/{id}/cancel" => [POST crate::operations::cancel],
     "/v1/skill-bindings" => [
         GET crate::skills::list_bindings,
         POST crate::skills::create_binding,

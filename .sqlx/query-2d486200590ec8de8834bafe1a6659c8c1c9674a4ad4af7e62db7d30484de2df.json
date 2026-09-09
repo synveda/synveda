@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update durable_operations\n        set state = 'succeeded', progress_percent = 100, completed_at = now(),\n            lease_owner = null, lease_expires_at = null, next_attempt_at = null,\n            last_error_code = null, result = '{}'::jsonb, updated_at = now()\n        where tenant_id = $1 and id = $2 and state = 'running'\n          and attempts = $3 and lease_owner = $4 and cancel_requested_at is null\n          and exists (\n              select 1 from skill_test_runs run\n              where run.tenant_id = durable_operations.tenant_id\n                and run.operation_id = durable_operations.id\n                and run.version_id = durable_operations.skill_version_id\n          )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d486200590ec8de8834bafe1a6659c8c1c9674a4ad4af7e62db7d30484de2df"
+}

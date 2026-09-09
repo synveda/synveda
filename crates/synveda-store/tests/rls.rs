@@ -194,6 +194,10 @@ const COVERED: &[&str] = &[
     "knowledge_revision_sources",
     "knowledge_revisions",
     "knowledge_sources",
+    // CPR-45 (ADR-0102): attempts and the payload-free dispatch outbox are
+    // part of the same tenant-bound operation authority.
+    "operation_attempts",
+    "operation_outbox",
     // CPR-5 (ADR-0072): an outstanding invitation is a live credential's
     // shadow. Tenant-bound so a hash lookup runs inside one tenant's own row
     // policy — the shape ADR-0059 decision 13 set for the provisioning
