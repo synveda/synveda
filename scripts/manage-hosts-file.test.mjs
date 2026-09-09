@@ -245,11 +245,13 @@ test("same-inode mutation preserves an available filesystem xattr", (context) =>
 
 test("ACL grammar accepts only Linux base entries", () => {
   assert.equal(linuxAclOutputIsBase("user::rw-\ngroup::r--\nother::r--\n", 0o644), true);
+  assert.equal(linuxAclOutputIsBase("user::rw-\ngroup::r--\nother::r--\n\n", 0o644), true);
   for (const output of [
     "user::rw-\nuser:1000:r--\ngroup::r--\nmask::r--\nother::r--\n",
     "user::rwx\ngroup::r-x\nother::r-x\ndefault:user::rwx\n",
     "# file: hosts\nuser::rw-\ngroup::r--\nother::r--\n",
     "user::rw-\ngroup::rw-\nother::r--\n",
+    "user::rw-\ngroup::r--\nother::r--\n\n\n",
   ]) {
     assert.equal(linuxAclOutputIsBase(output, 0o644), false);
   }

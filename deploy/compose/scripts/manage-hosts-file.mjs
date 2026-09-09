@@ -245,7 +245,12 @@ function permissionTriplet(mode, shift) {
 
 export function linuxAclOutputIsBase(output, mode) {
   if (typeof output !== "string" || !Number.isInteger(mode)) return false;
-  const lines = output.endsWith("\n") ? output.slice(0, -1).split("\n") : output.split("\n");
+  // GNU getfacl terminates a listing with a newline and may append its
+  // documented blank listing separator even when only one path was requested.
+  let listing = output;
+  if (listing.endsWith("\n\n")) listing = listing.slice(0, -2);
+  else if (listing.endsWith("\n")) listing = listing.slice(0, -1);
+  const lines = listing.split("\n");
   if (lines.some((line) => line.length === 0 || line.startsWith("#"))) return false;
   const expected = new Set([
     `user::${permissionTriplet(mode, 6)}`,
