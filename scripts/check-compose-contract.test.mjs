@@ -4535,6 +4535,10 @@ test("the database test bridge consumes one private file without rendering it", 
   try {
     const path = join(scratch, "gateway-url");
     const sentinel = "postgresql://gateway:cpr45-wrapper-sentinel@database.test:5432/synveda";
+    const fileOnlyEnvironment = { ...process.env };
+    delete fileOnlyEnvironment.DATABASE_URL;
+    delete fileOnlyEnvironment.DATABASE_URL_FILE;
+    delete fileOnlyEnvironment.SYNVEDA_CARGO_DATABASE_URL_FILE;
     writeFileSync(path, `${sentinel}\n`, { mode: 0o600 });
     chmodSync(path, 0o600);
 
@@ -4547,7 +4551,7 @@ test("the database test bridge consumes one private file without rendering it", 
       ],
       {
         env: {
-          ...process.env,
+          ...fileOnlyEnvironment,
           EXPECTED_DATABASE_URL: sentinel,
           SYNVEDA_CARGO_DATABASE_URL_FILE: path,
         },
@@ -4560,7 +4564,7 @@ test("the database test bridge consumes one private file without rendering it", 
 
     result = spawnSync("/bin/sh", ["-x", CARGO_DATABASE_URL_WRAPPER, "true"], {
       env: {
-        ...process.env,
+        ...fileOnlyEnvironment,
         SYNVEDA_CARGO_DATABASE_URL_FILE: path,
       },
       encoding: "utf8",
@@ -4572,7 +4576,7 @@ test("the database test bridge consumes one private file without rendering it", 
 
     result = spawnSync(CARGO_DATABASE_URL_WRAPPER, ["true"], {
       env: {
-        ...process.env,
+        ...fileOnlyEnvironment,
         DATABASE_URL: "postgresql://direct:cpr45-direct-wrapper-sentinel@database.test/db",
         SYNVEDA_CARGO_DATABASE_URL_FILE: path,
       },
@@ -4586,7 +4590,7 @@ test("the database test bridge consumes one private file without rendering it", 
 
     result = spawnSync(CARGO_DATABASE_URL_WRAPPER, ["true"], {
       env: {
-        ...process.env,
+        ...fileOnlyEnvironment,
         SYNVEDA_CARGO_DATABASE_URL_FILE: join(scratch, "missing-cpr45-path-sentinel"),
       },
       encoding: "utf8",
