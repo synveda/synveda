@@ -216,7 +216,6 @@ backup semantics to native primitives rather than translating Compose YAML.
 - [Client support](docs/CLIENT_SUPPORT.md)
 - [Benchmarks and evaluation limits](docs/BENCHMARKS.md)
 - [ADR index](docs/adr/README.md)
-- [Schema hard-cut inventory](docs/implementation/context-hard-cut-inventory.md)
 - [Generated OpenAPI](docs/api/openapi.json)
 
 ## Contributing

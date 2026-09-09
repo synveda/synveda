@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // CPR-43 / ADR-0069: enforce the epoch-3 hard cut over active production
-// surfaces. Historical ledgers and negative tests retain old vocabulary as
-// evidence; they are deliberately outside this scanner and classified in
-// docs/implementation/context-hard-cut-inventory.md.
+// surfaces. Historical ADRs and negative tests retain old vocabulary as
+// evidence; they are deliberately outside this production-surface scanner.
 
 import {
   existsSync,

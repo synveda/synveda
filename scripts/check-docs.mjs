@@ -352,7 +352,7 @@ export function codeSpanReferenceFindings({
   trackedPaths,
   lineCounts = new Map(),
 }) {
-  if (!isCurrentDocument(file) || file === "docs/implementation/context-hard-cut-inventory.md") {
+  if (!isCurrentDocument(file)) {
     return [];
   }
   const directories = directoryPaths(trackedPaths);

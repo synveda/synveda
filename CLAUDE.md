@@ -5,7 +5,8 @@ carry phase history.
 
 For Claude Code adapter work, also read
 [adapters/claude-code/README.md](adapters/claude-code/README.md), ADR-0078 and
-ADR-0079.
+ADR-0079. Support claims must match `adapters/registry.json` and generated
+`docs/CLIENT_SUPPORT.md`.
 
 `make claude-acceptance` is deterministic replay of authentic frames through a
 live gateway. `make claude-acceptance-live` requires an installed,
