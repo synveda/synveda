@@ -4255,8 +4255,8 @@ exec "$@"
 	    writeFileSync(
 	      bootstrap,
 	      readFileSync(DATABASE_BOOTSTRAP, "utf8")
-	        .replaceAll("/run/secrets", secrets)
 	        .replaceAll("/tmp/synveda-database-bootstrap", snapshotDirectory)
+	        .replaceAll("/run/secrets", secrets)
 	        .replaceAll("/usr/local/bin/synveda-input-snapshot", fakeSnapshot),
       { mode: 0o700 },
     );
