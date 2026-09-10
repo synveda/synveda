@@ -176,8 +176,8 @@ gateway paths are deleted; `synveda init` is a side-effect-free refusal.
 The root documentation index now points source users to one detailed Compose
 guide and labels the unverified packaged-reference workflow separately.
 
-Deterministic gates cover the provider/runtime matrix, two-principal browser
-scenario, restart lifecycle, logical database/key recovery, same-schema image
+Deterministic gates cover the provider/runtime matrix, a three-principal
+governed retry-review browser scenario, restart lifecycle, logical database/key recovery, same-schema image
 upgrade, external dependency wiring, bounded local metrics, customer-safe
 Operations view and the disabled-by-default Apalis 0.7.4 Skill-validation
 transport. PostgreSQL operation/outbox state remains authoritative and the
@@ -191,6 +191,15 @@ persisted receipt verification. A canonical down/up retained the exact product
 volume and generated key set; exact-project reset separately retained the
 issuer, KMS key and demo credentials. Strict policy outcomes remained visibly
 pending where review was required.
+
+The new three-principal retry-review revision passes deterministic fixture and
+deployment contracts, but has not replaced that recorded live evidence. The
+current host's managed development hostname block belongs to the stopped
+`synveda-development-acceptance-phase1` project. That project's containers and
+networks have now been removed with product data retained, but the root-owned
+hostname block still requires interactive operator removal. The next live run
+is `make compose-acceptance` against a fresh suffixed project after that
+handoff.
 
 The feature remains open for repeat development runs on Linux and Docker
 Desktop, reference HTTPS, live recovery/upgrade/Apalis execution, live external

@@ -1168,10 +1168,25 @@ test("canonical up prepares once, reruns convergence, and keeps credentials stab
     assert.match(first.stdout, /Docker Compose 2\.33\.1\+/);
     assert.match(first.stdout, /required public binding: 127\.0\.0\.1:8080\/tcp/);
     assert.match(first.stdout, /browser URL: http:\/\/app\.synveda\.test:8080\/console\//);
-    assert.match(first.stdout, /login accounts: synveda-demo-admin, synveda-demo-member/);
+    assert.match(
+      first.stdout,
+      /login accounts: synveda-demo-admin \(author\), synveda-demo-member \(reviewer\), synveda-demo-viewer \(restricted viewer\)/,
+    );
     assert.ok(
       first.stdout.includes(
-        `administrator password file: ${join(state.secrets, "keycloak_demo_admin_password")}`,
+        `author password file: ${join(state.secrets, "keycloak_demo_admin_password")}`,
+      ),
+      first.stdout,
+    );
+    assert.ok(
+      first.stdout.includes(
+        `reviewer password file: ${join(state.secrets, "keycloak_demo_member_password")}`,
+      ),
+      first.stdout,
+    );
+    assert.ok(
+      first.stdout.includes(
+        `viewer password file: ${join(state.secrets, "keycloak_demo_viewer_password")}`,
       ),
       first.stdout,
     );

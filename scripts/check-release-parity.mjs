@@ -426,6 +426,7 @@ export function helmAcceptanceFindings(demo, clientPod, keycloakFixture) {
     "keycloak_convergence_admin_password",
     "keycloak_demo_admin_password",
     "keycloak_demo_member_password",
+    "keycloak_demo_viewer_password",
   ]) {
     if (!runtimeSecretVolume.includes(`- { key: ${key}, path: ${key} }`)) {
       findings.push(`Helm acceptance Keycloak init cannot read ${key}`);

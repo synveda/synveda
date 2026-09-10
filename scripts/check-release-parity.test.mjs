@@ -378,7 +378,7 @@ test("kind acceptance builds and loads the chart's exact image coordinates", () 
       demo,
       client,
       keycloak.replace(
-        "              - { key: keycloak_demo_member_password, path: keycloak_demo_member_password }\n        - name: server-secrets",
+        "              - { key: keycloak_demo_viewer_password, path: keycloak_demo_viewer_password }\n        - name: server-secrets",
         "              - { key: postgres_owner_password, path: postgres_owner_password }\n        - name: server-secrets",
       ),
     ],

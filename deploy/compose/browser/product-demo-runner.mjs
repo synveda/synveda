@@ -13,17 +13,34 @@ import {
   validateCliLoginUrl,
   validateDemoReceipt,
   validateDemoStatus,
+  validateRetryReviewInspection,
+  validateRetryReviewProposal,
+  validateRetryReviewReceipt,
+  validateRetryReviewRerun,
+  validateRetryReviewStatus,
+  validateRetryReviewVerification,
 } from "./product-demo-contract.mjs";
 
 const CLI = "/usr/local/bin/synveda";
 const ADMIN_PASSWORD_FILE = "/run/secrets/keycloak_demo_admin_password";
 const MEMBER_PASSWORD_FILE = "/run/secrets/keycloak_demo_member_password";
+const VIEWER_PASSWORD_FILE = "/run/secrets/keycloak_demo_viewer_password";
 const MAX_LOGIN_OUTPUT = 16 * 1024;
 const MAX_DEMO_OUTPUT = 2 * 1024 * 1024;
 const LOGIN_TIMEOUT = 90_000;
 const DEMO_TIMEOUT = 10 * 60_000;
 const CLEANUP_TIMEOUT = 5_000;
 const CHILD_STOP_TIMEOUT = 1_000;
+
+function isLocalRetryReviewTarget(settings) {
+  const host = new URL(settings.appOrigin).hostname;
+  return (
+    host === "app.synveda.test" ||
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "[::1]"
+  );
+}
 
 function failure(stage) {
   return new BrowserContractError(stage);
@@ -426,7 +443,16 @@ async function loginIdentity({
   }
 }
 
-async function runCli(args, environment, timeout, spawnProcess) {
+async function runCli(
+  args,
+  environment,
+  timeout,
+  spawnProcess,
+  expectation = "json",
+) {
+  if (!["json", "success", "denied"].includes(expectation)) {
+    throw failure("configuration");
+  }
   const process = launchChild(
     args,
     environment,
@@ -446,13 +472,27 @@ async function runCli(args, environment, timeout, spawnProcess) {
       timeout,
       "product-demo",
     );
-    if (
-      process.overLimit ||
-      result.error === true ||
-      result.code !== 0 ||
-      result.signal !== null
-    ) throw failure("product-demo");
+    const cleanExit =
+      !process.overLimit &&
+      result.error !== true &&
+      result.code === 0 &&
+      result.signal === null;
+    if (expectation === "denied") {
+      if (
+        process.overLimit ||
+        result.error === true ||
+        result.code === 0 ||
+        result.code === null ||
+        result.signal !== null ||
+        result.stdout.length !== 0 ||
+        result.stderr.toString("utf8").includes("Idempotency-Key")
+      ) throw failure("product-demo-denial");
+      completed = true;
+      return true;
+    }
+    if (!cleanExit) throw failure("product-demo");
     completed = true;
+    if (expectation === "success") return true;
     try {
       return JSON.parse(result.stdout.toString("utf8"));
     } catch {
@@ -483,16 +523,22 @@ export async function runProductAcceptance({
     typeof chromium?.launch !== "function" ||
     typeof readPassword !== "function"
   ) throw failure("configuration");
+  const localRetryReview = isLocalRetryReviewTarget(settings);
   let adminPassword;
   let memberPassword;
+  let viewerPassword;
   try {
     adminPassword = readPassword(ADMIN_PASSWORD_FILE);
     if (phase === "seed") {
       memberPassword = readPassword(MEMBER_PASSWORD_FILE);
+      if (localRetryReview) {
+        viewerPassword = readPassword(VIEWER_PASSWORD_FILE);
+      }
     }
     if (
       !Buffer.isBuffer(adminPassword) ||
-      (phase === "seed" && !Buffer.isBuffer(memberPassword))
+      (phase === "seed" && !Buffer.isBuffer(memberPassword)) ||
+      (phase === "seed" && localRetryReview && !Buffer.isBuffer(viewerPassword))
     ) {
       throw failure("password-file");
     }
@@ -500,7 +546,7 @@ export async function runProductAcceptance({
       chromium,
       environment,
       settings,
-      profile: "alice",
+      profile: localRetryReview ? "author" : "alice",
       username: "synveda-demo-admin",
       password: adminPassword,
       timeout: loginTimeout,
@@ -511,39 +557,248 @@ export async function runProductAcceptance({
         chromium,
         environment,
         settings,
-        profile: "bob",
+        profile: localRetryReview ? "reviewer" : "bob",
         username: "synveda-demo-member",
         password: memberPassword,
         timeout: loginTimeout,
         spawnProcess,
       });
+      if (localRetryReview) {
+        await login({
+          chromium,
+          environment,
+          settings,
+          profile: "viewer",
+          username: "synveda-demo-viewer",
+          password: viewerPassword,
+          timeout: loginTimeout,
+          spawnProcess,
+        });
+      }
     }
   } finally {
     adminPassword?.fill?.(0);
     memberPassword?.fill?.(0);
+    viewerPassword?.fill?.(0);
+  }
+  if (!localRetryReview) {
+    if (phase === "seed") {
+      const args = [
+        "demo",
+        "start",
+        "--profile",
+        "team",
+        "--credentials",
+        "alice",
+        "--bob-credentials",
+        "bob",
+        "--json",
+      ];
+      validateDemoReceipt(
+        await command(args, environment, demoTimeout, spawnProcess),
+      );
+      validateDemoReceipt(
+        await command(args, environment, demoTimeout, spawnProcess),
+      );
+    }
+    validateDemoStatus(
+      await command(
+        ["demo", "status", "--credentials", "alice", "--json"],
+        environment,
+        demoTimeout,
+        spawnProcess,
+      ),
+    );
+    return true;
   }
   if (phase === "seed") {
-    const args = [
+    const seedArgs = [
       "demo",
-      "start",
-      "--profile",
-      "team",
-      "--credentials",
-      "alice",
-      "--bob-credentials",
-      "bob",
+      "retry-review",
+      "seed",
+      "--author-credentials",
+      "author",
+      "--reviewer-credentials",
+      "reviewer",
+      "--viewer-credentials",
+      "viewer",
+      "--confirm-target",
+      settings.appOrigin,
       "--json",
     ];
-    validateDemoReceipt(
-      await command(args, environment, demoTimeout, spawnProcess),
+    const first = await command(
+      seedArgs,
+      environment,
+      demoTimeout,
+      spawnProcess,
     );
-    validateDemoReceipt(
-      await command(args, environment, demoTimeout, spawnProcess),
+    validateRetryReviewReceipt(first, "seeded");
+    const second = await command(
+      seedArgs,
+      environment,
+      demoTimeout,
+      spawnProcess,
+    );
+    validateRetryReviewRerun(first, second);
+
+    validateRetryReviewInspection(
+      await command(
+        [
+          "demo",
+          "retry-review",
+          "inspect",
+          "--author-credentials",
+          "author",
+          "--json",
+        ],
+        environment,
+        demoTimeout,
+        spawnProcess,
+      ),
+      second,
+    );
+    const captured = await command(
+      [
+        "demo",
+        "retry-review",
+        "capture",
+        "--author-credentials",
+        "author",
+        "--confirm-target",
+        settings.appOrigin,
+        "--json",
+      ],
+      environment,
+      demoTimeout,
+      spawnProcess,
+    );
+    validateRetryReviewReceipt(captured, "learning_pending");
+
+    const inspectProposal = async (id) => {
+      validateRetryReviewProposal(
+        await command(
+          ["proposal", "show", id, "--profile", "reviewer", "--json"],
+          environment,
+          demoTimeout,
+          spawnProcess,
+        ),
+        id,
+      );
+    };
+    const approveAndApply = async (id) => {
+      await inspectProposal(id);
+      await command(
+        [
+          "proposal",
+          "approve",
+          id,
+          "--profile",
+          "reviewer",
+          "--comment",
+          "Synthetic CPR-45 acceptance replay review",
+        ],
+        environment,
+        demoTimeout,
+        spawnProcess,
+        "success",
+      );
+      await command(
+        ["proposal", "apply", id, "--profile", "author"],
+        environment,
+        demoTimeout,
+        spawnProcess,
+        "success",
+      );
+    };
+    const learningChange = captured.resources.learning.change_id;
+    await inspectProposal(learningChange);
+    await command(
+      [
+        "proposal",
+        "approve",
+        learningChange,
+        "--profile",
+        "viewer",
+        "--comment",
+        "Synthetic CPR-45 acceptance replay denial probe",
+      ],
+      environment,
+      demoTimeout,
+      spawnProcess,
+      "denied",
+    );
+    await command(
+      [
+        "proposal",
+        "approve",
+        learningChange,
+        "--profile",
+        "reviewer",
+        "--comment",
+        "Synthetic CPR-45 acceptance replay review",
+      ],
+      environment,
+      demoTimeout,
+      spawnProcess,
+      "success",
+    );
+    await command(
+      ["proposal", "apply", learningChange, "--profile", "author"],
+      environment,
+      demoTimeout,
+      spawnProcess,
+      "success",
+    );
+    await approveAndApply(captured.resources.skill_install.change_id);
+
+    const binding = await command(
+      [
+        "demo",
+        "retry-review",
+        "bind-skill",
+        "--author-credentials",
+        "author",
+        "--confirm-target",
+        settings.appOrigin,
+        "--json",
+      ],
+      environment,
+      demoTimeout,
+      spawnProcess,
+    );
+    validateRetryReviewReceipt(binding, "binding_pending");
+    await approveAndApply(binding.resources.skill_binding.change_id);
+    validateRetryReviewVerification(
+      await command(
+        [
+          "demo",
+          "retry-review",
+          "verify",
+          "--author-credentials",
+          "author",
+          "--reviewer-credentials",
+          "reviewer",
+          "--confirm-target",
+          settings.appOrigin,
+          "--json",
+        ],
+        environment,
+        demoTimeout,
+        spawnProcess,
+      ),
+      binding,
     );
   }
-  validateDemoStatus(
+  validateRetryReviewStatus(
     await command(
-      ["demo", "status", "--credentials", "alice", "--json"],
+      [
+        "demo",
+        "retry-review",
+        "status",
+        "--author-credentials",
+        "author",
+        "--json",
+      ],
       environment,
       demoTimeout,
       spawnProcess,

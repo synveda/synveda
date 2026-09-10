@@ -26,6 +26,13 @@ use zeroize::Zeroizing;
 use crate::api::Api;
 use crate::credentials;
 
+mod retry_review;
+pub use retry_review::{
+    bind_skill as retry_review_bind_skill, capture as retry_review_capture,
+    inspect as retry_review_inspect, seed as retry_review_seed, status as retry_review_status,
+    verify as retry_review_verify,
+};
+
 const RECEIPT_VERSION: u32 = 1;
 const RECEIPT_NAME: &str = "pulseboard-demo.json";
 const MAX_CAPTURE_POLLS: usize = 120;

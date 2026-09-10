@@ -48,8 +48,8 @@ the only bundled identity provider. Temporal is absent.
   roles under the existing Cedar, forced-RLS, VedaFlow and audit invariants.
 - Support bundled or external OIDC and bundled or external PostgreSQL with the
   same product image; external dependencies remain operator-owned.
-- Exercise a clean two-principal public-API scenario across the fixed restart
-  matrix.
+- Exercise a clean three-principal public-API review scenario across the fixed
+  restart matrix, including a denied restricted-viewer action.
 - Back up both product databases with separately held KMS/identity recovery
   material and restore only into a fresh isolated target.
 - Keep `skill_validation@1` as the sole optional Apalis 0.7.4 canary behind the
@@ -104,6 +104,21 @@ The documentation audit consolidates source-checkout operation in
 beginner navigation through the root documentation index. It does not add live
 deployment evidence or change the remaining acceptance boundary.
 
+The current local fixture uses the existing public API, deterministic Session
+Capture, VedaFlow review/apply, Knowledge provenance, Context and Skill
+binding surfaces for a synthetic ingestion-retry learning. Its stable seed
+stops before Capture, uses Avery Author, Riley Reviewer and Vera Restricted
+Viewer with existing role keys, refuses an unintended gateway or conflicting
+curator file, and never resets product data.
+
+Deterministic replay and public-resource status contracts pass for this
+three-principal revision, but its fresh live replay is not yet recorded. On
+the current host, the stopped `synveda-development-acceptance-phase1` project
+still owns the root-managed development hostname block; its containers and
+networks are gone while its product data remains retained. The next action is
+interactive operator removal of that exact hostname block, followed by
+`make compose-acceptance` in a fresh suffixed project.
+
 ### Recorded development evidence
 
 On 2026-09-10, `make compose-acceptance` passed from a clean project volume on
@@ -151,9 +166,11 @@ instead of advertising unreviewed revisions or executing Skill validation.
   token cases fail.
 - Separate database roles cannot cross product boundaries and forced RLS holds
   for runtime work.
-- The public-API scenario creates a workspace/project, redeems a second-member
-  invitation, records a Session/Capture candidate, accepts Knowledge and reuses
-  it with provenance after every service restart.
+- The public-API scenario creates a workspace/project, maps three distinct
+  identities to existing grants, records and captures a synthetic Session,
+  denies the viewer's review attempt, separately reviews/applies Knowledge and
+  a versioned Skill binding, then reuses the exact Knowledge revision with
+  provenance after every service restart.
 - Backup/restore binds both databases and recovery keys, verifies audit/key
   evidence and refuses a wrong key without overwriting the source.
 - Native and optional Apalis delivery produce one authorised canary effect

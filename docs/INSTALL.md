@@ -647,33 +647,17 @@ directory-owned rows and tell the operator to change the directory or use the
 dedicated assignment route. No live Entra or Okta verification is claimed by
 the repository fixtures; they remain labelled captured or transcribed.
 
-## PulseBoard product walkthrough
+## Local governed product walkthrough
 
-Once the runtime is ready and the acting user has completed `synveda login`,
-the packaged tour uses only the public application API:
-
-```sh
-synveda demo start --profile personal
-synveda demo status
-synveda demo reset --force
-```
-
-`--profile team` uses a separately logged-in `bob` credential when one exists,
-or `--bob-credentials <profile>` when explicitly supplied. Alice issues a
-one-time workspace invitation and Bob redeems it before the teammate leg; the
-token and accept URL are not stored. With no second credential the command
-returns the invitation and says that clean-session reuse ran as Alice.
-`--profile governed` selects the
-canonical enterprise Configuration on the same binary/schema and reports
-pending review honestly. The first exact canonical Configuration and matching
-binding still create and apply typed VedaFlow changes; this is not an edition
-switch or a bootstrap bypass.
-
-The mode-0600 XDG receipt makes an interrupted run resumable. Reset archives
-receipt-owned objects through public routes and preserves immutable/audit
-history. For repository acceptance evidence, run
-`sh demos/cpr-41-one-command-demo.sh`; it combines the CLI contract with the
-database-backed Profile and PulseBoard scenarios.
+The canonical source-checkout walkthrough is
+[Governed ingestion-retry walkthrough](../deploy/compose/README.md#governed-ingestion-retry-walkthrough).
+It uses three real Keycloak logins and only public Synveda APIs to inspect a
+synthetic Session, capture a learning, demonstrate a denied viewer action,
+perform separate review/apply transitions, bind a versioned Skill, select the
+approved Knowledge revision into authorised context and inspect provenance and
+content-free audit evidence. Its seed is resumable and intentionally stops
+before Capture; no demo reset, model subscription or alternate backend is
+required.
 
 ## The admin console
 

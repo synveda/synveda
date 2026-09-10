@@ -49,6 +49,8 @@ services:
         target: keycloak_demo_admin_password
       - source: keycloak_demo_member_password
         target: keycloak_demo_member_password
+      - source: keycloak_demo_viewer_password
+        target: keycloak_demo_viewer_password
     depends_on:
       gateway:
         condition: service_healthy

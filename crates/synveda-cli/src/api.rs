@@ -207,6 +207,12 @@ impl Api {
         self.send(request, "PATCH", path).await
     }
 
+    /// `PUT path` with a JSON body, as a JSON value.
+    pub async fn put(&self, path: &str, body: Value) -> Result<Value, String> {
+        let request = self.http.put(format!("{}{path}", self.base)).json(&body);
+        self.send(request, "PUT", path).await
+    }
+
     /// `DELETE path`, as a JSON value (or `null` for a 204).
     pub async fn delete(&self, path: &str) -> Result<Value, String> {
         self.send(

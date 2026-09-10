@@ -124,7 +124,7 @@ test_name=atomic-output
 refuse group-ids "$test_dir/partial.json"
 
 printf '%s\n' \
-    '{"id":"00000000-0000-4000-8000-000000000045","username":"synveda-demo-admin","enabled":true,"emailVerified":true,"email":"admin@demo.synveda.invalid","firstName":"Synveda","lastName":"Demo Admin","requiredActions":[],"attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["admin"]}}' \
+    '{"id":"00000000-0000-4000-8000-000000000045","username":"synveda-demo-admin","enabled":true,"emailVerified":true,"email":"admin@demo.synveda.invalid","firstName":"Avery","lastName":"Author","requiredActions":[],"attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["admin"]}}' \
     > "$test_dir/demo-admin.json"
 test_name=demo-user
 accept '' demo-user "$test_dir/demo-admin.json" synveda-demo-admin admin
@@ -160,11 +160,12 @@ test_name=demo-user-state-foreign
 accept 'demo=foreign' demo-user-state "$test_dir/demo-unmanaged.json" \
     synveda-demo-admin admin
 printf '%s\n' \
-    '[{"id":"00000000-0000-4000-8000-000000000046","username":"renamed-managed-member","attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["member"]}},{"id":"00000000-0000-4000-8000-000000000045","username":"renamed-managed-admin","attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["admin"]}}]' \
+    '[{"id":"00000000-0000-4000-8000-000000000047","username":"renamed-managed-viewer","attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["viewer"]}},{"id":"00000000-0000-4000-8000-000000000046","username":"renamed-managed-member","attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["member"]}},{"id":"00000000-0000-4000-8000-000000000045","username":"renamed-managed-admin","attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["admin"]}}]' \
     > "$test_dir/demo-owned-users.json"
 test_name=demo-owned-users
 accept 'admin=00000000-0000-4000-8000-000000000045
-member=00000000-0000-4000-8000-000000000046' \
+member=00000000-0000-4000-8000-000000000046
+viewer=00000000-0000-4000-8000-000000000047' \
     demo-owned-users "$test_dir/demo-owned-users.json"
 test_name=demo-owned-admin-kind
 accept 'admin=00000000-0000-4000-8000-000000000045' \
@@ -175,10 +176,10 @@ sed 's/"synvedaDemoKind":\["member"\]/"synvedaDemoKind":["admin"]/' \
     "$test_dir/demo-owned-users.json" > "$test_dir/demo-owned-duplicate-kind.json"
 test_name=demo-owned-duplicate-kind-refusal
 refuse demo-owned-users "$test_dir/demo-owned-duplicate-kind.json"
-sed 's/]$/,{"id":"00000000-0000-4000-8000-000000000047","username":"extra","attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["member"]}}]/' \
-    "$test_dir/demo-owned-users.json" > "$test_dir/demo-owned-three.json"
+sed 's/]$/,{"id":"00000000-0000-4000-8000-000000000048","username":"extra","attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["member"]}}]/' \
+    "$test_dir/demo-owned-users.json" > "$test_dir/demo-owned-four.json"
 test_name=demo-owned-inventory-cap
-refuse demo-owned-users "$test_dir/demo-owned-three.json"
+refuse demo-owned-users "$test_dir/demo-owned-four.json"
 printf '%s\n' \
     '[{"id":"00000000-0000-4000-8000-000000000047","type":"password"}]' \
     > "$test_dir/demo-credential.json"

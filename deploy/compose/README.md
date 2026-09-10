@@ -286,17 +286,120 @@ has access to the other product's database.
 
 ## Demo and browser acceptance
 
-The demo profile adds two short-lived, convergence-owned users,
-`synveda-demo-admin` and `synveda-demo-member`:
+The demo profile adds three convergence-owned users for the fictional Northstar
+Delivery team:
+
+- `synveda-demo-admin` — Avery Author, initially admitted through the existing
+  `synveda-admins` bootstrap boundary;
+- `synveda-demo-member` — Riley Reviewer, granted the existing `reviewer` and
+  `administrator` roles at the demo project by the fixture;
+- `synveda-demo-viewer` — Vera Restricted Viewer, granted only the existing
+  `viewer` role at that project.
+
+Start the opt-in profile without resetting an existing project:
 
     SYNVEDA_COMPOSE_PROFILES=demo make compose-up
     SYNVEDA_COMPOSE_PROFILES=demo make compose-smoke
 
 Their passwords are generated into the mode-0600
-`keycloak_demo_admin_password` and `keycloak_demo_member_password` files below
-the printed mode-0700 project secret directory. Read them only through a local
-password-input mechanism. The administrator belongs to `synveda-admins`; the
-member receives no Keycloak domain role.
+`keycloak_demo_admin_password`, `keycloak_demo_member_password` and
+`keycloak_demo_viewer_password` files below the printed mode-0700 project
+secret directory. Read them only through a local password-input mechanism.
+Only Avery belongs to the Keycloak `synveda-admins` group; Riley and Vera
+receive no Keycloak domain role. Synveda's Cedar-governed grants remain the
+application authority.
+
+### Governed ingestion-retry walkthrough
+
+This walkthrough uses public APIs and the normal deterministic Capture and
+retrieval paths. The Session and events are synthetic replay; no model, paid
+service or live coding-agent subscription is involved. Set the explicit HTTP
+relaxation only for this loopback development origin, then create three stored
+login profiles. For each command, open the printed URL in a fresh private
+browser session and sign in as the named user with that user's password file:
+
+```sh
+export SYNVEDA_GATEWAY=http://app.synveda.test:8080
+export SYNVEDA_INSECURE_DEVELOPMENT_HTTP=true
+
+synveda login --gateway "$SYNVEDA_GATEWAY" --profile author --no-browser
+# Avery Author: synveda-demo-admin
+synveda login --gateway "$SYNVEDA_GATEWAY" --profile reviewer --no-browser
+# Riley Reviewer: synveda-demo-member
+synveda login --gateway "$SYNVEDA_GATEWAY" --profile viewer --no-browser
+# Vera Restricted Viewer: synveda-demo-viewer
+```
+
+Seed is deliberately incomplete. It creates or reopens the stable
+`northstar-delivery-demo` workspace and `ingestion-api` project, verifies the
+three grants, creates one already-approved Knowledge revision with repository
+provenance, opens a versioned Skill install proposal, and appends one synthetic
+finding to a Session. It does not capture that Session:
+
+```sh
+synveda demo retry-review seed \
+  --author-credentials author \
+  --reviewer-credentials reviewer \
+  --viewer-credentials viewer \
+  --confirm-target "$SYNVEDA_GATEWAY"
+synveda demo retry-review inspect --author-credentials author
+synveda demo retry-review capture \
+  --author-credentials author \
+  --confirm-target "$SYNVEDA_GATEWAY"
+```
+
+The expected finding says that retries reuse the original `Idempotency-Key`,
+return 409 while the first ingestion runs, and replay its stored response once
+complete. Capture prints two exact IDs: `<learning-change-id>` and
+`<skill-change-id>`. Riley inspects each proposal. Vera's attempted learning
+approval must exit non-zero without granting or applying anything; then Riley
+reviews and Avery applies each typed change:
+
+```sh
+synveda proposal show <learning-change-id> --profile reviewer
+synveda proposal approve <learning-change-id> --profile viewer \
+  --comment "Not authorised to review"
+# expected: denied; no state transition
+synveda proposal approve <learning-change-id> --profile reviewer \
+  --comment "Retry contract matches the reviewed Session evidence"
+synveda proposal apply <learning-change-id> --profile author
+
+synveda proposal show <skill-change-id> --profile reviewer
+synveda proposal approve <skill-change-id> --profile reviewer \
+  --comment "Skill instructions preserve idempotency and content-free evidence"
+synveda proposal apply <skill-change-id> --profile author
+```
+
+Now open the project binding, substitute the printed
+`<binding-change-id>`, and keep review and effect execution separate:
+
+```sh
+synveda demo retry-review bind-skill \
+  --author-credentials author \
+  --confirm-target "$SYNVEDA_GATEWAY"
+synveda proposal show <binding-change-id> --profile reviewer
+synveda proposal approve <binding-change-id> --profile reviewer \
+  --comment "Pin the reviewed Skill version at the ingestion project"
+synveda proposal apply <binding-change-id> --profile author
+
+synveda demo retry-review verify \
+  --author-credentials author \
+  --reviewer-credentials reviewer \
+  --confirm-target "$SYNVEDA_GATEWAY" \
+  --json
+synveda demo retry-review status --author-credentials author --json
+```
+
+`verify` first reads the applied Knowledge head and its Session-event
+provenance, then requests Riley's authorised context, checks that it selected
+that exact revision, reads the enabled pinned Skill version, and finally reads
+content-free Knowledge, Skill, Session and context audit pages plus the chain
+verification result. `status` reopens the recorded Knowledge, Session,
+Capture, Skill, Context and audit addresses through the public API. Re-running
+`seed` uses stable idempotency keys and must retain the same addresses; it
+refuses a different gateway, different identities, a
+different effective curator file or changed receipt ownership. There is no
+fixture reset endpoint and no business-table SQL.
 
 The existing isolated browser acceptance starts from an explicitly fresh,
 suffixed project. If the ordinary development block is installed, stop that
@@ -317,9 +420,11 @@ Then select and install the acceptance project:
     make compose-resolver-check
     make compose-acceptance
 
-It exercises real authorization-code login, PKCE S256, issuer/audience claims
-and first-administrator admission through the same proxy authority used by
-containers. Redirect hops are validated from Playwright request events while
+It replays the same staged scenario through three real authorization-code
+logins, PKCE S256, issuer/audience claims and first-administrator admission
+through the same proxy authority used by containers. The automated reviews
+are labelled synthetic acceptance replay; they are not evidence of a human
+reviewing a live agent execution. Redirect hops are validated from Playwright request events while
 routable foreign requests are aborted. The fixture keeps every capability
 dropped and uses the reviewed Playwright seccomp profile with one documented
 local change: `chroot` is unconditional so Chromium can enter its unprivileged
