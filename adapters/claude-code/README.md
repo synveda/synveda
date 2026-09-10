@@ -325,10 +325,10 @@ that no token ever appears in a redirect URL.
 demos/adpt-1-claude-code.sh
 ```
 
-A clean HOME, the prebuilt plugin, `synveda login` against live Rauthy,
-and a session that receives its watermarked block and contributes its
-turn back — timed against ADPT-1's two-minute budget, then joined in one
-verifying audit chain by the run it all belongs to.
+The deterministic gate replays authentic captured frames through a live
+gateway and verifies that a session receives its watermarked block and
+contributes its turn back within ADPT-1's two-minute budget. The resulting
+events join the run's verifying audit chain.
 
 CPR-14 adds the current session-plane acceptance targets:
 

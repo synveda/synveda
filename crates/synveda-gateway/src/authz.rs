@@ -136,10 +136,11 @@ pub(crate) fn context_at_tier<'a>(
 /// resource refers to — `None` for tenant-level resources.
 ///
 /// Quarantine resolves here (AUTH-2, ADR-0013 decision 6), and since the
-/// cutover it has exactly one meaning: *not provisioned*. An IdP subject
+/// cutover it has exactly one meaning: *not provisioned*. An IdP user subject
 /// with no identity is quarantined — fail closed, because skipping
-/// `/auth/login` must not out-privilege completing it, and an unregistered
-/// service client is exactly this case. A provisioned identity never is:
+/// `/auth/login` must not out-privilege completing it. Unregistered
+/// service-audience subjects are refused earlier during tenant admission. A
+/// provisioned identity never is:
 /// its scope is its own principal scope (CPR-7, ADR-0074 decision 3), and
 /// an ungranted one reaches nothing because the anchor model says so
 /// rather than because a placement-derived flag does. Service identities
@@ -241,6 +242,79 @@ async fn gather_inner(
             "a departed identity presented a token; refusing every action"
         );
     }
+    gather_resolved_identity(
+        conn,
+        tenant_id,
+        context.claims.subject,
+        identity,
+        quarantined,
+        service,
+        resource_chain,
+        selection,
+        resources,
+    )
+    .await
+}
+
+/// Assembles the same current Cedar input for a durable operation's persisted
+/// requester. No token claims are synthesized: the identity, groups, grants,
+/// packs and relaxations are re-read under tenant RLS immediately before the
+/// effect. The initial canary accepts people only because service-token
+/// lifetime and confinement cannot be reconstructed after the request ends.
+pub(crate) async fn gather_for_operation_identity(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    identity: Identity,
+    anchor: Option<&Scope>,
+    selection: AnchorSelection,
+    resources: Vec<ResourceEntity>,
+) -> Result<DecisionInput> {
+    if identity.tenant_id != tenant_id {
+        return Err(Error::Internal {
+            message: "an operation requester was loaded under the wrong tenant".to_owned(),
+        });
+    }
+    let subject = identity
+        .subject
+        .clone()
+        .ok_or_else(operation_identity_denied)?;
+    if identity.kind != IdentityKind::User || identity.sealed() {
+        return Err(operation_identity_denied());
+    }
+    gather_resolved_identity(
+        conn,
+        tenant_id,
+        subject,
+        Some(identity),
+        false,
+        false,
+        ResourceChain::Anchor(anchor),
+        selection,
+        resources,
+    )
+    .await
+}
+
+fn operation_identity_denied() -> Error {
+    Error::PolicyDenied {
+        action: "skill_validation.execute".to_owned(),
+        resource: "durable operation".to_owned(),
+        reason: "the requesting identity is not an active user".to_owned(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn gather_resolved_identity(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    subject: String,
+    identity: Option<Identity>,
+    mut quarantined: bool,
+    service: bool,
+    resource_chain: ResourceChain<'_>,
+    selection: AnchorSelection,
+    resources: Vec<ResourceEntity>,
+) -> Result<DecisionInput> {
     // The caller's own chain: the identity row is the binding between a
     // token subject and the scope that is theirs (CPR-7, ADR-0074 decision
     // 3) — a directory-created identity's scope is keyed by its directory
@@ -248,7 +322,7 @@ async fn gather_inner(
     // two can never mint one person two scopes.
     let own_scope = match &identity {
         Some(identity) => Some(identity.scope_id),
-        None => scopes::principal_scope(&mut *conn, tenant_id, &context.claims.subject)
+        None => scopes::principal_scope(&mut *conn, tenant_id, &subject)
             .await?
             .map(|scope| scope.id),
     };
@@ -302,19 +376,12 @@ async fn gather_inner(
     // decision the grant model could not reach. The cost is a handful of
     // indexed reads inside a transaction the request already opened.
     let identity_id = identity.as_ref().map(|identity| identity.id);
-    let anchors = anchors::resolve(
-        &mut *conn,
-        tenant_id,
-        &context.claims.subject,
-        identity_id,
-        selection,
-    )
-    .await?;
+    let anchors = anchors::resolve(&mut *conn, tenant_id, &subject, identity_id, selection).await?;
     let groups = anchors::groups_of(&mut *conn, tenant_id, identity_id).await?;
 
     let principal = Principal {
         tenant_id,
-        subject: context.claims.subject,
+        subject,
         quarantined,
         // Where this caller stands: their own scope's id, which is what
         // `principal in resource` walks up from.
@@ -431,6 +498,17 @@ pub(crate) fn decide(
     resource: Resource,
 ) -> Result<Authorized> {
     decide_from(state, input, 0, action, resource)
+}
+
+/// Background-operation variant of [`decide`] using the worker's shared PDP
+/// directly. Authorization input still comes from the same gather seam.
+pub(crate) fn decide_with_pdp(
+    pdp: &Pdp,
+    input: &DecisionInput,
+    action: Action,
+    resource: Resource,
+) -> Result<Authorized> {
+    decide_inner_with_pdp(pdp, input, 0, action, resource, None)
 }
 
 /// [`decide`] for a resource whose chain starts at `position` of the
@@ -557,6 +635,23 @@ pub(crate) fn decide_skill_read(
     decide_skill_read_from(state, input, 0, resource, sensitivity)
 }
 
+/// Background-operation variant of [`decide_skill_read`].
+pub(crate) fn decide_skill_read_with_pdp(
+    pdp: &Pdp,
+    input: &DecisionInput,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_inner_with_pdp(
+        pdp,
+        input,
+        0,
+        Action::SkillRead,
+        resource,
+        Some(sensitivity),
+    )
+}
+
 /// [`decide_skill_read`] for a resource whose chain starts at `position` —
 /// what the registry's gradient walk asks once per scope on the caller's own
 /// chain.
@@ -586,11 +681,21 @@ fn decide_inner(
     resource: Resource,
     sensitivity: Option<Sensitivity>,
 ) -> Result<Authorized> {
+    decide_inner_with_pdp(&state.pdp, input, position, action, resource, sensitivity)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decide_inner_with_pdp(
+    pdp: &Pdp,
+    input: &DecisionInput,
+    position: usize,
+    action: Action,
+    resource: Resource,
+    sensitivity: Option<Sensitivity>,
+) -> Result<Authorized> {
     let mut context = input.context_from(position);
     context.sensitivity = sensitivity;
-    let decision = state
-        .pdp
-        .authorize(&input.principal, action, resource, &context)?;
+    let decision = pdp.authorize(&input.principal, action, resource, &context)?;
     decision.clone().require(action, resource)?;
     // The grant keys that reached this resource (CPR-6, ADR-0073 decision
     // 5; since the cutover, the only roles there are). The audit event's
@@ -661,6 +766,28 @@ pub async fn refresh_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
     Ok(())
 }
 
+/// Performs the first process-local policy convergence and refuses any
+/// tenant or pack failure.
+///
+/// A periodic refresher may retain a previous in-memory compile after a bad
+/// update. A fresh process has no last-good tenant pack, so its governed
+/// background plane cannot start until every active tenant has been read and
+/// compiled once.
+pub async fn converge_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
+    for tenant in tenants::active(pool).await? {
+        let outcomes = refresh_tenant(pool, pdp, tenant.id).await?;
+        if record_refresh_outcomes(&outcomes) == "error" {
+            return Err(Error::Invalid {
+                message: format!(
+                    "stored policy-pack convergence failed for tenant {}",
+                    tenant.id
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Reconciles one tenant's stored packs (see [`refresh_packs_once`]),
 /// counts each pack-level outcome (`installed`, `removed`, `unchanged`,
 /// `error`) into the reload metric, and returns the tenant's collapsed
@@ -677,7 +804,11 @@ pub async fn refresh_tenant_packs(pool: &PgPool, pdp: &Pdp, tenant_id: TenantId)
             vec!["error"]
         }
     };
-    for outcome in &outcomes {
+    record_refresh_outcomes(&outcomes)
+}
+
+fn record_refresh_outcomes(outcomes: &[&'static str]) -> &'static str {
+    for outcome in outcomes {
         metrics::counter!(POLICY_PACK_RELOADS_TOTAL, "outcome" => *outcome).increment(1);
     }
     for candidate in ["error", "installed", "removed"] {
@@ -737,23 +868,35 @@ async fn refresh_tenant(
     Ok(outcomes)
 }
 
-/// Spawns the reload loop: one sweep immediately, then one per `interval`.
-/// Sweep-level failures (e.g. the database down) are logged and retried
-/// next tick — policy distribution degrades to the last-good state, it
-/// never takes the gateway down.
-pub fn spawn_pack_refresher(
+/// Runs the process-local policy-pack refresh loop until process shutdown.
+///
+/// The worker performs one successful refresh before this loop is started,
+/// so Capture cannot decide against a fresh process that has not installed
+/// stored tenant packs yet.
+pub async fn run_pack_refresher(
     pool: PgPool,
     pdp: Arc<Pdp>,
     interval: Duration,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(error) = refresh_packs_once(&pool, &pdp).await {
-                tracing::warn!(error = %error, "policy pack refresh sweep failed");
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    let mut ticker = tokio::time::interval(interval);
+    // The initial convergence was explicit; do not immediately duplicate it.
+    ticker.tick().await;
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
             }
+            _ = ticker.tick() => {}
         }
-    })
+        if *shutdown.borrow() {
+            return;
+        }
+        if let Err(error) = refresh_packs_once(&pool, &pdp).await {
+            tracing::warn!(error = %error, "policy pack refresh sweep failed");
+        }
+    }
 }

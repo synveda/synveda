@@ -66,7 +66,7 @@ pub const MCP_CLIENT: &str = concat!("synveda-mcp/", env!("CARGO_PKG_VERSION"));
 /// The CLI installs no OTel exporter — `synveda mcp` deliberately does not
 /// (see `mcp::subscribe`), and the one-shot verbs have no subscriber at
 /// all — so the span this names as the parent is never reported to a
-/// collector. In Jaeger the gateway's spans appear under a root that is
+/// collector. In a trace backend the gateway's spans appear under a root that is
 /// not there, which renders fine and is exactly what ADPT-1's hooks have
 /// always produced. Do not go looking for the missing span; nothing lost
 /// it.
@@ -74,7 +74,7 @@ pub const MCP_CLIENT: &str = concat!("synveda-mcp/", env!("CARGO_PKG_VERSION"));
 /// What this buys is real all the same: every call from one command shares
 /// an id, the gateway now continues that trace rather than starting its
 /// own (FND-5, ADR-0007's deferred clause), and the id is printed where a
-/// person can paste it into Jaeger.
+/// person can paste it into the configured trace backend.
 struct TraceContext {
     trace_id: String,
     parent_span_id: String,
@@ -144,22 +144,22 @@ impl Api {
         profile_name: &str,
         client: &'static str,
     ) -> Result<(Self, Origin), String> {
-        let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|err| format!("build the HTTP client: {err}"))?;
+        let http = login::client_with_timeout(Duration::from_secs(30))?;
 
         let trace = TraceContext::new()?;
 
-        if let Some(token) = std::env::var("SYNVEDA_TOKEN")
-            .ok()
-            .filter(|token| !token.is_empty())
-        {
+        let environment_token = match std::env::var("SYNVEDA_TOKEN") {
+            Ok(token) if !token.is_empty() => Some(token),
+            Ok(_) => return Err("SYNVEDA_TOKEN must not be empty".to_owned()),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err("SYNVEDA_TOKEN must be valid UTF-8".to_owned());
+            }
+        };
+        if let Some(token) = environment_token {
             return Ok((
                 Self {
-                    base: login::gateway_url(None),
+                    base: login::gateway_url(None)?,
                     bearer: token,
                     subject: "SYNVEDA_TOKEN".to_owned(),
                     http,
@@ -190,7 +190,7 @@ impl Api {
     }
 
     /// The trace id every call from this client carries — the one to paste
-    /// into Jaeger to see what the gateway did with them.
+    /// into the configured trace backend to see what the gateway did with them.
     pub fn trace_id(&self) -> &str {
         &self.trace.trace_id
     }
@@ -272,6 +272,17 @@ impl Api {
         self.send(request, "POST", path).await
     }
 
+    /// Redeem one invitation without ever placing its bearer token in a
+    /// diagnostic. The gateway route carries the credential in the path, so
+    /// callers must use this boundary instead of generic [`Self::post`].
+    pub async fn accept_invite(&self, token: &str) -> Result<Value, String> {
+        let request = self
+            .http
+            .post(format!("{}/v1/invites/{token}/accept", self.base));
+        self.send_secret_path(request, "POST", "/v1/invites/{invite_token}/accept")
+            .await
+    }
+
     /// [`Api::get`] into a typed view.
     pub async fn get_as<T: DeserializeOwned>(&self, path: &str) -> Result<T, String> {
         decode(self.get(path).await?, path)
@@ -316,6 +327,27 @@ impl Api {
         method: &str,
         path: &str,
     ) -> Result<Value, String> {
+        self.send_with_error_policy(request, method, path, true)
+            .await
+    }
+
+    async fn send_secret_path(
+        &self,
+        request: reqwest::RequestBuilder,
+        method: &str,
+        path: &str,
+    ) -> Result<Value, String> {
+        self.send_with_error_policy(request, method, path, false)
+            .await
+    }
+
+    async fn send_with_error_policy(
+        &self,
+        request: reqwest::RequestBuilder,
+        method: &str,
+        path: &str,
+        include_error_body: bool,
+    ) -> Result<Value, String> {
         let response = request
             .bearer_auth(&self.bearer)
             // Every governed verb goes through here, so this one line is
@@ -329,11 +361,14 @@ impl Api {
             .header("x-synveda-client", self.client)
             .send()
             .await
-            .map_err(|err| format!("{method} {}{path}: {err}", self.base))?;
+            .map_err(|err| format!("{method} {}{path}: {}", self.base, err.without_url()))?;
         let status = response.status();
+        if !status.is_success() && !include_error_body {
+            return Err(render_refusal(status, "", false));
+        }
         let body = response.text().await.unwrap_or_default();
         if !status.is_success() {
-            return Err(refusal(status, &body));
+            return Err(render_refusal(status, &body, true));
         }
         if body.is_empty() {
             return Ok(Value::Null);
@@ -356,6 +391,14 @@ fn refusal(status: reqwest::StatusCode, body: &str) -> String {
         // status rather than pretend to know more.
         Err(_) if body.trim().is_empty() => format!("HTTP {status}"),
         Err(_) => format!("HTTP {status}: {}", body.trim()),
+    }
+}
+
+fn render_refusal(status: reqwest::StatusCode, body: &str, include_body: bool) -> String {
+    if include_body {
+        refusal(status, body)
+    } else {
+        format!("HTTP {status}")
     }
 }
 
@@ -396,10 +439,39 @@ mod tests {
         assert_ne!(parts[2], "0".repeat(16));
     }
 
+    #[tokio::test]
+    async fn invitation_transport_errors_never_render_the_bearer_path() {
+        let token = "synveda_invite_v1.00000000-0000-7000-8000-000000000000.secret";
+        let api = Api {
+            base: "http://[".to_owned(),
+            bearer: "test-bearer".to_owned(),
+            subject: "test-subject".to_owned(),
+            http: reqwest::Client::new(),
+            trace: TraceContext::new().expect("trace context"),
+            client: CLI_CLIENT,
+        };
+
+        let error = api.accept_invite(token).await.expect_err("invalid URL");
+        assert!(!error.contains(token), "invitation token reached: {error}");
+        assert!(error.contains("/v1/invites/{invite_token}/accept"));
+    }
+
+    #[test]
+    fn invitation_http_refusals_discard_an_echoed_bearer() {
+        let token = "synveda_invite_v1.00000000-0000-7000-8000-000000000000.secret";
+        let diagnostic = render_refusal(
+            reqwest::StatusCode::BAD_GATEWAY,
+            &format!("upstream echoed /v1/invites/{token}/accept"),
+            false,
+        );
+        assert_eq!(diagnostic, "HTTP 502 Bad Gateway");
+        assert!(!diagnostic.contains(token));
+    }
+
     /// One trace per client, which is one trace per thing the user asked
     /// for: every call a command makes shares an id, and two commands do
     /// not. Reusing across clients would merge unrelated work into one
-    /// Jaeger view; minting per *call* would scatter one command across
+    /// trace view; minting per *call* would scatter one command across
     /// several.
     #[test]
     fn one_client_is_one_trace_and_two_clients_are_two() {
@@ -481,6 +553,8 @@ mod tests {
         // SAFETY: the lock above makes this the only thread touching the
         // environment for the duration of the test.
         unsafe {
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
             std::env::set_var("SYNVEDA_TOKEN", "test-bearer");
             std::env::set_var("SYNVEDA_GATEWAY", format!("http://127.0.0.1:{port}"));
         }
@@ -490,6 +564,8 @@ mod tests {
         unsafe {
             std::env::remove_var("SYNVEDA_TOKEN");
             std::env::remove_var("SYNVEDA_GATEWAY");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
         }
         server.await.expect("server task");
 
@@ -507,7 +583,7 @@ mod tests {
         assert!(
             traceparent.contains(api.trace_id()),
             "the id the header carries must be the one `trace_id()` reports, or the \
-             number printed for a human to paste into Jaeger names a different trace",
+             number printed for a human to inspect names a different trace",
         );
         // ADR-0027 promises `<name>/<version>`, and the gateway refuses a
         // value outside a conservative character set rather than sanitising
@@ -515,6 +591,162 @@ mod tests {
         // silently stops being recorded on that one.
         assert_eq!(client, CLI_CLIENT, "the default caller is the CLI itself");
         assert_eq!(seen[0].1, seen[1].1, "one client name per command");
+    }
+
+    #[tokio::test]
+    async fn ambient_proxy_variables_cannot_receive_the_gateway_bearer() {
+        use tokio::io::AsyncWriteExt as _;
+
+        let _guard = crate::testing::ENV.lock().await;
+        let gateway = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind gateway capture");
+        let gateway_port = gateway.local_addr().expect("gateway addr").port();
+        let proxy = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind proxy capture");
+        let proxy_port = proxy.local_addr().expect("proxy addr").port();
+        let gateway_task = tokio::spawn(async move {
+            let (mut stream, _) = gateway.accept().await.expect("accept direct request");
+            let mut request = vec![0u8; 4096];
+            let read = tokio::io::AsyncReadExt::read(&mut stream, &mut request)
+                .await
+                .expect("read direct request");
+            let request = String::from_utf8_lossy(&request[..read]);
+            assert!(request.contains("authorization: Bearer proxy-proof-bearer\r\n"));
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                      content-length: 2\r\nconnection: close\r\n\r\n{}",
+                )
+                .await
+                .expect("write direct response");
+        });
+        let proxy_task = tokio::spawn(async move {
+            match tokio::time::timeout(Duration::from_secs(1), proxy.accept()).await {
+                Ok(Ok((mut stream, _))) => {
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\n\
+                              connection: close\r\n\r\n",
+                        )
+                        .await
+                        .expect("write proxy refusal");
+                    true
+                }
+                Ok(Err(error)) => panic!("proxy accept failed: {error}"),
+                Err(_) => false,
+            }
+        });
+
+        let proxy_url = format!("http://127.0.0.1:{proxy_port}");
+        let settings = [
+            "SYNVEDA_TOKEN",
+            "SYNVEDA_GATEWAY",
+            "SYNVEDA_INSECURE_DEVELOPMENT_HTTP",
+            "SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE",
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+        ];
+        let previous: Vec<_> = settings
+            .iter()
+            .map(|name| (*name, std::env::var_os(name)))
+            .collect();
+        unsafe {
+            std::env::set_var("SYNVEDA_TOKEN", "proxy-proof-bearer");
+            std::env::set_var(
+                "SYNVEDA_GATEWAY",
+                format!("http://127.0.0.1:{gateway_port}"),
+            );
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
+            for name in [
+                "HTTP_PROXY",
+                "http_proxy",
+                "HTTPS_PROXY",
+                "https_proxy",
+                "ALL_PROXY",
+                "all_proxy",
+            ] {
+                std::env::set_var(name, &proxy_url);
+            }
+            std::env::set_var("NO_PROXY", "");
+            std::env::set_var("no_proxy", "");
+        }
+
+        let result = async {
+            let (api, _) = Api::connect("default").await?;
+            api.get("/v1/whoami").await
+        }
+        .await;
+        unsafe {
+            for (name, value) in previous {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+        let proxy_observed = proxy_task.await.expect("proxy capture task");
+        if proxy_observed {
+            gateway_task.abort();
+        } else {
+            gateway_task.await.expect("direct gateway task");
+        }
+        assert!(!proxy_observed, "ambient proxy received a gateway request");
+        result.expect("gateway request stayed direct");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn non_unicode_environment_token_is_refused_instead_of_falling_back() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let _guard = crate::testing::ENV.lock().await;
+        let previous = std::env::var_os("SYNVEDA_TOKEN");
+        unsafe {
+            std::env::set_var(
+                "SYNVEDA_TOKEN",
+                std::ffi::OsString::from_vec(vec![0xff, 0xfe]),
+            );
+        }
+        let result = Api::connect("default").await;
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("SYNVEDA_TOKEN", value),
+                None => std::env::remove_var("SYNVEDA_TOKEN"),
+            }
+        }
+        let error = match result {
+            Ok(_) => panic!("non-Unicode token selected a credential path"),
+            Err(error) => error,
+        };
+        assert_eq!(error, "SYNVEDA_TOKEN must be valid UTF-8");
+    }
+
+    #[tokio::test]
+    async fn empty_environment_token_is_refused_instead_of_loading_a_profile() {
+        let _guard = crate::testing::ENV.lock().await;
+        let previous = std::env::var_os("SYNVEDA_TOKEN");
+        unsafe { std::env::set_var("SYNVEDA_TOKEN", "") };
+        let result = Api::connect("default").await;
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("SYNVEDA_TOKEN", value),
+                None => std::env::remove_var("SYNVEDA_TOKEN"),
+            }
+        }
+        let error = match result {
+            Ok(_) => panic!("empty token selected a stored credential path"),
+            Err(error) => error,
+        };
+        assert_eq!(error, "SYNVEDA_TOKEN must not be empty");
     }
 
     /// The MCP server must not look like the CLI on the wire. Everything

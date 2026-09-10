@@ -4,6 +4,9 @@
 //! against Postgres, including immutable history, provenance-preserving merge,
 //! explicit supersession and content erasure.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -14,13 +17,13 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::{knowledge, okf, telemetry};
 use synveda_identity::{Claims, Hs256Verifier, TenantContext, with_tenant};
 use synveda_ingest::embedding::Embedder as _;
 use synveda_store::{
     access, context as context_store, identities, imports as import_store, knowledge as stored,
-    knowledge_conflicts, knowledge_search, projects, rls, scopes, sessions, tenants, workspaces,
+    knowledge_conflicts, knowledge_search, projects, rls, scopes, sessions, workspaces,
 };
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::configuration::ConfigurationContextChannel;
@@ -92,7 +95,7 @@ async fn admitted_tenant() -> Option<(AppState, Tenant)> {
         Err(_) => {
             eprintln!(
                 "skipping CPR-16 Knowledge lifecycle test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }
@@ -102,12 +105,12 @@ async fn admitted_tenant() -> Option<(AppState, Tenant)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant_id = TenantId::new();
     let slug = format!("cpr16-{}", tenant_id.as_uuid().simple());
-    let tenant = synveda_store::tenants::create(
+    let tenant = tenant_fixture::create(
         &pool,
         tenant_id,
         &slug,
@@ -180,7 +183,7 @@ async fn grant(
         .await
         .expect("begin tenant tx");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id,
@@ -222,6 +225,7 @@ fn tenant_context(tenant: &Tenant, subject: &str) -> TenantContext {
             tenant_id: tenant.id,
             provisioning: None,
             lifetime: None,
+            credential_class: synveda_identity::CredentialClass::PrimaryBearer,
         },
     }
 }
@@ -1037,7 +1041,7 @@ async fn review_is_live_and_forget_leaves_only_content_free_evidence() {
     );
 
     let foreign_tenant_id = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &state.pool,
         foreign_tenant_id,
         &format!("cpr16-foreign-{}", foreign_tenant_id.as_uuid().simple()),
@@ -1593,7 +1597,7 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
     assert_eq!(gone_status, StatusCode::NOT_FOUND);
 
     let foreign_id = TenantId::new();
-    let foreign = tenants::create(
+    let foreign = tenant_fixture::create(
         &state.pool,
         foreign_id,
         &format!("cpr17-foreign-{}", foreign_id.as_uuid().simple()),
@@ -1662,7 +1666,11 @@ async fn conflicts_are_transitional_governed_and_temporally_queryable() {
         .await
         .expect("create original Knowledge");
     assert_eq!(original_result.outcome, KnowledgeMutationOutcome::Applied);
-    let known_before_challenger = Utc::now();
+    let known_before_challenger = snapshot(&state.pool, tenant.id, original_id)
+        .await
+        .expect("original retained")
+        .item
+        .transaction_from;
     tokio::time::sleep(Duration::from_millis(2)).await;
 
     let (challenger, challenger_id, challenger_revision, _) = create_command(

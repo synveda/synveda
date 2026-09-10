@@ -23,11 +23,11 @@ Forces at play:
   precisely so any verified subject — human, dev, or headless — can be
   bound (ADR-0015). A service identity that is anything *other* than an
   identity row would fork every seam built on that shape.
-- **The fail-closed rule already contains unregistered clients.** An
-  IdP-verified subject with no identity row is quarantined at the
-  enforcement seam (ADR-0013 decision 6). A client-credentials token
-  from an unregistered client is exactly that case: denied everything
-  by the base layer, with zero new code.
+- **The fail-closed rule must distinguish credential classes.** An access
+  token carrying any configured service audience is a service credential,
+  even when it also carries the primary API audience. It must resolve to one
+  active registered service identity before tenant admission; an unknown,
+  departed or user-kind subject is a uniform 401, not a role-free user.
 - **Enforcement belongs in the PDP** (seed §2.2): "team scope cannot
   call org-scope endpoints" must be a policy the decision log can name,
   not a gateway if-statement. And it must survive custom packs —
@@ -61,15 +61,15 @@ forbid over a new `token_scope` principal attribute.
    grant and presents them as bearer tokens. `OidcVerifier` verifies
    them exactly like user bearer tokens — same issuer trust entries,
    same JWKS cache and rotation handling. `IssuerConfig` gains
-   `service_audiences` (default empty): the audience check accepts the
-   primary bearer audience *or* any listed service audience, because
-   client-credentials tokens carry the client's own audience, not the
-   login client's. A bearer token without a `sub` claim falls back to
-   `azp` — the authorized party, the client the token was issued to:
-   Rauthy mints client-credentials tokens as `sub: null` + `azp`, while
-   Entra-style IdPs set `sub`; both name the registered subject. ID
-   tokens never fall back (OIDC requires `sub` on them — login must
-   name an end user). Synveda stores no client secrets and mints
+   `service_audiences` (default empty). Bearer audiences form a closed set:
+   every value must be the primary API audience or a configured service
+   audience; the login client id and unknown or duplicate audiences are
+   refused. Presence of any service audience classifies the whole token as a
+   service credential, including mixed primary+service arrays, and tenant
+   admission requires its exact active `kind = service` identity. Only this
+   service credential class may fall back from a missing `sub` to `azp`;
+   primary API bearers and interactive ID tokens never do. Synveda stores no
+   client secrets and mints
    nothing. The dev HS256 mode needs no change: kind is a property of
    the identity row (decision 2), not the token, so
    `synveda token issue` with a registered service subject exercises
@@ -184,8 +184,8 @@ forbid over a new `token_scope` principal attribute.
 
 - Positive: the AC holds with defense in depth — an agent credential
   is confined by registration, not by the absence of roles; an
-  unregistered client is already quarantined by ADR-0013's fail-closed
-  rule; agents are full identities (bindable, movable, quarantinable,
+  unregistered or wrong-kind service credential is rejected before tenant
+  use; agents are full identities (bindable, movable, quarantinable,
   composable) with no parallel machinery; the token path, the seam,
   and the caches are all reused unchanged.
 - Negative / accepted trade-offs: real IdPs need `service_audiences`

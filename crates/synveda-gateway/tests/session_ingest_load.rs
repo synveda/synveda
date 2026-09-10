@@ -11,6 +11,9 @@
 //! message when it is unset (CI has no database), same convention as
 //! tests/service_identities.rs (whose harness this copies).
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -27,10 +30,10 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::{OidcVerifier, parse_issuers};
-use synveda_store::{identities, scopes, tenants};
+use synveda_store::{identities, scopes};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{Identity, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
 use tower::ServiceExt;
@@ -38,6 +41,7 @@ use tower::ServiceExt;
 const KEY_PEM: &str = include_str!("fixtures/idp_key_a.pem");
 const KEY_JWK: &str = include_str!("fixtures/idp_key_a.jwk.json");
 const CLIENT_ID: &str = "synveda-test";
+const API_AUDIENCE: &str = "synveda-test-api";
 const SERVICE_AUDIENCE: &str = "synveda-agents";
 const AGENT_CLIENT: &str = "obs-agent";
 const AGENT_SECRET: &str = "obs-agent-secret";
@@ -106,7 +110,7 @@ impl MockIdp {
         self.sign(&json!({
             "iss": self.issuer,
             "sub": subject,
-            "aud": CLIENT_ID,
+            "aud": API_AUDIENCE,
             "iat": now_secs(),
             "exp": now_secs() + 600,
         }))
@@ -119,6 +123,10 @@ async fn discovery(State(idp): State<MockIdp>) -> Json<Value> {
         "authorization_endpoint": format!("{}/authorize", idp.issuer),
         "token_endpoint": format!("{}/token", idp.issuer),
         "jwks_uri": format!("{}/jwks", idp.issuer),
+        "code_challenge_methods_supported": ["S256"],
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
     }))
 }
 
@@ -163,6 +171,7 @@ async fn token_endpoint(
 fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
     let config = format!(
         r#"[{{"issuer":"{issuer}","client_id":"{CLIENT_ID}",
+             "audience":"{API_AUDIENCE}",
              "tenant":{{"static":{{"tenant_id":"{tenant}"}}}},
              "service_audiences":["{SERVICE_AUDIENCE}"]}}]"#
     );
@@ -238,7 +247,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         Err(_) => {
             eprintln!(
                 "skipping MEM-1 observe test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }
@@ -248,12 +257,12 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("mem1-{}", id.as_uuid().simple());
-    tenants::create(&pool, id, &slug, "MEM-1 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "MEM-1 test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id, url))
@@ -263,7 +272,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
 /// quarantine scope any more: quarantine is a departure-derived status
 /// (CPR-7, ADR-0074 decision 3).
 async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let org = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("mint root");
@@ -313,7 +322,7 @@ fn events_uri(run: synveda_types::SessionId) -> String {
 }
 
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
         .await
         .expect("mint principal scope");
@@ -348,16 +357,19 @@ fn batch(_session: &str, keys: &[&str]) -> Value {
     })
 }
 
-/// Staged events for `tenant` (superuser test connection — RLS-exempt on
-/// purpose; the RLS suite owns isolation).
+/// Staged events for `tenant`, observed through the ordinary request-plane
+/// role and a tenant-scoped transaction.
 async fn staged(pool: &PgPool, tenant: TenantId) -> i64 {
-    sqlx::query_scalar!(
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
+    let count = sqlx::query_scalar!(
         r#"select count(*) as "count!" from session_events where tenant_id = $1"#,
         tenant.as_uuid(),
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
-    .expect("count observe_events")
+    .expect("count observe_events");
+    tx.commit().await.expect("commit staged-event count");
+    count
 }
 
 // ── The throughput AC ────────────────────────────────────────────────────────
@@ -416,13 +428,10 @@ async fn append_ack_sustains_1k_events_per_second() {
     }
     let run = runs[0];
 
-    // Prior load runs (or a crashed one) may have left dead tuples in the
-    // buffer tables; vacuum first so this run measures the ack path, not
-    // a predecessor's cleanup debt.
-    sqlx::raw_sql("vacuum (analyze) session_events")
-        .execute(&pool)
-        .await
-        .expect("pre-run vacuum");
+    // `make db-test` supplies a fresh isolated volume. Table maintenance is
+    // intentionally not part of this request-plane benchmark: PostgreSQL 17
+    // reserves VACUUM for MAINTAIN/table-owner authority, which the gateway
+    // credential must never hold.
 
     // The Docker-link baseline, for the failure message.
     let mut baseline = Vec::with_capacity(20);
@@ -496,30 +505,10 @@ async fn append_ack_sustains_1k_events_per_second() {
         "every load event admitted exactly once (plus the warmups)"
     );
 
-    // Hygiene: the immutable session rows would accumulate in the dev
-    // database run over run and skew the next run's timings. Declared as a
-    // disposal, because migration 0046's trigger refuses any
-    // other delete from this table — which is the point of the trigger: a
-    // handler that has not said it is retention cannot retire a transcript.
-    // A load run's own cleanup is exactly the case that has to say so.
-    let mut cleanup = pool.begin().await.expect("begin cleanup");
-    sqlx::raw_sql("set local synveda.retention_purge = 'on'")
-        .execute(&mut *cleanup)
-        .await
-        .expect("declare the purge");
-    sqlx::query!(
-        "delete from session_events where tenant_id = $1",
-        tenant.as_uuid(),
-    )
-    .execute(&mut *cleanup)
-    .await
-    .expect("purge load-test recorded rows");
-    cleanup.commit().await.expect("commit cleanup");
-    // Pay this run's vacuum debt here rather than in the next run's tail.
-    sqlx::raw_sql("vacuum (analyze) session_events")
-        .execute(&pool)
-        .await
-        .expect("post-run vacuum");
+    // The database gate owns a disposable volume. Keeping the immutable
+    // evidence intact exercises the same retention boundary as production;
+    // privileged deletion and VACUUM belong to operator acceptance, not this
+    // request-plane throughput test.
     acks.sort_unstable();
     let percentile = |p: f64| {
         let rank = ((acks.len() as f64) * p).ceil() as usize;

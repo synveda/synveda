@@ -272,7 +272,7 @@ by logging in and everything else is a governed verb.
    browser is involved, so what it proves is the protocol path, not a person's.
 
 9. **The image under test is the released image, and the sidecar volume is a
-   cache.** The kind job builds `deploy/compose/gateway/Dockerfile` as it
+   cache.** The kind job builds `deploy/compose/product/Dockerfile` as it
    stands — not a thin wrapper around a CI-built binary — because the whole
    point of the job is that *this* artefact serves; layer caching pays for it.
    The Tantivy sidecar gets a PVC rather than an `emptyDir`, and the chart

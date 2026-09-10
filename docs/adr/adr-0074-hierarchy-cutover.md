@@ -76,13 +76,14 @@ bootstrap on the governed scope model.
    anchor resolver reads.
 
 4. **The admin door is a grant.** The `synveda-admins` IdP-group convention
-   now upserts an `administrator` grant at the tenant root scope at every
-   login completion — additive only, first establishment audited, exactly the
-   ADR-0015 decision 6 shape on the new noun. This replaces the tenant-wide
+   may create one `administrator` grant at the tenant root: the first
+   qualifying login atomically claims an insert-only tenant marker and audits
+   the grant. Any earlier root-administrator grant consumes the same marker;
+   later group members use governed Synveda grants, and revocation does not
+   reopen provider authority (ADR-0102). This replaces the tenant-wide
    `org-admin` binding and closes ADR-0073's recorded gap for the *operator*
-   door (first login of an admin-group member mints the first grant a tenant
-   holds); admission-level bootstrap (a tenant with no IdP admin group) is
-   still break-glass: direct store seeding, as CPR-6's harnesses already do.
+   door. Admission-level bootstrap (a tenant with no IdP admin group) remains
+   break-glass: direct store seeding, as CPR-6's harnesses already do.
 
 5. **Administration is public and typed.** Six routes under
    `/v1/admin/scopes` (list, create, get, patch, ancestors, descendants),

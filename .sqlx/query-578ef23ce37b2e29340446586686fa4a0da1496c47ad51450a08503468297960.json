@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "create schema synveda_cli_role_drift authorization synveda_gateway",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "578ef23ce37b2e29340446586686fa4a0da1496c47ad51450a08503468297960"
+}

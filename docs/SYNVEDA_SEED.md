@@ -145,7 +145,8 @@ forbid always overrides a wider permit.
 
 ## 6. Policy engine
 
-- **PDP**: Cedar embedded in the gateway, fronted by one internal
+- **PDP**: Cedar embedded in each authorising Synveda product process (gateway
+  and core worker), fronted by one internal
   `authorize(subject, action, resource, context)` seam. No policy sidecar or
   second permission mapping participates in a decision.
 - **Policy packs** — versioned bundles applied per governed scope:
@@ -188,18 +189,19 @@ forbid always overrides a wider permit.
 │  write: immutable session events + typed VedaFlow commands          │
 └──────┬──────────────────────────────────────────┬──────────────────┘
 ┌──────▼──────────────┐                 ┌─────────▼──────────────────┐
-│ POSTGRES 17         │                 │ LEASED DATABASE WORKERS     │
-│ Knowledge, sessions,│                 │ capture, index convergence, │
-│ scopes, versions,   │                 │ import and re-encryption     │
-│ audit, jobs, FTS,   │                 │ run in the gateway process   │
-│ pgvector, relations │                 │ and remain restart-safe      │
+│ POSTGRES 17         │                 │ CORE WORKER PROCESS          │
+│ Knowledge, sessions,│                 │ capture, index convergence,  │
+│ scopes, versions,   │                 │ relaxation expiry and        │
+│ audit, jobs, FTS,   │                 │ directory pull use their     │
+│ pgvector, relations │                 │ existing database contracts  │
 └─────────────────────┘                 └─────────────────────────────┘
 Cross-cutting: embedded Cedar PDP · standards-based OIDC · OTel traces/metrics
-Deploy: source/installed Compose or Helm, currently one gateway replica
+Deploy: canonical Compose or Helm, one gateway/core worker; optional Apalis canary leaf
 ```
 
-**Language decisions**: core/gateway in **Rust** (single static binary, on-prem friendly,
-latency-critical read path). Claude Code adapter in **TypeScript** (hooks ecosystem).
+**Language decisions**: core/gateway/worker in **Rust** (one product image with
+separate request and worker binaries, on-prem friendly, latency-critical read
+path). Claude Code adapter in **TypeScript** (hooks ecosystem).
 The admin console is React and uses the generated OpenAPI client. Public Rust,
 TypeScript and Python SDKs remain open work; deleted stubs are not support.
 
@@ -217,8 +219,9 @@ TypeScript and Python SDKs remain open work; deleted stubs are not support.
 
 **Dependency licensing/stack constraint**: the shipped core path admits only
 the repository's approved permissive dependency licences. PostgreSQL,
-pgvector, Cedar, Rauthy and the Rust/TypeScript runtime are current; optional
-engines and hosting services require a separate accepted decision. This
+pgvector, Cedar, Keycloak and the Rust/TypeScript runtime are current; the
+optional Apalis canary is an exact-pinned deployment leaf. Other engines and
+hosting services require a separate accepted decision. This
 constraint does not choose a licence for Synveda itself.
 
 ---
@@ -240,8 +243,9 @@ synveda/
 │   ├── synveda-vedaflow     # immutable objects, commits, refs and proposals
 │   ├── synveda-identity     # OIDC, SCIM and directory adapters
 │   ├── synveda-okf          # pure bounded OKF v0.2 exchange adapter
-│   ├── synveda-gateway      # axum HTTP application plane and DB-leased workers
-│   ├── synveda-cli          # admin/dev CLI (synveda init, synveda policy apply, ...)
+│   ├── synveda-gateway      # axum HTTP gateway plus the private core-worker binary
+│   ├── synveda-apalis       # optional deployment leaf for one operation transport
+│   ├── synveda-cli          # administration and public-API CLI
 │                            #   + `synveda mcp`: the generic MCP server (see §7 footnote)
 │   └── synveda-eval         # unprivileged public-API evaluation client
 ├── adapters/
@@ -255,9 +259,11 @@ synveda/
 
 Dependency rule: `types ← crypto ← {policy, store, identity, audit, vedaflow}
 ← retrieval/ingest ← gateway`; `synveda-okf` is a types-only format leaf.
-Nothing imports "upward". Adapters and future SDKs depend only on the public
-API, never on crates. The check enumerates the CLI's local bootstrap exceptions
-and keeps the evaluation crate dependency-free.
+`synveda-apalis` is an optional deployment leaf over the gateway/store seams;
+no core or public-contract crate imports it. Nothing else imports "upward".
+Adapters and future SDKs depend only on the public API, never on crates. The
+check enumerates the CLI's local bootstrap exceptions and keeps the evaluation
+crate dependency-free.
 
 ---
 

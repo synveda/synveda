@@ -71,6 +71,7 @@ mod tests {
                 tenant_id: tenant.id,
                 provisioning: None,
                 lifetime: None,
+                credential_class: crate::token::CredentialClass::PrimaryBearer,
             },
             tenant,
         }

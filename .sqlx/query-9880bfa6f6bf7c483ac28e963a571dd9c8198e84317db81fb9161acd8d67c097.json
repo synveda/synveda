@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select inventory.kind as \"kind!\",\n                  inventory.schema_name as \"schema_name!\",\n                  inventory.object_name as \"object_name!\",\n                  inventory.detail as \"detail!\",\n                  inventory.privilege as \"privilege!\"\n             from (\n               select 'namespace'::text as kind,\n                      namespace.nspname::text as schema_name,\n                      ''::text as object_name,\n                      ''::text as detail,\n                      acl.privilege_type::text as privilege\n                 from pg_catalog.pg_namespace as namespace,\n                      lateral pg_catalog.aclexplode(namespace.nspacl) as acl\n                 join pg_catalog.pg_roles as app on app.oid = acl.grantee\n                where app.rolname = 'synveda_app'\n               union all\n               select 'attribute'::text,\n                      namespace.nspname::text,\n                      object.relname::text,\n                      attribute.attname::text,\n                      acl.privilege_type::text\n                 from pg_catalog.pg_attribute as attribute\n                 join pg_catalog.pg_class as object on object.oid = attribute.attrelid\n                 join pg_catalog.pg_namespace as namespace on namespace.oid = object.relnamespace,\n                      lateral pg_catalog.aclexplode(attribute.attacl) as acl\n                 join pg_catalog.pg_roles as app on app.oid = acl.grantee\n                where app.rolname = 'synveda_app'\n               union all\n               select 'relation'::text,\n                      namespace.nspname::text,\n                      object.relname::text,\n                      object.relkind::text,\n                      acl.privilege_type::text\n                 from pg_catalog.pg_class as object\n                 join pg_catalog.pg_namespace as namespace on namespace.oid = object.relnamespace,\n                      lateral pg_catalog.aclexplode(object.relacl) as acl\n                 join pg_catalog.pg_roles as app on app.oid = acl.grantee\n                where app.rolname = 'synveda_app'\n               union all\n               select 'routine'::text,\n                      namespace.nspname::text,\n                      routine.proname::text,\n                      pg_catalog.pg_get_function_identity_arguments(routine.oid)::text,\n                      acl.privilege_type::text\n                 from pg_catalog.pg_proc as routine\n                 join pg_catalog.pg_namespace as namespace on namespace.oid = routine.pronamespace,\n                      lateral pg_catalog.aclexplode(routine.proacl) as acl\n                 join pg_catalog.pg_roles as app on app.oid = acl.grantee\n                where app.rolname = 'synveda_app'\n               union all\n               select 'type'::text,\n                      namespace.nspname::text,\n                      data_type.typname::text,\n                      data_type.typtype::text,\n                      acl.privilege_type::text\n                 from pg_catalog.pg_type as data_type\n                 join pg_catalog.pg_namespace as namespace on namespace.oid = data_type.typnamespace,\n                      lateral pg_catalog.aclexplode(data_type.typacl) as acl\n                 join pg_catalog.pg_roles as app on app.oid = acl.grantee\n                where app.rolname = 'synveda_app'\n             ) as inventory\n            order by inventory.kind collate \"C\", inventory.schema_name collate \"C\",\n                     inventory.object_name collate \"C\", inventory.detail collate \"C\",\n                     inventory.privilege collate \"C\"\n            limit $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "schema_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "object_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "detail!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "privilege!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "9880bfa6f6bf7c483ac28e963a571dd9c8198e84317db81fb9161acd8d67c097"
+}

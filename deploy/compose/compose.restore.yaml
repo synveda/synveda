@@ -1,0 +1,116 @@
+x-synveda-restore-proxy-closure: &synveda-restore-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+x-synveda-recovery-verifier: &synveda-recovery-verifier
+  profiles: [recovery]
+  image: ${SYNVEDA_PRODUCT_IMAGE:?set SYNVEDA_PRODUCT_IMAGE}
+  labels:
+    com.synveda.contract: cpr-45
+  user: "${SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID}"
+  entrypoint: ["/usr/local/bin/synveda"]
+  environment:
+    <<: *synveda-restore-proxy-closure
+    DATABASE_URL_FILE: /run/secrets/database_url
+    SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
+    SYNVEDA_DATABASE_REQUIRED_PEER: keycloak
+    SYNVEDA_KMS_KEY_FILE: /run/secrets/kms_key
+    SYNVEDA_KMS_KEY_REF_FILE: /run/secrets/kms_key_ref
+    RUST_LOG: ${RUST_LOG:-info}
+  read_only: true
+  init: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 64
+  restart: "no"
+  mem_limit: 256m
+  cpus: 0.5
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,mode=0700,size=16m,uid=${SYNVEDA_RUNTIME_UID},gid=${SYNVEDA_RUNTIME_GID}
+  volumes:
+    - type: bind
+      source: ${SYNVEDA_DATABASE_ROLES_FILE:?set SYNVEDA_DATABASE_ROLES_FILE}
+      target: /etc/synveda/database/roles.json
+      read_only: true
+  networks:
+    synveda-data: {}
+
+services:
+  # The restore target is intentionally private. Its browser acceptance runs
+  # on app-backend; it never competes with or impersonates the source edge.
+  proxy:
+    ports: !reset []
+
+  database-restore:
+    profiles: [recovery]
+    image: ${SYNVEDA_POSTGRES_IMAGE:?set SYNVEDA_POSTGRES_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
+    user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
+    entrypoint: ["/usr/local/bin/synveda-logical-restore"]
+    command: ["restore"]
+    environment:
+      <<: *synveda-restore-proxy-closure
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    restart: "no"
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=0700,size=16m,uid=${SYNVEDA_RUNTIME_UID},gid=${SYNVEDA_RUNTIME_GID}
+    secrets:
+      - source: postgres_owner_password
+        target: postgres_owner_password
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_RESTORE_DATABASE_DIR:?set SYNVEDA_RESTORE_DATABASE_DIR}
+        target: /backup
+        read_only: true
+    networks:
+      synveda-data: {}
+
+  recovery-verify:
+    <<: *synveda-recovery-verifier
+    command:
+      - db
+      - recovery-verify
+      - --tenant
+      - ${SYNVEDA_BOOTSTRAP_TENANT_ID:?set SYNVEDA_BOOTSTRAP_TENANT_ID}
+    secrets:
+      - source: synveda_gateway_database_url
+        target: database_url
+      - source: synveda_kms_key
+        target: kms_key
+      - source: synveda_kms_key_ref
+        target: kms_key_ref
+
+  recovery-key-refusal:
+    <<: *synveda-recovery-verifier
+    command:
+      - db
+      - recovery-verify
+      - --tenant
+      - ${SYNVEDA_BOOTSTRAP_TENANT_ID:?set SYNVEDA_BOOTSTRAP_TENANT_ID}
+      - --expect-key-refusal
+    secrets:
+      - source: synveda_gateway_database_url
+        target: database_url
+      - source: synveda_wrong_kms_key
+        target: kms_key
+      - source: synveda_kms_key_ref
+        target: kms_key_ref
+
+secrets:
+  synveda_wrong_kms_key:
+    file: ${SYNVEDA_RESTORE_WRONG_KMS_KEY_FILE:?set SYNVEDA_RESTORE_WRONG_KMS_KEY_FILE}

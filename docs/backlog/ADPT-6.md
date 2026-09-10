@@ -21,7 +21,11 @@ The repository has no LlamaIndex adapter or verified LlamaIndex support. LlamaIn
 
 ## Architecture seam
 
-The adapter is a Python public-API client above ADPT-4. LlamaIndex DTOs map at the package boundary to session events, context requests, and Knowledge results; no framework type enters Synveda core crates. The gateway remains responsible for OIDC identity, PDP, forced RLS, capture, VedaFlow, and audit.
+The adapter is a Python public-API client above ADPT-4. LlamaIndex DTOs map at
+the package boundary to session events, context requests, and Knowledge
+results; no framework type enters Synveda core crates. The Synveda gateway and
+private core-worker processes remain responsible for OIDC identity, PDP,
+forced RLS, Capture, VedaFlow and audit through the same application contract.
 
 ## Acceptance criteria
 

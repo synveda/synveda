@@ -34,10 +34,12 @@
 //!
 //! ## Transactions
 //!
-//! Reads take any executor. The mutations that run more than one statement —
-//! [`update_group`], [`remove_member`], [`accept_invite`] — take a connection
-//! and MUST be wrapped in a transaction; on the data path that means
-//! [`crate::rls::begin_tenant_tx`].
+//! Reads take any executor. Grant mutations and the mutations that run more
+//! than one statement — [`update_group`], [`remove_member`],
+//! [`accept_invite`] — take a connection and MUST be wrapped in a transaction;
+//! on the data path that means [`crate::rls::begin_tenant_tx`]. Direct grant
+//! mutations share a transaction-scoped `(tenant, principal)` fence so a
+//! lifecycle operation can retire a complete set without an insert phantom.
 //!
 //! ## Tenancy
 //!
@@ -792,8 +794,11 @@ pub struct NewGrant {
     ),
     err(Display)
 )]
-pub async fn create_grant(executor: impl PgExecutor<'_>, new: &NewGrant) -> Result<ScopeGrant> {
+pub async fn create_grant(conn: &mut PgConnection, new: &NewGrant) -> Result<ScopeGrant> {
     validate_new_grant(new)?;
+    if let Some(principal_id) = new.subject.principal_id() {
+        lock_principal_grants(&mut *conn, new.tenant_id, principal_id).await?;
+    }
     let row = sqlx::query_as!(
         GrantRow,
         r#"
@@ -826,7 +831,7 @@ pub async fn create_grant(executor: impl PgExecutor<'_>, new: &NewGrant) -> Resu
         new.invite_id.map(|id| id.as_uuid()) as Option<Uuid>,
         new.granted_by.as_deref() as Option<&str>,
     )
-    .fetch_one(executor)
+    .fetch_one(&mut *conn)
     .await
     .map_err(storage_error)?;
 
@@ -837,6 +842,83 @@ pub async fn create_grant(executor: impl PgExecutor<'_>, new: &NewGrant) -> Resu
     )
     .increment(1);
     row.try_into()
+}
+
+/// Claims the tenant's one-time identity-provider administrator bootstrap.
+///
+/// The caller supplies the grant id it will insert in the same transaction.
+/// This helper takes the same principal mutation fence as grant creation
+/// before touching the tenant-wide marker. That principal-before-marker order
+/// matches the trigger path used by every other grant creator and prevents a
+/// bootstrap claimant from deadlocking with a concurrent governed grant.
+/// A database trigger records the first tenant-root administrator created by
+/// every other grant path, so this insert wins only when no earlier path has
+/// consumed bootstrap. The marker is insert-only and survives grant revocation;
+/// rollback removes both marker and grant together.
+#[tracing::instrument(
+    name = "store.access.claim_initial_administrator_bootstrap",
+    skip_all,
+    fields(tenant.id = %tenant_id, grant.id = %grant_id),
+    err(Display)
+)]
+pub async fn claim_initial_administrator_bootstrap(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    grant_id: GrantId,
+    principal_id: &str,
+) -> Result<bool> {
+    lock_principal_grants(&mut *conn, tenant_id, principal_id).await?;
+    let claimed = sqlx::query!(
+        r#"
+        insert into tenant_administrator_bootstraps (tenant_id, grant_id)
+        values ($1, $2)
+        on conflict (tenant_id) do nothing
+        returning tenant_id
+        "#,
+        tenant_id.as_uuid(),
+        grant_id.as_uuid(),
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(claimed.is_some())
+}
+
+/// Serialises every direct-grant mutation for one tenant principal.
+///
+/// A row lock cannot exclude a grant that does not exist yet. This
+/// transaction-scoped advisory lock supplies that missing predicate fence.
+/// The fixed namespace and length-delimited tenant UUID make the input
+/// unambiguous; a 64-bit hash collision only serialises unrelated principals.
+/// Callers MUST already be inside a transaction.
+#[tracing::instrument(
+    name = "store.access.lock_principal_grants",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+pub async fn lock_principal_grants(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    principal_id: &str,
+) -> Result<()> {
+    validate_principal_id(principal_id)?;
+    sqlx::query!(
+        r#"
+        select pg_catalog.pg_advisory_xact_lock(
+            pg_catalog.hashtextextended(
+                'synveda.scope-grants.principal.v1:' || $1::uuid::text || ':' || $2::text,
+                0
+            )
+        )
+        "#,
+        tenant_id.as_uuid(),
+        principal_id,
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(())
 }
 
 fn validate_new_grant(new: &NewGrant) -> Result<()> {
@@ -938,6 +1020,85 @@ pub async fn list_grants(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// A bounded page of direct grants held by one principal. Lifecycle paths
+/// use this to prove a retirement set fits their fixed work budget before
+/// mutating any row.
+#[tracing::instrument(
+    name = "store.access.principal_grants_bounded",
+    skip_all,
+    fields(tenant.id = %tenant_id, grant.limit = limit),
+    err(Display)
+)]
+pub async fn principal_grants_bounded(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    principal_id: &str,
+    excluded_id: Option<GrantId>,
+    limit: i64,
+) -> Result<Vec<ScopeGrant>> {
+    if !(1..=1024).contains(&limit) {
+        return Err(Error::Invalid {
+            message: "principal grant page limit must be between 1 and 1024".to_owned(),
+        });
+    }
+    let rows = sqlx::query_as!(
+        GrantRow,
+        r#"
+        select id, tenant_id, scope_id, subject_kind, principal_id, group_id,
+               role_key, source, invite_id, directory_source,
+               directory_resource_id, granted_by, created_at
+        from scope_grants
+        where tenant_id = $1 and principal_id = $2
+          and ($3::uuid is null or id <> $3)
+        order by created_at, id
+        limit $4
+        "#,
+        tenant_id.as_uuid(),
+        principal_id,
+        excluded_id.map(|id| id.as_uuid()) as Option<Uuid>,
+        limit,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// The at-most-one structural owner row a principal scope mints. Fetching
+/// two makes corruption observable without loading unrelated grants at the
+/// scope into an authentication transaction.
+#[tracing::instrument(
+    name = "store.access.structural_owner_grants",
+    skip_all,
+    fields(tenant.id = %tenant_id, scope.id = %scope_id),
+    err(Display)
+)]
+pub async fn structural_owner_grants(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+) -> Result<Vec<ScopeGrant>> {
+    let rows = sqlx::query_as!(
+        GrantRow,
+        r#"
+        select id, tenant_id, scope_id, subject_kind, principal_id, group_id,
+               role_key, source, invite_id, directory_source,
+               directory_resource_id, granted_by, created_at
+        from scope_grants
+        where tenant_id = $1 and scope_id = $2
+          and role_key = 'owner' and source = 'owner'
+        order by id
+        limit 2
+        "#,
+        tenant_id.as_uuid(),
+        scope_id.as_uuid(),
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// Revokes one grant by id, returning what was revoked.
 ///
 /// Fails with [`Error::NotFound`] for a grant that is not this tenant's and
@@ -953,6 +1114,17 @@ pub async fn revoke_grant(
     tenant_id: TenantId,
     id: GrantId,
 ) -> Result<ScopeGrant> {
+    let observed = get_grant(&mut *conn, tenant_id, id)
+        .await?
+        .ok_or_else(|| grant_not_found(id))?;
+    if let Some(principal_id) = observed.principal_id.as_deref() {
+        lock_principal_grants(&mut *conn, tenant_id, principal_id).await?;
+    }
+    // Grant identity, subject and source are immutable. Re-read after the
+    // principal predicate fence so the decision reflects the fenced state;
+    // the DELETE below is the operation that takes the row lock. A locking
+    // SELECT would require UPDATE authority that the deliberately immutable
+    // runtime table does not grant.
     let grant = get_grant(&mut *conn, tenant_id, id)
         .await?
         .ok_or_else(|| grant_not_found(id))?;
@@ -999,6 +1171,14 @@ pub async fn revoke_directory_grant(
     tenant_id: TenantId,
     id: GrantId,
 ) -> Result<ScopeGrant> {
+    let observed = get_grant(&mut *conn, tenant_id, id)
+        .await?
+        .ok_or_else(|| grant_not_found(id))?;
+    if let Some(principal_id) = observed.principal_id.as_deref() {
+        lock_principal_grants(&mut *conn, tenant_id, principal_id).await?;
+    }
+    // See `revoke_grant`: immutable row fields are safely re-read after the
+    // principal fence, and DELETE owns the row-lock/concurrent-delete result.
     let grant = get_grant(&mut *conn, tenant_id, id)
         .await?
         .ok_or_else(|| grant_not_found(id))?;
@@ -1058,6 +1238,7 @@ pub async fn remove_member(
     principal_id: &str,
 ) -> Result<Vec<ScopeGrant>> {
     validate_principal_id(principal_id)?;
+    lock_principal_grants(&mut *conn, tenant_id, principal_id).await?;
     let direct = list_grants(
         &mut *conn,
         tenant_id,
@@ -1690,6 +1871,12 @@ pub async fn accept_invite(
     now: DateTime<Utc>,
 ) -> Result<Accepted> {
     validate_principal_id(principal_id)?;
+
+    // The invitation row serialises redemption of this token; the principal
+    // fence also orders the grant it may create against identity retirement.
+    // Take the predicate fence first, matching every other grant mutation's
+    // lock order.
+    lock_principal_grants(&mut *conn, tenant_id, principal_id).await?;
 
     // Locked, so two redemptions of one token serialise rather than both
     // finding it pending.

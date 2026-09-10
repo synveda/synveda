@@ -1,0 +1,159 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into durable_operations\n            (tenant_id, id, kind, operation_version, skill_version_id,\n             requested_by_identity_id, input_hash)\n        values ($1, $2, 'skill_validation', $3, $4, $5, $6)\n        returning tenant_id, id, operation_version, proposal_id, knowledge_item_id,\n                  skill_version_id, requested_by_identity_id, authorized_at,\n                  kind, state, input_hash, progress_percent, attempts, next_attempt_at,\n                  cancel_requested_at, lease_owner, lease_expires_at, last_error_code,\n                  result, created_at, updated_at, started_at, completed_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "operation_version",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "skill_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "requested_by_identity_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "authorized_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "input_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "progress_percent",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 12,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "next_attempt_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "cancel_requested_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "lease_owner",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "lease_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "last_error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "result",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int2",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "e5a42c4e51c6dccb416d37e57fb7cd81a11ee4124bdd66dcef603d2b7d4a7ff6"
+}

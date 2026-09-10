@@ -17,15 +17,19 @@
 //!
 //! These tests need a live Postgres; they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database); run them locally with
-//! `make dev-up` then `make db-test`. Isolation is by freshly minted UUIDv7
+//! `make db-test`. Isolation is by freshly minted UUIDv7
 //! tenants, so a shared dev database is fine.
 
-use std::sync::OnceLock;
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
+use std::future::Future;
+use std::sync::{Mutex, OnceLock};
 
 use chrono::{Duration, Utc};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
-use synveda_store::{access, identities, projects, scopes, tenants, workspaces};
+use synveda_store::{access, identities, projects, scopes, workspaces};
 use synveda_types::access::{
     GrantSource, GrantSubject, GroupSource, InviteStatus, RoleKey, SubjectKind,
 };
@@ -41,6 +45,21 @@ use synveda_types::{
 struct Db {
     rt: tokio::runtime::Runtime,
     pool: PgPool,
+    execution: Mutex<()>,
+}
+
+impl Db {
+    fn block_on<F: Future>(&self, future: F) -> F::Output {
+        // This integration binary shares one current-thread runtime and a
+        // six-connection pool. Serial execution prevents ordinary tests from
+        // occupying every connection while a lock-witness test needs its
+        // holder, waiter and observer at the same time.
+        let _execution = self
+            .execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.rt.block_on(future)
+    }
 }
 
 fn db() -> Option<&'static Db> {
@@ -51,7 +70,7 @@ fn db() -> Option<&'static Db> {
             Err(_) => {
                 eprintln!(
                     "skipping access tests: DATABASE_URL is not set \
-                     (run `make dev-up` then `make db-test`)"
+                     (run `make db-test`)"
                 );
                 return None;
             }
@@ -66,12 +85,16 @@ fn db() -> Option<&'static Db> {
                 .connect(&url)
                 .await
                 .expect("connect to DATABASE_URL");
-            synveda_store::migrate(&pool)
+            synveda_store::epoch::verify(&pool)
                 .await
                 .expect("apply migrations");
             pool
         });
-        Some(Db { rt, pool })
+        Some(Db {
+            rt,
+            pool,
+            execution: Mutex::new(()),
+        })
     })
     .as_ref()
 }
@@ -79,14 +102,14 @@ fn db() -> Option<&'static Db> {
 async fn admit(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("acc-{}", tenant.as_uuid().simple());
-    tenants::create(pool, tenant, &slug, "CPR-5 fixture", TenantStatus::Active)
+    tenant_fixture::create(pool, tenant, &slug, "CPR-5 fixture", TenantStatus::Active)
         .await
         .expect("admit tenant");
     tenant
 }
 
-async fn begin(pool: &PgPool) -> Transaction<'static, Postgres> {
-    pool.begin().await.expect("begin transaction")
+async fn begin(pool: &PgPool, tenant: TenantId) -> Transaction<'static, Postgres> {
+    tenant_fixture::begin(pool, tenant).await
 }
 
 /// A workspace with one project under it, and the scopes both own.
@@ -100,7 +123,7 @@ struct Tree {
 
 async fn seed_tree(pool: &PgPool) -> Tree {
     let tenant = admit(pool).await;
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tenant).await;
     let workspace = workspaces::create(
         &mut tx,
         &workspaces::NewWorkspace {
@@ -144,7 +167,7 @@ async fn seed_tree(pool: &PgPool) -> Tree {
 
 /// A `principal`-shaped scope hanging off the tenant root — somebody's own.
 async fn seed_principal_scope(pool: &PgPool, tree: &Tree, slug: &str) -> ScopeId {
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tree.tenant).await;
     let scope = scopes::create(
         &mut tx,
         &scopes::NewScope {
@@ -173,9 +196,9 @@ async fn grant(
     role: RoleKey,
     source: GrantSource,
 ) -> synveda_types::access::ScopeGrant {
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tenant).await;
     let grant = access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,
@@ -193,6 +216,54 @@ async fn grant(
     grant
 }
 
+async fn claim_initial_admin(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant: TenantId,
+    root_scope: ScopeId,
+    subject: &str,
+) -> bool {
+    let grant_id = GrantId::new();
+    let claimed = access::claim_initial_administrator_bootstrap(tx, tenant, grant_id, subject)
+        .await
+        .expect("claim initial administrator bootstrap");
+    if claimed {
+        access::create_grant(
+            tx,
+            &access::NewGrant {
+                id: grant_id,
+                tenant_id: tenant,
+                scope_id: root_scope,
+                subject: principal(subject),
+                role_key: RoleKey::Administrator,
+                source: GrantSource::Automation,
+                invite_id: None,
+                granted_by: None,
+            },
+        )
+        .await
+        .expect("create initial administrator grant");
+    }
+    claimed
+}
+
+async fn tenant_root_grants(
+    pool: &PgPool,
+    tenant: TenantId,
+    root_scope: ScopeId,
+) -> Vec<synveda_types::access::ScopeGrant> {
+    let mut tx = begin(pool, tenant).await;
+    access::list_grants(
+        &mut *tx,
+        tenant,
+        &access::GrantFilter {
+            scope_id: Some(root_scope),
+            principal_id: None,
+        },
+    )
+    .await
+    .expect("list tenant-root grants")
+}
+
 fn principal(id: &str) -> GrantSubject {
     GrantSubject::Principal {
         principal_id: id.to_owned(),
@@ -200,7 +271,7 @@ fn principal(id: &str) -> GrantSubject {
 }
 
 async fn new_group(pool: &PgPool, tenant: TenantId, slug: &str, members: &[&str]) -> GroupId {
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tenant).await;
     let group = access::create_group(
         &mut *tx,
         &access::NewGroup {
@@ -262,7 +333,7 @@ async fn new_group(pool: &PgPool, tenant: TenantId, slug: &str, members: &[&str]
 }
 
 async fn new_identity(pool: &PgPool, tenant: TenantId, subject: &str) -> IdentityId {
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tenant).await;
     let identity_id = IdentityId::new();
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
@@ -300,9 +371,12 @@ async fn new_identity(pool: &PgPool, tenant: TenantId, subject: &str) -> Identit
 }
 
 async fn members_at(pool: &PgPool, tenant: TenantId, scope: ScopeId) -> Vec<access::AccessEntry> {
-    access::members_of(pool, tenant, scope)
+    let mut tx = begin(pool, tenant).await;
+    let members = access::members_of(&mut *tx, tenant, scope)
         .await
-        .expect("resolve members")
+        .expect("resolve members");
+    tx.commit().await.expect("commit member resolution");
+    members
 }
 
 // ── Inheritance ──────────────────────────────────────────────────────────────
@@ -312,7 +386,7 @@ async fn members_at(pool: &PgPool, tenant: TenantId, scope: ScopeId) -> Vec<acce
 #[test]
 fn a_workspace_grant_reaches_its_projects_without_a_second_row() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         grant(
             &db.pool,
@@ -335,8 +409,11 @@ fn a_workspace_grant_reaches_its_projects_without_a_second_row() {
              makes 'why can this person see my project' answerable"
         );
 
+        let mut tx = synveda_store::rls::begin_tenant_tx(&db.pool, tree.tenant)
+            .await
+            .expect("begin tenant transaction");
         let rows = access::list_grants(
-            &db.pool,
+            &mut *tx,
             tree.tenant,
             &access::GrantFilter {
                 scope_id: Some(tree.project_scope),
@@ -349,6 +426,7 @@ fn a_workspace_grant_reaches_its_projects_without_a_second_row() {
             rows.is_empty(),
             "inheritance must not materialise a per-project row: {rows:?}"
         );
+        tx.commit().await.expect("commit tenant transaction");
     });
 }
 
@@ -357,9 +435,9 @@ fn a_workspace_grant_reaches_its_projects_without_a_second_row() {
 #[test]
 fn a_project_grant_stays_in_its_project() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let sibling = projects::create(
             &mut tx,
             &projects::NewProject {
@@ -411,7 +489,7 @@ fn a_project_grant_stays_in_its_project() {
 #[test]
 fn a_principal_scope_inherits_nothing_from_anywhere() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let mine = seed_principal_scope(&db.pool, &tree, "sam").await;
 
@@ -468,7 +546,7 @@ fn a_principal_scope_inherits_nothing_from_anywhere() {
 #[test]
 fn the_resolution_orders_the_nearest_grant_first() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         grant(
             &db.pool,
@@ -525,7 +603,7 @@ fn the_resolution_orders_the_nearest_grant_first() {
 #[test]
 fn a_group_grant_resolves_to_its_members_and_follows_them() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "engineering", &["robin", "kim"]).await;
         grant(
@@ -551,7 +629,7 @@ fn a_group_grant_resolves_to_its_members_and_follows_them() {
 
         // A third person joins the group; nothing is written on the grant.
         let sam = new_identity(&db.pool, tree.tenant, "sam").await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let mut members: Vec<IdentityId> = access::group_members(&mut *tx, tree.tenant, group)
             .await
             .expect("current members")
@@ -589,7 +667,7 @@ fn a_group_grant_resolves_to_its_members_and_follows_them() {
 #[test]
 fn an_archived_group_confers_nothing() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "contractors", &["robin"]).await;
         grant(
@@ -608,7 +686,7 @@ fn an_archived_group_confers_nothing() {
             1
         );
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         access::update_group(
             &mut tx,
             tree.tenant,
@@ -630,14 +708,16 @@ fn an_archived_group_confers_nothing() {
                 .is_empty(),
             "an archived group resolves to nobody"
         );
+        let mut tx = begin(&db.pool, tree.tenant).await;
         assert_eq!(
-            access::list_grants(&db.pool, tree.tenant, &access::GrantFilter::default())
+            access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
                 .await
                 .expect("list")
                 .len(),
             1,
             "and the grant is still there — archiving is not revoking"
         );
+        tx.commit().await.expect("commit archived-group read");
     });
 }
 
@@ -646,7 +726,7 @@ fn an_archived_group_confers_nothing() {
 #[test]
 fn an_empty_group_grants_access_to_nobody() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "empty", &[]).await;
         grant(
@@ -672,19 +752,21 @@ fn an_empty_group_grants_access_to_nobody() {
 #[test]
 fn a_membership_replacement_is_the_whole_list() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &["robin", "kim", "sam"]).await;
 
-        let sam = access::group_members(&db.pool, tree.tenant, group)
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let sam = access::group_members(&mut *tx, tree.tenant, group)
             .await
             .expect("members")
             .into_iter()
             .find(|member| member.principal_id.as_deref() == Some("sam"))
             .expect("sam")
             .identity_id;
+        tx.commit().await.expect("commit member lookup");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         access::update_group(
             &mut tx,
             tree.tenant,
@@ -700,11 +782,13 @@ fn a_membership_replacement_is_the_whole_list() {
         .expect("replace");
         tx.commit().await.expect("commit");
 
-        let members = access::group_members(&db.pool, tree.tenant, group)
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let members = access::group_members(&mut *tx, tree.tenant, group)
             .await
             .expect("read members");
         assert_eq!(members.len(), 1, "a duplicate is one membership");
         assert_eq!(members[0].principal_id.as_deref(), Some("sam"));
+        tx.commit().await.expect("commit replacement read");
     });
 }
 
@@ -713,11 +797,11 @@ fn a_membership_replacement_is_the_whole_list() {
 #[test]
 fn a_stale_group_update_writes_nothing() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &["robin"]).await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         access::update_group(
             &mut tx,
             tree.tenant,
@@ -733,7 +817,7 @@ fn a_stale_group_update_writes_nothing() {
         .expect("first update");
         tx.commit().await.expect("commit");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let stale = access::update_group(
             &mut tx,
             tree.tenant,
@@ -752,14 +836,16 @@ fn a_stale_group_update_writes_nothing() {
         );
         drop(tx);
 
+        let mut tx = begin(&db.pool, tree.tenant).await;
         assert_eq!(
-            access::group_members(&db.pool, tree.tenant, group)
+            access::group_members(&mut *tx, tree.tenant, group)
                 .await
                 .expect("read members")
                 .len(),
             1,
             "the refused update must not have emptied the group"
         );
+        tx.commit().await.expect("commit stale-update read");
     });
 }
 
@@ -768,10 +854,10 @@ fn a_stale_group_update_writes_nothing() {
 #[test]
 fn an_empty_group_update_is_refused() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &[]).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let result = access::update_group(
             &mut tx,
             tree.tenant,
@@ -791,7 +877,7 @@ fn an_empty_group_update_is_refused() {
 #[test]
 fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tenant = admit(&db.pool).await;
         for (source, directory_source, resource_id) in [
             (GroupSource::Directory, None, None),
@@ -801,8 +887,9 @@ fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
                 Some("00u1a2b3".to_owned()),
             ),
         ] {
+            let mut tx = begin(&db.pool, tenant).await;
             let result = access::create_group(
-                &db.pool,
+                &mut *tx,
                 &access::NewGroup {
                     id: GroupId::new(),
                     tenant_id: tenant,
@@ -821,10 +908,12 @@ fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
                 matches!(result, Err(Error::Invalid { .. })),
                 "{source} with the wrong reference shape must be refused, got {result:?}"
             );
+            drop(tx);
         }
 
         // And the CHECK holds against direct SQL, for a writer that never went
         // through the service.
+        let mut tx = begin(&db.pool, tenant).await;
         let err = sqlx::query(
             "insert into groups (id, tenant_id, slug, display_name, source, \
              directory_source, directory_resource_id) \
@@ -832,7 +921,7 @@ fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
         )
         .bind(GroupId::new().as_uuid())
         .bind(tenant.as_uuid())
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await
         .expect_err("the CHECK refuses it");
         assert_eq!(
@@ -847,10 +936,11 @@ fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
 #[test]
 fn a_directory_group_cannot_be_edited_here() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tenant = admit(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let group = access::create_group(
-            &db.pool,
+            &mut *tx,
             &access::NewGroup {
                 id: GroupId::new(),
                 tenant_id: tenant,
@@ -866,8 +956,9 @@ fn a_directory_group_cannot_be_edited_here() {
         )
         .await
         .expect("create directory group");
+        tx.commit().await.expect("commit directory group");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let result = access::update_group(
             &mut tx,
             tenant,
@@ -892,11 +983,13 @@ fn a_directory_group_cannot_be_edited_here() {
 /// forward by exactly one — against direct SQL, so the rule holds for the owner
 /// role that migrations and break-glass psql run as.
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn a_groups_identity_is_immutable_against_direct_sql() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tenant = admit(&db.pool).await;
         let group = new_group(&db.pool, tenant, "eng", &[]).await;
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
 
         for (statement, what) in [
             (
@@ -922,7 +1015,7 @@ fn a_groups_identity_is_immutable_against_direct_sql() {
         ] {
             let err = sqlx::query(statement)
                 .bind(group.as_uuid())
-                .execute(&db.pool)
+                .execute(&administrator)
                 .await
                 .expect_err(what);
             assert_eq!(
@@ -941,7 +1034,7 @@ fn a_groups_identity_is_immutable_against_direct_sql() {
 #[test]
 fn one_subject_holds_one_role_once_per_scope() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         grant(
             &db.pool,
@@ -952,8 +1045,9 @@ fn one_subject_holds_one_role_once_per_scope() {
             GrantSource::Direct,
         )
         .await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let again = access::create_grant(
-            &db.pool,
+            &mut tx,
             &access::NewGrant {
                 id: GrantId::new(),
                 tenant_id: tree.tenant,
@@ -967,6 +1061,7 @@ fn one_subject_holds_one_role_once_per_scope() {
         )
         .await;
         assert!(matches!(again, Err(Error::Conflict { .. })), "{again:?}");
+        drop(tx);
 
         // A *different* role for the same person is a different grant: they
         // are additive, and revoked separately.
@@ -993,7 +1088,7 @@ fn one_subject_holds_one_role_once_per_scope() {
 #[test]
 fn a_grant_has_exactly_one_subject_against_direct_sql() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &[]).await;
 
@@ -1012,6 +1107,7 @@ fn a_grant_has_exactly_one_subject_against_direct_sql() {
             ),
             ("principal", None, None, "a grant naming nobody"),
         ] {
+            let mut tx = begin(&db.pool, tree.tenant).await;
             let err = sqlx::query(
                 "insert into scope_grants \
                  (id, tenant_id, scope_id, subject_kind, principal_id, group_id, role_key, source) \
@@ -1023,7 +1119,7 @@ fn a_grant_has_exactly_one_subject_against_direct_sql() {
             .bind(kind)
             .bind(principal_id)
             .bind(group_id.map(|id| id.as_uuid()))
-            .execute(&db.pool)
+            .execute(&mut *tx)
             .await
             .expect_err(what);
             assert_eq!(
@@ -1031,6 +1127,7 @@ fn a_grant_has_exactly_one_subject_against_direct_sql() {
                 Some("23514"),
                 "{what} must be refused by a CHECK, got {err:?}"
             );
+            drop(tx);
         }
     });
 }
@@ -1040,10 +1137,11 @@ fn a_grant_has_exactly_one_subject_against_direct_sql() {
 #[test]
 fn only_an_invite_grant_names_an_invitation() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let claimed = access::create_grant(
-            &db.pool,
+            &mut tx,
             &access::NewGrant {
                 id: GrantId::new(),
                 tenant_id: tree.tenant,
@@ -1057,9 +1155,11 @@ fn only_an_invite_grant_names_an_invitation() {
         )
         .await;
         assert!(matches!(claimed, Err(Error::Invalid { .. })), "{claimed:?}");
+        drop(tx);
 
         // And the CHECK behind it, for a writer that never went through the
         // service.
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let err = sqlx::query(
             "insert into scope_grants \
              (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source) \
@@ -1068,7 +1168,7 @@ fn only_an_invite_grant_names_an_invitation() {
         .bind(GrantId::new().as_uuid())
         .bind(tree.tenant.as_uuid())
         .bind(tree.workspace_scope.as_uuid())
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await
         .expect_err("the CHECK refuses it");
         assert_eq!(
@@ -1082,9 +1182,10 @@ fn only_an_invite_grant_names_an_invitation() {
 /// nothing holding a connection can quietly turn a `viewer` into an `owner`
 /// while `created_at` still says "since when".
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn a_grant_is_never_edited_against_direct_sql() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let existing = grant(
             &db.pool,
@@ -1095,9 +1196,10 @@ fn a_grant_is_never_edited_against_direct_sql() {
             GrantSource::Direct,
         )
         .await;
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
         let err = sqlx::query("update scope_grants set role_key = 'owner' where id = $1")
             .bind(existing.id.as_uuid())
-            .execute(&db.pool)
+            .execute(&administrator)
             .await
             .expect_err("the trigger refuses every update");
         assert_eq!(
@@ -1113,10 +1215,10 @@ fn a_grant_is_never_edited_against_direct_sql() {
 #[test]
 fn a_directory_grant_cannot_be_revoked_here() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let robin = new_identity(&db.pool, tree.tenant, "robin").await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let group = access::sync_directory_group(
             &mut tx,
             GroupId::new(),
@@ -1140,7 +1242,7 @@ fn a_directory_grant_cannot_be_revoked_here() {
             GrantSource::Directory,
         )
         .await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let result = access::revoke_grant(&mut tx, tree.tenant, managed.id).await;
         let Err(Error::Conflict { message }) = result else {
             panic!("expected a conflict naming the directory, got {result:?}");
@@ -1153,7 +1255,7 @@ fn a_directory_grant_cannot_be_revoked_here() {
         let members = members_at(&db.pool, tree.tenant, tree.workspace_scope).await;
         assert!(members[0].directory_managed);
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let revoked = access::revoke_directory_grant(&mut tx, tree.tenant, managed.id)
             .await
             .expect("directory surface revokes its own assignment");
@@ -1171,7 +1273,7 @@ fn a_directory_grant_cannot_be_revoked_here() {
 #[test]
 fn revoking_a_grant_removes_what_it_conferred() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let held = grant(
             &db.pool,
@@ -1189,7 +1291,7 @@ fn revoking_a_grant_removes_what_it_conferred() {
             1
         );
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let revoked = access::revoke_grant(&mut tx, tree.tenant, held.id)
             .await
             .expect("revoke");
@@ -1203,10 +1305,152 @@ fn revoking_a_grant_removes_what_it_conferred() {
             "the project stops inheriting it immediately"
         );
         let again = {
-            let mut tx = begin(&db.pool).await;
+            let mut tx = begin(&db.pool, tree.tenant).await;
             access::revoke_grant(&mut tx, tree.tenant, held.id).await
         };
         assert!(matches!(again, Err(Error::NotFound { .. })), "{again:?}");
+    });
+}
+
+#[test]
+fn a_root_administrator_grant_permanently_consumes_idp_bootstrap() {
+    let Some(db) = db() else { return };
+    db.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let first = grant(
+            &db.pool,
+            tree.tenant,
+            tree.tenant_scope,
+            principal("initial-admin"),
+            RoleKey::Administrator,
+            GrantSource::Direct,
+        )
+        .await;
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        assert!(
+            !access::claim_initial_administrator_bootstrap(
+                &mut tx,
+                tree.tenant,
+                GrantId::new(),
+                "later-admin",
+            )
+            .await
+            .expect("observe bootstrap claimed by trigger"),
+            "a governed root administrator grant closes the IdP door"
+        );
+        access::revoke_grant(&mut tx, tree.tenant, first.id)
+            .await
+            .expect("revoke first administrator");
+        tx.commit().await.expect("commit revocation");
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        assert!(
+            !access::claim_initial_administrator_bootstrap(
+                &mut tx,
+                tree.tenant,
+                GrantId::new(),
+                "later-admin",
+            )
+            .await
+            .expect("observe persistent bootstrap marker"),
+            "revocation must not return authority to the identity provider"
+        );
+    });
+}
+
+#[test]
+fn concurrent_initial_admin_claims_are_single_winner_and_rollback_safe() {
+    let Some(db) = db() else { return };
+    db.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let mut winner_tx = begin(&db.pool, tree.tenant).await;
+        assert!(
+            claim_initial_admin(
+                &mut winner_tx,
+                tree.tenant,
+                tree.tenant_scope,
+                "first-claimant",
+            )
+            .await
+        );
+        let winner_pid = tenant_fixture::backend_pid(&mut winner_tx).await;
+
+        let pool = db.pool.clone();
+        let tenant = tree.tenant;
+        let root_scope = tree.tenant_scope;
+        let (pid_tx, pid_rx) = tokio::sync::oneshot::channel();
+        let contender = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_tx.send(pid).expect("report second claimant pid");
+            let claimed = claim_initial_admin(&mut tx, tenant, root_scope, "second-claimant").await;
+            tx.commit().await.expect("commit second claimant");
+            claimed
+        });
+        let contender_pid = pid_rx.await.expect("receive second claimant pid");
+        let mut observer = begin(&db.pool, tree.tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, contender_pid, winner_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+        winner_tx.commit().await.expect("commit first claimant");
+        let contender_claimed = tokio::time::timeout(std::time::Duration::from_secs(5), contender)
+            .await
+            .expect("second claimant must finish without deadlock")
+            .expect("second claimant task");
+        assert!(!contender_claimed, "only one claimant may win");
+        let grants = tenant_root_grants(&db.pool, tree.tenant, tree.tenant_scope).await;
+        assert_eq!(grants.len(), 1, "exactly one root grant commits");
+        assert_eq!(grants[0].principal_id.as_deref(), Some("first-claimant"));
+
+        let retry_tree = seed_tree(&db.pool).await;
+        let mut abandoned_tx = begin(&db.pool, retry_tree.tenant).await;
+        assert!(
+            claim_initial_admin(
+                &mut abandoned_tx,
+                retry_tree.tenant,
+                retry_tree.tenant_scope,
+                "abandoned-claimant",
+            )
+            .await
+        );
+        let abandoned_pid = tenant_fixture::backend_pid(&mut abandoned_tx).await;
+        let pool = db.pool.clone();
+        let tenant = retry_tree.tenant;
+        let root_scope = retry_tree.tenant_scope;
+        let (pid_tx, pid_rx) = tokio::sync::oneshot::channel();
+        let retry = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_tx.send(pid).expect("report retry claimant pid");
+            let claimed = claim_initial_admin(&mut tx, tenant, root_scope, "retry-claimant").await;
+            tx.commit().await.expect("commit retry claimant");
+            claimed
+        });
+        let retry_pid = pid_rx.await.expect("receive retry claimant pid");
+        let mut observer = begin(&db.pool, retry_tree.tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, retry_pid, abandoned_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+        abandoned_tx
+            .rollback()
+            .await
+            .expect("roll back marker and grant");
+        let retry_claimed = tokio::time::timeout(std::time::Duration::from_secs(5), retry)
+            .await
+            .expect("retry must finish without deadlock")
+            .expect("retry claimant task");
+        assert!(
+            retry_claimed,
+            "rollback returns the claim to the next waiter"
+        );
+        let grants = tenant_root_grants(&db.pool, retry_tree.tenant, retry_tree.tenant_scope).await;
+        assert_eq!(grants.len(), 1, "only the retry grant commits");
+        assert_eq!(grants[0].principal_id.as_deref(), Some("retry-claimant"));
     });
 }
 
@@ -1215,11 +1459,11 @@ fn revoking_a_grant_removes_what_it_conferred() {
 #[test]
 fn removing_a_member_refuses_what_it_cannot_actually_remove() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
 
         // Nothing at all.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let missing =
             access::remove_member(&mut tx, tree.tenant, tree.project_scope, "nobody").await;
         assert!(
@@ -1239,7 +1483,7 @@ fn removing_a_member_refuses_what_it_cannot_actually_remove() {
             GrantSource::Direct,
         )
         .await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let inherited =
             access::remove_member(&mut tx, tree.tenant, tree.project_scope, "robin").await;
         let Err(Error::Conflict { message }) = inherited else {
@@ -1262,7 +1506,7 @@ fn removing_a_member_refuses_what_it_cannot_actually_remove() {
             GrantSource::Direct,
         )
         .await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let via_group =
             access::remove_member(&mut tx, tree.tenant, tree.project_scope, "kim").await;
         let Err(Error::Conflict { message }) = via_group else {
@@ -1290,12 +1534,287 @@ fn removing_a_member_refuses_what_it_cannot_actually_remove() {
             GrantSource::Direct,
         )
         .await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let removed = access::remove_member(&mut tx, tree.tenant, tree.project_scope, "sam")
             .await
             .expect("remove");
         tx.commit().await.expect("commit removal");
         assert_eq!(removed.len(), 2, "both roles written here go");
+    });
+}
+
+// ── Concurrency ─────────────────────────────────────────────────────────────
+
+/// The principal advisory fence excludes an insert phantom while a lifecycle
+/// transaction snapshots and retires that principal's existing authority.
+#[test]
+fn principal_grant_retirement_serializes_a_concurrent_insert() {
+    let Some(db) = db() else { return };
+    db.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let subject = "fenced-principal";
+        let old = grant(
+            &db.pool,
+            tree.tenant,
+            tree.workspace_scope,
+            principal(subject),
+            RoleKey::Member,
+            GrantSource::Direct,
+        )
+        .await;
+
+        let mut holder = begin(&db.pool, tree.tenant).await;
+        access::lock_principal_grants(&mut holder, tree.tenant, subject)
+            .await
+            .expect("lock principal retirement predicate");
+        let snapshot =
+            access::principal_grants_bounded(&mut *holder, tree.tenant, subject, None, 16)
+                .await
+                .expect("snapshot authority under fence");
+        assert_eq!(
+            snapshot.iter().map(|grant| grant.id).collect::<Vec<_>>(),
+            [old.id]
+        );
+        let holder_pid = tenant_fixture::backend_pid(&mut holder).await;
+
+        let pool = db.pool.clone();
+        let tenant = tree.tenant;
+        let project_scope = tree.project_scope;
+        let waiter_subject = subject.to_owned();
+        let (pid_sender, pid_receiver) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_sender.send(pid).expect("report waiter pid");
+            let created = access::create_grant(
+                &mut tx,
+                &access::NewGrant {
+                    id: GrantId::new(),
+                    tenant_id: tenant,
+                    scope_id: project_scope,
+                    subject: principal(&waiter_subject),
+                    role_key: RoleKey::Reviewer,
+                    source: GrantSource::Direct,
+                    invite_id: None,
+                    granted_by: Some("concurrent-granter".to_owned()),
+                },
+            )
+            .await
+            .expect("create grant after retirement fence");
+            tx.commit().await.expect("commit concurrent grant");
+            created
+        });
+        let waiter_pid = pid_receiver.await.expect("receive waiter pid");
+        let mut observer = begin(&db.pool, tree.tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, waiter_pid, holder_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+
+        access::revoke_grant(&mut holder, tree.tenant, old.id)
+            .await
+            .expect("retire snapshotted grant");
+        holder.commit().await.expect("commit retirement");
+        let created = tokio::time::timeout(std::time::Duration::from_secs(3), waiter)
+            .await
+            .expect("concurrent insert completes after fence release")
+            .expect("concurrent insert task");
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let final_grants =
+            access::principal_grants_bounded(&mut *tx, tree.tenant, subject, None, 16)
+                .await
+                .expect("read linearized authority");
+        assert_eq!(final_grants.len(), 1);
+        assert_eq!(final_grants[0].id, created.id);
+        assert_eq!(final_grants[0].role_key, RoleKey::Reviewer);
+        tx.commit().await.expect("commit final authority read");
+    });
+}
+
+/// Principal-scope creation must wait on the principal predicate fence before
+/// it locks the tenant-root parent. Otherwise an ordinary grant that already
+/// owns the fence and needs an FK lock on that root forms the opposite edge of
+/// a database deadlock.
+#[test]
+fn principal_scope_creation_locks_the_principal_before_its_parent() {
+    let Some(db) = db() else { return };
+    db.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let subject = "ordered-principal";
+        let mut holder = begin(&db.pool, tree.tenant).await;
+        access::lock_principal_grants(&mut holder, tree.tenant, subject)
+            .await
+            .expect("hold principal predicate fence");
+        let holder_pid = tenant_fixture::backend_pid(&mut holder).await;
+
+        let pool = db.pool.clone();
+        let tenant = tree.tenant;
+        let parent_scope_id = tree.tenant_scope;
+        let waiter_subject = subject.to_owned();
+        let (pid_sender, pid_receiver) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_sender.send(pid).expect("report scope creator pid");
+            let scope = scopes::create(
+                &mut tx,
+                &scopes::NewScope {
+                    id: ScopeId::new(),
+                    tenant_id: tenant,
+                    kind: ScopeKind::Principal,
+                    parent_scope_id: Some(parent_scope_id),
+                    slug: scopes::principal_slug(&waiter_subject),
+                    display_name: "Ordered principal".to_owned(),
+                    attributes: serde_json::json!({}),
+                    principal_id: Some(waiter_subject.clone()),
+                    created_by: None,
+                },
+            )
+            .await
+            .expect("create principal scope after fence release");
+            tx.commit().await.expect("commit principal scope");
+            scope
+        });
+        let waiter_pid = pid_receiver.await.expect("receive scope creator pid");
+        let mut observer = begin(&db.pool, tree.tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, waiter_pid, holder_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+
+        let parent_grant = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            access::create_grant(
+                &mut holder,
+                &access::NewGrant {
+                    id: GrantId::new(),
+                    tenant_id: tree.tenant,
+                    scope_id: tree.tenant_scope,
+                    subject: principal(subject),
+                    role_key: RoleKey::Reviewer,
+                    source: GrantSource::Direct,
+                    invite_id: None,
+                    granted_by: Some("lock-order-probe".to_owned()),
+                },
+            ),
+        )
+        .await
+        .expect("parent grant cannot wait on the blocked scope creator")
+        .expect("create parent grant while holding the principal fence");
+        holder.commit().await.expect("release principal fence");
+
+        let scope = tokio::time::timeout(std::time::Duration::from_secs(3), waiter)
+            .await
+            .expect("scope creation completes after fence release")
+            .expect("scope creation task");
+        assert_eq!(parent_grant.scope_id, tree.tenant_scope);
+        assert_eq!(scope.parent_scope_id, Some(tree.tenant_scope));
+        assert_eq!(scope.kind, ScopeKind::Principal);
+        assert_eq!(scope.principal_id.as_deref(), Some(subject));
+    });
+}
+
+/// The principal fence also precedes minting a missing tenant root. Workspace
+/// creation takes that fence before it can mint the same root, so reversing
+/// those two operations would deadlock on a tenant's first structural write.
+#[test]
+fn principal_scope_creation_locks_the_principal_before_a_missing_root() {
+    let Some(db) = db() else { return };
+    db.block_on(async {
+        let tenant = admit(&db.pool).await;
+        let subject = "fresh-root-owner";
+        let mut holder = begin(&db.pool, tenant).await;
+        access::lock_principal_grants(&mut holder, tenant, subject)
+            .await
+            .expect("hold workspace owner principal fence");
+        let holder_pid = tenant_fixture::backend_pid(&mut holder).await;
+
+        let pool = db.pool.clone();
+        let waiter_subject = subject.to_owned();
+        let (pid_sender, pid_receiver) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_sender.send(pid).expect("report principal creator pid");
+            let scope = scopes::ensure_principal_scope(
+                &mut tx,
+                tenant,
+                &waiter_subject,
+                "Fresh root owner",
+            )
+            .await
+            .expect("create principal scope after fence release");
+            tx.commit().await.expect("commit principal scope");
+            scope
+        });
+        let waiter_pid = pid_receiver.await.expect("receive principal creator pid");
+        let mut observer = begin(&db.pool, tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, waiter_pid, holder_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+
+        let (workspace, owner, root_id) =
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                let workspace = workspaces::create(
+                    &mut holder,
+                    &workspaces::NewWorkspace {
+                        id: WorkspaceId::new(),
+                        tenant_id: tenant,
+                        slug: "first-workspace".to_owned(),
+                        display_name: "First workspace".to_owned(),
+                        description: None,
+                        created_by: None,
+                    },
+                )
+                .await
+                .expect("workspace owner can mint the missing root");
+                let owner = access::create_grant(
+                    &mut holder,
+                    &access::NewGrant {
+                        id: GrantId::new(),
+                        tenant_id: tenant,
+                        scope_id: workspace.scope_id,
+                        subject: principal(subject),
+                        role_key: RoleKey::Owner,
+                        source: GrantSource::Owner,
+                        invite_id: None,
+                        granted_by: None,
+                    },
+                )
+                .await
+                .expect("mint workspace owner grant under the held fence");
+                let root_id = scopes::tenant_root(&mut *holder, tenant)
+                    .await
+                    .expect("read minted tenant root")
+                    .expect("workspace minted tenant root")
+                    .id;
+                (workspace, owner, root_id)
+            })
+            .await
+            .expect("workspace creation cannot wait on the blocked principal creator");
+        holder.commit().await.expect("release principal fence");
+
+        let principal_scope = tokio::time::timeout(std::time::Duration::from_secs(3), waiter)
+            .await
+            .expect("principal creation completes after fence release")
+            .expect("principal creation task");
+        assert_eq!(owner.scope_id, workspace.scope_id);
+        assert_eq!(principal_scope.parent_scope_id, Some(root_id));
+        assert_eq!(principal_scope.kind, ScopeKind::Principal);
+        assert_eq!(principal_scope.principal_id.as_deref(), Some(subject));
+
+        let mut tx = begin(&db.pool, tenant).await;
+        let owner_grants = access::structural_owner_grants(&mut *tx, tenant, principal_scope.id)
+            .await
+            .expect("read principal structural owner grant");
+        assert_eq!(owner_grants.len(), 1);
+        assert_eq!(owner_grants[0].principal_id.as_deref(), Some(subject));
+        tx.commit().await.expect("commit owner grant read");
     });
 }
 
@@ -1308,8 +1827,9 @@ async fn invite(
     hash: [u8; 32],
     ttl: Duration,
 ) -> InviteId {
-    access::create_invite(
-        pool,
+    let mut tx = begin(pool, tenant).await;
+    let invite = access::create_invite(
+        &mut *tx,
         &access::NewInvite {
             id: InviteId::new(),
             tenant_id: tenant,
@@ -1322,8 +1842,9 @@ async fn invite(
         },
     )
     .await
-    .expect("create invite")
-    .id
+    .expect("create invite");
+    tx.commit().await.expect("commit invite");
+    invite.id
 }
 
 /// Redeeming an invitation mints the grant it carries, with the provenance
@@ -1331,7 +1852,7 @@ async fn invite(
 #[test]
 fn redeeming_an_invitation_mints_a_grant_that_says_where_it_came_from() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let hash = [1u8; 32];
         let id = invite(
@@ -1343,7 +1864,7 @@ fn redeeming_an_invitation_mints_a_grant_that_says_where_it_came_from() {
         )
         .await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let accepted = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
             .await
             .expect("redeem");
@@ -1368,7 +1889,7 @@ fn redeeming_an_invitation_mints_a_grant_that_says_where_it_came_from() {
 #[test]
 fn an_invitation_is_one_time_and_a_retry_is_not_a_second_redemption() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let hash = [2u8; 32];
         invite(
@@ -1380,13 +1901,13 @@ fn an_invitation_is_one_time_and_a_retry_is_not_a_second_redemption() {
         )
         .await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let first = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
             .await
             .expect("first redemption");
         tx.commit().await.expect("commit");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let replay = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
             .await
             .expect("the same principal replays");
@@ -1397,7 +1918,7 @@ fn an_invitation_is_one_time_and_a_retry_is_not_a_second_redemption() {
             "the same grant, not a second"
         );
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let stolen =
             access::accept_invite(&mut tx, tree.tenant, &hash, "intruder", Utc::now()).await;
         let Err(Error::Conflict { message }) = stolen else {
@@ -1406,14 +1927,16 @@ fn an_invitation_is_one_time_and_a_retry_is_not_a_second_redemption() {
         assert!(message.contains("already been accepted"), "{message}");
         drop(tx);
 
+        let mut tx = begin(&db.pool, tree.tenant).await;
         assert_eq!(
-            access::list_grants(&db.pool, tree.tenant, &access::GrantFilter::default())
+            access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
                 .await
                 .expect("list")
                 .len(),
             1,
             "one invitation minted one grant, whatever was retried"
         );
+        tx.commit().await.expect("commit replay read");
     });
 }
 
@@ -1422,7 +1945,7 @@ fn an_invitation_is_one_time_and_a_retry_is_not_a_second_redemption() {
 #[test]
 fn an_invitation_expires_without_anything_running() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let hash = [3u8; 32];
         let id = invite(
@@ -1436,7 +1959,7 @@ fn an_invitation_expires_without_anything_running() {
 
         // No sweep, no job: just a later instant.
         let later = Utc::now() + Duration::days(1);
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let result = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", later).await;
         let Err(Error::Conflict { message }) = result else {
             panic!("expected an expiry conflict, got {result:?}");
@@ -1446,21 +1969,24 @@ fn an_invitation_expires_without_anything_running() {
 
         // And the stored status is still `pending` — `expired` is derived, so
         // the row does not lie about what happened to it.
-        let stored = access::get_invite(&db.pool, tree.tenant, id)
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let stored = access::get_invite(&mut *tx, tree.tenant, id)
             .await
             .expect("read")
             .expect("still there");
         assert_eq!(stored.status, InviteStatus::Pending);
         assert_eq!(stored.effective_status(later), InviteStatus::Expired);
+        tx.commit().await.expect("commit expired-invite read");
     });
 }
 
 /// Withdrawing an invitation ends it, and neither terminal state can be
 /// reopened — including against direct SQL.
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn a_terminal_invitation_cannot_be_reopened() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let hash = [4u8; 32];
         let id = invite(
@@ -1472,14 +1998,14 @@ fn a_terminal_invitation_cannot_be_reopened() {
         )
         .await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let withdrawn = access::revoke_invite(&mut tx, tree.tenant, id, Some("granter"))
             .await
             .expect("withdraw");
         tx.commit().await.expect("commit");
         assert_eq!(withdrawn.status, InviteStatus::Revoked);
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let redeem = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now()).await;
         let Err(Error::Conflict { message }) = redeem else {
             panic!("expected a conflict, got {redeem:?}");
@@ -1487,14 +2013,15 @@ fn a_terminal_invitation_cannot_be_reopened() {
         assert!(message.contains("withdrawn"), "{message}");
         drop(tx);
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let twice = access::revoke_invite(&mut tx, tree.tenant, id, Some("granter")).await;
         assert!(matches!(twice, Err(Error::Conflict { .. })), "{twice:?}");
         drop(tx);
 
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
         let err = sqlx::query("update pending_invites set status = 'pending' where id = $1")
             .bind(id.as_uuid())
-            .execute(&db.pool)
+            .execute(&administrator)
             .await
             .expect_err("the trigger refuses a reopened invitation");
         assert_eq!(
@@ -1508,9 +2035,10 @@ fn a_terminal_invitation_cannot_be_reopened() {
 /// An invitation's terms are immutable: re-pointing one at a different scope or
 /// a fatter role is issuing another, not editing this one.
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn an_invitations_terms_are_immutable_against_direct_sql() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let id = invite(
             &db.pool,
@@ -1520,6 +2048,7 @@ fn an_invitations_terms_are_immutable_against_direct_sql() {
             Duration::days(7),
         )
         .await;
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
         for (statement, what) in [
             ("update pending_invites set role_key = 'owner' where id = $1", "the role"),
             ("update pending_invites set scope_id = scope_id where id = $1 and false", "a no-op"),
@@ -1528,7 +2057,7 @@ fn an_invitations_terms_are_immutable_against_direct_sql() {
         ] {
             let result = sqlx::query(statement)
                 .bind(id.as_uuid())
-                .execute(&db.pool)
+                .execute(&administrator)
                 .await;
             match result {
                 // The no-op statement matches no row; the rest must be refused.
@@ -1548,10 +2077,11 @@ fn an_invitations_terms_are_immutable_against_direct_sql() {
 #[test]
 fn an_invitation_cannot_be_born_expired() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let result = access::create_invite(
-            &db.pool,
+            &mut *tx,
             &access::NewInvite {
                 id: InviteId::new(),
                 tenant_id: tree.tenant,
@@ -1574,7 +2104,7 @@ fn an_invitation_cannot_be_born_expired() {
 #[test]
 fn redeeming_for_access_already_held_consumes_the_invitation_and_conflicts_with_nothing() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let existing = grant(
             &db.pool,
@@ -1595,21 +2125,23 @@ fn redeeming_for_access_already_held_consumes_the_invitation_and_conflicts_with_
         )
         .await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let accepted = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
             .await
             .expect("redeem");
         tx.commit().await.expect("commit");
         assert_eq!(accepted.grant.id, existing.id, "the grant they already had");
         assert_eq!(accepted.invite.status, InviteStatus::Accepted);
+        let mut tx = begin(&db.pool, tree.tenant).await;
         assert_eq!(
-            access::list_grants(&db.pool, tree.tenant, &access::GrantFilter::default())
+            access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
                 .await
                 .expect("list")
                 .len(),
             1,
             "and no duplicate row"
         );
+        tx.commit().await.expect("commit existing-grant read");
     });
 }
 
@@ -1619,7 +2151,7 @@ fn redeeming_for_access_already_held_consumes_the_invitation_and_conflicts_with_
 #[test]
 fn an_unknown_token_is_indistinguishable_from_a_foreign_one() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let mine = seed_tree(&db.pool).await;
         let theirs = seed_tree(&db.pool).await;
         let hash = [8u8; 32];
@@ -1632,10 +2164,10 @@ fn an_unknown_token_is_indistinguishable_from_a_foreign_one() {
         )
         .await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, mine.tenant).await;
         let foreign = access::accept_invite(&mut tx, mine.tenant, &hash, "robin", Utc::now()).await;
         drop(tx);
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, mine.tenant).await;
         let unknown =
             access::accept_invite(&mut tx, mine.tenant, &[99u8; 32], "robin", Utc::now()).await;
         drop(tx);
@@ -1656,7 +2188,7 @@ fn an_unknown_token_is_indistinguishable_from_a_foreign_one() {
 #[test]
 fn another_tenants_rows_are_absent_on_every_surface() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let mine = seed_tree(&db.pool).await;
         let theirs = seed_tree(&db.pool).await;
         let their_group = new_group(&db.pool, theirs.tenant, "eng", &["robin"]).await;
@@ -1678,65 +2210,70 @@ fn another_tenants_rows_are_absent_on_every_surface() {
         )
         .await;
 
+        let mut tx = begin(&db.pool, mine.tenant).await;
         assert!(
-            access::get_group(&db.pool, mine.tenant, their_group)
+            access::get_group(&mut *tx, mine.tenant, their_group)
                 .await
                 .expect("read")
                 .is_none()
         );
         assert!(
-            access::get_grant(&db.pool, mine.tenant, their_grant.id)
+            access::get_grant(&mut *tx, mine.tenant, their_grant.id)
                 .await
                 .expect("read")
                 .is_none()
         );
         assert!(
-            access::get_invite(&db.pool, mine.tenant, their_invite)
+            access::get_invite(&mut *tx, mine.tenant, their_invite)
                 .await
                 .expect("read")
                 .is_none()
         );
         assert!(
-            access::list_groups(&db.pool, mine.tenant)
+            access::list_groups(&mut *tx, mine.tenant)
                 .await
                 .expect("list")
                 .is_empty()
         );
         assert!(
-            access::list_grants(&db.pool, mine.tenant, &access::GrantFilter::default())
+            access::list_grants(&mut *tx, mine.tenant, &access::GrantFilter::default())
                 .await
                 .expect("list")
                 .is_empty()
         );
         assert!(
-            access::list_invites(&db.pool, mine.tenant, theirs.workspace_scope)
+            access::list_invites(&mut *tx, mine.tenant, theirs.workspace_scope)
                 .await
                 .expect("list")
                 .is_empty(),
             "another tenant's scope resolves to no invitations rather than theirs"
         );
         assert!(
-            members_at(&db.pool, mine.tenant, theirs.workspace_scope)
+            access::members_of(&mut *tx, mine.tenant, theirs.workspace_scope)
                 .await
+                .expect("resolve foreign members")
                 .is_empty(),
             "and to nobody"
         );
         assert!(
-            access::group_members(&db.pool, mine.tenant, their_group)
+            access::group_members(&mut *tx, mine.tenant, their_group)
                 .await
                 .expect("read")
                 .is_empty()
         );
+        tx.commit().await.expect("commit cross-tenant reads");
 
         // The same slug in two tenants is two groups, not a collision.
         new_group(&db.pool, mine.tenant, "eng", &["kim"]).await;
+        let mut tx = begin(&db.pool, mine.tenant).await;
         assert_eq!(
-            access::list_groups(&db.pool, mine.tenant)
+            access::list_groups(&mut *tx, mine.tenant)
                 .await
                 .expect("list")
                 .len(),
             1
         );
+        tx.commit().await.expect("commit same-slug read");
     });
 }
 
@@ -1745,7 +2282,7 @@ fn another_tenants_rows_are_absent_on_every_surface() {
 #[test]
 fn the_grant_filters_select_rows_rather_than_authority() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         grant(
             &db.pool,
@@ -1766,8 +2303,9 @@ fn the_grant_filters_select_rows_rather_than_authority() {
         )
         .await;
 
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let at_project = access::list_grants(
-            &db.pool,
+            &mut *tx,
             tree.tenant,
             &access::GrantFilter {
                 scope_id: Some(tree.project_scope),
@@ -1784,7 +2322,7 @@ fn the_grant_filters_select_rows_rather_than_authority() {
         assert_eq!(at_project[0].principal_id.as_deref(), Some("kim"));
 
         let robins = access::list_grants(
-            &db.pool,
+            &mut *tx,
             tree.tenant,
             &access::GrantFilter {
                 scope_id: None,
@@ -1796,12 +2334,13 @@ fn the_grant_filters_select_rows_rather_than_authority() {
         assert_eq!(robins.len(), 1);
 
         assert_eq!(
-            access::list_grants(&db.pool, tree.tenant, &access::GrantFilter::default())
+            access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
                 .await
                 .expect("list")
                 .len(),
             2,
             "and no filter is the tenant's grants"
         );
+        tx.commit().await.expect("commit grant-filter reads");
     });
 }

@@ -17,6 +17,12 @@ metadata:
     app: synveda-install-test
 spec:
   restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    fsGroup: 65532
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
   volumes:
     - name: work
       emptyDir: {}
@@ -27,14 +33,23 @@ spec:
         name: install-test-scripts
         # 0755, in the decimal Kubernetes wants for a file mode.
         defaultMode: 493
+    - name: operator-secret
+      secret:
+        secretName: ops2-keycloak
+        defaultMode: 288
+        items:
+          - key: keycloak_demo_admin_password
+            path: keycloak_demo_admin_password
   containers:
     - name: client
-      image: synveda/gateway:__IMAGE_TAG__
+      image: ghcr.io/synveda/product:__IMAGE_TAG__
       imagePullPolicy: Never
       command: ["/bin/sh", "/scripts/client.sh"]
       env:
         - name: SYNVEDA_GATEWAY
           value: http://synveda.synveda-test.svc.cluster.local:8120
+        - name: SYNVEDA_INSECURE_DEVELOPMENT_HTTP
+          value: "true"
         - name: HOME
           value: /home/tester
         - name: WORK_DIR
@@ -44,19 +59,33 @@ spec:
         - { name: home, mountPath: /home/tester }
         - { name: scripts, mountPath: /scripts }
     - name: browser
-      image: node:22-bookworm-slim
+      image: node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
       # Pulled, unlike the product image beside it, which is kind-loaded.
       imagePullPolicy: IfNotPresent
       command: ["node", "/scripts/browser.mjs"]
       env:
         - name: IDP_URL
-          value: http://idp.synveda-test.svc.cluster.local:8080
-        - name: OPERATOR_EMAIL
-          value: operator@synveda.test
-        - name: OPERATOR_PASSWORD
-          value: install-test-Operator-1
+          value: http://keycloak.synveda-test.svc.cluster.local:8080
+        - name: APP_URL
+          value: http://synveda.synveda-test.svc.cluster.local:8120
+        - name: OPERATOR_USERNAME
+          value: synveda-demo-admin
+        - name: OPERATOR_PASSWORD_FILE
+          value: /run/secrets/keycloak_demo_admin_password
+        - name: CREDENTIALS_FILE
+          value: /home/tester/.config/synveda/credentials.json
         - name: WORK_DIR
           value: /work
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
       volumeMounts:
         - { name: work, mountPath: /work }
+        - { name: home, mountPath: /home/tester, readOnly: true }
         - { name: scripts, mountPath: /scripts }
+        - { name: operator-secret, mountPath: /run/secrets, readOnly: true }

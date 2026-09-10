@@ -1,0 +1,203 @@
+# The product image every deployment shape uses (OPS-1; CPR-36, ADR-0095;
+# CPR-45, ADR-0102). Build context is the repository root.
+#
+# Two stages, and the split is the point: dependencies compile in their own
+# layer so that editing this workspace's own sources does not recompile
+# Cedar and sqlx. A cold build is minutes and is what ADR-0055
+# decision 6 puts *outside* the acceptance criterion's clock — a release
+# ships this image, and the operator being timed pulls it.
+
+# The console bundle (CNSL-1, ADR-0056 decision 1). Its own stage, because
+# it shares nothing with the Rust build and must not invalidate it: editing
+# a stylesheet should not recompile Cedar.
+#
+# This is also what keeps decision 1's promise concrete — the image gains a
+# static directory, not a second runtime. Node appears here and never in
+# the runtime stage.
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS console
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+WORKDIR /src
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY console/package.json console/
+# The adapter is a workspace member the lockfile resolves against.
+COPY adapters/claude-code/package.json adapters/claude-code/
+RUN pnpm install --frozen-lockfile --filter @synveda/console...
+COPY tsconfig.base.json ./
+COPY console console
+RUN pnpm --filter @synveda/console build
+
+FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS build
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+WORKDIR /src
+
+# The toolchain file pins the same version this image starts from; copying
+# it keeps a mismatch a build error rather than a silent upgrade.
+COPY rust-toolchain.toml ./
+
+# Dependency layer: the manifests and a stub for every crate in the
+# workspace, so `cargo build` resolves and compiles the dependency graph
+# with none of our code in it. `members = ["crates/*"]` means every
+# directory must exist with a lib target for the resolve to succeed.
+COPY Cargo.toml Cargo.lock ./
+COPY crates/synveda-audit/Cargo.toml       crates/synveda-audit/
+COPY crates/synveda-apalis/Cargo.toml      crates/synveda-apalis/
+COPY crates/synveda-cli/Cargo.toml         crates/synveda-cli/
+COPY crates/synveda-crypto/Cargo.toml      crates/synveda-crypto/
+COPY crates/synveda-eval/Cargo.toml        crates/synveda-eval/
+COPY crates/synveda-gateway/Cargo.toml     crates/synveda-gateway/
+COPY crates/synveda-gateway/test-support-enabler/Cargo.toml crates/synveda-gateway/test-support-enabler/
+COPY crates/synveda-identity/Cargo.toml    crates/synveda-identity/
+COPY crates/synveda-ingest/Cargo.toml      crates/synveda-ingest/
+COPY crates/synveda-okf/Cargo.toml         crates/synveda-okf/
+COPY crates/synveda-policy/Cargo.toml      crates/synveda-policy/
+COPY crates/synveda-retrieval/Cargo.toml   crates/synveda-retrieval/
+COPY crates/synveda-store/Cargo.toml       crates/synveda-store/
+COPY crates/synveda-types/Cargo.toml       crates/synveda-types/
+COPY crates/synveda-vedaflow/Cargo.toml    crates/synveda-vedaflow/
+RUN set -eux; \
+    for crate in crates/*/; do \
+      mkdir -p "$crate/src"; \
+      : > "$crate/src/lib.rs"; \
+    done; \
+    mkdir -p crates/synveda-apalis/src crates/synveda-cli/src crates/synveda-eval/src crates/synveda-gateway/src; \
+    echo 'fn main() {}' > crates/synveda-apalis/src/main.rs; \
+    echo 'fn main() {}' > crates/synveda-cli/src/main.rs; \
+    echo 'fn main() {}' > crates/synveda-eval/src/main.rs; \
+    echo 'fn main() {}' > crates/synveda-gateway/src/main.rs; \
+    mkdir -p crates/synveda-gateway/src/bin; \
+    echo 'fn main() {}' > crates/synveda-gateway/src/bin/synveda-worker.rs; \
+    echo 'fn main() {}' > crates/synveda-gateway/src/bin/synveda-oidc-diagnostic.rs; \
+    mkdir -p crates/synveda-gateway/test-support-enabler/src; \
+    : > crates/synveda-gateway/test-support-enabler/src/lib.rs
+# sqlx macros compile against the committed query cache; this image has no
+# database, exactly like CI.
+ENV SQLX_OFFLINE=true
+RUN cargo build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
+
+# The real sources. Touching them invalidates only from here down.
+COPY .sqlx .sqlx
+COPY adapters/registry.json adapters/registry.json
+COPY crates crates
+RUN set -eux; \
+    find crates -name '*.rs' -newermt '1970-01-01' -exec touch {} +; \
+    cargo build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
+
+# Acceptance-only browser fixture. Keeping this as a target in the product
+# Dockerfile lets it copy the exact CLI built above instead of compiling a
+# second drifting client or transferring a bearer between containers. It is
+# selected explicitly by compose.browser-acceptance.dev.yaml; the runtime
+# stage below remains the default product image for every deployment shape.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e AS browser-acceptance
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+
+WORKDIR /workspace
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY deploy/compose/browser/package.json deploy/compose/browser/package.json
+RUN pnpm install --frozen-lockfile --prod --filter @synveda/compose-browser-acceptance...
+COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
+COPY --chmod=0555 deploy/compose/browser/console-login.mjs deploy/compose/browser/product-demo.mjs deploy/compose/browser/
+COPY --chmod=0444 deploy/compose/browser/console-login-runner.mjs deploy/compose/browser/console-login-contract.mjs deploy/compose/browser/product-demo-runner.mjs deploy/compose/browser/product-demo-contract.mjs deploy/compose/browser/
+COPY --chmod=0444 deploy/compose/browser/PLAYWRIGHT-LICENSE deploy/compose/browser/PLAYWRIGHT-NOTICE deploy/compose/browser/seccomp_profile.NOTICE /usr/share/licenses/synveda-browser-acceptance/
+
+# Docker populates a new named volume from this sticky, otherwise empty mount
+# point. The fixture can therefore create private per-UID directories without
+# a root entrypoint or host-bind ownership assumptions on Linux or Desktop.
+RUN install -d -m 01777 /var/lib/synveda-browser
+ENV HOME=/var/lib/synveda-browser/home \
+    XDG_CONFIG_HOME=/var/lib/synveda-browser/home/config \
+    XDG_STATE_HOME=/var/lib/synveda-browser/home/state \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+USER 65532:65532
+WORKDIR /workspace/deploy/compose/browser
+ENTRYPOINT ["node", "console-login.mjs"]
+
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS runtime
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+# ca-certificates for OIDC discovery against an external issuer over TLS;
+# libssl3 for SQLx's external-PostgreSQL TLS backend; curl for health probes.
+RUN apt-get update \
+ && apt-get install --no-install-recommends --yes ca-certificates curl libssl3 \
+ && rm -rf /var/lib/apt/lists/*
+# Product binaries and no mutable data: the Cedar schema, the base layer and all three
+# product packs are `include_str!`d into synveda-policy, so there is no
+# policy directory to ship and no way for the image's policy to differ from
+# the binary's.
+#
+# The one product image is the deployment contract. It contains the separate
+# gateway and core-worker commands plus the operator CLI used for migrations
+# and SCIM provisioning. Compose and Helm select a closed launcher role; they
+# do not rebuild or reinterpret the application for a deployment shape.
+COPY --from=build /src/target/release/synveda-gateway /usr/local/bin/synveda-gateway
+COPY --from=build /src/target/release/synveda-worker /usr/local/bin/synveda-worker
+COPY --from=build /src/target/release/synveda-apalis-worker /usr/local/bin/synveda-apalis-worker
+COPY --from=build /src/target/release/synveda-oidc-diagnostic /usr/local/bin/synveda-oidc-diagnostic
+COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
+COPY --chmod=0755 deploy/compose/product/synveda-container /usr/local/bin/synveda-container
+
+# The console bundle is static data served by the gateway from its own origin
+# (CNSL-1, ADR-0056 decision 1). No Node process runs in this stage; gateway and
+# worker remain separate invocations of this same immutable image.
+COPY --from=console /src/console/dist /usr/share/synveda/console
+ENV HOME=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache \
+    SYNVEDA_CONSOLE_DIR=/usr/share/synveda/console
+
+WORKDIR /app
+EXPOSE 8120 8121 8122
+
+# Compose supplies the operator's validated non-zero UID/GID so mode-0600
+# secret bind mounts remain readable. This default also makes an unconfigured
+# image non-root and preserves arbitrary-UID compatibility for later OpenShift.
+USER 65532:65532
+STOPSIGNAL SIGTERM
+
+# Health is role-specific. Compose and Kubernetes call the closed `probe`
+# command instead of inheriting a gateway-only OCI HEALTHCHECK.
+ENTRYPOINT ["/usr/local/bin/synveda-container"]
+CMD ["gateway"]

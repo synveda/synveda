@@ -13,6 +13,9 @@
 //! when it is unset (CI has no database); run them locally with
 //! `make db-test`.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -23,7 +26,7 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_types::{GrantId, TenantId};
@@ -79,16 +82,15 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 }
 
 /// Connects, migrates, admits a tenant, and binds the admin subject
-/// tenant-wide `org-admin` — the CLI's bootstrap path, and what a person
-/// running `synveda init` holds after their first login. Enforcement still
-/// runs through the PDP with this row as data.
+/// tenant-wide `org-admin` — the deployment bootstrap boundary after the first
+/// login. Enforcement still runs through the PDP with this row as data.
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
     let url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
             eprintln!(
                 "skipping workspace API test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }
@@ -98,12 +100,12 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("cpr4-{}", id.as_uuid().simple());
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         &pool,
         id,
         &slug,
@@ -119,7 +121,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         .await
         .expect("mint root");
     synveda_store::access::create_grant(
-        &mut *tx,
+        &mut tx,
         &synveda_store::access::NewGrant {
             id: GrantId::new(),
             tenant_id: id,
@@ -209,13 +211,16 @@ async fn seed_project(app: &Router, token: &str, workspace_id: &str, slug: &str)
 
 /// Every audit action in the tenant's chain, in order.
 async fn chain_actions(state: &AppState, tenant_id: TenantId) -> Vec<String> {
-    sqlx::query_scalar::<_, String>(
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
+    let actions = sqlx::query_scalar::<_, String>(
         "select action from audit_log where tenant_id = $1 order by seq",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await
-    .expect("read the chain")
+    .expect("read the chain");
+    tx.commit().await.expect("commit chain read");
+    actions
 }
 
 // ── The whole path, once ─────────────────────────────────────────────────────
@@ -512,7 +517,7 @@ async fn one_subjects_key_does_not_shadow_anothers() {
         .await
         .expect("mint root");
     synveda_store::access::create_grant(
-        &mut *tx,
+        &mut tx,
         &synveda_store::access::NewGrant {
             id: GrantId::new(),
             tenant_id,
@@ -657,13 +662,15 @@ async fn an_update_event_records_the_precondition() {
     )
     .await;
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let payload: Value = sqlx::query_scalar::<_, Value>(
         "select payload from audit_log where tenant_id = $1 and action = 'workspace.updated'",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("read the event");
+    tx.commit().await.expect("commit audit event read");
     assert_eq!(payload["expected_revision"], 1);
     // `seed_workspace` names a workspace after its slug, so the "before" image
     // is the slug and the "after" is what the update sent.
@@ -1073,14 +1080,16 @@ async fn a_credential_in_a_remote_never_reaches_a_row_or_the_chain() {
         "the response must not echo the credential: {attached}"
     );
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let payload: Value = sqlx::query_scalar::<_, Value>(
         "select payload from audit_log \
          where tenant_id = $1 and action = 'project.repository.attached'",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("read the event");
+    tx.commit().await.expect("commit audit event read");
     assert!(
         !payload.to_string().contains("ghp_"),
         "the audit chain must not carry the credential: {payload}"

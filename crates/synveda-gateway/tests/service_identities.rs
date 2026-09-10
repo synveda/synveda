@@ -3,13 +3,16 @@
 //! tenant-wide org-admin binding, because the base layer confines every
 //! decision to the anchor subtree. Plus the surrounding contract: the
 //! client-credentials grant end to end against a mock IdP, the
-//! PDP-gated registration surface, the fail-closed containment of
+//! PDP-gated registration surface, the authentication-boundary refusal of
 //! unregistered clients, the service-token lifetime cap, and revocation
 //! taking effect on the very next request.
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), same convention as
 //! tests/jit_provisioning.rs.
+
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -27,10 +30,11 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_audit::{AuditAction, ChainVerification};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::{OidcVerifier, parse_issuers};
-use synveda_store::{access, identities, scopes, tenants};
+use synveda_store::{access, directory, identities, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::Scope;
 use synveda_types::{GrantId, Identity, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
@@ -39,6 +43,7 @@ use tower::ServiceExt;
 const KEY_PEM: &str = include_str!("fixtures/idp_key_a.pem");
 const KEY_JWK: &str = include_str!("fixtures/idp_key_a.jwk.json");
 const CLIENT_ID: &str = "synveda-test";
+const API_AUDIENCE: &str = "synveda-test-api";
 const SERVICE_AUDIENCE: &str = "synveda-agents";
 const AGENT_CLIENT: &str = "ci-agent";
 const AGENT_SECRET: &str = "ci-agent-secret";
@@ -58,6 +63,43 @@ fn metrics_handle() -> PrometheusHandle {
         .clone()
 }
 
+fn service_rejection_count(reason: &str) -> u64 {
+    let label = format!(r#"reason="{reason}""#);
+    metrics_handle()
+        .render()
+        .lines()
+        .find(|line| {
+            line.starts_with("synveda_service_token_rejections_total{") && line.contains(&label)
+        })
+        .and_then(|line| line.split_whitespace().last())
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0)
+}
+
+async fn assert_identity_rejection_audit(pool: &PgPool, tenant: TenantId, actor_subject: &str) {
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
+    let mut events = synveda_audit::tail(&mut tx, tenant, 10)
+        .await
+        .expect("read service rejection audit chain");
+    events.reverse();
+    let verification = synveda_audit::verify(&mut tx, tenant)
+        .await
+        .expect("verify service rejection audit chain");
+    tx.rollback().await.expect("finish audit assertion");
+
+    assert_eq!(verification, ChainVerification::Valid { events: 1 });
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(event.action, "auth.token.rejected");
+    assert_eq!(event.outcome, "deny");
+    assert_eq!(event.actor_subject, actor_subject);
+    assert_eq!(event.resource, format!("tenant {tenant}"));
+    assert_eq!(
+        event.payload,
+        json!({"op": "tenant.resolve", "reason": "identity_unresolved"})
+    );
+}
+
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -70,8 +112,8 @@ fn now_secs() -> u64 {
 /// An in-process OIDC provider serving discovery, JWKS, and a token
 /// endpoint speaking the OAuth2 client-credentials grant (ADR-0018
 /// decision 1): the registered client authenticates with its secret and
-/// receives an RS256 access token carrying its own audience — the shape
-/// Rauthy and the enterprise IdPs mint for headless agents.
+/// receives an RS256 access token carrying its own audience — a common shape
+/// for providers that mint credentials for headless agents.
 #[derive(Clone)]
 struct MockIdp {
     issuer: String,
@@ -114,7 +156,7 @@ impl MockIdp {
         self.sign(&json!({
             "iss": self.issuer,
             "sub": subject,
-            "aud": CLIENT_ID,
+            "aud": API_AUDIENCE,
             "iat": now_secs(),
             "exp": now_secs() + 600,
         }))
@@ -163,6 +205,10 @@ async fn discovery(State(idp): State<MockIdp>) -> Json<Value> {
         "authorization_endpoint": format!("{}/authorize", idp.issuer),
         "token_endpoint": format!("{}/token", idp.issuer),
         "jwks_uri": format!("{}/jwks", idp.issuer),
+        "code_challenge_methods_supported": ["S256"],
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
     }))
 }
 
@@ -186,8 +232,8 @@ async fn token_endpoint(
         )
             .into_response();
     }
-    // The Rauthy shape (ADR-0018 decision 1): client-credentials access
-    // tokens carry `sub: null` and name the client in `azp` — the
+    // One supported provider shape (ADR-0018 decision 1): client-credentials
+    // access tokens carry `sub: null` and name the client in `azp` — the
     // verifier's azp fallback is what makes them usable. The direct
     // `service_token` mints cover the sub-bearing (Entra) shape.
     let token = idp.sign(&json!({
@@ -208,12 +254,13 @@ async fn token_endpoint(
 
 // ── Gateway harness ──────────────────────────────────────────────────────────
 
-/// The gateway in OIDC mode with a static tenant binding (the dev-Rauthy
-/// shape, ADR-0010 decision 4) and the agents' audience accepted on
+/// The gateway in OIDC mode with a static tenant binding (ADR-0010 decision 4)
+/// and the agents' audience accepted on
 /// bearer tokens (ADR-0018 decision 1).
 fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
     let config = format!(
         r#"[{{"issuer":"{issuer}","client_id":"{CLIENT_ID}",
+             "audience":"{API_AUDIENCE}",
              "tenant":{{"static":{{"tenant_id":"{tenant}"}}}},
              "service_audiences":["{SERVICE_AUDIENCE}"]}}]"#
     );
@@ -290,7 +337,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         Err(_) => {
             eprintln!(
                 "skipping service-identity test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }
@@ -300,12 +347,12 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("auth3-{}", id.as_uuid().simple());
-    tenants::create(&pool, id, &slug, "AUTH-3 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "AUTH-3 test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id, url))
@@ -314,7 +361,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
 /// Seeds the tenant root with an `eng` org unit and a platform unit under
 /// it. Returns (root, eng, platform).
 async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope, Scope) {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let org = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("mint root");
@@ -357,7 +404,7 @@ async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope, Scope
 /// Provisions a *user* identity at the store level (the JIT shape) so an
 /// IdP-verified subject is not quarantined at the seam.
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
         .await
         .expect("mint principal scope");
@@ -398,7 +445,7 @@ async fn bind(
         }
     };
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,
@@ -559,18 +606,16 @@ async fn agent_token_with_team_scope_cannot_call_org_scope_endpoints() {
     );
 }
 
-/// A client-credentials token whose subject was never registered is
-/// quarantined at the seam (ADR-0013 decision 6): denied everything, even
-/// with roles bound to the subject.
+/// A service-audience token whose subject was never registered is refused at
+/// tenant resolution, even with roles bound to the subject.
 #[tokio::test]
-async fn an_unregistered_client_token_is_quarantined_fail_closed() {
+async fn an_unregistered_client_token_is_refused_fail_closed() {
     let _serial = serial().await;
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
     let (_, _, platform) = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
-    let app = router(state(&db_url, &idp.issuer, tenant));
 
     bind(
         &pool,
@@ -580,22 +625,67 @@ async fn an_unregistered_client_token_is_quarantined_fail_closed() {
         RoleKey::Administrator,
     )
     .await;
+    let mut one_connection_state = state(&db_url, &idp.issuer, tenant);
+    one_connection_state.pool = PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(1))
+        .connect(&db_url)
+        .await
+        .expect("connect one-connection application pool");
+    let app = router(one_connection_state);
     let rogue = idp.service_token("rogue", 600, true);
-    let (status, body) = send(
-        &app,
-        request(
-            Method::GET,
-            &format!("/v1/admin/scopes/{}", platform.id),
-            &rogue,
-            None,
+    let rejected_before = service_rejection_count("identity_unresolved");
+    let (status, body) = tokio::time::timeout(
+        Duration::from_secs(3),
+        send(
+            &app,
+            request(
+                Method::GET,
+                &format!("/v1/admin/scopes/{}", platform.id),
+                &rogue,
+                None,
+            ),
         ),
     )
-    .await;
+    .await
+    .expect("service rejection must not self-starve its application pool");
     assert_eq!(
         status,
-        StatusCode::FORBIDDEN,
-        "an unregistered client must be quarantined: {body}"
+        StatusCode::UNAUTHORIZED,
+        "an unregistered client must fail authentication: {body}"
     );
+    assert_eq!(
+        service_rejection_count("identity_unresolved"),
+        rejected_before + 1
+    );
+    assert_identity_rejection_audit(&pool, tenant, "rogue").await;
+}
+
+/// A service audience cannot turn an ordinary user's signed token into a
+/// service credential. Audience class and registered identity kind must agree.
+#[tokio::test]
+async fn a_service_audience_token_cannot_authenticate_a_user_identity() {
+    let _serial = serial().await;
+    let Some((pool, tenant, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn().await;
+    let app = router(state(&db_url, &idp.issuer, tenant));
+    seed_user(&pool, tenant, "ordinary-user").await;
+
+    let token = idp.service_token("ordinary-user", 600, true);
+    let rejected_before = service_rejection_count("identity_unresolved");
+    let (status, body) = send(&app, request(Method::GET, "/v1/whoami", &token, None)).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "a service audience must not authenticate a user identity: {body}"
+    );
+    assert_eq!(
+        service_rejection_count("identity_unresolved"),
+        rejected_before + 1
+    );
+    assert_identity_rejection_audit(&pool, tenant, "ordinary-user").await;
 }
 
 /// The lifetime cap (ADR-0018 decision 5): a service token that lives
@@ -702,8 +792,204 @@ async fn registration_is_pdp_gated_on_the_anchor() {
     assert_eq!(response.status(), StatusCode::CONFLICT);
 }
 
+/// Service registration and first-login directory adoption share the subject
+/// namespace. Registration must wait on the tenant correspondence fence
+/// before taking the principal fence, so a login that has bound the identity
+/// can still take that principal fence and commit without a lock cycle.
+#[tokio::test]
+async fn registration_locks_directory_correspondence_before_the_principal() {
+    let _serial = serial().await;
+    let Some((pool, tenant, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let (_, _, platform) = seed_hierarchy(&pool, tenant).await;
+    let idp = MockIdp::spawn().await;
+
+    seed_user(&pool, tenant, "admin").await;
+    bind(&pool, tenant, "admin", None, RoleKey::Administrator).await;
+
+    let mut seed = tenant_fixture::begin(&pool, tenant).await;
+    let directory_scope =
+        scopes::ensure_principal_scope(&mut seed, tenant, "directory-anchor", "Directory anchor")
+            .await
+            .expect("create directory-backed principal scope");
+    let directory_identity = identities::create(
+        &mut seed,
+        IdentityId::new(),
+        tenant,
+        None,
+        IdentityKind::User,
+        Some("shared@example.test"),
+        Some("Shared subject"),
+        directory_scope.id,
+    )
+    .await
+    .expect("create unbound directory identity");
+    seed.commit().await.expect("commit directory identity");
+
+    let app_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&db_url)
+        .await
+        .expect("connect single-backend gateway pool");
+    let mut app_connection = app_pool.acquire().await.expect("acquire gateway backend");
+    let app_pid = sqlx::query_scalar!(r#"select pg_catalog.pg_backend_pid() as "pid!""#)
+        .fetch_one(&mut *app_connection)
+        .await
+        .expect("read gateway backend pid");
+    drop(app_connection);
+    let mut app_state = state(&db_url, &idp.issuer, tenant);
+    app_state.pool = app_pool;
+    let app = router(app_state);
+
+    let subject = "shared-service-subject";
+    let mut login = tenant_fixture::begin(&pool, tenant).await;
+    directory::lock_correspondence(&mut login, tenant)
+        .await
+        .expect("hold directory correspondence fence");
+    identities::bind_subject(&mut login, tenant, directory_identity.id, subject)
+        .await
+        .expect("bind login subject before principal transfer");
+    let login_pid = tenant_fixture::backend_pid(&mut login).await;
+
+    let request = request(
+        Method::POST,
+        "/v1/service-identities",
+        &idp.user_token("admin"),
+        Some(json!({ "subject": subject, "scope_id": platform.id })),
+    );
+    let registration = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
+
+    let mut observer = tenant_fixture::begin(&pool, tenant).await;
+    tenant_fixture::wait_until_blocked_by(&mut observer, app_pid, login_pid).await;
+    observer
+        .rollback()
+        .await
+        .expect("finish blocker observation");
+
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        access::lock_principal_grants(&mut login, tenant, subject),
+    )
+    .await
+    .expect("login principal fence cannot wait on registration")
+    .expect("take login principal fence");
+    login.commit().await.expect("commit subject adoption");
+
+    let response = tokio::time::timeout(Duration::from_secs(3), registration)
+        .await
+        .expect("registration resolves after directory fence release")
+        .expect("registration task");
+    assert_eq!(
+        response.status(),
+        StatusCode::CONFLICT,
+        "the committed directory identity owns the shared subject"
+    );
+}
+
+/// Registration applies ADR-0074's "your own scope is yours" rule to service
+/// principals too. The automatic owner grant is atomic and audited; it lets
+/// the service govern its private leaf while the tenant administrator remains
+/// outside that privacy boundary.
+#[tokio::test]
+async fn registered_service_owns_and_can_govern_its_private_leaf() {
+    let _serial = serial().await;
+    let Some((pool, tenant, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let (_, _, platform) = seed_hierarchy(&pool, tenant).await;
+    let idp = MockIdp::spawn().await;
+    let app = router(state(&db_url, &idp.issuer, tenant));
+
+    seed_user(&pool, tenant, "admin").await;
+    bind(&pool, tenant, "admin", None, RoleKey::Administrator).await;
+    let admin = idp.user_token("admin");
+    let registered = register_agent(&app, &admin, platform.id).await;
+    let leaf: ScopeId = registered["scope_id"]
+        .as_str()
+        .expect("service leaf id")
+        .parse()
+        .expect("parse service leaf id");
+
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("tenant tx");
+    let grants = access::list_grants(
+        &mut *tx,
+        tenant,
+        &access::GrantFilter {
+            scope_id: Some(leaf),
+            principal_id: Some(AGENT_CLIENT.to_owned()),
+        },
+    )
+    .await
+    .expect("read service owner grant");
+    assert!(
+        grants.iter().any(|grant| {
+            grant.role_key == RoleKey::Owner && grant.source == GrantSource::Owner
+        }),
+        "registration must atomically mint the service owner grant"
+    );
+    let audit = synveda_audit::search(
+        &mut tx,
+        tenant,
+        &synveda_audit::EventFilter {
+            actions: vec![AuditAction::AccessGranted],
+            resource: Some(format!("scope {leaf}")),
+            ..synveda_audit::EventFilter::default()
+        },
+        0,
+        20,
+    )
+    .await
+    .expect("read service grant audit");
+    assert!(
+        audit.items.iter().any(|event| {
+            event.payload["origin"] == "service-identity-registration"
+                && event.payload["grant"]["subject"] == AGENT_CLIENT
+        }),
+        "registration must chain a content-free access.granted event"
+    );
+    drop(tx);
+
+    let grant_body = json!({
+        "principal_id": "service-collaborator",
+        "role": "member",
+        "scope_id": leaf,
+    });
+    let mut admin_request = request(
+        Method::POST,
+        "/v1/admin/grants",
+        &admin,
+        Some(grant_body.clone()),
+    );
+    admin_request.headers_mut().insert(
+        "idempotency-key",
+        "service-private-admin-denied".parse().expect("header"),
+    );
+    let (status, _) = send(&app, admin_request).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "tenant administration must not cross another principal's privacy boundary"
+    );
+
+    let service = idp.service_token(AGENT_CLIENT, 600, true);
+    let mut service_request = request(Method::POST, "/v1/admin/grants", &service, Some(grant_body));
+    service_request.headers_mut().insert(
+        "idempotency-key",
+        "service-private-owner-grant".parse().expect("header"),
+    );
+    let (status, body) = send(&app, service_request).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the service owner must govern its own leaf: {body}"
+    );
+}
+
 /// Revocation deletes the registration and its personal leaf; the agent's
-/// very next request is quarantined fail-closed, and the listing/get
+/// very next request fails authentication, and the listing/get
 /// surfaces agree it is gone.
 #[tokio::test]
 async fn revocation_takes_effect_on_the_next_request() {
@@ -756,12 +1042,12 @@ async fn revocation_takes_effect_on_the_next_request() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    // The very next agent request is quarantined (ADR-0013 decision 6):
-    // an IdP-verified subject with no identity row.
+    // The very next service-audience request fails tenant resolution: an
+    // unregistered subject cannot use the service credential class.
     let (status, body) = send(&app, request(Method::GET, &team_uri, &agent, None)).await;
     assert_eq!(
         status,
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "the revoked agent must be contained: {body}"
     );
 

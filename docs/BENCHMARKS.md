@@ -84,10 +84,12 @@ hand-edited cell fails a build rather than becoming a claim.
 ```sh
 # The corpus is not in this repository — see evals/fixtures/longmemeval/NOTICE.md
 export ANTHROPIC_API_KEY=...
-make dev-up
 EVAL_LONGMEMEVAL_INSTANCES=500 EVAL_REPORT=/tmp/longmemeval.json make eval-longmemeval-judged
 node scripts/publish-benchmark.mjs /tmp/longmemeval.json
 ```
+
+The evaluation target owns a fresh exact-role PostgreSQL fixture; no persistent
+development stack is a prerequisite.
 
 `publish-benchmark.mjs` refuses a report that is not the judged tier, that
 names no reader or judge model, that could not grade every instance it

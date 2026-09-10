@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into tenant_administrator_bootstraps (tenant_id, grant_id)\n        values ($1, $2)\n        on conflict (tenant_id) do nothing\n        returning tenant_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "57043bd1fbc0c5b8f023fdd86292a8f0c935959760ef382dfcd706b747deb1af"
+}

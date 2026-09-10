@@ -1,0 +1,17 @@
+services:
+  keycloak-realm-convergence:
+    environment:
+      SYNVEDA_KEYCLOAK_DEMO_ENABLED: "true"
+      SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE: /run/secrets/keycloak_demo_admin_password
+      SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE: /run/secrets/keycloak_demo_member_password
+    secrets:
+      - source: keycloak_demo_admin_password
+        target: keycloak_demo_admin_password
+      - source: keycloak_demo_member_password
+        target: keycloak_demo_member_password
+
+secrets:
+  keycloak_demo_admin_password:
+    file: ${SYNVEDA_SECRETS_DIR:?set SYNVEDA_SECRETS_DIR}/keycloak_demo_admin_password
+  keycloak_demo_member_password:
+    file: ${SYNVEDA_SECRETS_DIR}/keycloak_demo_member_password

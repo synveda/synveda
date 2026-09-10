@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select not exists (\n              select 1\n                from pg_catalog.pg_roles as protected\n                cross join pg_catalog.unnest($2::text[]) with ordinality\n                  as expected_member(role_name, position)\n                join pg_catalog.unnest($3::text[]) with ordinality\n                  as expected_grantor(role_name, position)\n                  using (position)\n               where protected.rolname = any($1::text[])\n                 and not exists (\n                   select 1\n                     from pg_catalog.pg_auth_members as membership\n                     join pg_catalog.pg_roles as member\n                       on member.oid = membership.member\n                     join pg_catalog.pg_roles as grantor\n                       on grantor.oid = membership.grantor\n                    where membership.roleid = protected.oid\n                      and member.rolname = expected_member.role_name\n                      and grantor.rolname = expected_grantor.role_name\n                      and membership.admin_option\n                      and not membership.inherit_option\n                      and not membership.set_option\n                 )\n            ) and not exists (\n              select 1\n                from pg_catalog.pg_auth_members as membership\n                join pg_catalog.pg_roles as protected\n                  on protected.oid = membership.roleid\n                join pg_catalog.pg_roles as member\n                  on member.oid = membership.member\n                join pg_catalog.pg_roles as grantor\n                  on grantor.oid = membership.grantor\n               where protected.rolname = any($1::text[])\n                 and membership.admin_option\n                 and not (\n                   not membership.inherit_option\n                   and not membership.set_option\n                   and exists (\n                     select 1\n                       from pg_catalog.unnest($2::text[]) with ordinality\n                         as expected_member(role_name, position)\n                       join pg_catalog.unnest($3::text[]) with ordinality\n                         as expected_grantor(role_name, position)\n                         using (position)\n                      where expected_member.role_name = member.rolname\n                        and expected_grantor.role_name = grantor.rolname\n                   )\n                 )\n            ) and not exists (\n              select 1\n                from pg_catalog.pg_auth_members as membership\n                join pg_catalog.pg_roles as grantor\n                  on grantor.oid = membership.grantor\n               where grantor.rolname = any($1::text[])\n            ) as \"safe!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "safe!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a636461535ccc1642367234798c85e3215fd1dd0ace8351cb1dc048d215617a5"
+}

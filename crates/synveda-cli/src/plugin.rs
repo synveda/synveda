@@ -321,7 +321,7 @@ fn locate(from: Option<&Path>) -> Result<PathBuf, String> {
     if let Some(path) = from {
         return validate(path).map(Path::to_path_buf);
     }
-    let home = crate::init::synveda_home()?;
+    let home = synveda_home()?;
     let installed = home.join("plugin");
     if installed.join(".claude-plugin/marketplace.json").is_file() {
         return Ok(installed);
@@ -337,6 +337,25 @@ fn locate(from: Option<&Path>) -> Result<PathBuf, String> {
          \x20 synveda plugin install --client claude-code --from /tmp/synveda-plugin/plugin",
         installed.display(),
     ))
+}
+
+fn synveda_home() -> Result<PathBuf, String> {
+    synveda_home_from(std::env::var_os("SYNVEDA_HOME"), std::env::var_os("HOME"))
+}
+
+fn synveda_home_from(
+    explicit: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = explicit.filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
+    home.filter(|path| !path.is_empty())
+        .map(|path| PathBuf::from(path).join(".synveda"))
+        .ok_or_else(|| {
+            "neither SYNVEDA_HOME nor HOME is set, so there is nowhere to look for an installed release"
+                .to_owned()
+        })
 }
 
 fn validate(path: &Path) -> Result<&Path, String> {
@@ -426,6 +445,7 @@ fn which(program: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
 
     fn scratch(what: &str) -> PathBuf {
         let dir =
@@ -433,6 +453,27 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn installed_home_never_falls_back_to_a_relative_empty_path() {
+        assert_eq!(
+            synveda_home_from(
+                Some(OsString::from("/srv/synveda")),
+                Some(OsString::from("/home/operator")),
+            )
+            .unwrap(),
+            PathBuf::from("/srv/synveda"),
+        );
+        assert_eq!(
+            synveda_home_from(
+                Some(OsString::new()),
+                Some(OsString::from("/home/operator")),
+            )
+            .unwrap(),
+            PathBuf::from("/home/operator/.synveda"),
+        );
+        assert!(synveda_home_from(Some(OsString::new()), Some(OsString::new())).is_err());
     }
 
     #[test]

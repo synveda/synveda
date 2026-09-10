@@ -1011,7 +1011,7 @@ pub async fn serve(
 /// stops with an editor window, and opening a gRPC connection to a
 /// collector that is usually not there would be a new network dependency,
 /// a start-up delay, and an error in a log for every user who has no
-/// Jaeger. The tool call's own timing is recorded below, which is the part
+/// Collector. The tool call's own timing is recorded below, which is the part
 /// a person debugging this actually needs.
 ///
 /// **No OTel span ids of our own**, even though the calls now carry a
@@ -1019,7 +1019,7 @@ pub async fn serve(
 /// continues the trace rather than starting one). `api::Api` mints that
 /// context per client — which here is per tool call — and the id is
 /// recorded on the span below, so a person reads it out of this log and
-/// pastes it into Jaeger. Making the root a *real* exported span would
+/// pastes it into the configured trace backend. Making the root a *real* exported span would
 /// need the exporter this paragraph's neighbour declines; a synthetic root
 /// is what ADPT-1's hooks have always produced and it renders fine.
 ///
@@ -1066,7 +1066,7 @@ async fn connect(server: &Server) -> Result<Api, String> {
             // this tool call sends as its `traceparent` is the id in the
             // log line beside it — which is how somebody debugging a slow
             // recall gets from this server's stderr to the gateway's trace
-            // in Jaeger without correlating by wall clock.
+            // in the trace backend without correlating by wall clock.
             tracing::Span::current().record("trace_id", api.trace_id());
             Ok(api)
         }

@@ -63,9 +63,9 @@ curl -fsS "http://127.0.0.1:8120/v1/workspaces/$ROOT/projects"
   assert.deepEqual(findings, []);
 });
 
-test("external OIDC provider routes are outside the Synveda contract", () => {
+test("a legacy provider path cannot bypass public-route validation", () => {
   const directory = fixture(`#!/bin/sh
-curl -fsS "$RAUTHY_URL/auth/v1/users"
+curl -fsS "$LEGACY_IDP_URL/auth/v1/users"
 curl -fsS "$GATEWAY_URL/v1/workspaces"
 `);
   const findings = checkCorpus({
@@ -73,7 +73,8 @@ curl -fsS "$GATEWAY_URL/v1/workspaces"
     routes: ["/v1/workspaces"],
     cliInventory: inventory(),
   });
-  assert.deepEqual(findings, []);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0], /\/v1\/users/);
 });
 
 test("the common built-binary aliases cannot hide a dead subcommand", () => {
@@ -103,6 +104,21 @@ synveda scope list
   });
   assert.equal(findings.length, 1, findings.join("\n"));
   assert.match(findings[0], /docs\/backlog\/DELETED\.md/u);
+});
+
+test("a demo cannot restore the retired owner-style Compose database probe", () => {
+  const directory = fixture(`#!/bin/sh
+synveda scope list
+rows=$($DEMO_COMPOSE exec -T postgres psql -U synveda -d "$DEMO_DATABASE")
+`);
+  const findings = checkCorpus({
+    demoDir: directory,
+    routes: [],
+    cliInventory: inventory(),
+  });
+  assert.equal(findings.length, 2, findings.join("\n"));
+  assert.match(findings[0], /DEMO_COMPOSE.*retired owner-style/u);
+  assert.match(findings[1], /DEMO_DATABASE.*retired owner-style/u);
 });
 
 test("container command arrays cannot hide a removed CLI option", () => {

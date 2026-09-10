@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with candidate as (\n            select outbox.tenant_id, outbox.operation_id, outbox.operation_version\n            from durable_operations operation\n            join operation_outbox outbox\n              on outbox.tenant_id = operation.tenant_id\n             and outbox.operation_id = operation.id\n             and outbox.operation_version = operation.operation_version\n            where operation.tenant_id = $1\n              and operation.kind = 'skill_validation'\n              and (\n                  (operation.state in ('pending', 'failed')\n                      and operation.next_attempt_at <= statement_timestamp())\n                  or (operation.state = 'running'\n                      and operation.lease_expires_at <= statement_timestamp())\n              )\n              and (\n                  (outbox.state = 'pending'\n                      and outbox.next_dispatch_at <= statement_timestamp())\n                  or (outbox.state = 'claimed'\n                      and outbox.lease_expires_at <= statement_timestamp())\n                  or (outbox.state = 'dispatched'\n                      and outbox.dispatched_at <= statement_timestamp()\n                          - make_interval(secs => $4::double precision))\n              )\n            order by coalesce(outbox.next_dispatch_at, outbox.lease_expires_at,\n                              outbox.dispatched_at), outbox.operation_id\n            for update of operation, outbox skip locked\n            limit 1\n        )\n        update operation_outbox outbox\n        set state = 'claimed', dispatch_attempts = outbox.dispatch_attempts + 1,\n            lease_owner = $2,\n            lease_expires_at = statement_timestamp()\n                + make_interval(secs => $3::double precision),\n            next_dispatch_at = null, last_error_code = null, updated_at = now()\n        from candidate\n        where outbox.tenant_id = candidate.tenant_id\n          and outbox.operation_id = candidate.operation_id\n          and outbox.operation_version = candidate.operation_version\n          and (\n              (outbox.state = 'pending'\n                  and outbox.next_dispatch_at <= statement_timestamp())\n              or (outbox.state = 'claimed'\n                  and outbox.lease_expires_at <= statement_timestamp())\n              or (outbox.state = 'dispatched'\n                  and outbox.dispatched_at <= statement_timestamp()\n                      - make_interval(secs => $4::double precision))\n          )\n        returning outbox.operation_id, outbox.operation_version,\n                  outbox.dispatch_attempts, outbox.lease_owner as \"lease_owner!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "operation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "operation_version",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "dispatch_attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "lease_owner!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "772f327749601b5cd3161487f4721357f8d7685210d4c990687fa77d8cd1df90"
+}

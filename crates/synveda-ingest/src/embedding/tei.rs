@@ -1,10 +1,9 @@
 //! The TEI embedder: `POST /embed` against a text-embeddings-inference
-//! base URL (tech plan §1.3 — BGE-M3 in the dev compose). Plain HTTP is
-//! fine here: the endpoint is self-hosted by definition. The model
+//! base URL (tech plan §1.3 — BGE-M3 in the isolated evaluation fixture or an
+//! operator endpoint). Plain HTTP can be used on a trusted private network. The model
 //! identity is config-declared, never probed from `/info` — gateway
 //! boot must not couple to TEI availability (ADR-0023 decision 6).
 
-use serde::Deserialize;
 use synveda_types::{Error, Result};
 
 use super::Embedder;
@@ -26,28 +25,25 @@ pub struct TeiEmbedder {
 
 impl TeiEmbedder {
     /// The default model identity when `SYNVEDA_EMBEDDER_MODEL` is
-    /// unset — what the dev compose serves.
+    /// unset — the BGE-M3 contract used by the evaluation fixture.
     pub const DEFAULT_MODEL: &'static str = "BAAI/bge-m3";
 
     /// Builds the embedder against a TEI base URL
-    /// (e.g. `http://localhost:8110`, the dev compose port).
-    #[must_use]
-    pub fn new(model: String, base_url: String) -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap_or_default(),
+    /// (e.g. the isolated evaluation fixture's `http://localhost:8110`).
+    pub fn new(model: String, base_url: String) -> Result<Self> {
+        let base_url = crate::provider_url::normalise(&base_url)
+            .ok_or_else(|| dependency("client_configuration_failed".to_owned()))?;
+        let client = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| dependency("client_configuration_failed".to_owned()))?;
+        Ok(Self {
+            client,
             model,
-            base_url: base_url.trim_end_matches('/').to_owned(),
-        }
+            base_url,
+        })
     }
-}
-
-/// TEI's error body, when it sends one.
-#[derive(Deserialize)]
-struct TeiError {
-    error: String,
 }
 
 impl Embedder for TeiEmbedder {
@@ -69,23 +65,15 @@ impl Embedder for TeiEmbedder {
             .json(&serde_json::json!({ "inputs": inputs }))
             .send()
             .await
-            .map_err(|err| dependency(format!("request failed: {err}")))?;
+            .map_err(|error| dependency(transport_code(&error).to_owned()))?;
         let status = response.status();
         if !status.is_success() {
-            let detail = response.text().await.unwrap_or_default();
-            let detail = serde_json::from_str::<TeiError>(&detail)
-                .map(|body| body.error)
-                .unwrap_or(detail);
-            let cut = detail
-                .char_indices()
-                .nth(200)
-                .map_or(detail.len(), |(index, _)| index);
-            return Err(dependency(format!("status {status}: {}", &detail[..cut])));
+            return Err(dependency(format!("upstream_http_{}", status.as_u16())));
         }
         let vectors: Vec<Vec<f32>> = response
             .json()
             .await
-            .map_err(|err| dependency(format!("unreadable response: {err}")))?;
+            .map_err(|_| dependency("response_invalid".to_owned()))?;
         // One vector per input, in order, or the whole call failed —
         // a deviation here silently misattributes vectors to contents.
         if vectors.len() != inputs.len() {
@@ -99,6 +87,16 @@ impl Embedder for TeiEmbedder {
             return Err(dependency(format!("empty vector at index {empty}")));
         }
         Ok(vectors)
+    }
+}
+
+fn transport_code(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "request_timeout"
+    } else if error.is_connect() {
+        "request_connect_failed"
+    } else {
+        "request_failed"
     }
 }
 

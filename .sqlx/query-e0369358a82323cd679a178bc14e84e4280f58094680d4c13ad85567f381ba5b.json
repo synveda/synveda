@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select state, dispatch_attempts, submission_failures\n           from operation_outbox where tenant_id = $1 and operation_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "dispatch_attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "submission_failures",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e0369358a82323cd679a178bc14e84e4280f58094680d4c13ad85567f381ba5b"
+}

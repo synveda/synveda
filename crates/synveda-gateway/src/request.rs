@@ -33,11 +33,10 @@ pub(crate) fn not_found(id: ScopeId) -> Error {
     }
 }
 
-/// The uniform 404 for missing *and* foreign scopes. Under the production
-/// `synveda_app` role RLS already hides other tenants' rows; this explicit
-/// tenant check keeps the API correct even on connections that bypass RLS
-/// (the dev-compose superuser — ADR-0009's accepted trade-off), and it is
-/// why every mutation starts by fetching the scope.
+/// The uniform 404 for missing *and* foreign scopes. RLS hides other tenants'
+/// rows under valid runtime roles; this explicit tenant check also keeps the
+/// application boundary correct in privileged test and migration contexts.
+/// Every mutation therefore starts by fetching the scope.
 pub(crate) fn found(scope: Option<Scope>, tenant_id: TenantId, id: ScopeId) -> Result<Scope> {
     scope
         .filter(|scope| scope.tenant_id == tenant_id)

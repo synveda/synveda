@@ -1,9 +1,13 @@
 # Deployment
 
-Synveda has one context-platform runtime. The host binary, source/release
-Compose service and Helm Deployment run the same gateway, schema epoch,
-generated `/v1` contract, embedded Cedar PDP, VedaFlow effects and hash-chained
-audit path (CPR-36, ADR-0095).
+Synveda has one context-platform runtime. Direct binaries, source/release
+Compose services and Helm Deployments use the same product commands, schema
+epoch, generated `/v1` contract, embedded Cedar PDP, VedaFlow effects and
+hash-chained audit path (CPR-36, ADR-0095, ADR-0102). The gateway is the public
+request process; the private core worker owns scheduled Capture, Knowledge
+index, relaxation-expiry and optional directory-pull work. A disabled-by-default
+Apalis leaf can transport one non-executing Skill-validation operation without
+owning its tenant or business state.
 
 `personal`, `team` and `enterprise` are not deployment editions. They are
 canonical Configuration documents copied into immutable governed versions and
@@ -12,68 +16,88 @@ OIDC wiring, supported model implementations, secret references and telemetry;
 they do not select policy, capture rules, context budgets, trace retention,
 freshness or Skill/Tool advertisement.
 
-- `compose/` is the contributor/single-node infrastructure: Postgres with the
-  development extensions, bundled Rauthy, optional TEI and Jaeger. It also
-  contains the gateway Dockerfile. `make dev-up` starts contributor services;
-  `synveda init` starts the profiled gateway.
-- `release/` is the pull-only single-node manifest installed under
-  `~/.synveda/profile`. `scripts/package-release.sh` substitutes one release
-  version and includes no source build or retired demo seeder.
-- `helm/` is the Kubernetes infrastructure: the same gateway image,
-  CloudNativePG, optional TEI, ingress and external IdP/secret wiring. The
-  CloudNativePG operator is deliberately a separately installed cluster
-  dependency.
+- `compose/` contains the additive canonical Docker reference graph and its
+  executable `up`, `smoke`, full `acceptance`, gateway-only `restart-gateway`,
+  paired logical `backup`/fresh private `restore-smoke`, `down` and
+  exact-confirmation `reset` lifecycle, plus optional observability and Apalis
+  canary profiles.
+  Deterministic lifecycle tests are implementation evidence, not a validated
+  reference claim: clean-volume browser/Keycloak and recovery acceptance are
+  still open.
+  This is also the only source-development product topology. Evaluation-only
+  dependencies use isolated fixtures and do not define another Synveda stack.
+- `helm/` is the Kubernetes infrastructure: separate gateway and worker
+  Deployments from the same image, CloudNativePG, optional TEI, ingress and
+  external IdP/secret wiring. The CloudNativePG operator is deliberately a
+  separately installed cluster dependency. The release workflow packages this
+  chart and a digest-bound reference bundle using one versioned six-image plan:
+  product, single-host and CloudNativePG PostgreSQL, optimized Keycloak,
+  reference proxy and browser acceptance. No tagged candidate has yet proved
+  publication, authenticated pulls or installation from those artifacts.
 
 ## Bootstrap boundary
 
-Both `synveda init` and the Helm install job do only the operations for which no
-authenticated product principal exists yet:
+Deployment-owned bootstrap and the Helm install job do only the operations for
+which no authenticated product principal exists yet:
 
-1. apply the current schema chain;
-2. provision/grant a least-privilege gateway LOGIN;
+1. provision the exact migrator, gateway and worker roles and extensions;
+2. prove database/peer isolation and apply the current schema chain;
 3. optionally admit the first tenant;
-4. establish deployment key/issuer material.
+4. establish deployment key and issuer material.
+
+The reserved `synveda init` verb is a permanent, side-effect-free refusal. It
+neither discovers profiles nor reads configuration. Canonical Compose owns the
+deployment lifecycle; explicit CLI commands remain available for bounded
+database migration, tenant admission and recovery operations.
 
 The first `synveda-admins` login creates the tenant root, the caller's principal
 scope and its root `administrator` grant. Workspaces, projects, sessions,
 capture decisions, Knowledge and Configuration are public-API/PDP/VedaFlow/
 audit acts after that. No deployment script inserts those tables directly.
 
-## Forced RLS in every deployed shape
+## Runtime database roles and forced RLS
 
-Migrations create `synveda_app` as a NOLOGIN capability role and grant each new
-table only the privileges its runtime paths need. The gateway never connects as
-the database owner:
+Deployment bootstrap creates `synveda_app` as a NOLOGIN capability role. The
+ordinary `synveda_migrator` owns only the selected database and public
+application objects. Distinct `synveda_gateway` and `synveda_worker` LOGINs
+inherit only `synveda_app`; they own no database, schema or object and carry no
+elevation, database-wide setting or other membership.
 
-- `synveda init` converges local `synveda_gateway` as LOGIN, non-superuser,
-  non-BYPASSRLS and a member of `synveda_app`; the host and Compose gateway DSNs
-  use it;
-- CloudNativePG generates the Helm login and the install job grants it the same
-  membership; the admin Secret exists only in migration/tenant-admission
-  containers.
+Gateway and worker continuously re-prove the same epoch, catalog authority,
+forced-RLS contract, peer isolation and database identity. Authority closure
+withdraws readiness and governed work; conclusive refusal terminates the
+process. This is process enforcement, not only a readiness probe.
 
-For a separately provisioned Postgres login, set
-`SYNVEDA_GATEWAY_DATABASE_URL` before `synveda init`. Init verifies that the
-named role already has LOGIN, is neither superuser nor BYPASSRLS, and inherits
-`synveda_app`; it refuses to start the gateway when any fact is false. The
-credential is written only to the deployment's mode-0600 environment file and
-is redacted from diagnostics.
+Compose supplies role-scoped files. Helm renders separate migrator, gateway
+and worker Secrets and the same explicit role contract; runtime Deployments do
+not receive the database owner or superuser credential. Its bootstrap,
+preflight and migration stages are bounded and ordered. Remaining Helm gaps
+include file-mount parity for issuer/KMS material and full promotion
+acceptance, not gateway-owner credential reuse.
 
-`make check-deploy` renders both Compose manifests and Helm, rejects an owner
-DSN or removed runtime surface, packages the release twice and checks the
+Direct-binary database commands require explicit `DATABASE_URL` or
+`DATABASE_URL_FILE`; there is no implicit development credential. Compose
+invokes explicit database, migration, tenant, identity and issuer-diagnostic
+commands rather than a second bootstrap implementation.
+
+The worker's default supervised join is 75 seconds. Canonical Compose gives it
+an 85-second outer stop grace and uses `restart: unless-stopped` so a deliberate
+non-zero critical-task exit is visible and restarted. Helm derives its
+termination grace as the configured worker join plus ten seconds.
+
+`make check-release-parity` validates the closed release-version boundary,
+exact six-image workflow plan, repeatable Helm chart and digest-bound Docker
+reference package without contacting Docker or a registry. The reference
+environment manifest pairs the source SHA with every image identity.
+`make check-chart-images` requires every external deployment-image base to
+carry a readable tag and full SHA-256 digest. `make check-deploy` includes both
+gates, renders canonical Compose and Helm, asserts distinct process commands,
+credentials and private worker probes, packages the reference twice and checks
 upgrade-shaped replacement. The CPR-36 database acceptance test also proves a
-runtime login with no tenant GUC cannot read tenant data. The kind acceptance
-test asserts the same role facts in a running chart before a governed round
-trip and CloudNativePG primary failover.
-
-## Why the Compose gateway may run on the host
-
-The bundled Rauthy issuer is `http://localhost:8100/auth/v1/`. An OIDC issuer
-identifier must be the same URL for the browser, discovery document, token and
-gateway; RFC 6761 resolves `localhost` to each caller's own loopback. The
-default installed gateway therefore runs as a host process. An external issuer
-has a mutually reachable DNS name and `synveda init --issuer ...` uses the same
-gateway image. This changes process placement, not product behaviour.
+runtime login with no tenant GUC cannot read tenant data. Current live Kind
+acceptance proves Keycloak login, a governed product round trip and worker
+readiness after CloudNativePG primary failover. That is Kubernetes source-image
+evidence, not a published Helm or Docker-reference release claim.
 
 ## Embeddings
 
@@ -86,20 +110,27 @@ measured 2026-07-26).
 
 Knowledge embedding rows retain model and dimension. A model change converges a
 separately labelled sidecar; an old vector is never reinterpreted as output from
-a new model. TEI's cache is persistent in Compose and Helm because a cold
-BGE-M3 download is about 2.3 GB.
+a new model. The isolated evaluation fixture and Helm retain a TEI cache
+because a cold BGE-M3 download is about 2.3 GB. A canonical Compose semantic
+profile remains pending.
 
 ## Honest operating limits
 
-- Helm runs one gateway replica with `Recreate`. Pending login state and
-  cross-process cache invalidation have not passed OPS-7; the chart refuses a
-  replicas value. CloudNativePG provides a replicated data plane, not gateway
-  HA, and a gateway upgrade has a brief outage.
-- Compose is a local single-node shape with explicit development database
+- Helm runs one gateway and one core-worker replica with `Recreate`. Pending
+  login state and cross-process cache invalidation have not passed OPS-7; the
+  chart refuses replica settings. CloudNativePG provides a replicated data
+  plane, not request or worker HA, and an application upgrade has a brief
+  outage. Worker SIGTERM has bounded cancellation/join evidence at idle;
+  interruption during claimed Capture work and two-worker execution remain
+  open.
+- Compose is a single-node shape with generated file-mounted development
   credentials. It is not a production secret-management example.
-- The chart has no Qdrant, Temporal consumer, backup promise, external HSM or
+- The chart has no Qdrant, workflow scheduler, backup promise, external HSM or
   customer-managed-key implementation. Provider credentials are Secret
   references; rendered diagnostics must not contain values.
 - Release binaries are unsigned and un-notarized; shipped binaries are macOS
   arm64 and Linux x86_64 only. There is no Windows build, zero-downtime gateway
-  upgrade guarantee or old-schema translator.
+  upgrade guarantee or old-schema translator. The release workflow has no
+  completed tagged run for the aligned chart/image set, captured OCI
+  descriptors, signatures or provenance. The generated environment manifest
+  has deterministic static coverage but no published-registry evidence.

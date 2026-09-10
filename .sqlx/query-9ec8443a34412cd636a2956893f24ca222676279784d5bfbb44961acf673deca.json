@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            update operation_outbox\n            set state = 'pending', lease_owner = null, lease_expires_at = null,\n                next_dispatch_at = statement_timestamp()\n                    + make_interval(secs => $3::double precision),\n                last_error_code = $4, completed_at = null, updated_at = now()\n            where tenant_id = $1 and operation_id = $2\n              and state in ('pending', 'dispatched')\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Float8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ec8443a34412cd636a2956893f24ca222676279784d5bfbb44961acf673deca"
+}

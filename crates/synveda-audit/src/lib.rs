@@ -25,8 +25,10 @@ mod query;
 
 pub use chain::{
     AUDIT_APPEND_FAILURES_TOTAL, AUDIT_EVENTS_TOTAL, AUDIT_VERIFICATIONS_TOTAL, AppendedEvent,
-    BreakReason, ChainVerification, StoredEvent, VerificationReport, append, compute_hash,
-    genesis_hash, head_seq, since, tail, verify, verify_report,
+    BreakReason, ChainVerification, StoredEvent, TENANT_KEY_PROVISION_WITNESSES_TOTAL,
+    TenantKeyProvisionedAppend, TenantKeyProvisionedWitness, VerificationReport, append,
+    append_tenant_key_provisioned_once, compute_hash, genesis_hash, head_seq, since, tail, verify,
+    verify_report,
 };
 pub use event::{Actor, ActorKind, AuditAction, AuditEvent, Outcome};
 pub use export::{

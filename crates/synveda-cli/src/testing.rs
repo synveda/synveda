@@ -7,7 +7,7 @@
 //! each of which therefore protected a test only from itself:
 //!
 //! - `credentials::tests::Scratch` — `XDG_CONFIG_HOME`, its own `Mutex`
-//! - `login::tests` — `SYNVEDA_GATEWAY`, no lock, with the comment
+//! - `login::tests` — gateway and transport-policy settings, no lock, with the comment
 //!   "no other thread reads this variable in this test binary"
 //! - `api::tests` — `SYNVEDA_TOKEN` and `SYNVEDA_GATEWAY`, its own `Mutex`
 //!

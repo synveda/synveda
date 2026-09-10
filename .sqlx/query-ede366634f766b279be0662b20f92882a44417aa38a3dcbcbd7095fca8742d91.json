@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select\n             (select count(*) from durable_operations where id = $1) as \"operations!\",\n             (select count(*) from operation_attempts where operation_id = $1) as \"attempts!\",\n             (select count(*) from operation_outbox where operation_id = $1) as \"outbox!\",\n             (select count(*) from skill_test_runs where operation_id = $1) as \"effects!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "operations!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "attempts!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "outbox!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "effects!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ede366634f766b279be0662b20f92882a44417aa38a3dcbcbd7095fca8742d91"
+}

@@ -1,10 +1,30 @@
 [package]
 name = "synveda-gateway"
-description = "HTTP/gRPC gateway — the only binary that speaks to the outside"
+description = "Synveda request gateway and private core-worker product processes"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+default-run = "synveda-gateway"
+
+[features]
+# Enabled only through the package's dev-dependency cycle so external
+# integration tests can assemble handlers without a process supervisor. The
+# release binaries reject this feature and the normal library does not expose
+# the behavior-only router.
+test-support = []
+
+[[bin]]
+name = "synveda-gateway"
+path = "src/main.rs"
+
+[[bin]]
+name = "synveda-worker"
+path = "src/bin/synveda-worker.rs"
+
+[[bin]]
+name = "synveda-oidc-diagnostic"
+path = "src/bin/synveda-oidc-diagnostic.rs"
 
 [dependencies]
 synveda-audit = { workspace = true }
@@ -28,6 +48,7 @@ axum = { workspace = true }
 # The inject audit event's task hash (CTX-3, ADR-0026 decision 5).
 blake3 = { workspace = true }
 chrono = { workspace = true }
+libc = { workspace = true }
 metrics = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -61,6 +82,7 @@ uuid = { workspace = true }
 base64 = { workspace = true }
 
 [dev-dependencies]
+synveda-gateway-test-support-enabler = { path = "test-support-enabler" }
 base64 = { workspace = true }
 # CPR-14's acceptance harness spawns the real hook binary as a child process
 # and writes its recorded frame to stdin, so the test profile needs the two

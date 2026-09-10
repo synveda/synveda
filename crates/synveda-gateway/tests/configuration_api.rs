@@ -4,6 +4,9 @@
 //! layer; immutable versions and revisioned bindings then govern a real
 //! context run. Store and adversarial RLS coverage live beside this test.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -14,12 +17,12 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::capture_worker;
 use synveda_ingest::extraction::{AnyExtractor, DeterministicExtractor};
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{GrantId, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
 use tower::ServiceExt;
@@ -110,7 +113,7 @@ async fn admitted_with_pack(
     let Ok(url) = std::env::var("DATABASE_URL") else {
         eprintln!(
             "skipping CPR-30 configuration API test: DATABASE_URL is not set \
-             (run `make dev-up` then `make db-test`)"
+             (run `make db-test`)"
         );
         return None;
     };
@@ -119,11 +122,11 @@ async fn admitted_with_pack(
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &pool,
         tenant,
         &format!("cpr30-{}", tenant.as_uuid().simple()),
@@ -154,7 +157,7 @@ async fn admitted_with_pack(
     .await
     .expect("create administrator identity");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,
@@ -330,12 +333,13 @@ async fn first_exact_profile_adoption_is_governed_and_closes_after_one_binding()
         "pending review must not materialise its reserved aggregate"
     );
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant).await;
     let opened = sqlx::query_scalar!(
         r#"select count(*) as "count!" from audit_log
            where tenant_id = $1 and action = 'configuration.change.opened'"#,
         tenant.as_uuid(),
     )
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count Configuration audit opens");
     let applied = sqlx::query_scalar!(
@@ -343,9 +347,10 @@ async fn first_exact_profile_adoption_is_governed_and_closes_after_one_binding()
            where tenant_id = $1 and action = 'configuration.change.applied'"#,
         tenant.as_uuid(),
     )
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count Configuration audit applications");
+    tx.commit().await.expect("commit Configuration audit read");
     assert_eq!(opened, 3, "every attempt retains a VedaFlow change");
     assert_eq!(
         applied, 2,
@@ -737,7 +742,7 @@ async fn immutable_versions_bindings_and_runtime_evidence_share_one_governed_pat
     .await
     .expect("create project-owner identity");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,
@@ -1040,12 +1045,13 @@ async fn immutable_versions_bindings_and_runtime_evidence_share_one_governed_pat
     assert!(immutable.is_err(), "immutable version accepted UPDATE");
     drop(tx);
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant).await;
     let opened = sqlx::query_scalar!(
         r#"select count(*) as "count!" from audit_log
            where tenant_id = $1 and action = 'configuration.change.opened'"#,
         tenant.as_uuid(),
     )
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count Configuration audit opens");
     let applied = sqlx::query_scalar!(
@@ -1053,7 +1059,7 @@ async fn immutable_versions_bindings_and_runtime_evidence_share_one_governed_pat
            where tenant_id = $1 and action = 'configuration.change.applied'"#,
         tenant.as_uuid(),
     )
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count Configuration audit applications");
     assert!(opened >= 6, "expected public Configuration change audits");
@@ -1065,9 +1071,12 @@ async fn immutable_versions_bindings_and_runtime_evidence_share_one_governed_pat
              and not (payload @> '{"artifact_references":[{"family":"configuration"}]}'::jsonb)"#,
         tenant.as_uuid(),
     )
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("check terminal Configuration artifact references");
+    tx.commit()
+        .await
+        .expect("commit Configuration evidence read");
     assert_eq!(
         untyped_terminal, 0,
         "terminal Configuration evidence lost its typed address"

@@ -351,7 +351,7 @@ impl ApprovalMatrix {
 ///
 /// Empty means auto-approve: the pack asks for nothing here and the floor
 /// does not apply, so a principal who passes `ChannelPublish` may publish
-/// without a second look. That is the tech plan §2.4 SMB collapse, and it
+/// without a second look. That is the tech plan §2.4 small-team collapse, and it
 /// is a decision a pack makes explicitly rather than a hole.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ApprovalRequirement {

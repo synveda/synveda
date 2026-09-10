@@ -1,0 +1,46 @@
+# Only database clients that must reach an operator-owned PostgreSQL endpoint
+# receive this egress seam. External OIDC alone must not widen migration or
+# preflight networking when PostgreSQL remains on the internal data network.
+services:
+  database-preflight:
+    environment:
+      SYNVEDA_DATABASE_EXPECTED_HOST: ${SYNVEDA_DATABASE_EXPECTED_HOST:?set SYNVEDA_DATABASE_EXPECTED_HOST}
+      SYNVEDA_DATABASE_EXPECTED_PORT: ${SYNVEDA_DATABASE_EXPECTED_PORT:?set SYNVEDA_DATABASE_EXPECTED_PORT}
+      SYNVEDA_DATABASE_EXPECTED_NAME: ${SYNVEDA_DATABASE_EXPECTED_NAME:?set SYNVEDA_DATABASE_EXPECTED_NAME}
+      SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE: /run/secrets/postgres_root_ca
+    secrets:
+      - source: synveda_postgres_root_ca
+        target: postgres_root_ca
+    networks:
+      application-egress:
+        gw_priority: 1
+
+  migrate:
+    secrets:
+      - source: synveda_postgres_root_ca
+        target: postgres_root_ca
+    networks:
+      application-egress:
+        gw_priority: 1
+
+  tenant-convergence:
+    secrets:
+      - source: synveda_postgres_root_ca
+        target: postgres_root_ca
+    networks:
+      application-egress:
+        gw_priority: 1
+
+  gateway:
+    secrets:
+      - source: synveda_postgres_root_ca
+        target: postgres_root_ca
+
+  worker:
+    secrets:
+      - source: synveda_postgres_root_ca
+        target: postgres_root_ca
+
+secrets:
+  synveda_postgres_root_ca:
+    file: ${SYNVEDA_SECRETS_DIR:?set SYNVEDA_SECRETS_DIR}/postgres_root_ca

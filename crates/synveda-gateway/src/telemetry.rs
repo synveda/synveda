@@ -31,6 +31,37 @@ pub const TENANT_RESOLUTIONS_TOTAL: &str = "synveda_tenant_resolutions_total";
 /// Request latency in seconds, labelled by method/route/status.
 pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_seconds";
 
+/// Gateway application-plane authority: 1 only after the complete bounded
+/// database proof accepted and 0 during boot, outage, drain or refusal.
+pub const GATEWAY_AUTHORITY_READY: &str = "synveda_gateway_authority_ready";
+
+/// Complete gateway database-authority checks, labelled by the closed outcome
+/// vocabulary `accepted|unavailable|timeout|refused`.
+pub const GATEWAY_AUTHORITY_CHECKS_TOTAL: &str = "synveda_gateway_authority_checks_total";
+
+/// Worker application-plane authority: 1 only after the complete bounded
+/// database proof accepted and 0 during boot, outage, drain or refusal.
+pub const WORKER_AUTHORITY_READY: &str = "synveda_worker_authority_ready";
+
+/// Complete worker database-authority checks, labelled by the closed outcome
+/// vocabulary `accepted|unavailable|timeout|refused`.
+pub const WORKER_AUTHORITY_CHECKS_TOTAL: &str = "synveda_worker_authority_checks_total";
+
+/// Experimental Apalis leaf application-plane authority.
+pub const APALIS_WORKER_AUTHORITY_READY: &str = "synveda_apalis_worker_authority_ready";
+
+/// Complete experimental Apalis leaf database-authority checks.
+pub const APALIS_WORKER_AUTHORITY_CHECKS_TOTAL: &str =
+    "synveda_apalis_worker_authority_checks_total";
+
+/// Core-worker readiness: 1 only while the supervisor is running and its
+/// most recent dependency probe accepted the schema and runtime role.
+pub const WORKER_READY: &str = "synveda_worker_ready";
+
+/// Age in seconds of the core worker supervisor's scheduler heartbeat. This
+/// is process-loop liveness, not progress of every owned task.
+pub const WORKER_HEARTBEAT_AGE_SECONDS: &str = "synveda_worker_heartbeat_age_seconds";
+
 /// Scope admin operations (CPR-7, ADR-0074), labelled by `op`
 /// (`list`/`create`/`get`/`update`/`ancestors`/`descendants`) and
 /// `outcome` (`ok`, `rejected` — the caller's fault, `error` — ours or an
@@ -69,12 +100,13 @@ pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
 /// measured separately by the Configuration plane.
 pub const POLICY_OPERATIONS_TOTAL: &str = "synveda_policy_operations_total";
 
-/// JIT provisioning outcomes at login (AUTH-2, ADR-0013): `mapped`,
-/// `admin` (admin-group subject with no team mapping, placed under the
-/// org root — AUTHZ-3, ADR-0015 decision 6), `quarantined`, `existing`
-/// (repeat login), or `error`. An AUD-1 emission point
-/// (`identity.provisioned`) once the audit log lands.
+/// JIT provisioning outcomes at login: `own-scope`, `bound`, or `error`.
+/// Identity creation/binding is audited through `identity.provisioned`.
 pub const JIT_PROVISIONS_TOTAL: &str = "synveda_jit_provisions_total";
+
+/// Initial-administrator bootstrap attempts driven by the verified IdP group,
+/// labelled only `claimed` or `closed`. CPR-45, ADR-0102.
+pub const JIT_ADMIN_BOOTSTRAPS_TOTAL: &str = "synveda_jit_admin_bootstraps_total";
 
 /// Role admin operations (AUTHZ-3, ADR-0015 decision 7), labelled by `op`
 /// (list/bind/unbind/list_node/bind_node/unbind_node) and `outcome`
@@ -99,10 +131,9 @@ pub const CAPABILITY_PROBES_TOTAL: &str = "synveda_capability_probes_total";
 /// once the audit log lands.
 pub const SERVICE_IDENTITY_OPERATIONS_TOTAL: &str = "synveda_service_identity_operations_total";
 
-/// Service tokens refused at the enforcement seam (AUTH-3, ADR-0018
-/// decision 5), labelled by `reason` (`lifetime_exceeded`,
-/// `lifetime_unknown` — no `iat`). An AUD-1 emission point once the audit
-/// log lands.
+/// Service tokens refused at the admission or enforcement seam (AUTH-3,
+/// ADR-0018 decision 5), labelled by the closed `reason` vocabulary
+/// (`identity_unresolved`, `lifetime_exceeded`, `lifetime_unknown`).
 pub const SERVICE_TOKEN_REJECTIONS_TOTAL: &str = "synveda_service_token_rejections_total";
 
 /// Redaction findings on the session-event intake seam,
@@ -202,8 +233,8 @@ pub struct Telemetry {
 
 /// Installs the global tracing subscriber: fmt logs filtered by `RUST_LOG`
 /// (default `info`) plus an OTLP/gRPC span exporter reading the standard
-/// `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4317` — Jaeger in
-/// the dev compose). Call once, from `main`, inside the Tokio runtime.
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4317`). Call once,
+/// from `main`, inside the Tokio runtime.
 ///
 /// # `RUST_LOG` quietens the console and nothing else
 ///
@@ -212,11 +243,11 @@ pub struct Telemetry {
 /// what was here and it had a trap in it. A registry-level filter applies
 /// to *every* layer, so `RUST_LOG=warn` did not merely quieten the log: it
 /// stopped `info`-level spans being recorded at all, and with them every
-/// exported trace. FND-5's acceptance criterion ("a single trace visible in
-/// Jaeger") silently stopped holding for anyone who turned their logs down,
-/// which is a thing operators do to *production*. Measured before the fix:
-/// at `RUST_LOG=warn` a request carrying a `traceparent` reached Jaeger not
-/// at all; at `info`, it arrived.
+/// exported trace. FND-5's single-exported-trace acceptance criterion silently
+/// stopped holding for anyone who turned their logs down, which is a thing
+/// operators do to *production*. Measured before the fix: at `RUST_LOG=warn`
+/// a request carrying a `traceparent` reached no trace backend; at `info`, it
+/// arrived.
 ///
 /// So the span exporter takes a fixed `INFO` floor of its own and the
 /// console keeps `RUST_LOG`. The trade-off, stated rather than discovered:
@@ -299,6 +330,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
             &[0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5, 1.0, 2.5],
         )
         .map_err(|err| internal(format!("metric buckets: {err}")))?
+        .set_buckets_for_metric(
+            Matcher::Full(synveda_store::operations::OPERATION_ATTEMPT_SECONDS.to_owned()),
+            &[0.01, 0.05, 0.1, 0.25, 1.0, 5.0, 10.0, 20.0],
+        )
+        .map_err(|err| internal(format!("metric buckets: {err}")))?
         .install_recorder()
         .map_err(|err| internal(format!("prometheus recorder: {err}")))?;
 
@@ -316,6 +352,58 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         HTTP_REQUEST_DURATION_SECONDS,
         metrics::Unit::Seconds,
         "Gateway HTTP request latency"
+    );
+    metrics::describe_gauge!(
+        WORKER_READY,
+        "Core-worker supervisor readiness after lifecycle, database, schema and runtime-role checks"
+    );
+    metrics::describe_gauge!(
+        WORKER_AUTHORITY_READY,
+        "Core-worker application-plane database authority"
+    );
+    metrics::describe_counter!(
+        WORKER_AUTHORITY_CHECKS_TOTAL,
+        "Complete core-worker database-authority checks by closed outcome"
+    );
+    metrics::describe_gauge!(
+        APALIS_WORKER_AUTHORITY_READY,
+        "Experimental Apalis leaf application-plane database authority"
+    );
+    metrics::describe_counter!(
+        APALIS_WORKER_AUTHORITY_CHECKS_TOTAL,
+        "Complete experimental Apalis leaf database-authority checks by closed outcome"
+    );
+    metrics::describe_gauge!(
+        WORKER_HEARTBEAT_AGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Age of the core worker supervisor scheduler heartbeat; not per-task progress"
+    );
+    metrics::describe_counter!(
+        synveda_store::operations::OPERATIONS_TOTAL,
+        "Durable Skill-validation operations by closed kind and lifecycle state"
+    );
+    metrics::describe_counter!(
+        synveda_store::operations::OPERATION_ATTEMPTS_TOTAL,
+        "Durable Skill-validation execution attempts by closed kind and outcome"
+    );
+    metrics::describe_histogram!(
+        synveda_store::operations::OPERATION_ATTEMPT_SECONDS,
+        metrics::Unit::Seconds,
+        "Durable Skill-validation execution-attempt latency"
+    );
+    metrics::describe_counter!(
+        synveda_store::operations::OPERATION_SWEEPS_TOTAL,
+        "Durable Skill-validation sweeps by closed outcome"
+    );
+    metrics::describe_gauge!(
+        synveda_store::operations::OPERATION_OLDEST_PENDING_AGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Age of the oldest non-terminal Skill-validation operation across active tenants"
+    );
+    metrics::describe_gauge!(
+        synveda_store::operations::OPERATION_OUTBOX_OLDEST_PENDING_AGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Age of the oldest non-terminal Skill-validation outbox row across active tenants"
     );
     metrics::describe_counter!(
         SCOPE_OPERATIONS_TOTAL,
@@ -368,7 +456,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     // module at login completion.
     metrics::describe_counter!(
         JIT_PROVISIONS_TOTAL,
-        "JIT identity provisioning by outcome (mapped/admin/quarantined/existing/error)"
+        "JIT identity provisioning by outcome (own-scope/bound/error)"
+    );
+    metrics::describe_counter!(
+        JIT_ADMIN_BOOTSTRAPS_TOTAL,
+        "IdP-signalled initial-administrator bootstrap attempts by outcome (claimed/closed)"
     );
     // AUTHZ-3 counter (ADR-0015): operations in the gateway's roles routes.
     metrics::describe_counter!(
@@ -389,8 +481,8 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     );
     metrics::describe_counter!(
         SERVICE_TOKEN_REJECTIONS_TOTAL,
-        "Service tokens refused at the enforcement seam by reason \
-         (lifetime_exceeded/lifetime_unknown)"
+        "Service tokens refused at admission or enforcement by reason \
+         (identity_unresolved/lifetime_exceeded/lifetime_unknown)"
     );
     // CPR-18 metrics (ADR-0083): extraction freezes session evidence and
     // produces reviewable candidates. Nothing here calls a candidate a
@@ -413,7 +505,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     );
     metrics::describe_counter!(
         synveda_store::capture::CAPTURE_MUTATIONS_TOTAL,
-        "Durable capture batch and candidate state transitions"
+        "Capture mutation statements accepted inside caller-owned transactions; transaction outcome is reported by the enclosing API or worker metric"
     );
     metrics::describe_counter!(
         crate::capture::CAPTURE_API_OPERATIONS_TOTAL,
@@ -429,6 +521,10 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         synveda_audit::AUDIT_APPEND_FAILURES_TOTAL,
         "Audit appends that failed on a best-effort path (the event is lost, never the response)"
+    );
+    metrics::describe_counter!(
+        synveda_audit::TENANT_KEY_PROVISION_WITNESSES_TOTAL,
+        "Generation-one key-provision audit witnesses converged by result"
     );
     metrics::describe_counter!(
         synveda_audit::AUDIT_VERIFICATIONS_TOTAL,
@@ -514,8 +610,16 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "JWKS refreshes by issuer and outcome (ok/error)"
     );
     metrics::describe_counter!(
+        synveda_identity::OIDC_DIAGNOSTICS_TOTAL,
+        "Explicit OIDC startup diagnostics by issuer and outcome (ok/unavailable/refused)"
+    );
+    metrics::describe_counter!(
         synveda_identity::OIDC_LOGINS_TOTAL,
         "OIDC logins by issuer and outcome (started/completed/rejected/error)"
+    );
+    metrics::describe_counter!(
+        synveda_identity::OIDC_REFRESHES_TOTAL,
+        "OIDC refresh-token redemptions by issuer and outcome (completed/rejected/error)"
     );
     // FLOW-1's counters (ADR-0030 decision 14 deferred describing them to
     // whichever feature made the binary call that crate — FLOW-2 did),

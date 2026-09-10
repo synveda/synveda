@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update durable_operations\n        set cancel_requested_at = coalesce(cancel_requested_at, now()),\n            state = 'cancelled', completed_at = now(), next_attempt_at = null,\n            lease_owner = null, lease_expires_at = null, last_error_code = null,\n            result = '{}'::jsonb, updated_at = now()\n        where tenant_id = $1 and id = $2 and kind = 'skill_validation'\n          and state in ('pending', 'running', 'failed')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c27491f0b11733c14db7d7876f1e0bd959d765744bccf20e9c56acfaf0ee2fbc"
+}

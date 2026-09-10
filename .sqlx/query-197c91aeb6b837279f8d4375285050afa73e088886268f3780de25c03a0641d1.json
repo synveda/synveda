@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select database.oid::bigint as \"oid!\"\n             from pg_catalog.pg_database as database\n            where database.datname = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "oid!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "197c91aeb6b837279f8d4375285050afa73e088886268f3780de25c03a0641d1"
+}

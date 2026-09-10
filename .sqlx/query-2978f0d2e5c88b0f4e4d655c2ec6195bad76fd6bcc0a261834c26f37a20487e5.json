@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "do $synveda$\n           begin\n             if not exists (\n               select 1 from pg_catalog.pg_roles\n                where rolname = 'synveda_cli_role_grantor'\n             ) then\n               create role synveda_cli_role_grantor nologin;\n             end if;\n           end\n           $synveda$",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "2978f0d2e5c88b0f4e4d655c2ec6195bad76fd6bcc0a261834c26f37a20487e5"
+}

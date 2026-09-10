@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use sqlx::{Acquire, PgConnection};
 use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::{BundleScan, RubricScore, ScanOutcome};
-use synveda_policy::{Action, Resource};
+use synveda_policy::{Action, Pdp, Resource};
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::skills::{
     self as store, ResolvedBinding, StoredBinding, StoredSkill, StoredTestRun, StoredUsageEvent,
@@ -26,12 +26,13 @@ use synveda_store::{configuration, rls, scopes};
 use synveda_types::json::canonicalise;
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    ArtifactFamily, ArtifactReference, AssetKind, Error, IdentityId, IdentityKind, ProposalEffect,
-    ProposalId, ProposalState, Result, ScanSeverity, ScopeId, Sensitivity, SessionId,
-    SkillBindingId, SkillBundle, SkillCommand, SkillFile, SkillFilePath, SkillId,
-    SkillMutationOutcome, SkillMutationResult, SkillName, SkillProvenance, SkillTestHarness,
-    SkillTestOutcome, SkillTestRunId, SkillUsageEventId, SkillUsageEvidence, SkillUsageStage,
-    SkillVersionFileRef, SkillVersionId, TenantId, validate_skill_usage_client_event_id,
+    ArtifactFamily, ArtifactReference, AssetKind, DurableOperationId, Error, Identity, IdentityId,
+    IdentityKind, ProposalEffect, ProposalId, ProposalState, Result, ScanSeverity, ScopeId,
+    Sensitivity, SessionId, SkillBindingId, SkillBundle, SkillCommand, SkillFile, SkillFilePath,
+    SkillId, SkillMutationOutcome, SkillMutationResult, SkillName, SkillProvenance,
+    SkillTestHarness, SkillTestOutcome, SkillTestRunId, SkillUsageEventId, SkillUsageEvidence,
+    SkillUsageStage, SkillVersionFileRef, SkillVersionId, TenantId,
+    validate_skill_usage_client_event_id,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer, SkillAsset};
 use utoipa::ToSchema;
@@ -49,7 +50,7 @@ pub const SKILL_OPERATIONS_TOTAL: &str = "synveda_skill_operations_total";
 
 const DEFAULT_LIMIT: i64 = 50;
 const MAX_LIMIT: i64 = 200;
-const VALIDATION_HARNESS_VERSION: &str = "synveda-validation-sandbox/1";
+pub(crate) const VALIDATION_HARNESS_VERSION: &str = "synveda-validation-sandbox/1";
 
 fn sensitivity_schema() -> utoipa::openapi::schema::Object {
     string_enum(Sensitivity::ALL.iter().map(|value| value.as_str()))
@@ -881,7 +882,7 @@ struct AppliedSkillEffect {
     binding_revision: Option<u64>,
 }
 
-fn identity_of(input: &DecisionInput, act: &str) -> Result<IdentityId> {
+pub(crate) fn identity_of(input: &DecisionInput, act: &str) -> Result<IdentityId> {
     input
         .identity
         .as_ref()
@@ -891,7 +892,11 @@ fn identity_of(input: &DecisionInput, act: &str) -> Result<IdentityId> {
         })
 }
 
-async fn scope_for(tx: &mut PgConnection, tenant: TenantId, scope_id: ScopeId) -> Result<Scope> {
+pub(crate) async fn scope_for(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+) -> Result<Scope> {
     found(
         scopes::get(&mut *tx, tenant, scope_id).await?,
         tenant,
@@ -2262,7 +2267,7 @@ async fn skill_view(
     })
 }
 
-async fn exact_visible(
+pub(crate) async fn exact_visible(
     state: &AppState,
     tx: &mut PgConnection,
     tenant: TenantId,
@@ -3122,6 +3127,181 @@ async fn version_bundle(
     })
 }
 
+/// Content-free result of the built-in non-executing validation sandbox.
+pub(crate) struct ValidationEvidence {
+    evidence: Value,
+    scan_ruleset_version: u32,
+    rubric_version: u32,
+}
+
+/// Runs the exact validation shared by the synchronous rollback path and the
+/// durable worker. Immutable bundle bytes are read through the caller's
+/// tenant-scoped transaction; no Skill script is executed.
+pub(crate) async fn evaluate_validation(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    skill: &StoredSkill,
+    version: &StoredVersion,
+) -> Result<ValidationEvidence> {
+    let bundle = version_bundle(tx, tenant, skill, version).await?;
+    let manifest = bundle.validate()?;
+    let scan = scan_security(&bundle.files).await?;
+    let quality = score_quality(&bundle.files).await?;
+    Ok(ValidationEvidence {
+        evidence: json!({
+            "executes_bundle_code": false,
+            "validated_manifest": true,
+            "files": bundle.files.len(),
+            "declared_tools": manifest.allowed_tools,
+            "declared_tools_are_authorization": false,
+            "security_findings": scan.files.iter().map(|file| file.findings.len()).sum::<usize>(),
+            "quality_score": quality.score,
+            "agent_skills_spec_commit": synveda_types::AGENT_SKILLS_SPEC_COMMIT,
+        }),
+        scan_ruleset_version: scan.ruleset_version,
+        rubric_version: quality.rubric_version,
+    })
+}
+
+/// Persists one validation result. `operation_id` is the unique business
+/// effect fence for durable execution and is absent on the synchronous
+/// rollback path.
+pub(crate) async fn record_validation_result(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    version_id: SkillVersionId,
+    actor: IdentityId,
+    operation_id: Option<DurableOperationId>,
+    validation: &ValidationEvidence,
+) -> Result<StoredTestRun> {
+    store::record_test_run(
+        tx,
+        tenant,
+        SkillTestRunId::new(),
+        version_id,
+        operation_id,
+        SkillTestHarness::ValidationSandbox,
+        VALIDATION_HARNESS_VERSION,
+        SkillTestOutcome::Passed,
+        validation.scan_ruleset_version,
+        validation.rubric_version,
+        &validation.evidence,
+        actor,
+    )
+    .await
+}
+
+/// Re-authorizes a durable validation as its persisted requester against the
+/// current identity, grants, packs and immutable Skill version. No token claim
+/// or request-local authority is synthesized.
+pub(crate) async fn authorize_durable_validation(
+    pdp: &Pdp,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    requester: Identity,
+    skill_id: SkillId,
+    version_id: SkillVersionId,
+    expected_scope_id: ScopeId,
+) -> Result<(StoredSkill, StoredVersion, Authorized)> {
+    let (skill, version) = read_skill_and_version(tx, tenant, skill_id, Some(version_id)).await?;
+    if skill.governing_scope_id != expected_scope_id {
+        return Err(Error::Internal {
+            message: "a Skill-validation operation is bound to the wrong governing scope"
+                .to_owned(),
+        });
+    }
+    let scope = scope_for(tx, tenant, skill.governing_scope_id).await?;
+    let input = authz::gather_for_operation_identity(
+        tx,
+        tenant,
+        requester,
+        Some(&scope),
+        AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
+    authz::decide_skill_read_with_pdp(pdp, &input, Resource::Scope(scope.id), version.sensitivity)?;
+    let write = authz::decide_with_pdp(pdp, &input, Action::SkillWrite, Resource::Scope(scope.id))?;
+    Ok((skill, version, write))
+}
+
+async fn replay_test_run(
+    state: &AppState,
+    tenant: TenantId,
+    skill_id: SkillId,
+    version_id: SkillVersionId,
+    run_id: SkillTestRunId,
+) -> Result<StoredTestRun> {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let (skill, _, _) = exact_visible(state, &mut tx, tenant, skill_id, Some(version_id)).await?;
+    let scope = scope_for(&mut tx, tenant, skill.governing_scope_id).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&scope),
+        AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
+    authz::decide(state, &input, Action::SkillWrite, Resource::Scope(scope.id))?;
+    let stored = store::test_run(&mut *tx, tenant, run_id)
+        .await?
+        .filter(|run| run.version_id == version_id)
+        .ok_or_else(|| Error::Conflict {
+            message: "the idempotent Skill test result is no longer available".to_owned(),
+        })?;
+    commit(tx).await?;
+    Ok(stored)
+}
+
+async fn create_test_run(
+    state: &AppState,
+    tenant: TenantId,
+    skill_id: SkillId,
+    version_id: SkillVersionId,
+    harness: SkillTestHarness,
+    claim: &Claim,
+) -> Result<StoredTestRun> {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let (skill, version, _) =
+        exact_visible(state, &mut tx, tenant, skill_id, Some(version_id)).await?;
+    let scope = scope_for(&mut tx, tenant, skill.governing_scope_id).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&scope),
+        AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
+    let authorized = authz::decide(state, &input, Action::SkillWrite, Resource::Scope(scope.id))?;
+    let actor = identity_of(&input, "testing a skill")?;
+    let validation = evaluate_validation(&mut tx, tenant, &skill, &version).await?;
+    let stored =
+        record_validation_result(&mut tx, tenant, version.id, actor, None, &validation).await?;
+    claim.remember(&mut tx, tenant, stored.id.as_uuid()).await?;
+    audit::record(
+        &mut tx,
+        tenant,
+        AuditAction::SkillTestRecorded,
+        Resource::Scope(skill.governing_scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "test_run_id": stored.id,
+            "skill_id": skill.id,
+            "version_id": version.id,
+            "harness": harness.as_str(),
+            "harness_version": VALIDATION_HARNESS_VERSION,
+            "outcome": stored.outcome.as_str(),
+            "executes_bundle_code": false,
+            "authz": audit::decision_context(Action::SkillWrite, &authorized),
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+    Ok(stored)
+}
+
 /// Run the built-in non-executing validation sandbox.
 #[utoipa::path(
     post,
@@ -3168,100 +3348,38 @@ pub(crate) async fn run_test(
         if let Dispatch::Replay(run_id) =
             crate::idempotency::dispatch(&state.pool, tenant, &claim).await?
         {
-            let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
-            let (skill, _, _) =
-                exact_visible(&state, &mut tx, tenant, id, Some(version_id)).await?;
-            let scope = scope_for(&mut tx, tenant, skill.governing_scope_id).await?;
-            let input = authz::gather(
+            let replayed = replay_test_run(
                 &state,
-                &mut tx,
-                Some(&scope),
-                AnchorSelection::none(),
-                Vec::new(),
-            )
-            .await?;
-            authz::decide(
-                &state,
-                &input,
-                Action::SkillWrite,
-                Resource::Scope(scope.id),
-            )?;
-            let stored = store::test_run(
-                &mut *tx,
                 tenant,
+                id,
+                version_id,
                 SkillTestRunId::from_uuid(run_id),
             )
-            .await?
-            .filter(|run| run.version_id == version_id)
-            .ok_or_else(|| Error::Conflict {
-                message: "the idempotent Skill test result is no longer available".to_owned(),
-            })?;
-            commit(tx).await?;
-            return Ok((StatusCode::OK, Json(stored.into())));
+            .await?;
+            return Ok((StatusCode::OK, Json(replayed.into())));
         }
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
-        let (skill, version, _) =
-            exact_visible(&state, &mut tx, tenant, id, Some(version_id)).await?;
-        let scope = scope_for(&mut tx, tenant, skill.governing_scope_id).await?;
-        let input = authz::gather(&state, &mut tx, Some(&scope), AnchorSelection::none(), Vec::new())
-            .await?;
-        authz::decide(
-            &state,
-            &input,
-            Action::SkillWrite,
-            Resource::Scope(scope.id),
-        )?;
-        let actor = identity_of(&input, "testing a skill")?;
-        let bundle = version_bundle(&mut tx, tenant, &skill, &version).await?;
-        let manifest = bundle.validate()?;
-        let scan = scan_security(&bundle.files).await?;
-        let quality = score_quality(&bundle.files).await?;
-        let evidence = json!({
-            "executes_bundle_code": false,
-            "validated_manifest": true,
-            "files": bundle.files.len(),
-            "declared_tools": manifest.allowed_tools,
-            "declared_tools_are_authorization": false,
-            "security_findings": scan.files.iter().map(|file| file.findings.len()).sum::<usize>(),
-            "quality_score": quality.score,
-            "agent_skills_spec_commit": synveda_types::AGENT_SKILLS_SPEC_COMMIT,
-        });
-        let stored = store::record_test_run(
-            &mut *tx,
-            tenant,
-            SkillTestRunId::new(),
-            version.id,
-            harness,
-            VALIDATION_HARNESS_VERSION,
-            SkillTestOutcome::Passed,
-            scan.ruleset_version,
-            quality.rubric_version,
-            &evidence,
-            actor,
-        )
-        .await?;
-        claim
-            .remember(&mut tx, tenant, stored.id.as_uuid())
-            .await?;
-        audit::record(
-            &mut tx,
-            tenant,
-            AuditAction::SkillTestRecorded,
-            Resource::Scope(skill.governing_scope_id).to_string(),
-            Outcome::Success,
-            json!({
-                "test_run_id": stored.id,
-                "skill_id": skill.id,
-                "version_id": version.id,
-                "harness": harness.as_str(),
-                "harness_version": VALIDATION_HARNESS_VERSION,
-                "outcome": stored.outcome.as_str(),
-                "executes_bundle_code": false,
-            }),
-        )
-        .await?;
-        commit(tx).await?;
-        Ok((StatusCode::CREATED, Json(SkillTestRunView::from(stored))))
+        match create_test_run(&state, tenant, id, version_id, harness, &claim).await {
+            Ok(stored) => Ok((StatusCode::CREATED, Json(stored.into()))),
+            Err(conflict @ Error::Conflict { .. }) => {
+                let run_id = crate::idempotency::resolve_conflict(
+                    &state.pool,
+                    tenant,
+                    &claim,
+                    conflict,
+                )
+                .await?;
+                let replayed = replay_test_run(
+                    &state,
+                    tenant,
+                    id,
+                    version_id,
+                    SkillTestRunId::from_uuid(run_id),
+                )
+                .await?;
+                Ok((StatusCode::OK, Json(replayed.into())))
+            }
+            Err(error) => Err(error),
+        }
     }
     .await;
     respond(&state, "test_run", result).await

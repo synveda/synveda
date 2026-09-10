@@ -25,12 +25,23 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 const TOOL_NAME: &str = "emit_extraction";
 
 /// The Anthropic Messages API extractor.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClaudeExtractor {
     client: reqwest::Client,
     api_key: String,
     model: String,
     base_url: String,
+}
+
+impl std::fmt::Debug for ClaudeExtractor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ClaudeExtractor")
+            .field("api_key", &"[REDACTED]")
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ClaudeExtractor {
@@ -44,17 +55,41 @@ impl ClaudeExtractor {
     /// Builds the extractor. The key is held, sent in the `x-api-key`
     /// header, and never logged (the `SYNVEDA_DEV_JWT_SECRET`
     /// discipline).
-    #[must_use]
-    pub fn new(api_key: String, model: String, base_url: String) -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap_or_default(),
+    pub fn new(api_key: String, model: String, base_url: String) -> Result<Self> {
+        let base_url = crate::provider_url::normalise(&base_url)
+            .ok_or_else(|| dependency("client_configuration_failed".to_owned()))?;
+        let client = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            // Never forward `x-api-key` to an operator-controlled redirect.
+            // Provider endpoint changes are configuration, not wire behavior.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| dependency("client_configuration_failed".to_owned()))?;
+        Ok(Self {
+            client,
             api_key,
             model,
-            base_url: base_url.trim_end_matches('/').to_owned(),
-        }
+            base_url,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_never_discloses_the_api_key() {
+        let secret = "SYNVEDA_CLAUDE_DEBUG_SECRET";
+        let extractor = ClaudeExtractor::new(
+            secret.to_owned(),
+            ClaudeExtractor::DEFAULT_MODEL.to_owned(),
+            ClaudeExtractor::DEFAULT_BASE_URL.to_owned(),
+        )
+        .expect("configure extractor");
+        let rendered = format!("{extractor:?}");
+        assert!(!rendered.contains(secret));
+        assert!(rendered.contains("[REDACTED]"));
     }
 }
 
@@ -62,7 +97,6 @@ impl ClaudeExtractor {
 #[derive(Deserialize)]
 struct MessagesResponse {
     model: String,
-    stop_reason: Option<String>,
     content: Vec<ContentBlock>,
 }
 
@@ -103,30 +137,21 @@ impl Extractor for ClaudeExtractor {
             .json(&body)
             .send()
             .await
-            .map_err(|err| dependency(format!("request failed: {err}")))?;
+            .map_err(|error| dependency(transport_code(&error).to_owned()))?;
         let status = response.status();
         if !status.is_success() {
-            let detail = response.text().await.unwrap_or_default();
-            return Err(dependency(format!(
-                "status {status}: {}",
-                truncate_detail(&detail)
-            )));
+            return Err(dependency(format!("upstream_http_{}", status.as_u16())));
         }
         let message: MessagesResponse = response
             .json()
             .await
-            .map_err(|err| dependency(format!("unreadable response: {err}")))?;
+            .map_err(|_| dependency("response_invalid".to_owned()))?;
         let tool_input = message
             .content
             .into_iter()
             .find(|block| block.kind == "tool_use" && block.name.as_deref() == Some(TOOL_NAME))
             .and_then(|block| block.input)
-            .ok_or_else(|| {
-                dependency(format!(
-                    "no {TOOL_NAME} tool call in response (stop_reason: {})",
-                    message.stop_reason.as_deref().unwrap_or("unknown")
-                ))
-            })?;
+            .ok_or_else(|| dependency("required_tool_call_missing".to_owned()))?;
         Ok(ExtractionOutcome {
             candidates: prompt::parse_candidates(SERVICE, tool_input, input.event_type)?,
             method: SERVICE.to_owned(),
@@ -144,13 +169,12 @@ fn dependency(message: String) -> Error {
     }
 }
 
-/// Error bodies ride into `Error::Dependency` messages, which reach logs
-/// and (as denial reasons never, but as messages sometimes) operators —
-/// keep them short and content-light.
-fn truncate_detail(detail: &str) -> &str {
-    let cut = detail
-        .char_indices()
-        .nth(200)
-        .map_or(detail.len(), |(index, _)| index);
-    &detail[..cut]
+fn transport_code(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "request_timeout"
+    } else if error.is_connect() {
+        "request_connect_failed"
+    } else {
+        "request_failed"
+    }
 }

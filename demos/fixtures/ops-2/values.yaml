@@ -16,7 +16,19 @@ gateway:
   # checks — one URL, resolving the same way for the gateway and for the
   # client, which is the property this whole test turns on.
   publicUrl: http://synveda.synveda-test.svc.cluster.local:8120
+  # This disposable in-cluster test deliberately has no TLS terminator. The
+  # same explicit application relaxation is supplied to its CLI client below;
+  # neither the chart nor the runtime infers permission from an http:// URL.
+  insecureDevelopmentHttp: true
   dbMaxConnections: 10
+  databaseExistingSecret: synveda-gateway-db
+
+worker:
+  # The demo creates this Secret with a fresh URL-safe password before Helm
+  # starts. The chart owns the role convergence, never the credential.
+  databaseExistingSecret: synveda-worker-db
+  dbMaxConnections: 5
+  resources: {}
 
 oidc:
   # Written by the demo *after* the install job admits the tenant: a trust

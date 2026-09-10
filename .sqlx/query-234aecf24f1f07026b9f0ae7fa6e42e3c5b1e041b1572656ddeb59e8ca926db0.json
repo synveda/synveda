@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select database.oid::bigint as \"oid!\",\n                  owner.oid::bigint as \"owner_oid!\",\n                  owner.rolname as \"owner!\",\n                  database.datallowconn as \"allows_connections!\",\n                  database.datistemplate as \"is_template!\"\n             from pg_catalog.pg_database as database\n             join pg_catalog.pg_roles as owner on owner.oid = database.datdba\n            where database.datname = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "oid!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_oid!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "owner!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 3,
+        "name": "allows_connections!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_template!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "234aecf24f1f07026b9f0ae7fa6e42e3c5b1e041b1572656ddeb59e8ca926db0"
+}

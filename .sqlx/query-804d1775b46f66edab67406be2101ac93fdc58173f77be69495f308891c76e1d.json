@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select pg_catalog.pg_advisory_xact_lock(\n            pg_catalog.hashtextextended(\n                'synveda.directory.correspondence.v1:' || $1::uuid::text,\n                0\n            )\n        )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pg_advisory_xact_lock",
+        "type_info": "Void"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "804d1775b46f66edab67406be2101ac93fdc58173f77be69495f308891c76e1d"
+}

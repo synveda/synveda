@@ -1,0 +1,85 @@
+#!/bin/bash -p
+# Deterministic image-build proof for the generation gate. No provider or
+# network access is used.
+unset BASH_ENV ENV CDPATH GLOBIGNORE PS4
+set +x
+set -eu
+umask 077
+PATH=/opt/keycloak/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+gate=/opt/keycloak/bin/synveda-generation-gate
+test_root=/tmp/synveda-generation-gate-self-test
+[ ! -e "$test_root" ] && [ ! -L "$test_root" ] || exit 1
+mkdir "$test_root"
+chmod 0700 "$test_root"
+SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH=$test_root
+export SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH
+
+generation_a=$($gate rotate)
+$gate publish "$generation_a"
+$gate ready
+
+# Pause an instrumented copy immediately after its second current-generation
+# check and before the marker rename. Rotation must remove the selector first,
+# so releasing this stale publisher can never make the selected generation
+# ready, even for one filesystem observation.
+instrumented_gate=$test_root/.instrumented-generation-gate
+injected_count=0
+while IFS= read -r source_line || [ -n "$source_line" ]; do
+    if [ "$source_line" = '    mv -Tf -- "$gate_candidate" "$generation_ready" || {' ]; then
+        injected_count=$((injected_count + 1))
+        printf '%s\n' \
+            '    if [ "${SYNVEDA_GENERATION_GATE_TEST_BARRIER:-}" = 1 ]; then' \
+            '        : > "$public_gate_dir/.publish-entered"' \
+            '        while [ ! -e "$public_gate_dir/.publish-release" ]; do' \
+            '            sleep 0.01' \
+            '        done' \
+            '    fi'
+    fi
+    printf '%s\n' "$source_line"
+done < "$gate" > "$instrumented_gate"
+[ "$injected_count" -eq 1 ]
+chmod 0555 "$instrumented_gate"
+
+$gate withdraw "$generation_a"
+SYNVEDA_GENERATION_GATE_TEST_BARRIER=1 \
+    "$instrumented_gate" publish "$generation_a" &
+publisher_pid=$!
+publisher_entered=false
+for ((attempt = 0; attempt < 200; attempt += 1)); do
+    if [ -f "$test_root/.publish-entered" ]; then
+        publisher_entered=true
+        break
+    fi
+    kill -0 "$publisher_pid" 2>/dev/null || exit 1
+    sleep 0.01
+done
+[ "$publisher_entered" = true ]
+generation_b=$($gate rotate)
+! $gate ready
+: > "$test_root/.publish-release"
+if wait "$publisher_pid"; then
+    exit 1
+fi
+! $gate ready
+[ ! -e "$test_root/$generation_a/cpr45-keycloak-realm-v3.ready" ]
+rm -f -- "$instrumented_gate" "$test_root/.publish-entered" \
+    "$test_root/.publish-release"
+
+! $gate publish "$generation_a"
+$gate publish "$generation_b"
+$gate ready
+
+$gate retire "$generation_a"
+$gate withdraw "$generation_b"
+rm -f -- "$test_root/current"
+rmdir -- "$test_root/$generation_b"
+
+ln -s /tmp/absolute-target "$test_root/current"
+! $gate capture
+rm -f -- "$test_root/current"
+ln -s ../traversal-target "$test_root/current"
+! $gate capture
+rm -f -- "$test_root/current"
+rmdir -- "$test_root"

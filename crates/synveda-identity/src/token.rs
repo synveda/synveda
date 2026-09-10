@@ -23,6 +23,24 @@ use synveda_types::{Error, Result, TenantId};
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Which credential boundary produced verified claims.
+///
+/// OIDC service-audience tokens are kept distinct through tenant resolution:
+/// they may name only a registered service identity. That prevents an ID
+/// token minted for an accidentally interactive service client from becoming
+/// a user bearer merely because its client id was configured as an accepted
+/// service audience.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialClass {
+    /// An ID token verified inside the authorization-code callback.
+    Interactive,
+    /// A bearer accepted through the primary API resource audience, or the
+    /// development HS256 verifier that has no OIDC audience vocabulary.
+    PrimaryBearer,
+    /// A bearer accepted exclusively through an additional service audience.
+    ServiceBearer,
+}
+
 /// Clock skew allowed when an issuer's `iat` is marginally ahead of the
 /// verifier. The same bound is used by dev/service and OIDC verification so
 /// one token authority cannot admit a time shape the other refuses.
@@ -67,6 +85,8 @@ pub struct Claims {
     /// identities' token lifetime with this, failing closed on `None`
     /// (AUTH-3, ADR-0018 decision 5). User tokens ignore it.
     pub lifetime: Option<Duration>,
+    /// The verified audience boundary that admitted this credential.
+    pub credential_class: CredentialClass,
 }
 
 /// What an IdP asserts about a subject beyond its name: the raw material
@@ -233,6 +253,7 @@ impl TokenVerifier for Hs256Verifier {
             // so they carry no provisioning claims (ADR-0013 decision 1).
             provisioning: None,
             lifetime,
+            credential_class: CredentialClass::PrimaryBearer,
         })
     }
 }

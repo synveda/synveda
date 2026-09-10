@@ -8,9 +8,10 @@
 ## Context
 
 AUTH-1 replaces the pre-AUTH-1 HS256 dev verifier (ADR-0008) with real OIDC:
-any compliant IdP, Rauthy bundled for dev/SMB, JWKS caching with rotation
-handling. The AC: login via Rauthy and via a mock Entra config both yield a
-Synveda session.
+any conforming IdP, a bundled reference provider, and JWKS caching with
+rotation handling. CPR-45 replaces the original Rauthy fixture with Keycloak;
+the application boundary remains provider-neutral. The AC is one real bundled
+flow plus the same deterministic mock-Entra contract.
 
 Forces at play:
 
@@ -38,8 +39,9 @@ Forces at play:
    The trait's `verify` becomes `async` (via `async-trait`, keeping
    `Arc<dyn TokenVerifier>` object-safe): verification may need to fetch
    discovery or keys; the HS256 dev verifier is unchanged behind the async
-   signature. Trust is configured per issuer: issuer URL, client id, audience
-   (defaults to client id), allowed signature algorithms (default
+   signature. Trust is configured per issuer: issuer URL, client id, a
+   mandatory bearer audience distinct from the login client id and every
+   service audience, allowed signature algorithms (default
    `["RS256"]`), and a tenant binding. Dispatch reads the *unverified*
    `iss` claim only to select the trust entry; every other claim is
    consulted only after signature verification under that entry's keys.
@@ -68,11 +70,12 @@ Forces at play:
    10-minute TTL — single-replica only, acceptable until the enterprise
    profile (OPS-2) makes login-state affinity a deployment concern.
 6. **Dependencies.** `jsonwebtoken` v10 with the `rust_crypto` backend
-   (pure-Rust RSA/EdDSA, no `ring` — licence-clean) for JWT + JWK
-   verification; `reqwest` with `default-features = false, features =
-   ["json"]` — no TLS backend yet, same doctrine as the sqlx TLS note: dev
-   IdPs are plain-http localhost, and the production TLS backend is chosen
-   (and licence-reviewed) when a deployment needs it; `getrandom` for
+   (pure-Rust RSA, no `ring` — licence-clean) for JWT + JWK verification;
+   the accepted algorithm vocabulary is exactly RS256/RS384/RS512.
+   `reqwest` uses `default-features = false` with `json` and the reviewed
+   `native-tls` backend. Ambient proxy variables are disabled on the OIDC
+   client; an explicit custom-CA/outbound-proxy contract remains open rather
+   than silently inheriting host process state. `getrandom` supplies
    `state`/`nonce`/`code_verifier` entropy (32 bytes each, base64url).
    All HTTP calls carry explicit timeouts.
 7. **Auth modes are mutually exclusive.** `SYNVEDA_OIDC_ISSUERS` (JSON
@@ -96,9 +99,11 @@ Forces at play:
    Entra-shaped issuer and `tid` claim; the test drives the full PKCE
    dance including rotation (new `kid` → refetch) and the negative paths
    (wrong issuer, wrong audience, expired, bad nonce, replayed state).
-   The Rauthy half runs against the live compose Rauthy, env-gated with
-   the same skip convention as the TEN-1 database tests, and in
-   `demos/auth-1-oidc-login.sh` end to end.
+   The bundled-provider half runs through the Compose Keycloak realm and the
+   same provider-neutral diagnostic. Discovery proves metadata and keys, not
+   token-endpoint client-registration behaviour: an actual authorization-code
+   exchange remains required evidence because providers do not advertise
+   public-client authentication support consistently.
 
 ## Options considered
 
@@ -132,9 +137,9 @@ Forces at play:
   the ADR-0008 seam held; per-issuer trust entries give AUTH-4/5 (SCIM,
   directory sync) and multi-IdP enterprises a place to stand; the PKCE
   flow is the one ADPT-1's `synveda login` will drive.
-- Negative / accepted trade-offs: no TLS in the gateway's outbound HTTP
-  client until a deployment needs it (tracked for OPS-1 — enterprise IdPs
-  are https); in-memory pending-login state pins login flows to one
+- Negative / accepted trade-offs: native TLS is present, but explicit custom
+  CA and outbound-proxy configuration are not yet implemented; in-memory
+  pending-login state pins login flows to one
   replica until OPS-2; the RustCrypto `rsa` crate carries the Marvin
   advisory (RUSTSEC-2023-0071) — acceptable because Synveda performs
   public-key verification only, never RSA private-key operations; if

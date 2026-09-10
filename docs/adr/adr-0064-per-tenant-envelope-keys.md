@@ -1,8 +1,8 @@
 # ADR-0064: per-tenant keys seal what leaves and what we have to read back — the retrieval substrate stays readable by design, and `console_sessions` cannot hold a tenant key because ADR-0056 was right to take its tenant away
 
-- **Status**: Accepted, **amended twice during implementation** (decision 12
-  named the wrong vocabulary; and decision 5 turned out to have a consequence
-  for decision 12 that neither of them noticed)
+- **Status**: Accepted, **amended three times** (decision 12 named the wrong
+  vocabulary; decision 5 had an unrecorded consequence for decision 12; and
+  CPR-45 made key-provision evidence safely convergent)
 - **Date**: 2026-08-11
 - **Feature(s)**: TEN-4
 - **Deciders**: sujitn
@@ -49,6 +49,40 @@ also compares the tag first, so the common mistake costs one comparison and
 produces an error that names the disagreement rather than the uniform "did not
 open". Found by a test asserting the wrong step, which is a better outcome
 than the test passing.
+
+## Amendment 3 (2026-08-31): provisioning evidence is a repairable witness
+
+ADR-0019 decision 7 normally commits a CLI mutation and its break-glass event
+in one transaction. Key provisioning cannot do that without holding a tenant
+transaction across an external KMS wrap. The existing separation avoided that
+outage-amplifying lock but left two bad retry choices: audit every rerun and
+duplicate evidence, or audit only the key-row creator and make a crash after
+the key commit permanently unauditable.
+
+Provisioning therefore uses one narrow repair protocol. The key row converges
+first; the caller must then unwrap the current generation, proving actual KMS
+custody rather than treating a wrapped database row as success. In a fresh
+tenant transaction it reads the authoritative generation-1 `kek_ref`, locks
+the tenant audit-chain head, and appends the exact
+`tenant.key.provisioned` generation-1 witness only when absent. A crash before
+the witness commits rolls that transaction back and the exact rerun repairs
+it. Concurrent reruns serialize on the existing chain-head lock. Disabled,
+wrong or externally denied KMS access fails before success evidence.
+
+Epoch-3 history needs no rewrite. Exact duplicate witnesses emitted by the
+old command remain immutable and satisfy convergence, but the new path never
+adds another. A malformed candidate that contains the generation-1 shape
+fails closed, including a conflicting KEK reference or a payload superset. An
+old post-rotation generation-2 provision event is a different fact, so it
+neither masquerades as nor blocks repair of the generation-1 witness.
+Candidate inspection is paged while the chain head is locked and
+refuses more than 4,096 matching rows, so corrupt or adversarial history cannot
+turn convergence into unbounded work. This amends only ADR-0019 decision 7's
+key-provision case; ordinary mutations remain same-transaction audited. The
+audit crate therefore exposes a generation-one key-provision witness type and
+operation, not a generic idempotent append: callers cannot choose another
+actor kind, action, outcome, resource, generation or payload shape through
+this exception.
 
 ## Context
 

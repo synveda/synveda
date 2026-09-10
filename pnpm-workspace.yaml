@@ -1,6 +1,7 @@
 packages:
   - adapters/*
   - console
+  - deploy/compose/browser
 
 # Build scripts are denied by default and allowed one package at a time
 # (pnpm's own posture, and the right one for a product that sells

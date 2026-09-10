@@ -1,0 +1,170 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with candidate as (\n            select candidate.id, candidate.state as previous_state\n            from durable_operations candidate\n            where candidate.tenant_id = $1 and candidate.kind = 'skill_validation'\n              and candidate.cancel_requested_at is null\n              and ($4::uuid is null or candidate.id = $4)\n              and candidate.attempts < $5\n              and (\n                  (candidate.state in ('pending', 'failed')\n                      and candidate.next_attempt_at <= statement_timestamp())\n                  or (candidate.state = 'running'\n                      and candidate.lease_expires_at <= statement_timestamp())\n              )\n            order by candidate.next_attempt_at nulls first, candidate.id\n            for update skip locked\n            limit 1\n        )\n        update durable_operations operation\n        set state = 'running', attempts = operation.attempts + 1,\n            lease_owner = $2,\n            lease_expires_at = statement_timestamp()\n                + make_interval(secs => $3::double precision),\n            started_at = coalesce(operation.started_at, now()), completed_at = null,\n            next_attempt_at = null, last_error_code = null,\n            progress_percent = operation.progress_percent, updated_at = now()\n        from candidate\n        where operation.tenant_id = $1 and operation.id = candidate.id\n        returning operation.tenant_id, operation.id, operation.operation_version,\n                  operation.proposal_id, operation.knowledge_item_id,\n                  operation.skill_version_id, operation.requested_by_identity_id,\n                  operation.authorized_at, operation.kind, operation.state,\n                  operation.input_hash, operation.progress_percent, operation.attempts,\n                  operation.next_attempt_at, operation.cancel_requested_at,\n                  operation.lease_owner, operation.lease_expires_at,\n                  operation.last_error_code, operation.result, operation.created_at,\n                  operation.updated_at, operation.started_at, operation.completed_at,\n                  operation.attempts as attempt_number,\n                  candidate.previous_state as \"previous_state!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "operation_version",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "skill_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "requested_by_identity_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "authorized_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "input_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "progress_percent",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 12,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "next_attempt_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "cancel_requested_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "lease_owner",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "lease_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "last_error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "result",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 23,
+        "name": "attempt_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 24,
+        "name": "previous_state!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Float8",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "471aa0e2aaec7cb61e7e2457702f78c337b5778e1a2e72ab92ef0929d3aeb3e7"
+}

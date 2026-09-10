@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "revoke synveda_app from synveda_gateway granted by synveda_cli_role_grantor",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "7b059076252322dd94032cf3016c25d9eec008bff3314a4cfbfc2322f020132d"
+}

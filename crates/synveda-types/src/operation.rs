@@ -11,7 +11,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{DurableOperationId, Error, KnowledgeItemId, ProposalId, Result, TenantId};
+use crate::{
+    DurableOperationId, Error, IdentityId, KnowledgeItemId, ProposalId, Result, SkillVersionId,
+    TenantId,
+};
+
+/// The only currently supported durable Skill-validation contract version.
+pub const SKILL_VALIDATION_OPERATION_VERSION: u16 = 1;
 
 /// First-class kinds of durable work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -19,17 +25,20 @@ use crate::{DurableOperationId, Error, KnowledgeItemId, ProposalId, Result, Tena
 pub enum OperationKind {
     /// Governed removal of one Knowledge aggregate's plaintext and indexes.
     KnowledgeErasure,
+    /// Non-executing validation of one immutable Skill version.
+    SkillValidation,
 }
 
 impl OperationKind {
     /// Every operation kind in stable storage order.
-    pub const ALL: &'static [Self] = &[Self::KnowledgeErasure];
+    pub const ALL: &'static [Self] = &[Self::KnowledgeErasure, Self::SkillValidation];
 
     /// Stable wire/storage name.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::KnowledgeErasure => "knowledge_erasure",
+            Self::SkillValidation => "skill_validation",
         }
     }
 }
@@ -64,10 +73,14 @@ pub enum OperationState {
     Running,
     /// Completed successfully; terminal.
     Succeeded,
-    /// A retryable or terminal execution failure, as recorded by attempts.
+    /// Waiting for a bounded retry after a failed execution attempt.
     Failed,
     /// Policy or legal hold deliberately prevents execution.
     Blocked,
+    /// A caller cancelled the operation before its effect committed.
+    Cancelled,
+    /// The bounded retry budget was exhausted; terminal.
+    DeadLettered,
 }
 
 impl OperationState {
@@ -78,6 +91,8 @@ impl OperationState {
         Self::Succeeded,
         Self::Failed,
         Self::Blocked,
+        Self::Cancelled,
+        Self::DeadLettered,
     ];
 
     /// Stable wire/storage name.
@@ -89,13 +104,18 @@ impl OperationState {
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
             Self::Blocked => "blocked",
+            Self::Cancelled => "cancelled",
+            Self::DeadLettered => "dead_lettered",
         }
     }
 
     /// Whether no worker may claim this row again.
     #[must_use]
     pub const fn is_terminal(self) -> bool {
-        matches!(self, Self::Succeeded | Self::Blocked)
+        matches!(
+            self,
+            Self::Succeeded | Self::Blocked | Self::Cancelled | Self::DeadLettered
+        )
     }
 }
 
@@ -126,18 +146,32 @@ pub struct DurableOperation {
     pub id: DurableOperationId,
     /// Owning tenant.
     pub tenant_id: TenantId,
-    /// VedaFlow change that authorised this work.
-    pub change_id: ProposalId,
+    /// Version of the closed operation-kind contract.
+    pub operation_version: u16,
+    /// VedaFlow change that authorised this work, for governed Knowledge work.
+    pub change_id: Option<ProposalId>,
     /// Domain target, when this operation acts on one Knowledge aggregate.
     pub knowledge_item_id: Option<KnowledgeItemId>,
+    /// Immutable Skill target, for Skill validation.
+    pub skill_version_id: Option<SkillVersionId>,
+    /// Identity whose current authority the worker must re-evaluate.
+    pub requested_by: Option<IdentityId>,
+    /// Time at which the request transaction authorised the operation.
+    pub authorized_at: DateTime<Utc>,
     /// Work family.
     pub kind: OperationKind,
     /// Canonical input digest, never the input plaintext.
     pub input_hash: String,
     /// Current durable state.
     pub state: OperationState,
+    /// Bounded customer-safe progress percentage.
+    pub progress_percent: u8,
     /// Number of worker claims.
     pub attempts: i32,
+    /// Earliest database time at which another attempt may be claimed.
+    pub next_attempt_at: Option<DateTime<Utc>>,
+    /// Caller cancellation request, when present.
+    pub cancel_requested_at: Option<DateTime<Utc>>,
     /// Current lease holder, if running.
     pub lease_owner: Option<String>,
     /// Lease expiry, if running.
@@ -170,6 +204,8 @@ mod tests {
         }
         assert!(OperationState::Succeeded.is_terminal());
         assert!(OperationState::Blocked.is_terminal());
+        assert!(OperationState::Cancelled.is_terminal());
+        assert!(OperationState::DeadLettered.is_terminal());
         assert!(!OperationState::Failed.is_terminal());
         assert!("erase".parse::<OperationKind>().is_err());
     }

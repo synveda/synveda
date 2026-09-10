@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run host-side Compose validators with one provider-independent Node trust set.
+set -eu
+
+unset NODE_OPTIONS NODE_EXTRA_CA_CERTS NODE_TLS_REJECT_UNAUTHORIZED \
+    NODE_USE_SYSTEM_CA NODE_USE_ENV_PROXY SSL_CERT_FILE SSL_CERT_DIR \
+    OPENSSL_CONF OPENSSL_CONF_INCLUDE \
+    OPENSSL_MODULES OPENSSL_ENGINES
+
+# The repository supports Node >=22, where this stable option predates the
+# contract. It removes build-time CA-store variation without enabling ambient
+# proxy routing or accepting an undeclared custom trust root.
+exec node --use-bundled-ca "$@"

@@ -1,0 +1,10 @@
+{
+  "name": "@synveda/compose-browser-acceptance",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One-shot content-free browser acceptance for the CPR-45 Compose fixture",
+  "type": "module",
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  }
+}

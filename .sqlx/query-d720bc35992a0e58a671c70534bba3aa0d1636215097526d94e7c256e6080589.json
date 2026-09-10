@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update operation_outbox\n        set state = 'completed', lease_owner = null, lease_expires_at = null,\n            next_dispatch_at = null, completed_at = coalesce(completed_at, now()),\n            updated_at = now()\n        where tenant_id = $1 and operation_id = $2 and state <> 'completed'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d720bc35992a0e58a671c70534bba3aa0d1636215097526d94e7c256e6080589"
+}

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select pg_catalog.pg_advisory_xact_lock(\n            pg_catalog.hashtextextended(\n                'synveda.scope-grants.principal.v1:' || $1::uuid::text || ':' || $2::text,\n                0\n            )\n        )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pg_advisory_xact_lock",
+        "type_info": "Void"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "05695d5ef7ac9098ee0f953034b39695c3b33d2648cc74e74e498ee1f9c22be0"
+}

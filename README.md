@@ -10,7 +10,9 @@ gateway remains the authority boundary.
 
 > **Production status: not ready.** The context-platform behaviour has strong
 > deterministic, tenancy and product evidence, but release artefact parity,
-> backup/PITR and key-custody restore evidence are P0 gaps. The gateway is also
+> production backup/PITR and key-custody ceremony evidence are P0 gaps. The
+> Docker reference has deterministic logical recovery tests, not a live or
+> production restore drill. The gateway is also
 > single-replica and restart-shaped. See
 > [Production readiness](docs/PRODUCTION_READINESS.md) for evidence and exit
 > criteria. Passing CI is not a production-readiness claim.
@@ -84,8 +86,8 @@ configuration is not lifecycle support.
 
 The current top-level gaps are deliberately explicit:
 
-- the release workflow does not publish the chart and CNPG-compatible image
-  pair named by Helm as one signed artefact set;
+- no tagged release has published and pull-verified the chart, five deployment
+  images and browser-acceptance fixture; none is signed;
 - no production backup, WAL archive, PITR, restore drill, RPO or RTO exists;
 - Helm can now reference an externally owned local key Secret, but custody,
   KEK rotation and joint database/key restore have not passed a production
@@ -107,21 +109,28 @@ here.
 
 ## Try it locally
 
-For source development you need the pinned Rust toolchain, Node/pnpm, Docker and
-GNU Make:
+The canonical local deployment needs Docker Engine 28+, Docker Compose 2.33.1+,
+Node.js 22+, OpenSSL and GNU Make. Configure the development hostnames first as
+described in [deploy/compose/README.md](deploy/compose/README.md), then use the
+same lifecycle exercised by the Docker reference:
 
 ```sh
-make dev-up
-make smoke
-make dev-down
+make compose-config
+make compose-up
+make compose-smoke
+make compose-down
 ```
 
-The first start builds the Postgres image and may download the optional BGE-M3
-embedding model. Named volumes persist until explicitly removed.
+The gateway, worker, production-mode Keycloak, PostgreSQL, reverse proxy and
+private OpenTelemetry Collector all run in containers. Named volumes persist
+until the explicitly confirmed `make compose-reset` operation.
 
-For the installed local profile and its key-custody warning, follow
-[docs/INSTALL.md](docs/INSTALL.md). Release archives are currently unsigned;
-verify checksums, and do not treat the installed profile as production-ready.
+For the digest-bound packaged Docker reference, install layout and key-custody
+warning, follow [docs/INSTALL.md](docs/INSTALL.md). Release archives are
+currently unsigned; verify checksums, and do not treat the reference bundle as
+production-ready. The accepted target for the Docker-first portable reference is
+[docs/DEPLOYMENT_CONTRACT.md](docs/DEPLOYMENT_CONTRACT.md); CPR-45 remains open
+until its clean-volume, identity, worker and recovery acceptance passes.
 
 Runnable feature acceptance lives under [`demos/`](demos/). Useful current
 entry points include:
@@ -169,26 +178,36 @@ The dependency direction is enforced:
 ```text
 types ← crypto ← {policy, store, identity, audit, vedaflow}
       ← {retrieval, ingest} ← gateway
+gateway/store ← synveda-apalis (optional deployment leaf)
 ```
 
-Adapters depend only on the public API. SQL remains in `synveda-store`, static
-and sqlx compile-time checked. The schema is the single epoch-3
+No core or public-contract crate imports the optional execution leaf. Ordinary
+client adapters depend only on the public API. All Synveda authoritative-schema
+SQL remains in `synveda-store`, static and sqlx compile-time checked. ADR-0102's
+optional Apalis leaf alone owns bounded bootstrap and verification SQL for its
+separate disposable transport database; no core or public crate imports that
+provider boundary. The schema is the single epoch-3
 `0001_context_platform.sql` baseline; pre-cut databases are refused with a
 destructive-reset instruction and no compatibility migrator.
 
 Repository layout:
 
 ```text
-crates/       13 Rust crates: domain, trust, persistence and application layers
+crates/       14 Rust crates: domain, trust, persistence and application layers
 adapters/     client integrations and conformance fixtures
 console/      generated-contract React application
 policies/     Cedar policy packs
-deploy/       development, release/installed and Helm shapes
+deploy/       canonical Docker reference, evaluation fixtures and Helm
 demos/        runnable acceptance evidence
 evals/        scenarios, corpora and committed baselines
 docs/         current contracts, feature inventory/open briefs, ADRs and OpenAPI
 scripts/      generation and CI consistency checks
 ```
+
+Deployment shapes implement one provider-neutral contract; they do not select
+product editions. Docker Compose is the accepted single-host reference target,
+and later Helm work maps the same commands, configuration, OIDC, OTLP and
+backup semantics to native primitives rather than translating Compose YAML.
 
 ## Documentation
 
@@ -201,7 +220,6 @@ scripts/      generation and CI consistency checks
 - [Client support](docs/CLIENT_SUPPORT.md)
 - [Benchmarks and evaluation limits](docs/BENCHMARKS.md)
 - [ADR index](docs/adr/README.md)
-- [Schema hard-cut inventory](docs/implementation/context-hard-cut-inventory.md)
 - [Generated OpenAPI](docs/api/openapi.json)
 
 ## Contributing

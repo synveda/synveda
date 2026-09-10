@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select operation.id, operation.operation_version, operation.state, operation.attempts,\n               operation.lease_owner, skill.governing_scope_id\n        from durable_operations operation\n        join operation_outbox outbox\n          on outbox.tenant_id = operation.tenant_id\n         and outbox.operation_id = operation.id\n         and outbox.operation_version = operation.operation_version\n        join skill_versions version\n          on version.tenant_id = operation.tenant_id\n         and version.id = operation.skill_version_id\n        join skills skill\n          on skill.tenant_id = version.tenant_id and skill.id = version.skill_id\n        where operation.tenant_id = $1 and operation.kind = 'skill_validation'\n          and operation.cancel_requested_at is null\n          and outbox.submission_failures >= $2\n          and (\n              (operation.state in ('pending', 'failed')\n                  and operation.next_attempt_at <= statement_timestamp())\n              or (operation.state = 'running'\n                  and operation.lease_expires_at <= statement_timestamp())\n          )\n          and (\n              (outbox.state = 'pending'\n                  and outbox.next_dispatch_at <= statement_timestamp())\n              or (outbox.state = 'claimed'\n                  and outbox.lease_expires_at <= statement_timestamp())\n          )\n        order by outbox.next_dispatch_at nulls first, outbox.operation_id\n        for update of operation, outbox skip locked\n        limit 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "operation_version",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "lease_owner",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "governing_scope_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "57b285b98bc3a6c8f97581c95f2e252d4c7dbcc1e6c6d358eafa1ec8f0449d4e"
+}

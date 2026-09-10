@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into public.schema_metadata (\n            id, epoch, baseline_revision, migration_head, created_by_version\n        )\n        values (true, $1, $2, $3, $4)\n        on conflict (id) do update\n            set migration_head = excluded.migration_head,\n                updated_at     = pg_catalog.statement_timestamp()\n        returning epoch              as \"epoch!\",\n                  baseline_revision  as \"baseline_revision!\",\n                  migration_head     as \"migration_head!\",\n                  created_at         as \"created_at!\",\n                  created_by_version as \"created_by_version!\",\n                  updated_at         as \"updated_at!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "epoch!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "baseline_revision!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "migration_head!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_by_version!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3c98fbbd3b799b17df3d739079188ccb32f4b3b16cb184ffc0a09e5209e253e7"
+}

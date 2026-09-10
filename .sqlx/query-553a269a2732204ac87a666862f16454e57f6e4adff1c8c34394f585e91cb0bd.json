@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "drop schema if exists synveda_cli_role_drift cascade",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "553a269a2732204ac87a666862f16454e57f6e4adff1c8c34394f585e91cb0bd"
+}

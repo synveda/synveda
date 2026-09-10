@@ -1,0 +1,151 @@
+#!/bin/bash -p
+unset BASH_ENV ENV CDPATH GLOBIGNORE PS4
+set +x
+set -eu
+umask 077
+
+test_dir=$(mktemp -d /tmp/synveda-keycloak-authority-stage-test.XXXXXX)
+test_name=setup
+cleanup() {
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "Keycloak authority stage self-test failed at $test_name" >&2
+    fi
+    rm -f -- "$test_dir"/*
+    rmdir -- "$test_dir"
+    exit "$status"
+}
+trap cleanup EXIT HUP INT TERM
+
+. /tmp/synveda-authority-stage
+
+run_case() {
+    case_status=$1
+    expected_result=$2
+    expected_stage=$3
+    stdout_fixture=$4
+    stderr_fixture=$5
+    rm -f -- "$test_dir/scoped-authority.out" \
+        "$test_dir/scoped-authority.error"
+    case "$stdout_fixture" in
+        empty) : > "$test_dir/scoped-authority.out" ;;
+        sentinel) printf '%s\n' 'forbidden-output-sentinel' \
+            > "$test_dir/scoped-authority.out" ;;
+        *) return 1 ;;
+    esac
+    case "$stderr_fixture" in
+        empty) : > "$test_dir/scoped-authority.error" ;;
+        exact) printf '%s\n' 'keycloak-projection: input was refused' \
+            > "$test_dir/scoped-authority.error" ;;
+        extra) printf '%s\n%s\n' 'keycloak-projection: input was refused' \
+            'forbidden-secret-sentinel' > "$test_dir/scoped-authority.error" ;;
+        missing-newline) printf '%s' 'keycloak-projection: input was refused' \
+            > "$test_dir/scoped-authority.error" ;;
+        *) return 1 ;;
+    esac
+    scoped_authority_stage=unclassified
+    if synveda_finish_scoped_authority_probe "$test_dir" "$case_status"; then
+        case_result=0
+    else
+        case_result=1
+    fi
+    [ "$case_result" -eq "$expected_result" ] && \
+        [ "$scoped_authority_stage" = "$expected_stage" ] && \
+        [ ! -e "$test_dir/scoped-authority.out" ] && \
+        [ ! -L "$test_dir/scoped-authority.out" ] && \
+        [ ! -e "$test_dir/scoped-authority.error" ] && \
+        [ ! -L "$test_dir/scoped-authority.error" ]
+}
+
+test_name=success
+run_case 0 0 complete empty empty
+test_name=success-output-refusal
+run_case 0 1 runtime-output sentinel empty
+
+stage_code=20
+for stage_name in \
+    token-http token-envelope jwks-http jwks-signature token-claims \
+    accessible-realms target-realm master-inventory master-self-query \
+    master-self master-federated-identities master-credentials master-clients \
+    master-session-stats deny-create-realm deny-create-master-user \
+    deny-update-master-self deny-add-master-realm-role proof-deadline cleanup \
+    token-contract refresh-contract; do
+    test_name=semantic-$stage_name
+    run_case "$stage_code" 1 "$stage_name" empty exact
+    stage_code=$((stage_code + 1))
+done
+[ "$stage_code" -eq 42 ]
+
+test_name=generic-runtime
+run_case 1 1 generic-runtime empty exact
+test_name=deadline
+run_case 124 1 deadline empty empty
+test_name=signal-kill
+run_case 137 1 signal empty empty
+test_name=signal-term
+run_case 143 1 signal empty empty
+test_name=unknown-code
+run_case 42 1 runtime-output empty exact
+test_name=semantic-empty-error
+run_case 20 1 runtime-output empty empty
+test_name=semantic-extra-error
+run_case 20 1 runtime-output empty extra
+test_name=semantic-missing-newline
+run_case 20 1 runtime-output empty missing-newline
+test_name=semantic-stdout
+run_case 20 1 runtime-output sentinel exact
+test_name=timeout-output
+run_case 124 1 runtime-output empty exact
+
+test_name=missing-capture
+: > "$test_dir/scoped-authority.error"
+scoped_authority_stage=unclassified
+if synveda_finish_scoped_authority_probe "$test_dir" 0; then
+    exit 1
+fi
+[ "$scoped_authority_stage" = runtime-output ] && \
+    [ ! -e "$test_dir/scoped-authority.out" ] && \
+    [ ! -e "$test_dir/scoped-authority.error" ]
+
+test_name=symlink-capture
+: > "$test_dir/capture-target"
+ln -s "$test_dir/capture-target" "$test_dir/scoped-authority.out"
+: > "$test_dir/scoped-authority.error"
+scoped_authority_stage=unclassified
+if synveda_finish_scoped_authority_probe "$test_dir" 0; then
+    exit 1
+fi
+[ "$scoped_authority_stage" = runtime-output ] && \
+    [ ! -e "$test_dir/scoped-authority.out" ] && \
+    [ ! -L "$test_dir/scoped-authority.out" ] && \
+    [ ! -e "$test_dir/scoped-authority.error" ] && \
+    [ -f "$test_dir/capture-target" ]
+rm -f -- "$test_dir/capture-target"
+
+test_name=stderr-symlink-capture
+: > "$test_dir/capture-target"
+: > "$test_dir/scoped-authority.out"
+ln -s "$test_dir/capture-target" "$test_dir/scoped-authority.error"
+scoped_authority_stage=unclassified
+if synveda_finish_scoped_authority_probe "$test_dir" 0; then
+    exit 1
+fi
+[ "$scoped_authority_stage" = runtime-output ] && \
+    [ ! -e "$test_dir/scoped-authority.out" ] && \
+    [ ! -e "$test_dir/scoped-authority.error" ] && \
+    [ ! -L "$test_dir/scoped-authority.error" ] && \
+    [ -f "$test_dir/capture-target" ]
+rm -f -- "$test_dir/capture-target"
+
+test_name=special-capture
+mkfifo "$test_dir/scoped-authority.out"
+: > "$test_dir/scoped-authority.error"
+scoped_authority_stage=unclassified
+if synveda_finish_scoped_authority_probe "$test_dir" 0; then
+    exit 1
+fi
+[ "$scoped_authority_stage" = runtime-output ] && \
+    [ ! -e "$test_dir/scoped-authority.out" ] && \
+    [ ! -e "$test_dir/scoped-authority.error" ]
+
+echo "Keycloak authority stage self-test passed"

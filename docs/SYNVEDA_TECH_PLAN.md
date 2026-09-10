@@ -26,8 +26,8 @@ it does not substitute for the still-open restore and failover evidence.
 | Sparse / lexical | Tenant-bound **Postgres FTS** | PostgreSQL | Lexical rank stays transactionally aligned with current Knowledge revisions; hybrid fusion with pgvector uses RRF in the gateway |
 | Graph | Immutable **KnowledgeRelation** rows in plain Postgres | — | Current ContextRun expansion starts from authorised Knowledge anchors, is bounded to two hops, and re-authorises every endpoint/path. Apache AGE and the Record graph are removed; a different engine requires new evidence and an ADR. |
 | Governed scopes | Plain Postgres (`scopes` + closure table) | — | Five parent-shapes, no organisational rank and no graph DB needed for tenancy |
-| Durable jobs | Leased tenant-bound Postgres tables | PostgreSQL | Capture, erasure, import/export, skill/tool tests and re-encryption share one observable idempotent operation model |
-| Workflow (complex) | **Temporal** | MIT | Optional boundary for future long-running cross-service workflows; current product mutations remain in the database-backed job model |
+| Durable jobs | Leased tenant-bound Postgres tables | PostgreSQL | PostgreSQL remains operation authority. CPR-45 adds a forced-RLS operation/attempt/outbox seam and evaluates Apalis 0.7.4 on one non-executing Skill validation; existing job families are not silently reclassified as one complete model. |
+| Workflow scheduler | **None in the current target** | — | No executable Temporal consumer exists. CPR-45 deleted the stale deployment residue; a future scheduler must earn a provider-neutral boundary through evidence and an ADR. |
 | Bitemporal versioning | Native tables (`tx_from/tx_to`, `valid_from/valid_to`) + triggers | — | No extension dependency; queryable "as-of" both dimensions |
 
 ### 1.2 Identity & policy — Rust-first
@@ -36,8 +36,8 @@ it does not substitute for the still-open restore and failover evidence.
 |---|---|---|---|
 | Authorisation (PDP) | **Cedar** (embedded) | Apache-2.0 | Amazon's policy language, **pure Rust, in-process** — no network hop on the hot read path; formally verified evaluator; policies-as-data suits VedaFlow versioning |
 | Relationship checks | Cedar entities and governed scope ancestry | Apache-2.0 | The current runtime has one authority engine. AUTHZ-6 tracks an OpenFGA spike; no adapter is implemented or claimed. |
-| Why not OPA | Rego is powerful but adds a Go sidecar + network hop on every context decision; Cedar embeds in the gateway binary | | OPA remains a possible adapter for shops that mandate it, not a shipped runtime |
-| OIDC provider (bundled dev/SMB) | **Rauthy** (Rust, Apache-2.0) | Apache-2.0 | Single-binary Rust OIDC server for SMB "batteries included" mode |
+| Why not OPA | Rego is powerful but adds a Go sidecar + network hop on every context decision; Cedar embeds in-process in the product binaries | | OPA remains a possible adapter for shops that mandate it, not a shipped runtime |
+| OIDC provider (bundled reference) | **Keycloak** (Apache-2.0) | Apache-2.0 | ADR-0102 selects production-mode Keycloak behind the generic OIDC/PKCE boundary. No bundled-provider compatibility mode exists. |
 | Enterprise IdP | Bring-your-own: Entra ID, Okta, Keycloak, Zitadel — standard OIDC + SCIM 2.0 | — | Synveda is an OIDC *client*, never the source of truth for identity |
 | Secrets/PII detection | Rust regex+ML pipeline; **gitleaks** ruleset port for secrets | MIT | Runs in `synveda-ingest` before persistence |
 
@@ -49,13 +49,14 @@ it does not substitute for the still-open restore and failover evidence.
 | ORM/queries | **sqlx** (compile-time checked SQL — auditability again) |
 | Embeddings serving | Optional **text-embeddings-inference** serving BGE-M3 for the measured dense path. Production model support, generation cutover and re-embedding remain open. |
 | Summarisation/extraction LLM | Pluggable: Claude API, or self-hosted via vLLM for air-gapped; behind `Extractor` trait |
-| Observability | OpenTelemetry on session, capture, Knowledge and ContextRun paths; Prometheus; Grafana/Jaeger |
-| Packaging | One gateway runtime in source/installed Compose and Helm. Helm currently enforces one gateway replica and makes no regional-data-plane claim. |
+| Observability | OpenTelemetry remains the application trace contract. Canonical Compose keeps application metrics off public proxy routes and optionally uses a closed private Collector scrape/fan-in with a digest-pinned, loopback-only Prometheus UI and 72-hour/1-GB TSDB block-retention thresholds (not a disk quota). Public-PKI external OTLP export is configured only through that private Collector. The customer-safe Operations route exposes four policy-visible aggregates and states which signals remain unavailable. Live validation remains open. |
+| Packaging | CPR-45 implementation, with live validation pending: one product image/configuration contract and Docker Compose as the single-host reference. Later Helm implements the same contract and currently enforces one gateway and one core-worker replica. |
 
 ### 1.4 Explicit non-choices
 
 - **No Elasticsearch/OpenSearch** (Postgres FTS is the current lexical leg),
-  **no Redis**, **no Kafka** (leased Postgres jobs), and **no Neo4j,
+  **no Redis**, **no Kafka** (Postgres-backed scheduled work; Capture uses a
+  fenced lease), and **no Neo4j,
   SurrealDB or Memgraph** in the current runtime. A future engine needs an
   evidenced feature and accepted ADR; no speculative trait is promised here.
 
@@ -148,7 +149,7 @@ Required approvals resolve from **(asset type × sensitivity × target scope × 
 | Skill version or binding change | live pack matrix, including the invariant security-reviewer requirement; skills are treated like code because they are |
 | Anything `restricted` sensitivity | + distinct `reviewer`; the author cannot review |
 | Policy relaxation under regulated-strict | distinct approvers, separate effect actor + hard expiry mandatory |
-| SMB `standard` pack | most of the above collapses to single-approver or auto-approve |
+| Small-team `standard` pack | most of the above collapses to single-approver or auto-approve |
 
 Reviews happen in Advanced → Reviews or via the proposal CLI. A verdict binds
 the exact commit the reviewer read; the gateway refuses a moved commit before
@@ -212,13 +213,14 @@ global `/v1/recall` route and no direct-store adapter path.
 
 ---
 
-## 4. Deployment profiles
+## 4. Deployment shapes
 
-| | SMB ("one command") | Enterprise regulated |
+| | Docker reference | Later Helm/on-prem |
 |---|---|---|
-| Footprint | `docker compose up`: gateway binary, Postgres + pgvector, Rauthy, TEI and optional Temporal | Helm: one gateway replica, CloudNativePG + pgvector, optional TEI, customer IdP |
+| Footprint | Reverse proxy, separate gateway/worker, PostgreSQL + pgvector, production-mode Keycloak and private OTel Collector; optional local visibility, Apalis experiment and backup-test services. The Compose semantic profile remains pending; TEI is available in the isolated evaluation fixture. | The same product commands/configuration with Kubernetes-native ingress, jobs, secrets, networks and external dependencies; optional TEI is already charted. |
 | Product behaviour | Governed Configuration documents select policy, capture and context behaviour; deployment shape does not. | The same runtime and Configuration model; no edition branch. |
-| Residency | Single deployment region | Single deployment region; OPS-3 regional routing is not implemented. |
+| Status | Accepted target under CPR-45; no validation claim until clean Linux + desktop acceptance passes. | Existing chart remains one gateway replica and is not promoted by mechanically translating Compose. |
+| Residency | One host/region; no host-loss tolerance. | Single deployment region; OPS-3 regional routing is not implemented. |
 | Keys | local deployment KEK wrapping deployment and per-tenant DEKs | the same shipped local provider; cloud KMS/HSM/CMK and WORM custody are extension points, not current support |
 
 ---
@@ -259,9 +261,9 @@ global `/v1/recall` route and no direct-store adapter path.
   graph-links); degrade gracefully. (Was "AGE maturity"; ADR-0043 removed the engine risk by
   removing the engine. Governed Configuration can set the graph budget to zero;
   there is no Cargo feature flag or second graph runtime.)
-- **Temporal operational weight** → no core path forks by deployment profile:
-  sessions and capture run in the gateway/Postgres runtime; Temporal remains
-  extension infrastructure until a feature proves a workflow needs it.
+- **Background execution coupling** → PostgreSQL remains operation authority,
+  workers re-enter forced-RLS tenant transactions and experimental executors
+  receive opaque identifiers only. There is no current Temporal target.
 - **Extraction quality** → capture creates reviewable candidates only;
   acceptance enters the typed Knowledge/VedaFlow boundary. The deterministic
   evaluation suite measures extraction quality, while model-backed evidence is

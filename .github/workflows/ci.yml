@@ -29,8 +29,8 @@ jobs:
     timeout-minutes: 30
     env:
       # sqlx macros compile against the committed .sqlx query cache; CI has no
-      # database. Regenerate with `cargo sqlx prepare --workspace -- --all-targets`
-      # against the dev compose Postgres whenever queries or migrations change.
+      # database. Regenerate and immediately verify through the fresh exact-role
+      # fixture with `SYNVEDA_DB_TEST_TASK=sqlx-prepare bash scripts/db-test.sh`.
       SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
@@ -147,11 +147,9 @@ jobs:
         with:
           node-version: 22
 
-      # Postgres only; no IdP and no model server (ADR-0028 decision 6).
-      - name: Start Postgres
-        run: docker compose -f deploy/compose/docker-compose.yml up --detach --wait postgres
-
       - name: Run the suite against the gate
+        # `make eval` owns one fresh exact-role PostgreSQL fixture. No legacy
+        # owner database, IdP or model server participates in this job.
         run: mkdir -p eval-report && make eval
         env:
           EVAL_REPORT: eval-report/report.json
@@ -165,40 +163,20 @@ jobs:
           path: eval-report/
           if-no-files-found: warn
 
-  # OPS-2's acceptance criterion (ADR-0062 decision 7). The only job that
-  # asks the gateway *image* to serve: ADR-0055 built it and could not
-  # exercise it, because the bundled IdP's issuer is a `localhost` URL and
-  # RFC 6761 makes that the caller's own loopback. A Service DNS name is a
-  # real name, so in a cluster the gateway and the client resolve the
-  # issuer to the same place.
-  #
-  # It asserts a governed round trip, a CloudNativePG failover and a live
-  # RLS backstop — never readiness. "Every pod is Ready" is the shape
-  # EVAL-3's first complete run had: a validity guard that passed when
-  # there was nothing to validate.
+  # OPS-2's live Kind acceptance (ADR-0062 decision 7) proves exact issuer
+  # resolution, a governed round trip, CloudNativePG failover and the runtime
+  # RLS backstop. Pod readiness alone is not acceptance evidence.
   #
   # Budget: 20 minutes, of which the cold Rust release build inside the
   # image is most. If it cannot hold that once layer caching settles, the
   # split is chart-lint on every PR (it already runs in `layering`) and
   # this on a nightly — the same division `eval` makes between its
   # deterministic half and its retrieval half, for the same reason.
-  # OPS-8's acceptance criterion (ADR-0065). The only job that exercises
-  # the *installer* — `scripts/install.sh` itself, against packaged release
-  # artefacts, with `cargo`, `rustc` and `rustup` shadowed by shims that
-  # exit 127. That last part is what makes "no Rust toolchain" a property of
-  # the run rather than a sentence in a README.
-  #
-  # It is also the only job that would notice `deploy/release/` drifting
-  # from the product: it installs from the tarball `scripts/package-release.sh`
-  # produces, not from the tree (ADR-0065 decision 3 chose this over a lint,
-  # because a checker comparing two compose files can only prove they are
-  # similar).
-  #
-  # Budget: 45 minutes, and **unmeasured on a GitHub runner** — the same
-  # honesty OPS-2 recorded about its own. The variables are a cold Rust
-  # release build and the Postgres image, which compiles AGE from source.
-  # If it cannot hold, this moves to a nightly and the unit tests around
-  # `Profile` stay on every PR.
+  # OPS-8/CPR-45 release contract. It executes the real installer against a
+  # freshly packaged digest-bound reference, proves repeat installation keeps
+  # mutable state, and checks the current schema/OpenAPI/Helm boundaries. It
+  # does not publish or pull release images and therefore is not live install
+  # evidence.
   release-install:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -222,27 +200,15 @@ jobs:
           --filter @synveda/console...
           --filter @synveda/claude-code-adapter...
       - run: demos/ops-8-release-install.sh
-      - name: What the install looked like
-        if: failure()
-        run: docker ps -a || true
 
   # OPS-9's acceptance demo (ADR-0066). Separate from `release-install`
   # rather than appended to it, because the two answer different questions
   # and a job that answered both would report neither: OPS-8 asks whether a
   # stranger can install this, and OPS-9 asks what they see once they have.
   #
-  # It runs against a dev stack rather than a packaged release — the demo's
-  # own header says why, and `package-release.sh` covers the part this
-  # leaves out by asserting the bundle carries the seeder, executable and
-  # syntactically valid.
-  #
-  # This job's prerequisites are explicit because its first run had two that
-  # were not, and both were invisible on the laptop it was written on: the
-  # `postgres` image (compose skips a `build:` when the image is already
-  # present, so a missing build context only surfaces where `make dev-up` has
-  # never run) and the console bundle. That is OPS-8's own recorded finding —
-  # "a machine where `node_modules` had made it invisible" — arriving a second
-  # time, which is the argument for this job existing rather than against it.
+  # It runs against the same fresh exact-role database fixture as current
+  # feature demos. The release-install gate separately owns packaged-reference
+  # acceptance; this job measures only the authenticated product experience.
   beta-demo:
     runs-on: ubuntu-latest
     timeout-minutes: 30

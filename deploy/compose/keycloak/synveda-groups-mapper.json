@@ -1,0 +1,14 @@
+{
+  "name": "synveda-groups",
+  "protocol": "openid-connect",
+  "protocolMapper": "oidc-group-membership-mapper",
+  "consentRequired": false,
+  "config": {
+    "claim.name": "groups",
+    "full.path": "false",
+    "id.token.claim": "true",
+    "access.token.claim": "true",
+    "userinfo.token.claim": "false",
+    "introspection.token.claim": "false"
+  }
+}

@@ -138,32 +138,18 @@ pub async fn create(
     Json(body): Json<wire::UserResource>,
 ) -> Result<Response, ScimError> {
     let attributes = attributes_of(&body)?;
-    let tenant_id = auth.tenant.id;
-    // Asked before anything is written: a second live record for somebody
-    // the product already knows is the directory disagreeing with itself,
-    // and a `409` after the create had committed would be a refusal for a
-    // resource that now exists.
-    if let Some(held) = reconcile::conflicting_record(&state, &auth.tenant, &attributes).await? {
-        return Err(ScimError::typed(
-            StatusCode::CONFLICT,
-            "uniqueness",
-            format!(
-                "this person already has a directory record here ({held}); \
-                 update that one rather than creating a second"
-            ),
-        ));
-    }
-    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let created = directory::create_user(&mut *tx, DirectoryUserId::new(), tenant_id, &attributes)
-        .await
-        .map_err(|error| ScimError::from_taxonomy(&error))?;
-    tx.commit().await.map_err(|err| {
-        ScimError::from_taxonomy(&synveda_types::Error::Storage {
-            message: format!("commit user create: {err}"),
-        })
-    })?;
-
-    let user = project(&state, &auth, created).await?;
+    // Mirror creation and its identity projection are one correspondence-
+    // fenced transaction. A concurrent create therefore either commits the
+    // complete resource or returns 409 without leaving an unlinked row.
+    let user = reconcile::create_and_reconcile(
+        &state,
+        &auth.tenant,
+        reconcile::DirectorySource::Scim(auth.credential.id),
+        DirectoryUserId::new(),
+        &attributes,
+    )
+    .await
+    .map_err(|error| ScimError::from_taxonomy(&error))?;
     Ok(ScimJson(
         StatusCode::CREATED,
         wire::UserResource::of(&user, &base_url(&state)),
@@ -182,7 +168,7 @@ pub async fn replace(
     let attributes = attributes_of(&body)?;
     let tenant_id = auth.tenant.id;
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let replaced = directory::replace_user(&mut *tx, tenant_id, id, &attributes)
+    let replaced = directory::replace_user(&mut tx, tenant_id, id, &attributes)
         .await
         .map_err(|error| ScimError::from_taxonomy(&error))?
         .ok_or_else(ScimError::not_found)?;
@@ -211,6 +197,11 @@ pub async fn patch(
     super::require_patch_schema(&body)?;
     let tenant_id = auth.tenant.id;
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    // PATCH derives its replacement from the retained row. Hold the
+    // correspondence fence before that read so a concurrent deactivation
+    // cannot commit between the snapshot and the replacement and be silently
+    // overwritten by an unrelated display-name patch.
+    directory::lock_correspondence(&mut tx, tenant_id).await?;
     let current = directory::user(&mut *tx, tenant_id, DIRECTORY_SOURCE, id)
         .await?
         .ok_or_else(ScimError::not_found)?;
@@ -219,7 +210,7 @@ pub async fn patch(
     for operation in &body.operations {
         apply_operation(&mut attributes, operation)?;
     }
-    let patched = directory::replace_user(&mut *tx, tenant_id, id, &attributes)
+    let patched = directory::replace_user(&mut tx, tenant_id, id, &attributes)
         .await
         .map_err(|error| ScimError::from_taxonomy(&error))?
         .ok_or_else(ScimError::not_found)?;
@@ -253,12 +244,16 @@ pub async fn delete(
     let id = parse_id(&id)?;
     let tenant_id = auth.tenant.id;
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    // DELETE also derives a full replacement. Its read and deactivation are
+    // one correspondence-fenced decision so it cannot overwrite newer mirror
+    // attributes with a stale snapshot.
+    directory::lock_correspondence(&mut tx, tenant_id).await?;
     let current = directory::user(&mut *tx, tenant_id, DIRECTORY_SOURCE, id)
         .await?
         .ok_or_else(ScimError::not_found)?;
     let mut attributes = current_attributes(&current);
     attributes.active = false;
-    let deactivated = directory::replace_user(&mut *tx, tenant_id, id, &attributes)
+    let deactivated = directory::replace_user(&mut tx, tenant_id, id, &attributes)
         .await?
         .ok_or_else(ScimError::not_found)?;
     tx.commit().await.map_err(|err| {

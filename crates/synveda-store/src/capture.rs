@@ -34,6 +34,24 @@ pub const CAPTURE_SCAN_LIMIT: i64 = 500;
 /// Low-level capture persistence transitions.
 pub const CAPTURE_MUTATIONS_TOTAL: &str = "synveda_capture_mutations_total";
 
+fn validate_lease_owner(lease_owner: &str) -> Result<()> {
+    if lease_owner.trim().is_empty() || lease_owner.chars().count() > 255 {
+        return Err(Error::Invalid {
+            message: "capture lease owner must be non-blank and at most 255 characters".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn stale_claim(batch: &CaptureBatch) -> Error {
+    Error::Conflict {
+        message: format!(
+            "capture batch {} attempt {} is no longer the current lease claim",
+            batch.id, batch.attempts
+        ),
+    }
+}
+
 /// Result of asking to freeze the current eligible event snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrozenBatch {
@@ -559,11 +577,7 @@ pub async fn claim_batch(
     lease_owner: &str,
     lease_seconds: i64,
 ) -> Result<Option<CaptureBatch>> {
-    if lease_owner.trim().is_empty() || lease_owner.chars().count() > 255 {
-        return Err(Error::Invalid {
-            message: "capture lease owner must be non-blank and at most 255 characters".to_owned(),
-        });
-    }
+    validate_lease_owner(lease_owner)?;
     let row = sqlx::query_as!(
         BatchRow,
         r#"
@@ -574,7 +588,8 @@ pub async fn claim_batch(
               and source_kind = 'session'
               and attempts < $2
               and (state = 'pending'
-                   or (state = 'running' and lease_expires_at <= now()))
+                   or (state = 'running'
+                       and lease_expires_at <= statement_timestamp()))
             order by created_at, id
             for update skip locked
             limit 1
@@ -582,7 +597,8 @@ pub async fn claim_batch(
         update capture_batches batch
            set state = 'running', attempts = attempts + 1,
                lease_owner = $3,
-               lease_expires_at = now() + make_interval(secs => $4::double precision),
+               lease_expires_at = statement_timestamp()
+                                  + make_interval(secs => $4::double precision),
                started_at = coalesce(started_at, now()), updated_at = now(),
                error_code = null
           from candidate
@@ -604,6 +620,94 @@ pub async fn claim_batch(
     .fetch_optional(&mut *conn)
     .await
     .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
+/// Extends one exact, still-live claim.
+///
+/// The attempt counter is the fencing token. Reusing an owner string cannot
+/// revive a stale executor after expiry or reclaim, and an executor that can
+/// no longer prove renewal must discard any dependency result it obtained.
+pub async fn renew_batch(
+    conn: &mut PgConnection,
+    batch: &CaptureBatch,
+    lease_owner: &str,
+    lease_seconds: i64,
+) -> Result<()> {
+    validate_lease_owner(lease_owner)?;
+    let renewed = sqlx::query_scalar!(
+        r#"
+        update capture_batches
+           set lease_expires_at = statement_timestamp()
+                                  + make_interval(secs => $5::double precision),
+               updated_at = now()
+         where tenant_id = $1 and id = $2 and state = 'running'
+           and lease_owner = $3 and attempts = $4
+           and lease_expires_at > statement_timestamp()
+        returning id
+        "#,
+        batch.tenant_id.as_uuid(),
+        batch.id.as_uuid(),
+        lease_owner,
+        batch.attempts,
+        lease_seconds.clamp(1, 3_600) as f64,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    if renewed.is_none() {
+        return Err(stale_claim(batch));
+    }
+    metrics::counter!(CAPTURE_MUTATIONS_TOTAL, "operation" => "batch_lease_renewed").increment(1);
+    Ok(())
+}
+
+/// Terminally fails one expired claim that exhausted the attempt bound.
+///
+/// A crashed final attempt cannot be claimed again because the attempts
+/// constraint is closed. The worker calls this transition before looking for
+/// new work and appends the content-free failure audit in the same tenant
+/// transaction.
+pub async fn fail_expired_exhausted_batch(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+) -> Result<Option<CaptureBatch>> {
+    let row = sqlx::query_as!(
+        BatchRow,
+        r#"
+        with candidate as (
+            select id
+              from capture_batches
+             where tenant_id = $1 and source_kind = 'session'
+               and state = 'running' and attempts >= $2
+               and lease_expires_at <= statement_timestamp()
+             order by created_at, id
+             for update skip locked
+             limit 1
+        )
+        update capture_batches batch
+           set state = 'failed', lease_owner = null, lease_expires_at = null,
+               error_code = 'lease_expired', completed_at = now(), updated_at = now()
+          from candidate
+         where batch.tenant_id = $1 and batch.id = candidate.id
+        returning batch.id, batch.tenant_id, batch.source_kind, batch.session_id,
+                  batch.import_job_id, batch.scope_id, batch.workspace_id,
+                  batch.project_id, batch.principal_id,
+                  batch.configuration_version_id, batch.configuration_hash,
+                  batch.input_hash, batch.event_count, batch.state,
+                  batch.extractor_method, batch.model_version, batch.attempts,
+                  batch.candidate_count, batch.error_code, batch.created_at,
+                  batch.started_at, batch.completed_at, batch.updated_at
+        "#,
+        tenant_id.as_uuid(),
+        MAX_CAPTURE_ATTEMPTS,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    if row.is_some() {
+        metrics::counter!(CAPTURE_MUTATIONS_TOTAL, "operation" => "batch_failed").increment(1);
+    }
     row.map(TryInto::try_into).transpose()
 }
 
@@ -653,6 +757,7 @@ pub async fn complete_batch(
     model_version: &str,
     candidates: &[NewCaptureCandidate],
 ) -> Result<CaptureBatch> {
+    validate_lease_owner(lease_owner)?;
     if batch.source_kind != CaptureSourceKind::Session
         || batch.session_id.is_none()
         || batch.import_job_id.is_some()
@@ -686,6 +791,40 @@ pub async fn complete_batch(
             });
         }
     }
+    // Fence before writing any candidate rows. A caller that catches the
+    // conflict and commits cannot retain output from an expired or reclaimed
+    // attempt. Holding this row lock also prevents a concurrent reclaimer
+    // from becoming authoritative while this transaction materialises the
+    // candidate set.
+    let row = sqlx::query_as!(
+        BatchRow,
+        r#"
+        update capture_batches
+           set state = 'completed', extractor_method = $5, model_version = $6,
+               candidate_count = $7, lease_owner = null,
+               lease_expires_at = null, completed_at = now(), updated_at = now()
+         where tenant_id = $1 and id = $2 and state = 'running'
+           and lease_owner = $3 and attempts = $4
+           and lease_expires_at > statement_timestamp()
+        returning id, tenant_id, source_kind, session_id, import_job_id,
+                  scope_id, workspace_id, project_id,
+                  principal_id, configuration_version_id, configuration_hash,
+                  input_hash, event_count, state, extractor_method,
+                  model_version, attempts, candidate_count, error_code,
+                  created_at, started_at, completed_at, updated_at
+        "#,
+        batch.tenant_id.as_uuid(),
+        batch.id.as_uuid(),
+        lease_owner,
+        batch.attempts,
+        method,
+        model_version,
+        candidates.len() as i32,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .ok_or_else(|| stale_claim(batch))?;
     for candidate in candidates {
         let content = &candidate.content;
         sqlx::query!(
@@ -771,38 +910,6 @@ pub async fn complete_batch(
             .map_err(storage_error)?;
         }
     }
-    let row = sqlx::query_as!(
-        BatchRow,
-        r#"
-        update capture_batches
-           set state = 'completed', extractor_method = $4, model_version = $5,
-               candidate_count = $6, lease_owner = null,
-               lease_expires_at = null, completed_at = now(), updated_at = now()
-         where tenant_id = $1 and id = $2 and state = 'running'
-           and lease_owner = $3
-        returning id, tenant_id, source_kind, session_id, import_job_id,
-                  scope_id, workspace_id, project_id,
-                  principal_id, configuration_version_id, configuration_hash,
-                  input_hash, event_count, state, extractor_method,
-                  model_version, attempts, candidate_count, error_code,
-                  created_at, started_at, completed_at, updated_at
-        "#,
-        batch.tenant_id.as_uuid(),
-        batch.id.as_uuid(),
-        lease_owner,
-        method,
-        model_version,
-        candidates.len() as i32,
-    )
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(storage_error)?
-    .ok_or_else(|| Error::Conflict {
-        message: format!(
-            "capture batch {} lease is no longer owned by {lease_owner}",
-            batch.id
-        ),
-    })?;
     metrics::counter!(CAPTURE_MUTATIONS_TOTAL, "operation" => "batch_completed").increment(1);
     row.try_into()
 }
@@ -815,18 +922,20 @@ pub async fn fail_batch(
     lease_owner: &str,
     error_code: &str,
 ) -> Result<CaptureBatch> {
+    validate_lease_owner(lease_owner)?;
     let terminal = batch.attempts >= MAX_CAPTURE_ATTEMPTS;
     let row = sqlx::query_as!(
         BatchRow,
         r#"
         update capture_batches
-           set state = case when $4 then 'failed' else 'pending' end,
+           set state = case when $5 then 'failed' else 'pending' end,
                lease_owner = null, lease_expires_at = null,
-               error_code = $5,
-               completed_at = case when $4 then now() else null end,
+               error_code = $6,
+               completed_at = case when $5 then now() else null end,
                updated_at = now()
          where tenant_id = $1 and id = $2 and state = 'running'
-           and lease_owner = $3
+           and lease_owner = $3 and attempts = $4
+           and lease_expires_at > statement_timestamp()
         returning id, tenant_id, source_kind, session_id, import_job_id,
                   scope_id, workspace_id, project_id,
                   principal_id, configuration_version_id, configuration_hash,
@@ -837,18 +946,14 @@ pub async fn fail_batch(
         batch.tenant_id.as_uuid(),
         batch.id.as_uuid(),
         lease_owner,
+        batch.attempts,
         terminal,
         error_code,
     )
     .fetch_optional(&mut *conn)
     .await
     .map_err(storage_error)?
-    .ok_or_else(|| Error::Conflict {
-        message: format!(
-            "capture batch {} lease is no longer owned by {lease_owner}",
-            batch.id
-        ),
-    })?;
+    .ok_or_else(|| stale_claim(batch))?;
     metrics::counter!(CAPTURE_MUTATIONS_TOTAL, "operation" => if terminal {
         "batch_failed"
     } else {

@@ -4,17 +4,18 @@
 # selects personal, team or enterprise product behaviour: those are immutable
 # governed Configuration versions and scope bindings in the one runtime.
 #
-# Five values have no default and the chart refuses to render without them:
-# `gateway.publicUrl`, `embedder`, `oidc.existingSecret`,
-# `kms.existingSecret`, and — if the embedder is `tei` — one of
-# `tei.enabled` or `tei.url`. Each is a decision somebody has to make on
-# purpose; a default would make it silently.
+# Seven values have no default and the chart refuses to render without them:
+# `gateway.publicUrl`, `gateway.databaseExistingSecret`,
+# `worker.databaseExistingSecret`, `embedder`,
+# `oidc.existingSecret`, `kms.existingSecret`, and — if the embedder is `tei`
+# — one of `tei.enabled` or `tei.url`. Each is a decision somebody has to
+# make on purpose; a default would make it silently.
 
 # ── The product image ────────────────────────────────────────────────────
-# Carries both binaries: the gateway serves, and the `synveda` CLI is what
-# the install job and an operator's `kubectl exec` use (ADR-0062 amendment).
+# Carries the gateway, core worker and `synveda` CLI. The install job and an
+# operator's `kubectl exec` use that same immutable artefact (ADR-0102).
 image:
-  repository: synveda/gateway
+  repository: ghcr.io/synveda/product
   # Empty means Chart.appVersion — the chart deploys the release it names.
   tag: ""
   pullPolicy: IfNotPresent
@@ -27,13 +28,11 @@ fullnameOverride: ""
 gateway:
   # There is no `replicas` key, and setting one is an error rather than a
   # no-op. One replica is a property of the process, not a starting point:
-  # pending logins live in memory (`LoginFlow` — a callback on the wrong pod
-  # is a 401 for a login the IdP completed) and the scope-chain cache is
-  # invalidated in-process with no TTL (a scope move handled by one
-  # replica leaves the others composing against the ancestry the mover
-  # left). Both fail silently, which is why this is refused rather than
-  # discouraged. OPS-7 is the feature that lifts it; ADR-0062 decision 4
-  # has the full inventory of what *is* already safe across processes.
+  # pending logins remain process-local, and cross-process policy/entity
+  # convergence has no accepted multi-replica bound. OPS-7 must prove login
+  # handoff and authority-mutation visibility before replicas. This is refused
+  # rather than silently accepted; ADR-0062 decision 4 inventories what is
+  # already safe across processes.
 
   # The externally reachable origin — the ingress host, not the Service.
   # SYNVEDA_PUBLIC_URL is where the gateway builds its /auth/callback
@@ -42,9 +41,27 @@ gateway:
   # that reads like a bug. Required.
   publicUrl: ""
 
-  # The pool the request handlers and the background loops share. Size it
-  # against postgres.maxConnections: this many per gateway, plus whatever
-  # else connects to the cluster, has to fit.
+  # Explicitly admits plaintext application and OIDC origins for disposable
+  # development/test deployments. Leave false for HTTPS reference and hosted
+  # deployments. The chart refuses HTTP without this opt-in and refuses this
+  # opt-in when publicUrl is HTTPS.
+  insecureDevelopmentHttp: false
+
+  # Operator-owned Secret with two distinct keys:
+  #
+  #   DATABASE_URL  postgres://synveda_gateway:<password>@<rw-service>:5432/synveda
+  #   password      the exact password embedded in DATABASE_URL
+  #
+  # Database bootstrap consumes only `password`; preflight and the gateway
+  # mount only `DATABASE_URL`. It must be distinct from both the CNPG
+  # migration-owner Secret and the worker Secret. Required.
+  databaseExistingSecret: ""
+  databaseUrlSecretKey: DATABASE_URL
+  databasePasswordSecretKey: password
+
+  # The synchronous request pool. Size it together with the worker pool
+  # against postgres.maxConnections; migration/operator connections still
+  # need headroom.
   dbMaxConnections: 20
 
   logLevel: info
@@ -54,6 +71,36 @@ gateway:
       memory: 512Mi
     limits:
       memory: 2Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+
+# ── The core worker ─────────────────────────────────────────────────────
+worker:
+  # Existing Secret owned by the operator, with two keys:
+  #
+  #   DATABASE_URL  postgres://synveda_worker:<password>@<rw-service>:5432/synveda
+  #   password      the exact password embedded in DATABASE_URL
+  #
+  # Database bootstrap uses `password` only to create/converge the fixed
+  # `synveda_worker` login. The process mounts only `DATABASE_URL` as a file;
+  # neither value is rendered into the Pod manifest. Required.
+  databaseExistingSecret: ""
+  databaseUrlSecretKey: DATABASE_URL
+  databasePasswordSecretKey: password
+
+  # One worker is deliberate until every owned loop has multi-worker
+  # acceptance. The chart refuses replica keys rather than ignoring them.
+  dbMaxConnections: 8
+  shutdownSeconds: 75
+  logLevel: info
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -78,8 +125,14 @@ ingress:
 # renders a Cluster for an operator that is already there.
 postgres:
   # Built from deploy/helm/postgres/Dockerfile: the CNPG base plus pgvector.
+  # Empty means
+  # ghcr.io/synveda/cnpg-postgres:17.11-synveda-<Chart.appVersion>.
+  # CloudNativePG requires a direct image tag to begin with its PostgreSQL
+  # version; the Synveda release remains paired in the suffix. An operator may
+  # still supply an exact registry reference (preferably the version-bearing
+  # tag plus a digest) explicitly.
   # Epoch 3 has no queue or graph-extension dependency.
-  image: synveda/enterprise-postgres:17
+  image: ""
   instances: 3
   storage:
     size: 100Gi
@@ -112,8 +165,8 @@ oidc:
 # ── Local key custody ────────────────────────────────────────────────────
 kms:
   # Name of an existing Secret holding the local KMS key and its stable
-  # reference. The chart wires custody into the gateway but never creates,
-  # prints or owns the key. Losing it makes every wrapped tenant key
+  # reference. The chart wires custody into gateway and worker but never
+  # creates, prints or owns the key. Losing it makes every wrapped tenant key
   # unrecoverable; back up and restore this Secret outside the database.
   #
   #   kubectl create secret generic synveda-kms \
@@ -169,23 +222,25 @@ extractor:
 
 # ── The install job ──────────────────────────────────────────────────────
 install:
-  # Runs `synveda db migrate` under the cluster's superuser, then grants the
-  # gateway's login role membership of `synveda_app` — the least-privilege
-  # role every migration has been granting since 0003. The gateway itself
-  # never holds an admin credential (ADR-0062 decision 2).
-  enabled: true
+  # The required Job converges roles/extensions under the CNPG superuser,
+  # proves the migrator/gateway/worker targets through the product preflight,
+  # then migrates and optionally admits one tenant under `synveda_migrator`.
+  # No product or runtime container receives the superuser credential.
   # Optionally admit the first tenant in the same job. Leave the slug empty
   # and NOTES.txt prints the command instead; a chart that hardcodes one
   # tenant into a multi-tenant product is guessing.
   tenant:
     slug: ""
     name: ""
+  # Bounds bootstrap, authority preflight, schema migration and optional
+  # first-tenant admission as one deployment operation.
+  activeDeadlineSeconds: 900
   backoffLimit: 3
   ttlSecondsAfterFinished: 3600
 
 # ── Telemetry ────────────────────────────────────────────────────────────
 otel:
-  # OTLP gRPC endpoint. Empty means the gateway's own default
+  # OTLP gRPC endpoint for both runtime processes. Empty means their default
   # (http://localhost:4317), which in a pod means nothing is collecting.
   endpoint: ""
 

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select not exists (\n                     select 1 from pg_catalog.pg_event_trigger\n                   )\n                   and (\n                     select count(*)\n                       from pg_catalog.pg_extension as extension\n                       join pg_catalog.pg_namespace as namespace\n                         on namespace.oid = extension.extnamespace\n                       join pg_catalog.pg_roles as owner\n                         on owner.oid = extension.extowner\n                      where (\n                        extension.extname = 'btree_gin'\n                        and extension.extversion = '1.3'\n                        and namespace.nspname = 'public'\n                        and owner.rolname = any($1::text[])\n                      ) or (\n                        extension.extname = 'vector'\n                        and extension.extversion = '0.8.6'\n                        and namespace.nspname = 'public'\n                        and owner.rolname = any($1::text[])\n                      ) or (\n                        extension.extname = 'plpgsql'\n                        and extension.extversion = '1.0'\n                        and namespace.nspname = 'pg_catalog'\n                        and owner.rolname = any($2::text[])\n                      )\n                   ) = 3 as \"safe!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "safe!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1f242571e4ba3bf2586c169e77b385bbec08cfb3821e976cee8cdfc516148fbb"
+}

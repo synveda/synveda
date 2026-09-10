@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update operation_attempts set heartbeat_at = now()\n               where tenant_id = $1 and operation_id = $2 and attempt_number = $3\n                 and worker_id = $4 and state = 'running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d3a185c3db48c6f64f7d6f9c77666011d2cddcf4d838c55eec7901d3e09b0d0e"
+}

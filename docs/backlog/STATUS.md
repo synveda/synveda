@@ -1,11 +1,11 @@
 # Feature inventory
 
-141 features in this index. This file is authoritative for feature identity,
+142 features in this index. This file is authoritative for feature identity,
 phase and delivered/open state. Delivered names identify historical slices;
 current contracts live in code, generated artefacts and accepted ADRs, while git
 retains their implementation evidence. Open entries link to current briefs.
 
-110 delivered; 31 open. The inventory and open-brief shape are checked in CI.
+110 delivered; 32 open. The inventory and open-brief shape are checked in CI.
 
 ## Phase 0 — Foundation (wk 1)
 
@@ -164,6 +164,29 @@ retains their implementation evidence. Open entries link to current briefs.
 - [x] CPR-42: Context-platform security and product-integrity audit — delivered 2026-08-26; ADR-0078
 - [x] CPR-43: Final context-platform hard cut — delivered 2026-08-26; ADR-0069
 - [x] CPR-44: Production hardening and maintainability cut — delivered 2026-08-26; ADR-0101
+- [ ] [CPR-45: Docker-first portable reference deployment](CPR-45.md) — open
+
+CPR-45 follows ADR-0105's direct-acceptance plan. Canonical Compose now owns the
+only source and packaged single-host topology: proxy-only public edge, isolated
+Synveda/Keycloak databases and roles, optimized Keycloak, separate product
+gateway/worker commands, mounted secrets and a private Collector. The
+digest-bound reference archive and environment manifest use that same graph.
+Retired provider, workflow-scheduler, contributor, installed-profile and host-
+gateway paths are deleted; `synveda init` is a side-effect-free refusal.
+
+Deterministic gates cover the provider/runtime matrix, two-principal browser
+scenario, restart lifecycle, logical database/key recovery, same-schema image
+upgrade, external dependency wiring, bounded local metrics, customer-safe
+Operations view and the disabled-by-default Apalis 0.7.4 Skill-validation
+transport. PostgreSQL operation/outbox state remains authoritative and the
+native worker is the rollback.
+
+The feature remains open for clean development and reference HTTPS runs on
+Linux and Docker Desktop, live recovery/upgrade/Apalis execution, live external
+providers, and one published-registry installed-reference run. This evidence
+would support controlled single-host use only. It would not establish HA,
+host-loss tolerance, DR/RPO/RTO, SaaS readiness, signing or Helm production
+readiness; OPS-5 retains S3/WAL-PITR and encrypted off-host recovery work.
 
 ## Unscheduled — not listed in the Sequencing section
 

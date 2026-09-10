@@ -146,6 +146,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "create_relaxation",
     "create_scope",
     "create_skill_binding",
+    "create_skill_validation_operation",
     "create_tool_binding",
     "create_workspace",
     "create_workspace_invite",

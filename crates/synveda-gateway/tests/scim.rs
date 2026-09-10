@@ -35,6 +35,9 @@
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -47,7 +50,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
@@ -56,7 +59,7 @@ use synveda_store::{access, directory, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GroupSource};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    DirectoryUserId, IdentityId, ScimCredentialId, ScopeId, TenantId, TenantStatus,
+    DirectoryUserId, IdentityId, IdentityKind, ScimCredentialId, ScopeId, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -83,7 +86,7 @@ async fn world() -> Option<World> {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         eprintln!(
             "skipping the AUTH-4 SCIM suite: DATABASE_URL is not set \
-             (run `make dev-up` then `make db-test`)"
+             (run `make db-test`)"
         );
         return None;
     };
@@ -92,13 +95,13 @@ async fn world() -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
 
     let tenant = TenantId::new();
     let slug = format!("auth4-{}", tenant.as_uuid().simple());
-    tenants::create(&pool, tenant, &slug, "AUTH-4 tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, tenant, &slug, "AUTH-4 tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
 
@@ -108,7 +111,7 @@ async fn world() -> Option<World> {
     // now (CPR-6), never a mapping to a scope, and a person's scope is
     // their own principal scope under the root, wherever their groups
     // put them (CPR-7, ADR-0074 decision 3).
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let org = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("mint root");
@@ -331,14 +334,16 @@ async fn a_second_record_for_one_person_is_refused_before_anything_is_written() 
         1,
         "one person, one identity"
     );
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
     let orphans = sqlx::query_scalar!(
         r#"select count(*) as "count!" from scim_users
            where tenant_id = $1 and identity_id is null"#,
         w.tenant.as_uuid(),
     )
-    .fetch_one(&w.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count orphans");
+    tx.commit().await.expect("commit orphan check");
     assert_eq!(
         orphans, 0,
         "a refused create leaves no record behind — the 409 is not about a \
@@ -349,6 +354,363 @@ async fn a_second_record_for_one_person_is_refused_before_anything_is_written() 
         Some(identity),
         "and the record they do have is untouched"
     );
+}
+
+/// A second inactive record is still a conflicting correspondence; it must
+/// not use the leaver path to seal the identity held by the original mirror.
+#[tokio::test]
+async fn a_second_inactive_record_cannot_seal_an_existing_person() {
+    let Some(w) = world().await else { return };
+    assign(&w, w.eng, REGULATED_STRICT).await;
+    let (original_user, _) = join(&w, "inactive-conflict@example.test", "synveda-eng-core").await;
+    let identity = linked_identity(&w, &original_user)
+        .await
+        .expect("original mirror is linked");
+
+    let (status, body) = scim_post(
+        &w,
+        "/scim/v2/Users",
+        json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "inactive-conflict-recreated@example.test",
+            "externalId": "inactive-conflict-new-object",
+            "emails": [{
+                "value": "inactive-conflict@example.test",
+                "type": "work",
+                "primary": true
+            }],
+            "active": false
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["scimType"], json!("uniqueness"));
+    let (status, listed) = scim_get(&w, "/scim/v2/Users").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["totalResults"], json!(1));
+
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let retained = identities::by_id(&mut *tx, w.tenant, identity)
+        .await
+        .expect("read retained identity")
+        .expect("identity remains");
+    assert!(!retained.sealed(), "the conflicting POST cannot depart it");
+    assert_eq!(
+        directory::user_for_identity(&mut *tx, w.tenant, identity)
+            .await
+            .expect("read retained correspondence")
+            .expect("original link remains")
+            .id
+            .to_string(),
+        original_user
+    );
+    tx.commit().await.expect("commit inactive conflict read");
+}
+
+/// A shared or recycled address is not identity authority when more than one
+/// active identity carries it. The weak fallback must refuse the directory
+/// record rather than selecting whichever identity was created first.
+#[tokio::test]
+async fn ambiguous_active_identity_email_is_refused_without_a_mirror_row() {
+    let Some(w) = world().await else { return };
+    assign(&w, w.eng, REGULATED_STRICT).await;
+    let email = "shared-address@example.test";
+    provision_via_login(&w, "shared-first-subject", email, "synveda-eng-core").await;
+    provision_via_login(&w, "shared-second-subject", email, "synveda-eng-core").await;
+
+    let (status, body) = scim_post(
+        &w,
+        "/scim/v2/Users",
+        json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "shared-directory-user@example.test",
+            "externalId": "shared-directory-object",
+            "emails": [{"value": email, "type": "work", "primary": true}],
+            "active": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["scimType"], json!("uniqueness"));
+    let (status, listed) = scim_get(&w, "/scim/v2/Users").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["totalResults"], json!(0));
+    assert_eq!(identity_count(&w, email).await, 2);
+}
+
+/// Directory user projection cannot adopt, deactivate or otherwise mutate a
+/// registered service identity even when a strong external ID collides with
+/// the service's token subject.
+#[tokio::test]
+async fn directory_correspondence_refuses_service_identity_type_confusion() {
+    let Some(w) = world().await else { return };
+    let service_subject = "service-correspondence-subject";
+    let service_id = IdentityId::new();
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let service_scope = scopes::ensure_principal_scope(
+        &mut tx,
+        w.tenant,
+        service_subject,
+        "Correspondence service fixture",
+    )
+    .await
+    .expect("create service scope");
+    identities::create(
+        &mut tx,
+        service_id,
+        w.tenant,
+        Some(service_subject),
+        IdentityKind::Service,
+        None,
+        Some("Correspondence service fixture"),
+        service_scope.id,
+    )
+    .await
+    .expect("create service identity");
+    tx.commit().await.expect("commit service fixture");
+
+    let (status, body) = scim_post(
+        &w,
+        "/scim/v2/Users",
+        json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "not-a-service@example.test",
+            "externalId": service_subject,
+            "active": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, listed) = scim_get(&w, "/scim/v2/Users").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["totalResults"], json!(0));
+
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let service = identities::by_id(&mut *tx, w.tenant, service_id)
+        .await
+        .expect("read service")
+        .expect("service remains");
+    assert_eq!(service.kind, IdentityKind::Service);
+    assert!(!service.sealed());
+    assert!(
+        directory::user_for_identity(&mut *tx, w.tenant, service_id)
+            .await
+            .expect("read service mirror link")
+            .is_none()
+    );
+    tx.commit().await.expect("commit service verification");
+}
+
+/// An out-of-band non-user link is reported as internal corruption before
+/// reconciliation can seal or move the service identity.
+#[tokio::test]
+async fn corrupt_directory_link_to_service_identity_never_mutates_the_service() {
+    let Some(w) = world().await else { return };
+    let service_subject = "corrupt-service-link-subject";
+    let service_id = IdentityId::new();
+    let mirror_id = DirectoryUserId::new();
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let service_scope = scopes::ensure_principal_scope(
+        &mut tx,
+        w.tenant,
+        service_subject,
+        "Corrupt service-link fixture",
+    )
+    .await
+    .expect("create corrupt-link service scope");
+    identities::create(
+        &mut tx,
+        service_id,
+        w.tenant,
+        Some(service_subject),
+        IdentityKind::Service,
+        None,
+        Some("Corrupt service-link fixture"),
+        service_scope.id,
+    )
+    .await
+    .expect("create corrupt-link service");
+    directory::create_user(
+        &mut tx,
+        mirror_id,
+        w.tenant,
+        &directory::UserAttributes {
+            directory_source: "scim".to_owned(),
+            external_id: Some("corrupt-mirror-object".to_owned()),
+            user_name: "corrupt-mirror@example.test".to_owned(),
+            active: true,
+            display_name: None,
+            given_name: None,
+            family_name: None,
+            work_email: None,
+        },
+    )
+    .await
+    .expect("create corrupt mirror");
+    directory::link_identity(&mut tx, w.tenant, "scim", mirror_id, service_id)
+        .await
+        .expect("seed corrupt service link");
+    tx.commit().await.expect("commit corrupt link fixture");
+
+    let (status, _) = scim_patch(
+        &w,
+        &format!("/scim/v2/Users/{mirror_id}"),
+        json!({
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            "Operations": [{"op": "replace", "path": "displayName", "value": "Still corrupt"}]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let service = identities::by_id(&mut *tx, w.tenant, service_id)
+        .await
+        .expect("read corrupt-linked service")
+        .expect("service remains");
+    assert_eq!(service.kind, IdentityKind::Service);
+    assert!(
+        !service.sealed(),
+        "directory projection did not depart service"
+    );
+    assert_eq!(
+        directory::user_for_identity(&mut *tx, w.tenant, service_id)
+            .await
+            .expect("read retained corrupt link")
+            .expect("corrupt link is retained for operator repair")
+            .id,
+        mirror_id
+    );
+    tx.commit().await.expect("commit corrupt-link verification");
+}
+
+/// Departed rows do not make a live email ambiguous: one active identity is
+/// adopted, while an inactive-only address creates a fresh rehire identity.
+#[tokio::test]
+async fn email_correspondence_is_active_first_and_inactive_only_is_a_rehire() {
+    let Some(w) = world().await else { return };
+    assign(&w, w.eng, REGULATED_STRICT).await;
+
+    let reused = "reused-address@example.test";
+    let departed = provision_via_login(&w, "reused-old-subject", reused, "synveda-eng-core").await;
+    let active = provision_via_login(&w, "reused-live-subject", reused, "synveda-eng-core").await;
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    identities::depart(&mut tx, w.tenant, departed)
+        .await
+        .expect("depart reused identity")
+        .expect("old identity was active");
+    tx.commit().await.expect("commit reused departure");
+
+    let (status, adopted) = scim_post(
+        &w,
+        "/scim/v2/Users",
+        json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "reused-directory-user@example.test",
+            "externalId": "reused-directory-object",
+            "emails": [{"value": reused, "type": "work", "primary": true}],
+            "active": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{adopted}");
+    assert_eq!(
+        linked_identity(
+            &w,
+            adopted["id"].as_str().expect("adopted directory user id")
+        )
+        .await,
+        Some(active)
+    );
+
+    let inactive_only = "inactive-only@example.test";
+    let former = provision_via_login(
+        &w,
+        "inactive-only-old-subject",
+        inactive_only,
+        "synveda-eng-core",
+    )
+    .await;
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    identities::depart(&mut tx, w.tenant, former)
+        .await
+        .expect("depart inactive-only identity")
+        .expect("former identity was active");
+    tx.commit().await.expect("commit inactive-only departure");
+
+    let (status, rehired) = scim_post(
+        &w,
+        "/scim/v2/Users",
+        json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "inactive-only-directory-user@example.test",
+            "externalId": "inactive-only-directory-object",
+            "emails": [{"value": inactive_only, "type": "work", "primary": true}],
+            "active": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{rehired}");
+    let successor = linked_identity(
+        &w,
+        rehired["id"].as_str().expect("rehire directory user id"),
+    )
+    .await
+    .expect("rehire projection linked an identity");
+    assert_ne!(successor, former);
+    assert_eq!(identity_count(&w, inactive_only).await, 2);
+}
+
+/// The correspondence fence covers mirror creation through projection. Two
+/// concurrent creates for one existing person therefore linearize to one
+/// complete resource and one pre-write conflict.
+#[tokio::test]
+async fn concurrent_scim_creates_commit_exactly_one_projected_resource() {
+    let Some(w) = world().await else { return };
+    assign(&w, w.eng, REGULATED_STRICT).await;
+    let email = "concurrent-correspondence@example.test";
+    let identity = provision_via_login(
+        &w,
+        "concurrent-correspondence-sub",
+        email,
+        "synveda-eng-core",
+    )
+    .await;
+    let first = scim_post(
+        &w,
+        "/scim/v2/Users",
+        json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "concurrent-first@example.test",
+            "externalId": "concurrent-first-object",
+            "emails": [{"value": email, "type": "work", "primary": true}],
+            "active": true
+        }),
+    );
+    let second = scim_post(
+        &w,
+        "/scim/v2/Users",
+        json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "concurrent-second@example.test",
+            "externalId": "concurrent-second-object",
+            "emails": [{"value": email, "type": "work", "primary": true}],
+            "active": true
+        }),
+    );
+    let (first, second) = tokio::join!(first, second);
+    let mut responses = [first, second];
+    responses.sort_by_key(|response| response.0.as_u16());
+    assert_eq!(responses[0].0, StatusCode::CREATED, "{:?}", responses[0]);
+    assert_eq!(responses[1].0, StatusCode::CONFLICT, "{:?}", responses[1]);
+    assert_eq!(responses[1].1["scimType"], json!("uniqueness"));
+    let created_id = responses[0].1["id"].as_str().expect("created id");
+    assert_eq!(linked_identity(&w, created_id).await, Some(identity));
+
+    let (status, listed) = scim_get(&w, "/scim/v2/Users").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["totalResults"], json!(1));
+    assert_eq!(identity_count(&w, email).await, 1);
 }
 
 /// Decision 12: the seal does not lift, and a rehire is a new person.
@@ -567,6 +929,57 @@ async fn delete_answers_204_then_404_and_seals_rather_than_deletes() {
     );
 }
 
+/// PATCH reads and writes one mirror snapshot under the correspondence fence.
+/// An unrelated display-name edit racing a deactivation therefore preserves
+/// the leaver decision in either serialization order.
+#[tokio::test]
+async fn concurrent_display_patch_cannot_reactivate_a_deactivated_user() {
+    let Some(w) = world().await else { return };
+    assign(&w, w.eng, REGULATED_STRICT).await;
+    let email = "patch-deactivate-race@example.test";
+    let (user, _) = join(&w, email, "synveda-eng-core").await;
+    let home = home_of(&w, &user).await;
+    let user_path = format!("/scim/v2/Users/{user}");
+
+    let display = scim_patch(
+        &w,
+        &user_path,
+        json!({
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            "Operations": [{
+                "op": "replace",
+                "path": "displayName",
+                "value": "Display update racing departure"
+            }]
+        }),
+    );
+    let deactivate = scim_patch(
+        &w,
+        &user_path,
+        json!({
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            "Operations": [{"op": "replace", "path": "active", "value": false}]
+        }),
+    );
+    let (display, deactivation) = tokio::join!(display, deactivate);
+    assert_eq!(display.0, StatusCode::OK, "{}", display.1);
+    assert_eq!(deactivation.0, StatusCode::OK, "{}", deactivation.1);
+
+    let user_id: DirectoryUserId = user.parse().expect("directory user id");
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let mirror = directory::user(&mut *tx, w.tenant, "scim", user_id)
+        .await
+        .expect("read raced mirror")
+        .expect("mirror remains");
+    assert!(
+        !mirror.active,
+        "display-only PATCH must preserve deactivation"
+    );
+    tx.commit().await.expect("commit raced mirror read");
+    assert!(sealed(&w, home).await);
+    assert_eq!(identity_count(&w, email).await, 1, "no rehire was minted");
+}
+
 // ── 5. The credential is confined ────────────────────────────────────────────
 
 /// Decision 13's confinement, from both directions, plus revocation.
@@ -604,7 +1017,7 @@ async fn a_provisioning_credential_reaches_this_plane_and_nothing_else() {
     // much as absent, because the lookup runs inside the tenant its own
     // token names.
     let other = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &w.pool,
         other,
         &format!("other-{}", other.as_uuid().simple()),
@@ -682,7 +1095,8 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
         .await
         .expect("the joiner reconciled onto an identity");
 
-    let group = access::list_groups(&w.pool, w.tenant)
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let group = access::list_groups(&mut *tx, w.tenant)
         .await
         .expect("list governed groups")
         .into_iter()
@@ -691,6 +1105,7 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
                 && group.directory_resource_id.as_deref() == Some(group_id.as_str())
         })
         .expect("the directory group was projected");
+    tx.commit().await.expect("commit group read");
     assert_eq!(group.source, GroupSource::Directory);
     assert_eq!(group.display_name, "synveda-eng-core");
     assert_eq!(
@@ -705,9 +1120,11 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
         None,
         "a SCIM-created person has no subject until they log in"
     );
-    let before_login = access::group_members(&w.pool, w.tenant, group.id)
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let before_login = access::group_members(&mut *tx, w.tenant, group.id)
         .await
         .expect("read members");
+    tx.commit().await.expect("commit pre-login member read");
     assert_eq!(before_login.len(), 1);
     assert_eq!(before_login[0].identity_id, identity);
     assert_eq!(before_login[0].principal_id, None);
@@ -717,9 +1134,11 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     let subject = "dana-subject";
     provision_via_login(&w, subject, "dana@example.test", "synveda-eng-core").await;
 
-    let members = access::group_members(&w.pool, w.tenant, group.id)
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let members = access::group_members(&mut *tx, w.tenant, group.id)
         .await
         .expect("read members");
+    tx.commit().await.expect("commit post-login member read");
     assert_eq!(members.len(), 1);
     assert_eq!(members[0].identity_id, identity);
     assert_eq!(members[0].principal_id.as_deref(), Some(subject));
@@ -731,9 +1150,11 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     // `owner` grant each principal scope carries at itself (CPR-7,
     // ADR-0074 decision 8) — minted by the scope, not by the directory,
     // and reaching nothing but the person's own material.
-    let grants = access::list_grants(&w.pool, w.tenant, &access::GrantFilter::default())
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let grants = access::list_grants(&mut *tx, w.tenant, &access::GrantFilter::default())
         .await
         .expect("list grants");
+    tx.commit().await.expect("commit grant read");
     let invented: Vec<_> = grants
         .iter()
         .filter(|grant| grant.source != synveda_types::access::GrantSource::Owner)
@@ -746,9 +1167,11 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     // Removing them from the directory group removes them here, on the next
     // sync rather than on a sweep.
     remove_member(&w, &group_id, &user_id).await;
-    let members = access::group_members(&w.pool, w.tenant, group.id)
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let members = access::group_members(&mut *tx, w.tenant, group.id)
         .await
         .expect("read members again");
+    tx.commit().await.expect("commit removed-member read");
     assert!(
         members.is_empty(),
         "leaving the directory group leaves this one"
@@ -758,10 +1181,12 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     // and an archived group resolves to nobody.
     let (status, body) = scim_delete(&w, &format!("/scim/v2/Groups/{group_id}")).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
-    let after = access::get_group(&w.pool, w.tenant, group.id)
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let after = access::get_group(&mut *tx, w.tenant, group.id)
         .await
         .expect("read the governed group")
         .expect("it is archived, not deleted");
+    tx.commit().await.expect("commit archived group read");
     assert_eq!(
         after.status,
         synveda_types::workspace::LifecycleStatus::Archived
@@ -956,14 +1381,17 @@ async fn subject_of(w: &World, identity: IdentityId) -> Option<String> {
 }
 
 async fn identity_count(w: &World, email: &str) -> i64 {
-    sqlx::query_scalar!(
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let count = sqlx::query_scalar!(
         r#"select count(*) as "count!" from identities where tenant_id = $1 and lower(email) = lower($2)"#,
         w.tenant.as_uuid(),
         email,
     )
-    .fetch_one(&w.pool)
+    .fetch_one(&mut *tx)
     .await
-    .expect("count identities")
+    .expect("count identities");
+    tx.commit().await.expect("commit identity count");
+    count
 }
 
 async fn bind_subject(w: &World, identity: IdentityId, subject: &str) {

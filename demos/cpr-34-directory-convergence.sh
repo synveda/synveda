@@ -32,21 +32,6 @@ cargo test -p synveda-store --test rls \
 cargo test -p synveda-gateway --test openapi -- --nocapture
 make check-api-types
 
-retired_mirrors=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
-  "select count(*) from pg_class where relnamespace = 'public'::regnamespace and relname in ('scim_groups', 'scim_group_members')")
-identity_membership=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
-  "select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'group_members' and column_name = 'identity_id'")
-directory_groups=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
-  "select count(*) from groups where source = 'directory'")
-group_audit=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
-  "select count(*) from audit_log where action in ('access.group.created', 'access.group.updated')")
-
-if [ "$retired_mirrors" -ne 0 ] || [ "$identity_membership" -ne 1 ] \
-  || [ "$directory_groups" -eq 0 ] || [ "$group_audit" -eq 0 ]; then
-  echo "CPR-34 evidence mismatch: retired_mirrors=$retired_mirrors identity_membership=$identity_membership directory_groups=$directory_groups group_audit=$group_audit" >&2
-  exit 1
-fi
-
 echo ""
-echo "CPR-34 directory: $directory_groups shared directory groups, $group_audit chained group transitions, identity-keyed membership and zero mirror tables."
+echo "CPR-34 directory: the acceptance tests proved shared directory groups, chained group transitions, identity-keyed membership, forced RLS and the hard-cut absence of mirror tables."
 demo_finish

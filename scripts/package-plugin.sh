@@ -30,6 +30,9 @@ cd "$(dirname "$0")/.."
 version="${1:?usage: package-plugin.sh <version> <output-dir>}"
 outdir="${2:?usage: package-plugin.sh <version> <output-dir>}"
 
+# Validate before the version can become an archive path or manifest value.
+sh scripts/release-version.sh "$version"
+
 adapter="adapters/claude-code"
 [ -f "$adapter/dist/hook.mjs" ] || {
   echo "package-plugin: $adapter/dist is not built." >&2
@@ -55,8 +58,8 @@ cp -R "$adapter/dist" "$stage/synveda/dist"
 
 # The plugin's version is the release's. `synveda plugin install` reports
 # what it installed and `claude plugin list` shows it, so a plugin claiming
-# a version the CLI beside it does not have is the same confusion ADR-0065
-# decision 5 refuses for the profile bundle.
+# a version the adjacent release artifact does not have is the same confusion
+# ADR-0065 decision 5 refuses.
 manifest="$stage/synveda/.claude-plugin/plugin.json"
 node -e '
   const fs = require("node:fs");

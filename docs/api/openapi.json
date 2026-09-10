@@ -6379,6 +6379,188 @@
         ]
       }
     },
+    "/v1/operations": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "List policy-visible Skill-validation operations at one project.",
+        "operationId": "list_operations",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Project selected by the caller.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "UUIDv7 cursor returned by the previous page.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1..=100.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationListView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Project absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/operations/{id}": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Get one policy-visible operation.",
+        "operationId": "get_operation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/operations/{id}/cancel": {
+      "post": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Request idempotent cancellation of one operation.",
+        "operationId": "cancel_operation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancellation state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cancellation denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/policy/packs": {
       "get": {
         "tags": [
@@ -11461,6 +11643,111 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkillUsageListView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/skills/{id}/versions/{version_id}/validation-operations": {
+      "post": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Enqueue the built-in non-executing Skill validation.",
+        "operationId": "create_skill_validation_operation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunSkillTestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Operation accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported harness",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Skill validation denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
                 }
               }
             }
@@ -19352,7 +19639,7 @@
             "items": {
               "$ref": "#/components/schemas/AnchorCapabilities"
             },
-            "description": "Where this caller stands, most specific first, and what they may do at\neach — **from real policy decisions** (CPR-6, ADR-0073 decision 8).\n\nTheir own scope, the tenant root, and every scope a direct or group\ngrant reaches them at. Nothing here is derived from a plan, an edition\nor a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that\nscope, under that scope's own effective profile, by the same PDP the\nact itself will pass through. A personal deployment and an enterprise\none differ in the rows this reads, never in the code that reads them."
+            "description": "Where this caller stands, most specific first, and what they may do at\neach — **from real policy decisions** (CPR-6, ADR-0073 decision 8).\n\nTheir own scope, the tenant root, and every scope a direct or group\ngrant reaches them at. Nothing here is derived from a plan, an edition\nor a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that\nscope, under that scope's own effective profile, by the same PDP the\nact itself will pass through. Configuration and policy bindings change\nthe rows this reads, never the code that reads them."
           },
           "anchors_not_answered": {
             "type": "integer",
@@ -20241,6 +20528,155 @@
           }
         },
         "additionalProperties": false
+      },
+      "OperationListView": {
+        "type": "object",
+        "description": "Bounded operation page.",
+        "required": [
+          "operations"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Cursor after the last returned operation, only when another visible\noperation was confirmed inside the bounded scan."
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperationView"
+            },
+            "description": "Policy-visible operations."
+          }
+        }
+      },
+      "OperationView": {
+        "type": "object",
+        "description": "Customer-safe view of one Skill-validation operation.",
+        "required": [
+          "id",
+          "kind",
+          "operation_version",
+          "state",
+          "skill_id",
+          "skill_version_id",
+          "progress_percent",
+          "attempts",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of fenced execution claims."
+          },
+          "cancel_requested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When cancellation was requested."
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Terminal completion time."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Request creation time."
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable content-free failure code."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable Synveda operation identifier."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "skill_validation"
+            ]
+          },
+          "next_attempt_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Earliest retry time for a retryable failure."
+          },
+          "operation_version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Closed operation contract version.",
+            "minimum": 0
+          },
+          "progress_percent": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Bounded progress percentage.",
+            "minimum": 0
+          },
+          "skill_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable Skill aggregate."
+          },
+          "skill_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact immutable Skill version."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "First execution start."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed",
+              "blocked",
+              "cancelled",
+              "dead_lettered"
+            ]
+          },
+          "test_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Immutable controlled test result after success."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last durable transition time."
+          }
+        }
       },
       "OriginView": {
         "type": "object",
@@ -21584,7 +22020,7 @@
           },
           "subject": {
             "type": "string",
-            "description": "The `sub` the IdP will put in the agent's client-credentials\ntokens (for Rauthy, the client id)."
+            "description": "The stable subject identifier expected from the agent's\nclient-credentials access tokens."
           }
         }
       },
@@ -24934,6 +25370,10 @@
     {
       "name": "skills",
       "description": "Agent Skills-compatible immutable versions, governed bindings, usage and controlled tests"
+    },
+    {
+      "name": "operations",
+      "description": "Customer-safe durable Skill validation state"
     },
     {
       "name": "tools",

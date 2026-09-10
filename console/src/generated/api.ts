@@ -3271,8 +3271,8 @@ export type MeView = {
      * grant reaches them at. Nothing here is derived from a plan, an edition
      * or a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that
      * scope, under that scope's own effective profile, by the same PDP the
-     * act itself will pass through. A personal deployment and an enterprise
-     * one differ in the rows this reads, never in the code that reads them.
+     * act itself will pass through. Configuration and policy bindings change
+     * the rows this reads, never the code that reads them.
      */
     anchors: AnchorCapabilities[];
     /**
@@ -3850,6 +3850,85 @@ export type OpenSessionBody = {
      * The workspace the run is in.
      */
     workspace_id: string;
+  };
+
+/**
+ * Bounded operation page.
+ */
+export type OperationListView = {
+    /**
+     * Cursor after the last returned operation, only when another visible
+     * operation was confirmed inside the bounded scan.
+     */
+    next_cursor?: string | null;
+    /**
+     * Policy-visible operations.
+     */
+    operations: OperationView[];
+  };
+
+/**
+ * Customer-safe view of one Skill-validation operation.
+ */
+export type OperationView = {
+    /**
+     * Number of fenced execution claims.
+     */
+    attempts: number;
+    /**
+     * When cancellation was requested.
+     */
+    cancel_requested_at?: string | null;
+    /**
+     * Terminal completion time.
+     */
+    completed_at?: string | null;
+    /**
+     * Request creation time.
+     */
+    created_at: string;
+    /**
+     * Stable content-free failure code.
+     */
+    error_code?: string | null;
+    /**
+     * Stable Synveda operation identifier.
+     */
+    id: string;
+    kind: "skill_validation";
+    /**
+     * Earliest retry time for a retryable failure.
+     */
+    next_attempt_at?: string | null;
+    /**
+     * Closed operation contract version.
+     */
+    operation_version: number;
+    /**
+     * Bounded progress percentage.
+     */
+    progress_percent: number;
+    /**
+     * Stable Skill aggregate.
+     */
+    skill_id: string;
+    /**
+     * Exact immutable Skill version.
+     */
+    skill_version_id: string;
+    /**
+     * First execution start.
+     */
+    started_at?: string | null;
+    state: "pending" | "running" | "succeeded" | "failed" | "blocked" | "cancelled" | "dead_lettered";
+    /**
+     * Immutable controlled test result after success.
+     */
+    test_run_id?: string | null;
+    /**
+     * Last durable transition time.
+     */
+    updated_at: string;
   };
 
 /**
@@ -4567,8 +4646,8 @@ export type RegisterServiceIdentityBody = {
      */
     scope_id: string;
     /**
-     * The `sub` the IdP will put in the agent's client-credentials
-     * tokens (for Rauthy, the client id).
+     * The stable subject identifier expected from the agent's
+     * client-credentials access tokens.
      */
     subject: string;
   };
@@ -7033,6 +7112,30 @@ export type Operations = {
     readonly response: OkfMaterializationView;
   };
   /**
+   * List policy-visible Skill-validation operations at one project.
+   */
+  readonly list_operations: {
+    readonly path: "/v1/operations";
+    readonly method: "GET";
+    readonly response: OperationListView;
+  };
+  /**
+   * Get one policy-visible operation.
+   */
+  readonly get_operation: {
+    readonly path: "/v1/operations/{id}";
+    readonly method: "GET";
+    readonly response: OperationView;
+  };
+  /**
+   * Request idempotent cancellation of one operation.
+   */
+  readonly cancel_operation: {
+    readonly path: "/v1/operations/{id}/cancel";
+    readonly method: "POST";
+    readonly response: OperationView;
+  };
+  /**
    * List immutable pack sources available to Configuration documents.
    */
   readonly list_policy_packs: {
@@ -7644,6 +7747,16 @@ export type Operations = {
     readonly response: SkillUsageListView;
   };
   /**
+   * Enqueue the built-in non-executing Skill validation.
+   */
+  readonly create_skill_validation_operation: {
+    readonly path: "/v1/skills/{id}/versions/{version_id}/validation-operations";
+    readonly method: "POST";
+    readonly body: RunSkillTestBody;
+    readonly idempotent: true;
+    readonly response: OperationView;
+  };
+  /**
    * `GET /v1/tool-bindings` — list policy-visible project bindings.
    */
   readonly list_tool_bindings: {
@@ -7966,6 +8079,9 @@ export const OPERATIONS = {
   list_okf_imports: { path: "/v1/okf/imports", method: "GET" },
   get_okf_import: { path: "/v1/okf/imports/{id}", method: "GET" },
   materialize_okf_import: { path: "/v1/okf/imports/{id}/materialize", method: "POST", idempotent: true },
+  list_operations: { path: "/v1/operations", method: "GET" },
+  get_operation: { path: "/v1/operations/{id}", method: "GET" },
+  cancel_operation: { path: "/v1/operations/{id}/cancel", method: "POST" },
   list_policy_packs: { path: "/v1/policy/packs", method: "GET" },
   get_project: { path: "/v1/projects/{project_id}", method: "GET" },
   update_project: { path: "/v1/projects/{project_id}", method: "PATCH" },
@@ -8034,6 +8150,7 @@ export const OPERATIONS = {
   list_skill_tests: { path: "/v1/skills/{id}/versions/{version_id}/tests", method: "GET" },
   run_skill_test: { path: "/v1/skills/{id}/versions/{version_id}/tests", method: "POST", idempotent: true },
   list_skill_usage: { path: "/v1/skills/{id}/versions/{version_id}/usage", method: "GET" },
+  create_skill_validation_operation: { path: "/v1/skills/{id}/versions/{version_id}/validation-operations", method: "POST", idempotent: true },
   list_tool_bindings: { path: "/v1/tool-bindings", method: "GET" },
   create_tool_binding: { path: "/v1/tool-bindings", method: "POST", idempotent: true },
   get_tool_binding: { path: "/v1/tool-bindings/{id}", method: "GET" },

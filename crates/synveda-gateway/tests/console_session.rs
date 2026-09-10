@@ -22,6 +22,9 @@
 //! message when it is unset (CI has no database), same convention as
 //! tests/tenant_resolution.rs.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -32,7 +35,7 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_identity::console::{CONSOLE_COOKIE, mint};
@@ -112,7 +115,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 async fn open_session(state: &AppState, subject: &str) -> (TenantId, String) {
     let tenant_id = TenantId::new();
     let slug = format!("cnsl1-{}", &tenant_id.to_string()[24..]);
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         &state.pool,
         tenant_id,
         &slug,
@@ -205,7 +208,7 @@ async fn a_presented_bearer_wins_over_a_cookie() {
     // A second tenant, named only by the bearer.
     let bearer_tenant = TenantId::new();
     let slug = format!("cnsl1b-{}", &bearer_tenant.to_string()[24..]);
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         &state.pool,
         bearer_tenant,
         &slug,
@@ -268,7 +271,7 @@ async fn a_session_past_its_hard_cap_is_gone() {
     let state = state(&url);
     let tenant_id = TenantId::new();
     let slug = format!("cnsl1x-{}", &tenant_id.to_string()[24..]);
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         &state.pool,
         tenant_id,
         &slug,
@@ -383,7 +386,7 @@ async fn a_bearer_mutation_needs_no_origin() {
     let state = state(&url);
     let tenant_id = TenantId::new();
     let slug = format!("cnsl1c-{}", &tenant_id.to_string()[24..]);
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         &state.pool,
         tenant_id,
         &slug,

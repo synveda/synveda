@@ -1,4 +1,4 @@
-//! The `synveda` admin/dev CLI (`synveda init`, `synveda policy apply`,
+//! The `synveda` administration and public-API CLI (`synveda policy apply`,
 //! `synveda proposal review`, ...). Talks to the gateway API as a client for
 //! everything a running gateway serves; the bootstrap commands below
 //! (TEN-1, ADR-0008) go to the database directly because they exist
@@ -16,12 +16,18 @@
 // they hold a lock while they do it.
 #![cfg_attr(not(test), forbid(unsafe_code))]
 
+#[cfg(all(feature = "eval-fixture", not(test), not(debug_assertions)))]
+compile_error!("the CLI release binary cannot include the eval-fixture feature");
+
 mod api;
 mod audit;
 mod channel;
 mod configuration;
 mod credentials;
+mod database_preflight;
 mod demo;
+#[cfg(test)]
+mod deployment_database;
 mod diff;
 mod directory;
 mod init;
@@ -40,6 +46,7 @@ mod scim;
 mod scope;
 mod service;
 mod session;
+mod settings;
 mod skill;
 mod spool;
 #[cfg(test)]
@@ -54,6 +61,10 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::Hs256Verifier;
+#[cfg(feature = "eval-fixture")]
+use synveda_types::GrantId;
+#[cfg(feature = "eval-fixture")]
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{
     CompositionConfig, IdentityId, PackConfig, ProposalId, ProposalState, RedactionConfig,
     RedactionMode, ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId, TenantStatus,
@@ -68,47 +79,17 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Bring up the single-node form of the shared runtime and admit its
-    /// first tenant (OPS-1; CPR-36, ADR-0095).
+    /// Reserved bootstrap verb; deployment bootstrap is Compose-owned
+    /// (ADR-0102).
     ///
-    /// What it does is deliberately small, because everything else the
-    /// product has a governed surface for is created *through* that
-    /// surface: `init` applies migrations, admits the tenant, configures
-    /// the issuer, and starts the stack. The operator's identity, their own
-    /// scope and their `administrator` grant at the tenant root all arrive
-    /// on the first `synveda login`, from AUTH-2's provisioning transaction,
-    /// chained under the operator's own subject. Workspaces, projects and
-    /// org units are `POST /v1/workspaces` and `synveda scope create` after
-    /// that.
+    /// The command refuses every invocation before reading configuration or
+    /// mutating state. Use the canonical Compose lifecycle instead.
     ///
     /// There is no path in here that writes a scope, an identity, a grant,
     /// Configuration or Knowledge behind the PDP's back — an installer runs once, as
     /// root-equivalent, before anybody is watching, which makes it the
     /// worst place in the product to keep a shortcut (seed §2.2).
-    Init {
-        /// Tenant slug to admit: lowercase, hyphenated. Also becomes the
-        /// tenant root scope's slug when the first thing that needs a parent
-        /// mints it.
-        #[arg(long, default_value = "acme")]
-        slug: String,
-        /// Tenant display name; becomes the tenant root scope's name.
-        #[arg(long, default_value = "ACME")]
-        name: String,
-        /// Which embedder new Knowledge indexes use. `deterministic` needs no
-        /// model download and is lexical-only; `tei` serves BGE-M3 and
-        /// downloads ~2.3 GB once. Index rows retain their model/dimension.
-        #[arg(long, value_parser = ["deterministic", "tei"], default_value = "deterministic")]
-        embedder: String,
-        /// An external OIDC issuer URL. Omitted, the bundled Rauthy is
-        /// configured for you; given, nothing is created in your directory
-        /// and the client registration you must perform there is printed
-        /// (ADR-0055 decision 4).
-        #[arg(long)]
-        issuer: Option<String>,
-        /// Print what would happen and change nothing.
-        #[arg(long)]
-        dry_run: bool,
-    },
+    Init,
     /// The governed scope tree (CPR-7, ADR-0074 decision 5).
     ///
     /// Gateway calls under the bearer `synveda login` stored, like
@@ -246,9 +227,8 @@ enum Command {
     ///
     /// It keeps everything that is not the database: `kms.key`, the compose
     /// profile, the console bundle, your stored logins, the Docker volumes,
-    /// and the other databases on the same server — Temporal's two share the
-    /// volume with ours, which is why this drops a database rather than a
-    /// volume.
+    /// and the other databases on the same server. That is why this drops a
+    /// database rather than a volume.
     Reset {
         /// What to reset. Required: `reset` names what it destroys rather
         /// than defaulting to everything there is.
@@ -417,10 +397,10 @@ enum DemoCommand {
         /// else `default`.
         #[arg(long)]
         credentials: Option<String>,
-        /// A separately logged-in Bob profile for the genuine teammate leg.
-        /// In team mode the command also discovers a stored profile named
-        /// `bob`; otherwise it issues a one-time invitation and runs the clean
-        /// reuse leg as Alice without impersonating another person.
+        /// A separately logged-in Bob profile for the genuine invitation and
+        /// teammate leg. In team mode the command also discovers a stored
+        /// profile named `bob`; otherwise it issues a one-time invitation and
+        /// runs the clean reuse leg as Alice without impersonating another person.
         #[arg(long)]
         bob_credentials: Option<String>,
         /// Print the final manifest summary as JSON.
@@ -1423,8 +1403,23 @@ enum AuditCommand {
 
 #[derive(Subcommand)]
 enum DbCommand {
-    /// Apply all pending migrations to DATABASE_URL.
-    Migrate,
+    /// Prove migrator, gateway and worker files select one writable database.
+    Preflight,
+    /// Apply migrations, or check candidate compatibility without writes.
+    Migrate {
+        /// Verify the existing schema/authority contract without migrating.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Verify one restored tenant's audit chain and KMS custody without writes.
+    RecoveryVerify {
+        /// Tenant whose restored chain and wrapped key must be readable.
+        #[arg(long)]
+        tenant: TenantId,
+        /// Require the supplied key to be cryptographically refused.
+        #[arg(long)]
+        expect_key_refusal: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1691,6 +1686,28 @@ enum TenantCommand {
         /// Admit in suspended state (its tokens will not resolve).
         #[arg(long)]
         suspended: bool,
+        /// Evaluation fixture only: establish this out-of-band HS256 subject
+        /// as the first administrator in the same audited admission.
+        #[cfg(feature = "eval-fixture")]
+        #[arg(long, hide = true)]
+        dev_administrator_subject: Option<String>,
+    },
+    /// Converge one deployment-owned tenant admission by exact UUID.
+    ///
+    /// This is the idempotent form used by deployment bootstrap jobs. It
+    /// creates through the same audited break-glass transaction as `create`,
+    /// and a rerun succeeds only when UUID, slug, name and active status are
+    /// byte-for-byte the expected admission.
+    Converge {
+        /// Stable deployment-owned UUIDv7.
+        #[arg(long)]
+        id: TenantId,
+        /// Human-stable handle: lowercase, hyphenated, unique.
+        #[arg(long)]
+        slug: String,
+        /// Display name.
+        #[arg(long)]
+        name: String,
     },
     /// A tenant's encryption keys (TEN-4, ADR-0064).
     #[command(subcommand)]
@@ -1863,8 +1880,8 @@ enum ServiceCommand {
         /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
         profile: Option<String>,
-        /// The `sub` the IdP puts in the agent's client-credentials
-        /// tokens (for Rauthy, the client id).
+        /// Stable subject identifier expected from the agent's
+        /// client-credentials access tokens.
         #[arg(long)]
         subject: String,
         /// The anchor node UUID.
@@ -1955,38 +1972,34 @@ fn read_config_arg(path: &std::path::Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))
 }
 
-fn profile_name(flag: Option<String>) -> String {
-    flag.or_else(|| std::env::var("SYNVEDA_PROFILE").ok())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| credentials::DEFAULT_PROFILE.to_owned())
+fn profile_name(flag: Option<String>) -> Result<String, String> {
+    if let Some(name) = flag {
+        if name.is_empty() {
+            return Err("--profile must not be empty".to_owned());
+        }
+        return Ok(name);
+    }
+    match std::env::var("SYNVEDA_PROFILE") {
+        Ok(name) if !name.is_empty() => Ok(name),
+        Ok(_) => Err("SYNVEDA_PROFILE must not be empty".to_owned()),
+        Err(std::env::VarError::NotPresent) => Ok(credentials::DEFAULT_PROFILE.to_owned()),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err("SYNVEDA_PROFILE must be valid UTF-8".to_owned())
+        }
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
-        Command::Init {
-            slug,
-            name,
-            embedder,
-            issuer,
-            dry_run,
-        } => {
-            init::init(init::Plan {
-                slug,
-                name,
-                embedder,
-                issuer,
-                dry_run,
-            })
-            .await
-        }
+        Command::Init => init::init().await,
         Command::Scope(ScopeCommand::List {
             under,
             profile,
             json,
-        }) => scope::list(&profile_name(profile), under.as_ref().copied(), json).await,
+        }) => scope::list(&profile_name(profile)?, under.as_ref().copied(), json).await,
         Command::Scope(ScopeCommand::Show { id, profile, json }) => {
-            scope::show(&profile_name(profile), id, json).await
+            scope::show(&profile_name(profile)?, id, json).await
         }
         Command::Scope(ScopeCommand::Create {
             parent,
@@ -1995,24 +2008,24 @@ async fn run(cli: Cli) -> Result<(), String> {
             name,
             profile,
             json,
-        }) => scope::create(&profile_name(profile), parent, &kind, &slug, &name, json).await,
+        }) => scope::create(&profile_name(profile)?, parent, &kind, &slug, &name, json).await,
         Command::Scope(ScopeCommand::Move {
             id,
             parent,
             profile,
             json,
-        }) => scope::move_scope(&profile_name(profile), id, parent, json).await,
+        }) => scope::move_scope(&profile_name(profile)?, id, parent, json).await,
         Command::Scope(ScopeCommand::Tree { profile, json }) => {
-            scope::tree(&profile_name(profile), json).await
+            scope::tree(&profile_name(profile)?, json).await
         }
 
         Command::Whoami {
             capabilities,
             profile,
             json,
-        } => whoami::show(&profile_name(profile), capabilities, json).await,
+        } => whoami::show(&profile_name(profile)?, capabilities, json).await,
         Command::Directory(DirectoryCommand::Status { profile, json }) => {
-            directory::status(&profile_name(profile), json).await
+            directory::status(&profile_name(profile)?, json).await
         }
         Command::Directory(DirectoryCommand::AuthoriseSeals {
             ceiling,
@@ -2021,28 +2034,28 @@ async fn run(cli: Cli) -> Result<(), String> {
             profile,
             json,
         }) => {
-            directory::authorise_seals(&profile_name(profile), ceiling, &reason, hours, json).await
+            directory::authorise_seals(&profile_name(profile)?, ceiling, &reason, hours, json).await
         }
         Command::Scim(ScimCommand::Token(ScimTokenCommand::Issue {
             label,
             days,
             profile,
             json,
-        })) => scim::issue(&profile_name(profile), &label, days, json).await,
+        })) => scim::issue(&profile_name(profile)?, &label, days, json).await,
         Command::Scim(ScimCommand::Token(ScimTokenCommand::List { profile, json })) => {
-            scim::list(&profile_name(profile), json).await
+            scim::list(&profile_name(profile)?, json).await
         }
         Command::Scim(ScimCommand::Token(ScimTokenCommand::Revoke { id, profile })) => {
-            scim::revoke(&profile_name(profile), &id).await
+            scim::revoke(&profile_name(profile)?, &id).await
         }
         Command::Relaxation(RelaxationCommand::List {
             scope,
             status,
             profile,
             json,
-        }) => relaxation::list(&profile_name(profile), scope, status.as_deref(), json).await,
+        }) => relaxation::list(&profile_name(profile)?, scope, status.as_deref(), json).await,
         Command::Relaxation(RelaxationCommand::Show { id, profile, json }) => {
-            relaxation::show(&profile_name(profile), id, json).await
+            relaxation::show(&profile_name(profile)?, id, json).await
         }
         Command::Relaxation(RelaxationCommand::Create {
             scope,
@@ -2056,7 +2069,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             json,
         }) => {
             relaxation::create(
-                &profile_name(profile),
+                &profile_name(profile)?,
                 scope,
                 subject,
                 &action,
@@ -2081,7 +2094,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             json,
         }) => {
             relaxation::revise(
-                &profile_name(profile),
+                &profile_name(profile)?,
                 id,
                 expected,
                 subject,
@@ -2100,7 +2113,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             reason,
             profile,
             json,
-        }) => relaxation::revoke(&profile_name(profile), id, expected, &reason, json).await,
+        }) => relaxation::revoke(&profile_name(profile)?, id, expected, &reason, json).await,
         Command::Login {
             gateway,
             issuer,
@@ -2108,15 +2121,15 @@ async fn run(cli: Cli) -> Result<(), String> {
             no_browser,
         } => {
             login::login(
-                login::gateway_url(gateway),
+                login::gateway_url(gateway)?,
                 issuer,
-                profile_name(profile),
+                profile_name(profile)?,
                 !no_browser,
             )
             .await
         }
         Command::Auth(AuthCommand::Token { profile, json }) => {
-            login::auth_token(profile_name(profile), json).await
+            login::auth_token(profile_name(profile)?, json).await
         }
         Command::Mcp {
             command: None,
@@ -2124,7 +2137,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             workspace,
             project,
             profile,
-        } => mcp::serve(profile_name(profile), writes, workspace, project).await,
+        } => mcp::serve(profile_name(profile)?, writes, workspace, project).await,
         Command::Mcp {
             workspace,
             project,
@@ -2142,7 +2155,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             &mcp::install::Plan {
                 client,
                 config,
-                profile: profile_name(profile),
+                profile: profile_name(profile)?,
                 dry_run,
                 force,
                 print,
@@ -2189,7 +2202,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 credentials::save(&stored)?;
                 eprintln!("synveda: forgot {count} profile(s)");
             } else {
-                let name = profile_name(profile);
+                let name = profile_name(profile)?;
                 if stored.profiles.remove(&name).is_none() {
                     return Err(format!("no credentials for profile `{name}`"));
                 }
@@ -2203,62 +2216,92 @@ async fn run(cli: Cli) -> Result<(), String> {
             );
             Ok(())
         }
-        Command::Db(DbCommand::Migrate) => {
+        Command::Db(DbCommand::Preflight) => database_preflight::run().await,
+        Command::Db(DbCommand::Migrate { check }) => {
             let pool = connect().await?;
-            // Asked here as well as inside `migrate`, so the refusal reaches
-            // a terminal as itself rather than wrapped in `storage:` — this
-            // is the command whose whole job is to advance a schema, and the
-            // answer "this one cannot be advanced, here is what to run" is
-            // the answer (CPR-2, ADR-0069).
-            synveda_store::epoch::preflight(&pool)
-                .await
-                .map_err(|refusal| refusal.to_string())?;
-            synveda_store::migrate(&pool)
-                .await
-                .map_err(|err| err.to_string())?;
-            eprintln!("migrations applied");
+            let database_roles = settings::database_roles()?;
+            if check {
+                synveda_store::check_migration_compatibility(&pool, &database_roles)
+                    .await
+                    .map_err(|err| err.to_string())?;
+                eprintln!("candidate database compatibility verified without writes");
+            } else {
+                synveda_store::migrate(&pool, &database_roles)
+                    .await
+                    .map_err(|err| err.to_string())?;
+                eprintln!("migrations applied");
+            }
             Ok(())
+        }
+        Command::Db(DbCommand::RecoveryVerify {
+            tenant,
+            expect_key_refusal,
+        }) => {
+            let pool = connect_current_epoch().await?;
+            keys::verify_recovery(&pool, tenant, expect_key_refusal).await
         }
         Command::Reset { database, force } => reset::reset(reset::Plan { database, force }).await,
         Command::Tenant(TenantCommand::Create {
             slug,
             name,
             suspended,
+            #[cfg(feature = "eval-fixture")]
+            dev_administrator_subject,
         }) => {
             let status = if suspended {
                 TenantStatus::Suspended
             } else {
                 TenantStatus::Active
             };
-            let pool = connect_current_epoch().await?;
-            let tenant = create_tenant(&pool, &slug, &name, status).await?;
-            // The tenant's key, in the same command that admits it (TEN-4,
-            // ADR-0064). Not in `create_tenant`'s transaction: wrapping a key
-            // is a KMS call, and a network call inside the transaction that
-            // admits a tenant is a transaction held open by somebody else's
-            // outage. A failure here leaves an admitted tenant with no key,
-            // which `tenant key provision` fixes and which the message says.
-            let key = match keys::provision_quietly(&pool, tenant.id).await {
-                Ok(version) => serde_json::json!({ "version": version }),
-                Err(error) => {
-                    eprintln!(
-                        "tenant admitted, but its encryption key was not \
-                         provisioned: {error}\nrun `synveda tenant key \
-                         provision --tenant {}` once a KEK is configured",
-                        tenant.id
-                    );
-                    serde_json::Value::Null
-                }
-            };
-            let mut rendered = serde_json::to_value(&tenant).map_err(|err| err.to_string())?;
-            if let Some(object) = rendered.as_object_mut() {
-                object.insert("encryption_key".to_string(), key);
+            #[cfg(feature = "eval-fixture")]
+            if suspended && dev_administrator_subject.is_some() {
+                return Err(
+                    "--dev-administrator-subject cannot admit an administrator into a suspended tenant"
+                        .to_owned(),
+                );
             }
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&rendered).map_err(|err| err.to_string())?
-            );
-            Ok(())
+            #[cfg(feature = "eval-fixture")]
+            if dev_administrator_subject.is_some() {
+                if std::env::var("SYNVEDA_EVAL_FIXTURE").as_deref() != Ok("1") {
+                    return Err(
+                        "--dev-administrator-subject requires SYNVEDA_EVAL_FIXTURE=1".to_owned(),
+                    );
+                }
+                settings::sensitive_setting("SYNVEDA_DEV_JWT_SECRET")?
+                    .filter(|secret| !secret.is_empty())
+                    .ok_or(
+                        "--dev-administrator-subject requires SYNVEDA_DEV_JWT_SECRET or SYNVEDA_DEV_JWT_SECRET_FILE",
+                    )?;
+            }
+            let database_roles = settings::database_roles()?;
+            let pool = connect_tenant_admission().await?;
+            #[cfg(feature = "eval-fixture")]
+            let tenant = if let Some(subject) = dev_administrator_subject.as_deref() {
+                if subject.is_empty() {
+                    return Err("--dev-administrator-subject cannot be empty".to_owned());
+                }
+                create_eval_tenant(&pool, &database_roles, &slug, &name, status, subject).await?
+            } else {
+                create_tenant(&pool, &database_roles, &slug, &name, status).await?
+            };
+            #[cfg(not(feature = "eval-fixture"))]
+            let tenant = create_tenant(&pool, &database_roles, &slug, &name, status).await?;
+            render_admitted_tenant(&pool, tenant, false).await
+        }
+        Command::Tenant(TenantCommand::Converge { id, slug, name }) => {
+            validate_deployment_tenant_admission(id, &slug, &name)?;
+            let database_roles = settings::database_roles()?;
+            let pool = connect_tenant_admission().await?;
+            let tenant = converge_tenant(
+                &pool,
+                &database_roles,
+                id,
+                &slug,
+                &name,
+                TenantStatus::Active,
+            )
+            .await?;
+            render_admitted_tenant(&pool, tenant, true).await
         }
         Command::Kms(KmsCommand::Keygen) => keys::keygen(),
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Provision { tenant })) => {
@@ -2425,21 +2468,21 @@ async fn run(cli: Cli) -> Result<(), String> {
             subject,
             scope,
             name,
-        }) => service::register(&profile_name(profile), &subject, scope, name.as_deref()).await,
+        }) => service::register(&profile_name(profile)?, &subject, scope, name.as_deref()).await,
         Command::Service(ServiceCommand::Remove { profile, id }) => {
-            service::remove(&profile_name(profile), id).await
+            service::remove(&profile_name(profile)?, id).await
         }
         Command::Service(ServiceCommand::List { profile }) => {
-            service::list(&profile_name(profile)).await
+            service::list(&profile_name(profile)?).await
         }
         Command::Audit(AuditCommand::Verify { profile, json }) => {
-            audit::verify(&profile_name(profile), json).await
+            audit::verify(&profile_name(profile)?, json).await
         }
         Command::Audit(AuditCommand::Tail {
             profile,
             limit,
             json,
-        }) => audit::tail(&profile_name(profile), limit, json).await,
+        }) => audit::tail(&profile_name(profile)?, limit, json).await,
         Command::Audit(AuditCommand::Events {
             profile,
             actor_subject,
@@ -2458,7 +2501,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             json,
         }) => {
             audit::events(
-                &profile_name(profile),
+                &profile_name(profile)?,
                 audit::EventQuery {
                     actor_subject,
                     action,
@@ -2488,7 +2531,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             json,
         }) => {
             audit::knowledge(
-                &profile_name(profile),
+                &profile_name(profile)?,
                 audit::KnowledgeQuery {
                     subject,
                     valid_at,
@@ -2504,7 +2547,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             output,
             profile,
             page_size,
-        }) => audit::export(&profile_name(profile), &output, page_size).await,
+        }) => audit::export(&profile_name(profile)?, &output, page_size).await,
         Command::Audit(AuditCommand::VerifyExport { path, json }) => {
             audit::verify_export_file(&path, json)
         }
@@ -2515,39 +2558,39 @@ async fn run(cli: Cli) -> Result<(), String> {
                 limit,
                 json,
                 profile,
-            } => proposal::list(&profile_name(profile), scope, state, limit, json).await,
+            } => proposal::list(&profile_name(profile)?, scope, state, limit, json).await,
             ProposalCommand::Show { id, json, profile } => {
-                proposal::show(&profile_name(profile), id, json).await
+                proposal::show(&profile_name(profile)?, id, json).await
             }
             ProposalCommand::Review {
                 id,
                 scope,
                 limit,
                 profile,
-            } => proposal::review(&profile_name(profile), id, scope, limit).await,
+            } => proposal::review(&profile_name(profile)?, id, scope, limit).await,
             ProposalCommand::Approve {
                 id,
                 comment,
                 profile,
-            } => proposal::approve(&profile_name(profile), id, comment).await,
+            } => proposal::approve(&profile_name(profile)?, id, comment).await,
             ProposalCommand::Reject {
                 id,
                 reason,
                 profile,
-            } => proposal::reject(&profile_name(profile), id, reason).await,
+            } => proposal::reject(&profile_name(profile)?, id, reason).await,
             ProposalCommand::Withdraw { id, profile } => {
-                proposal::withdraw(&profile_name(profile), id).await
+                proposal::withdraw(&profile_name(profile)?, id).await
             }
             ProposalCommand::Publish { id, profile } => {
-                proposal::publish(&profile_name(profile), id).await
+                proposal::publish(&profile_name(profile)?, id).await
             }
             ProposalCommand::Apply { id, profile } => {
-                proposal::apply(&profile_name(profile), id).await
+                proposal::apply(&profile_name(profile)?, id).await
             }
         },
         Command::Prompt(command) => match command {
             PromptCommand::List { scope, profile } => {
-                prompt::list(&profile_name(profile), scope).await
+                prompt::list(&profile_name(profile)?, scope).await
             }
             PromptCommand::Show {
                 name,
@@ -2560,7 +2603,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 prompt::show(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     prompt::Ask {
                         name: &name,
                         scope,
@@ -2589,7 +2632,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .transpose()
                     .map_err(|err| err.to_string())?;
                 prompt::author(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     prompt::Draft {
                         name: &name,
                         scope,
@@ -2606,21 +2649,21 @@ async fn run(cli: Cli) -> Result<(), String> {
                 scope,
                 title,
                 profile,
-            } => prompt::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
+            } => prompt::propose(&profile_name(profile)?, &name, scope, title.as_deref()).await,
         },
         Command::Skill(command) => match command {
             SkillCommand::List {
                 scope,
                 json,
                 profile,
-            } => skill::list(&profile_name(profile), scope, json).await,
+            } => skill::list(&profile_name(profile)?, scope, json).await,
             SkillCommand::Show {
                 name,
                 version,
                 json,
                 quiet,
                 profile,
-            } => skill::show(&profile_name(profile), &name, version, json, quiet).await,
+            } => skill::show(&profile_name(profile)?, &name, version, json, quiet).await,
             SkillCommand::Import {
                 dir,
                 scope,
@@ -2634,7 +2677,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .transpose()
                     .map_err(|err| err.to_string())?;
                 skill::import(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     &dir,
                     scope,
                     name.as_deref(),
@@ -2651,7 +2694,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 skill::install(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     &name,
                     scope,
                     &client,
@@ -2664,7 +2707,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 scope,
                 json,
                 profile,
-            } => skill::available(&profile_name(profile), scope, json).await,
+            } => skill::available(&profile_name(profile)?, scope, json).await,
             SkillCommand::Sync {
                 scope,
                 client,
@@ -2674,7 +2717,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 skill::sync(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     scope,
                     &client,
                     root.as_deref(),
@@ -2687,28 +2730,28 @@ async fn run(cli: Cli) -> Result<(), String> {
 
         Command::Configuration(command) => match command {
             ConfigurationCommand::Templates { json, profile } => {
-                configuration::templates(&profile_name(profile), json).await
+                configuration::templates(&profile_name(profile)?, json).await
             }
             ConfigurationCommand::List {
                 scope,
                 json,
                 profile,
-            } => configuration::list(&profile_name(profile), scope, json).await,
+            } => configuration::list(&profile_name(profile)?, scope, json).await,
             ConfigurationCommand::Show { id, json, profile } => {
-                configuration::show(&profile_name(profile), id, json).await
+                configuration::show(&profile_name(profile)?, id, json).await
             }
             ConfigurationCommand::Effective {
                 scope,
                 json,
                 profile,
-            } => configuration::effective(&profile_name(profile), scope, json).await,
+            } => configuration::effective(&profile_name(profile)?, scope, json).await,
             ConfigurationCommand::Compare {
                 id,
                 from,
                 to,
                 json,
                 profile,
-            } => configuration::compare(&profile_name(profile), id, from, to, json).await,
+            } => configuration::compare(&profile_name(profile)?, id, from, to, json).await,
             ConfigurationCommand::Create {
                 scope,
                 name,
@@ -2718,7 +2761,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 configuration::create(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     scope,
                     &name,
                     template,
@@ -2734,21 +2777,21 @@ async fn run(cli: Cli) -> Result<(), String> {
                 json,
                 profile,
             } => {
-                configuration::publish(&profile_name(profile), id, expected_version, &file, json)
+                configuration::publish(&profile_name(profile)?, id, expected_version, &file, json)
                     .await
             }
             ConfigurationCommand::Bindings {
                 scope,
                 json,
                 profile,
-            } => configuration::bindings(&profile_name(profile), scope, json).await,
+            } => configuration::bindings(&profile_name(profile)?, scope, json).await,
             ConfigurationCommand::Bind {
                 scope,
                 artifact,
                 version,
                 json,
                 profile,
-            } => configuration::bind(&profile_name(profile), scope, artifact, version, json).await,
+            } => configuration::bind(&profile_name(profile)?, scope, artifact, version, json).await,
             ConfigurationCommand::UpdateBinding {
                 id,
                 expected_revision,
@@ -2761,7 +2804,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 configuration::update_binding(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     id,
                     expected_revision,
                     artifact,
@@ -2780,7 +2823,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 configuration::rollback(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     id,
                     expected_revision,
                     version,
@@ -2810,7 +2853,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 okf::import(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     &path,
                     project,
                     source_revision.as_deref(),
@@ -2825,12 +2868,12 @@ async fn run(cli: Cli) -> Result<(), String> {
                 item_ids,
                 json,
                 profile,
-            } => okf::export(&profile_name(profile), project, &output, &item_ids, json).await,
+            } => okf::export(&profile_name(profile)?, project, &output, &item_ids, json).await,
         },
 
         Command::ContextPack(command) => match command {
             ContextPackCommand::List { scope, profile } => {
-                pack::list(&profile_name(profile), scope).await
+                pack::list(&profile_name(profile)?, scope).await
             }
             ContextPackCommand::Author {
                 name,
@@ -2847,7 +2890,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .transpose()
                     .map_err(|err| err.to_string())?;
                 pack::author(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     pack::Bundle {
                         name: &name,
                         scope,
@@ -2864,14 +2907,14 @@ async fn run(cli: Cli) -> Result<(), String> {
                 scope,
                 title,
                 profile,
-            } => pack::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
+            } => pack::propose(&profile_name(profile)?, &name, scope, title.as_deref()).await,
         },
         Command::Session(command) => match command {
             SessionCommand::Flush {
                 dir,
                 verbose,
                 profile,
-            } => session::flush(&profile_name(profile), dir, verbose).await,
+            } => session::flush(&profile_name(profile)?, dir, verbose).await,
             SessionCommand::Spool(command) => match command {
                 SpoolCommand::Status { dir, json } => session::status(dir, json),
                 SpoolCommand::Purge { acknowledged, dir } => session::purge(dir, acknowledged),
@@ -2886,7 +2929,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             profile,
         } => {
             recall::recall(
-                &profile_name(profile),
+                &profile_name(profile)?,
                 recall::Ask {
                     query: &query,
                     workspace: workspace.as_deref(),
@@ -2905,31 +2948,31 @@ async fn run(cli: Cli) -> Result<(), String> {
         }) => {
             demo::start(
                 profile,
-                &profile_name(credentials),
+                &profile_name(credentials)?,
                 bob_credentials.as_deref(),
                 json,
             )
             .await
         }
         Command::Demo(DemoCommand::Status { credentials, json }) => {
-            demo::status(&profile_name(credentials), json).await
+            demo::status(&profile_name(credentials)?, json).await
         }
         Command::Demo(DemoCommand::Reset { force, credentials }) => {
-            demo::reset(&profile_name(credentials), force).await
+            demo::reset(&profile_name(credentials)?, force).await
         }
         Command::Channel(command) => match command {
             ChannelCommand::Status {
                 scope,
                 json,
                 profile,
-            } => channel::status(&profile_name(profile), scope, json).await,
+            } => channel::status(&profile_name(profile)?, scope, json).await,
             ChannelCommand::History {
                 scope,
                 channel,
                 limit,
                 json,
                 profile,
-            } => channel::history(&profile_name(profile), scope, channel, limit, json).await,
+            } => channel::history(&profile_name(profile)?, scope, channel, limit, json).await,
             ChannelCommand::Rollback {
                 scope,
                 from,
@@ -2940,7 +2983,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 channel::rollback(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     scope,
                     from,
                     to,
@@ -2957,24 +3000,35 @@ async fn run(cli: Cli) -> Result<(), String> {
                 channel,
                 json,
                 profile,
-            } => channel::pin(&profile_name(profile), scope, commit, reason, channel, json).await,
+            } => {
+                channel::pin(
+                    &profile_name(profile)?,
+                    scope,
+                    commit,
+                    reason,
+                    channel,
+                    json,
+                )
+                .await
+            }
             ChannelCommand::Unpin {
                 scope,
                 reason,
                 channel,
                 json,
                 profile,
-            } => channel::unpin(&profile_name(profile), scope, reason, channel, json).await,
+            } => channel::unpin(&profile_name(profile)?, scope, reason, channel, json).await,
         },
         Command::Token(TokenCommand::Issue {
             tenant,
             subject,
             ttl_secs,
         }) => {
-            let secret = std::env::var("SYNVEDA_DEV_JWT_SECRET")
-                .ok()
+            let secret = settings::sensitive_setting("SYNVEDA_DEV_JWT_SECRET")?
                 .filter(|secret| !secret.is_empty())
-                .ok_or("SYNVEDA_DEV_JWT_SECRET must be set to issue dev tokens")?;
+                .ok_or(
+                    "SYNVEDA_DEV_JWT_SECRET or SYNVEDA_DEV_JWT_SECRET_FILE must be set to issue dev tokens",
+                )?;
             let token = Hs256Verifier::new(secret.as_bytes()).issue(
                 &subject,
                 tenant,
@@ -2998,34 +3052,285 @@ fn break_glass() -> Actor {
 
 /// Admits a tenant and chains `tenant.created` in the same transaction.
 ///
-/// Shared by `synveda tenant create` and `synveda init` (OPS-1, ADR-0055
-/// decision 1) so that the installer takes the *existing* audited
-/// break-glass path rather than a second one that could drift from it —
-/// this and `db migrate` are the only store-level writes on the install
-/// path, and both predate it.
+/// This is the single audited break-glass tenant-admission path. Deployment
+/// convergence invokes it explicitly rather than maintaining a second
+/// bootstrap implementation that could drift from it.
 pub(crate) async fn create_tenant(
     pool: &sqlx::PgPool,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
     slug: &str,
     name: &str,
     status: TenantStatus,
 ) -> Result<synveda_types::Tenant, String> {
-    let tenant_id = TenantId::new();
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
+    create_tenant_with_admission(
+        pool,
+        database_roles,
+        slug,
+        name,
+        status,
+        TenantAdmission::Standard,
+    )
+    .await
+}
+
+#[cfg(feature = "eval-fixture")]
+async fn create_eval_tenant(
+    pool: &sqlx::PgPool,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
+    slug: &str,
+    name: &str,
+    status: TenantStatus,
+    administrator_subject: &str,
+) -> Result<synveda_types::Tenant, String> {
+    create_tenant_with_admission(
+        pool,
+        database_roles,
+        slug,
+        name,
+        status,
+        TenantAdmission::EvalAdministrator(administrator_subject.to_owned()),
+    )
+    .await
+}
+
+enum TenantAdmission {
+    Standard,
+    #[cfg(feature = "eval-fixture")]
+    EvalAdministrator(String),
+}
+
+async fn create_tenant_with_admission(
+    pool: &sqlx::PgPool,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
+    slug: &str,
+    name: &str,
+    status: TenantStatus,
+    admission: TenantAdmission,
+) -> Result<synveda_types::Tenant, String> {
+    create_tenant_with_admission_id(
+        pool,
+        database_roles,
+        TenantId::new(),
+        slug,
+        name,
+        status,
+        admission,
+    )
+    .await
+}
+
+async fn create_tenant_with_admission_id(
+    pool: &sqlx::PgPool,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
+    tenant_id: TenantId,
+    slug: &str,
+    name: &str,
+    status: TenantStatus,
+    admission: TenantAdmission,
+) -> Result<synveda_types::Tenant, String> {
+    let mut tx = synveda_store::rls::begin_migrator_tenant_tx(pool, tenant_id, database_roles)
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(|error| {
+            format!(
+                "tenant admission requires the exact configured migrator principal, database target and schema epoch: {error}"
+            )
+        })?;
     let tenant = synveda_store::tenants::create(&mut *tx, tenant_id, slug, name, status)
         .await
         .map_err(|err| err.to_string())?;
+    record_tenant_admission(&mut tx, &tenant, admission).await?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    Ok(tenant)
+}
+
+async fn record_tenant_admission(
+    tx: &mut sqlx::PgConnection,
+    tenant: &synveda_types::Tenant,
+    admission: TenantAdmission,
+) -> Result<(), String> {
     record_break_glass(
-        &mut tx,
-        tenant_id,
+        tx,
+        tenant.id,
         AuditAction::TenantCreated,
-        format!("tenant {tenant_id}"),
+        format!("tenant {}", tenant.id),
         json!({"slug": tenant.slug, "name": tenant.name, "status": tenant.status}),
     )
     .await?;
-    tx.commit().await.map_err(|err| err.to_string())?;
-    Ok(tenant)
+    match admission {
+        TenantAdmission::Standard => {}
+        #[cfg(feature = "eval-fixture")]
+        TenantAdmission::EvalAdministrator(subject) => {
+            let root = synveda_store::scopes::ensure_tenant_root(&mut *tx, tenant.id)
+                .await
+                .map_err(|err| err.to_string())?;
+            let grant = synveda_store::access::create_grant(
+                tx,
+                &synveda_store::access::NewGrant {
+                    id: GrantId::new(),
+                    tenant_id: tenant.id,
+                    scope_id: root.id,
+                    subject: GrantSubject::Principal {
+                        principal_id: subject.clone(),
+                    },
+                    role_key: RoleKey::Administrator,
+                    source: GrantSource::Automation,
+                    invite_id: None,
+                    granted_by: None,
+                },
+            )
+            .await
+            .map_err(|err| err.to_string())?;
+            record_break_glass(
+                tx,
+                tenant.id,
+                AuditAction::AccessGranted,
+                format!("scope {}", root.id),
+                json!({
+                    "origin": "eval-fixture-tenant-admission",
+                    "grant": {
+                        "id": grant.id,
+                        "scope_id": grant.scope_id,
+                        "subject": subject,
+                        "role": RoleKey::Administrator,
+                    },
+                }),
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Idempotently admits one deployment-owned tenant without creating a second
+/// bootstrap path. The read and possible insert use the exact migrator
+/// authority proof and tenant-scoped transaction used by ordinary admission.
+/// A single retry closes the concurrent-create race; it never widens a
+/// conflict with another UUID or different immutable admission fields.
+async fn converge_tenant(
+    pool: &sqlx::PgPool,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
+    tenant_id: TenantId,
+    slug: &str,
+    name: &str,
+    status: TenantStatus,
+) -> Result<synveda_types::Tenant, String> {
+    validate_deployment_tenant_admission(tenant_id, slug, name)?;
+    for attempt in 0..2 {
+        let mut tx = synveda_store::rls::begin_migrator_tenant_tx(
+            pool,
+            tenant_id,
+            database_roles,
+        )
+        .await
+        .map_err(|error| {
+            format!(
+                "tenant admission requires the exact configured migrator principal, database target and schema epoch: {error}"
+            )
+        })?;
+
+        if let Some(existing) = synveda_store::tenants::by_id(&mut *tx, tenant_id)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            if existing.slug != slug || existing.name != name || existing.status != status {
+                return Err(format!(
+                    "tenant {tenant_id} already exists with a different slug, name or status"
+                ));
+            }
+            tx.commit().await.map_err(|error| error.to_string())?;
+            return Ok(existing);
+        }
+
+        let tenant =
+            match synveda_store::tenants::create(&mut *tx, tenant_id, slug, name, status).await {
+                Ok(tenant) => tenant,
+                Err(synveda_types::Error::Conflict { .. }) if attempt == 0 => {
+                    tx.rollback().await.map_err(|error| error.to_string())?;
+                    continue;
+                }
+                Err(error) => return Err(error.to_string()),
+            };
+        record_tenant_admission(&mut tx, &tenant, TenantAdmission::Standard).await?;
+        tx.commit().await.map_err(|error| error.to_string())?;
+        return Ok(tenant);
+    }
+    Err("tenant admission did not converge after a concurrent create".to_owned())
+}
+
+fn is_deployment_tenant_id(tenant_id: TenantId) -> bool {
+    let uuid = tenant_id.as_uuid();
+    uuid.get_version_num() == 7 && uuid.as_bytes()[8] & 0b1100_0000 == 0b1000_0000
+}
+
+fn validate_deployment_tenant_admission(
+    tenant_id: TenantId,
+    slug: &str,
+    name: &str,
+) -> Result<(), String> {
+    if !is_deployment_tenant_id(tenant_id) {
+        return Err("tenant converge requires an RFC 4122 UUIDv7 --id".to_owned());
+    }
+    let slug_starts_safely = slug
+        .as_bytes()
+        .first()
+        .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit());
+    if !slug_starts_safely
+        || slug.len() > 63
+        || !slug
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        || slug.ends_with('-')
+        || slug.contains("--")
+    {
+        return Err("tenant converge requires a bounded lowercase --slug".to_owned());
+    }
+    if name.is_empty()
+        || name.len() > 128
+        || name.starts_with('-')
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b' ' | b'-'))
+        || !name.bytes().any(|byte| byte.is_ascii_alphanumeric())
+    {
+        return Err("tenant converge requires a bounded display --name".to_owned());
+    }
+    Ok(())
+}
+
+async fn render_admitted_tenant(
+    pool: &sqlx::PgPool,
+    tenant: synveda_types::Tenant,
+    require_key: bool,
+) -> Result<(), String> {
+    // Key wrapping remains outside the admission transaction: a network KMS
+    // outage must not hold the transaction that creates the tenant. A rerun
+    // converges the already-admitted row and retries this idempotent step.
+    let key = match keys::provision_quietly(pool, tenant.id).await {
+        Ok(version) => serde_json::json!({ "version": version }),
+        Err(error) if require_key => {
+            return Err(format!(
+                "tenant {0} was admitted, but its required encryption key was not provisioned: {error}; rerun the same converge command after restoring KMS availability",
+                tenant.id
+            ));
+        }
+        Err(error) => {
+            eprintln!(
+                "tenant admitted, but its encryption key was not provisioned: {error}\n\
+                 run `synveda tenant key provision --tenant {}` once a KEK is configured",
+                tenant.id
+            );
+            serde_json::Value::Null
+        }
+    };
+    let mut rendered = serde_json::to_value(&tenant).map_err(|error| error.to_string())?;
+    if let Some(object) = rendered.as_object_mut() {
+        object.insert("encryption_key".to_owned(), key);
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&rendered).map_err(|error| error.to_string())?
+    );
+    Ok(())
 }
 
 /// Chains a break-glass event in the same transaction as the mutation it
@@ -3063,13 +3368,12 @@ pub(crate) async fn record_break_glass(
 
 /// [`connect`], then the schema epoch guard (CPR-2, ADR-0069).
 ///
-/// Every store-level command goes through this. They open `DATABASE_URL`
-/// directly and write with the owner role — which makes them the one family
-/// of verbs that could quietly succeed against a database from before the
-/// context-platform cut, writing new-model rows beside old-model ones with
-/// nothing in the process to notice. The two that do not are the two that
-/// cannot: `db migrate`, which creates the epoch, and `reset`, which is what
-/// a refusal tells you to run.
+/// Every store-level command except migration and reset goes through this.
+/// Most operator mutations intentionally receive an owner URL; the read-only
+/// recovery verifier deliberately receives the ordinary gateway URL. Either
+/// could otherwise act on a database from before the context-platform cut
+/// without noticing its model. `db migrate` creates the epoch, while `reset`
+/// is the destructive remedy named by a refusal.
 async fn connect_current_epoch() -> Result<sqlx::PgPool, String> {
     let pool = connect().await?;
     synveda_store::epoch::verify(&pool)
@@ -3078,26 +3382,32 @@ async fn connect_current_epoch() -> Result<sqlx::PgPool, String> {
     Ok(pool)
 }
 
+/// Connects tenant admission only to an explicitly selected deployment
+/// database. There is no implicit development credential.
+async fn connect_tenant_admission() -> Result<sqlx::PgPool, String> {
+    let url = settings::database_url()?;
+    connect_url(&url).await
+}
+
 async fn connect() -> Result<sqlx::PgPool, String> {
-    // `DATABASE_URL`, or the single-node profile's own Postgres — which is
-    // the same default `synveda init` installs against, so the commands
-    // INSTALL.md tells a new operator to run next (`audit tail`, `audit
-    // verify`) work on a machine that has one deployment and no Makefile.
-    //
-    // The message this replaces named the Makefile, which is in a checkout
-    // an installed operator does not have (OPS-8). Erroring on a missing
-    // variable was right while a checkout was the only way to get here.
-    let url = init::database_url();
+    // Direct-binary administration must select its database explicitly. The
+    // deployment owns credentials and may supply the same contract by file.
+    let url = settings::database_url()?;
+    connect_url(&url).await
+}
+
+async fn connect_url(url: &str) -> Result<sqlx::PgPool, String> {
+    let connect_options = synveda_store::database_url::parse("DATABASE_URL", url)
+        .map_err(|error| error.to_string())?;
     PgPoolOptions::new()
         .max_connections(2)
-        .connect(&url)
+        .connect_with(connect_options)
         .await
         .map_err(|err| {
-            let safe_url = init::redacted_database_url(&url);
+            let safe_url = settings::redacted_database_url(url);
             format!(
                 "connect to {safe_url}: {err}\n\
-                 (set DATABASE_URL to reach a database other than the one \
-                 `synveda init` installs)"
+                 (set DATABASE_URL or DATABASE_URL_FILE to select the deployment database)"
             )
         })
 }
@@ -3131,6 +3441,103 @@ mod hard_cut_tests {
             error.to_string().contains("unexpected argument '--demo'"),
             "unexpected clap refusal: {error}"
         );
+    }
+
+    #[test]
+    fn migration_check_is_the_only_non_mutating_migrate_mode() {
+        Cli::try_parse_from(["synveda", "db", "migrate"])
+            .expect("ordinary migration remains available");
+        Cli::try_parse_from(["synveda", "db", "migrate", "--check"])
+            .expect("candidate compatibility mode must parse");
+
+        let error = Cli::try_parse_from(["synveda", "db", "migrate", "--dry-run"])
+            .err()
+            .expect("an imprecise migration alias must be refused");
+        assert!(error.to_string().contains("--dry-run"), "{error}");
+    }
+
+    #[test]
+    fn deployment_tenant_convergence_has_one_exact_non_secret_shape() {
+        Cli::try_parse_from([
+            "synveda",
+            "tenant",
+            "converge",
+            "--id",
+            "019b53c0-7c00-7000-8000-000000000045",
+            "--slug",
+            "synveda-demo",
+            "--name",
+            "Synveda Demo",
+        ])
+        .expect("deployment tenant convergence must parse");
+
+        let error = Cli::try_parse_from([
+            "synveda",
+            "tenant",
+            "converge",
+            "--id",
+            "019b53c0-7c00-7000-8000-000000000045",
+            "--slug",
+            "synveda-demo",
+        ])
+        .err()
+        .expect("all immutable admission fields are required");
+        assert!(error.to_string().contains("--name"), "{error}");
+
+        let non_rfc_variant: TenantId = "019b53c0-7c00-7000-c000-000000000045"
+            .parse()
+            .expect("syntactically valid non-RFC UUID");
+        assert_eq!(non_rfc_variant.as_uuid().get_version_num(), 7);
+        assert!(
+            !is_deployment_tenant_id(non_rfc_variant),
+            "deployment convergence must reject non-RFC UUID variants before database access"
+        );
+        let deployment_id: TenantId = "019b53c0-7c00-7000-8000-000000000045"
+            .parse()
+            .expect("deployment UUIDv7");
+        for (slug, name) in [
+            ("synveda--demo", "Synveda Demo"),
+            ("synveda-demo-", "Synveda Demo"),
+            ("Synveda-demo", "Synveda Demo"),
+            ("synveda-demo", "-Synveda Demo"),
+            ("synveda-demo", "Synveda/Demo"),
+            ("synveda-demo", "Synveda Démo"),
+        ] {
+            assert!(
+                validate_deployment_tenant_admission(deployment_id, slug, name).is_err(),
+                "invalid deployment admission was accepted: {slug:?} {name:?}"
+            );
+        }
+        assert!(
+            validate_deployment_tenant_admission(deployment_id, &"a".repeat(64), "Synveda Demo")
+                .is_err()
+        );
+        assert!(
+            validate_deployment_tenant_admission(deployment_id, "synveda-demo", &"A".repeat(129))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn recovery_verification_has_one_tenant_scoped_command_shape() {
+        for extra in [None, Some("--expect-key-refusal")] {
+            let mut args = vec![
+                "synveda",
+                "db",
+                "recovery-verify",
+                "--tenant",
+                "019b53c0-7c00-7000-8000-000000000045",
+            ];
+            if let Some(argument) = extra {
+                args.push(argument);
+            }
+            Cli::try_parse_from(args).expect("documented recovery verification must parse");
+        }
+
+        let error = Cli::try_parse_from(["synveda", "db", "recovery-verify"])
+            .err()
+            .expect("recovery verification always requires an explicit tenant");
+        assert!(error.to_string().contains("--tenant"), "{error}");
     }
 
     #[test]
@@ -3172,6 +3579,42 @@ mod hard_cut_tests {
             ],
         ] {
             Cli::try_parse_from(args).expect("documented OKF command must parse");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn profile_selection_refuses_non_unicode_environment_input() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let _guard = crate::testing::ENV.blocking_lock();
+        let previous = std::env::var_os("SYNVEDA_PROFILE");
+        unsafe {
+            std::env::set_var(
+                "SYNVEDA_PROFILE",
+                std::ffi::OsString::from_vec(vec![0xff, 0xfe]),
+            );
+        }
+        let error = profile_name(None).expect_err("non-Unicode profile must be refused");
+        assert_eq!(error, "SYNVEDA_PROFILE must be valid UTF-8");
+        assert_eq!(
+            profile_name(Some("explicit".to_owned())).expect("flag takes precedence"),
+            "explicit"
+        );
+        assert_eq!(
+            profile_name(Some(String::new())).expect_err("empty flag must be refused"),
+            "--profile must not be empty"
+        );
+        unsafe { std::env::set_var("SYNVEDA_PROFILE", "") };
+        assert_eq!(
+            profile_name(None).expect_err("empty environment profile must be refused"),
+            "SYNVEDA_PROFILE must not be empty"
+        );
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("SYNVEDA_PROFILE", value),
+                None => std::env::remove_var("SYNVEDA_PROFILE"),
+            }
         }
     }
 }

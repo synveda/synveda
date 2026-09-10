@@ -1,28 +1,20 @@
-{{- if .Values.install.enabled }}
 {{- /*
-The install job — the Kubernetes equivalent of `synveda init`,
-and deliberately the same two store-level writes ADR-0055 decision 1
-allowed an installer: the migrations, and one tenant row. Both are existing
-audited break-glass paths. Everything else in an initialised deployment —
-the tenant root scope, identities, grants, Configuration and Knowledge — still arrive through
-the gateway under a real bearer and a PDP decision, which is what makes a
-second installer cheap enough to be a Job.
+The required, revision-named install Job implements the same authority order as
+the Compose reference (CPR-45, ADR-0102):
 
-Not a Helm hook. A pre-install hook runs before the release's own
-resources, so the Cluster it needs would not exist yet; the ordering that
-matters is enforced instead by the gateway's own wait — see the sentinel in
-gateway-deployment.yaml, which tests exactly the condition this job
-establishes. Named per revision because a Job's spec is immutable and an
-upgrade has to be able to run it again.
+  1. database-bootstrap — superuser-only role, extension, ownership and ACL
+     convergence through the shared audited PostgreSQL command;
+  2. database-preflight — the product proves the migrator, gateway and worker
+     credentials select one writable database generation and exact roles;
+  3. migrate — the product advances application DDL as `synveda_migrator`;
+  4. tenant — optional, install-only admission under that same migrator.
 
-Three steps, in order:
-  1. migrate  — `synveda db migrate` as the superuser (it creates a role
-                and an extension)
-  2. grant    — hand the gateway's login role membership of `synveda_app`,
-                the least-privilege role every migration has been granting
-                since 0003. Membership rather than a second grant set: one
-                place to be wrong is better than two that must agree.
-  3. tenant   — optional, install only, and convergent.
+The superuser password is mounted only into the bootstrap init container.
+Product and runtime containers never receive it. The Job is not a Helm hook:
+the CNPG Cluster and generated Secrets must exist first. Gateway and worker may
+start independently, but their product-owned authority sentinels remain closed
+until this Job has established the complete contract. A revision suffix is
+required because a Job spec is immutable.
 */ -}}
 apiVersion: batch/v1
 kind: Job
@@ -32,6 +24,7 @@ metadata:
     {{- include "synveda.labels" . | nindent 4 }}
     app.kubernetes.io/component: install
 spec:
+  activeDeadlineSeconds: {{ .Values.install.activeDeadlineSeconds }}
   backoffLimit: {{ .Values.install.backoffLimit }}
   ttlSecondsAfterFinished: {{ .Values.install.ttlSecondsAfterFinished }}
   template:
@@ -42,6 +35,7 @@ spec:
     spec:
       restartPolicy: Never
       serviceAccountName: {{ include "synveda.serviceAccountName" . }}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -49,60 +43,109 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       initContainers:
-        # CNPG has a cluster to bootstrap and a primary to elect, and
-        # `synveda db migrate` connects eagerly. Without this wait the job
-        # would exhaust its backoffLimit racing a database that was always
-        # going to arrive — a fresh install failing on its own start-up
-        # order. The secret this reads may not exist yet either; a pod
-        # waiting on a missing secret is pending, not failed, which is the
-        # behaviour we want.
-        - name: wait-for-postgres
-          image: {{ .Values.postgres.image }}
+        - name: database-bootstrap
+          image: {{ include "synveda.postgresImage" . }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          command:
-            - sh
-            - -ec
+          # Kubernetes' atomic Secret writer exposes projected keys as
+          # symlinks. The shared bootstrap command deliberately refuses every
+          # symlink, so this container copies four fixed, read-only projection
+          # paths into a private memory-backed volume before invoking it. No
+          # value is placed in an argument, environment variable or log.
+          command: ["/bin/sh", "-ec"]
+          args:
             - |
-              until psql "$DATABASE_URL" -tAc 'select 1' >/dev/null 2>&1; do
-                echo "waiting for {{ include "synveda.clusterName" . }} to accept connections"
-                sleep 3
+              umask 077
+              for secret in \
+                postgres_bootstrap_password \
+                synveda_migrator_password \
+                synveda_gateway_password \
+                synveda_worker_password
+              do
+                source=/run/bootstrap-projection/$secret
+                destination=/run/secrets/$secret
+                if [ ! -r "$source" ] || [ ! -f "$source" ]; then
+                  echo "database-bootstrap: required Secret projection is unreadable" >&2
+                  exit 78
+                fi
+                cp -- "$source" "$destination"
+                chmod 0600 "$destination"
               done
+              if [ ! -r /run/database-roles/roles.json ] || [ ! -f /run/database-roles/roles.json ]; then
+                echo "database-bootstrap: database role contract projection is unreadable" >&2
+                exit 78
+              fi
+              cp -- /run/database-roles/roles.json /run/secrets/database_roles.json
+              chmod 0600 /run/secrets/database_roles.json
+              exec /usr/local/bin/synveda-database-bootstrap synveda
           env:
-            {{- include "synveda.adminDsnEnv" . | nindent 12 }}
+            - name: SYNVEDA_POSTGRES_BOOTSTRAP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "synveda.superuserSecret" . }}
+                  key: username
+            - name: SYNVEDA_POSTGRES_BOOTSTRAP_URL
+              value: postgresql://$(SYNVEDA_POSTGRES_BOOTSTRAP_USER)@{{ include "synveda.clusterName" . }}-rw:5432/postgres
+            - name: SYNVEDA_POSTGRES_BUNDLED_CLUSTER
+              value: "true"
+            - name: SYNVEDA_DATABASE_BOOTSTRAP_PRIVATE_DIR
+              value: /run/secrets
+            - name: SYNVEDA_DATABASE_ROLES_FILE
+              value: /run/secrets/database_roles.json
+          volumeMounts:
+            - name: bootstrap-projection
+              mountPath: /run/bootstrap-projection
+              readOnly: true
+            - name: bootstrap-private
+              mountPath: /run/secrets
+            - name: bootstrap-snapshots
+              mountPath: /tmp
+            - name: database-roles
+              mountPath: /run/database-roles
+              readOnly: true
+
+        - name: database-preflight
+          image: {{ include "synveda.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          args: ["database-preflight"]
+          env:
+            - name: SYNVEDA_MIGRATOR_DATABASE_URL_FILE
+              value: /run/secrets/synveda-preflight/migrator_database_url
+            - name: SYNVEDA_GATEWAY_DATABASE_URL_FILE
+              value: /run/secrets/synveda-preflight/gateway_database_url
+            - name: SYNVEDA_WORKER_DATABASE_URL_FILE
+              value: /run/secrets/synveda-preflight/worker_database_url
+            - name: SYNVEDA_DATABASE_ROLES_FILE
+              value: /etc/synveda/database/roles.json
+          volumeMounts:
+            - name: preflight-databases
+              mountPath: /run/secrets/synveda-preflight
+              readOnly: true
+            - name: database-roles
+              mountPath: /etc/synveda/database
+              readOnly: true
+
         - name: migrate
           image: {{ include "synveda.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          command: ["/usr/local/bin/synveda", "db", "migrate"]
+          args: ["migrate"]
           env:
-            {{- include "synveda.adminDsnEnv" . | nindent 12 }}
-        - name: grant
-          image: {{ .Values.postgres.image }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          command:
-            - sh
-            - -ec
-            - |
-              # `synveda_app` is NOLOGIN and holds exactly the grants the
-              # migrations gave it. The gateway's role inherits them by
-              # membership, so nothing here has to be kept in sync with a
-              # migration. Re-granting is a no-op, which is what makes the
-              # job safe to run on every upgrade.
-              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-                -c 'grant synveda_app to "{{ include "synveda.appRole" . }}"'
-              # Prove it, rather than assume it: this is the exact read the
-              # gateway's sentinel waits on.
-              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
-                "select rolcanlogin || '|' || rolsuper || '|' || rolbypassrls || '|' ||
-                        pg_has_role('{{ include "synveda.appRole" . }}', 'synveda_app', 'member')
-                   from pg_catalog.pg_roles
-                  where rolname = '{{ include "synveda.appRole" . }}'" \
-                | grep -qx 'true|false|false|true'
-          env:
-            {{- include "synveda.adminDsnEnv" . | nindent 12 }}
+            - name: DATABASE_URL_FILE
+              value: /run/secrets/synveda-migrator/database_url
+            - name: SYNVEDA_DATABASE_ROLES_FILE
+              value: /etc/synveda/database/roles.json
+          volumeMounts:
+            - name: migrator-database
+              mountPath: /run/secrets/synveda-migrator
+              readOnly: true
+            - name: database-roles
+              mountPath: /etc/synveda/database
+              readOnly: true
+
       containers:
         - name: tenant
           image: {{ include "synveda.image" . }}
@@ -114,12 +157,9 @@ spec:
             - sh
             - -ec
             - |
-              # Convergent, for ADR-0055 decision 7's reason: a second run
-              # against an initialised deployment reports what is there and
-              # changes nothing. Admission is an owner-role operation —
-              # `synveda_app` holds SELECT on `tenants` and nothing more —
-              # so this step runs under the admin identity too.
-              if out=$(synveda tenant create --slug "$SYNVEDA_TENANT_SLUG" --name "$SYNVEDA_TENANT_NAME" 2>&1); then
+              if out=$(/usr/local/bin/synveda tenant create \
+                --slug "$SYNVEDA_TENANT_SLUG" \
+                --name "$SYNVEDA_TENANT_NAME" 2>&1); then
                 echo "$out"
               else
                 case "$out" in
@@ -134,19 +174,99 @@ spec:
               value: {{ .Values.install.tenant.slug | quote }}
             - name: SYNVEDA_TENANT_NAME
               value: {{ default .Values.install.tenant.slug .Values.install.tenant.name | quote }}
-            {{- include "synveda.adminDsnEnv" . | nindent 12 }}
+            - name: DATABASE_URL_FILE
+              value: /run/secrets/synveda-migrator/database_url
+            - name: SYNVEDA_DATABASE_ROLES_FILE
+              value: /etc/synveda/database/roles.json
+          volumeMounts:
+            - name: migrator-database
+              mountPath: /run/secrets/synveda-migrator
+              readOnly: true
+            - name: database-roles
+              mountPath: /etc/synveda/database
+              readOnly: true
           {{- else }}
           command:
             - sh
             - -ec
             - |
-              echo "schema migrated and the gateway role granted."
+              echo "database roles, targets and schema converged."
               {{- if .Values.install.tenant.slug }}
               echo "tenant admission runs on install only; this is revision {{ .Release.Revision }}."
               {{- else }}
               echo "no tenant requested (install.tenant.slug is empty)."
-              echo "admitting one needs the admin credential, not the gateway's —"
-              echo "see 'admitting a tenant' in the chart's NOTES."
               {{- end }}
           {{- end }}
-{{- end }}
+
+      volumes:
+        - name: bootstrap-projection
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ include "synveda.superuserSecret" . }}
+                  items:
+                    - key: password
+                      path: postgres_bootstrap_password
+              - secret:
+                  name: {{ include "synveda.migratorSecret" . }}
+                  items:
+                    - key: password
+                      path: synveda_migrator_password
+              - secret:
+                  name: {{ .Values.gateway.databaseExistingSecret }}
+                  items:
+                    - key: {{ .Values.gateway.databasePasswordSecretKey }}
+                      path: synveda_gateway_password
+              - secret:
+                  name: {{ .Values.worker.databaseExistingSecret }}
+                  items:
+                    - key: {{ .Values.worker.databasePasswordSecretKey }}
+                      path: synveda_worker_password
+        - name: bootstrap-private
+          emptyDir:
+            medium: Memory
+            # Four 4096-byte credentials, one 4096-byte role contract and the
+            # three-line pgpass whose escaping can double password bytes must
+            # fit together. Keep bounded headroom for filenames and metadata.
+            sizeLimit: 64Ki
+        - name: bootstrap-snapshots
+          emptyDir:
+            medium: Memory
+            # The shared shell keeps bounded input snapshots here and may
+            # materialise its fixed SQL heredoc in TMPDIR. Match the 16 MiB
+            # Compose bootstrap tmpfs so either supported /bin/sh strategy
+            # fits without turning /tmp into unbounded node storage.
+            sizeLimit: 16Mi
+        - name: preflight-databases
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ include "synveda.migratorSecret" . }}
+                  items:
+                    - key: uri
+                      path: migrator_database_url
+              - secret:
+                  name: {{ .Values.gateway.databaseExistingSecret }}
+                  items:
+                    - key: {{ .Values.gateway.databaseUrlSecretKey }}
+                      path: gateway_database_url
+              - secret:
+                  name: {{ .Values.worker.databaseExistingSecret }}
+                  items:
+                    - key: {{ .Values.worker.databaseUrlSecretKey }}
+                      path: worker_database_url
+        - name: migrator-database
+          secret:
+            secretName: {{ include "synveda.migratorSecret" . }}
+            defaultMode: 0440
+            items:
+              - key: uri
+                path: database_url
+        - name: database-roles
+          configMap:
+            name: {{ include "synveda.fullname" . }}-database-roles
+            items:
+              - key: roles.json
+                path: roles.json

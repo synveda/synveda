@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update operation_outbox\n        set state = case when $8 then 'dispatched' else 'pending' end,\n            lease_owner = null, lease_expires_at = null,\n            next_dispatch_at = case when $8 then null else\n                statement_timestamp() + make_interval(secs => $6::double precision)\n            end,\n            last_error_code = case when $8 then null else $7 end,\n            submission_failures = case when $8 then 0 else submission_failures + 1 end,\n            dispatched_at = case when $8 then coalesce(dispatched_at, now())\n                                 else dispatched_at end,\n            updated_at = now()\n        where tenant_id = $1 and operation_id = $2 and operation_version = $3\n          and state = 'claimed' and lease_owner = $4 and dispatch_attempts = $5\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int2",
+        "Text",
+        "Int4",
+        "Float8",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d5081f9ac061cb936e7243e17a9dda48552bafb0f8f9261e30ea4490093e7819"
+}

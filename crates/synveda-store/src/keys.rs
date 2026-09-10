@@ -441,29 +441,47 @@ impl KeyRing {
         }
         let version = KeyVersion::FIRST;
         let wrapped = self.wrap_fresh(scope).await?;
-        match scope {
+        let inserted = match scope {
             KeyScope::Deployment => {
                 deployment_insert(pool, version, &wrapped, self.kms.key_ref()).await
             }
             KeyScope::Tenant(tenant_id) => {
                 let mut tx = begin_tenant_tx(pool, tenant_id).await?;
-                tenant_insert(&mut *tx, tenant_id, version, &wrapped, self.kms.key_ref()).await?;
-                tx.commit().await.map_err(storage_error)
+                match tenant_insert(&mut *tx, tenant_id, version, &wrapped, self.kms.key_ref())
+                    .await
+                {
+                    Ok(()) => tx.commit().await.map_err(storage_error),
+                    Err(error) => {
+                        tx.rollback().await.map_err(storage_error)?;
+                        Err(error)
+                    }
+                }
             }
+        };
+        match inserted {
+            Ok(()) => {
+                metrics::counter!(
+                    KEYS_MINTED_TOTAL,
+                    "scope" => scope.label(),
+                    "reason" => "provision",
+                )
+                .increment(1);
+                Ok(version)
+            }
+            // PostgreSQL reports the unique conflict only after the winning
+            // transaction resolves. Read back its authoritative current
+            // generation rather than claiming this caller minted version 1.
+            Err(Error::Conflict { .. }) => self
+                .stored_current(pool, scope)
+                .await?
+                .map(|stored| stored.version)
+                .ok_or_else(|| Error::Internal {
+                    message: format!(
+                        "concurrent key provisioning for {scope} committed no current generation"
+                    ),
+                }),
+            Err(other) => Err(other),
         }
-        // A conflict means somebody else provisioned between the read and the
-        // insert, which is the outcome this function promises anyway.
-        .or_else(|err| match err {
-            Error::Conflict { .. } => Ok(()),
-            other => Err(other),
-        })?;
-        metrics::counter!(
-            KEYS_MINTED_TOTAL,
-            "scope" => scope.label(),
-            "reason" => "provision",
-        )
-        .increment(1);
-        Ok(version)
     }
 
     /// Retires the current key and mints the next generation, atomically.

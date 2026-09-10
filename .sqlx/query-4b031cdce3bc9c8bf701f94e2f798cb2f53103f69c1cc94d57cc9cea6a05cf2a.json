@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select marker.epoch              as \"epoch!\",\n               coalesce(\n                 (pg_catalog.to_jsonb(marker) ->> 'baseline_revision')::integer,\n                 0\n               )                         as \"baseline_revision!\",\n               case\n                 when pg_catalog.octet_length(marker.migration_head) <= 16\n                 then marker.migration_head\n               end                       as \"migration_head?\",\n               marker.created_at         as \"created_at!\",\n               case\n                 when pg_catalog.octet_length(marker.created_by_version) <= 64\n                 then marker.created_by_version\n               end                       as \"created_by_version?\",\n               marker.updated_at         as \"updated_at!\"\n        from public.schema_metadata marker\n        limit 2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "epoch!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "baseline_revision!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "migration_head?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_by_version?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "4b031cdce3bc9c8bf701f94e2f798cb2f53103f69c1cc94d57cc9cea6a05cf2a"
+}

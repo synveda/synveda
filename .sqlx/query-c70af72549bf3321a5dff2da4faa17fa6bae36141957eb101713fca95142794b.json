@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update operation_outbox\n           set next_dispatch_at = statement_timestamp(), updated_at = statement_timestamp()\n           where tenant_id = $1 and operation_id = $2 and state = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c70af72549bf3321a5dff2da4faa17fa6bae36141957eb101713fca95142794b"
+}

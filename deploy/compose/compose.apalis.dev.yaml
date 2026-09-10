@@ -1,0 +1,28 @@
+# Development-only source builds for the optional Apalis product commands.
+
+x-synveda-apalis-build-closure: &synveda-apalis-build-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+services:
+  apalis-migrate:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/product/Dockerfile
+      args:
+        <<: *synveda-apalis-build-closure
+
+  apalis-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/product/Dockerfile
+      args:
+        <<: *synveda-apalis-build-closure

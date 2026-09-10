@@ -1050,7 +1050,7 @@ async fn add_member(
     )
     .await?;
     let grant = access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id,
@@ -2096,7 +2096,7 @@ async fn grant_at(
         }
     }
     let grant = access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id,
@@ -2290,7 +2290,7 @@ async fn assign_directory_access(
     )
     .await?;
     let grant = access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id,

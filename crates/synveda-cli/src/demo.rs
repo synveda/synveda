@@ -21,6 +21,7 @@ use chrono::Utc;
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use zeroize::Zeroizing;
 
 use crate::api::Api;
 use crate::credentials;
@@ -28,6 +29,7 @@ use crate::credentials;
 const RECEIPT_VERSION: u32 = 1;
 const RECEIPT_NAME: &str = "pulseboard-demo.json";
 const MAX_CAPTURE_POLLS: usize = 120;
+const MAX_OPERATION_POLLS: usize = 120;
 
 /// The three canonical product profiles. These are copied Configuration
 /// documents, not runtime/deployment branches.
@@ -110,6 +112,19 @@ impl Receipt {
         save_receipt(self)
     }
 
+    fn put_pair(
+        &mut self,
+        first_name: &str,
+        first_value: Value,
+        second_name: &str,
+        second_value: Value,
+    ) -> Result<(), String> {
+        self.resources.insert(first_name.to_owned(), first_value);
+        self.resources.insert(second_name.to_owned(), second_value);
+        self.updated_at = Utc::now().to_rfc3339();
+        save_receipt(self)
+    }
+
     fn notice(&mut self, notice: impl Into<String>) -> Result<(), String> {
         let notice = notice.into();
         if !self.notices.contains(&notice) {
@@ -147,6 +162,7 @@ pub async fn start(
 
     let mut receipt = begin_or_resume(profile, &alice)?;
     if receipt.state == "active" {
+        ensure_skill_validation(&alice, &mut receipt).await?;
         return render(&receipt, json_output);
     }
     eprintln!(
@@ -202,6 +218,7 @@ pub async fn start(
     .await?;
 
     ensure_skill(&alice, &mut receipt).await?;
+    ensure_skill_validation(&alice, &mut receipt).await?;
     ensure_tool(&alice, &mut receipt).await?;
     ensure_okf(&alice, &mut receipt).await?;
     ensure_okf_export(&alice, &mut receipt).await?;
@@ -226,6 +243,7 @@ pub async fn status(credential_profile: &str, json_output: bool) -> Result<(), S
         ("workspace", "/v1/workspaces/"),
         ("project", "/v1/projects/"),
         ("first_session", "/v1/sessions/"),
+        ("first_capture", "/v1/capture-batches/"),
         ("reuse_session", "/v1/sessions/"),
         ("current_session", "/v1/sessions/"),
         ("webhook_knowledge", "/v1/knowledge/"),
@@ -235,6 +253,7 @@ pub async fn status(credential_profile: &str, json_output: bool) -> Result<(), S
         ("incident_knowledge", "/v1/knowledge/"),
         ("reuse_context", "/v1/context-runs/"),
         ("current_context", "/v1/context-runs/"),
+        ("release_skill_validation", "/v1/operations/"),
     ] {
         if let Some(value) = receipt.resource(name)
             && let Some(id) = object_id(value)
@@ -545,16 +564,28 @@ async fn prepare_team_member(
             return Err(format!("Bob profile {profile:?} is not provisioned"));
         }
         if receipt.resource("bob_member").is_none() {
-            let project = receipt.require_resource("project")?;
-            let id = required_str(&project, "id")?;
-            let value: Value = alice
+            let workspace = receipt.require_resource("workspace")?;
+            let id = required_str(&workspace, "id")?;
+            let mut created: Value = alice
                 .post_idempotent_as(
-                    &format!("/v1/projects/{id}/members"),
-                    Some(json!({"principal_id": bob.subject, "role": "member"})),
-                    &receipt.key("bob-member"),
+                    &format!("/v1/workspaces/{id}/invites"),
+                    Some(json!({
+                        "role": "member",
+                        "email": "member@demo.synveda.invalid",
+                        "expires_in_secs": 604800
+                    })),
+                    &receipt.key("bob-invite"),
                 )
                 .await?;
-            receipt.put("bob_member", value)?;
+            let token = take_secret_field(&mut created, "token")?;
+            let _accept_url = take_secret_field(&mut created, "accept_url")?;
+            let accepted = bob.accept_invite(token.as_str()).await?;
+            receipt.put_pair(
+                "bob_invite",
+                json!({"invite": created["invite"]}),
+                "bob_member",
+                accepted,
+            )?;
         }
         receipt.put(
             "bob_principal",
@@ -566,7 +597,7 @@ async fn prepare_team_member(
     if receipt.resource("bob_invite").is_none() {
         let workspace = receipt.require_resource("workspace")?;
         let id = required_str(&workspace, "id")?;
-        let created: Value = alice
+        let mut created: Value = alice
             .post_idempotent_as(
                 &format!("/v1/workspaces/{id}/invites"),
                 Some(json!({
@@ -577,10 +608,10 @@ async fn prepare_team_member(
                 &receipt.key("bob-invite"),
             )
             .await?;
-        let token = created["token"].as_str().unwrap_or("<not returned>");
-        let accept_url = created["accept_url"].as_str().unwrap_or("<not returned>");
-        println!("Bob invitation (shown once): {token}");
-        println!("Accept through Bob's own login: {accept_url}");
+        let token = take_secret_field(&mut created, "token")?;
+        let accept_url = take_secret_field(&mut created, "accept_url")?;
+        println!("Bob invitation (shown once): {}", token.as_str());
+        println!("Accept through Bob's own login: {}", accept_url.as_str());
         receipt.put("bob_invite", json!({"invite": created["invite"]}))?;
     } else {
         receipt.notice(
@@ -591,6 +622,13 @@ async fn prepare_team_member(
         "No distinct Bob credential was available; clean-session reuse runs as Alice and no teammate claim is made",
     )?;
     Ok(None)
+}
+
+fn take_secret_field(value: &mut Value, name: &str) -> Result<Zeroizing<String>, String> {
+    match value.get_mut(name).map(Value::take) {
+        Some(Value::String(secret)) if !secret.is_empty() => Ok(Zeroizing::new(secret)),
+        _ => Err(format!("invitation response has no {name}")),
+    }
 }
 
 async fn ensure_first_session(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
@@ -784,7 +822,47 @@ async fn ensure_reuse_context(api: &Api, receipt: &mut Receipt) -> Result<(), St
         {
             return Err("Bob's context leaked Alice's private quick-test preference".to_owned());
         }
+        let rendered = run["rendered"]
+            .as_str()
+            .ok_or_else(|| "the clean reuse context returned no rendered block".to_owned())?;
+        if run["selection_count"].as_i64().unwrap_or_default() < 1
+            || !rendered.contains("provider event ID")
+        {
+            return Err(
+                "the clean reuse context did not select the shared webhook convention".to_owned(),
+            );
+        }
         receipt.put("reuse_context", run)?;
+    }
+    if api.subject != receipt.actor_subject && receipt.resource("private_isolation").is_none() {
+        let session = receipt.require_resource("reuse_session")?;
+        let session_id = required_str(&session, "id")?;
+        let private = receipt.require_resource("private_knowledge")?;
+        let private_id = required_str(&private, "id")?;
+        let result = api
+            .post(
+                &format!("/v1/sessions/{session_id}/knowledge-query"),
+                Some(json!({"query": "test-fast", "limit": 20})),
+            )
+            .await?;
+        let items = result["items"]
+            .as_array()
+            .ok_or_else(|| "private-isolation query returned no items array".to_owned())?;
+        if items
+            .iter()
+            .any(|item| object_id(&item["knowledge"]) == Some(private_id))
+        {
+            return Err("Bob's Knowledge query exposed Alice's private preference".to_owned());
+        }
+        receipt.put(
+            "private_isolation",
+            json!({
+                "session_id": session_id,
+                "private_knowledge_id": private_id,
+                "inspected_count": items.len(),
+                "private_knowledge_absent": true,
+            }),
+        )?;
     }
     Ok(())
 }
@@ -967,6 +1045,39 @@ async fn ensure_skill(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
         receipt.notice("Release Skill installation is in Advanced > Reviews; no unreviewed version was advertised or pinned")?;
     }
     Ok(())
+}
+
+async fn ensure_skill_validation(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
+    let skill = receipt.require_resource("release_skill")?;
+    match skill["outcome"].as_str() {
+        Some("applied") => {}
+        Some("pending_review") => {
+            receipt.notice(
+                "Release Skill validation remains pending until its governed version is applied",
+            )?;
+            return Ok(());
+        }
+        other => {
+            return Err(format!(
+                "release Skill cannot be validated from governance outcome {other:?}"
+            ));
+        }
+    }
+    let operation = match receipt.resource("release_skill_validation") {
+        Some(operation) => operation.clone(),
+        None => {
+            let skill_id = required_str(&skill, "skill_id")?;
+            let version_id = required_str(&skill, "version_id")?;
+            api.post_idempotent_as(
+                &format!("/v1/skills/{skill_id}/versions/{version_id}/validation-operations"),
+                Some(json!({"harness": "validation_sandbox"})),
+                &receipt.key("release-skill-validation"),
+            )
+            .await?
+        }
+    };
+    let completed = poll_operation(api, &operation).await?;
+    receipt.put("release_skill_validation", completed)
 }
 
 async fn ensure_tool(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
@@ -1193,6 +1304,48 @@ async fn poll_capture(api: &Api, batch: &Value) -> Result<Value, String> {
     ))
 }
 
+async fn poll_operation(api: &Api, operation: &Value) -> Result<Value, String> {
+    let id = required_str(operation, "id")?;
+    for _ in 0..MAX_OPERATION_POLLS {
+        let current = api.get(&format!("/v1/operations/{id}")).await?;
+        match current["state"].as_str() {
+            Some("succeeded")
+                if current["progress_percent"].as_u64() == Some(100)
+                    && current["attempts"]
+                        .as_i64()
+                        .is_some_and(|attempts| attempts >= 1)
+                    && current["test_run_id"].as_str().is_some() =>
+            {
+                return Ok(current);
+            }
+            Some("succeeded") => {
+                return Err(format!(
+                    "Skill-validation operation {id} returned incomplete success evidence"
+                ));
+            }
+            Some("pending" | "running" | "failed") => {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Some("blocked" | "cancelled" | "dead_lettered") => {
+                return Err(format!(
+                    "Skill-validation operation {id} ended in {} ({})",
+                    current["state"].as_str().unwrap_or("unknown"),
+                    current["error_code"].as_str().unwrap_or("no_error_code")
+                ));
+            }
+            other => {
+                return Err(format!(
+                    "Skill-validation operation {id} returned state {other:?}"
+                ));
+            }
+        }
+    }
+    Err(format!(
+        "Skill-validation operation {id} did not complete within {} seconds",
+        MAX_OPERATION_POLLS / 2
+    ))
+}
+
 fn knowledge_handle(result: &Value) -> Option<Value> {
     let candidate = result.get("candidate").unwrap_or(result);
     let item_id = candidate
@@ -1206,6 +1359,7 @@ fn knowledge_handle(result: &Value) -> Option<Value> {
     Some(json!({
         "id": item_id,
         "revision_id": revision_id,
+        "candidate_id": candidate.get("id"),
         "change_id": candidate.get("resulting_change_id").or_else(|| candidate.get("change_id")),
         "outcome": candidate.get("resulting_outcome").or_else(|| candidate.get("outcome")),
     }))
@@ -1266,6 +1420,7 @@ fn render(receipt: &Receipt, json_output: bool) -> Result<(), String> {
         ("capture batch", "first_capture"),
         ("current context", "current_context"),
         ("release Skill", "release_skill"),
+        ("Skill validation", "release_skill_validation"),
         ("MCP server", "tool_server"),
         ("OKF import", "okf_import"),
     ] {
@@ -1289,7 +1444,7 @@ fn render(receipt: &Receipt, json_output: bool) -> Result<(), String> {
                 "    semantic        unavailable: deterministic hash is labelled lexical-only"
             );
             println!(
-                "                    re-run the deployment with `synveda init --embedder tei`"
+                "                    configure TEI in the validated deployment before restart"
             );
         }
     }
@@ -1418,7 +1573,8 @@ mod tests {
     #[test]
     fn receipt_never_persists_an_invitation_token_or_secret() {
         let source = include_str!("demo.rs");
-        assert!(source.contains("created[\"token\"]"));
+        assert!(source.contains("take_secret_field(&mut created, \"token\")"));
+        assert!(source.contains("bob.accept_invite(token.as_str())"));
         assert!(source.contains("json!({\"invite\": created[\"invite\"]})"));
         for forbidden in [
             concat!("synveda_", "store"),

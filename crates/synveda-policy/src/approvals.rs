@@ -152,7 +152,7 @@ pub fn regulated_strict() -> ApprovalMatrix {
     matrix
 }
 
-/// `standard`: the SMB collapse tech plan §2.4 names — "most of the above
+/// `standard`: the small-team collapse tech plan §2.4 names — "most of the above
 /// collapses to single-approver or auto-approve".
 ///
 /// Auto-approve is a real answer, not a hole: `ChannelPublish` still

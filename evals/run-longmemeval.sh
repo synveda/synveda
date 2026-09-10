@@ -28,13 +28,20 @@
 # figure and gates nothing, so the command still exits successfully when
 # one of its bounds is breached.
 #
-# Exit status is the gate's. Needs the dev compose (postgres), node, and
-# the corpus fetched into evals/fixtures/longmemeval — see that
+# Exit status is the gate's. It owns one fresh exact-role PostgreSQL fixture
+# and needs Docker, node, and the corpus fetched into
+# evals/fixtures/longmemeval — see that
 # directory's NOTICE.md, and note that the corpus is deliberately not
 # committed.
 set -eu
 
 cd "$(dirname "$0")/.."
+
+if [ "${SYNVEDA_EVAL_EXACT_DATABASE:-}" != 1 ]; then
+  SYNVEDA_DB_TEST_TASK=longmemeval-evaluation
+  export SYNVEDA_DB_TEST_TASK
+  exec bash scripts/db-test.sh "$@"
+fi
 . evals/lib.sh
 
 EVAL_LONGMEMEVAL_INSTANCES=${EVAL_LONGMEMEVAL_INSTANCES:-10}
@@ -43,6 +50,8 @@ EVAL_LONGMEMEVAL_TOKEN_TTL_SECS=${EVAL_LONGMEMEVAL_TOKEN_TTL_SECS:-7200}
 export EVAL_LONGMEMEVAL_INSTANCES EVAL_LONGMEMEVAL_ACTORS
 export EVAL_LONGMEMEVAL_TOKEN_TTL_SECS
 
-trap eval_down EXIT INT TERM
+trap 'eval_finish $?' EXIT
+trap 'eval_finish 130' INT
+trap 'eval_finish 143' TERM
 eval_up
 eval_longmemeval "$@"

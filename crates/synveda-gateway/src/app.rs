@@ -25,9 +25,90 @@ use tower_http::trace::TraceLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
 use crate::auth;
+use crate::authority::AuthorityGate;
 use crate::error::ApiError;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
+
+/// Narrow state used by scheduled directory reconciliation.
+///
+/// It deliberately excludes HTTP authentication, login and origin state. A
+/// worker that reconciles directory facts needs only ordinary tenant
+/// transactions, the process-local PDP cache it invalidates after structural
+/// writes, and tenant key custody for stored connector configuration.
+#[derive(Clone)]
+pub(crate) struct DirectoryRuntime {
+    pub(crate) pool: PgPool,
+    pub(crate) pdp: Arc<Pdp>,
+    pub(crate) keys: Arc<synveda_store::keys::KeyRing>,
+}
+
+impl DirectoryRuntime {
+    pub(crate) fn new(
+        pool: PgPool,
+        pdp: Arc<Pdp>,
+        keys: Arc<synveda_store::keys::KeyRing>,
+    ) -> Self {
+        Self { pool, pdp, keys }
+    }
+
+    pub(crate) fn invalidate_scopes(&self, tenant_id: synveda_types::TenantId) {
+        self.pdp.flush_entities(tenant_id);
+    }
+}
+
+/// Browser-cookie policy selected only from the validated public application
+/// URL at process startup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConsoleCookieMode {
+    /// HTTPS uses browser-enforced `__Host-` names and `Secure`.
+    Https,
+    /// Explicit development HTTP uses distinct host-only names and omits only
+    /// the attributes that a plaintext origin cannot satisfy.
+    ExplicitDevelopmentHttp,
+}
+
+/// A configured OIDC login flow plus its immutable browser-cookie policy.
+pub struct ConfiguredLogin {
+    flow: LoginFlow,
+    cookie_mode: ConsoleCookieMode,
+}
+
+impl ConfiguredLogin {
+    pub(crate) fn from_validated_public_url(
+        flow: LoginFlow,
+        explicit_development_http: bool,
+    ) -> Self {
+        let cookie_mode = if explicit_development_http {
+            ConsoleCookieMode::ExplicitDevelopmentHttp
+        } else {
+            ConsoleCookieMode::Https
+        };
+        Self { flow, cookie_mode }
+    }
+
+    /// Builds login state for a behaviour test without process-global
+    /// environment configuration.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn for_behavior_test(flow: LoginFlow, explicit_development_http: bool) -> Self {
+        Self::from_validated_public_url(flow, explicit_development_http)
+    }
+
+    /// Returns the immutable cookie policy for this login runtime.
+    #[must_use]
+    pub(crate) const fn cookie_mode(&self) -> ConsoleCookieMode {
+        self.cookie_mode
+    }
+}
+
+impl std::ops::Deref for ConfiguredLogin {
+    type Target = LoginFlow;
+
+    fn deref(&self) -> &Self::Target {
+        &self.flow
+    }
+}
 
 /// Shared state for all routes.
 #[derive(Clone)]
@@ -43,7 +124,7 @@ pub struct AppState {
     pub verifier: Arc<dyn TokenVerifier>,
     /// The code+PKCE login flow when OIDC is configured (AUTH-1); `None`
     /// otherwise, in which case `/auth/*` answers 404.
-    pub login: Option<Arc<LoginFlow>>,
+    pub login: Option<Arc<ConfiguredLogin>>,
     /// This gateway's own origin (`scheme://host[:port]`), derived from
     /// `SYNVEDA_PUBLIC_URL`. The value a cookie-authenticated mutation's
     /// `Origin` header must equal (CNSL-1, ADR-0056 decision 4). Bearer
@@ -71,6 +152,14 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub(crate) fn directory_runtime(&self) -> DirectoryRuntime {
+        DirectoryRuntime::new(
+            self.pool.clone(),
+            Arc::clone(&self.pdp),
+            Arc::clone(&self.keys),
+        )
+    }
+
     /// The one post-commit seam for every scope-tree mutation (ADR-0017
     /// decision 5, kept when the chain cache left with the hierarchy —
     /// CPR-7, ADR-0074): flushes the tenant's Cedar entity fragments, so
@@ -161,9 +250,47 @@ fn console_routes() -> Router<AppState> {
     }
 }
 
-/// Builds the gateway router: ops-plane routes plus the authenticated `/v1`
-/// plane, wrapped in the per-request trace span and HTTP metrics middleware.
-pub fn router(state: AppState) -> Router {
+/// Builds the in-process behavior-test router.
+///
+/// The product binary uses [`governed_router`], which applies the process-owned
+/// authority gate. This explicitly named seam retains direct dependency
+/// probing for focused route and FND-5 behavior tests that do not run the
+/// process supervisor. It is not a product assembly path.
+#[doc(hidden)]
+#[cfg(feature = "test-support")]
+pub fn behavior_test_router(state: AppState) -> Router {
+    let application = application_routes(&state);
+    let ops = Router::new()
+        .route("/healthz", get(healthz))
+        .route("/readyz", get(behavior_test_readyz))
+        .route("/metrics", get(render_metrics));
+    finish_router(state, application, ops)
+}
+
+/// Builds the product router with a fail-closed database-authority gate.
+///
+/// Liveness and private metrics remain available while the gate is closed;
+/// readiness runs the same bounded serialized proof as the process sentinel;
+/// every auth, console, SCIM and `/v1` route is structurally gated.
+pub fn governed_router(state: AppState, gate: AuthorityGate) -> Router {
+    let application = application_routes(&state).route_layer(middleware::from_fn_with_state(
+        gate.clone(),
+        require_authority,
+    ));
+    let ops = Router::new()
+        .route("/healthz", get(healthz))
+        .route(
+            "/readyz",
+            get(move || {
+                let gate = gate.clone();
+                async move { governed_readyz(gate).await }
+            }),
+        )
+        .route("/metrics", get(render_metrics));
+    finish_router(state, application, ops)
+}
+
+fn application_routes(state: &AppState) -> Router<AppState> {
     // Every /v1 route sits behind tenant resolution; ops routes do not.
     // The admin planes authorize every operation through the PDP inside
     // their handlers (AUTHZ-1, ADR-0012).
@@ -172,9 +299,6 @@ pub fn router(state: AppState) -> Router {
         tenant::resolve_tenant,
     ));
     Router::new()
-        .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
-        .route("/metrics", get(render_metrics))
         // The auth plane is unauthenticated by nature: it is how a caller
         // becomes authenticated (AUTH-1, ADR-0010). The two CLI routes
         // serve `synveda login` over the same flow (ADPT-1, ADR-0027
@@ -200,6 +324,10 @@ pub fn router(state: AppState) -> Router {
         // tenant from that credential (`synveda_identity::scim`).
         .merge(crate::scim::router(state.clone()))
         .merge(authenticated)
+}
+
+fn finish_router(state: AppState, application: Router<AppState>, ops: Router<AppState>) -> Router {
+    ops.merge(application)
         .layer(middleware::from_fn(track_http_metrics))
         // Added last so the request span is outermost and every inner span —
         // middleware included — nests under it.
@@ -209,6 +337,32 @@ pub fn router(state: AppState) -> Router {
                 .on_response(record_response),
         )
         .with_state(state)
+}
+
+async fn require_authority(
+    State(gate): State<AuthorityGate>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let mut permit = gate.permit();
+    if !permit.is_open() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response();
+    }
+    let response = next.run(request);
+    tokio::pin!(response);
+    tokio::select! {
+        biased;
+        () = permit.revoked() => {
+            (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response()
+        }
+        response = &mut response => {
+            if permit.is_open() {
+                response
+            } else {
+                (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response()
+            }
+        }
+    }
 }
 
 /// Liveness: the process is up. No dependencies touched.
@@ -227,18 +381,41 @@ async fn healthz() -> &'static str {
 /// boot would therefore be a check a database could arrive after. Answering it
 /// per probe costs one single-row select and closes that window: nothing that
 /// routes on readiness sends traffic to a gateway sitting on the wrong epoch.
-async fn readyz(State(state): State<AppState>) -> Response {
+#[cfg(feature = "test-support")]
+async fn behavior_test_readyz(State(state): State<AppState>) -> Response {
     if let Err(err) = synveda_retrieval::readiness(&state.pool).await {
         tracing::error!(error = %err, "readiness check failed");
         // The detail is in the trace and the log; the body stays generic.
         return (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response();
     }
-    match synveda_store::epoch::verify(&state.pool).await {
+    if let Err(err) = synveda_store::epoch::verify(&state.pool).await {
+        tracing::error!(error = %err, "readiness check failed: schema epoch");
+        return (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response();
+    }
+    match synveda_store::runtime_role::database_identity(&state.pool).await {
         Ok(_) => (StatusCode::OK, "ready").into_response(),
         Err(err) => {
-            tracing::error!(error = %err, "readiness check failed: schema epoch");
+            tracing::error!(error = %err, "readiness check failed: database target");
             (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response()
         }
+    }
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod assembly_tests {
+    #[test]
+    fn the_product_entrypoint_uses_only_the_governed_router() {
+        let entrypoint = include_str!("main.rs");
+        assert!(entrypoint.contains("app::governed_router"));
+        assert!(!entrypoint.contains("behavior_test_router"));
+    }
+}
+
+async fn governed_readyz(gate: AuthorityGate) -> Response {
+    if gate.is_open() {
+        (StatusCode::OK, "ready").into_response()
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response()
     }
 }
 
@@ -314,8 +491,8 @@ pub(crate) async fn whoami(
     }
 }
 
-/// One span per request. `otel.name` gives Jaeger the `VERB /route` operation
-/// name; the status code is recorded on response, and `tenant.id` by the
+/// One span per request. `otel.name` gives the exported span its `VERB /route`
+/// operation name; the status code is recorded on response, and `tenant.id` by the
 /// tenant-resolution middleware once resolution succeeds (TEN-1 AC).
 ///
 /// When the caller sent a W3C `traceparent`, this span continues that trace
@@ -378,8 +555,8 @@ fn make_request_span(request: &Request) -> tracing::Span {
 /// reading rather than ours.** W3C requires a version-`00` trace-id to be
 /// exactly 32 hex digits; `TraceContextPropagator` checks the field parses
 /// as hex and not that it is full width, so `00-4bf92f3577b34da6-…` is
-/// accepted and zero-padded into a valid id. The cost is a confusing
-/// Jaeger view — two callers sending the same short id share a trace — and
+/// accepted and zero-padded into a valid id. The cost is a confusing trace
+/// view — two callers sending the same short id share a trace — and
 /// it stops there, because nothing authorises off a trace id. Left as the
 /// SDK has it, and pinned by
 /// `observability.rs::a_short_trace_id_is_accepted_and_padded_by_the_sdk`
@@ -400,7 +577,7 @@ fn make_request_span(request: &Request) -> tracing::Span {
 /// story, not a substitute for it — AUD-1's hash-chained events remain the
 /// tamper-evident record". Nothing authorises off a trace id, no audit event
 /// derives from one, and the PDP never sees one. The blast radius of a
-/// forged `traceparent` is a misleading Jaeger view, which is the same blast
+/// forged `traceparent` is a misleading trace view, which is the same blast
 /// radius as a client that lies in its own logs.
 fn parent_context(headers: &axum::http::HeaderMap) -> Option<opentelemetry::Context> {
     let context = opentelemetry::global::get_text_map_propagator(|propagator| {

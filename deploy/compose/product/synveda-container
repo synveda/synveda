@@ -1,0 +1,120 @@
+#!/bin/sh
+# CPR-45 / ADR-0102: one product image exposes a closed command vocabulary.
+# Deployment shape belongs in Compose or Helm, never in this launcher.
+set -eu
+LC_ALL=C
+export LC_ALL
+
+usage() {
+    echo "usage: synveda-container {gateway|worker|apalis-migrate|apalis-worker|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe {gateway|worker|apalis-worker} {live|ready}}" >&2
+    exit 64
+}
+
+case "${1:-}" in
+    gateway)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda-gateway
+        ;;
+    worker)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda-worker
+        ;;
+    apalis-worker)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda-apalis-worker worker
+        ;;
+    apalis-migrate)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda-apalis-worker migrate
+        ;;
+    issuer-diagnostic)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/bin/timeout \
+            --foreground \
+            --signal=TERM \
+            --kill-after=2s \
+            50s \
+            /usr/local/bin/synveda-oidc-diagnostic
+        ;;
+    database-preflight)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda db preflight
+        ;;
+    migrate)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda db migrate
+        ;;
+    migration-check)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda db migrate --check
+        ;;
+    tenant-converge)
+        [ "$#" -eq 1 ] || usage
+        tenant_id=${SYNVEDA_BOOTSTRAP_TENANT_ID:-}
+        tenant_slug=${SYNVEDA_BOOTSTRAP_TENANT_SLUG:-}
+        tenant_name=${SYNVEDA_BOOTSTRAP_TENANT_NAME:-}
+        case "$tenant_id" in
+            ????????-????-7???-[89ab]???-????????????) ;;
+            *) echo "tenant convergence: tenant UUIDv7 was refused" >&2; exit 78 ;;
+        esac
+        case "$tenant_id" in
+            *[!0-9a-f-]*) echo "tenant convergence: tenant UUIDv7 was refused" >&2; exit 78 ;;
+        esac
+        case "$tenant_slug" in
+            [a-z0-9]*) ;;
+            *) echo "tenant convergence: tenant slug was refused" >&2; exit 78 ;;
+        esac
+        case "$tenant_slug" in
+            *[!a-z0-9-]*|*-|*--*)
+                echo "tenant convergence: tenant slug was refused" >&2
+                exit 78
+                ;;
+        esac
+        [ "${#tenant_slug}" -le 63 ] || {
+            echo "tenant convergence: tenant slug was refused" >&2
+            exit 78
+        }
+        case "$tenant_name" in
+            ''|-*|*[!A-Za-z0-9._' '-]*)
+                echo "tenant convergence: tenant name was refused" >&2
+                exit 78
+                ;;
+        esac
+        case "$tenant_name" in
+            *[A-Za-z0-9]*) ;;
+            *) echo "tenant convergence: tenant name was refused" >&2; exit 78 ;;
+        esac
+        [ "${#tenant_name}" -le 128 ] || {
+            echo "tenant convergence: tenant name was refused" >&2
+            exit 78
+        }
+        exec /usr/local/bin/synveda tenant converge \
+            --id "$tenant_id" --slug "$tenant_slug" --name "$tenant_name"
+        ;;
+    probe)
+        [ "$#" -eq 3 ] || usage
+        case "$2" in
+            gateway) port=8120 ;;
+            worker) port=8121 ;;
+            apalis-worker) port=8122 ;;
+            *) usage ;;
+        esac
+        case "$3" in
+            live) path=healthz ;;
+            ready) path=readyz ;;
+            *) usage ;;
+        esac
+        exec /usr/bin/curl \
+            --disable \
+            --noproxy '*' \
+            --fail \
+            --silent \
+            --show-error \
+            --connect-timeout 1 \
+            --max-time 2 \
+            "http://127.0.0.1:${port}/${path}"
+        ;;
+    *)
+        usage
+        ;;
+esac

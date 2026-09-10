@@ -21,7 +21,7 @@ cannot honour. ADR-0062.
 {{- end -}}
 
 {{- define "synveda.labels" -}}
-helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimAll "-._" }}
 {{ include "synveda.selectorLabels" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
@@ -34,6 +34,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "synveda.image" -}}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) -}}
+{{- end -}}
+
+{{- define "synveda.postgresImage" -}}
+{{- default (printf "ghcr.io/synveda/cnpg-postgres:17.11-synveda-%s" .Chart.AppVersion) .Values.postgres.image -}}
 {{- end -}}
 
 {{- define "synveda.serviceAccountName" -}}
@@ -49,7 +53,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-pg" (include "synveda.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "synveda.appSecret" -}}
+{{- define "synveda.migratorSecret" -}}
 {{- printf "%s-app" (include "synveda.clusterName" .) -}}
 {{- end -}}
 
@@ -57,37 +61,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-superuser" (include "synveda.clusterName" .) -}}
 {{- end -}}
 
-{{/*
-The application database and the role that reaches it. CNPG owns both
-names; they are here so the install job's GRANT and the gateway's DSN
-cannot drift apart.
-*/}}
+{{/* Fixed database principals in the portable deployment contract. */}}
 {{- define "synveda.dbName" -}}synveda{{- end -}}
-{{- define "synveda.appRole" -}}synveda_gateway{{- end -}}
-
-{{/*
-The admin identity, for the install job and nothing else. Assembled from
-the parts rather than CNPG's own `uri` key, because that one names the
-cluster's default database and the schema lives in ours.
-
-Kubernetes expands $(VAR) against earlier entries in the same list, so the
-password never appears in a manifest. CNPG generates alphanumeric
-passwords, so it needs no URI escaping — if that ever changes, this breaks
-loudly at connect time rather than quietly at parse time.
-*/}}
-{{- define "synveda.adminDsnEnv" -}}
-- name: SYNVEDA_PG_ADMIN_USER
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "synveda.superuserSecret" . }}
-      key: username
-- name: SYNVEDA_PG_ADMIN_PASSWORD
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "synveda.superuserSecret" . }}
-      key: password
-- name: DATABASE_URL
-  value: postgres://$(SYNVEDA_PG_ADMIN_USER):$(SYNVEDA_PG_ADMIN_PASSWORD)@{{ include "synveda.clusterName" . }}-rw:5432/{{ include "synveda.dbName" . }}
+{{- define "synveda.migratorRole" -}}synveda_migrator{{- end -}}
+{{- define "synveda.gatewayRole" -}}synveda_gateway{{- end -}}
+{{- define "synveda.workerRole" -}}synveda_worker{{- end -}}
+{{- define "synveda.databaseRolesJson" -}}
+{"migrator":"{{ include "synveda.migratorRole" . }}","gateway":"{{ include "synveda.gatewayRole" . }}","worker":"{{ include "synveda.workerRole" . }}","administrators":["postgres"],"administrative_memberships":[],"forbidden_databases":["postgres","template1"],"isolated_peer_roles":[]}
 {{- end -}}
 
 {{/*
@@ -98,10 +78,13 @@ silent if the chart rendered it anyway.
 */}}
 {{- define "synveda.validate" -}}
 
-{{- /* Decision 4. A second replica breaks login and serves stale scope
-       chains, and both look like something else. OPS-7 lifts this. */ -}}
+{{- /* Decision 4. Pending login handoff and authority-mutation visibility do
+       not have accepted multi-replica evidence. OPS-7 lifts this. */ -}}
 {{- if or (hasKey .Values.gateway "replicas") (hasKey .Values.gateway "replicaCount") (hasKey .Values "replicaCount") -}}
-{{- fail "gateway replicas are not configurable in this chart (ADR-0062 decision 4).\n  Two things in the gateway are process-local and fail silently with more than one replica:\n    - pending logins and CLI handoff codes live in memory (LoginFlow), so an\n      /auth/callback that lands on another pod is a 401 for a login the IdP completed;\n    - policy/scope caches are invalidated in-process, so a scope move handled by one\n      replica can leave another replica deciding against stale ancestry.\n  OPS-7 is the feature that fixes both. Remove the key." -}}
+{{- fail "gateway replicas are not configurable in this chart (ADR-0062 decision 4).\n  Two things in the gateway lack accepted multi-replica evidence:\n    - pending logins and CLI handoff codes live in memory (LoginFlow), so an\n      /auth/callback that lands on another pod is a 401 for a login the IdP completed;\n    - cross-process policy/entity convergence has no accepted mutation-visibility\n      bound, so a second replica is not yet supported.\n  OPS-7 is the feature that fixes both. Remove the key." -}}
+{{- end -}}
+{{- if or (hasKey .Values.worker "replicas") (hasKey .Values.worker "replicaCount") -}}
+{{- fail "worker replicas are not configurable in this chart (CPR-45, ADR-0102).\n  Capture is fenced, but every core maintenance loop has not yet passed concurrent-worker acceptance. Remove the key." -}}
 {{- end -}}
 
 {{- /* Decision 6. Origin and redirect URI are both derived from this. */ -}}
@@ -110,6 +93,15 @@ silent if the chart rendered it anyway.
 {{- end -}}
 {{- if not (or (hasPrefix "http://" .Values.gateway.publicUrl) (hasPrefix "https://" .Values.gateway.publicUrl)) -}}
 {{- fail (printf "gateway.publicUrl must be an absolute http(s) URL, got %q" .Values.gateway.publicUrl) -}}
+{{- end -}}
+{{- if not (kindIs "bool" .Values.gateway.insecureDevelopmentHttp) -}}
+{{- fail "gateway.insecureDevelopmentHttp must be a boolean" -}}
+{{- end -}}
+{{- if and (hasPrefix "http://" .Values.gateway.publicUrl) (not .Values.gateway.insecureDevelopmentHttp) -}}
+{{- fail "plaintext gateway.publicUrl requires gateway.insecureDevelopmentHttp=true; use HTTPS outside an explicitly disposable development/test deployment" -}}
+{{- end -}}
+{{- if and (hasPrefix "https://" .Values.gateway.publicUrl) .Values.gateway.insecureDevelopmentHttp -}}
+{{- fail "gateway.insecureDevelopmentHttp must remain false when gateway.publicUrl uses HTTPS" -}}
 {{- end -}}
 {{- if hasSuffix "/" .Values.gateway.publicUrl -}}
 {{- fail (printf "gateway.publicUrl must not end in a slash, got %q — the gateway appends its own paths" .Values.gateway.publicUrl) -}}
@@ -140,6 +132,49 @@ silent if the chart rendered it anyway.
 {{- end -}}
 {{- if not .Values.kms.keyRefSecretKey -}}
 {{- fail "kms.keyRefSecretKey must name the Secret key containing the stable KMS key reference" -}}
+{{- end -}}
+
+{{- /* Runtime credentials are operator-owned. The chart converges the fixed
+       roles but never generates, copies or renders their passwords. */ -}}
+{{- if not .Values.gateway.databaseExistingSecret -}}
+{{- fail "gateway.databaseExistingSecret is required: name an operator-owned Secret holding DATABASE_URL and password for the fixed synveda_gateway login.\n  Database bootstrap consumes the password; the gateway mounts only the DSN file." -}}
+{{- end -}}
+{{- if not .Values.gateway.databaseUrlSecretKey -}}
+{{- fail "gateway.databaseUrlSecretKey must name the Secret key containing the gateway PostgreSQL URL" -}}
+{{- end -}}
+{{- if not .Values.gateway.databasePasswordSecretKey -}}
+{{- fail "gateway.databasePasswordSecretKey must name the Secret key containing the gateway login password" -}}
+{{- end -}}
+{{- if eq .Values.gateway.databaseUrlSecretKey .Values.gateway.databasePasswordSecretKey -}}
+{{- fail "gateway database URL and password Secret keys must be distinct" -}}
+{{- end -}}
+{{- if not .Values.worker.databaseExistingSecret -}}
+{{- fail "worker.databaseExistingSecret is required: name an operator-owned Secret holding DATABASE_URL and password for the fixed synveda_worker login.\n  The install job creates/converges that non-owner login; the worker mounts only the DSN file." -}}
+{{- end -}}
+{{- if not .Values.worker.databaseUrlSecretKey -}}
+{{- fail "worker.databaseUrlSecretKey must name the Secret key containing the worker PostgreSQL URL" -}}
+{{- end -}}
+{{- if not .Values.worker.databasePasswordSecretKey -}}
+{{- fail "worker.databasePasswordSecretKey must name the Secret key containing the worker login password" -}}
+{{- end -}}
+{{- if eq .Values.worker.databaseUrlSecretKey .Values.worker.databasePasswordSecretKey -}}
+{{- fail "worker database URL and password Secret keys must be distinct" -}}
+{{- end -}}
+{{- if eq .Values.gateway.databaseExistingSecret .Values.worker.databaseExistingSecret -}}
+{{- fail "gateway and worker database Secrets must be distinct" -}}
+{{- end -}}
+{{- range $component := list "gateway" "worker" -}}
+{{- $secret := index (index $.Values $component) "databaseExistingSecret" -}}
+{{- if eq $secret (include "synveda.migratorSecret" $) -}}
+{{- fail (printf "%s.databaseExistingSecret must not be the CloudNativePG migrator Secret: runtime processes refuse database-owner roles" $component) -}}
+{{- end -}}
+{{- if eq $secret (include "synveda.superuserSecret" $) -}}
+{{- fail (printf "%s.databaseExistingSecret must not be the CloudNativePG superuser Secret" $component) -}}
+{{- end -}}
+{{- end -}}
+
+{{- if hasKey .Values.install "enabled" -}}
+{{- fail "install.enabled was removed: role convergence, three-way database preflight and migration are mandatory chart resources" -}}
 {{- end -}}
 
 {{- /* Decision 10. The embedder is a property of the corpus. */ -}}
@@ -176,8 +211,27 @@ silent if the chart rendered it anyway.
 {{- end -}}
 
 {{- /* Decision 2's arithmetic, stated where somebody can act on it. */ -}}
-{{- if ge (int .Values.gateway.dbMaxConnections) (int .Values.postgres.maxConnections) -}}
-{{- fail (printf "gateway.dbMaxConnections (%d) must be below postgres.maxConnections (%d): the gateway's pool is shared by its request handlers and its background loops, and the cluster needs headroom for the operator's own connections" (int .Values.gateway.dbMaxConnections) (int .Values.postgres.maxConnections)) -}}
+{{- if or (lt (int .Values.gateway.dbMaxConnections) 1) (gt (int .Values.gateway.dbMaxConnections) 64) -}}
+{{- fail "gateway.dbMaxConnections must be between 1 and 64, matching the application startup bound" -}}
+{{- end -}}
+{{- if or (lt (int .Values.worker.dbMaxConnections) 1) (gt (int .Values.worker.dbMaxConnections) 64) -}}
+{{- fail "worker.dbMaxConnections must be between 1 and 64, matching the application startup bound" -}}
+{{- end -}}
+{{- $runtimeConnections := add (int .Values.gateway.dbMaxConnections) (int .Values.worker.dbMaxConnections) -}}
+{{- if ge $runtimeConnections (int .Values.postgres.maxConnections) -}}
+{{- fail (printf "gateway.dbMaxConnections + worker.dbMaxConnections (%d) must be below postgres.maxConnections (%d): the cluster needs headroom for migration, operator and probe connections" $runtimeConnections (int .Values.postgres.maxConnections)) -}}
+{{- end -}}
+{{- if or (lt (int .Values.worker.shutdownSeconds) 3) (gt (int .Values.worker.shutdownSeconds) 300) -}}
+{{- fail "worker.shutdownSeconds must be between 3 and 300, preserving cooperative drain and both forced-join windows" -}}
+{{- end -}}
+{{- if or (lt (int .Values.install.activeDeadlineSeconds) 300) (gt (int .Values.install.activeDeadlineSeconds) 3600) -}}
+{{- fail "install.activeDeadlineSeconds must be between 300 and 3600" -}}
+{{- end -}}
+{{- if or (lt (int .Values.install.backoffLimit) 0) (gt (int .Values.install.backoffLimit) 6) -}}
+{{- fail "install.backoffLimit must be between 0 and 6" -}}
+{{- end -}}
+{{- if or (lt (int .Values.install.ttlSecondsAfterFinished) 300) (gt (int .Values.install.ttlSecondsAfterFinished) 604800) -}}
+{{- fail "install.ttlSecondsAfterFinished must be between 300 and 604800" -}}
 {{- end -}}
 
 {{- /*

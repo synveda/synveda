@@ -39,14 +39,12 @@ const ARCHIVE_MAGIC: &[u8; 8] = b"SVCTXEX2";
 /// better than this function guessing that an operator running
 /// `tenant key rotate` did not mean it.
 pub fn kms_from_env() -> Result<Kms, String> {
-    let Some(key) = std::env::var("SYNVEDA_KMS_KEY")
-        .ok()
+    let Some(key) = crate::settings::sensitive_setting("SYNVEDA_KMS_KEY")?
         .filter(|value| !value.trim().is_empty())
     else {
         return Ok(Kms::Disabled);
     };
-    let key_ref = std::env::var("SYNVEDA_KMS_KEY_REF")
-        .ok()
+    let key_ref = crate::settings::sensitive_setting("SYNVEDA_KMS_KEY_REF")?
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "local:default".to_string());
     LocalKms::from_hex(&key, key_ref)
@@ -56,6 +54,95 @@ pub fn kms_from_env() -> Result<Kms, String> {
 
 fn ring() -> Result<KeyRing, String> {
     Ok(KeyRing::new(kms_from_env()?))
+}
+
+/// Verifies a restored tenant without changing its database state.
+///
+/// The database archive proves row recovery. This check proves the stronger
+/// application invariants that matter after recovery: the named tenant still
+/// exists behind forced RLS, its complete audit prefix re-hashes, and the
+/// separately supplied KEK opens the current tenant data key. The negative
+/// mode accepts only the uniform authenticated-decryption refusal; a missing
+/// row or storage failure cannot masquerade as wrong-key evidence.
+pub async fn verify_recovery(
+    pool: &sqlx::PgPool,
+    tenant: TenantId,
+    expect_key_refusal: bool,
+) -> Result<(), String> {
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .map_err(|_| "recovery verification could not enter the tenant boundary".to_owned())?;
+    synveda_store::tenants::by_id(&mut *tx, tenant)
+        .await
+        .map_err(|_| "recovery verification could not read the tenant".to_owned())?
+        .ok_or_else(|| "recovery verification did not find the tenant".to_owned())?;
+    let current = synveda_store::keys::tenant_current(&mut *tx, tenant)
+        .await
+        .map_err(|_| "recovery verification could not read the tenant key".to_owned())?
+        .ok_or_else(|| "recovery verification did not find the tenant key".to_owned())?;
+    let audit = synveda_audit::verify_report(&mut tx, tenant)
+        .await
+        .map_err(|_| "recovery verification could not verify the audit chain".to_owned())?;
+    tx.commit()
+        .await
+        .map_err(|_| "recovery verification could not close its read transaction".to_owned())?;
+    let audit_events = match audit.verification {
+        synveda_audit::ChainVerification::Valid { events } => events,
+        synveda_audit::ChainVerification::Broken { .. } => {
+            return Err("recovery verification found a broken audit chain".to_owned());
+        }
+    };
+
+    let ring = ring()?;
+    if current.kek_ref != ring.kms().key_ref() {
+        return Err("recovery verification found an unexpected tenant key reference".to_owned());
+    }
+    let key = ring.sealing_key(pool, KeyScope::Tenant(tenant)).await;
+    if expect_key_refusal {
+        match key {
+            Err(synveda_types::Error::Invalid { message })
+                if message == "sealed payload for kms.data_key did not open under this key" =>
+            {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "tenant": tenant,
+                        "audit_events": audit_events,
+                        "audit_head_seq": audit.head_seq,
+                        "tenant_key_version": current.version.get(),
+                        "key_refusal": true,
+                    })
+                );
+                return Ok(());
+            }
+            Ok(_) => {
+                return Err("recovery verification expected the supplied key to be refused".into());
+            }
+            Err(_) => {
+                return Err(
+                    "recovery verification did not observe the expected cryptographic key refusal"
+                        .into(),
+                );
+            }
+        }
+    }
+
+    let opened =
+        key.map_err(|_| "recovery verification could not open the tenant key".to_owned())?;
+    if opened.version() != current.version {
+        return Err("recovery verification opened an unexpected tenant key generation".to_owned());
+    }
+    println!(
+        "{}",
+        serde_json::json!({
+            "tenant": tenant,
+            "audit_events": audit_events,
+            "audit_head_seq": audit.head_seq,
+            "tenant_key_version": current.version.get(),
+            "key_opened": true,
+        })
+    );
+    Ok(())
 }
 
 /// Prints a fresh KEK as hex, and nothing else.
@@ -89,19 +176,46 @@ pub fn keygen() -> Result<(), String> {
 /// If no KEK is configured, or the tenant does not exist.
 pub async fn provision_quietly(pool: &sqlx::PgPool, tenant: TenantId) -> Result<u32, String> {
     let ring = ring()?;
+    provision_quietly_with_ring(pool, tenant, &ring).await
+}
+
+pub(crate) async fn provision_quietly_with_ring(
+    pool: &sqlx::PgPool,
+    tenant: TenantId,
+    ring: &KeyRing,
+) -> Result<u32, String> {
     let version = ring
         .provision(pool, KeyScope::Tenant(tenant))
         .await
         .map_err(|err| err.to_string())?;
-    chain(
-        pool,
-        tenant,
-        synveda_audit::AuditAction::TenantKeyProvisioned,
-        format!("tenant {tenant} key"),
-        serde_json::json!({ "version": version.get(), "kek_ref": ring.kms().key_ref() }),
-    )
-    .await?;
+    // An existing wrapped row is not custody. Prove that this process can
+    // unwrap the current generation before converging success evidence; this
+    // catches disabled, wrong and externally denied KMS authority on reruns.
+    ring.sealing_key(pool, KeyScope::Tenant(tenant))
+        .await
+        .map_err(|err| err.to_string())?;
+    converge_provision_audit(pool, tenant).await?;
     Ok(version.get())
+}
+
+async fn converge_provision_audit(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String> {
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .map_err(|err| err.to_string())?;
+    let first = synveda_store::keys::tenant_at(&mut *tx, tenant, KeyVersion::FIRST)
+        .await
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| "tenant key provisioning committed without generation 1".to_owned())?;
+    let witness = synveda_audit::TenantKeyProvisionedWitness {
+        occurred_at: chrono::Utc::now(),
+        break_glass_subject: crate::break_glass().subject,
+        kek_ref: first.kek_ref,
+        trace_id: None,
+    };
+    synveda_audit::append_tenant_key_provisioned_once(&mut tx, tenant, &witness)
+        .await
+        .map_err(|err| err.to_string())?;
+    tx.commit().await.map_err(|err| err.to_string())
 }
 
 /// Mints a tenant's first data key, or reports the one already there.

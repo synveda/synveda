@@ -17,6 +17,8 @@ use synveda_types::{
 };
 use uuid::Uuid;
 
+use crate::operations::OperationRow;
+
 /// Counts typed Knowledge change and operation transitions.
 pub const KNOWLEDGE_LIFECYCLE_ACTS_TOTAL: &str = "synveda_knowledge_lifecycle_acts_total";
 
@@ -265,50 +267,6 @@ pub async fn finish_change(
     Ok(updated == 1)
 }
 
-struct OperationRow {
-    tenant_id: Uuid,
-    id: Uuid,
-    proposal_id: Uuid,
-    knowledge_item_id: Option<Uuid>,
-    kind: String,
-    state: String,
-    input_hash: String,
-    attempts: i32,
-    lease_owner: Option<String>,
-    lease_expires_at: Option<DateTime<Utc>>,
-    last_error_code: Option<String>,
-    result: Value,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-    started_at: Option<DateTime<Utc>>,
-    completed_at: Option<DateTime<Utc>>,
-}
-
-impl TryFrom<OperationRow> for DurableOperation {
-    type Error = Error;
-
-    fn try_from(row: OperationRow) -> Result<Self> {
-        Ok(Self {
-            id: DurableOperationId::from_uuid(row.id),
-            tenant_id: TenantId::from_uuid(row.tenant_id),
-            change_id: ProposalId::from_uuid(row.proposal_id),
-            knowledge_item_id: row.knowledge_item_id.map(KnowledgeItemId::from_uuid),
-            kind: row.kind.parse().map_err(vocabulary)?,
-            input_hash: row.input_hash,
-            state: row.state.parse().map_err(vocabulary)?,
-            attempts: row.attempts,
-            lease_owner: row.lease_owner,
-            lease_expires_at: row.lease_expires_at,
-            result: row.result,
-            last_error_code: row.last_error_code,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            started_at: row.started_at,
-            completed_at: row.completed_at,
-        })
-    }
-}
-
 /// Creates a pending erasure operation.
 pub async fn create_erasure_operation(
     conn: &mut PgConnection,
@@ -324,8 +282,10 @@ pub async fn create_erasure_operation(
         insert into durable_operations
             (tenant_id, id, kind, proposal_id, knowledge_item_id, input_hash)
         values ($1, $2, 'knowledge_erasure', $3, $4, $5)
-        returning tenant_id, id, proposal_id, knowledge_item_id, kind, state,
-                  input_hash, attempts, lease_owner, lease_expires_at,
+        returning tenant_id, id, operation_version, proposal_id, knowledge_item_id,
+                  skill_version_id, requested_by_identity_id, authorized_at,
+                  kind, state, input_hash, progress_percent, attempts, next_attempt_at,
+                  cancel_requested_at, lease_owner, lease_expires_at,
                   last_error_code, result, created_at, updated_at, started_at,
                   completed_at
         "#,
@@ -367,10 +327,14 @@ pub async fn start_operation(
             lease_owner = $3,
             lease_expires_at = now() + make_interval(secs => $4::double precision),
             started_at = coalesce(started_at, now()),
-            completed_at = null, updated_at = now(), last_error_code = null
-        where tenant_id = $1 and id = $2 and state in ('pending', 'failed')
-        returning tenant_id, id, proposal_id, knowledge_item_id, kind, state,
-                  input_hash, attempts, lease_owner, lease_expires_at,
+            completed_at = null, next_attempt_at = null,
+            updated_at = now(), last_error_code = null
+        where tenant_id = $1 and id = $2 and kind = 'knowledge_erasure'
+          and state in ('pending', 'failed')
+        returning tenant_id, id, operation_version, proposal_id, knowledge_item_id,
+                  skill_version_id, requested_by_identity_id, authorized_at,
+                  kind, state, input_hash, progress_percent, attempts, next_attempt_at,
+                  cancel_requested_at, lease_owner, lease_expires_at,
                   last_error_code, result, created_at, updated_at, started_at,
                   completed_at
         "#,
@@ -397,8 +361,10 @@ pub async fn block_operation(
         update durable_operations
         set state = 'blocked', completed_at = now(), updated_at = now(),
             lease_owner = null, lease_expires_at = null,
+            next_attempt_at = null,
             last_error_code = $3, result = jsonb_build_object('blocked', true)
-        where tenant_id = $1 and id = $2 and state in ('pending', 'running', 'failed')
+        where tenant_id = $1 and id = $2 and kind = 'knowledge_erasure'
+          and state in ('pending', 'running', 'failed')
         "#,
         tenant_id.as_uuid(),
         operation_id.as_uuid(),
@@ -420,8 +386,10 @@ pub async fn read_operation(
     sqlx::query_as!(
         OperationRow,
         r#"
-        select tenant_id, id, proposal_id, knowledge_item_id, kind, state,
-               input_hash, attempts, lease_owner, lease_expires_at,
+        select tenant_id, id, operation_version, proposal_id, knowledge_item_id,
+               skill_version_id, requested_by_identity_id, authorized_at,
+               kind, state, input_hash, progress_percent, attempts, next_attempt_at,
+               cancel_requested_at, lease_owner, lease_expires_at,
                last_error_code, result, created_at, updated_at, started_at,
                completed_at
         from durable_operations
@@ -451,8 +419,10 @@ pub async fn operation_for_change(
     sqlx::query_as!(
         OperationRow,
         r#"
-        select tenant_id, id, proposal_id, knowledge_item_id, kind, state,
-               input_hash, attempts, lease_owner, lease_expires_at,
+        select tenant_id, id, operation_version, proposal_id, knowledge_item_id,
+               skill_version_id, requested_by_identity_id, authorized_at,
+               kind, state, input_hash, progress_percent, attempts, next_attempt_at,
+               cancel_requested_at, lease_owner, lease_expires_at,
                last_error_code, result, created_at, updated_at, started_at,
                completed_at
         from durable_operations

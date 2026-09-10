@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select pg_catalog.pg_advisory_lock(pg_catalog.hashtext('synveda.reset.database'))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pg_advisory_lock",
+        "type_info": "Void"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3f5a306266610fae4a0b6171f32e6ccdf6f5aa5d84fca8d4e294b440103d3df3"
+}

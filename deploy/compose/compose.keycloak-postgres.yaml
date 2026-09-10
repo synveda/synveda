@@ -1,0 +1,17 @@
+# Ordering which exists only when both bundled providers share the reference
+# PostgreSQL server. The external-PostgreSQL Keycloak row must not acquire a
+# phantom dependency on the bundled database service.
+services:
+  database-bootstrap:
+    environment:
+      SYNVEDA_DATABASE_REQUIRE_KEYCLOAK_PASSWORD: "true"
+    secrets:
+      - source: keycloak_database_password
+        target: keycloak_database_password
+
+  keycloak-database-bootstrap:
+    depends_on:
+      postgres:
+        condition: service_healthy
+      database-bootstrap:
+        condition: service_completed_successfully

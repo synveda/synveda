@@ -5,24 +5,40 @@
 //! candidate is deliberately inspected before and after every transition: the
 //! extraction half may propose, but only the decision half may publish.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
+use axum::extract::State;
 use axum::http::{Request, StatusCode};
+use axum::response::Json;
+use axum::routing::post;
 use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::capture_worker;
-use synveda_ingest::extraction::{AnyExtractor, DeterministicExtractor};
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_ingest::extraction::{AnyExtractor, DeterministicExtractor, VllmExtractor};
+use synveda_store::capture::{self as capture_store, NewCaptureCandidate};
+use synveda_store::{access, identities, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
-use synveda_types::{GrantId, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
+use synveda_types::capture::{CaptureBatch, CaptureBatchState};
+use synveda_types::knowledge::{
+    KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeType, knowledge_revision_content_hash,
+};
+use synveda_types::{
+    CaptureBatchId, CaptureCandidateId, Error, GrantId, IdentityId, IdentityKind, ScopeId,
+    Sensitivity, TenantId, TenantStatus,
+};
+use tokio::sync::Notify;
 use tower::ServiceExt;
 
 #[path = "support/configuration.rs"]
@@ -125,7 +141,7 @@ async fn admitted_tenant(pack: &str) -> Option<(AppState, TenantId)> {
         Err(_) => {
             eprintln!(
                 "skipping CPR-18 capture API test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
+                 (run `make db-test`)"
             );
             return None;
         }
@@ -135,11 +151,11 @@ async fn admitted_tenant(pack: &str) -> Option<(AppState, TenantId)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant_id = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &pool,
         tenant_id,
         &format!("cpr18-{}", tenant_id.as_uuid().simple()),
@@ -336,6 +352,940 @@ async fn run_capture(state: &AppState) {
     );
 }
 
+fn lease_test_candidate(
+    batch: &CaptureBatch,
+    event: &capture_store::FrozenEvent,
+    id: CaptureCandidateId,
+) -> NewCaptureCandidate {
+    let content = KnowledgeRevisionContent {
+        title: "Fenced capture output".to_owned(),
+        body_markdown: "Only the current lease attempt may retain this candidate.".to_owned(),
+        summary: "Fenced capture output.".to_owned(),
+        tags: vec!["fencing".to_owned()],
+        sensitivity: Sensitivity::WORKING,
+        confidence_permille: 900,
+        valid_from: event.occurred_at,
+        valid_to: None,
+        stale_after: None,
+        verification_metadata: json!({}),
+        metadata: json!({"test": "cpr-45-capture-fencing"}),
+    };
+    NewCaptureCandidate {
+        id,
+        ordinal: 1,
+        proposed_scope_id: batch.scope_id,
+        proposed_project_id: batch.project_id,
+        proposed_owner_principal_id: None,
+        knowledge_type: KnowledgeType::Fact,
+        origin: KnowledgeOrigin::Observed,
+        content_hash: knowledge_revision_content_hash(&content),
+        content,
+        source_event_ids: vec![event.id],
+        matches: Vec::new(),
+    }
+}
+
+fn assert_stale_claim(error: Error) {
+    assert!(
+        matches!(&error, Error::Conflict { message } if message.contains("current lease claim")),
+        "unexpected stale-claim result: {error}"
+    );
+}
+
+async fn expire_claim(state: &AppState, tenant_id: TenantId, batch_id: CaptureBatchId) {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin lease-expiry transaction");
+    let changed = sqlx::query(
+        "update capture_batches set lease_expires_at = statement_timestamp(), updated_at = now() \
+         where tenant_id = $1 and id = $2 and state = 'running'",
+    )
+    .bind(tenant_id.as_uuid())
+    .bind(batch_id.as_uuid())
+    .execute(&mut *tx)
+    .await
+    .expect("expire capture claim");
+    assert_eq!(changed.rows_affected(), 1, "one live claim should expire");
+    tx.commit().await.expect("commit lease expiry");
+}
+
+async fn lease_expiry(
+    state: &AppState,
+    tenant_id: TenantId,
+    batch_id: CaptureBatchId,
+) -> chrono::DateTime<chrono::Utc> {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin lease inspection");
+    let expiry = sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+        "select lease_expires_at from capture_batches where tenant_id = $1 and id = $2",
+    )
+    .bind(tenant_id.as_uuid())
+    .bind(batch_id.as_uuid())
+    .fetch_one(&mut *tx)
+    .await
+    .expect("read lease expiry")
+    .expect("running batch has an expiry");
+    tx.rollback().await.expect("finish lease inspection");
+    expiry
+}
+
+async fn assert_candidate_absent(
+    state: &AppState,
+    tenant_id: TenantId,
+    candidate_id: CaptureCandidateId,
+) {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin candidate inspection");
+    assert!(
+        capture_store::get_candidate(&mut tx, tenant_id, candidate_id)
+            .await
+            .expect("look for fenced candidate")
+            .is_none(),
+        "a rejected completion must not retain candidate rows"
+    );
+    tx.rollback().await.expect("finish candidate inspection");
+}
+
+async fn batch_candidate_count(
+    state: &AppState,
+    tenant_id: TenantId,
+    batch_id: CaptureBatchId,
+) -> i64 {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin candidate-count inspection");
+    let count = sqlx::query_scalar(
+        "select count(*) from capture_candidates where tenant_id = $1 and batch_id = $2",
+    )
+    .bind(tenant_id.as_uuid())
+    .bind(batch_id.as_uuid())
+    .fetch_one(&mut *tx)
+    .await
+    .expect("count batch candidates");
+    tx.rollback()
+        .await
+        .expect("finish candidate-count inspection");
+    count
+}
+
+async fn completion_audit_count(
+    state: &AppState,
+    tenant_id: TenantId,
+    batch_id: CaptureBatchId,
+) -> usize {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin completion-audit inspection");
+    let audit = synveda_audit::tail(&mut tx, tenant_id, 1_000)
+        .await
+        .expect("read capture audit");
+    tx.rollback()
+        .await
+        .expect("finish completion-audit inspection");
+    audit
+        .iter()
+        .filter(|event| {
+            event.action.as_str() == "capture.batch.completed"
+                && event.payload["batch_id"] == batch_id.to_string()
+        })
+        .count()
+}
+
+async fn reclaim_expired_claim(
+    state: &AppState,
+    tenant_id: TenantId,
+    batch_id: CaptureBatchId,
+    lease_owner: &str,
+) -> CaptureBatch {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin atomic expiry and reclaim");
+    let changed = sqlx::query(
+        "update capture_batches set lease_expires_at = statement_timestamp(), updated_at = now() \
+         where tenant_id = $1 and id = $2 and state = 'running'",
+    )
+    .bind(tenant_id.as_uuid())
+    .bind(batch_id.as_uuid())
+    .execute(&mut *tx)
+    .await
+    .expect("expire claimed batch");
+    assert_eq!(changed.rows_affected(), 1, "one claim should be stolen");
+    let reclaimed = capture_store::claim_batch(&mut tx, tenant_id, lease_owner, 30)
+        .await
+        .expect("reclaim expired batch")
+        .expect("expired batch is claimable");
+    assert_eq!(reclaimed.id, batch_id, "the intended batch is reclaimed");
+    tx.commit().await.expect("commit authoritative reclaim");
+    reclaimed
+}
+
+async fn wait_for_lease_extension(
+    state: &AppState,
+    tenant_id: TenantId,
+    batch_id: CaptureBatchId,
+    initial: chrono::DateTime<chrono::Utc>,
+) -> chrono::DateTime<chrono::Utc> {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let current = lease_expiry(state, tenant_id, batch_id).await;
+            if current > initial {
+                return current;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("worker renews while the extractor is blocked")
+}
+
+async fn named_worker_pool(application_name: &str) -> sqlx::PgPool {
+    let url = std::env::var("DATABASE_URL").expect("database-backed test has DATABASE_URL");
+    let application_name = application_name.to_owned();
+    PgPoolOptions::new()
+        .max_connections(3)
+        .after_connect(move |connection, _| {
+            let application_name = application_name.clone();
+            Box::pin(async move {
+                sqlx::query_scalar::<_, String>("select set_config('application_name', $1, false)")
+                    .bind(application_name)
+                    .fetch_one(&mut *connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&url)
+        .await
+        .expect("connect named worker pool")
+}
+
+async fn wait_for_database_lock(state: &AppState, tenant_id: TenantId, application_name: &str) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+                .await
+                .expect("begin worker-state inspection");
+            let waiting: bool = sqlx::query_scalar(
+                "select exists (select 1 from pg_stat_activity \
+                 where application_name = $1 and wait_event_type = 'Lock')",
+            )
+            .bind(application_name)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("inspect worker wait state");
+            tx.rollback().await.expect("finish worker-state inspection");
+            if waiting {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker reaches the deliberately blocked preflight query");
+}
+
+#[derive(Clone)]
+struct BlockingVllmState {
+    block_on: String,
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+    calls: Arc<AtomicUsize>,
+}
+
+struct BlockingVllm {
+    base_url: String,
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+    calls: Arc<AtomicUsize>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for BlockingVllm {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+fn request_has_exact_payload_text(request: &Value, expected: &str) -> bool {
+    request["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|message| message["role"] == "user")
+        .filter_map(|message| message["content"].as_str())
+        .filter_map(|content| serde_json::from_str::<Value>(content).ok())
+        .any(|input| input["payload"]["text"] == expected)
+}
+
+async fn blocked_vllm_response(
+    State(state): State<BlockingVllmState>,
+    Json(request): Json<Value>,
+) -> Json<Value> {
+    let target = request_has_exact_payload_text(&request, &state.block_on);
+    let content = if target {
+        state.calls.fetch_add(1, Ordering::SeqCst);
+        state.entered.notify_one();
+        state.release.notified().await;
+        "{\"candidates\":[{\"knowledge_type\":\"fact\",\"title\":\"Renewed capture\",\"body_markdown\":\"The worker retained its exact lease while extraction was blocked.\",\"summary\":\"The capture lease was renewed.\",\"tags\":[\"lease\"],\"confidence\":0.9}] }"
+    } else {
+        "{\"candidates\":[]}"
+    };
+    Json(json!({
+        "model": "cpr45-blocking@1",
+        "choices": [{
+            "message": {
+                "content": content
+            }
+        }]
+    }))
+}
+
+#[test]
+fn blocking_vllm_fixture_matches_only_the_exact_target_event() {
+    let request = |role: &str, text: &str| {
+        json!({
+            "messages": [{
+                "role": role,
+                "content": json!({"payload": {"text": text}}).to_string(),
+            }],
+        })
+    };
+    assert!(request_has_exact_payload_text(
+        &request("user", "target event"),
+        "target event"
+    ));
+    assert!(!request_has_exact_payload_text(
+        &request("user", "target event plus another"),
+        "target event"
+    ));
+    assert!(!request_has_exact_payload_text(
+        &request("system", "target event"),
+        "target event"
+    ));
+    assert!(!request_has_exact_payload_text(
+        &json!({"messages": [{"role": "user", "content": "not-json"}]}),
+        "target event"
+    ));
+}
+
+async fn spawn_blocking_vllm(block_on: &str) -> BlockingVllm {
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind blocking vLLM fixture");
+    let address = listener.local_addr().expect("read vLLM fixture address");
+    let app = Router::new()
+        .route("/v1/chat/completions", post(blocked_vllm_response))
+        .with_state(BlockingVllmState {
+            block_on: block_on.to_owned(),
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+            calls: Arc::clone(&calls),
+        });
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("serve blocking vLLM fixture");
+    });
+    BlockingVllm {
+        base_url: format!("http://{address}"),
+        entered,
+        release,
+        calls,
+        task,
+    }
+}
+
+#[tokio::test]
+async fn capture_leases_renew_fence_stale_results_and_terminalise_exhaustion() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant(synveda_policy::STANDARD).await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, _) = workspace(&app, &token, "lease-fence").await;
+    let (project_id, _) = project(&app, &token, &workspace_id, "lease-fence").await;
+    let session_id = session(
+        &app,
+        &token,
+        &workspace_id,
+        &project_id,
+        "lease-fence-session",
+    )
+    .await;
+    append(
+        &app,
+        &token,
+        &session_id,
+        vec![event(
+            "lease-fence-one",
+            "The portable worker must fence stale model output.",
+        )],
+    )
+    .await;
+    let (status, frozen) = freeze(&app, &token, &session_id, "lease-fence-one").await;
+    assert_eq!(status, StatusCode::CREATED, "{frozen}");
+    let batch_id = frozen["id"]
+        .as_str()
+        .expect("capture batch id")
+        .parse::<CaptureBatchId>()
+        .expect("parse capture batch id");
+    let owner = format!("cpr45-fence-{tenant_id}");
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin first claim");
+    let first = capture_store::claim_batch(&mut tx, tenant_id, &owner, 30)
+        .await
+        .expect("claim first attempt")
+        .expect("pending capture batch");
+    let events = capture_store::frozen_events(&mut *tx, tenant_id, first.id)
+        .await
+        .expect("load frozen evidence");
+    tx.commit().await.expect("commit first claim");
+    assert_eq!(first.attempts, 1);
+    assert_eq!(events.len(), 1);
+    let candidate_id = CaptureCandidateId::new();
+    let candidate = lease_test_candidate(&first, &events[0], candidate_id);
+
+    let before_renewal = lease_expiry(&state, tenant_id, batch_id).await;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin renewal");
+    capture_store::renew_batch(&mut tx, &first, &owner, 120)
+        .await
+        .expect("renew first claim");
+    tx.commit().await.expect("commit renewal");
+    let after_renewal = lease_expiry(&state, tenant_id, batch_id).await;
+    assert!(after_renewal > before_renewal);
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin competing claim");
+    assert!(
+        capture_store::claim_batch(&mut tx, tenant_id, "another-owner", 30)
+            .await
+            .expect("look for competing work")
+            .is_none(),
+        "a live claim must not be reclaimed"
+    );
+    tx.rollback().await.expect("roll back empty claim");
+
+    for (forged, forged_owner) in [
+        (first.clone(), "wrong-owner"),
+        (
+            CaptureBatch {
+                attempts: first.attempts + 1,
+                ..first.clone()
+            },
+            owner.as_str(),
+        ),
+    ] {
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+            .await
+            .expect("begin forged renewal");
+        let error = capture_store::renew_batch(&mut tx, &forged, forged_owner, 120)
+            .await
+            .expect_err("forged claim must not renew");
+        assert_stale_claim(error);
+        tx.commit()
+            .await
+            .expect("a rejected renewal has no mutation to roll back");
+    }
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin wrong-owner failure");
+    let error = capture_store::fail_batch(&mut tx, &first, "wrong-owner", "forged-owner")
+        .await
+        .expect_err("wrong owner must not fail a live claim");
+    assert_stale_claim(error);
+    tx.commit()
+        .await
+        .expect("rejected wrong-owner failure has no mutation");
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin wrong-owner completion");
+    let error = capture_store::complete_batch(
+        &mut tx,
+        &first,
+        "wrong-owner",
+        "fence-test",
+        "fence-test@1",
+        std::slice::from_ref(&candidate),
+    )
+    .await
+    .expect_err("wrong owner must not complete a live claim");
+    assert_stale_claim(error);
+    tx.commit()
+        .await
+        .expect("rejected wrong-owner completion has no mutation");
+    assert_candidate_absent(&state, tenant_id, candidate_id).await;
+
+    // Establish an old transaction timestamp, then expire from a newer
+    // transaction. A lease predicate using PostgreSQL `now()` would accept
+    // this stale attempt; statement time must reject it.
+    let mut old_tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin old-clock transaction");
+    let old_clock: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("select transaction_timestamp()")
+            .fetch_one(&mut *old_tx)
+            .await
+            .expect("read old transaction clock");
+    expire_claim(&state, tenant_id, batch_id).await;
+    let expired_at = lease_expiry(&state, tenant_id, batch_id).await;
+    assert!(
+        expired_at > old_clock,
+        "test must distinguish the two clocks"
+    );
+    let mut expired_renewal = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin expired renewal");
+    let error = capture_store::renew_batch(&mut expired_renewal, &first, &owner, 120)
+        .await
+        .expect_err("an expired claim must not renew");
+    assert_stale_claim(error);
+    expired_renewal
+        .commit()
+        .await
+        .expect("rejected expired renewal has no mutation");
+    let error = capture_store::fail_batch(&mut old_tx, &first, &owner, "stale-clock")
+        .await
+        .expect_err("transaction-start time must not revive an expired claim");
+    assert_stale_claim(error);
+    old_tx
+        .commit()
+        .await
+        .expect("rejected stale failure commits no mutation");
+
+    let mut stale_tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin stale completion");
+    let error = capture_store::complete_batch(
+        &mut stale_tx,
+        &first,
+        &owner,
+        "fence-test",
+        "fence-test@1",
+        std::slice::from_ref(&candidate),
+    )
+    .await
+    .expect_err("expired completion must be fenced");
+    assert_stale_claim(error);
+    stale_tx
+        .commit()
+        .await
+        .expect("caught completion conflict must remain side-effect free");
+    assert_candidate_absent(&state, tenant_id, candidate_id).await;
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin same-owner reclaim");
+    let second = capture_store::claim_batch(&mut tx, tenant_id, &owner, 30)
+        .await
+        .expect("reclaim expired batch")
+        .expect("expired batch available");
+    tx.commit().await.expect("commit second claim");
+    assert_eq!(second.attempts, 2);
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin stale same-owner failure");
+    let error = capture_store::fail_batch(&mut tx, &first, &owner, "stale-attempt")
+        .await
+        .expect_err("same owner cannot revive the old attempt");
+    assert_stale_claim(error);
+    tx.commit()
+        .await
+        .expect("stale same-owner failure has no mutation");
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin stale same-owner completion");
+    let error = capture_store::complete_batch(
+        &mut tx,
+        &first,
+        &owner,
+        "fence-test",
+        "fence-test@1",
+        std::slice::from_ref(&candidate),
+    )
+    .await
+    .expect_err("same owner cannot complete the reclaimed attempt");
+    assert_stale_claim(error);
+    tx.commit()
+        .await
+        .expect("stale same-owner completion has no mutation");
+    assert_candidate_absent(&state, tenant_id, candidate_id).await;
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin winning completion");
+    let completed = capture_store::complete_batch(
+        &mut tx,
+        &second,
+        &owner,
+        "fence-test",
+        "fence-test@1",
+        std::slice::from_ref(&candidate),
+    )
+    .await
+    .expect("current claim completes");
+    tx.commit().await.expect("commit winning completion");
+    assert_eq!(completed.state, CaptureBatchState::Completed);
+    assert_eq!(completed.attempts, 2);
+    assert_eq!(completed.candidate_count, 1);
+
+    let mut replay = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin completion replay");
+    let error = capture_store::complete_batch(
+        &mut replay,
+        &second,
+        &owner,
+        "fence-test",
+        "fence-test@1",
+        std::slice::from_ref(&candidate),
+    )
+    .await
+    .expect_err("completed attempt cannot replay");
+    assert_stale_claim(error);
+    replay
+        .commit()
+        .await
+        .expect("completion replay remains side-effect free");
+    let candidate_count = batch_candidate_count(&state, tenant_id, batch_id).await;
+    assert_eq!(candidate_count, 1);
+
+    // Freeze a changed snapshot, exhaust four ordinary retries, then crash
+    // the fifth claim. The next worker pass must terminalise it with audit
+    // evidence instead of leaving an unclaimable running row forever.
+    append(
+        &app,
+        &token,
+        &session_id,
+        vec![event(
+            "lease-fence-two",
+            "A final expired attempt must become an inspectable failure.",
+        )],
+    )
+    .await;
+    let (status, exhausted) = freeze(&app, &token, &session_id, "lease-fence-two").await;
+    assert_eq!(status, StatusCode::CREATED, "{exhausted}");
+    let exhausted_id = exhausted["id"]
+        .as_str()
+        .expect("exhausted batch id")
+        .parse::<CaptureBatchId>()
+        .expect("parse exhausted batch id");
+    for expected_attempt in 1..=synveda_types::capture::MAX_CAPTURE_ATTEMPTS {
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+            .await
+            .expect("begin bounded retry claim");
+        let attempt = capture_store::claim_batch(&mut tx, tenant_id, &owner, 30)
+            .await
+            .expect("claim bounded retry")
+            .expect("retry batch remains claimable");
+        assert_eq!(attempt.id, exhausted_id);
+        assert_eq!(attempt.attempts, expected_attempt);
+        if expected_attempt < synveda_types::capture::MAX_CAPTURE_ATTEMPTS {
+            capture_store::fail_batch(&mut tx, &attempt, &owner, "test-retry")
+                .await
+                .expect("release bounded retry");
+        }
+        tx.commit().await.expect("commit bounded retry transition");
+    }
+    expire_claim(&state, tenant_id, exhausted_id).await;
+    let summary = capture_worker::sweep_once(
+        &capture_worker::Deps {
+            pool: state.pool.clone(),
+            pdp: Arc::clone(&state.pdp),
+            extractor: Arc::new(AnyExtractor::Deterministic(DeterministicExtractor::new())),
+        },
+        &capture_worker::Config {
+            poll_interval: Duration::from_secs(1),
+            lease_duration: Duration::from_secs(30),
+            batches_per_tenant: 1,
+            lease_owner: owner,
+        },
+    )
+    .await
+    .expect("terminalise exhausted claim");
+    assert!(summary.failed_attempts >= 1, "{summary:?}");
+    let mut inspect = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("inspect exhausted claim");
+    let exhausted = capture_store::get_batch(&mut *inspect, tenant_id, exhausted_id)
+        .await
+        .expect("load exhausted batch")
+        .expect("exhausted batch remains inspectable");
+    let audit = synveda_audit::tail(&mut inspect, tenant_id, 100)
+        .await
+        .expect("read terminal failure audit");
+    inspect.commit().await.expect("finish exhausted inspection");
+    assert_eq!(exhausted.state, CaptureBatchState::Failed);
+    assert_eq!(exhausted.error_code.as_deref(), Some("lease_expired"));
+    assert!(audit.iter().any(|event| {
+        event.action.as_str() == "capture.batch.completed"
+            && event.payload["batch_id"] == exhausted_id.to_string()
+            && event.payload["state"] == "failed"
+            && event.payload["error_code"] == "lease_expired"
+    }));
+}
+
+#[tokio::test]
+async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_result() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant(synveda_policy::STANDARD).await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, _) = workspace(&app, &token, "worker-renewal").await;
+    let (project_id, _) = project(&app, &token, &workspace_id, "worker-renewal").await;
+    let session_id = session(
+        &app,
+        &token,
+        &workspace_id,
+        &project_id,
+        "worker-renewal-session",
+    )
+    .await;
+    append(
+        &app,
+        &token,
+        &session_id,
+        vec![event(
+            "worker-renewal-one",
+            "A blocked model call must not outlive its database authority.",
+        )],
+    )
+    .await;
+    let (status, frozen) = freeze(&app, &token, &session_id, "worker-renewal-one").await;
+    assert_eq!(status, StatusCode::CREATED, "{frozen}");
+    let renewed_batch_id = frozen["id"]
+        .as_str()
+        .expect("renewed batch id")
+        .parse::<CaptureBatchId>()
+        .expect("parse renewed batch id");
+
+    let blocked =
+        spawn_blocking_vllm("A blocked model call must not outlive its database authority.").await;
+    let deps = capture_worker::Deps {
+        pool: state.pool.clone(),
+        pdp: Arc::clone(&state.pdp),
+        extractor: Arc::new(AnyExtractor::Vllm(
+            VllmExtractor::new("cpr45-blocking@1".to_owned(), blocked.base_url.clone())
+                .expect("configure blocking extractor"),
+        )),
+    };
+    let config = capture_worker::Config {
+        poll_interval: Duration::from_secs(1),
+        lease_duration: Duration::from_secs(1),
+        batches_per_tenant: 1,
+        lease_owner: format!("cpr45-renew-{}", CaptureBatchId::new()),
+    };
+    let sweep = tokio::spawn(async move { capture_worker::sweep_once(&deps, &config).await });
+    tokio::time::timeout(Duration::from_secs(10), blocked.entered.notified())
+        .await
+        .expect("extractor receives the frozen event");
+    let initial_expiry = lease_expiry(&state, tenant_id, renewed_batch_id).await;
+    let extended_expiry =
+        wait_for_lease_extension(&state, tenant_id, renewed_batch_id, initial_expiry).await;
+    assert!(extended_expiry > initial_expiry);
+    blocked.release.notify_one();
+    let summary = tokio::time::timeout(Duration::from_secs(3), sweep)
+        .await
+        .expect("renewed extraction finishes within the test bound")
+        .expect("renewed worker task joins")
+        .expect("renewed worker sweep succeeds");
+    assert!(summary.completed >= 1, "{summary:?}");
+    assert_eq!(blocked.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        batch_candidate_count(&state, tenant_id, renewed_batch_id).await,
+        1
+    );
+    assert_eq!(
+        completion_audit_count(&state, tenant_id, renewed_batch_id).await,
+        1
+    );
+
+    append(
+        &app,
+        &token,
+        &session_id,
+        vec![event(
+            "worker-renewal-two",
+            "A reclaimed attempt must discard dependency output.",
+        )],
+    )
+    .await;
+    let (status, frozen) = freeze(&app, &token, &session_id, "worker-renewal-two").await;
+    assert_eq!(status, StatusCode::CREATED, "{frozen}");
+    let reclaimed_batch_id = frozen["id"]
+        .as_str()
+        .expect("reclaimed batch id")
+        .parse::<CaptureBatchId>()
+        .expect("parse reclaimed batch id");
+
+    let lost = spawn_blocking_vllm("A reclaimed attempt must discard dependency output.").await;
+    let loser_owner = format!("cpr45-loser-{}", CaptureBatchId::new());
+    let deps = capture_worker::Deps {
+        pool: state.pool.clone(),
+        pdp: Arc::clone(&state.pdp),
+        extractor: Arc::new(AnyExtractor::Vllm(
+            VllmExtractor::new("cpr45-blocking@1".to_owned(), lost.base_url.clone())
+                .expect("configure blocking extractor"),
+        )),
+    };
+    let config = capture_worker::Config {
+        poll_interval: Duration::from_secs(1),
+        lease_duration: Duration::from_secs(1),
+        batches_per_tenant: 1,
+        lease_owner: loser_owner,
+    };
+    let sweep = tokio::spawn(async move { capture_worker::sweep_once(&deps, &config).await });
+    tokio::time::timeout(Duration::from_secs(10), lost.entered.notified())
+        .await
+        .expect("losing extractor receives the frozen event");
+    let winner_owner = format!("cpr45-winner-{}", CaptureBatchId::new());
+    let winner = reclaim_expired_claim(&state, tenant_id, reclaimed_batch_id, &winner_owner).await;
+    assert_eq!(winner.attempts, 2);
+    let summary = tokio::time::timeout(Duration::from_secs(3), sweep)
+        .await
+        .expect("losing extraction observes the failed renewal")
+        .expect("losing worker task joins")
+        .expect("losing worker sweep returns an outcome");
+    lost.release.notify_waiters();
+    assert!(summary.abandoned_attempts >= 1, "{summary:?}");
+    assert_eq!(lost.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        batch_candidate_count(&state, tenant_id, reclaimed_batch_id).await,
+        0,
+        "the stale provider response must not materialise a candidate"
+    );
+    assert_eq!(
+        completion_audit_count(&state, tenant_id, reclaimed_batch_id).await,
+        0,
+        "the losing attempt must not append terminal audit evidence"
+    );
+
+    // Return the authoritative claim to the ordinary worker path so this
+    // acceptance test leaves no live or pending work behind.
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin winner cleanup");
+    capture_store::fail_batch(&mut tx, &winner, &winner_owner, "test-requeue")
+        .await
+        .expect("release the winner for ordinary processing");
+    tx.commit().await.expect("commit winner cleanup");
+    run_capture(&state).await;
+}
+
+#[tokio::test]
+#[ignore = "serial migrator lock acceptance"]
+async fn capture_worker_reproves_a_preflight_lease_before_calling_the_extractor() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant(synveda_policy::STANDARD).await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, _) = workspace(&app, &token, "preflight-expiry").await;
+    let (project_id, _) = project(&app, &token, &workspace_id, "preflight-expiry").await;
+    let session_id = session(
+        &app,
+        &token,
+        &workspace_id,
+        &project_id,
+        "preflight-expiry-session",
+    )
+    .await;
+    append(
+        &app,
+        &token,
+        &session_id,
+        vec![event(
+            "preflight-expiry-one",
+            "Expired preflight authority must prevent provider disclosure.",
+        )],
+    )
+    .await;
+    let (status, frozen) = freeze(&app, &token, &session_id, "preflight-expiry-one").await;
+    assert_eq!(status, StatusCode::CREATED, "{frozen}");
+    let batch_id = frozen["id"]
+        .as_str()
+        .expect("preflight batch id")
+        .parse::<CaptureBatchId>()
+        .expect("parse preflight batch id");
+
+    // AccessExclusive is a serial test synchronisation barrier, not worker
+    // authority. PostgreSQL 17 correctly withholds that lock from the gateway,
+    // so the barrier uses the separately verified migrator/database owner;
+    // the worker still claims and reads through its ordinary tenant role.
+    let barrier_pool = tenant_fixture::migrator_pool(&state.pool).await;
+    let mut blocker = barrier_pool.begin().await.expect("begin preflight barrier");
+    sqlx::query("lock table configuration_versions in access exclusive mode")
+        .execute(&mut *blocker)
+        .await
+        .expect("lock frozen configuration reads");
+
+    let fixture =
+        spawn_blocking_vllm("Expired preflight authority must prevent provider disclosure.").await;
+    fixture.release.notify_one();
+    let application_name = format!("cpr45-preflight-{}", CaptureBatchId::new());
+    let worker_pool = named_worker_pool(&application_name).await;
+    let deps = capture_worker::Deps {
+        pool: worker_pool,
+        pdp: Arc::clone(&state.pdp),
+        extractor: Arc::new(AnyExtractor::Vllm(
+            VllmExtractor::new("cpr45-blocking@1".to_owned(), fixture.base_url.clone())
+                .expect("configure blocking extractor"),
+        )),
+    };
+    let config = capture_worker::Config {
+        poll_interval: Duration::from_secs(1),
+        lease_duration: Duration::from_secs(1),
+        batches_per_tenant: 1,
+        lease_owner: format!("cpr45-preflight-{}", CaptureBatchId::new()),
+    };
+    let sweep = tokio::spawn(async move { capture_worker::sweep_once(&deps, &config).await });
+    wait_for_database_lock(&state, tenant_id, &application_name).await;
+    tokio::time::sleep(Duration::from_millis(1_250)).await;
+    blocker.rollback().await.expect("release preflight barrier");
+    barrier_pool.close().await;
+
+    let summary = tokio::time::timeout(Duration::from_secs(3), sweep)
+        .await
+        .expect("expired preflight returns within the test bound")
+        .expect("preflight worker task joins")
+        .expect("preflight worker reports abandonment");
+    assert!(summary.abandoned_attempts >= 1, "{summary:?}");
+    assert_eq!(
+        fixture.calls.load(Ordering::SeqCst),
+        0,
+        "no frozen content reaches the provider after preflight expiry"
+    );
+    assert_eq!(batch_candidate_count(&state, tenant_id, batch_id).await, 0);
+    assert_eq!(completion_audit_count(&state, tenant_id, batch_id).await, 0);
+
+    let winner_owner = format!("cpr45-preflight-winner-{}", CaptureBatchId::new());
+    let winner = reclaim_expired_claim(&state, tenant_id, batch_id, &winner_owner).await;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin preflight cleanup");
+    capture_store::fail_batch(&mut tx, &winner, &winner_owner, "test-requeue")
+        .await
+        .expect("release preflight winner for ordinary processing");
+    tx.commit().await.expect("commit preflight cleanup");
+    run_capture(&state).await;
+}
+
 async fn candidates(app: &Router, token: &str, batch_id: &str) -> Vec<Value> {
     let (status, value) = call(
         app,
@@ -467,21 +1417,25 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
     assert_eq!(same_snapshot, StatusCode::OK, "{other_key}");
     assert_eq!(other_key["id"], batch_id);
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let before_knowledge: i64 =
         sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
             .bind(tenant_id.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count Knowledge before extraction");
+    tx.commit().await.expect("commit pre-extraction read");
     assert_eq!(before_knowledge, 0);
     run_capture(&state).await;
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let after_extraction: i64 =
         sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
             .bind(tenant_id.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count Knowledge after extraction");
+    tx.commit().await.expect("commit post-extraction read");
     let retired_table: Option<String> =
         sqlx::query_scalar("select to_regclass('public.records')::text")
             .fetch_one(&state.pool)
@@ -685,6 +1639,7 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{forgotten}");
     assert_eq!(forgotten["outcome"], "applied");
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let scrubbed: (String, String, bool, Option<Value>) = sqlx::query_as(
         "select candidate.title, candidate.body_markdown, candidate.content_erased, decision.payload \
          from capture_candidates candidate \
@@ -694,7 +1649,7 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
     )
     .bind(tenant_id.as_uuid())
     .bind(uuid::Uuid::parse_str(values[5]["id"].as_str().expect("candidate id")).expect("uuid"))
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("read scrubbed candidate");
     assert_eq!(scrubbed, (String::new(), String::new(), true, None));
@@ -704,7 +1659,7 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
          where tenant_id = $1 and action like 'capture.%'",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("read capture audit payloads");
     for plaintext in phrases
@@ -720,9 +1675,12 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
         "select count(*) from audit_log where tenant_id = $1 and action = 'capture.candidate.decided'",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count decision audit events");
+    tx.commit()
+        .await
+        .expect("commit Capture erasure evidence read");
     assert_eq!(decisions, 6, "retries must not duplicate decision audits");
 
     // A changed event set is a new snapshot. Session end freezes it without
@@ -840,12 +1798,16 @@ async fn strict_profile_retains_a_pending_review_instead_of_publishing() {
     assert_eq!(pending["candidate"]["resulting_outcome"], "pending_review");
     assert!(pending["candidate"]["resulting_change_id"].is_string());
     assert!(pending["candidate"]["resulting_revision_id"].is_null());
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let active: i64 =
         sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
             .bind(tenant_id.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count unpublished Knowledge");
+    tx.commit()
+        .await
+        .expect("commit unpublished Knowledge read");
     assert_eq!(active, 0, "pending review is not active Knowledge");
     let (status, replay) = decide(&app, &token, id, "accept", "strict-accept", json!({})).await;
     assert_eq!(status, StatusCode::OK, "{replay}");
@@ -1141,12 +2103,14 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     assert_eq!(batch_status, StatusCode::CREATED, "{batch}");
     let alice_batch = batch["id"].as_str().expect("Alice batch id");
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let unpublished: i64 =
         sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
             .bind(tenant_id.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count pre-review Knowledge");
+    tx.commit().await.expect("commit pre-review Knowledge read");
     assert_eq!(
         unpublished, 0,
         "extraction intent must not publish Knowledge"
@@ -1408,6 +2372,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     .await;
     assert_eq!(old_status, StatusCode::OK, "{old_detail}");
     assert_eq!(old_detail["lifecycle_state"], "superseded");
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let relation_count: i64 = sqlx::query_scalar(
         "select count(*) from knowledge_relations where tenant_id = $1 \
          and source_item_id = $2 and target_item_id = $3 and relation_type = 'supersedes'",
@@ -1415,9 +2380,10 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     .bind(tenant_id.as_uuid())
     .bind(uuid::Uuid::parse_str(&replacement_item).expect("replacement item UUID"))
     .bind(uuid::Uuid::parse_str(&request_id_item).expect("old item UUID"))
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count explicit supersession");
+    tx.commit().await.expect("commit supersession read");
     assert_eq!(relation_count, 1);
 
     // A third clean run receives the correction, never the superseded head.
@@ -1560,6 +2526,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     // The product path remains one model: every publication has a VedaFlow
     // change, the retired aggregate is absent, and the deleted global runtime
     // endpoints are still hard 404s.
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64, bool) = sqlx::query_as(
         "select \
            (select count(*) from sessions where tenant_id = $1), \
@@ -1574,7 +2541,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
            (select to_regclass('public.records') is not null)",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("read MVP database state");
     assert_eq!(counts, (3, 5, 2, 5, 5, 4, 4, 4, 2, false));
@@ -1582,17 +2549,18 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
         "select count(*) from knowledge_items where tenant_id = $1 and lifecycle_state = 'active'",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count current Knowledge");
     let superseded: i64 = sqlx::query_scalar(
         "select count(*) from knowledge_items where tenant_id = $1 and lifecycle_state = 'superseded'",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count superseded Knowledge");
     assert_eq!((active, superseded), (3, 1));
+    tx.commit().await.expect("commit MVP state read");
 
     for path in ["/v1/observe", "/v1/inject", "/v1/recall"] {
         let (status, body) = call(&app, "POST", path, &alice, None, Some(json!({}))).await;
@@ -1663,6 +2631,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     // joins them with independently executed Skill, Tool, OKF, graph and
     // isolation scenarios rather than manufacturing counters from test names.
     if let Ok(path) = std::env::var("SYNVEDA_PRODUCT_EVAL_EVIDENCE") {
+        let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
         let funnel: (i64, i64, i64, i64) = sqlx::query_as(
             "select \
                (select coalesce(sum(candidate_count), 0) from session_context_runs where tenant_id = $1), \
@@ -1672,7 +2641,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
                (select coalesce(sum(token_count), 0) from context_selections where tenant_id = $1)",
         )
         .bind(tenant_id.as_uuid())
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *tx)
         .await
         .expect("read CPR-40 funnel measurements");
         let feedback: Vec<(String, i64)> = sqlx::query_as(
@@ -1680,7 +2649,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
              where tenant_id = $1 group by feedback_type order by feedback_type",
         )
         .bind(tenant_id.as_uuid())
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await
         .expect("read CPR-40 feedback measurements");
         let feedback = feedback
@@ -1696,7 +2665,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
                    and link.knowledge_revision_id = selected.knowledge_revision_id)",
         )
         .bind(tenant_id.as_uuid())
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *tx)
         .await
         .expect("measure selected Knowledge provenance gaps");
         let model_versions: Vec<String> = sqlx::query_scalar(
@@ -1704,9 +2673,10 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
              where tenant_id = $1 and model_version is not null order by model_version",
         )
         .bind(tenant_id.as_uuid())
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await
         .expect("read CPR-40 extraction model versions");
+        tx.commit().await.expect("commit product measurements read");
         assert_eq!(
             model_versions.len(),
             1,

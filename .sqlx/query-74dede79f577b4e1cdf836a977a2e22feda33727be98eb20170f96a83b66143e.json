@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select version.skill_id, skill.governing_scope_id\n        from skill_versions version\n        join skills skill\n          on skill.tenant_id = version.tenant_id and skill.id = version.skill_id\n        where version.tenant_id = $1 and version.id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "skill_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "governing_scope_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "74dede79f577b4e1cdf836a977a2e22feda33727be98eb20170f96a83b66143e"
+}

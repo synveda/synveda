@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-24
-- **Feature(s)**: CPR-18
+- **Feature(s)**: CPR-18, CPR-45
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
@@ -39,6 +39,23 @@ forced RLS. The batch itself is the durable job address; it is not put into
 `durable_operations`, whose current shape is deliberately bound to a
 VedaFlow proposal and work already authorised for application. Extraction has
 not proposed a Knowledge mutation yet.
+
+CPR-45 tightens that lease before extraction moves into a separately
+restartable process. The claim identity is the exact tuple of tenant, batch,
+process-unique owner and incremented `attempts` value; the attempt counter is
+the fencing token. Claim, renewal, completion and failure compare PostgreSQL
+statement time, not transaction-start time. The worker renews independently
+while an external extractor is in flight and discards the result as soon as it
+cannot prove renewal. Because the claim clock starts before configuration and
+PDP preflight finishes, the worker first commits a renewal after preflight and
+before disclosing any event to a provider. Renewal shutdown is
+cancellation-aware and bounded. Completion performs the fenced terminal
+transition before inserting any candidate or evidence row, so even a caller
+that catches the conflict and commits cannot retain stale output. A crashed,
+expired final attempt is terminalised with the stable `lease_expired` code and
+content-free audit evidence before the tenant receives more work. These rules
+reuse the existing counter and require no schema-era or data compatibility
+path.
 
 ### 2. The extractor returns proposed Knowledge, never storage instructions
 

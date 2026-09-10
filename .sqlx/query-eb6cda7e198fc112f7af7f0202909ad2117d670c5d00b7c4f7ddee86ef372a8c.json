@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select namespace.nspname as \"schema_name!\",\n                  object.relname as \"object_name!\",\n                  object.relkind::text as \"object_kind!\",\n                  object.relrowsecurity as \"row_security!\",\n                  object.relforcerowsecurity as \"force_row_security!\",\n                  coalesce(policy.polname, '') as \"policy_name!\",\n                  coalesce(policy.polpermissive::text, '') as \"permissive!\",\n                  coalesce(policy.polcmd::text, '') as \"command!\",\n                  case\n                    when pg_catalog.cardinality(policy.polroles) > 16 then '<oversized>'\n                    else coalesce(\n                      (\n                        select pg_catalog.string_agg(\n                                 coalesce(role.rolname, 'PUBLIC'),\n                                 ',' order by coalesce(role.rolname, 'PUBLIC') collate \"C\"\n                               )\n                          from pg_catalog.unnest(policy.polroles) as policy_role(oid)\n                          left join pg_catalog.pg_roles as role on role.oid = policy_role.oid\n                      ),\n                      ''\n                    )\n                  end as \"roles!\",\n                  case\n                    when pg_catalog.octet_length(coalesce(\n                           pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), ''\n                         )) <= 4096\n                    then coalesce(\n                      pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), ''\n                    )\n                    else '<oversized>'\n                  end as \"using_expression!\",\n                  case\n                    when pg_catalog.octet_length(coalesce(\n                           pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid), ''\n                         )) <= 4096\n                    then coalesce(\n                      pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid), ''\n                    )\n                    else '<oversized>'\n                  end as \"check_expression!\"\n             from pg_catalog.pg_class as object\n             join pg_catalog.pg_namespace as namespace\n               on namespace.oid = object.relnamespace\n             left join pg_catalog.pg_policy as policy\n               on policy.polrelid = object.oid\n            where namespace.nspname = 'public'\n              and object.relkind in ('r', 'p')\n            order by namespace.nspname collate \"C\", object.relname collate \"C\",\n                     policy.polname collate \"C\"\n            limit $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "schema_name!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 1,
+        "name": "object_name!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 2,
+        "name": "object_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "row_security!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "force_row_security!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "policy_name!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 6,
+        "name": "permissive!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "command!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "roles!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "using_expression!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "check_expression!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "eb6cda7e198fc112f7af7f0202909ad2117d670c5d00b7c4f7ddee86ef372a8c"
+}

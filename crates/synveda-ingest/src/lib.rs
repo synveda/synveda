@@ -9,6 +9,7 @@ pub mod capture_worker;
 mod chain;
 pub mod embedding;
 pub mod extraction;
+mod provider_url;
 mod redaction;
 mod skillrubric;
 mod skillscan;

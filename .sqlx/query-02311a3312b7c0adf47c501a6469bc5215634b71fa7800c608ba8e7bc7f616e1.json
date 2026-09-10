@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select max(version) from public._sqlx_migrations",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "max",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "02311a3312b7c0adf47c501a6469bc5215634b71fa7800c608ba8e7bc7f616e1"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists (\n              select 1\n                from pg_catalog.pg_database as database\n                join pg_catalog.pg_roles as owner on owner.oid = database.datdba\n               where database.datname = $1\n                 and owner.rolname = $2\n                 and not database.datallowconn\n                 and not database.datistemplate\n                 and not exists (\n                   select 1\n                     from pg_catalog.aclexplode(database.datacl) as acl\n                    where not (\n                      acl.grantee = owner.oid\n                      and acl.grantor = owner.oid\n                      and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')\n                      and not acl.is_grantable\n                      or acl.grantee in (\n                        select role.oid from pg_catalog.pg_roles as role\n                         where role.rolname in ($3, $4)\n                      )\n                      and acl.grantor = owner.oid\n                      and acl.privilege_type = 'CONNECT'\n                      and not acl.is_grantable\n                      or acl.grantee in (\n                        select role.oid from pg_catalog.pg_roles as role\n                         where role.rolname = any($5::text[])\n                      )\n                      and acl.grantor = owner.oid\n                      and acl.privilege_type = 'CONNECT'\n                      and not acl.is_grantable\n                    )\n                 )\n                 and (\n                   select count(*)\n                     from pg_catalog.aclexplode(database.datacl) as acl\n                    where acl.grantee = owner.oid\n                      and acl.grantor = owner.oid\n                      and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')\n                      and not acl.is_grantable\n                 ) = 3\n                 and (\n                   select count(*)\n                     from pg_catalog.aclexplode(database.datacl) as acl\n                    where acl.grantee in (\n                            select role.oid from pg_catalog.pg_roles as role\n                             where role.rolname in ($3, $4)\n                          )\n                      and acl.grantor = owner.oid\n                      and acl.privilege_type = 'CONNECT'\n                      and not acl.is_grantable\n                 ) = 2\n                 and (\n                   select count(*)\n                     from pg_catalog.aclexplode(database.datacl) as acl\n                    where acl.grantee in (\n                            select role.oid from pg_catalog.pg_roles as role\n                             where role.rolname = any($5::text[])\n                          )\n                      and acl.grantor = owner.oid\n                      and acl.privilege_type = 'CONNECT'\n                      and not acl.is_grantable\n                 ) = pg_catalog.cardinality($5::text[])\n            ) as \"safe!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "safe!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name",
+        "Name",
+        "Name",
+        "Name",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b5d83eb1a8578e38e2f3ef77e210ada0757416b00927267596595368682b98c5"
+}

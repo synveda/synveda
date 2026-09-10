@@ -1,0 +1,48 @@
+x-synveda-recovery-proxy-closure: &synveda-recovery-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+services:
+  database-backup:
+    profiles: [recovery]
+    image: ${SYNVEDA_POSTGRES_IMAGE:?set SYNVEDA_POSTGRES_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
+    user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
+    entrypoint: ["/usr/local/bin/synveda-logical-backup"]
+    command: ["backup"]
+    environment:
+      <<: *synveda-recovery-proxy-closure
+      SYNVEDA_BACKUP_PROJECT: ${SYNVEDA_BACKUP_PROJECT:?set SYNVEDA_BACKUP_PROJECT}
+      SYNVEDA_BACKUP_ID: ${SYNVEDA_BACKUP_ID:?set SYNVEDA_BACKUP_ID}
+      SYNVEDA_BACKUP_TENANT_ID: ${SYNVEDA_BOOTSTRAP_TENANT_ID:?set SYNVEDA_BOOTSTRAP_TENANT_ID}
+      SYNVEDA_BACKUP_POSTGRES_IMAGE: ${SYNVEDA_POSTGRES_IMAGE}
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    restart: "no"
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=0700,size=16m,uid=${SYNVEDA_RUNTIME_UID},gid=${SYNVEDA_RUNTIME_GID}
+    secrets:
+      - source: postgres_owner_password
+        target: postgres_owner_password
+      - source: keycloak_database_password
+        target: keycloak_database_password
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_BACKUP_STAGING_DIR:?set SYNVEDA_BACKUP_STAGING_DIR}
+        target: /backup
+    networks:
+      synveda-data: {}

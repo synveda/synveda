@@ -1,0 +1,142 @@
+#!/bin/sh
+# CPR-45: restore a validated logical pair into one fresh private cluster.
+set +x
+set -eu
+
+LC_ALL=C
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL PATH
+umask 077
+
+usage() {
+    echo "usage: synveda-logical-restore restore" >&2
+    exit 64
+}
+[ "$#" -eq 1 ] && [ "$1" = restore ] || usage
+
+backup=/backup
+for required in manifest.json synveda.dump keycloak.dump; do
+    candidate=$backup/$required
+    [ ! -L "$candidate" ] && [ -f "$candidate" ] && [ -s "$candidate" ] || {
+        echo "logical-restore: recovery set was refused" >&2
+        exit 78
+    }
+done
+for candidate in "$backup"/.[!.]* "$backup"/..?* "$backup"/*; do
+    [ -e "$candidate" ] || [ -L "$candidate" ] || continue
+    case "${candidate##*/}" in
+        manifest.json|synveda.dump|keycloak.dump) ;;
+        *) echo "logical-restore: recovery set contained an unknown entry" >&2; exit 78 ;;
+    esac
+done
+
+password_file=/run/secrets/postgres_owner_password
+[ ! -L "$password_file" ] && [ -f "$password_file" ] || {
+    echo "logical-restore: owner credential file was refused" >&2
+    exit 78
+}
+password_bytes=$(stat -c '%s' "$password_file") || exit 78
+owner_password=
+IFS= read -r owner_password < "$password_file" || :
+case "$owner_password" in
+    ''|*[!A-Za-z0-9._~-]*)
+        echo "logical-restore: owner credential file was refused" >&2
+        exit 78
+        ;;
+esac
+[ "$password_bytes" -eq "$((${#owner_password} + 1))" ] && \
+    [ "$password_bytes" -le 4096 ] || {
+    echo "logical-restore: owner credential file was refused" >&2
+    exit 78
+}
+
+pgpass=/tmp/synveda-restore.pgpass
+cleanup() {
+    cleanup_status=$?
+    trap '' HUP INT TERM
+    trap - EXIT
+    rm -f -- "$pgpass"
+    unset owner_password
+    exit "$cleanup_status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+printf 'postgres:5432:*:synveda_owner:%s\n' "$owner_password" > "$pgpass"
+chmod 600 "$pgpass"
+unset owner_password
+PGPASSFILE=$pgpass
+PGCONNECT_TIMEOUT=10
+PGAPPNAME=synveda-logical-restore
+export PGPASSFILE PGCONNECT_TIMEOUT PGAPPNAME
+unset PGDATABASE PGHOST PGHOSTADDR PGOPTIONS PGPASSWORD PGPORT PGSERVICE \
+    PGSERVICEFILE PGSSLCERT PGSSLCRL PGSSLKEY PGSSLMODE PGSSLROOTCERT PGUSER
+
+case "$(pg_restore --version)" in
+    'pg_restore (PostgreSQL) 17.'*) ;;
+    *) echo "logical-restore: PostgreSQL 17 pg_restore is required" >&2; exit 69 ;;
+esac
+pg_restore --list "$backup/synveda.dump" >/dev/null
+pg_restore --list "$backup/keycloak.dump" >/dev/null
+
+cluster_shape=$(
+    psql -X -qAt --no-password \
+        --host=postgres --port=5432 --username=synveda_owner --dbname=postgres \
+        --command="select count(*) filter (where datname = 'synveda' and pg_get_userbyid(datdba) = 'synveda_migrator'), count(*) filter (where datname = 'keycloak' and pg_get_userbyid(datdba) = 'keycloak'), count(*) filter (where datname in ('synveda','keycloak') and numbackends <> 0) from pg_stat_database"
+) || {
+    echo "logical-restore: fresh target cluster was unavailable" >&2
+    exit 69
+}
+[ "$cluster_shape" = '1|1|0' ] || {
+    echo "logical-restore: target databases were not fresh and idle" >&2
+    exit 78
+}
+for database in synveda keycloak; do
+    user_tables=$(
+        psql -X -qAt --no-password \
+            --host=postgres --port=5432 --username=synveda_owner --dbname="$database" \
+            --command="select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relkind in ('r','p') and n.nspname not in ('pg_catalog','information_schema')"
+    ) || exit 69
+    [ "$user_tables" = 0 ] || {
+        echo "logical-restore: target $database database was not empty" >&2
+        exit 78
+    }
+done
+
+restore_database() {
+    archive=$1
+    pg_restore \
+        --host=postgres \
+        --port=5432 \
+        --username=synveda_owner \
+        --dbname=postgres \
+        --clean \
+        --if-exists \
+        --create \
+        --exit-on-error \
+        --no-password \
+        "$archive"
+}
+restore_database "$backup/synveda.dump"
+restore_database "$backup/keycloak.dump"
+
+# Logical archives do not include planner statistics. Rebuild them before the
+# restored application graph starts so the smoke does not validate a cold,
+# pathologically planned database by accident.
+for database in synveda keycloak; do
+    psql -X -q --no-password \
+        --host=postgres --port=5432 --username=synveda_owner --dbname="$database" \
+        --command=ANALYZE
+done
+
+restored_shape=$(
+    psql -X -qAt --no-password \
+        --host=postgres --port=5432 --username=synveda_owner --dbname=postgres \
+        --command="select count(*) filter (where datname = 'synveda' and pg_get_userbyid(datdba) = 'synveda_migrator'), count(*) filter (where datname = 'keycloak' and pg_get_userbyid(datdba) = 'keycloak') from pg_database"
+) || exit 69
+[ "$restored_shape" = '1|1' ] || {
+    echo "logical-restore: restored database ownership was refused" >&2
+    exit 78
+}
+echo "logical database pair restored into the fresh private cluster"

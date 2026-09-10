@@ -114,7 +114,7 @@ fn the_packs_differ_where_the_tech_plan_says_they_do() {
 
     // A working neighbourhood's own memory (a workspace): one curator
     // under regulated-strict, auto under the two sharing packs (tech plan
-    // §2.4's SMB collapse; an org_unit is *shared* territory since CPR-7's
+    // §2.4's small-team collapse; an org_unit is *shared* territory since CPR-7's
     // shape vocabulary, priced one notch higher).
     let local = |matrix: &ApprovalMatrix| {
         matrix.resolve(

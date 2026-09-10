@@ -121,7 +121,15 @@ Forces at play:
    1. the mirror row's own link to an identity (`scim_users.identity_id`);
    2. `identities.subject` = the mirror row's `externalId` (the case
       where the directory's anchor *is* the token subject);
-   3. `identities.email`, case-folded, = the mirror row's `userName`.
+   3. the unique active user identity whose case-folded email equals the
+      mirror work address, then its `userName`.
+
+   Email is a weak correspondence hint, not a unique identifier. Two active
+   user identities with one address are `Ambiguous` and refuse projection;
+   departed-only matches permit a new rehire identity. Service identities are
+   never candidates. Mirror mutation and correspondence resolution share one
+   tenant-wide transaction fence; SCIM create commits its mirror, identity
+   projection and link atomically, so a 409 leaves no created resource.
 
    **[Implementation note, 2026-08-05]** The first match was drafted as an
    `identities.external_id` column. There is none: the mirror holds
@@ -492,7 +500,9 @@ Forces at play:
   decision did not picture. The match now tries the work address first. And
   once it fired, the 1:1 projection constraint refused the link *after* the
   create had committed, so the client received a `409` for a resource that
-  by then existed; the question is now asked before anything is written.
+  by then existed. Create and projection now run in one correspondence-fenced
+  transaction: the conflict rolls back the mirror too. Ambiguous active email
+  matches are refused rather than resolved by creation order.
 - **Found while building, recorded here because it is not this feature's
   code**: `personal_slug`'s uniqueness suffix (AUTH-2, `synveda-identity`)
   took the **first** eight hex characters of a UUIDv7 — which are a

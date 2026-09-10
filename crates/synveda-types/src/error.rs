@@ -80,7 +80,7 @@ pub enum Error {
         message: String,
     },
 
-    /// An upstream dependency failed (IdP, embedding service, Temporal, ...).
+    /// An upstream dependency failed (IdP, embedding service, object store, ...).
     #[error("dependency {service}: {message}")]
     Dependency {
         /// Which dependency, e.g. `oidc-provider`, `tei`.

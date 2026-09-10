@@ -40,8 +40,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     };
     let tenant: TenantId = tenant.parse()?;
     let verify_only = args.next().as_deref() == Some("verify");
-    let url =
-        std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL is not set (run `make dev-up`)")?;
+    let url = std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL is not set")?;
     let pool = PgPoolOptions::new()
         .max_connections(16)
         .connect(&url)

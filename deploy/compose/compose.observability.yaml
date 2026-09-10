@@ -1,0 +1,80 @@
+services:
+  worker:
+    environment:
+      SYNVEDA_WORKER_ALLOW_NON_LOOPBACK_HEALTH: "true"
+      # The default worker listener remains loopback-only. This explicit
+      # deployment relaxation makes it reachable on the worker's private
+      # Compose networks for Collector scraping; no worker port is published.
+      SYNVEDA_WORKER_LISTEN_ADDR: 0.0.0.0:8121
+
+  prometheus:
+    profiles: [observability]
+    image: ${SYNVEDA_PROMETHEUS_IMAGE:?set SYNVEDA_PROMETHEUS_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
+    user: "65532:65532"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=72h
+      - --storage.tsdb.retention.size=1GB
+      - --query.timeout=30s
+      - --web.listen-address=0.0.0.0:9090
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    restart: ${SYNVEDA_COMPOSE_RESTART_POLICY:?set SYNVEDA_COMPOSE_RESTART_POLICY}
+    stop_grace_period: 30s
+    mem_limit: 512m
+    cpus: 1.0
+    environment:
+      HTTP_PROXY: ""
+      http_proxy: ""
+      HTTPS_PROXY: ""
+      https_proxy: ""
+      NO_PROXY: ""
+      no_proxy: ""
+      FTP_PROXY: ""
+      ftp_proxy: ""
+      ALL_PROXY: ""
+      all_proxy: ""
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+    volumes:
+      - type: bind
+        source: ./configs/prometheus/prometheus.yaml
+        target: /etc/prometheus/prometheus.yaml
+        read_only: true
+      - type: volume
+        source: prometheus-data
+        target: /prometheus
+        volume:
+          nocopy: false
+    ports:
+      - target: 9090
+        published: ${SYNVEDA_PROMETHEUS_PORT:?set SYNVEDA_PROMETHEUS_PORT}
+        host_ip: 127.0.0.1
+        protocol: tcp
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - /bin/promtool
+        - check
+        - ready
+        - --url=http://127.0.0.1:9090
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      telemetry: {}
+
+volumes:
+  prometheus-data:
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.volume: prometheus-data
