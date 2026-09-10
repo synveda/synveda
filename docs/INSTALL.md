@@ -11,10 +11,9 @@ OIDC. Deterministic gates cover file selection, private inputs, exact-project
 locking, network preflight, tenant/realm convergence and smoke predicates. It
 has not yet passed clean-volume browser acceptance on the supported desktop
 and Linux platforms, so it is not a supported controlled-use deployment.
-`synveda init` remains closed by a cutover gate and refuses before profile
-discovery, Compose, secret-file or database mutation. The old Rauthy profile
-cannot establish the new exact database-authority, endpoint and file-secret
-contract safely and is not an alternative installation path.
+The reserved `synveda init` verb is a permanent side-effect-free refusal.
+Canonical Compose owns bootstrap. The remaining legacy release-profile files
+are withdrawn cutover residue, not an alternative installation path.
 
 The target contract and current limits are in
 [DEPLOYMENT_CONTRACT.md](DEPLOYMENT_CONTRACT.md). From a clean, reviewed
@@ -738,12 +737,9 @@ directory-owned rows and tell the operator to change the directory or use the
 dedicated assignment route. No live Entra or Okta verification is claimed by
 the repository fixtures; they remain labelled captured or transcribed.
 
-The retained bundled-Rauthy profile used a host gateway because its issuer was
-`http://localhost:8100/...`; the closed `init` entrypoint means that shape is
-cutover residue, not an executable or supported install. Canonical Keycloak
-Compose removes the workaround only after its exact-issuer acceptance. ADR-0055
-decision 8 has the localhost measurements; CPR-45 replaces it with one
-proxy-routed Keycloak issuer name.
+The removed localhost-issuer topology required a host gateway. Canonical
+Keycloak Compose instead uses one proxy-routed issuer name reachable unchanged
+from browser and containers. ADR-0055 retains the historical measurement.
 
 ## PulseBoard product walkthrough
 
@@ -981,18 +977,17 @@ After a reset, re-run the deployment-owned database bootstrap and only then
 use the complete explicit authority plan. The withdrawn implicit init command
 cannot bring the deployment back up.
 
-`reset` drops and recreates **the application database** — not the volumes,
-not the installation. Your `kms.key`, the compose profile, the console bundle,
-your stored logins and every other database on the same server all survive. It
-stops the gateway first, installs the extensions, migrates to the current
-epoch, removes the derived search index, and is idempotent: running it twice
-leaves the same thing.
+`reset` drops and recreates **the application database** — not volumes,
+installation files, stored logins or any other database on the server. Stop the
+canonical deployment first; the direct-binary command deliberately does not
+discover or kill containers. It installs the extensions, migrates to the
+current epoch and is idempotent.
 
 It requires both flags. `synveda reset --database` on its own tells you what
 it would destroy and destroys nothing. It also refuses a `DATABASE_URL` or
-`DATABASE_URL_FILE` target that points at another machine, and prints the two
-statements to run there by hand instead — `--force` says "yes, destroy it", not
-"and I checked which server I am pointed at".
+`DATABASE_URL_FILE` target that points at another machine and directs you to
+that deployment's authenticated recovery procedure. `--force` does not weaken
+the local-only boundary.
 
 If instead you are told the database is at a *newer* epoch than the build,
 **do not reset it**: that database holds data this installation cannot read,
@@ -1034,10 +1029,8 @@ erasure, backup or credential rotation. See
 [`deploy/compose/README.md`](../deploy/compose/README.md) for exact lock-recovery
 and provider-mode procedures.
 
-The installed transitional profile and legacy host-gateway process remain
-cutover residue only. No current reference claim is based on them; canonical
-Compose keeps the gateway in its container. To remove installed artifacts
-rather than stop a canonical checkout, see **Uninstalling** below.
+Canonical Compose keeps the gateway in its container. To remove installed
+artifacts rather than stop a canonical checkout, see **Uninstalling** below.
 
 ## Uninstalling
 
@@ -1094,12 +1087,12 @@ Everything is idempotent — a second run finds nothing, says so, and exits 0.
 | | |
 |---|---|
 | `synveda` | the CLI, on your `PATH` |
-| `~/.synveda/bin/synveda-gateway` | the gateway, run as a host process |
+| `~/.synveda/bin/synveda-gateway` | withdrawn release binary; no current lifecycle starts it on the host |
 | `~/.synveda/bin/synveda-worker` | the private core-worker direct-binary artefact; Compose runs its image-contained copy |
 | `~/.synveda/console/` | the admin console bundle |
 | `~/.synveda/profile/` | the transitional Compose file, Rauthy config and version; not an accepted reference deployment |
 | `~/.synveda/plugin/` | the Claude Code marketplace, installed into no client |
-| `~/.synveda/data/` | the transitional gateway pidfile/log and rendered configuration |
+| `~/.synveda/data/` | legacy pidfile/log state that may remain from an earlier install |
 | `~/.synveda/data/kms.key` | the deployment's key-encryption key, `0600` — **back this up** |
 
 `SYNVEDA_HOME` moves all of it; `SYNVEDA_BIN` moves the CLI.
@@ -1123,15 +1116,9 @@ curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/instal
 separate, explicit step above, and the OPS-8 demo asserts the absence rather
 than trusting it.
 
-The host-gateway shape exists only in the unaccepted bundled-Rauthy transition.
-It is not part of the deployment contract and is deleted after Keycloak
-acceptance. The accepted target uses one product image with distinct gateway
-and worker commands, both containerised.
-
-The CLI and transitional profile still ship together, but `init` currently
-refuses at the CPR-45 cutover gate before reading or comparing that profile.
-Version comparison resumes only with the accepted reference lifecycle; it is
-not current executable behavior.
+The host-gateway shape is deleted. The target uses one product image with
+distinct gateway and worker commands, both containerised. The reserved `init`
+verb never reads or compares an installed profile.
 
 ## Current verification boundary
 

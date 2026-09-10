@@ -18,7 +18,9 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::time::Instant;
 
-use crate::init;
+use crate::settings;
+
+const STOPPED_DEPLOYMENT_ATTESTATION: &str = "stop every gateway and worker using this database first; --force confirms that precondition as well as destruction";
 
 /// What one `reset` was asked for.
 pub struct Plan {
@@ -40,19 +42,17 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
                 .to_owned(),
         );
     }
-    let database_url = init::database_url()?;
     if !plan.force {
         return Err(format!(
-            "this destroys the whole of {} — every tenant, every record, every \
-             audit event.\n\nRe-run with --force if that is what you want:\n\n    \
+            "this destroys the configured database — every tenant, every record, every \
+             audit event. {STOPPED_DEPLOYMENT_ATTESTATION}.\n\nRe-run with --force if that is what you want:\n\n    \
              {}\n",
-            describe(&database_url.value),
             synveda_store::epoch::RESET_COMMAND,
         ));
     }
 
     let started = Instant::now();
-    let url = database_url.value;
+    let url = settings::database_url()?;
     let admin_url = reset_admin_database_url()?;
     refuse_a_database_that_is_not_this_machine_s(&url)?;
     refuse_a_database_that_is_not_this_machine_s(&admin_url)?;
@@ -60,21 +60,12 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
     println!("synveda reset");
     println!();
     println!("    database   {}", describe(&url));
+    println!("    processes  externally stopped (asserted by --force; not discovered)");
 
-    // Before the drop, not after: a gateway or worker holding this database
-    // open would be evicted by `WITH (FORCE)` and stay alive with caches,
-    // claims or timers that describe rows nobody can read any more.
-    let stopped = init::stop_host_gateway();
-    match stopped {
-        Some(pid) => println!("    gateway    stopped (pid {pid})"),
-        None => println!("    gateway    none running as a host process"),
-    }
-    if let Some(compose) = init::compose_file_if_any().filter(|path| path.exists()) {
-        init::stop_compose_product_processes(&compose)?;
-        println!("    containers stopped (gateway, worker)");
-    }
-
-    let database_roles = init::database_roles()?;
+    // This direct-binary recovery command never discovers or kills product
+    // processes. The operator must first stop the canonical deployment so no
+    // gateway or worker survives the forced database recreation.
+    let database_roles = settings::database_roles()?;
     let outcome = synveda_store::reset::recreate(&admin_url, &url, &database_roles)
         .await
         .map_err(|err| err.to_string())?;
@@ -106,8 +97,8 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
     println!("carried across — there is no migration from the previous model, which");
     println!("is what this command exists to make true rather than to work around.");
     println!();
-    println!("Re-run the separately validated deployment-owned bootstrap, then log in");
-    println!("through that deployment. `synveda init` remains unavailable during CPR-45.");
+    println!("Re-run the deployment-owned bootstrap, then log in through that deployment.");
+    println!("The reserved `synveda init` verb is not a deployment lifecycle.");
     println!();
     println!("See docs/INSTALL.md for the current cutover boundary.");
     Ok(())
@@ -122,7 +113,7 @@ fn reset_admin_database_url() -> Result<String, String> {
             .to_owned()),
         (Some(value), None) => os_string_setting("SYNVEDA_RESET_ADMIN_DATABASE_URL", value),
         (None, Some(path)) => {
-            init::read_database_url_file("SYNVEDA_RESET_ADMIN_DATABASE_URL_FILE", Path::new(&path))
+            settings::read_setting_file("SYNVEDA_RESET_ADMIN_DATABASE_URL_FILE", Path::new(&path))
         }
         (None, None) => Err("SYNVEDA_RESET_ADMIN_DATABASE_URL or \
              SYNVEDA_RESET_ADMIN_DATABASE_URL_FILE is required; reset never reuses the \
@@ -271,6 +262,10 @@ mod tests {
         assert!(
             no_force.contains(synveda_store::epoch::RESET_COMMAND),
             "the refusal has to print the command that would work: {no_force}"
+        );
+        assert!(
+            no_force.contains("stop every gateway and worker"),
+            "the force acknowledgement must name its process-stop precondition: {no_force}"
         );
     }
 }

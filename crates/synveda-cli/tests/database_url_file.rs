@@ -182,7 +182,7 @@ fn database_preflight_process_failures_are_content_free() {
 }
 
 #[test]
-fn tenant_admission_refuses_an_implicit_database_target() {
+fn tenant_admission_refuses_a_missing_database_target() {
     let scratch = std::env::temp_dir().join(format!(
         "synveda-cli-tenant-explicit-database-{}",
         std::process::id()
@@ -224,7 +224,7 @@ fn tenant_admission_refuses_an_implicit_database_target() {
     assert_eq!(refusal.stdout, b"");
     assert_eq!(
         String::from_utf8_lossy(&refusal.stderr),
-        "synveda: tenant create requires explicit DATABASE_URL or DATABASE_URL_FILE for the configured migrator\n"
+        "synveda: DATABASE_URL or DATABASE_URL_FILE is required; no implicit database credential exists\n"
     );
 
     std::fs::remove_dir_all(scratch).ok();

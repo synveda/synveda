@@ -171,7 +171,10 @@ CPR-45 now follows ADR-0105's direct-acceptance plan. The canonical Compose
 graph already provides the proxy-only edge, separate Synveda and Keycloak
 databases/roles, optimized production-mode Keycloak, containerized gateway and
 worker processes, mounted secret files and a private OpenTelemetry Collector.
-Unused Temporal runtime assets are deleted.
+Unused Temporal runtime assets, the contributor Rauthy topology and the dormant
+CLI profile/host-gateway bootstrap are deleted. The reserved `synveda init`
+verb is a side-effect-free refusal; direct database commands require an
+explicit value or file target.
 
 The earlier clean-engine/Colima receipt and provider fixtures were removed:
 they did not start Docker or establish product evidence. The direct
@@ -196,9 +199,9 @@ bounded generated public APIs and explicitly marks unavailable signals. Executab
 external PostgreSQL plus external OIDC and public-PKI external OTLP wiring are
 deterministically implemented but still await live provider evidence. A
 bounded private Collector-to-Prometheus profile is implemented with
-loopback-only operator access and
-deterministic lifecycle evidence. Current-source Linux and Docker Desktop
-browser acceptance must pass before the legacy Rauthy paths are deleted.
+loopback-only operator access and deterministic lifecycle evidence.
+Current-source Linux and Docker Desktop browser acceptance must pass before the
+remaining withdrawn release/profile Rauthy paths are deleted.
 Feature-local recovery evidence does not establish DR or owned RPO/RTO; no HA,
 SaaS, signing or Helm-production claim follows. S3/WAL-PITR and encrypted
 off-host retention remain OPS-5 production work rather than Docker-reference

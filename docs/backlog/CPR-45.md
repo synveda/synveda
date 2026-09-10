@@ -14,8 +14,9 @@ size: XL
 
 Synveda has one application runtime, schema and public API, but it does not yet
 have complete current-source evidence for a portable single-host installation.
-The canonical Compose graph exists, while the installed release profile and
-legacy contributor loop still carry Rauthy. Backup/restore and the experimental
+The canonical Compose graph exists and the legacy contributor loop is deleted,
+while the withdrawn installed release profile still carries Rauthy.
+Backup/restore and the experimental
 Apalis canary are implemented and deterministically tested, but neither has run
 on a live reference stack. Clean-volume Keycloak browser acceptance has not run
 on the current source.
@@ -110,6 +111,13 @@ paths and overwrites forwarding, identity and tracing headers.
 The gateway runs in its container. The issuer is exact across browser,
 discovery, tokens and containers. Development uses managed `.test` host
 mappings; reference mode uses real DNS.
+
+The reserved `synveda init` command is now a small side-effect-free refusal;
+the dormant Rauthy/profile/host-gateway implementation is deleted. Reusable
+direct-binary settings retain bounded mutually exclusive value/file handling,
+and database commands require an explicit target instead of an owner-credential
+development default. Exact-role/RLS convergence remains test-only deployment
+evidence rather than a hidden installer.
 
 The core worker owns Capture, Knowledge indexing, relaxation expiry and
 optional directory pull. PostgreSQL remains the authority for their existing

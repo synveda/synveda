@@ -1,4 +1,4 @@
-//! The `synveda` admin/dev CLI (`synveda init`, `synveda policy apply`,
+//! The `synveda` administration and public-API CLI (`synveda policy apply`,
 //! `synveda proposal review`, ...). Talks to the gateway API as a client for
 //! everything a running gateway serves; the bootstrap commands below
 //! (TEN-1, ADR-0008) go to the database directly because they exist
@@ -26,6 +26,8 @@ mod configuration;
 mod credentials;
 mod database_preflight;
 mod demo;
+#[cfg(test)]
+mod deployment_database;
 mod diff;
 mod directory;
 mod init;
@@ -44,6 +46,7 @@ mod scim;
 mod scope;
 mod service;
 mod session;
+mod settings;
 mod skill;
 mod spool;
 #[cfg(test)]
@@ -76,37 +79,17 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Reserved bootstrap verb; unavailable during the CPR-45 Docker
-    /// reference cutover (ADR-0102).
+    /// Reserved bootstrap verb; deployment bootstrap is Compose-owned
+    /// (ADR-0102).
     ///
-    /// The cutover gate refuses every invocation before profile discovery,
-    /// Compose, secret-file or database mutation. The retained flags are
-    /// reserved inputs for the future canonical lifecycle; none currently
-    /// changes that refusal. The verb reopens only after the file-secret,
-    /// Keycloak issuer and whole-operation lifecycle pass clean-volume
-    /// acceptance.
+    /// The command refuses every invocation before reading configuration or
+    /// mutating state. Use the canonical Compose lifecycle instead.
     ///
     /// There is no path in here that writes a scope, an identity, a grant,
     /// Configuration or Knowledge behind the PDP's back — an installer runs once, as
     /// root-equivalent, before anybody is watching, which makes it the
     /// worst place in the product to keep a shortcut (seed §2.2).
-    Init {
-        /// Reserved tenant slug input; not consumed while init is unavailable.
-        #[arg(long, default_value = "acme")]
-        slug: String,
-        /// Reserved tenant display-name input; not consumed during cutover.
-        #[arg(long, default_value = "ACME")]
-        name: String,
-        /// Reserved embedder input; not consumed while init is unavailable.
-        #[arg(long, value_parser = ["deterministic", "tei"], default_value = "deterministic")]
-        embedder: String,
-        /// Reserved external OIDC issuer input; not consumed during cutover.
-        #[arg(long)]
-        issuer: Option<String>,
-        /// Reserved dry-run flag; init still returns the same cutover refusal.
-        #[arg(long)]
-        dry_run: bool,
-    },
+    Init,
     /// The governed scope tree (CPR-7, ADR-0074 decision 5).
     ///
     /// Gateway calls under the bearer `synveda login` stored, like
@@ -2009,22 +1992,7 @@ fn profile_name(flag: Option<String>) -> Result<String, String> {
 #[tokio::main(flavor = "current_thread")]
 async fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
-        Command::Init {
-            slug,
-            name,
-            embedder,
-            issuer,
-            dry_run,
-        } => {
-            init::init(init::Plan {
-                slug,
-                name,
-                embedder,
-                issuer,
-                dry_run,
-            })
-            .await
-        }
+        Command::Init => init::init().await,
         Command::Scope(ScopeCommand::List {
             under,
             profile,
@@ -2251,7 +2219,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Db(DbCommand::Preflight) => database_preflight::run().await,
         Command::Db(DbCommand::Migrate { check }) => {
             let pool = connect().await?;
-            let database_roles = init::database_roles()?;
+            let database_roles = settings::database_roles()?;
             if check {
                 synveda_store::check_migration_compatibility(&pool, &database_roles)
                     .await
@@ -2299,13 +2267,13 @@ async fn run(cli: Cli) -> Result<(), String> {
                         "--dev-administrator-subject requires SYNVEDA_EVAL_FIXTURE=1".to_owned(),
                     );
                 }
-                init::sensitive_setting("SYNVEDA_DEV_JWT_SECRET")?
+                settings::sensitive_setting("SYNVEDA_DEV_JWT_SECRET")?
                     .filter(|secret| !secret.is_empty())
                     .ok_or(
                         "--dev-administrator-subject requires SYNVEDA_DEV_JWT_SECRET or SYNVEDA_DEV_JWT_SECRET_FILE",
                     )?;
             }
-            let database_roles = init::database_roles()?;
+            let database_roles = settings::database_roles()?;
             let pool = connect_tenant_admission().await?;
             #[cfg(feature = "eval-fixture")]
             let tenant = if let Some(subject) = dev_administrator_subject.as_deref() {
@@ -2322,7 +2290,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Tenant(TenantCommand::Converge { id, slug, name }) => {
             validate_deployment_tenant_admission(id, &slug, &name)?;
-            let database_roles = init::database_roles()?;
+            let database_roles = settings::database_roles()?;
             let pool = connect_tenant_admission().await?;
             let tenant = converge_tenant(
                 &pool,
@@ -3056,7 +3024,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             subject,
             ttl_secs,
         }) => {
-            let secret = init::sensitive_setting("SYNVEDA_DEV_JWT_SECRET")?
+            let secret = settings::sensitive_setting("SYNVEDA_DEV_JWT_SECRET")?
                 .filter(|secret| !secret.is_empty())
                 .ok_or(
                     "SYNVEDA_DEV_JWT_SECRET or SYNVEDA_DEV_JWT_SECRET_FILE must be set to issue dev tokens",
@@ -3084,11 +3052,9 @@ fn break_glass() -> Actor {
 
 /// Admits a tenant and chains `tenant.created` in the same transaction.
 ///
-/// Shared by `synveda tenant create` and `synveda init` (OPS-1, ADR-0055
-/// decision 1) so that the installer takes the *existing* audited
-/// break-glass path rather than a second one that could drift from it —
-/// this and `db migrate` are the only store-level writes on the install
-/// path, and both predate it.
+/// This is the single audited break-glass tenant-admission path. Deployment
+/// convergence invokes it explicitly rather than maintaining a second
+/// bootstrap implementation that could drift from it.
 pub(crate) async fn create_tenant(
     pool: &sqlx::PgPool,
     database_roles: &synveda_store::runtime_role::DatabaseRoles,
@@ -3416,30 +3382,17 @@ async fn connect_current_epoch() -> Result<sqlx::PgPool, String> {
     Ok(pool)
 }
 
-/// Connects the tenant-admission command only to an explicitly selected
-/// deployment database. The legacy contributor default is not authority to
-/// admit a tenant, even if its login happens to retain owner capability.
+/// Connects tenant admission only to an explicitly selected deployment
+/// database. There is no implicit development credential.
 async fn connect_tenant_admission() -> Result<sqlx::PgPool, String> {
-    let setting = init::database_url()?;
-    if !setting.explicitly_configured {
-        return Err(
-            "tenant create requires explicit DATABASE_URL or DATABASE_URL_FILE for the configured migrator"
-                .to_owned(),
-        );
-    }
-    connect_url(&setting.value).await
+    let url = settings::database_url()?;
+    connect_url(&url).await
 }
 
 async fn connect() -> Result<sqlx::PgPool, String> {
-    // `DATABASE_URL`, `DATABASE_URL_FILE`, or the legacy local development
-    // Postgres default used by direct operator commands. CPR-45 deliberately
-    // refuses that implicit value in `synveda init`: only the deployment
-    // bootstrap may establish the exact migrator/runtime role contract.
-    //
-    // The message this replaces named the Makefile, which is in a checkout
-    // an installed operator does not have (OPS-8). Erroring on a missing
-    // variable was right while a checkout was the only way to get here.
-    let url = init::database_url()?.value;
+    // Direct-binary administration must select its database explicitly. The
+    // deployment owns credentials and may supply the same contract by file.
+    let url = settings::database_url()?;
     connect_url(&url).await
 }
 
@@ -3451,7 +3404,7 @@ async fn connect_url(url: &str) -> Result<sqlx::PgPool, String> {
         .connect_with(connect_options)
         .await
         .map_err(|err| {
-            let safe_url = init::redacted_database_url(url);
+            let safe_url = settings::redacted_database_url(url);
             format!(
                 "connect to {safe_url}: {err}\n\
                  (set DATABASE_URL or DATABASE_URL_FILE to select the deployment database)"

@@ -244,6 +244,18 @@ association under forced RLS, so the queue does not become schema, tenant or
 business-state authority. Revision-2 databases are refused with the same
 pre-1.0 reset guidance; there is no translator.
 
+### 2026-09-10 amendment — deployment-owned process lifecycle (CPR-45)
+
+**21. Direct reset does not discover or signal deployment processes.** The
+canonical Compose wrapper owns its containers and exact project state; PID and
+obsolete Compose-file discovery in a direct binary cannot safely identify that
+authority. Before `synveda reset --database --force`, the operator must stop
+every gateway and worker using the target. `--force` explicitly attests that
+precondition as well as accepting destruction, and the command prints that it
+did not verify process state. Canonical deployments use their confirmed
+`compose-reset` lifecycle instead. This supersedes only decision 7's retired
+host-gateway stop mechanism; the database/volume boundary remains unchanged.
+
 ## Options considered
 
 **1. Derive the epoch from `_sqlx_migrations`.** No new table, and the data is

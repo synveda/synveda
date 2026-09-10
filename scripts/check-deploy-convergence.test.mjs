@@ -762,21 +762,24 @@ test("the removed init demo field is recognised without matching a negative test
   assert.equal(hasRetiredDemoField('assert!(error.contains("--demo"));\n'), false);
 });
 
-test("the withdrawn init entrypoint remains a gate-only boundary", () => {
+test("the reserved init entrypoint is a bounded literal-only refusal", () => {
   const current = readFileSync(INIT_SOURCE, "utf8");
   assert.deepEqual(initCutoverFindings(current), []);
   assert.deepEqual(
     initCutoverFindings(
       current.replace(
-        "    reference_cutover_gate()\n}\n\n#[allow(dead_code)]",
-        "    let _profile = Profile::discover()?;\n    reference_cutover_gate()\n}\n\n#[allow(dead_code)]",
+        "    Err(\n",
+        "    let _profile = Profile::discover()?;\n    Err(\n",
       ),
     ),
-    ["public init entrypoint is not a gate-only cutover refusal"],
+    [
+      "public init entrypoint is not a literal-only refusal",
+      "reserved init retains Profile::",
+    ],
   );
   assert.deepEqual(
-    initCutoverFindings(current.replace("async fn init_after_cutover", "async fn init_legacy")),
-    ["init cutover entrypoint has no isolated dormant implementation"],
+    initCutoverFindings(`${current}\nasync fn init_after_cutover() {}\n`),
+    ["reserved init retains init_after_cutover"],
   );
 });
 

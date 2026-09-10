@@ -167,10 +167,10 @@ Keycloak application traffic passes through the public gate only after exact
 realm convergence; its management port and administration surface remain
 private.
 
-Rauthy remains in withdrawn/transitional contributor, CLI init, install,
-package, release, smoke and fixture paths until live current-source
-Keycloak/browser acceptance passes. It is not a supported alternate provider
-mode and must then be deleted rather than retained as a compatibility path.
+Rauthy remains only in the withdrawn install/package/release profile until live
+current-source Keycloak/browser acceptance passes. The contributor topology,
+smoke path and dormant CLI implementation are deleted. Rauthy is not a
+supported alternate provider mode and must not survive as compatibility.
 
 ## Worker and queue boundary
 

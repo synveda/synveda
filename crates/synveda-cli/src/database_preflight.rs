@@ -16,7 +16,7 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_store::runtime_role::DatabaseIdentity;
 use zeroize::Zeroizing;
 
-use crate::init;
+use crate::settings;
 
 const TARGET_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -419,7 +419,7 @@ fn bounded_setting(setting: &str, value: OsString, maximum_bytes: usize) -> Resu
 }
 
 pub(crate) async fn run() -> Result<(), String> {
-    let roles = init::database_roles()?;
+    let roles = settings::database_roles()?;
     let requirements = TopologyRequirements::from_environment(&roles)?;
     let migrator = inspect(&MIGRATOR, roles.migrator(), &roles, &requirements).await?;
     let gateway = inspect(&GATEWAY, roles.gateway(), &roles, &requirements).await?;
@@ -560,7 +560,7 @@ fn resolve_file_only_url(
         ));
     }
     let path = file.ok_or_else(|| format!("{file_setting} is required"))?;
-    init::read_database_url_file(file_setting, Path::new(&path))
+    settings::read_setting_file(file_setting, Path::new(&path))
 }
 
 fn require_one_target(

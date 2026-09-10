@@ -81,14 +81,40 @@ export function hasRetiredDemoField(source) {
 }
 
 export function initCutoverFindings(source) {
+  const findings = [];
   const entrypoint = source.match(
-    /pub async fn init\([^)]*\)\s*->\s*Result<\(\), String>\s*\{\s*([\s\S]*?)\s*\}\s*#\[allow\(dead_code\)\]\s*async fn init_after_cutover/,
+    /^pub async fn init\(\)\s*->\s*Result<\(\), String>\s*\{\s*Err\(\s*"([^"]*)"\s*\.to_owned\(\),?\s*\)\s*\}/m,
   );
-  if (!entrypoint) return ["init cutover entrypoint has no isolated dormant implementation"];
-  if (entrypoint[1].replace(/\s+/g, " ").trim() !== "reference_cutover_gate()") {
-    return ["public init entrypoint is not a gate-only cutover refusal"];
+  if (!entrypoint) {
+    findings.push("public init entrypoint is not a literal-only refusal");
+  } else {
+    for (const phrase of [
+      "not a deployment lifecycle",
+      "reads no configuration",
+      "changes no state",
+    ]) {
+      if (!entrypoint[1].includes(phrase)) {
+        findings.push(`public init refusal is missing: ${phrase}`);
+      }
+    }
   }
-  return [];
+  if (source.split("\n").length > 80) {
+    findings.push("reserved init module exceeds its 80-line boundary");
+  }
+  for (const [marker, pattern] of [
+    ["init_after_cutover", /init_after_cutover/i],
+    ["Rauthy", /\brauthy\b/i],
+    ["Profile::", /\bprofile\s*::/i],
+    ["start_host_gateway", /start_host_gateway/i],
+    ["stop_host_gateway", /stop_host_gateway/i],
+    ["std::env", /std\s*::\s*env/i],
+    ["std::fs", /std\s*::\s*fs/i],
+    ["sqlx::", /sqlx\s*::/i],
+    ["reqwest::", /reqwest\s*::/i],
+  ]) {
+    if (pattern.test(source)) findings.push(`reserved init retains ${marker}`);
+  }
+  return findings;
 }
 
 export function releaseNoteFindings(source) {
@@ -187,7 +213,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "93e42ffb6a3af9f5f0f585230869172ab5648c7e94c85a0774d13317997b64d1"
+    "31d334dcabb5b999caaa5fd4605a5b9ee21696e64b3425ffea2780a640ca8d1d"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }
@@ -2108,8 +2134,8 @@ function checkCompose(relative, release) {
   if (retired.length) fail(`${relative} retains ${retired.join(", ")}`);
 
   // Compose parsing and interpolation are different failure modes. Rendering
-  // with interpolation disabled checks the manifest without exposing the
-  // restricted .env values that `synveda init` may have written beside it.
+  // with interpolation disabled checks the manifest without exposing local
+  // deployment values stored beside it.
   run("docker", ["compose", "-f", relative, "config", "--no-interpolate"]);
 }
 

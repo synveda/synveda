@@ -1,6 +1,6 @@
 [package]
 name = "synveda-cli"
-description = "Admin/dev CLI (synveda init, synveda policy apply, synveda proposal review, ...)"
+description = "Administration and public-API CLI for Synveda"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

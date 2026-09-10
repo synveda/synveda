@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            update public.schema_metadata\n               set epoch = $1,\n                   updated_at = $2\n             where id\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "00f1d7bc79c42a9f99e24230fd83e32462ce87f9f7bcffdb9dba3f8fac83417d"
+}

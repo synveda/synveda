@@ -3483,7 +3483,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_GATEWAY_DATABASE_URL_FILE=$main_gateway_file \
       SYNVEDA_TEST_WORKER_DATABASE_URL_FILE=$main_worker_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-cli --bin synveda \
-          init::tests::compose_runtime_logins_are_distinct_and_rls_enforced \
+          deployment_database::compose_runtime_logins_are_distinct_and_rls_enforced \
           -- --exact --nocapture --test-threads=1 || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then

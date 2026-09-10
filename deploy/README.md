@@ -48,10 +48,10 @@ which no authenticated product principal exists yet:
 3. optionally admit the first tenant;
 4. establish deployment key and issuer material.
 
-The `synveda init` verb is closed by a CPR-45 cutover gate before profile
-discovery or mutation. It neither infers nor provisions database authority.
-It reopens only when the canonical Compose lifecycle owns the same bounded
-file inputs and complete startup deadline.
+The reserved `synveda init` verb is a permanent, side-effect-free refusal. It
+neither discovers profiles nor reads configuration. Canonical Compose owns the
+deployment lifecycle; explicit CLI commands remain available for bounded
+database migration, tenant admission and recovery operations.
 
 The first `synveda-admins` login creates the tenant root, the caller's principal
 scope and its root `administrator` grant. Workspaces, projects, sessions,
@@ -78,13 +78,13 @@ preflight and migration stages are bounded and ordered. Remaining Helm gaps
 include file-mount parity for issuer/KMS material and full promotion
 acceptance, not gateway-owner credential reuse.
 
-The closed `synveda init` implementation retains explicit URL validation but
-is not the canonical bootstrap entry point. Compose now invokes the explicit
-database, migration, tenant, identity and issuer-diagnostic commands. There is
-no implicit bundled fallback or host/container endpoint claim.
+Direct-binary database commands require explicit `DATABASE_URL` or
+`DATABASE_URL_FILE`; there is no implicit development credential. Compose
+invokes explicit database, migration, tenant, identity and issuer-diagnostic
+commands rather than a second bootstrap implementation.
 
-The worker's default supervised join is 75 seconds. Both transitional Compose
-manifests give it an 85-second outer stop grace; the installed release also
+The worker's default supervised join is 75 seconds. Canonical Compose and the
+transitional release manifest give it an 85-second outer stop grace; the latter
 uses `restart: unless-stopped` so a deliberate non-zero critical-task exit is
 visible and restarted. Helm derives its termination grace as the configured
 worker join plus ten seconds.
@@ -94,8 +94,9 @@ exact five-image workflow plan, packages the Helm chart twice and renders the
 version-matched GHCR product/CloudNativePG pair without contacting Docker or
 a registry. `make check-chart-images` requires every external deployment-image
 base to carry a readable tag and full SHA-256 digest.
-`make check-deploy` includes both gates, renders both transitional Compose
-manifests and Helm, asserts distinct process commands/credentials and private
+`make check-deploy` includes both gates, renders canonical Compose, the
+transitional release manifest and Helm, asserts distinct process
+commands/credentials and private
 worker probes, packages the release twice and checks the upgrade-shaped
 replacement. The
 CPR-36 database acceptance test also proves a runtime login with no tenant GUC
@@ -104,17 +105,14 @@ worker role before a governed round trip and repeat private readiness after
 CloudNativePG primary failover, but that script has not been rerun since the
 current three-credential install-job cutover.
 
-## Legacy host-gateway residue
+## Removed host-gateway topology
 
-The retained Rauthy profile used `http://localhost:8100/auth/v1/`. An OIDC
-issuer identifier must be the same URL for the browser, discovery document,
-token and gateway, while RFC 6761 resolves `localhost` to each caller's own
-loopback. That forced its gateway onto the host. The CPR-45 cutover gate now
-refuses the lifecycle before it can start either the bundled or external-issuer
-legacy shape. Canonical Keycloak Compose removes the workaround by running both
-product processes in containers behind one browser/container-reachable proxy
-issuer name. That graph is executable; exact browser issuer/PKCE acceptance is
-still required before the legacy stack can be deleted.
+The obsolete localhost-issuer topology forced the gateway onto the host and is
+deleted. Canonical Keycloak Compose runs both product processes in containers
+behind one browser/container-reachable proxy issuer name. Exact browser issuer
+and PKCE acceptance remains required before a controlled-use claim. A withdrawn
+release archive still contains the old bundled provider and is the next
+hard-deletion slice; it is not started or advertised by canonical Compose.
 
 ## Embeddings
 

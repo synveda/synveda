@@ -245,7 +245,7 @@ synveda/
 │   ├── synveda-okf          # pure bounded OKF v0.2 exchange adapter
 │   ├── synveda-gateway      # axum HTTP gateway plus the private core-worker binary
 │   ├── synveda-apalis       # optional deployment leaf for one operation transport
-│   ├── synveda-cli          # admin/dev CLI (synveda init, synveda policy apply, ...)
+│   ├── synveda-cli          # administration and public-API CLI
 │                            #   + `synveda mcp`: the generic MCP server (see §7 footnote)
 │   └── synveda-eval         # unprivileged public-API evaluation client
 ├── adapters/

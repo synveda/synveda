@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            select epoch as \"epoch!\",\n                   updated_at as \"updated_at!\"\n              from public.schema_metadata\n             where id\n            ",
+  "query": "\n            select epoch as \"epoch!\",\n                   updated_at as \"updated_at!\"\n              from public.schema_metadata\n             where id\n        ",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "8125f2d76c2bc9af8d4641ad5b897e5dc82a33a2c21220396c2245387309e1af"
+  "hash": "9a1ff811ddde1df0169478b717e90ee2d670a9118d942e96ce099fc53ed328e0"
 }
