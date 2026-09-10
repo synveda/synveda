@@ -98,6 +98,11 @@ set and restores only into a confirmed fresh project. It proves the audit chain,
 tenant key and wrong-key refusal before normal convergence. This is same-host
 planned-interruption validation, not PITR or disaster recovery.
 
+The documentation audit consolidates source-checkout operation in
+`deploy/compose/README.md`, keeps packaged installation distinct, and routes
+beginner navigation through the root documentation index. It does not add live
+deployment evidence or change the remaining acceptance boundary.
+
 ### Remaining live acceptance
 
 1. Run clean development and reference HTTPS acceptance on Linux and Docker

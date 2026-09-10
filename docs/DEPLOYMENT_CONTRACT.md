@@ -3,9 +3,13 @@
 Status: current contract for CPR-45 and ADR-0102, as amended by ADR-0105.
 
 This document defines the application/deployment boundary shared by direct
-binary execution, Docker Compose and later Kubernetes packaging. The
-authoritative implementation is the product image, its commands, the
-configuration readers, the database schema and the generated public API.
+binary execution, Docker Compose, the current Helm chart and future Kubernetes
+promotion. The authoritative implementation is the product image, its commands,
+the configuration readers, the database schema and the generated public API.
+
+Source-checkout operator steps live only in the
+[canonical Compose guide](../deploy/compose/README.md). This document is the
+normative cross-deployment mapping, not another quickstart.
 
 ## Principles
 

@@ -2,8 +2,9 @@
 
 Synveda has one context-platform runtime: separate gateway and worker
 processes, PostgreSQL, generic OIDC, one public API and the same governed
-configuration semantics in direct binaries, Compose and later Helm. Personal,
-team and enterprise are Configuration documents, not deployment editions.
+configuration semantics in direct binaries, Compose and the current Helm
+chart. Personal, team and enterprise are Configuration documents, not
+deployment editions.
 
 The CPR-45 canonical Compose graph has a bounded lifecycle for development and
 reference HTTPS, with bundled or external PostgreSQL/OIDC selections. The
@@ -21,146 +22,35 @@ provider and no legacy deployment profile is supported.
 The target contract and current limits are in
 [DEPLOYMENT_CONTRACT.md](DEPLOYMENT_CONTRACT.md).
 
-## Run from a source checkout
+## Choose an installation workflow
 
-From a clean, reviewed checkout, inspect the exact development plan and current
-ownership state, then run the hardcoded `/etc/hosts` helper. This executes the
-checkout helper as root with a fixed root-owned Node runtime and is an
-administrator trust decision, not a sandbox against the checkout owner:
+### Source checkout
 
-```sh
-make compose-hosts-plan
-make compose-hosts-status
-SYNVEDA_CONFIRM_HOSTS_INSTALL=install:127.0.0.1:synveda-development:app.synveda.test:auth.synveda.test \
-  make compose-hosts-install
-```
+[`deploy/compose/README.md`](../deploy/compose/README.md) is the one detailed
+source-checkout Compose guide. It owns prerequisites, hostname setup, the
+project-scoped lifecycle, optional profiles, reference TLS, external providers,
+recovery, upgrade and exact-confirmation reset. Follow it from a clean,
+reviewed checkout; do not combine fragments or abbreviated commands from other
+documents.
 
-Never run Make, Compose, Docker, secret generation or browser acceptance as
-root. Flush the active host resolver cache as documented in
-[`deploy/compose/README.md`](../deploy/compose/README.md), then run the ordinary
-operator lifecycle:
+The root README is only a short entry point to that guide. The security model
+and trusted-host boundary are documented separately in
+[SECURITY.md](SECURITY.md#docker-reference-boundary).
 
-```sh
-make compose-hosts-status
-make compose-resolver-check
-make compose-config
-make compose-up
-make compose-smoke
-make compose-restart-gateway
-make compose-down
-```
+### Packaged reference
 
-`compose-down` and confirmed `compose-reset` deliberately retain this
-host-wide prerequisite. After stopping the exact project, remove it with the
-same selectors and the removal-bound confirmation, flush the cache, and prove
-the state is absent:
+The packaged reference is a genuinely different workflow: it installs an
+immutable release archive and invokes that archive's pinned HTTPS-only
+launcher. Its implemented layout and present verification boundary are
+described under [Install a release artifact](#install-a-release-artifact).
+There is no currently verified public install command because no tagged
+candidate has completed a registry-backed installation. Existing tags predate
+this CPR-45 reference contract and are not an installation path for the current
+schema epoch.
 
-```sh
-SYNVEDA_CONFIRM_HOSTS_REMOVE=remove:127.0.0.1:synveda-development:app.synveda.test:auth.synveda.test \
-  make compose-hosts-remove
-make compose-hosts-status
-```
-
-The helper refuses unmarked, duplicate, foreign or drifted ownership instead
-of editing hostname lines globally. It keeps its full recovery copy root-only
-beside the physical host file and never emits existing host-file content. It
-updates the existing inode by appending or truncating only the terminal managed
-suffix, retaining xattrs, security labels and file flags. The supported host
-file is root-owned, single-link, exact mode `0644`, with no access ACL and an
-ACL-free physical parent; ACL-bearing or noncanonical targets are refused
-before sidecars. Linux requires fixed root-controlled `getfacl` from the `acl`
-package. Interrupted
-append recovery accepts only an exact strict prefix of that suffix under a new
-exactly confirmed action; this is recoverable rather than an old-or-new
-power-loss atomicity claim. The raw-content-free mode-0644 ownership record
-carries a full-file digest of the already world-readable target; the complete
-source recovery record is root-owned mode `0600` and ACL-free.
-External-OIDC development owns only the application hostname and uses `-` as
-the confirmation's final identity-host field. Reference mode uses operator DNS
-and never reads or manages `/etc/hosts`.
-
-`compose-up` creates or validates project-scoped secret files, converges the
-bundled authorities and keeps gateway and worker in separate containers.
-`compose-smoke` probes the public host route and private-route refusals, but is
-not a browser authorization-code exchange. `compose-restart-gateway` performs
-a locked, health-gated restart of only the existing gateway and repeats the
-smoke; the command is not itself browser-session evidence and does not claim
-that an in-flight login survives. `compose-acceptance` adds a fresh browser
-login and the existing two-principal public-API PulseBoard team scenario before
-the fixed six-service restart matrix. The scenario also creates and polls one
-durable non-executing Skill validation. Selecting the experimental Apalis
-profile adds its worker as a seventh restart. The gate runs smoke after every
-restart, then repeats login and verifies the existing receipt against live
-product rows under one project lock; its exact selectors are documented in
-[`deploy/compose/README.md`](../deploy/compose/README.md). A live run,
-reference HTTPS, live backup/restore and live upgrade acceptance remain open. The
-browser checks bind administrator authority to the configured tenant before
-and after the matrix; those identity, operation and PulseBoard rows witness
-persistence across the restarts.
-External PostgreSQL plus external OIDC now starts through the same product
-graph when the operator supplies pre-provisioned roles, strict verify-full role
-URLs and a mounted root certificate. Compose applies Synveda schema migrations
-and tenant convergence, but it does not provision, reset, back up or restore
-that external cluster. Exact preparation and limitations are documented in the
-Compose README.
-
-For optional local infrastructure metrics, set
-`SYNVEDA_COMPOSE_PROFILES=observability` for `compose-up`, `compose-smoke` and
-the matching down/reset command. The private Collector scrapes gateway and
-worker readiness into a digest-pinned Prometheus whose UI is available only on
-host loopback (port 9090 by default). Its TSDB blocks use 72-hour and 1-GB
-retention thresholds, whichever triggers first; WAL/head/compaction overhead
-means that policy is not a disk quota. This is not the customer-safe Operations
-page: `/console/operations` separately presents four bounded, authorised
-project activity lists, including durable operations, and identifies signals the public API cannot
-yet provide. Neither surface is production monitoring;
-the full profile contract and tunnel guidance are in the Compose README.
-
-The optional `apalis` profile is limited to `skill_validation@1` and requires
-bundled PostgreSQL/OIDC. It adds a private queue database, a one-shot migration
-and a private worker; the native worker remains the default rollback. Run its
-live canary/restart gate with:
-
-```sh
-SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance,apalis make compose-acceptance
-```
-
-Backup, restore, upgrade and standalone gateway restart refuse this
-experimental profile.
-
-Reference certificate-file preparation and its executable ordering are defined
-in [`deploy/compose/README.md`](../deploy/compose/README.md). The lifecycle
-preflights a leaf-first leaf-and-intermediate fullchain with the trust root
-omitted, matching unencrypted key, SAN coverage and validity before startup
-mutation. Reference host validators also refuse ambient Node/OpenSSL trust
-overrides and use Node's bundled CA set for application and bundled-issuer
-runtime probes. External-OIDC smoke closes the issuer scheme but does not fetch
-that issuer from the host. These checks do not establish browser trust,
-explicit custom-CA/proxy support or automatic renewal.
-
-The canonical Compose graph also refuses Docker client proxy auto-injection:
-every runtime service and every development build explicitly empties the ten
-upper/lower HTTP, HTTPS, NO, FTP and ALL proxy names. Startup proves the
-created containers retain exactly those empty runtime entries. This is a
-closed ambient-input boundary, not supported outbound-proxy configuration.
-
-For development source builds, `compose-up` refuses ambient BuildKit, Buildx
-and Bake selectors, proves the pinned local Engine still resolves as the
-`default` context, uses fresh private Buildx state and an explicit default
-builder, and starts the graph only with `--no-build` after that build succeeds.
-Reference startup and gateway restart never build. Docker registry
-authentication is retained opaquely; the lifecycle does not print, parse or
-rewrite it. Its effective directory and the lifecycle temporary root must be
-physically outside the repository for a development build. `DOCKER_CONFIG` is
-the portable path; raw `DOCKER_AUTH_CONFIG` support depends on the installed
-Docker client. Without explicit `DOCKER_CONFIG`, development builds require an
-accessible `HOME`; an existing `config.json` must be regular and not a symlink.
-Installed Docker plugins, credential helpers and daemon policy are operator
-prerequisites rather than evidence supplied by this repository.
-
-The remaining sections describe product use only after a gateway has been
-started through separately validated development/test infrastructure. They are
-not deployment instructions or evidence that the reference is complete.
+The remaining sections describe product use after a gateway has been started
+through either workflow. They are not deployment instructions or evidence that
+the reference is complete.
 
 ## Bootstrap policy
 
@@ -179,7 +69,7 @@ surface, by a person the PDP can decide about. Deployment bootstrap runs once
 with elevated database authority before anybody is watching — it is the worst
 place in this product to keep a shortcut past the policy engine (seed §2.2).
 
-## Log in — this is where the organisation starts to exist
+## Log in — this is where the governed scope tree starts to exist
 
 ```sh
 export SYNVEDA_GATEWAY=http://app.synveda.test:8080
@@ -188,8 +78,9 @@ synveda login --gateway "$SYNVEDA_GATEWAY"
 
 Use credentials provisioned by the deployment's identity operator; no current
 `init` path prints demo credentials. The browser opens, you sign in, and
-**that login is where the tenant starts to exist**: on a fresh tenant whose
-administrator bootstrap remains unclaimed, the tenant
+**that login is where the tenant's governed product structure starts to
+exist**: on a fresh admitted tenant whose administrator bootstrap remains
+unclaimed, the tenant
 root scope is minted from the tenant's own slug and name, your identity gets
 its own `principal`-shaped scope under it, and you are granted
 `administrator` **at the tenant root** because yours is the first qualifying
@@ -204,12 +95,12 @@ subject, not an installer's:
 ## Build your scope tree
 
 ```sh
-root=$(curl -sH "authorization: Bearer $TOKEN" "$SYNVEDA_GATEWAY/v1/admin/scopes" \
-        | python3 -c 'import json,sys;print(json.load(sys.stdin)["parent"]["id"])')
+synveda scope list --json
+root="<parent.id UUID from the JSON output>"
 
-synveda scope create --parent $root --kind org_unit --slug eng      --name Engineering
-eng=<the id the tree shows>
-synveda scope create --parent $eng  --kind workspace --slug platform --name Platform
+synveda scope create --parent "$root" --kind org_unit --slug eng --name Engineering
+eng="<created Engineering scope UUID>"
+synveda scope create --parent "$eng" --kind workspace --slug platform --name Platform
 
 synveda scope tree
 ```
@@ -233,7 +124,8 @@ product-level subtypes of a governed scope, and grants — not role
 bindings — are what let people act:
 
 ```sh
-curl -H "authorization: Bearer $TOKEN" "$SYNVEDA_GATEWAY/v1/me"
+printf 'authorization: Bearer %s\n' "$(synveda auth token)" |
+  curl --silent --show-error --header @- "$SYNVEDA_GATEWAY/v1/me"
 ```
 
 `/v1/me` is the one call a client makes first. It answers who you are, what
@@ -243,7 +135,7 @@ what you may do there**:
 ```json
 "anchors": [
   {"scope_id": "…", "kind": "principal", "source": "principal_scope",
-   "direct": false, "roles": [], "actions": {"memory.write": true, …}},
+   "direct": false, "roles": [], "actions": {"knowledge.write": true, …}},
   {"scope_id": "…", "kind": "workspace", "source": "grant",
    "direct": true,  "roles": ["owner"], "actions": {"workspace.update": true, …}}
 ]
@@ -364,14 +256,18 @@ confinement remain overriding forbids.
 Inspect these under **Advanced → Scopes**, or with the public-HTTP CLI:
 
 ```sh
+start="<current RFC 3339 UTC timestamp>"
+end="<later RFC 3339 UTC timestamp within the configured maximum>"
+narrower_end="<earlier end timestamp, still after start>"
+
 synveda relaxation list --scope <scope-id>
 synveda relaxation show <relaxation-id>
 synveda relaxation create --scope <scope-id> --subject <identity-id> \
-  --start 2026-08-25T12:00:00Z --end 2026-08-25T14:00:00Z \
+  --start "$start" --end "$end" \
   --reason "bounded incident investigation"
 synveda relaxation revise <relaxation-id> --expected <current-version-id> \
-  --subject <identity-id> --start 2026-08-25T12:00:00Z \
-  --end 2026-08-25T13:00:00Z --reason "narrowed investigation window"
+  --subject <identity-id> --start "$start" \
+  --end "$narrower_end" --reason "narrowed investigation window"
 synveda relaxation revoke <relaxation-id> --expected <current-version-id> \
   --reason "investigation complete"
 ```
@@ -387,7 +283,7 @@ translated.
 ## Check it works
 
 ```sh
-synveda scope tree                          # your organisation
+synveda scope tree                          # your governed scope tree
 synveda recall --query "..."                 # a governed read
 synveda audit tail --limit 20 # policy-visible recent activity
 synveda audit verify         # the caller's tenant chain
@@ -692,8 +588,10 @@ An external issuer remains part of the generic application contract, but the
 withdrawn `init` verb is not an external-IdP setup path. A separately validated
 deployment must mount the issuer configuration and provision a public
 authorization-code client with PKCE S256, its exact deployment callback/origin,
-and the `openid profile email groups` scopes. The issuer in discovery, tokens
-and gateway configuration must be byte-for-byte identical.
+and the exact scopes named by `login_scopes`. The base configuration requests
+`openid`, `profile` and `email`; add a provider-specific groups scope only when
+that provider requires it to emit the configured groups claim. The issuer in
+discovery, tokens and gateway configuration must be byte-for-byte identical.
 
 The canonical Compose guide contains the exact
 [provider-neutral issuer document shape](../deploy/compose/README.md#external-oidc),
@@ -785,12 +683,12 @@ no second process and no second port. Sign in with credentials provisioned by
 the deployment's identity operator; the session is an `HttpOnly` cookie, so
 there is no token to paste.
 
-**Since CPR-8 the console is the product rather than a review queue.** The
-first sign-in on a fresh deployment goes to a six-step **getting started**
+The first sign-in on a fresh deployment goes to a six-step **getting started**
 flow — create a workspace (just you, or a team), create the first project,
 attach the repository it is about, choose your agent client, copy the two
-commands that connect it, and run a connection check — because nobody is
-asked to declare an organisation before they can hold a record.
+commands that connect it, and run a connection check. The workflow starts with
+the governed scope and project in which Sessions, Knowledge and reusable Skills
+will live; it does not require a separate organisation declaration.
 
 After that the left-hand navigation is the product: **Home, Sessions,
 Knowledge, New Learnings, Skills, Tools, Operations, People, Settings**, with a
@@ -925,19 +823,11 @@ remain OPS-5 work.
 ## Upgrading
 
 The Docker reference has a bounded same-schema product-image upgrade smoke.
-Start with a reference project that has already passed browser/product
-acceptance, keep its exact DNS, TLS, provider-image and network selectors, and
-set distinct immutable product images:
-
-```sh
-export SYNVEDA_COMPOSE_RUNTIME=reference
-export SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance
-export SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-local
-export SYNVEDA_COMPOSE_IPV4_POOL=10.231.45.0/24
-export SYNVEDA_PRODUCT_STARTING_IMAGE=registry.example/synveda/product@sha256:<starting-digest>
-export SYNVEDA_PRODUCT_IMAGE=registry.example/synveda/product@sha256:<candidate-digest>
-make compose-upgrade-smoke
-```
+The canonical Compose guide owns the exact
+[selectors and procedure](../deploy/compose/README.md#same-schema-product-upgrade-smoke).
+It starts with a reference project that has passed browser/product acceptance
+and requires distinct immutable starting and candidate product images while
+retaining the exact DNS, TLS, provider-image and network selections.
 
 The candidate performs a read-only current-schema and database-authority check
 before either runtime process changes. The lifecycle then proves candidate,
@@ -1022,13 +912,9 @@ ended on; start a new Claude Code session to pick it up.
 
 ## Stopping and starting
 
-From a checkout, use the canonical project-scoped lifecycle:
-
-```sh
-make compose-down
-make compose-up
-make compose-restart-gateway
-```
+For a source checkout, use the project-scoped start, stop, restart and reset
+procedures in the
+[canonical Compose guide](../deploy/compose/README.md#default-lifecycle).
 
 For an installed reference, set the same host/provider selectors used at
 startup and invoke its pinned launcher:
@@ -1041,15 +927,11 @@ export SYNVEDA_AUTH_HOST=auth.example.com
 ```
 
 `compose-down` preserves the database volume and every project input. Reset is
-separate, destructive, and requires the exact project confirmation:
-
-```sh
-SYNVEDA_CONFIRM_RESET=synveda-development make compose-reset
-```
-
-Reset preserves the secret set, issuer input and KMS key; it is not tenant
-erasure, backup or credential rotation. See
-[`deploy/compose/README.md`](../deploy/compose/README.md) for exact lock-recovery
+separate and destructive. Run the workflow's reset action without a
+confirmation first, inspect the exact target it reports, and only then rerun it
+with that displayed value. Reset preserves the secret set, issuer input and KMS
+key; it is not tenant erasure, backup or credential rotation. The Compose guide
+owns the exact [reset contract](../deploy/compose/README.md#reset), lock recovery
 and provider-mode procedures.
 
 ## Uninstalling
@@ -1090,17 +972,18 @@ The release workflow produces native binaries, the console, the Claude plugin,
 the Helm chart and `synveda-reference-<version>.tar.gz`. The reference archive
 contains the HTTPS-only canonical Compose runtime and `environment.json`, which
 binds its source SHA and image digests. No tagged candidate has yet completed a
-registry-backed install, so the commands below describe the implemented
-installer contract rather than a validated published release:
+registry-backed install, so there is no current public installation command.
+Existing tags predate this reference contract. Do not combine one of them with
+the mutable `main` branch installer or pipe that installer into a shell. When a
+candidate is published, use the tag-bound installer and artifacts named by that
+release, inspect the installer first, and compare the release's version, source
+SHA and image identities with the installed manifest.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh \
-  | SYNVEDA_VERSION=v0.2.0 SYNVEDA_BIN="$HOME/.local/bin" sh
-```
-
-The installer verifies `SHA256SUMS`, installs artifacts and never starts
-containers or edits an AI client. Configure real DNS and TLS, inspect the
-installed manifest, then use
+The implemented installer verifies `SHA256SUMS`, installs artifacts and never
+starts containers or edits an AI client. The checksum detects accidental
+corruption; because signed provenance is not implemented, it does not
+authenticate an artifact obtained through the same channel. Configure real DNS
+and TLS, inspect the installed manifest, then use
 `~/.synveda/reference/current/synveda-compose`. The packaged launcher fixes
 reference HTTPS and image identities; the operator still owns hostnames,
 certificates and supported external-dependency inputs.
@@ -1127,12 +1010,8 @@ with no terminal to prompt on, or you declining — it puts the CLI in
 `~/.synveda/bin` instead and tells you**. Nothing else here needs a privilege.
 If the directory it lands in is not on your `PATH`, the installer prints the
 `export` line to add. An explicitly selected directory is created when absent
-and refused when it is a symlink. To choose up front and skip sudo entirely:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh \
-  | SYNVEDA_BIN="$HOME/.local/bin" sh
-```
+and refused when it is a symlink. Set `SYNVEDA_BIN` to a reviewed user-owned
+directory when invoking a future tag-bound installer to skip sudo entirely.
 
 **The installer touches nothing belonging to an editor or an AI client.** No
 `~/.claude`, no Claude Desktop config, no `~/.cursor`. Hooking one up is the

@@ -52,16 +52,19 @@ synveda plugin install --from /tmp/synveda-plugin/plugin
 Then log in once:
 
 ```sh
-synveda login --gateway http://127.0.0.1:8120
+export SYNVEDA_GATEWAY=http://app.synveda.test:8080
+synveda login --gateway "$SYNVEDA_GATEWAY"
 ```
 
-**Why a marketplace and not this directory.** Until 2026-08-11 this file said
-"point Claude Code at this directory as a plugin", and `demos/adpt-1-claude-code.sh`
-copies three directories into `~/.claude/plugins/synveda/`. Claude Code reads
-neither. It installs plugins from a *marketplace* — a directory carrying
-`.claude-plugin/marketplace.json` — into a cache it owns, tracked in
-`known_marketplaces.json` and `installed_plugins.json`. `package-plugin.sh`
-builds that wrapper; `synveda plugin install` hands it to `claude plugin`.
+That URL is the canonical development Compose gateway. Use the deployment's
+application URL instead for reference or external deployments; use
+`http://127.0.0.1:8120` only when deliberately running the gateway binary
+directly.
+
+**Why a marketplace and not this directory.** Claude Code installs plugins
+from a marketplace carrying `.claude-plugin/marketplace.json` into its own
+cache. `package-plugin.sh` builds that wrapper; `synveda plugin install` hands
+it to `claude plugin`.
 
 Check it actually loaded, because installing and loading are different things:
 
@@ -75,9 +78,8 @@ Two manifest keys are why that check matters. `hooks` must **not** name
 a duplicate-load error that leaves the plugin `✘ failed to load` with the
 install looking perfectly healthy. And the MCP server belongs in `.mcp.json`
 at this directory's root, **not** as an inline `mcpServers` in `plugin.json`,
-where it is silently ignored. This plugin shipped with both mistakes for a
-year (ADR-0027 amendment, 2026-08-11); `package-plugin.sh` now refuses to
-build a bundle that reintroduces either.
+where it is silently ignored. `package-plugin.sh` refuses a bundle that
+violates either constraint.
 
 That is the whole configuration. `synveda login` opens your browser at
 the *gateway's* `/auth/login` — never the IdP's directly — so the login
@@ -92,30 +94,19 @@ no OAuth code of its own (ADR-0027 decisions 4 to 6).
 The composed block is passed through verbatim; the hook renders nothing of
 its own.
 
-> **Fetch-by-handle is not available right now.** CTX-4's index tier ended its
-> lines with `(recall <id>)` and `synveda recall <id>` turned a handle into a
-> body. `/v1/recall` was deleted with the observe cutover and the context-run
-> endpoint that replaced it takes no ids, so a handle currently names something
-> nothing can fetch. Prompt 18 re-cuts recall over the new model. `synveda
-> recall --query` still answers questions.
+The injected context block is budgeted. For a deeper search, `synveda recall
+--query` and the MCP `recall` tool open a separate governed Session and call
+`POST /v1/sessions/{session_id}/knowledge-query`. There is no global
+`/v1/recall` route or direct Knowledge-by-ID fetch tool.
 
 ### The MCP tool
 
-The `mcpServers` slot of the same manifest gives the model a `recall`
-tool, so it can reach past the block it was handed and ask the corpus a
-question of its own.
-
-The protocol behind it is **not in this package**. CTX-5 hand-wrote a
-JSON-RPC loop here to keep the plugin dependency-free; ADR-0042 option 8
-recorded what would reverse that — "protocol revisions churn, or a second
-transport" — and `2026-07-28` did, replacing the negotiation handshake
-with per-request `_meta`, making `server/discover` mandatory, and adding
-`-32022`. Since ADR-0057 decision 4 the server is `synveda mcp`, one
-implementation shared with Claude Desktop and Cursor, and
-`dist/mcp-server.mjs` is a ~40-line launcher that resolves the binary the
-way the credential seam does (`SYNVEDA_CLI`, else `synveda` on `PATH`),
-hands it the client's own stdio, and — if the CLI is missing — says so
-instead of coming up with an empty tool list.
+The plugin's `.mcp.json` gives the model a `recall` tool, so it can reach past
+the composed block and ask the governed corpus a question of its own. The
+protocol implementation is the shared `synveda mcp` command used by supported
+clients. `dist/mcp-server.mjs` is a thin launcher: it resolves `SYNVEDA_CLI` or
+`synveda` on `PATH`, passes through the client's stdio, and reports a missing
+CLI instead of starting with an empty tool list.
 
 It launches `synveda mcp --writes host`, hard-coded. This plugin's `Stop`
 hook already records the turn as session events, so a `remember` tool here

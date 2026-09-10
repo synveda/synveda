@@ -127,10 +127,12 @@ until the explicitly confirmed `make compose-reset` operation.
 
 For the digest-bound packaged Docker reference, install layout and key-custody
 warning, follow [docs/INSTALL.md](docs/INSTALL.md). Release archives are
-currently unsigned; verify checksums, and do not treat the reference bundle as
-production-ready. The accepted target for the Docker-first portable reference is
-[docs/DEPLOYMENT_CONTRACT.md](docs/DEPLOYMENT_CONTRACT.md); CPR-45 remains open
-until its clean-volume, identity, worker and recovery acceptance passes.
+currently unsigned; checksums detect corruption but do not authenticate an
+artifact obtained through the same channel. Do not treat the reference bundle
+as production-ready. The accepted target for the Docker-first portable
+reference is [docs/DEPLOYMENT_CONTRACT.md](docs/DEPLOYMENT_CONTRACT.md); CPR-45
+remains open until its clean-volume, identity, worker and recovery acceptance
+passes.
 
 Runnable feature acceptance lives under [`demos/`](demos/). Useful current
 entry points include:
@@ -206,21 +208,22 @@ scripts/      generation and CI consistency checks
 
 Deployment shapes implement one provider-neutral contract; they do not select
 product editions. Docker Compose is the accepted single-host reference target,
-and later Helm work maps the same commands, configuration, OIDC, OTLP and
-backup semantics to native primitives rather than translating Compose YAML.
+and the current Helm chart maps the runtime commands, configuration, OIDC and
+OTLP seams to native primitives rather than translating Compose YAML. Helm
+backup/recovery parity and production promotion remain open.
 
 ## Documentation
 
-- [Product principles and invariants](docs/SYNVEDA_SEED.md)
-- [Technical plan](docs/SYNVEDA_TECH_PLAN.md)
-- [Feature inventory and open work](docs/backlog/STATUS.md)
-- [Production readiness](docs/PRODUCTION_READINESS.md)
-- [Security model and residual limits](docs/SECURITY.md)
-- [Install and local operations](docs/INSTALL.md)
-- [Client support](docs/CLIENT_SUPPORT.md)
-- [Benchmarks and evaluation limits](docs/BENCHMARKS.md)
-- [ADR index](docs/adr/README.md)
-- [Generated OpenAPI](docs/api/openapi.json)
+This is the documentation index. Start with the path matching the job:
+
+| Goal | Reading path |
+| --- | --- |
+| Try locally | [Canonical source-checkout Compose guide](deploy/compose/README.md) |
+| Use the product | [Install and operate Synveda](docs/INSTALL.md), then the [generated OpenAPI](docs/api/openapi.json) and [client support matrix](docs/CLIENT_SUPPORT.md) |
+| Contribute | [Contributor workflow](CONTRIBUTING.md), [agent rules](AGENTS.md) and [feature inventory/open work](docs/backlog/STATUS.md) |
+| Understand architecture | [Product principles and invariants](docs/SYNVEDA_SEED.md), [technical plan](docs/SYNVEDA_TECH_PLAN.md) and [ADR index](docs/adr/README.md) |
+| Understand deployment limits | [Infrastructure shapes](deploy/README.md), [deployment contract](docs/DEPLOYMENT_CONTRACT.md), [security model](docs/SECURITY.md) and [production-readiness gaps](docs/PRODUCTION_READINESS.md) |
+| Check measured claims | [Benchmarks and evaluation limits](docs/BENCHMARKS.md) |
 
 ## Contributing
 

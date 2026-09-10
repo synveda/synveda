@@ -1,10 +1,11 @@
-# Canonical Docker Compose deployment
+# Canonical source-checkout Docker Compose guide
 
-This directory is Synveda's canonical single-host deployment for CPR-45. It
-runs the gateway and worker as separate processes with PostgreSQL, bundled
-Keycloak, a reverse proxy and a private OpenTelemetry Collector. Optional
-settings add a bounded local Prometheus operator view, external trace export or
-one experimental Apalis-backed Skill-validation worker.
+This is the sole detailed source-checkout guide for Synveda's canonical
+single-host deployment under CPR-45. It runs the gateway and worker as separate
+processes with PostgreSQL, bundled Keycloak, a reverse proxy and a private
+OpenTelemetry Collector. Optional settings add a bounded local Prometheus
+operator view, external trace export or one experimental Apalis-backed
+Skill-validation worker.
 
 It supports development and reference configuration. Logical backup, isolated
 restore and same-schema product upgrade commands are implemented, but live
@@ -21,6 +22,7 @@ Compose fragments manually.
 - Docker Compose 2.33.1 or newer;
 - Node.js 22 or newer;
 - OpenSSL;
+- GNU Make;
 - a non-root Unix operator.
 
 Hosts install/remove additionally requires root-owned, non-writable,
@@ -33,6 +35,21 @@ selected .test hostnames to resolve only to 127.0.0.1.
 
 The default names are app.synveda.test and auth.synveda.test. The browser,
 gateway, discovery document and tokens use the same issuer authority.
+
+The reviewed checkout, fixed root-owned Node binary, Docker/Compose/Buildx
+binaries, credential helpers, daemon mirrors, daemon proxy/CA and embedded
+BuildKit policy are part of the trusted host. The lifecycle does not sandbox a
+checkout from its owner. It empties ambient Docker client proxy variables for
+runtime services and development builds; explicit outbound-proxy and custom-CA
+support are not implemented.
+
+Development builds also refuse ambient BuildKit, Buildx and Bake selectors,
+pin the validated local Engine, use private Buildx state outside the repository
+and start the graph with `--no-build` only after the explicit build succeeds.
+Registry authentication is retained opaquely. If `DOCKER_CONFIG` is not set,
+an accessible `HOME` is required; any existing `config.json` must be a regular
+file rather than a symlink. The complete boundary and residual risks are in
+[the security model](../../docs/SECURITY.md#docker-reference-boundary).
 
 ## Development hostname setup
 
@@ -48,15 +65,49 @@ confirmation printed by the plan. For the default project:
       make compose-hosts-install
 
 Run only that target with the required privilege escalation; do not run Docker,
-the lifecycle or Make generally as root. Flush the active resolver cache, then
-verify both the owned text and operating-system resolution:
+the lifecycle or Make generally as root. Flush the active resolver cache. On
+macOS:
+
+    sudo dscacheutil -flushcache
+    sudo killall -HUP mDNSResponder
+
+On a Linux host using systemd-resolved:
+
+    sudo resolvectl flush-caches
+
+For another local resolver, use that resolver's documented cache-flush action.
+Then verify both the owned text and operating-system resolution:
 
     make compose-hosts-status
     make compose-resolver-check
 
-The manager owns at most one marked block in /etc/hosts, refuses drift or
-foreign equivalent rows, and keeps a private recovery record. Reference mode
-uses operator DNS and never edits /etc/hosts.
+The manager owns at most one marked block in `/etc/hosts`, refuses unmarked,
+duplicate, foreign or drifted ownership, and keeps a root-only recovery copy
+without printing existing host-file content. It modifies only a terminal
+managed suffix and preserves the existing inode metadata. Noncanonical,
+ACL-bearing, multiply linked or incorrectly owned targets are refused.
+Interrupted append recovery requires a newly confirmed exact-prefix action;
+this is a recovery contract, not an old-or-new power-loss atomicity claim.
+External-OIDC development owns only the application hostname. Reference mode
+uses operator DNS and never reads or edits `/etc/hosts`.
+
+### Removing development hostname ownership
+
+`compose-down` and confirmed `compose-reset` retain the host-wide hostname
+prerequisite. When the development project is no longer needed, stop it first,
+then ask the removal action for its configuration-bound confirmation. The first
+call is expected to refuse without mutation:
+
+    make compose-down
+    make compose-hosts-remove
+
+Inspect the exact value it prints, then rerun with that value and the same
+selectors:
+
+    SYNVEDA_CONFIRM_HOSTS_REMOVE="<exact value printed above>" make compose-hosts-remove
+
+Flush the resolver cache again and run `make compose-hosts-status` to prove the
+owned block is absent. The helper never removes unrelated hostname rows.
 
 ## Default lifecycle
 

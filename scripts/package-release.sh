@@ -232,11 +232,14 @@ chmod 755 "$stage/synveda-compose"
 cat > "$stage/README.md" <<EOF
 # Synveda Docker reference $version
 
-This is the digest-bound, single-host reference deployment. It is suitable for
-controlled evaluation; it is not highly available, host-loss tolerant,
-production SaaS or an enterprise certification.
+This is the implemented digest-bound, single-host reference deployment. The
+repository has deterministic contract checks for this shape, but this archive
+alone is not clean-host, published-image, identity, recovery or upgrade
+evidence. Those validations remain pending. It is not highly available,
+host-loss tolerant, production SaaS or an enterprise certification.
 
-Install it with \`scripts/install.sh\`, configure real DNS and TLS, then run:
+Install it with the tag-bound \`scripts/install.sh\` named by this release,
+configure real DNS and TLS, then run:
 
     export SYNVEDA_APP_HOST=app.example.com
     export SYNVEDA_AUTH_HOST=auth.example.com

@@ -1,5 +1,11 @@
 # GRPH-4 — AGE traversal spike & graph fallback assessment
 
+> **Status: historical evidence, superseded.** The measurements are retained
+> because they informed the graph decision. [ADR-0097](../adr/adr-0097-bounded-knowledge-graph-retrieval.md)
+> is the current contract: bounded `KnowledgeRelation` rows in PostgreSQL
+> replaced Apache AGE and the Record graph. The conditional recommendation
+> below is not current implementation guidance.
+
 - **Date**: 2026-07-25
 - **Feature**: GRPH-4 (de-risk, Phase 2 gate)
 - **Criteria**: [ADR-0029](../adr/adr-0029-graph-traversal-gate.md), pre-registered before the run

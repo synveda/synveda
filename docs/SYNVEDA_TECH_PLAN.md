@@ -50,7 +50,7 @@ it does not substitute for the still-open restore and failover evidence.
 | Embeddings serving | Optional **text-embeddings-inference** serving BGE-M3 for the measured dense path. Production model support, generation cutover and re-embedding remain open. |
 | Summarisation/extraction LLM | Pluggable: Claude API, or self-hosted via vLLM for air-gapped; behind `Extractor` trait |
 | Observability | OpenTelemetry remains the application trace contract. Canonical Compose keeps application metrics off public proxy routes and optionally uses a closed private Collector scrape/fan-in with a digest-pinned, loopback-only Prometheus UI and 72-hour/1-GB TSDB block-retention thresholds (not a disk quota). Public-PKI external OTLP export is configured only through that private Collector. The customer-safe Operations route exposes four policy-visible aggregates and states which signals remain unavailable. Live validation remains open. |
-| Packaging | CPR-45 implementation, with live validation pending: one product image/configuration contract and Docker Compose as the single-host reference. Later Helm implements the same contract and currently enforces one gateway and one core-worker replica. |
+| Packaging | CPR-45 implementation, with live validation pending: one product image/configuration contract and Docker Compose as the single-host reference. The current Helm chart maps the runtime contract and enforces one gateway and one core-worker replica; recovery parity and production promotion remain open. |
 
 ### 1.4 Explicit non-choices
 
@@ -215,7 +215,7 @@ global `/v1/recall` route and no direct-store adapter path.
 
 ## 4. Deployment shapes
 
-| | Docker reference | Later Helm/on-prem |
+| | Docker reference | Current Helm / future on-prem promotion |
 |---|---|---|
 | Footprint | Reverse proxy, separate gateway/worker, PostgreSQL + pgvector, production-mode Keycloak and private OTel Collector; optional local visibility, Apalis experiment and backup-test services. The Compose semantic profile remains pending; TEI is available in the isolated evaluation fixture. | The same product commands/configuration with Kubernetes-native ingress, jobs, secrets, networks and external dependencies; optional TEI is already charted. |
 | Product behaviour | Governed Configuration documents select policy, capture and context behaviour; deployment shape does not. | The same runtime and Configuration model; no edition branch. |

@@ -1,5 +1,11 @@
 # Deployment
 
+This file is the infrastructure-shape overview. Source-checkout operator steps
+live in the [canonical Compose guide](compose/README.md); the normative mapping
+across deployment shapes lives in the
+[deployment contract](../docs/DEPLOYMENT_CONTRACT.md), and unproved operational
+claims remain in [production readiness](../docs/PRODUCTION_READINESS.md).
+
 Synveda has one context-platform runtime. Direct binaries, source/release
 Compose services and Helm Deployments use the same product commands, schema
 epoch, generated `/v1` contract, embedded Cedar PDP, VedaFlow effects and

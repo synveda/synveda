@@ -173,6 +173,8 @@ gateway/worker commands, mounted secrets and a private Collector. The
 digest-bound reference archive and environment manifest use that same graph.
 Retired provider, workflow-scheduler, contributor, installed-profile and host-
 gateway paths are deleted; `synveda init` is a side-effect-free refusal.
+The root documentation index now points source users to one detailed Compose
+guide and labels the unverified packaged-reference workflow separately.
 
 Deterministic gates cover the provider/runtime matrix, two-principal browser
 scenario, restart lifecycle, logical database/key recovery, same-schema image
