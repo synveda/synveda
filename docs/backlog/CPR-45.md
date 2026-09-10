@@ -112,12 +112,12 @@ Viewer with existing role keys, refuses an unintended gateway or conflicting
 curator file, and never resets product data.
 
 Deterministic replay and public-resource status contracts pass for this
-three-principal revision, but its fresh live replay is not yet recorded. On
-the current host, the stopped `synveda-development-acceptance-phase1` project
-still owns the root-managed development hostname block; its containers and
-networks are gone while its product data remains retained. The next action is
-interactive operator removal of that exact hostname block, followed by
-`make compose-acceptance` in a fresh suffixed project.
+three-principal revision, but its fresh live replay is not yet recorded. The
+old `synveda-development-acceptance-phase1` containers and networks are gone,
+as are the five selected development image tags. Its product data remains
+retained, and the development hostname mapping is absent. The next action is
+installation of a fresh project's exact hostname block followed by
+`make compose-acceptance` in that suffixed project.
 
 ### Recorded development evidence
 

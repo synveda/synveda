@@ -194,12 +194,11 @@ pending where review was required.
 
 The new three-principal retry-review revision passes deterministic fixture and
 deployment contracts, but has not replaced that recorded live evidence. The
-current host's managed development hostname block belongs to the stopped
-`synveda-development-acceptance-phase1` project. That project's containers and
-networks have now been removed with product data retained, but the root-owned
-hostname block still requires interactive operator removal. The next live run
-is `make compose-acceptance` against a fresh suffixed project after that
-handoff.
+old `synveda-development-acceptance-phase1` containers and networks are gone,
+as are the five selected development image tags. Product data remains retained,
+and the development hostname mapping is absent. The next live run requires
+installation of a fresh project's exact hostname block followed by
+`make compose-acceptance` against that suffixed project.
 
 The feature remains open for repeat development runs on Linux and Docker
 Desktop, reference HTTPS, live recovery/upgrade/Apalis execution, live external
