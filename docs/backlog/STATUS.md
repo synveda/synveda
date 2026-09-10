@@ -183,8 +183,17 @@ Operations view and the disabled-by-default Apalis 0.7.4 Skill-validation
 transport. PostgreSQL operation/outbox state remains authoritative and the
 native worker is the rollback.
 
-The feature remains open for clean development and reference HTTPS runs on
-Linux and Docker Desktop, live recovery/upgrade/Apalis execution, live external
+On 2026-09-10, clean-volume development acceptance passed on macOS 26.6.2
+arm64 with OrbStack Docker Engine 29.4.0 and Compose 5.1.2. It proved packaged
+console serving, Keycloak PKCE login and exact discovery, worker-completed
+Capture, the public-API team scenario, all six native service restarts and
+persisted receipt verification. A canonical down/up retained the exact product
+volume and generated key set; exact-project reset separately retained the
+issuer, KMS key and demo credentials. Strict policy outcomes remained visibly
+pending where review was required.
+
+The feature remains open for repeat development runs on Linux and Docker
+Desktop, reference HTTPS, live recovery/upgrade/Apalis execution, live external
 providers, and one published-registry installed-reference run. This evidence
 would support controlled single-host use only. It would not establish HA,
 host-loss tolerance, DR/RPO/RTO, SaaS readiness, signing or Helm production

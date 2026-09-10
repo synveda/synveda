@@ -325,6 +325,9 @@ pub async fn reset(credential_profile: &str, force: bool) -> Result<(), String> 
         if let Some(value) = receipt.resource(name)
             && let Some(item) = object_id(value)
         {
+            if name == "private_knowledge" && value["outcome"] != "applied" {
+                continue;
+            }
             let current = api.get(&format!("/v1/knowledge/{item}")).await?;
             if current["lifecycle_state"] != "archived" && current["lifecycle_state"] != "erased" {
                 let revision = required_str(&current["current_revision"], "id")?;
@@ -744,11 +747,19 @@ async fn decide_first_candidates(api: &Api, receipt: &mut Receipt) -> Result<(),
             )
             .await?;
         let stored = if action == "accept" {
-            knowledge_handle(&result).unwrap_or_else(|| result.clone())
+            knowledge_handle(&result)?
         } else {
             result
         };
         receipt.put(result_name, stored)?;
+        if result_name == "private_knowledge"
+            && receipt.require_resource(result_name)?["outcome"] == "pending_review"
+        {
+            receipt.notice(
+                "private quick-test preference remains pending in Advanced Reviews; \
+                 the demo does not claim it as active Knowledge",
+            )?;
+        }
     }
     Ok(())
 }
@@ -854,6 +865,16 @@ async fn ensure_reuse_context(api: &Api, receipt: &mut Receipt) -> Result<(), St
         {
             return Err("Bob's Knowledge query exposed Alice's private preference".to_owned());
         }
+        let evidence_kind = match private["outcome"].as_str() {
+            Some("applied") => "owner_scope",
+            Some("pending_review") => "pending_review_not_published",
+            _ => {
+                return Err(
+                    "private preference has neither an applied nor pending-review outcome"
+                        .to_owned(),
+                );
+            }
+        };
         receipt.put(
             "private_isolation",
             json!({
@@ -861,6 +882,7 @@ async fn ensure_reuse_context(api: &Api, receipt: &mut Receipt) -> Result<(), St
                 "private_knowledge_id": private_id,
                 "inspected_count": items.len(),
                 "private_knowledge_absent": true,
+                "evidence_kind": evidence_kind,
             }),
         )?;
     }
@@ -1346,23 +1368,57 @@ async fn poll_operation(api: &Api, operation: &Value) -> Result<Value, String> {
     ))
 }
 
-fn knowledge_handle(result: &Value) -> Option<Value> {
+fn knowledge_handle(result: &Value) -> Result<Value, String> {
     let candidate = result.get("candidate").unwrap_or(result);
     let item_id = candidate
         .get("resulting_knowledge_item_id")
-        .or_else(|| candidate.get("knowledge_item_id"))?
-        .as_str()?;
+        .or_else(|| candidate.get("knowledge_item_id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "candidate decision has no resulting Knowledge item".to_owned())?;
+    let candidate_id = candidate
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "candidate decision has no candidate id".to_owned())?;
+    let change_id = candidate
+        .get("resulting_change_id")
+        .or_else(|| candidate.get("change_id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "candidate decision has no VedaFlow change id".to_owned())?;
+    let outcome = candidate
+        .get("resulting_outcome")
+        .or_else(|| candidate.get("outcome"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "candidate decision has no governance outcome".to_owned())?;
     let revision_id = candidate
         .get("resulting_revision_id")
-        .or_else(|| candidate.get("revision_id"))?
-        .as_str()?;
-    Some(json!({
+        .or_else(|| candidate.get("revision_id"))
+        .and_then(Value::as_str);
+    match (outcome, revision_id) {
+        ("applied", Some(_)) | ("pending_review", None) => {}
+        ("applied", None) => {
+            return Err("applied candidate decision has no Knowledge revision".to_owned());
+        }
+        ("pending_review", Some(_)) => {
+            return Err(
+                "pending candidate decision unexpectedly has a Knowledge revision".to_owned(),
+            );
+        }
+        _ => {
+            return Err(format!(
+                "candidate decision returned governance outcome {outcome}"
+            ));
+        }
+    }
+    let mut handle = json!({
         "id": item_id,
-        "revision_id": revision_id,
-        "candidate_id": candidate.get("id"),
-        "change_id": candidate.get("resulting_change_id").or_else(|| candidate.get("change_id")),
-        "outcome": candidate.get("resulting_outcome").or_else(|| candidate.get("outcome")),
-    }))
+        "candidate_id": candidate_id,
+        "change_id": change_id,
+        "outcome": outcome,
+    });
+    if let Some(revision_id) = revision_id {
+        handle["revision_id"] = json!(revision_id);
+    }
+    Ok(handle)
 }
 
 fn content(title: &str, body: &str, summary: &str, tags: &[&str], confidence: u16) -> Value {
@@ -1568,6 +1624,53 @@ mod tests {
         assert_eq!(DemoProfile::Personal.template(), "personal");
         assert_eq!(DemoProfile::Team.template(), "team");
         assert_eq!(DemoProfile::Governed.template(), "enterprise");
+    }
+
+    #[test]
+    fn candidate_handles_preserve_applied_and_pending_governance_outcomes() {
+        let applied = knowledge_handle(&json!({
+            "candidate": {
+                "id": "candidate",
+                "resulting_change_id": "change",
+                "resulting_knowledge_item_id": "knowledge",
+                "resulting_revision_id": "revision",
+                "resulting_outcome": "applied"
+            },
+            "replayed": false
+        }))
+        .expect("applied candidate handle");
+        assert_eq!(applied["id"], "knowledge");
+        assert_eq!(applied["revision_id"], "revision");
+        assert_eq!(applied["outcome"], "applied");
+
+        let pending = knowledge_handle(&json!({
+            "candidate": {
+                "id": "candidate",
+                "resulting_change_id": "change",
+                "resulting_knowledge_item_id": "knowledge",
+                "resulting_revision_id": null,
+                "resulting_outcome": "pending_review"
+            },
+            "replayed": false
+        }))
+        .expect("pending candidate handle");
+        assert_eq!(pending["id"], "knowledge");
+        assert_eq!(pending["change_id"], "change");
+        assert_eq!(pending["outcome"], "pending_review");
+        assert!(pending.get("revision_id").is_none());
+
+        assert!(
+            knowledge_handle(&json!({
+                "candidate": {
+                    "id": "candidate",
+                    "resulting_change_id": "change",
+                    "resulting_knowledge_item_id": "knowledge",
+                    "resulting_revision_id": null,
+                    "resulting_outcome": "applied"
+                }
+            }))
+            .is_err()
+        );
     }
 
     #[test]

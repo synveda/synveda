@@ -70,7 +70,9 @@ export async function runBrowserAcceptance({
   let completed = false;
   let primaryError;
   let routeError;
+  let requestListener;
   const pendingRoutes = new Set();
+  const inspectedRequests = new WeakMap();
   const requireCleanRoutes = () => {
     if (routeError !== undefined) throw routeError;
   };
@@ -116,32 +118,58 @@ export async function runBrowserAcceptance({
       }),
     );
     page = await atStage("browser-launch", () => context.newPage());
+    const inspectRequest = (request) => {
+      const prior = inspectedRequests.get(request);
+      if (prior === true) return;
+      if (prior instanceof BrowserContractError) throw prior;
+      try {
+        const raw = request.url();
+        if (!allowedRequest(raw, settings)) {
+          throw new BrowserContractError("network-boundary");
+        }
+        const parsed = new URL(raw);
+        if (
+          parsed.origin === settings.issuerOrigin &&
+          parsed.pathname === settings.authorizationPath
+        ) {
+          if (authorizationState !== undefined) {
+            throw new BrowserContractError("authorization-request");
+          }
+          authorizationState = validateAuthorizationUrl(raw, settings);
+        }
+        if (
+          parsed.origin === settings.appOrigin &&
+          parsed.pathname === "/auth/callback"
+        ) {
+          if (callbackSeen) throw new BrowserContractError("callback");
+          validateCallbackUrl(raw, settings, authorizationState);
+          callbackSeen = true;
+        }
+        inspectedRequests.set(request, true);
+      } catch (error) {
+        const failure =
+          error instanceof BrowserContractError
+            ? error
+            : new BrowserContractError("network-boundary");
+        inspectedRequests.set(request, failure);
+        routeError ??= failure;
+        throw failure;
+      }
+    };
+    // Playwright does not route the redirect targets of an intercepted request.
+    // Request events cover those hops; routing still aborts every routable
+    // request outside this closed browser contract.
+    requestListener = (request) => {
+      try {
+        inspectRequest(request);
+      } catch {}
+    };
+    page.on("request", requestListener);
     await atStage("browser-launch", () =>
       page.route("**/*", (route) => {
         const operation = (async () => {
-          const raw = route.request().url();
           try {
-            if (!allowedRequest(raw, settings)) {
-              throw new BrowserContractError("network-boundary");
-            }
-            const parsed = new URL(raw);
-            if (
-              parsed.origin === settings.issuerOrigin &&
-              parsed.pathname === settings.authorizationPath
-            ) {
-              if (authorizationState !== undefined) {
-                throw new BrowserContractError("authorization-request");
-              }
-              authorizationState = validateAuthorizationUrl(raw, settings);
-            }
-            if (
-              parsed.origin === settings.appOrigin &&
-              parsed.pathname === "/auth/callback"
-            ) {
-              if (callbackSeen) throw new BrowserContractError("callback");
-              validateCallbackUrl(raw, settings, authorizationState);
-              callbackSeen = true;
-            }
+            inspectRequest(route.request());
             await route.continue();
           } catch (error) {
             const failure = error instanceof BrowserContractError
@@ -267,6 +295,13 @@ export async function runBrowserAcceptance({
   } finally {
     if (password !== undefined) password.fill(0);
     let cleanupFailed = false;
+    if (requestListener !== undefined && typeof page?.off === "function") {
+      try {
+        page.off("request", requestListener);
+      } catch {
+        cleanupFailed = true;
+      }
+    }
     if (typeof page?.unrouteAll === "function") {
       cleanupFailed = !(await boundedCleanup(
         () => page.unrouteAll({ behavior: "ignoreErrors" }),
@@ -288,7 +323,7 @@ export async function runBrowserAcceptance({
         () => Promise.allSettled([...pendingRoutes]),
       )) || cleanupFailed;
     }
-    if (primaryError === undefined && routeError !== undefined) primaryError = routeError;
+    if (routeError !== undefined) primaryError = routeError;
     if (primaryError === undefined && cleanupFailed) {
       primaryError = new BrowserContractError("browser-cleanup");
     }

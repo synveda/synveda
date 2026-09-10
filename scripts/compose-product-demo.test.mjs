@@ -44,7 +44,6 @@ const RESOURCE_NAMES = [
   "current_session",
   "current_context",
   "release_skill",
-  "release_skill_validation",
 ];
 const STATUS_NAMES = [
   "workspace",
@@ -57,7 +56,6 @@ const STATUS_NAMES = [
   "private_knowledge",
   "reuse_context",
   "current_context",
-  "release_skill_validation",
 ];
 
 const uuid = (value) =>
@@ -236,6 +234,7 @@ function receipt() {
         private_knowledge_id: ids.privateKnowledge,
         inspected_count: 1,
         private_knowledge_absent: true,
+        evidence_kind: "owner_scope",
       },
       current_session: session(ids.currentSession, "bob-subject"),
       current_context: context(
@@ -339,6 +338,48 @@ function status() {
   };
 }
 
+function pendingPrivateReceipt() {
+  const value = receipt();
+  delete value.resources.private_knowledge.revision_id;
+  value.resources.private_knowledge.change_id = uuid(28);
+  value.resources.private_knowledge.outcome = "pending_review";
+  value.resources.private_isolation.evidence_kind =
+    "pending_review_not_published";
+  value.notices = [
+    "private quick-test preference remains pending in Advanced Reviews; the demo does not claim it as active Knowledge",
+  ];
+  return value;
+}
+
+function pendingPrivateStatus() {
+  const value = status();
+  value.receipt = pendingPrivateReceipt();
+  value.live.private_knowledge = {
+    status: "unavailable",
+    reason: "not published",
+  };
+  return value;
+}
+
+function pendingSkillReceipt(value = receipt()) {
+  value.resources.release_skill.outcome = "pending_review";
+  value.resources.release_skill.change_id = uuid(29);
+  delete value.resources.release_skill_validation;
+  value.notices ??= [];
+  value.notices.push(
+    "Release Skill installation is in Advanced > Reviews; no unreviewed version was advertised or pinned",
+    "Release Skill validation remains pending until its governed version is applied",
+  );
+  return value;
+}
+
+function governedStatus() {
+  const value = pendingPrivateStatus();
+  value.receipt = pendingSkillReceipt(value.receipt);
+  delete value.live.release_skill_validation;
+  return value;
+}
+
 function fakeChild() {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
@@ -407,6 +448,11 @@ test("CLI login and loopback handoff URLs are exact and secret-free", () => {
 test("the product receipt requires the real team, Capture, Knowledge and reuse legs", () => {
   assert.equal(validateDemoReceipt(receipt()), true);
   assert.equal(validateDemoStatus(status()), true);
+  assert.equal(validateDemoReceipt(pendingPrivateReceipt()), true);
+  assert.equal(validateDemoStatus(pendingPrivateStatus()), true);
+  assert.equal(validateDemoReceipt(pendingSkillReceipt()), true);
+  assert.equal(validateDemoReceipt(governedStatus().receipt), true);
+  assert.equal(validateDemoStatus(governedStatus()), true);
   for (const name of RESOURCE_NAMES) {
     const mutant = receipt();
     delete mutant.resources[name];
@@ -427,9 +473,33 @@ test("the product receipt requires the real team, Capture, Knowledge and reuse l
     },
     (value) => { value.resources.reuse_context.rendered = "test-fast"; },
     (value) => { value.resources.private_isolation.private_knowledge_absent = false; },
+    (value) => { value.resources.private_isolation.evidence_kind = "pending_review_not_published"; },
     (value) => { value.resources.release_skill_validation.state = "dead_lettered"; },
   ]) {
     const mutant = receipt();
+    mutate(mutant);
+    refuse(() => validateDemoReceipt(mutant), "product-demo");
+  }
+
+  for (const mutate of [
+    (value) => { value.notices = []; },
+    (value) => {
+      value.resources.release_skill_validation =
+        receipt().resources.release_skill_validation;
+    },
+    (value) => { delete value.resources.release_skill.change_id; },
+  ]) {
+    const mutant = pendingSkillReceipt();
+    mutate(mutant);
+    refuse(() => validateDemoReceipt(mutant), "product-demo");
+  }
+
+  for (const mutate of [
+    (value) => { value.notices = []; },
+    (value) => { value.resources.private_knowledge.revision_id = uuid(29); },
+    (value) => { value.resources.private_isolation.evidence_kind = "owner_scope"; },
+  ]) {
+    const mutant = pendingPrivateReceipt();
     mutate(mutant);
     refuse(() => validateDemoReceipt(mutant), "product-demo");
   }

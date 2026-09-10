@@ -134,6 +134,13 @@ The reference graph applies:
 - init/signal handling and bounded shutdown;
 - no privileged containers and no Docker socket mount.
 
+The browser acceptance fixture also drops every capability. Its reviewed
+Playwright seccomp profile differs from the pinned upstream profile only by an
+unconditional `chroot` allowance, which Chromium needs after entering its
+unprivileged user namespace when `CAP_SYS_CHROOT` has already been dropped. An
+exact digest/rule checker and the colocated notice bind that exception before
+Compose starts the fixture.
+
 Only Caddy publishes public ports. The optional Prometheus operator UI binds to
 host loopback only. PostgreSQL, the Apalis queue, gateway/worker/Apalis-worker
 metrics and health, Keycloak management, OTLP receivers and recovery services

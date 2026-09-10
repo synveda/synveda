@@ -31,7 +31,7 @@ score for the implemented code.
 
 | Scope | Status | Exit evidence | Limit |
 |---|---|---|---|
-| Development Compose | Not ready | Clean-volume browser login and product lifecycle on a supported Docker Desktop platform | Explicit loopback HTTP; no reference security claim |
+| Development Compose | Not ready | Repeat the clean-volume browser/product lifecycle on Linux and Docker Desktop; one macOS/OrbStack run passed | Explicit loopback HTTP; no reference security claim |
 | Single-host reference | Not ready | Linux and desktop HTTPS runs with the restart matrix, joint logical database/key restore, Apalis canary and the implemented Operations view | One host; planned interruption; no HA, owned RPO/RTO or DR |
 | External OIDC | Not assessed | Same product image boots against a named conformant provider | Configuration-only evidence is not provider support |
 | Hosted promotion | Not ready | Published artifacts, off-host recovery, custody, abuse controls and runbooks | Compose evidence is necessary, not sufficient |
@@ -40,15 +40,20 @@ The current canonical graph has a proxy-only public edge, separate Synveda and
 Keycloak databases/roles, production-mode Keycloak, containerized gateway and
 worker, mounted secret files and a private OpenTelemetry Collector. Static
 Compose checks cover the provider/runtime/OTLP matrix plus optional
-observability and Apalis renders. The direct acceptance command,
-fixed restart matrix and two-principal public-API team scenario are implemented
-and deterministically tested, but have not run against a supported Docker host.
-Static evidence does not prove DNS,
-TLS, browser login, live database recovery or a running service.
+observability and Apalis renders. The direct acceptance command, fixed restart
+matrix and two-principal public-API team scenario are implemented and
+deterministically tested. On 2026-09-10, the clean development path also passed
+on macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0 and Compose 5.1.2,
+including PKCE browser login, worker Capture completion, exact issuer recovery
+after PostgreSQL/Keycloak restarts and persisted receipt verification. A
+subsequent canonical down/up retained the exact PostgreSQL volume and generated
+key set. That one host run does not prove reference TLS, Linux or Docker Desktop
+support, live database recovery or a published installation.
 
 ADR-0105 removed the clean-engine/Colima simulation because it supplied no live
-Docker evidence. Direct Compose/browser, restart and logical recovery
-acceptance now await Linux and Docker Desktop runs. The logical database pair,
+Docker evidence. Direct Compose/browser and native restart acceptance still
+await repetition on Linux and Docker Desktop; logical recovery remains live-
+unproved on every supported host class. The logical database pair,
 separate KMS/Keycloak recovery set and fresh private restore are implemented
 and deterministically tested. The same-schema product-image upgrade lifecycle
 and its read-only compatibility refusal are also implemented and

@@ -192,7 +192,9 @@ async function driveCliBrowser({
   let handoffSeen = false;
   let routeError;
   let primaryError;
+  let requestListener;
   const pendingRoutes = new Set();
+  const inspectedRequests = new WeakMap();
   try {
     browser = await chromium.launch({
       headless: true,
@@ -217,39 +219,65 @@ async function driveCliBrowser({
       viewport: { width: 1280, height: 800 },
     });
     page = await context.newPage();
+    const inspectRequest = (request) => {
+      const prior = inspectedRequests.get(request);
+      if (prior === true) return;
+      if (prior instanceof BrowserContractError) throw prior;
+      try {
+        const raw = request.url();
+        if (!allowedCliRequest(raw, settings, login)) {
+          throw failure("network-boundary");
+        }
+        const parsed = new URL(raw);
+        if (
+          parsed.origin === settings.issuerOrigin &&
+          parsed.pathname === settings.authorizationPath
+        ) {
+          if (authorizationState !== undefined) {
+            throw failure("authorization-request");
+          }
+          authorizationState = validateAuthorizationUrl(raw, settings);
+        }
+        if (
+          parsed.origin === settings.appOrigin &&
+          parsed.pathname === "/auth/callback"
+        ) {
+          if (callbackSeen) throw failure("callback");
+          validateCallbackUrl(raw, settings, authorizationState);
+          callbackSeen = true;
+        }
+        if (
+          parsed.origin === login.redirectOrigin &&
+          `${parsed.origin}${parsed.pathname}` === login.redirect
+        ) {
+          if (handoffSeen) throw failure("cli-handoff");
+          validateCliHandoffUrl(raw, login);
+          handoffSeen = true;
+        }
+        inspectedRequests.set(request, true);
+      } catch (error) {
+        const closed =
+          error instanceof BrowserContractError
+            ? error
+            : failure("network-boundary");
+        inspectedRequests.set(request, closed);
+        routeError ??= closed;
+        throw closed;
+      }
+    };
+    // Redirect targets bypass Playwright route handlers. Observe every request
+    // to validate those hops, while routing aborts any routable request outside
+    // the closed app, issuer and exact loopback-handoff contract.
+    requestListener = (request) => {
+      try {
+        inspectRequest(request);
+      } catch {}
+    };
+    page.on("request", requestListener);
     await page.route("**/*", (route) => {
       const operation = (async () => {
-        const raw = route.request().url();
         try {
-          if (!allowedCliRequest(raw, settings, login)) {
-            throw failure("network-boundary");
-          }
-          const parsed = new URL(raw);
-          if (
-            parsed.origin === settings.issuerOrigin &&
-            parsed.pathname === settings.authorizationPath
-          ) {
-            if (authorizationState !== undefined) {
-              throw failure("authorization-request");
-            }
-            authorizationState = validateAuthorizationUrl(raw, settings);
-          }
-          if (
-            parsed.origin === settings.appOrigin &&
-            parsed.pathname === "/auth/callback"
-          ) {
-            if (callbackSeen) throw failure("callback");
-            validateCallbackUrl(raw, settings, authorizationState);
-            callbackSeen = true;
-          }
-          if (
-            parsed.origin === login.redirectOrigin &&
-            `${parsed.origin}${parsed.pathname}` === login.redirect
-          ) {
-            if (handoffSeen) throw failure("cli-handoff");
-            validateCliHandoffUrl(raw, login);
-            handoffSeen = true;
-          }
+          inspectRequest(route.request());
           await route.continue();
         } catch (error) {
           const closed =
@@ -296,6 +324,13 @@ async function driveCliBrowser({
   } finally {
     password.fill(0);
     let cleanupFailed = false;
+    if (requestListener !== undefined && typeof page?.off === "function") {
+      try {
+        page.off("request", requestListener);
+      } catch {
+        cleanupFailed = true;
+      }
+    }
     if (typeof page?.unrouteAll === "function") {
       cleanupFailed =
         !(await boundedCleanup(() =>
@@ -321,9 +356,7 @@ async function driveCliBrowser({
         !(await boundedCleanup(() => Promise.allSettled([...pendingRoutes]))) ||
         cleanupFailed;
     }
-    if (primaryError === undefined && routeError !== undefined) {
-      primaryError = routeError;
-    }
+    if (routeError !== undefined) primaryError = routeError;
     if (primaryError === undefined && cleanupFailed) {
       primaryError = failure("browser-cleanup");
     }

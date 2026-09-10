@@ -28,7 +28,6 @@ const REQUIRED_RESOURCES = Object.freeze([
   "current_session",
   "current_context",
   "release_skill",
-  "release_skill_validation",
 ]);
 const STATUS_RESOURCES = Object.freeze([
   "workspace",
@@ -38,10 +37,8 @@ const STATUS_RESOURCES = Object.freeze([
   "reuse_session",
   "current_session",
   "webhook_knowledge",
-  "private_knowledge",
   "reuse_context",
   "current_context",
-  "release_skill_validation",
 ]);
 
 function refuse(stage) {
@@ -201,6 +198,17 @@ function appliedKnowledge(value) {
   );
 }
 
+function pendingKnowledge(value) {
+  return (
+    object(value) &&
+    uuid(value.id) &&
+    uuid(value.candidate_id) &&
+    uuid(value.change_id) &&
+    value.revision_id === undefined &&
+    value.outcome === "pending_review"
+  );
+}
+
 function completedContext(value, receipt, session) {
   const { workspace, project } = receipt.resources;
   return (
@@ -315,9 +323,16 @@ export function validateDemoReceipt(value) {
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
   const webhookCandidate = byId.get(webhook.candidate_id);
   const privateCandidate = byId.get(privateKnowledge.candidate_id);
+  const privateApplied = appliedKnowledge(privateKnowledge);
+  const privatePending = pendingKnowledge(privateKnowledge);
   if (
     !appliedKnowledge(webhook) ||
-    !appliedKnowledge(privateKnowledge) ||
+    (!privateApplied && !privatePending) ||
+    (privatePending &&
+      (!Array.isArray(value.notices) ||
+        !value.notices.includes(
+          "private quick-test preference remains pending in Advanced Reviews; the demo does not claim it as active Knowledge",
+        ))) ||
     !object(webhookCandidate) ||
     webhookCandidate.proposed_scope_id !== project.scope_id ||
     webhookCandidate.proposed_project_id !== project.id ||
@@ -346,28 +361,45 @@ export function validateDemoReceipt(value) {
     isolation.private_knowledge_id !== privateKnowledge.id ||
     !Number.isInteger(isolation.inspected_count) ||
     isolation.inspected_count < 0 ||
-    isolation.private_knowledge_absent !== true
+    isolation.private_knowledge_absent !== true ||
+    isolation.evidence_kind !==
+      (privatePending ? "pending_review_not_published" : "owner_scope")
   ) refuse("product-demo");
 
   const skill = resources.release_skill;
   const validation = resources.release_skill_validation;
+  const skillApplied = object(skill) && skill.outcome === "applied";
+  const skillPending =
+    object(skill) && skill.outcome === "pending_review" && uuid(skill.change_id);
   if (
-    !object(skill) ||
-    skill.outcome !== "applied" ||
+    (!skillApplied && !skillPending) ||
     !uuid(skill.skill_id) ||
-    !uuid(skill.version_id) ||
-    !object(validation) ||
-    !uuid(validation.id) ||
-    validation.kind !== "skill_validation" ||
-    validation.operation_version !== 1 ||
-    validation.state !== "succeeded" ||
-    validation.skill_id !== skill.skill_id ||
-    validation.skill_version_id !== skill.version_id ||
-    validation.progress_percent !== 100 ||
-    !Number.isInteger(validation.attempts) ||
-    validation.attempts < 1 ||
-    !uuid(validation.test_run_id) ||
-    validation.error_code !== undefined
+    !uuid(skill.version_id)
+  ) refuse("product-demo");
+  if (skillApplied) {
+    if (
+      !object(validation) ||
+      !uuid(validation.id) ||
+      validation.kind !== "skill_validation" ||
+      validation.operation_version !== 1 ||
+      validation.state !== "succeeded" ||
+      validation.skill_id !== skill.skill_id ||
+      validation.skill_version_id !== skill.version_id ||
+      validation.progress_percent !== 100 ||
+      !Number.isInteger(validation.attempts) ||
+      validation.attempts < 1 ||
+      !uuid(validation.test_run_id) ||
+      validation.error_code !== undefined
+    ) refuse("product-demo");
+  } else if (
+    validation !== undefined ||
+    !Array.isArray(value.notices) ||
+    !value.notices.includes(
+      "Release Skill installation is in Advanced > Reviews; no unreviewed version was advertised or pinned",
+    ) ||
+    !value.notices.includes(
+      "Release Skill validation remains pending until its governed version is applied",
+    )
   ) refuse("product-demo");
   return true;
 }
@@ -385,6 +417,19 @@ export function validateDemoStatus(value) {
   ) refuse("product-status");
 
   const resources = value.receipt.resources;
+  const privatePending = pendingKnowledge(resources.private_knowledge);
+  const skillPending = resources.release_skill.outcome === "pending_review";
+  if (
+    !object(value.live.private_knowledge) ||
+    value.live.private_knowledge.status !==
+      (privatePending ? "unavailable" : "visible")
+  ) refuse("product-status");
+  if (
+    (skillPending && value.live.release_skill_validation !== undefined) ||
+    (!skillPending &&
+      (!object(value.live.release_skill_validation) ||
+        value.live.release_skill_validation.status !== "visible"))
+  ) refuse("product-status");
   const visible = (name) => value.live[name].value;
   const workspace = visible("workspace");
   const project = visible("project");
@@ -392,7 +437,6 @@ export function validateDemoStatus(value) {
   const firstCapture = visible("first_capture");
   const reuseSession = visible("reuse_session");
   const currentSession = visible("current_session");
-  const skillValidation = visible("release_skill_validation");
   if (
     workspace.id !== resources.workspace.id ||
     workspace.status !== "active" ||
@@ -407,11 +451,16 @@ export function validateDemoStatus(value) {
     currentSession.status !== "ended" ||
     firstCapture.id !== resources.first_capture.id ||
     firstCapture.state !== "completed" ||
-    firstCapture.candidate_count !== resources.first_capture.candidate_count ||
-    skillValidation.id !== resources.release_skill_validation.id ||
-    skillValidation.state !== "succeeded" ||
-    skillValidation.test_run_id !== resources.release_skill_validation.test_run_id
+    firstCapture.candidate_count !== resources.first_capture.candidate_count
   ) refuse("product-status");
+  if (!skillPending) {
+    const skillValidation = visible("release_skill_validation");
+    if (
+      skillValidation.id !== resources.release_skill_validation.id ||
+      skillValidation.state !== "succeeded" ||
+      skillValidation.test_run_id !== resources.release_skill_validation.test_run_id
+    ) refuse("product-status");
+  }
 
   const assertLiveKnowledge = (name, owner) => {
     const handle = resources[name];
@@ -430,7 +479,9 @@ export function validateDemoStatus(value) {
     ) refuse("product-status");
   };
   assertLiveKnowledge("webhook_knowledge", undefined);
-  assertLiveKnowledge("private_knowledge", value.receipt.actor_subject);
+  if (!privatePending) {
+    assertLiveKnowledge("private_knowledge", value.receipt.actor_subject);
+  }
 
   const reuse = visible("reuse_context");
   const current = visible("current_context");

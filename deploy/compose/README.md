@@ -7,11 +7,13 @@ OpenTelemetry Collector. Optional settings add a bounded local Prometheus
 operator view, external trace export or one experimental Apalis-backed
 Skill-validation worker.
 
-It supports development and reference configuration. Logical backup, isolated
-restore and same-schema product upgrade commands are implemented, but live
-browser, reference-HTTPS, recovery and upgrade evidence is still required
-before this implementation can be called validated for controlled single-host use. It is not an HA,
-disaster-recovery, hosted-SaaS or enterprise-certification claim.
+It supports development and reference configuration. A clean development
+acceptance passed on macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0 and
+Compose 5.1.2 on 2026-09-10. Linux and Docker Desktop development runs,
+reference HTTPS, recovery, upgrade and Apalis live evidence are still required
+before this implementation can be called validated for controlled single-host
+use. It is not an HA, disaster-recovery, hosted-SaaS or
+enterprise-certification claim.
 
 Use deploy/compose/scripts/compose.sh through the Make targets. Do not assemble
 Compose fragments manually.
@@ -20,9 +22,11 @@ Compose fragments manually.
 
 - Docker Engine 28 or newer, reached through its local Unix socket;
 - Docker Compose 2.33.1 or newer;
+- for development source builds, Docker Buildx with the running embedded
+  `default` builder and local `docker` driver;
 - Node.js 22 or newer;
-- OpenSSL;
-- GNU Make;
+- OpenSSL when generating bundled-provider secrets or running restore;
+- GNU Make for the documented targets;
 - a non-root Unix operator.
 
 Hosts install/remove additionally requires root-owned, non-writable,
@@ -119,6 +123,16 @@ Development with bundled PostgreSQL and bundled Keycloak is the default:
     make compose-restart-gateway
     make compose-down
 
+For a ready-to-use local demo, select the existing demo profile before start:
+
+    export SYNVEDA_COMPOSE_PROFILES=demo
+    make compose-up
+
+Successful startup prints the actual `/console/` browser URL, the two demo
+account names, the protected password-file paths, and exact status, bounded-log
+and stop instructions. It never prints a password. Keep the same `SYNVEDA_*`
+selectors for every later lifecycle command.
+
 compose-up:
 
 1. validates the host, Docker socket, network range and inputs;
@@ -141,12 +155,18 @@ routes. It is not a browser-login test.
 acceptance suffix and private `/24`, runs the real browser login, then uses two
 real CLI login profiles to seed the existing public-API PulseBoard team
 scenario. This includes Alice issuing and Bob redeeming a one-time workspace
-invitation and one durable non-executing Skill validation. A second start
-reopens and checks the active receipt; it does not repeat the mutations. The
-gate then restarts PostgreSQL, Keycloak, Collector, worker, gateway and proxy
-one at a time, runs the full smoke after each, repeats browser login and
-verifies the existing receipt against live product rows. One project lock and
-one bounded deadline cover the run. The identity admission, operation and
+invitation, worker-completed Capture, governed Knowledge decisions and a
+non-executing Skill decision. Under the current strict policy, private
+Knowledge and the Skill honestly remain `pending_review`; no revision or Skill
+validation is advertised as applied. The witness also accepts and verifies the
+applied path when policy permits it. A second start reopens and checks the
+active receipt; it does not repeat the mutations. The gate then restarts
+PostgreSQL, Keycloak, Collector, worker, gateway and proxy one at a time, runs
+the full smoke after each, repeats browser login and verifies the existing
+receipt against live product rows. Transient network or HTTP 5xx recovery is
+re-probed for at most 180 seconds after each restart; an exposed refusal route,
+wrong issuer document or other contract failure is immediate. One project lock
+and one bounded deadline cover the run. The identity admission, Capture and
 PulseBoard rows are persisted-state witnesses across the matrix.
 Success leaves the stack running for inspection and later recovery/upgrade
 gates; reset remains separately confirmed.
@@ -266,14 +286,17 @@ has access to the other product's database.
 
 ## Demo and browser acceptance
 
-The demo profile adds two short-lived, convergence-owned users:
+The demo profile adds two short-lived, convergence-owned users,
+`synveda-demo-admin` and `synveda-demo-member`:
 
     SYNVEDA_COMPOSE_PROFILES=demo make compose-up
     SYNVEDA_COMPOSE_PROFILES=demo make compose-smoke
 
-Their passwords are generated into project-scoped secret files and should be
-read only through a local password-input mechanism. The administrator belongs
-to synveda-admins; the member receives no Keycloak domain role.
+Their passwords are generated into the mode-0600
+`keycloak_demo_admin_password` and `keycloak_demo_member_password` files below
+the printed mode-0700 project secret directory. Read them only through a local
+password-input mechanism. The administrator belongs to `synveda-admins`; the
+member receives no Keycloak domain role.
 
 The existing isolated browser acceptance starts from an explicitly fresh,
 suffixed project. If the ordinary development block is installed, stop that
@@ -296,9 +319,14 @@ Then select and install the acceptance project:
 
 It exercises real authorization-code login, PKCE S256, issuer/audience claims
 and first-administrator admission through the same proxy authority used by
-containers. It requires a real Docker Engine; deterministic fixture tests are
-not live evidence. After inspecting the result, stop and reset that exact
-project, then remove its owned hosts block:
+containers. Redirect hops are validated from Playwright request events while
+routable foreign requests are aborted. The fixture keeps every capability
+dropped and uses the reviewed Playwright seccomp profile with one documented
+local change: `chroot` is unconditional so Chromium can enter its unprivileged
+sandbox after Docker has dropped `CAP_SYS_CHROOT`. The profile bytes, digest
+and notice are checked before use. It requires a real Docker Engine;
+deterministic fixture tests are not live evidence. After inspecting the result,
+stop and reset that exact project, then remove its owned hosts block:
 
     SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance make compose-down
     SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance \
@@ -633,10 +661,14 @@ still removed.
 ## Current validation gaps
 
 The Docker reference implementation covers the source,
-deterministic-contract and packaged-release boundaries. It still requires live
-execution of clean development and reference HTTPS installs, the
-restart/Apalis matrix, paired logical backup and isolated restore, and
-same-schema product upgrade on Linux and one Docker Desktop platform.
+deterministic-contract and packaged-release boundaries. The 2026-09-10
+macOS/OrbStack clean-volume development run proved packaged-console login,
+public-API product use, worker Capture completion, the native restart matrix,
+persisted receipt verification and a non-destructive down/up that retained the
+product-data volume and generated key set. Confirmed reset separately retained
+the project keys. It still requires repetition on Linux and Docker Desktop,
+reference HTTPS, live Apalis execution, paired logical backup and isolated
+restore, and the same-schema product upgrade.
 
 A general dashboard platform, ACME, HA, Helm promotion, signed provenance,
 S3/WAL-PITR recovery and enterprise controls remain later production work.

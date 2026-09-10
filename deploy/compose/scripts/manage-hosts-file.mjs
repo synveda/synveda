@@ -384,6 +384,42 @@ function readSnapshot(path, limit, expectedUid, expectedMode, label) {
   }
 }
 
+function readWritableSnapshot(path, limit, expectedUid, expectedMode, label, hooks) {
+  const before = lstatIfPresent(path);
+  if (before === undefined || before.isSymbolicLink()) refuse(`${label} was unavailable`, 69);
+  validateRegular(before, expectedUid, expectedMode, label);
+  let fd;
+  try {
+    fd = openSync(path, O_RDWR | O_NOFOLLOW);
+    // macOS may attach system provenance metadata when a protected file is
+    // first opened for mutation. Snapshot through that descriptor so the
+    // resulting ctime is authoritative; the later mutation still rechecks
+    // the exact inode, bytes and complete metadata before writing.
+    hooks.afterWritableSnapshotOpen?.();
+    const opened = fstatSync(fd, { bigint: true });
+    validateRegular(opened, expectedUid, expectedMode, label);
+    if (before.dev !== opened.dev || before.ino !== opened.ino) {
+      refuse(`${label} changed during writable inspection`, 75);
+    }
+    if (opened.size > BigInt(limit)) refuse(`${label} size was refused`);
+    const bytes = readDescriptor(fd, limit);
+    const after = fstatSync(fd, { bigint: true });
+    if (!sameIdentity(statIdentity(opened), statIdentity(after)) || after.size !== BigInt(bytes.length)) {
+      refuse(`${label} changed during writable inspection`, 75);
+    }
+    return Object.freeze({ bytes, stat: statIdentity(after) });
+  } catch (error) {
+    if (error instanceof HostsFileError) throw error;
+    refuse(`${label} writability was refused`, 70);
+  } finally {
+    if (fd !== undefined) {
+      const closing = fd;
+      fd = undefined;
+      closeDescriptor(closing, label);
+    }
+  }
+}
+
 function resolveManagedPaths(targetPath, expectedUid, aclInspector) {
   let parent;
   try {
@@ -1153,21 +1189,24 @@ function targetMatchesRecord(target, managed, selection, allowInterruptedPrefix 
 }
 
 function installMapping(paths, selection, expectedUid, expectedGid, lock, hooks) {
-  let target = readSnapshot(paths.target, TARGET_LIMIT, expectedUid, TARGET_MODE, "hosts file");
+  let target = readWritableSnapshot(
+    paths.target,
+    TARGET_LIMIT,
+    expectedUid,
+    TARGET_MODE,
+    "hosts file",
+    hooks,
+  );
   const existing = inspectSidecars(paths, selection, expectedUid, true);
   if (existing === undefined) {
     if (classifyHostsBytes(target.bytes, selection).state !== "absent") {
       refuse("unowned hosts mapping was refused");
     }
-    assertTargetWritable(paths, target, expectedUid, hooks);
   } else {
     const existingMatch = targetMatchesRecord(target, existing, selection, true);
     if (existingMatch.state === "installed" && existing.public !== undefined) {
       syncTarget(paths, target, expectedUid, hooks);
       return "installed";
-    }
-    if (existingMatch.state !== "installed") {
-      assertTargetWritable(paths, target, expectedUid, hooks);
     }
   }
   const managed = prepareManagedState(

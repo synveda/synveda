@@ -9,6 +9,7 @@ import {
   referenceHostTrustFindings,
   runtimeStateFindings,
   waitForLocalMetrics,
+  waitForPublicEndpoints,
 } from "../deploy/compose/scripts/check-runtime-smoke.mjs";
 
 const hostTrustEnvironment = [
@@ -163,6 +164,91 @@ test("runtime URL schemes cannot weaken the selected deployment mode", () => {
     ),
     undefined,
   );
+});
+
+test("public readiness wait is explicit and bounded", () => {
+  const args = smokeArguments(
+    "development",
+    "http://app.synveda.test:8080",
+    "http://auth.synveda.test:8080/realms/synveda",
+  );
+  assert.equal(
+    parseArguments([...args, "--readiness-wait-ms", "300000"])[
+      "readiness-wait-ms"
+    ],
+    300000,
+  );
+  for (const value of ["-1", "01", "300001", "unbounded"]) {
+    assert.equal(
+      parseArguments([...args, "--readiness-wait-ms", value]),
+      undefined,
+      value,
+    );
+  }
+});
+
+test("public readiness retries only transient server unavailability", async () => {
+  const selection = parseArguments(
+    smokeArguments(
+      "development",
+      "http://app.synveda.test:8080",
+      "http://auth.synveda.test:8080/realms/synveda",
+    ),
+  );
+  const originalFetch = globalThis.fetch;
+  let discoveryAttempts = 0;
+  globalThis.fetch = async (source) => {
+    const url = new URL(source);
+    if (
+      url.pathname.endsWith("/.well-known/openid-configuration") &&
+      url.pathname.startsWith("/realms/synveda/")
+    ) {
+      discoveryAttempts += 1;
+      if (discoveryAttempts === 1) return new Response("", { status: 503 });
+      return new Response(JSON.stringify({ issuer: selection.issuer }), {
+        status: 200,
+      });
+    }
+    if (["/healthz", "/readyz", "/console/"].includes(url.pathname)) {
+      return new Response("", { status: 200 });
+    }
+    return new Response("", { status: 404 });
+  };
+  try {
+    await waitForPublicEndpoints(selection, 100, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(discoveryAttempts, 2);
+});
+
+test("public readiness never retries an exposed refusal route", async () => {
+  const selection = parseArguments(
+    smokeArguments(
+      "development",
+      "http://app.synveda.test:8080",
+      "http://auth.synveda.test:8080/realms/synveda",
+    ),
+  );
+  const originalFetch = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async (source) => {
+    requests += 1;
+    const url = new URL(source);
+    if (url.pathname === "/metrics") {
+      return new Response("exposed", { status: 200 });
+    }
+    return new Response("", { status: 200 });
+  };
+  try {
+    await assert.rejects(
+      waitForPublicEndpoints(selection, 100, 1),
+      /public metrics refusal probe failed/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requests, 4);
 });
 
 test("Compose ps accepts array and newline-delimited JSON", () => {

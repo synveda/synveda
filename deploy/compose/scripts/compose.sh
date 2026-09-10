@@ -73,6 +73,8 @@ lifecycle_timeout=${SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS:-$lifecycle_defaul
 # postflight margins rather than handing Docker the whole lifecycle budget.
 restart_postflight_reserve_seconds=40
 restart_orchestration_margin_seconds=5
+restart_public_readiness_seconds=180
+runtime_smoke_readiness_wait_ms=0
 
 case "$lifecycle_timeout" in
     ''|0|0*|*[!0-9]*)
@@ -952,6 +954,40 @@ if [ "$oidc_mode" = external ]; then
     caddy_identity_config=$compose_dir/configs/caddy/identity.external.caddy
 fi
 
+print_start_preflight() {
+    echo "Compose preflight for $project"
+    required_host="non-root macOS or Linux; Docker Engine 28.0.0+ on a local Unix socket; Docker Compose 2.33.1+; Node.js 22+"
+    if [ "$runtime" = development ]; then
+        required_host="$required_host; Docker Buildx with the running embedded default builder and local docker driver"
+    fi
+    if [ "$postgres_mode" = bundled ]; then
+        required_host="$required_host; OpenSSL"
+    fi
+    echo "required host: $required_host; GNU Make for Make targets"
+    case "$runtime" in
+        development)
+            echo "required public binding: 127.0.0.1:$public_port/tcp"
+            if [ "$oidc_mode" = bundled ]; then
+                echo "required hostname mapping: 127.0.0.1 $app_host $auth_host"
+            else
+                echo "required hostname mapping: 127.0.0.1 $app_host"
+            fi
+            ;;
+        reference)
+            echo "required public bindings: operator interface ports 80/tcp and 443/tcp"
+            if [ "$oidc_mode" = bundled ]; then
+                echo "required operator DNS: $app_host and $auth_host"
+            else
+                echo "required operator DNS: $app_host; external issuer DNS and trust are operator-managed"
+            fi
+            ;;
+    esac
+}
+
+case "$action" in
+    up|acceptance) print_start_preflight ;;
+esac
+
 run_hosts_manager() {
     hosts_manager_action=$1
     shift
@@ -1110,7 +1146,16 @@ fi
 
 run_hosts_ownership_preflight() {
     if [ "$runtime" = development ]; then
-        run_hosts_manager status --expect installed
+        hosts_status=0
+        run_hosts_manager status --expect installed || hosts_status=$?
+        if [ "$hosts_status" -ne 0 ]; then
+            echo "compose: development hostname prerequisite failed for $project" >&2
+            echo "compose: with the same selectors, inspect make compose-hosts-status and make compose-hosts-plan" >&2
+            echo "compose: if the mapping is absent, install only the reviewed block with:" >&2
+            echo "compose: SYNVEDA_CONFIRM_HOSTS_INSTALL=$(hosts_confirmation install) make compose-hosts-install" >&2
+            echo "compose: flush the resolver cache, then run make compose-resolver-check" >&2
+            return "$hosts_status"
+        fi
     fi
 }
 
@@ -2360,12 +2405,31 @@ run_runtime_smoke() {
     if [ "$observability_profile" = true ]; then
         set -- "$@" --prometheus-url "http://127.0.0.1:$prometheus_port"
     fi
+    if [ "$runtime_smoke_readiness_wait_ms" -gt 0 ]; then
+        set -- "$@" --readiness-wait-ms "$runtime_smoke_readiness_wait_ms"
+    fi
     run_bounded "$lifecycle_timeout" "$node_runner" "$@" || runtime_smoke_status=$?
     if ! rm -f -- "$status_file"; then
         [ "$runtime_smoke_status" -ne 0 ] || runtime_smoke_status=70
     fi
     status_file=
     return "$runtime_smoke_status"
+}
+
+print_operator_summary() {
+    echo "browser URL: $public_app_url/console/"
+    if [ "$demo_profile" = true ]; then
+        echo "login accounts: synveda-demo-admin, synveda-demo-member"
+        echo "administrator password file: $secret_dir/keycloak_demo_admin_password"
+        echo "member password file: $secret_dir/keycloak_demo_member_password"
+    else
+        echo "login accounts: no demo accounts selected; use SYNVEDA_COMPOSE_PROFILES=demo for the local demo identities"
+        echo "credential directory: $secret_dir"
+    fi
+    echo "status: with the same SYNVEDA_* selectors, run make compose-smoke"
+    echo "gateway logs: docker logs --tail 200 $project-gateway-1"
+    echo "worker logs: docker logs --tail 200 $project-worker-1"
+    echo "stop: with the same SYNVEDA_* selectors, run make compose-down"
 }
 
 wait_for_browser_acceptance() {
@@ -2504,6 +2568,7 @@ restart_selected_service() {
     restart_required_seconds=$((
         restart_runner_seconds +
         restart_health_runner_seconds +
+        restart_public_readiness_seconds +
         restart_postflight_reserve_seconds +
         restart_orchestration_margin_seconds
     ))
@@ -2519,7 +2584,9 @@ restart_selected_service() {
     wait_for_restart_recovery "$@"
     prove_assets_converged
     run_resolver_preflight
+    runtime_smoke_readiness_wait_ms=$((restart_public_readiness_seconds * 1000))
     run_runtime_smoke "$@"
+    runtime_smoke_readiness_wait_ms=0
     capture_restart_container_identity "$@"
     [ "$restart_container_identity" = "$restart_container_identity_before" ] || {
         echo "compose: $restart_service_name container identity changed during restart" >&2
@@ -3023,6 +3090,7 @@ case "$action" in
     up)
         start_compose_graph "$@"
         echo "canonical Compose services converged for $project"
+        print_operator_summary
         ;;
     acceptance)
         start_compose_graph "$@"
@@ -3078,6 +3146,7 @@ case "$action" in
         rerun_browser_acceptance "$@"
         run_product_acceptance verify "$@"
         echo "canonical Compose acceptance passed for $project; services remain running"
+        print_operator_summary
         ;;
     backup)
         prepare_asset_contract "$@"

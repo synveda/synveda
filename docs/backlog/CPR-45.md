@@ -16,8 +16,9 @@ Synveda has one application runtime, schema and public API, but complete live
 evidence for a portable single-host installation is still missing. The
 canonical Compose graph, digest-bound reference archive, logical recovery,
 same-schema upgrade and experimental Apalis canary are implemented and covered
-by deterministic contracts. They have not all run together from an empty
-published installation on Linux and Docker Desktop.
+by deterministic contracts. Development acceptance has run from a clean volume
+on one macOS/OrbStack host; the complete set has not run from an empty published
+installation on Linux and Docker Desktop.
 
 Static configuration cannot prove that an operator can pull the artifacts,
 sign in through Keycloak, use the product, restart it, recover it and upgrade
@@ -103,10 +104,32 @@ The documentation audit consolidates source-checkout operation in
 beginner navigation through the root documentation index. It does not add live
 deployment evidence or change the remaining acceptance boundary.
 
+### Recorded development evidence
+
+On 2026-09-10, `make compose-acceptance` passed from a clean project volume on
+macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0 and Compose 5.1.2. The run
+validated and reused the project-scoped credentials, built and served the
+console assets from the product image, converged PostgreSQL schema epoch 3 and
+Keycloak, completed real PKCE browser login, and seeded the two-principal
+scenario through the public API. Capture completion witnessed worker activity.
+The fixed restart matrix then recovered public application and exact-issuer
+discovery readiness and verified the original receipt against live rows.
+A subsequent canonical down/up retained the exact PostgreSQL volume and left
+the stopped-state issuer and generated secret set byte-identical after start.
+Confirmed project reset was also exercised and retained the existing issuer,
+KMS key and demo credential files byte-for-byte.
+
+This is implementation evidence for one local VM-backed Engine, not Docker
+Desktop/Linux, reference HTTPS, recovery, upgrade, Apalis, installed-release or
+production evidence. Strict review policy left the private Knowledge and
+release Skill decisions pending; the witness preserved those governed outcomes
+instead of advertising unreviewed revisions or executing Skill validation.
+
 ### Remaining live acceptance
 
-1. Run clean development and reference HTTPS acceptance on Linux and Docker
-   Desktop, including exact issuer/browser login and the restart matrix.
+1. Repeat clean development acceptance on Linux and Docker Desktop, and run
+   reference HTTPS acceptance on both host classes, including exact
+   issuer/browser login and the restart matrix.
 2. Run logical backup and isolated restore with the recovered KMS key and
    post-restore Keycloak login on both supported host classes.
 3. Run the native and Apalis Skill-validation paths through duplicate,
