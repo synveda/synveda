@@ -3271,8 +3271,8 @@ export type MeView = {
      * grant reaches them at. Nothing here is derived from a plan, an edition
      * or a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that
      * scope, under that scope's own effective profile, by the same PDP the
-     * act itself will pass through. A personal deployment and an enterprise
-     * one differ in the rows this reads, never in the code that reads them.
+     * act itself will pass through. Configuration and policy bindings change
+     * the rows this reads, never the code that reads them.
      */
     anchors: AnchorCapabilities[];
     /**

@@ -12,7 +12,7 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-# The evaluator never provisions or migrates through the retained contributor
+# The evaluator never provisions or migrates through a persistent development
 # database. Its outer invocation enters the same fresh exact-role fixture as
 # `make db-test`; the inner invocation receives only role-scoped URL files.
 if [ "${SYNVEDA_EVAL_EXACT_DATABASE:-}" != 1 ]; then

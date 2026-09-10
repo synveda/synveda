@@ -50,7 +50,7 @@ export function chartParityFindings(cargo, chart, values, helpers, cluster, inst
     findings.push("workspace, chart version and appVersion are not identical");
   }
   const image = topLevelYamlBlock(values, "image");
-  if (!image.includes("  repository: ghcr.io/synveda/gateway\n")) {
+  if (!image.includes("  repository: ghcr.io/synveda/product\n")) {
     findings.push("chart product image does not use the GHCR publication repository");
   }
   if (!image.includes('  tag: ""\n')) {
@@ -61,7 +61,7 @@ export function chartParityFindings(cargo, chart, values, helpers, cluster, inst
     findings.push("chart PostgreSQL override is not empty by default");
   }
   const postgresHelper =
-    '{{- default (printf "ghcr.io/synveda/enterprise-postgres:17.11-synveda-%s" .Chart.AppVersion) .Values.postgres.image -}}';
+    '{{- default (printf "ghcr.io/synveda/cnpg-postgres:17.11-synveda-%s" .Chart.AppVersion) .Values.postgres.image -}}';
   if (!helpers.includes(postgresHelper)) {
     findings.push("chart PostgreSQL image does not default to the CNPG-compatible release coordinate");
   }
@@ -153,20 +153,27 @@ export function releaseWorkflowFindings(source) {
     findings.push("release image matrix is not bound to native runners");
   }
   const releaseImages = [
-    ["The product image", "deploy/compose/gateway/Dockerfile", "gateway", null, ""],
+    ["The product image", "deploy/compose/product/Dockerfile", "product", null, ""],
     ["Postgres", "deploy/compose/postgres/Dockerfile", "postgres", "reference", ""],
     [
       "CloudNativePG PostgreSQL",
       "deploy/helm/postgres/Dockerfile",
-      "enterprise-postgres",
+      "cnpg-postgres",
       null,
       "17.11-synveda-",
     ],
     ["Bundled Keycloak", "deploy/compose/keycloak/Dockerfile", "keycloak", null, ""],
     ["Reference proxy", "deploy/compose/proxy/Dockerfile", "proxy", null, ""],
+    [
+      "Browser acceptance fixture",
+      "deploy/compose/product/Dockerfile",
+      "browser-acceptance",
+      "browser-acceptance",
+      "",
+    ],
   ];
   if (source.split("uses: docker/build-push-action@v6").length - 1 !== releaseImages.length) {
-    findings.push("release image build set is not the exact five-image contract");
+    findings.push("release image build set is not five deployment images plus one fixture");
   }
   for (const [name, dockerfile, repository, target, tagPrefix] of releaseImages) {
     if (imagesJob.split(`      - name: ${name}\n`).length - 1 !== 1) {
@@ -225,7 +232,7 @@ export function releaseWorkflowFindings(source) {
     "        run: |",
     "          set -euo pipefail",
     '          version="${{ needs.version.outputs.version }}"',
-    "          for image in gateway postgres keycloak proxy; do",
+    "          for image in product postgres keycloak proxy browser-acceptance; do",
     "            docker buildx imagetools create \\",
     '              --tag "ghcr.io/synveda/$image:$version" \\',
     '              "ghcr.io/synveda/$image:$version-amd64" \\',
@@ -234,10 +241,10 @@ export function releaseWorkflowFindings(source) {
     "          done",
     '          cnpg_tag="17.11-synveda-$version"',
     "          docker buildx imagetools create \\",
-    '            --tag "ghcr.io/synveda/enterprise-postgres:$cnpg_tag" \\',
-    '            "ghcr.io/synveda/enterprise-postgres:$cnpg_tag-amd64" \\',
-    '            "ghcr.io/synveda/enterprise-postgres:$cnpg_tag-arm64"',
-    '          docker buildx imagetools inspect "ghcr.io/synveda/enterprise-postgres:$cnpg_tag"',
+    '            --tag "ghcr.io/synveda/cnpg-postgres:$cnpg_tag" \\',
+    '            "ghcr.io/synveda/cnpg-postgres:$cnpg_tag-amd64" \\',
+    '            "ghcr.io/synveda/cnpg-postgres:$cnpg_tag-arm64"',
+    '          docker buildx imagetools inspect "ghcr.io/synveda/cnpg-postgres:$cnpg_tag"',
   ].join("\n");
   if (
     publishJob.split("      - name: Join the per-architecture image tags\n").length - 1 !== 1 ||
@@ -245,11 +252,41 @@ export function releaseWorkflowFindings(source) {
   ) {
     findings.push("multi-architecture manifest join is not the exact publish-bound plan");
   }
+  const packageReference = stepBlock(source, "Package the digest-bound Docker reference");
+  const packagePosition = publishJob.indexOf(
+    "      - name: Package the digest-bound Docker reference\n",
+  );
+  const joinPosition = publishJob.indexOf(
+    "      - name: Join the per-architecture image tags\n",
+  );
+  const inventoryPosition = publishJob.indexOf("      - name: Every release asset is present\n");
+  const checksumPosition = publishJob.indexOf("      - name: Checksums\n");
+  if (
+    publishJob.split("      - name: Package the digest-bound Docker reference\n").length - 1 !==
+      1 ||
+    !(joinPosition >= 0 && packagePosition > joinPosition && inventoryPosition > packagePosition) ||
+    checksumPosition <= inventoryPosition ||
+    !packageReference.includes('SOURCE_SHA: ${{ github.sha }}') ||
+    !packageReference.includes(
+      'scripts/package-release.sh "$version" assets "$SOURCE_SHA"',
+    ) ||
+    !packageReference.includes(
+      'if ! docker buildx imagetools inspect --raw "$image" > "$output"; then',
+    ) ||
+    !packageReference.includes('if [ ! -s "$output" ]; then') ||
+    !packageReference.includes('digest=$(sha256sum "$output" | awk')
+  ) {
+    findings.push("reference package is not digest-bound after image join and before inventory");
+  }
   if (!source.includes("sha256sum synveda-*.tar.gz synveda-*.tgz > SHA256SUMS")) {
     findings.push("release checksums omit the Helm chart");
   }
-  if (!source.includes('"synveda-$version.tgz"; do') || !source.includes("all six assets present")) {
-    findings.push("release asset inventory omits the Helm chart");
+  if (
+    !source.includes('"synveda-reference-$version.tar.gz"') ||
+    !source.includes('"synveda-$version.tgz"; do') ||
+    !source.includes("all six release archives are present")
+  ) {
+    findings.push("release asset inventory omits the reference bundle or Helm chart");
   }
   const release = stepBlock(source, "Publish");
   const releaseKeys = [
@@ -272,6 +309,9 @@ export function releaseWorkflowFindings(source) {
     releaseKeys[2][1] !== "run" ||
     releaseKeys[2][2] !== "|" ||
     !release.includes("          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n") ||
+    !release.includes("installed \\`synveda-compose\\` launcher") ||
+    release.includes("installed `synveda-compose` launcher") ||
+    !release.includes("scripts/install.sh | SYNVEDA_VERSION=${GITHUB_REF_NAME} sh") ||
     !release.trimEnd().endsWith(releaseCommand)
   ) {
     findings.push("GitHub Release publication is not the exact failure-propagating boundary");
@@ -318,15 +358,15 @@ export function versionBoundaryFindings(shared, installer, packagers) {
 export function helmAcceptanceFindings(demo, clientPod, keycloakFixture) {
   const findings = [];
   for (const [name, marker] of [
-    ["product coordinate", 'PRODUCT_IMAGE="ghcr.io/synveda/gateway:$IMAGE_TAG"'],
+    ["product coordinate", 'PRODUCT_IMAGE="ghcr.io/synveda/product:$IMAGE_TAG"'],
     ["Keycloak coordinate", 'KEYCLOAK_IMAGE="ghcr.io/synveda/keycloak:$IMAGE_TAG"'],
     [
       "CloudNativePG coordinate",
-      'CNPG_IMAGE="ghcr.io/synveda/enterprise-postgres:17.11-synveda-$IMAGE_TAG"',
+      'CNPG_IMAGE="ghcr.io/synveda/cnpg-postgres:17.11-synveda-$IMAGE_TAG"',
     ],
     [
       "product build",
-      'docker build -t "$PRODUCT_IMAGE" -f deploy/compose/gateway/Dockerfile .',
+      'docker build -t "$PRODUCT_IMAGE" -f deploy/compose/product/Dockerfile .',
     ],
     [
       "CloudNativePG build",
@@ -343,7 +383,7 @@ export function helmAcceptanceFindings(demo, clientPod, keycloakFixture) {
   ]) {
     if (!demo.includes(marker)) findings.push(`Helm acceptance ${name} has drifted`);
   }
-  if (!clientPod.includes("image: ghcr.io/synveda/gateway:__IMAGE_TAG__")) {
+  if (!clientPod.includes("image: ghcr.io/synveda/product:__IMAGE_TAG__")) {
     findings.push("Helm acceptance client does not use the chart product coordinate");
   }
   if (
@@ -435,8 +475,8 @@ function packageAndRenderChart(version) {
       { cwd: ROOT, encoding: "utf8" },
     );
     for (const image of [
-      `ghcr.io/synveda/gateway:${version}`,
-      `ghcr.io/synveda/enterprise-postgres:17.11-synveda-${version}`,
+      `ghcr.io/synveda/product:${version}`,
+      `ghcr.io/synveda/cnpg-postgres:17.11-synveda-${version}`,
     ]) {
       if (!rendered.includes(image)) throw new Error(`packaged chart does not render ${image}`);
     }
@@ -452,8 +492,8 @@ function packageAndRenderChart(version) {
       { cwd: ROOT, encoding: "utf8" },
     );
     for (const image of [
-      `ghcr.io/synveda/gateway:${version}`,
-      `ghcr.io/synveda/enterprise-postgres:17.11-synveda-${version}`,
+      `ghcr.io/synveda/product:${version}`,
+      `ghcr.io/synveda/cnpg-postgres:17.11-synveda-${version}`,
     ]) {
       if (!acceptance.includes(image)) {
         throw new Error(`Helm acceptance values do not render ${image}`);
@@ -513,7 +553,7 @@ export function main() {
     ),
     ...releaseWorkflowFindings(read(".github/workflows/release.yml")),
     ...versionBoundaryFindings(read("scripts/release-version.sh"), read("scripts/install.sh"), [
-      ["release profile packager", read("scripts/package-release.sh"), 'stage="$outdir/synveda-profile-$version"'],
+      ["Docker reference packager", read("scripts/package-release.sh"), 'stage="$outdir/synveda-reference-$version"'],
       ["plugin packager", read("scripts/package-plugin.sh"), 'stage="$outdir/plugin"'],
       ["chart packager", read("scripts/package-chart.sh"), 'mkdir -p "$outdir"'],
     ]),
@@ -531,7 +571,7 @@ export function main() {
   }
   packageAndRenderChart(version);
   console.log(
-    `ok: release version ${version}, five-image workflow, chart package and GHCR product/CNPG defaults form one deterministic release plan`,
+    `ok: release version ${version}, five deployment images plus one acceptance fixture, the reference bundle, chart package and GHCR product/CNPG defaults form one deterministic release plan`,
   );
 }
 

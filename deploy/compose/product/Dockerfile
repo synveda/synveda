@@ -178,7 +178,7 @@ COPY --from=build /src/target/release/synveda-worker /usr/local/bin/synveda-work
 COPY --from=build /src/target/release/synveda-apalis-worker /usr/local/bin/synveda-apalis-worker
 COPY --from=build /src/target/release/synveda-oidc-diagnostic /usr/local/bin/synveda-oidc-diagnostic
 COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
-COPY --chmod=0755 deploy/compose/gateway/synveda-container /usr/local/bin/synveda-container
+COPY --chmod=0755 deploy/compose/product/synveda-container /usr/local/bin/synveda-container
 
 # The console bundle is static data served by the gateway from its own origin
 # (CNSL-1, ADR-0056 decision 1). No Node process runs in this stage; gateway and

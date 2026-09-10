@@ -166,51 +166,27 @@ retains their implementation evidence. Open entries link to current briefs.
 - [x] CPR-44: Production hardening and maintainability cut — delivered 2026-08-26; ADR-0101
 - [ ] [CPR-45: Docker-first portable reference deployment](CPR-45.md) — open
 
+CPR-45 follows ADR-0105's direct-acceptance plan. Canonical Compose now owns the
+only source and packaged single-host topology: proxy-only public edge, isolated
+Synveda/Keycloak databases and roles, optimized Keycloak, separate product
+gateway/worker commands, mounted secrets and a private Collector. The
+digest-bound reference archive and environment manifest use that same graph.
+Retired provider, workflow-scheduler, contributor, installed-profile and host-
+gateway paths are deleted; `synveda init` is a side-effect-free refusal.
 
-CPR-45 now follows ADR-0105's direct-acceptance plan. The canonical Compose
-graph already provides the proxy-only edge, separate Synveda and Keycloak
-databases/roles, optimized production-mode Keycloak, containerized gateway and
-worker processes, mounted secret files and a private OpenTelemetry Collector.
-Unused Temporal runtime assets, the contributor Rauthy topology and the dormant
-CLI profile/host-gateway bootstrap are deleted. The reserved `synveda init`
-verb is a side-effect-free refusal; direct database commands require an
-explicit value or file target.
+Deterministic gates cover the provider/runtime matrix, two-principal browser
+scenario, restart lifecycle, logical database/key recovery, same-schema image
+upgrade, external dependency wiring, bounded local metrics, customer-safe
+Operations view and the disabled-by-default Apalis 0.7.4 Skill-validation
+transport. PostgreSQL operation/outbox state remains authoritative and the
+native worker is the rollback.
 
-The earlier clean-engine/Colima receipt and provider fixtures were removed:
-they did not start Docker or establish product evidence. The direct
-fresh-project browser/restart acceptance command now seeds and verifies the
-real two-principal public-API team scenario across the restart matrix,
-including invitation redemption, and awaits a supported live Docker host.
-PostgreSQL-native logical backup plus
-isolated database/key restore is also implemented and deterministically tested; its live
-Docker run remains pending. Same-schema application-image upgrade/rollback is
-implemented with a read-only candidate compatibility check and deterministic
-failure recovery; its live reference run remains pending. The forced-RLS
-`skill_validation@1` operation, attempt and transactional outbox plus its
-disabled-by-default Apalis 0.7.4 leaf are implemented. The native worker remains
-the rollback, and the optional private queue carries only tenant/operation
-routing identifiers while business state stays in Synveda PostgreSQL. The
-synchronous diagnostic path resolves concurrent same-key Skill tests through a
-freshly authorised winner and commits only one run/audit. Fresh isolated
-exact-role PostgreSQL acceptance now passes the operation/outbox concurrency,
-retry, cancellation, dead-letter and cross-tenant cases; live Apalis transport
-execution remains pending. The customer-safe Operations route now composes four
-bounded generated public APIs and explicitly marks unavailable signals. Executable
-external PostgreSQL plus external OIDC and public-PKI external OTLP wiring are
-deterministically implemented but still await live provider evidence. A
-bounded private Collector-to-Prometheus profile is implemented with
-loopback-only operator access and deterministic lifecycle evidence.
-Current-source Linux and Docker Desktop browser acceptance must pass before the
-remaining withdrawn release/profile Rauthy paths are deleted.
-Feature-local recovery evidence does not establish DR or owned RPO/RTO; no HA,
-SaaS, signing or Helm-production claim follows. S3/WAL-PITR and encrypted
-off-host retention remain OPS-5 production work rather than Docker-reference
-completion work.
-
-Current-source live development/reference, recovery, upgrade and Apalis
-acceptance remain pending. The optional Apalis transport database stays
-separate from Synveda's closed authoritative schema and is not a business-state
-or recovery authority.
+The feature remains open for clean development and reference HTTPS runs on
+Linux and Docker Desktop, live recovery/upgrade/Apalis execution, live external
+providers, and one published-registry installed-reference run. This evidence
+would support controlled single-host use only. It would not establish HA,
+host-loss tolerance, DR/RPO/RTO, SaaS readiness, signing or Helm production
+readiness; OPS-5 retains S3/WAL-PITR and encrypted off-host recovery work.
 
 ## Unscheduled — not listed in the Sequencing section
 

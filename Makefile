@@ -353,15 +353,14 @@ check-chart-images:
 	node --test scripts/check-chart-images.test.mjs
 	node scripts/check-chart-images.mjs
 
-# CPR-45 / PR-01: validates the release-version boundary and exact five-image
-# workflow plan, packages the chart twice and renders its GHCR product/CNPG
-# pair. It uses no Docker, registry, cluster or network and therefore makes no
-# build or pullability claim.
+# CPR-45 / PR-01: validates release versions, the digest-bound reference
+# package/installer, the exact release image plan and the Helm package. It uses
+# no Docker daemon, registry, cluster or network and makes no pullability claim.
 check-release-parity:
-	node --test scripts/check-release-parity.test.mjs
+	node --test scripts/check-release-parity.test.mjs scripts/install.test.mjs
 	node scripts/check-release-parity.mjs
 
-# The enterprise chart renders, in both of the shapes CI covers: the
+# The Helm chart renders in both shapes CI covers: the
 # minimum a real install must state, and every optional path at once.
 # Needs helm. The chart's defaults deliberately do not render — five values
 # have no default because each is a decision somebody has to make on
@@ -371,10 +370,9 @@ chart-lint:
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
 	node scripts/check-helm-contract.mjs
 
-# CPR-36: source/release Compose, Helm, generated API and the packaged profile
-# are one runtime; a repeat package cannot retain a removed asset. CPR-44's
-# scratch-HOME test keeps the local KEK exactly when this deployment keeps its
-# volumes, and proves the explicit purge and dry-run paths separately.
+# CPR-36/CPR-45: canonical Compose, Helm, generated API and the packaged
+# reference are one runtime. Unsafe legacy uninstall automation stays refused
+# until OPS-10 can persist and prove the exact installed deployment receipt.
 check-deploy: check-release-parity check-chart-images check-compose-contract
 	node --test scripts/check-deploy-convergence.test.mjs
 	node --test scripts/uninstall.test.mjs

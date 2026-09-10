@@ -24,7 +24,7 @@ const NAMES = [
 ];
 const ARG_LINES = NAMES.map((name) => `ARG ${name}`);
 const DOCKERFILES = [
-  "deploy/compose/gateway/Dockerfile",
+  "deploy/compose/product/Dockerfile",
   "deploy/compose/postgres/Dockerfile",
   "deploy/compose/keycloak/Dockerfile",
   "deploy/compose/proxy/Dockerfile",
@@ -219,7 +219,7 @@ test("the build assertion accepts only absent or empty proxy values", () => {
   }
 });
 
-test("all fourteen deployment image stages assert proxy closure first", () => {
+test("all thirteen deployment image stages assert proxy closure first", () => {
   assert.deepEqual(DOCKERFILES.toSorted(), dockerfilesBelow(join(ROOT, "deploy")));
   let stageCount = 0;
   for (const path of DOCKERFILES) {
@@ -251,7 +251,7 @@ test("all fourteen deployment image stages assert proxy closure first", () => {
       );
     }
   }
-  assert.equal(stageCount, 14);
+  assert.equal(stageCount, 13);
 });
 
 test("stage mutants cannot omit, rename, default or defer the assertion", () => {

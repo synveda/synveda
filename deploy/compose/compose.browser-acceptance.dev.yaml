@@ -14,7 +14,7 @@ services:
   browser-acceptance:
     build:
       context: ../..
-      dockerfile: deploy/compose/gateway/Dockerfile
+      dockerfile: deploy/compose/product/Dockerfile
       target: browser-acceptance
       args:
         <<: *synveda-browser-build-proxy-closure

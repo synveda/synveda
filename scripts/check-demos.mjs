@@ -315,10 +315,6 @@ function routeMatcher(path) {
 function pathsIn(words) {
   const paths = [];
   for (const word of words) {
-    // Rauthy is a separate product with its own `/auth/v1` API. Those calls
-    // exercise Synveda's OIDC boundary but are not Synveda production routes
-    // and therefore cannot appear in Synveda's OpenAPI document.
-    if (word.includes("/auth/v1/")) continue;
     for (const match of word.matchAll(/\/v1\/[A-Za-z0-9_{}.$/:-]+/g)) {
       paths.push(match[0].replace(/[),.:]+$/, "").split(/[?#]/, 1)[0]);
     }

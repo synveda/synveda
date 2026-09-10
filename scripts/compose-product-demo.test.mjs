@@ -680,7 +680,7 @@ test("CLI timeout escalates to SIGKILL and oversized output fails closed", async
 
 test("the fixture copies the product CLI and exposes no token-transfer shortcut", () => {
   const dockerfile = readFileSync(
-    join(ROOT, "deploy/compose/gateway/Dockerfile"),
+    join(ROOT, "deploy/compose/product/Dockerfile"),
     "utf8",
   );
   const runner = readFileSync(

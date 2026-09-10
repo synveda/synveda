@@ -26,17 +26,14 @@ freshness or Skill/Tool advertisement.
   still open.
   This is also the only source-development product topology. Evaluation-only
   dependencies use isolated fixtures and do not define another Synveda stack.
-- `release/` is the pull-only transitional artifact manifest installed under
-  `~/.synveda/profile`. It is retained for cutover evidence but is no longer
-  advertised as a turnkey single-host install.
 - `helm/` is the Kubernetes infrastructure: separate gateway and worker
   Deployments from the same image, CloudNativePG, optional TEI, ingress and
   external IdP/secret wiring. The CloudNativePG operator is deliberately a
-  separately installed cluster dependency. The source release workflow now
-  packages this chart and has one versioned build plan for the product,
-  single-host and CloudNativePG PostgreSQL, optimized Keycloak and reference
-  proxy images. No tagged candidate has yet proved publication, authenticated
-  pulls or installation from those artifacts.
+  separately installed cluster dependency. The release workflow packages this
+  chart and a digest-bound reference bundle using one versioned six-image plan:
+  product, single-host and CloudNativePG PostgreSQL, optimized Keycloak,
+  reference proxy and browser acceptance. No tagged candidate has yet proved
+  publication, authenticated pulls or installation from those artifacts.
 
 ## Bootstrap boundary
 
@@ -83,36 +80,24 @@ Direct-binary database commands require explicit `DATABASE_URL` or
 invokes explicit database, migration, tenant, identity and issuer-diagnostic
 commands rather than a second bootstrap implementation.
 
-The worker's default supervised join is 75 seconds. Canonical Compose and the
-transitional release manifest give it an 85-second outer stop grace; the latter
-uses `restart: unless-stopped` so a deliberate non-zero critical-task exit is
-visible and restarted. Helm derives its termination grace as the configured
-worker join plus ten seconds.
+The worker's default supervised join is 75 seconds. Canonical Compose gives it
+an 85-second outer stop grace and uses `restart: unless-stopped` so a deliberate
+non-zero critical-task exit is visible and restarted. Helm derives its
+termination grace as the configured worker join plus ten seconds.
 
-`make check-release-parity` validates the closed release-version boundary and
-exact five-image workflow plan, packages the Helm chart twice and renders the
-version-matched GHCR product/CloudNativePG pair without contacting Docker or
-a registry. `make check-chart-images` requires every external deployment-image
-base to carry a readable tag and full SHA-256 digest.
-`make check-deploy` includes both gates, renders canonical Compose, the
-transitional release manifest and Helm, asserts distinct process
-commands/credentials and private
-worker probes, packages the release twice and checks the upgrade-shaped
-replacement. The
-CPR-36 database acceptance test also proves a runtime login with no tenant GUC
-cannot read tenant data. The kind acceptance script is written to assert the
-worker role before a governed round trip and repeat private readiness after
-CloudNativePG primary failover, but that script has not been rerun since the
-current three-credential install-job cutover.
-
-## Removed host-gateway topology
-
-The obsolete localhost-issuer topology forced the gateway onto the host and is
-deleted. Canonical Keycloak Compose runs both product processes in containers
-behind one browser/container-reachable proxy issuer name. Exact browser issuer
-and PKCE acceptance remains required before a controlled-use claim. A withdrawn
-release archive still contains the old bundled provider and is the next
-hard-deletion slice; it is not started or advertised by canonical Compose.
+`make check-release-parity` validates the closed release-version boundary,
+exact six-image workflow plan, repeatable Helm chart and digest-bound Docker
+reference package without contacting Docker or a registry. The reference
+environment manifest pairs the source SHA with every image identity.
+`make check-chart-images` requires every external deployment-image base to
+carry a readable tag and full SHA-256 digest. `make check-deploy` includes both
+gates, renders canonical Compose and Helm, asserts distinct process commands,
+credentials and private worker probes, packages the reference twice and checks
+upgrade-shaped replacement. The CPR-36 database acceptance test also proves a
+runtime login with no tenant GUC cannot read tenant data. Current live Kind
+acceptance proves Keycloak login, a governed product round trip and worker
+readiness after CloudNativePG primary failover. That is Kubernetes source-image
+evidence, not a published Helm or Docker-reference release claim.
 
 ## Embeddings
 
@@ -125,8 +110,9 @@ measured 2026-07-26).
 
 Knowledge embedding rows retain model and dimension. A model change converges a
 separately labelled sidecar; an old vector is never reinterpreted as output from
-a new model. TEI's cache is persistent in Compose and Helm because a cold
-BGE-M3 download is about 2.3 GB.
+a new model. The isolated evaluation fixture and Helm retain a TEI cache
+because a cold BGE-M3 download is about 2.3 GB. A canonical Compose semantic
+profile remains pending.
 
 ## Honest operating limits
 
@@ -139,11 +125,12 @@ BGE-M3 download is about 2.3 GB.
   open.
 - Compose is a single-node shape with generated file-mounted development
   credentials. It is not a production secret-management example.
-- The chart has no Qdrant, Temporal consumer, backup promise, external HSM or
+- The chart has no Qdrant, workflow scheduler, backup promise, external HSM or
   customer-managed-key implementation. Provider credentials are Secret
   references; rendered diagnostics must not contain values.
 - Release binaries are unsigned and un-notarized; shipped binaries are macOS
   arm64 and Linux x86_64 only. There is no Windows build, zero-downtime gateway
   upgrade guarantee or old-schema translator. The release workflow has no
   completed tagged run for the aligned chart/image set, captured OCI
-  descriptors or versioned environment manifest.
+  descriptors, signatures or provenance. The generated environment manifest
+  has deterministic static coverage but no published-registry evidence.

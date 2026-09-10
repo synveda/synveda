@@ -57,6 +57,31 @@ and bundled OIDC; backup, restore and upgrade actions refuse that profile.
 The standalone gateway-restart action is also refused; full acceptance owns the
 proved Apalis restart sequence.
 
+## Packaged reference
+
+The release artifact is `synveda-reference-<version>.tar.gz`. It contains only
+the reference Compose closure, its fixed configuration and lifecycle scripts,
+plus `environment.json`, `version`, `source-sha` and an executable
+`synveda-compose` launcher. The environment manifest binds the source SHA to
+six first-party image identities: product, single-host PostgreSQL, optimized
+Keycloak, reference proxy, browser acceptance and CloudNativePG PostgreSQL. It
+also records the digest-pinned Collector and Prometheus inputs.
+
+The archive contains no development overlay, Dockerfile, database-test fixture,
+local `.env`, secret, runtime state, backup, retired identity provider or
+workflow-scheduler asset. Its launcher fixes reference HTTPS semantics and
+immutable image references while leaving DNS, certificates and supported
+external dependency settings operator-owned.
+
+The installer stores immutable releases below
+`$SYNVEDA_HOME/reference/releases/<version>-<source-sha>` and repoints
+`$SYNVEDA_HOME/reference/current` at the selected release. Mutable deployment
+inputs live below `$SYNVEDA_HOME/state/synveda-reference`; database and recovery
+secret archives live under `$SYNVEDA_HOME/backups/{database,secrets}/synveda-reference`.
+Upgrades preserve both roots. Automatic artifact removal remains fail-closed
+until OPS-10 adds a strict installer-owned receipt; operators use the installed
+launcher for `down` and confirmation-gated `reset`.
+
 ## Images and commands
 
 | Image | Commands or role |

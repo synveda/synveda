@@ -233,8 +233,8 @@ pub struct Telemetry {
 
 /// Installs the global tracing subscriber: fmt logs filtered by `RUST_LOG`
 /// (default `info`) plus an OTLP/gRPC span exporter reading the standard
-/// `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4317` — Jaeger in
-/// the dev compose). Call once, from `main`, inside the Tokio runtime.
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4317`). Call once,
+/// from `main`, inside the Tokio runtime.
 ///
 /// # `RUST_LOG` quietens the console and nothing else
 ///
@@ -243,11 +243,11 @@ pub struct Telemetry {
 /// what was here and it had a trap in it. A registry-level filter applies
 /// to *every* layer, so `RUST_LOG=warn` did not merely quieten the log: it
 /// stopped `info`-level spans being recorded at all, and with them every
-/// exported trace. FND-5's acceptance criterion ("a single trace visible in
-/// Jaeger") silently stopped holding for anyone who turned their logs down,
-/// which is a thing operators do to *production*. Measured before the fix:
-/// at `RUST_LOG=warn` a request carrying a `traceparent` reached Jaeger not
-/// at all; at `info`, it arrived.
+/// exported trace. FND-5's single-exported-trace acceptance criterion silently
+/// stopped holding for anyone who turned their logs down, which is a thing
+/// operators do to *production*. Measured before the fix: at `RUST_LOG=warn`
+/// a request carrying a `traceparent` reached no trace backend; at `info`, it
+/// arrived.
 ///
 /// So the span exporter takes a fixed `INFO` floor of its own and the
 /// console keeps `RUST_LOG`. The trade-off, stated rather than discovered:

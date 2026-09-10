@@ -1,6 +1,6 @@
 //! The TEI embedder: `POST /embed` against a text-embeddings-inference
-//! base URL (tech plan §1.3 — BGE-M3 in the dev compose). Plain HTTP is
-//! fine here: the endpoint is self-hosted by definition. The model
+//! base URL (tech plan §1.3 — BGE-M3 in the isolated evaluation fixture or an
+//! operator endpoint). Plain HTTP can be used on a trusted private network. The model
 //! identity is config-declared, never probed from `/info` — gateway
 //! boot must not couple to TEI availability (ADR-0023 decision 6).
 
@@ -25,11 +25,11 @@ pub struct TeiEmbedder {
 
 impl TeiEmbedder {
     /// The default model identity when `SYNVEDA_EMBEDDER_MODEL` is
-    /// unset — what the dev compose serves.
+    /// unset — the BGE-M3 contract used by the evaluation fixture.
     pub const DEFAULT_MODEL: &'static str = "BAAI/bge-m3";
 
     /// Builds the embedder against a TEI base URL
-    /// (e.g. `http://localhost:8110`, the dev compose port).
+    /// (e.g. the isolated evaluation fixture's `http://localhost:8110`).
     pub fn new(model: String, base_url: String) -> Result<Self> {
         let base_url = crate::provider_url::normalise(&base_url)
             .ok_or_else(|| dependency("client_configuration_failed".to_owned()))?;

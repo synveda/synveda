@@ -1,26 +1,32 @@
-# Installing Synveda during the Docker reference cutover
+# Install and operate Synveda
 
 Synveda has one context-platform runtime: separate gateway and worker
 processes, PostgreSQL, generic OIDC, one public API and the same governed
 configuration semantics in direct binaries, Compose and later Helm. Personal,
 team and enterprise are Configuration documents, not deployment editions.
 
-The CPR-45 canonical Compose graph now has an executable, bounded lifecycle for
-development with bundled PostgreSQL and either bundled Keycloak or external
-OIDC. Deterministic gates cover file selection, private inputs, exact-project
-locking, network preflight, tenant/realm convergence and smoke predicates. It
-has not yet passed clean-volume browser acceptance on the supported desktop
-and Linux platforms, so it is not a supported controlled-use deployment.
+The CPR-45 canonical Compose graph has a bounded lifecycle for development and
+reference HTTPS, with bundled or external PostgreSQL/OIDC selections. The
+digest-bound release archive packages that same reference graph and records its
+source and image identities. Deterministic gates cover packaging, installation,
+private inputs, exact-project locking, authority convergence and smoke
+predicates. Clean-volume development/reference, recovery, upgrade and Apalis
+runs are still pending on Linux and Docker Desktop, so the current verdict is
+“Docker reference implemented; live validation pending.”
+
 The reserved `synveda init` verb is a permanent side-effect-free refusal.
-Canonical Compose owns bootstrap. The remaining legacy release-profile files
-are withdrawn cutover residue, not an alternative installation path.
+Canonical Compose owns bootstrap; Keycloak is the only bundled identity
+provider and no legacy deployment profile is supported.
 
 The target contract and current limits are in
-[DEPLOYMENT_CONTRACT.md](DEPLOYMENT_CONTRACT.md). From a clean, reviewed
-checkout, inspect the exact development plan and current ownership state, then
-run the hardcoded `/etc/hosts` helper. This executes the checkout helper as root
-with a fixed root-owned Node runtime and is an administrator trust decision,
-not a sandbox against the checkout owner:
+[DEPLOYMENT_CONTRACT.md](DEPLOYMENT_CONTRACT.md).
+
+## Run from a source checkout
+
+From a clean, reviewed checkout, inspect the exact development plan and current
+ownership state, then run the hardcoded `/etc/hosts` helper. This executes the
+checkout helper as root with a fixed root-owned Node runtime and is an
+administrator trust decision, not a sandbox against the checkout owner:
 
 ```sh
 make compose-hosts-plan
@@ -156,9 +162,9 @@ The remaining sections describe product use only after a gateway has been
 started through separately validated development/test infrastructure. They are
 not deployment instructions or evidence that the reference is complete.
 
-### Bootstrap policy retained for the accepted lifecycle
+## Bootstrap policy
 
-The resumed reference bootstrap will create **no organisation**. After tenant
+Reference bootstrap creates **no organisation**. After tenant
 admission the tenant contains one row and the audit chain contains one
 break-glass event to say so:
 
@@ -169,14 +175,15 @@ break-glass event to say so:
 There are no scopes, identities, grants, Configuration bindings or Knowledge
 items, because
 everything the product has a governed surface for is created *through* that
-surface, by a person the PDP can decide about. An installer runs once, as
-root-equivalent, before anybody is watching — it is the worst place in this
-product to keep a shortcut past the policy engine (seed §2.2). See ADR-0055.
+surface, by a person the PDP can decide about. Deployment bootstrap runs once
+with elevated database authority before anybody is watching — it is the worst
+place in this product to keep a shortcut past the policy engine (seed §2.2).
 
 ## Log in — this is where the organisation starts to exist
 
 ```sh
-synveda login --gateway http://127.0.0.1:8120
+export SYNVEDA_GATEWAY=http://app.synveda.test:8080
+synveda login --gateway "$SYNVEDA_GATEWAY"
 ```
 
 Use credentials provisioned by the deployment's identity operator; no current
@@ -197,7 +204,7 @@ subject, not an installer's:
 ## Build your scope tree
 
 ```sh
-root=$(curl -sH "authorization: Bearer $TOKEN" http://127.0.0.1:8120/v1/admin/scopes \
+root=$(curl -sH "authorization: Bearer $TOKEN" "$SYNVEDA_GATEWAY/v1/admin/scopes" \
         | python3 -c 'import json,sys;print(json.load(sys.stdin)["parent"]["id"])')
 
 synveda scope create --parent $root --kind org_unit --slug eng      --name Engineering
@@ -226,7 +233,7 @@ product-level subtypes of a governed scope, and grants — not role
 bindings — are what let people act:
 
 ```sh
-curl -H "authorization: Bearer $TOKEN" http://127.0.0.1:8120/v1/me
+curl -H "authorization: Bearer $TOKEN" "$SYNVEDA_GATEWAY/v1/me"
 ```
 
 `/v1/me` is the one call a client makes first. It answers who you are, what
@@ -389,7 +396,8 @@ synveda audit export --output audit-chain.json # frozen public-API prefix
 synveda audit verify-export audit-chain.json # offline; no profile needed
 ```
 
-Traces are at <http://localhost:16686>.
+Traces are exported through the configured OTLP endpoint. The core Compose
+Collector is private; a local trace UI is optional and backend-specific.
 
 Audit query and export require tenant-wide `audit.read`; a grant below the
 tenant root is refused rather than served a misleading partial chain. The
@@ -687,6 +695,10 @@ authorization-code client with PKCE S256, its exact deployment callback/origin,
 and the `openid profile email groups` scopes. The issuer in discovery, tokens
 and gateway configuration must be byte-for-byte identical.
 
+The canonical Compose guide contains the exact
+[provider-neutral issuer document shape](../deploy/compose/README.md#external-oidc),
+including the distinct login-client/API audiences and static tenant binding.
+
 One group claim is read: `synveda-admins` may seed the first tenant-root
 `administrator` grant only while the tenant's insert-only bootstrap remains
 unclaimed. It never governs later administrator assignment. There is no
@@ -737,15 +749,9 @@ directory-owned rows and tell the operator to change the directory or use the
 dedicated assignment route. No live Entra or Okta verification is claimed by
 the repository fixtures; they remain labelled captured or transcribed.
 
-The removed localhost-issuer topology required a host gateway. Canonical
-Keycloak Compose instead uses one proxy-routed issuer name reachable unchanged
-from browser and containers. ADR-0055 retains the historical measurement.
-
 ## PulseBoard product walkthrough
 
-The removed ACME release seeder is not packaged or aliased: it depended on the
-deleted hierarchy, policy-assignment and global observe/recall surfaces. Once
-the runtime is initialised and the acting user has completed `synveda login`,
+Once the runtime is ready and the acting user has completed `synveda login`,
 the packaged tour uses only the public application API:
 
 ```sh
@@ -773,7 +779,8 @@ database-backed Profile and PulseBoard scenarios.
 
 ## The admin console
 
-`http://127.0.0.1:8120/console/`, served by the gateway from its own origin —
+`http://app.synveda.test:8080/console/` in development, or the configured
+reference HTTPS application URL, is served by the gateway from its own origin —
 no second process and no second port. Sign in with credentials provisioned by
 the deployment's identity operator; the session is an `HttpOnly` cookie, so
 there is no token to paste.
@@ -786,8 +793,9 @@ commands that connect it, and run a connection check — because nobody is
 asked to declare an organisation before they can hold a record.
 
 After that the left-hand navigation is the product: **Home, Sessions,
-Knowledge, New Learnings, Skills, Tools, People, Settings**, with a workspace
-and a project switcher in the header that remember what you chose. **People**
+Knowledge, New Learnings, Skills, Tools, Operations, People, Settings**, with a
+workspace and a project switcher in the header that remember what you chose.
+**People**
 is where you invite somebody (a one-time link you copy — this product emails
 nobody), see who may act in a workspace and who has access only to one
 project, and read *why* each of them does: granted here, inherited from a
@@ -815,6 +823,11 @@ you may read them, so a viewer who holds no governance role sees no Advanced
 section at all. That is a forecast and not a permission: every act is decided
 again at its own seam, and a page you reach anyway will show you the gateway's
 own refusal.
+
+**Operations** shows bounded, authorised lists of recent operations, Sessions,
+context runs and Capture batches. It labels stale, partial and unavailable
+signals and does not expose provider task IDs, raw content or infrastructure
+administration.
 
 **Sessions** is where you see what your agents have actually been doing.
 Every run an agent opened against this deployment, newest first, narrowed by
@@ -1017,6 +1030,16 @@ make compose-up
 make compose-restart-gateway
 ```
 
+For an installed reference, set the same host/provider selectors used at
+startup and invoke its pinned launcher:
+
+```sh
+export SYNVEDA_APP_HOST=app.example.com
+export SYNVEDA_AUTH_HOST=auth.example.com
+~/.synveda/reference/current/synveda-compose down
+~/.synveda/reference/current/synveda-compose up
+```
+
 `compose-down` preserves the database volume and every project input. Reset is
 separate, destructive, and requires the exact project confirmation:
 
@@ -1029,46 +1052,28 @@ erasure, backup or credential rotation. See
 [`deploy/compose/README.md`](../deploy/compose/README.md) for exact lock-recovery
 and provider-mode procedures.
 
-Canonical Compose keeps the gateway in its container. To remove installed
-artifacts rather than stop a canonical checkout, see **Uninstalling** below.
-
 ## Uninstalling
 
+Automatic artifact removal is deliberately unavailable. The current
+`scripts/uninstall.sh` has no ownership receipt from which it can prove the
+installed release, CLI destination and deployment selection, so normal
+invocation exits 69 without mutation. `--dry-run` is also a no-op and `--purge`
+is refused. This is the open OPS-10 boundary, not a successful uninstall.
+
+Stop an installed deployment with its exact launcher and selectors first:
+
 ```sh
-curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/uninstall.sh | sh
+SYNVEDA_APP_HOST=app.example.com SYNVEDA_AUTH_HOST=auth.example.com \
+  ~/.synveda/reference/current/synveda-compose down
 ```
 
-Fetched rather than installed on disk, for the reason a self-deleting script
-is a bad idea: it removes the directory it would have lived in. From a
-checkout it is `scripts/uninstall.sh`.
+That preserves Docker volumes, project state, KMS/OIDC material and backups.
+For destructive deployment reset, run the same launcher's `reset` action and
+supply the exact `SYNVEDA_CONFIRM_RESET` value it prints. Reset does not remove
+immutable release artifacts or recovery backups.
 
-It stops the gateway and the containers, and removes exactly what the
-installer wrote — the CLI from wherever the sudo fallback put it, plus
-`~/.synveda/{bin,console,profile,plugin}` and the transient entries under
-`~/.synveda/data/`. A default uninstall deliberately leaves
-`~/.synveda/data/kms.key`. `--dry-run` lists every path and container it would
-touch, states when the key would be retained, and changes nothing.
-
-**Your data and its key survive by default.** The three named volumes stay,
-and so does the local KEK at `~/.synveda/data/kms.key`; the output names both
-and the command that would remove them. Preserve that key for any later
-explicitly validated deployment using the retained database. A governed
-Knowledge `forget` removes one authorised item's
-plaintext, sources and index state while retaining content-free audit
-evidence; it does not delete a tenant. A tenant row still cannot be deleted
-(TEN-5), so a volume purge remains the only whole-tenant wipe. That is a
-deployment-level wipe, not a GDPR erasure certificate.
-
-`--purge` is the irreversible coupled path: it runs `docker compose down -v`
-and removes `~/.synveda/data/kms.key` with the rest of the install state.
-`--purge --dry-run` reports both destructions and performs neither. Losing the
-key while retaining a database would make console sessions, tenant secrets
-and sealed tenant exports unrecoverable, so a warning is not treated as
-consent to delete it. If Compose cannot confirm that the volumes were removed,
-purge exits non-zero and keeps the key.
-
-**It touches no editor or AI client config**, mirroring the promise the
-installer makes. Undo those explicitly, before removing the CLI:
+Client configuration is separate and must be removed explicitly before any
+future artifact cleanup:
 
 ```sh
 synveda mcp uninstall --client cursor   # removes our entry, and only ours
@@ -1077,23 +1082,41 @@ synveda plugin uninstall                # removes the Claude Code plugin
 
 `mcp uninstall` is the exact mirror of `mcp install`: your other MCP servers
 survive, and a hand-maintained JSONC config keeps its comments and layout
-byte-for-byte. The uninstaller lists any client configs it finds mentioning
-us so you know which ones to run it for.
+byte-for-byte. No shell removal command deletes editor or AI-client state.
 
-Everything is idempotent — a second run finds nothing, says so, and exits 0.
+## Install a release artifact
+
+The release workflow produces native binaries, the console, the Claude plugin,
+the Helm chart and `synveda-reference-<version>.tar.gz`. The reference archive
+contains the HTTPS-only canonical Compose runtime and `environment.json`, which
+binds its source SHA and image digests. No tagged candidate has yet completed a
+registry-backed install, so the commands below describe the implemented
+installer contract rather than a validated published release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh \
+  | SYNVEDA_VERSION=v0.2.0 SYNVEDA_BIN="$HOME/.local/bin" sh
+```
+
+The installer verifies `SHA256SUMS`, installs artifacts and never starts
+containers or edits an AI client. Configure real DNS and TLS, inspect the
+installed manifest, then use
+`~/.synveda/reference/current/synveda-compose`. The packaged launcher fixes
+reference HTTPS and image identities; the operator still owns hostnames,
+certificates and supported external-dependency inputs.
 
 ## What the artifact installer places
 
 | | |
 |---|---|
 | `synveda` | the CLI, on your `PATH` |
-| `~/.synveda/bin/synveda-gateway` | withdrawn release binary; no current lifecycle starts it on the host |
-| `~/.synveda/bin/synveda-worker` | the private core-worker direct-binary artefact; Compose runs its image-contained copy |
+| `~/.synveda/bin/{synveda-gateway,synveda-worker}` | direct-binary artifacts; the reference runs their image-contained commands |
 | `~/.synveda/console/` | the admin console bundle |
-| `~/.synveda/profile/` | the transitional Compose file, Rauthy config and version; not an accepted reference deployment |
 | `~/.synveda/plugin/` | the Claude Code marketplace, installed into no client |
-| `~/.synveda/data/` | legacy pidfile/log state that may remain from an earlier install |
-| `~/.synveda/data/kms.key` | the deployment's key-encryption key, `0600` — **back this up** |
+| `~/.synveda/reference/releases/<version>-<source-sha>/` | immutable digest-bound Docker reference |
+| `~/.synveda/reference/current` | validated symlink to the selected immutable release |
+| `~/.synveda/state/synveda-reference/` | mode-0700 deployment inputs, including keys and issuer state; preserved across upgrades |
+| `~/.synveda/backups/{database,secrets}/synveda-reference/` | separate recovery roots; preserved across upgrades |
 
 `SYNVEDA_HOME` moves all of it; `SYNVEDA_BIN` moves the CLI.
 
@@ -1101,10 +1124,10 @@ The CLI goes to `/usr/local/bin` by default, which is root-owned on macOS and
 on most Linux. The installer asks `sudo` for that one file and, **if sudo is
 unavailable or refused — a managed machine where you are not an admin, a pipe
 with no terminal to prompt on, or you declining — it puts the CLI in
-`~/.synveda/bin` instead and tells you**, rather than failing an install whose
-other four parts are already in place. Nothing else here needs a privilege.
+`~/.synveda/bin` instead and tells you**. Nothing else here needs a privilege.
 If the directory it lands in is not on your `PATH`, the installer prints the
-`export` line to add. To choose up front and skip sudo entirely:
+`export` line to add. An explicitly selected directory is created when absent
+and refused when it is a symlink. To choose up front and skip sudo entirely:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh \
@@ -1116,19 +1139,17 @@ curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/instal
 separate, explicit step above, and the OPS-8 demo asserts the absence rather
 than trusting it.
 
-The host-gateway shape is deleted. The target uses one product image with
-distinct gateway and worker commands, both containerised. The reserved `init`
-verb never reads or compares an installed profile.
-
 ## Current verification boundary
 
 `make compose-config` and `make check-deploy` prove static Compose/Helm and
 release-package contracts. The latter includes `make check-release-parity`,
 which rejects unsafe release versions before path construction, proves the
-exact native five-image workflow plan, packages the chart twice and renders
-the version-matched GHCR product/CloudNativePG pair without a daemon or
-network. The installer applies the same version vocabulary before downloads or
-temporary paths. `make db-test` proves exact
+exact five deployment images plus browser-acceptance fixture, packages the
+reference and chart repeatably, and verifies the source/image environment
+manifest without a daemon or network. Installer tests prove checksum-verified
+installation, version/source identity, a two-version current-link update,
+idempotent reinstall with preserved state and pre-mutation refusal of the
+retired profile footprint. `make db-test` proves exact
 database bootstrap, preflight, migration, forced RLS and authority drift
 behavior against fresh PostgreSQL fixtures. These checks do not build an image
 or prove artifact publication or pulls. The implemented

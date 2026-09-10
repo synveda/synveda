@@ -66,7 +66,7 @@ pub const MCP_CLIENT: &str = concat!("synveda-mcp/", env!("CARGO_PKG_VERSION"));
 /// The CLI installs no OTel exporter — `synveda mcp` deliberately does not
 /// (see `mcp::subscribe`), and the one-shot verbs have no subscriber at
 /// all — so the span this names as the parent is never reported to a
-/// collector. In Jaeger the gateway's spans appear under a root that is
+/// collector. In a trace backend the gateway's spans appear under a root that is
 /// not there, which renders fine and is exactly what ADPT-1's hooks have
 /// always produced. Do not go looking for the missing span; nothing lost
 /// it.
@@ -74,7 +74,7 @@ pub const MCP_CLIENT: &str = concat!("synveda-mcp/", env!("CARGO_PKG_VERSION"));
 /// What this buys is real all the same: every call from one command shares
 /// an id, the gateway now continues that trace rather than starting its
 /// own (FND-5, ADR-0007's deferred clause), and the id is printed where a
-/// person can paste it into Jaeger.
+/// person can paste it into the configured trace backend.
 struct TraceContext {
     trace_id: String,
     parent_span_id: String,
@@ -190,7 +190,7 @@ impl Api {
     }
 
     /// The trace id every call from this client carries — the one to paste
-    /// into Jaeger to see what the gateway did with them.
+    /// into the configured trace backend to see what the gateway did with them.
     pub fn trace_id(&self) -> &str {
         &self.trace.trace_id
     }
@@ -471,7 +471,7 @@ mod tests {
     /// One trace per client, which is one trace per thing the user asked
     /// for: every call a command makes shares an id, and two commands do
     /// not. Reusing across clients would merge unrelated work into one
-    /// Jaeger view; minting per *call* would scatter one command across
+    /// trace view; minting per *call* would scatter one command across
     /// several.
     #[test]
     fn one_client_is_one_trace_and_two_clients_are_two() {
@@ -583,7 +583,7 @@ mod tests {
         assert!(
             traceparent.contains(api.trace_id()),
             "the id the header carries must be the one `trace_id()` reports, or the \
-             number printed for a human to paste into Jaeger names a different trace",
+             number printed for a human to inspect names a different trace",
         );
         // ADR-0027 promises `<name>/<version>`, and the gateway refuses a
         // value outside a conservative character set rather than sanitising

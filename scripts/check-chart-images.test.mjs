@@ -94,11 +94,11 @@ test("Compose image selector mutants cannot hide a missing or ambient value", ()
 
 test("Helm computed image defaults preserve a safe literal tag prefix", () => {
   const helper = `{{- define "synveda.postgresImage" -}}
-{{- default (printf "ghcr.io/synveda/enterprise-postgres:17.11-synveda-%s" .Chart.AppVersion) .Values.postgres.image -}}
+{{- default (printf "ghcr.io/synveda/cnpg-postgres:17.11-synveda-%s" .Chart.AppVersion) .Values.postgres.image -}}
 {{- end -}}
 `;
   assert.deepEqual(helmComputedImageReferences(helper), [
-    "ghcr.io/synveda/enterprise-postgres:17.11-synveda-<appVersion>",
+    "ghcr.io/synveda/cnpg-postgres:17.11-synveda-<appVersion>",
   ]);
   assert.deepEqual(
     helmComputedImageReferences(
@@ -113,7 +113,7 @@ test("Helm computed image defaults preserve a safe literal tag prefix", () => {
   ]) {
     assert.throws(() =>
       helmComputedImageReferences(
-        helper.replace("ghcr.io/synveda/enterprise-postgres", repository),
+        helper.replace("ghcr.io/synveda/cnpg-postgres", repository),
       ),
     );
   }
@@ -192,11 +192,12 @@ test("external Dockerfile bases require a readable tag and full digest", () => {
 
 test("release workflow image discovery sees the closed versioned set", () => {
   const source = [
-    ["gateway", ""],
+    ["product", ""],
     ["postgres", ""],
-    ["enterprise-postgres", "17.11-synveda-"],
+    ["cnpg-postgres", "17.11-synveda-"],
     ["keycloak", ""],
     ["proxy", ""],
+    ["browser-acceptance", ""],
   ]
     .map(
       ([name, prefix]) =>
@@ -204,19 +205,21 @@ test("release workflow image discovery sees the closed versioned set", () => {
     )
     .join("\n");
   assert.deepEqual(releaseWorkflowImageReferences(source), [
-    "ghcr.io/synveda/gateway:<version>",
+    "ghcr.io/synveda/product:<version>",
     "ghcr.io/synveda/postgres:<version>",
-    "ghcr.io/synveda/enterprise-postgres:17.11-synveda-<version>",
+    "ghcr.io/synveda/cnpg-postgres:17.11-synveda-<version>",
     "ghcr.io/synveda/keycloak:<version>",
     "ghcr.io/synveda/proxy:<version>",
+    "ghcr.io/synveda/browser-acceptance:<version>",
   ]);
   assert.deepEqual(
     releaseWorkflowImageReferences(source.replace("matrix.arch", "matrix.platform")),
     [
       "ghcr.io/synveda/postgres:<version>",
-      "ghcr.io/synveda/enterprise-postgres:17.11-synveda-<version>",
+      "ghcr.io/synveda/cnpg-postgres:17.11-synveda-<version>",
       "ghcr.io/synveda/keycloak:<version>",
       "ghcr.io/synveda/proxy:<version>",
+      "ghcr.io/synveda/browser-acceptance:<version>",
     ],
   );
 });

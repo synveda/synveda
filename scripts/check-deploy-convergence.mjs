@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -76,6 +77,19 @@ export function temporalRuntimeResidueFindings(sources, temporalConfigPresent) {
   return findings;
 }
 
+const RETIRED_DEPLOYMENT_PATHS = [
+  "deploy/compose/rauthy",
+  "deploy/compose/temporal",
+  "deploy/release",
+  "deploy/compose/docker-compose.yml",
+  "deploy/compose/gateway",
+  "scripts/smoke.sh",
+];
+
+export function retiredDeploymentPathFindings(isPresent) {
+  return RETIRED_DEPLOYMENT_PATHS.filter((path) => isPresent(path));
+}
+
 export function hasRetiredDemoField(source) {
   return /^\s*demo:\s*bool,/m.test(source);
 }
@@ -130,8 +144,8 @@ export function releaseNoteFindings(source) {
       findings.push(`unaccepted turnkey command ${command}`);
     }
   }
-  if (!notes.includes("Docker reference deployment acceptance is pending")) {
-    findings.push("Docker reference acceptance notice is missing");
+  if (!notes.includes("Docker reference live clean-host acceptance is tracked separately")) {
+    findings.push("Docker reference live-acceptance boundary is missing");
   }
   return findings;
 }
@@ -157,43 +171,19 @@ export function releasePostgresBuildFindings(source) {
 
 export function postgresImageTargetFindings(source) {
   const runtime = source.indexOf(" AS runtime\n");
-  const development = source.indexOf("FROM runtime AS development\n");
   const reference = source.indexOf("FROM runtime AS reference\n");
-  const copy =
-    "COPY --chmod=0444 deploy/compose/postgres/development-initdb.sql " +
-    "/docker-entrypoint-initdb.d/01-synveda-extensions.sql";
   const findings = [];
-  if (!(runtime >= 0 && development > runtime && reference > development)) {
-    findings.push("PostgreSQL runtime/development/reference stages are not closed and ordered");
+  if (!(runtime >= 0 && reference > runtime)) {
+    findings.push("PostgreSQL runtime/reference stages are not closed and ordered");
     return findings;
   }
-  const runtimeBlock = source.slice(runtime, development);
-  const developmentBlock = source.slice(development, reference);
-  const referenceBlock = source.slice(reference);
-  if (!developmentBlock.includes(copy) || source.split(copy).length !== 2) {
-    findings.push("development extension init is not isolated to one development stage");
+  if (/FROM runtime AS development|docker-entrypoint-initdb\.d|development-initdb\.sql/.test(source)) {
+    findings.push("PostgreSQL image retains an alternate initdb lifecycle");
   }
-  if (/docker-entrypoint-initdb\.d|development-initdb\.sql/.test(runtimeBlock + referenceBlock)) {
-    findings.push("reference PostgreSQL image inherits development initdb SQL");
-  }
-  if (!/^FROM runtime AS reference\s*$/m.test(referenceBlock)) {
+  if (!/^FROM runtime AS reference\s*$/m.test(source.slice(reference))) {
     findings.push("reference PostgreSQL image is not the default final stage");
   }
   return findings;
-}
-
-export function developmentInitdbFindings(source) {
-  const active = source
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("--"));
-  const expected = [
-    "create extension if not exists vector;",
-    "create extension if not exists btree_gin;",
-  ];
-  return JSON.stringify(active) === JSON.stringify(expected)
-    ? []
-    : ["development initdb is not the exact two-extension prerequisite"];
 }
 
 export function shellFunctionOrderFindings(source, names) {
@@ -1560,7 +1550,7 @@ export function productImageFindings(source) {
     ["synveda", "COPY --from=build /src/target/release/synveda /usr/local/bin/synveda"],
     [
       "synveda-container",
-      "COPY --chmod=0755 deploy/compose/gateway/synveda-container /usr/local/bin/synveda-container",
+      "COPY --chmod=0755 deploy/compose/product/synveda-container /usr/local/bin/synveda-container",
     ],
   ]) {
     if (!finalActive.includes(instruction)) {
@@ -2066,80 +2056,11 @@ function run(command, args, options = {}) {
   }
 }
 
-function checkCompose(relative, release) {
-  const source = read(relative);
-  if (!release) {
-    const buildFindings = contributorPostgresBuildFindings(source);
-    if (buildFindings.length > 0) fail(`${relative} ${buildFindings.join(", ")}`);
-  }
-  const gateway = serviceBlock(`\n${source}`, "gateway");
-  if (!gateway) fail(`${relative} has no gateway service`);
-  if (!gateway.includes("synveda_gateway")) {
-    fail(`${relative} does not connect the gateway as synveda_gateway`);
-  }
-  if (/postgres:\/\/synveda:/.test(gateway)) {
-    fail(`${relative} hands the database-owner DSN to the gateway`);
-  }
-  if (!gateway.includes("SYNVEDA_GATEWAY_DATABASE_URL")) {
-    fail(`${relative} cannot receive a separately provisioned runtime DSN`);
-  }
-  if (!gateway.includes('SYNVEDA_WORKER_DATABASE_URL: ""')) {
-    fail(`${relative} leaves the worker DSN in the gateway environment`);
-  }
-  if (
-    !gateway.includes(
-      '"/usr/local/bin/synveda-container", "probe", "gateway", "live"',
-    )
-  ) {
-    fail(`${relative} does not attach the gateway role-specific liveness probe`);
-  }
-  const worker = serviceBlock(`\n${source}`, "worker");
-  if (!worker) fail(`${relative} has no worker service`);
-  if (!worker.includes("synveda_worker")) {
-    fail(`${relative} does not connect the worker as synveda_worker`);
-  }
-  if (/postgres:\/\/synveda:/.test(worker)) {
-    fail(`${relative} hands the database-owner DSN to the worker`);
-  }
-  if (!worker.includes("SYNVEDA_WORKER_DATABASE_URL")) {
-    fail(`${relative} cannot receive a separately provisioned worker DSN`);
-  }
-  if (!worker.includes('SYNVEDA_GATEWAY_DATABASE_URL: ""')) {
-    fail(`${relative} leaves the gateway DSN in the worker environment`);
-  }
-  if (!worker.includes('command: ["worker"]')) {
-    fail(`${relative} does not select the worker image command`);
-  }
-  if (!worker.includes("stop_grace_period: 85s")) {
-    fail(`${relative} can kill the worker before its bounded drain completes`);
-  }
-  if (release && !worker.includes("restart: unless-stopped")) {
-    fail(`${relative} does not restart a failed installed worker`);
-  }
-  if (!worker.includes('"/usr/local/bin/synveda-container", "probe", "worker", "ready"')) {
-    fail(`${relative} does not attach the worker readiness probe`);
-  }
-  if (/^\s*ports:/m.test(worker)) {
-    fail(`${relative} publishes the worker health surface`);
-  }
-  const gatewayImage = gateway.match(/^\s*image:\s*(\S+)/m)?.[1];
-  const workerImage = worker.match(/^\s*image:\s*(\S+)/m)?.[1];
-  if (!gatewayImage || gatewayImage !== workerImage) {
-    fail(`${relative} does not use one image for gateway and worker`);
-  }
-  if (release && /^\s*build:/m.test(source)) {
-    fail(`${relative} is a release manifest with a source build`);
-  }
-  const retired = retiredFindings(source);
-  if (retired.length) fail(`${relative} retains ${retired.join(", ")}`);
-
-  // Compose parsing and interpolation are different failure modes. Rendering
-  // with interpolation disabled checks the manifest without exposing local
-  // deployment values stored beside it.
-  run("docker", ["compose", "-f", relative, "config", "--no-interpolate"]);
-}
-
 function checkTemporalRuntimeResidue() {
+  const retiredPaths = retiredDeploymentPathFindings((path) => existsSync(join(ROOT, path)));
+  if (retiredPaths.length > 0) {
+    fail(`retired deployment paths returned: ${retiredPaths.join(", ")}`);
+  }
   const composeSources = readdirSync(join(ROOT, "deploy/compose"), {
     withFileTypes: true,
   })
@@ -2154,7 +2075,6 @@ function checkTemporalRuntimeResidue() {
   }
   const findings = temporalRuntimeResidueFindings(
     [
-      ["deploy/release/docker-compose.yml", read("deploy/release/docker-compose.yml")],
       ["Makefile", read("Makefile")],
       ...composeSources,
       ...dependencyPaths.map((path) => [path, read(path)]),
@@ -2274,7 +2194,7 @@ function checkReleaseNotes() {
 }
 
 function checkProductImageInputs() {
-  const relative = "deploy/compose/gateway/Dockerfile";
+  const relative = "deploy/compose/product/Dockerfile";
   const source = read(relative);
   const missing = missingLocalDockerCopySources(source, (path) =>
     existsSync(join(ROOT, path)),
@@ -2312,7 +2232,7 @@ function checkProductImageInputs() {
     );
   }
 
-  const launcherRelative = "deploy/compose/gateway/synveda-container";
+  const launcherRelative = "deploy/compose/product/synveda-container";
   const launcher = read(launcherRelative);
   const launcherFindings = productLauncherFindings(launcher);
   if (launcherFindings.length > 0) {
@@ -2351,13 +2271,6 @@ function checkProductImageInputs() {
   if (/\bapt-get\b/.test(helmPostgresImage)) {
     fail(`${helmPostgresRelative} must not mutate the pinned CNPG base through apt`);
   }
-  const initdbFindings = developmentInitdbFindings(
-    read("deploy/compose/postgres/development-initdb.sql"),
-  );
-  if (initdbFindings.length > 0) {
-    fail(`development PostgreSQL init violates its boundary: ${initdbFindings.join(", ")}`);
-  }
-
   const functionOrderFindings = shellFunctionOrderFindings(read("scripts/db-test.sh"), [
     "private_evidence_file",
     "assert_database_secrets_absent",
@@ -2426,34 +2339,78 @@ function checkReleaseUpgradeShape() {
   const scratch = mkdtempSync(join(tmpdir(), "synveda-deploy-check-"));
   try {
     const version = "0.2.0";
-    run("bash", ["scripts/package-release.sh", version, scratch]);
-    const stage = join(scratch, `synveda-profile-${version}`);
+    const sourceSha = "1".repeat(40);
+    const digests = ["2", "3", "4", "5", "6", "7"].map(
+      (digit) => `sha256:${digit.repeat(64)}`,
+    );
+    const packageArgs = [
+      "scripts/package-release.sh",
+      version,
+      scratch,
+      sourceSha,
+      ...digests,
+    ];
+    run("bash", packageArgs);
+    const stage = join(scratch, `synveda-reference-${version}`);
+    if (existsSync(stage)) fail("the reference packager retained its publication stage");
+    mkdirSync(stage);
     const stale = join(stage, "retired-demo-sentinel");
     writeFileSync(stale, "must be removed by replacement\n");
-    run("bash", ["scripts/package-release.sh", version, scratch]);
-    if (existsSync(stale)) fail("a repeated release package retained a stale profile file");
+    run("bash", packageArgs);
+    if (existsSync(stage)) fail("a repeated release package retained its publication stage");
+    if (readdirSync(scratch, { withFileTypes: true }).some((entry) => entry.isDirectory())) {
+      fail("the reference package output contains a directory that release publication would upload");
+    }
 
-    const archive = join(scratch, `synveda-profile-${version}.tar.gz`);
+    const archive = join(scratch, `synveda-reference-${version}.tar.gz`);
     const entries = run("tar", ["-tzf", archive]).split("\n").filter(Boolean);
-    const expected = new Set([
-      `synveda-profile-${version}/`,
-      `synveda-profile-${version}/docker-compose.yml`,
-      `synveda-profile-${version}/rauthy/`,
-      `synveda-profile-${version}/rauthy/config.toml`,
-      `synveda-profile-${version}/version`,
-    ]);
-    for (const entry of entries) {
-      if (!expected.has(entry)) fail(`release profile contains unexpected entry ${entry}`);
+    for (const required of [
+      `synveda-reference-${version}/synveda-compose`,
+      `synveda-reference-${version}/environment.json`,
+      `synveda-reference-${version}/source-sha`,
+      `synveda-reference-${version}/deploy/compose/compose.yaml`,
+      `synveda-reference-${version}/deploy/compose/compose.reference.yaml`,
+      `synveda-reference-${version}/deploy/compose/compose.keycloak.yaml`,
+      `synveda-reference-${version}/deploy/compose/compose.external.yaml`,
+    ]) {
+      if (!entries.includes(required)) fail(`release reference is missing ${required}`);
     }
-    if (entries.some((entry) => entry.includes("/demo/"))) {
-      fail("release profile still packages the retired demo seeder");
+    if (
+      entries.some((entry) =>
+        /(?:^|\/)(?:\.env|runtime|backups|secrets|rauthy|temporal)(?:\/|$)|\.dev\.yaml$|Dockerfile$/.test(
+          entry,
+        ),
+      )
+    ) {
+      fail("release reference contains mutable, retired or source-development input");
     }
-    const packaged = readFileSync(join(stage, "docker-compose.yml"), "utf8");
-    if (!serviceBlock(`\n${packaged}`, "gateway").includes("synveda_gateway")) {
-      fail("packaged release drifted from the least-privilege gateway DSN");
+    const extracted = join(scratch, "extracted");
+    mkdirSync(extracted);
+    run("tar", ["-xzf", archive, "-C", extracted]);
+    const extractedStage = join(extracted, `synveda-reference-${version}`);
+    const environment = JSON.parse(
+      readFileSync(join(extractedStage, "environment.json"), "utf8"),
+    );
+    if (
+      environment.schema_version !== 1 ||
+      environment.release_version !== version ||
+      environment.source_sha !== sourceSha ||
+      environment.images.product !== `ghcr.io/synveda/product@${digests[0]}` ||
+      environment.images.browser_acceptance !==
+        `ghcr.io/synveda/browser-acceptance@${digests[4]}` ||
+      environment.images.helm_postgres !==
+        `ghcr.io/synveda/cnpg-postgres@${digests[5]}`
+    ) {
+      fail("release environment manifest is not bound to source and image identities");
     }
-    if (!serviceBlock(`\n${packaged}`, "worker").includes("synveda_worker")) {
-      fail("packaged release drifted from the least-privilege worker DSN");
+    const launcher = readFileSync(join(extractedStage, "synveda-compose"), "utf8");
+    for (const marker of [
+      "SYNVEDA_COMPOSE_RUNTIME=reference",
+      `SYNVEDA_PRODUCT_IMAGE='ghcr.io/synveda/product@${digests[0]}'`,
+      "$install_home/state",
+      "$install_home/backups",
+    ]) {
+      if (!launcher.includes(marker)) fail(`release launcher is missing ${marker}`);
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
@@ -2462,7 +2419,6 @@ function checkReleaseUpgradeShape() {
 
 export function main() {
   checkTemporalRuntimeResidue();
-  checkCompose("deploy/release/docker-compose.yml", true);
   checkHelm();
   checkProductImageInputs();
   checkPublicContract();
@@ -2471,7 +2427,7 @@ export function main() {
   console.log(
     "deployment convergence holds: canonical Compose contract, Helm render, product image inputs, " +
       "current OpenAPI, distinct runtime DSNs, three-role Helm preflight and " +
-      "repeatable release replacement",
+      "repeatable digest-bound reference packaging",
   );
 }
 

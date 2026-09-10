@@ -204,7 +204,7 @@ if (
 }
 
 requireMarkers("database bootstrap", bootstrap, [
-  `image: ghcr.io/synveda/enterprise-postgres:17.11-synveda-${appVersion}`,
+  `image: ghcr.io/synveda/cnpg-postgres:17.11-synveda-${appVersion}`,
   'command: ["/bin/sh", "-ec"]',
   "source=/run/bootstrap-projection/$secret",
   "destination=/run/secrets/$secret",

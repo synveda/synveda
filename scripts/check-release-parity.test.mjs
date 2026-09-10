@@ -38,9 +38,9 @@ const currentVersionInputs = () => [
   read("scripts/install.sh"),
   [
     [
-      "release profile packager",
+      "Docker reference packager",
       read("scripts/package-release.sh"),
-      'stage="$outdir/synveda-profile-$version"',
+      'stage="$outdir/synveda-reference-$version"',
     ],
     ["plugin packager", read("scripts/package-plugin.sh"), 'stage="$outdir/plugin"'],
     ["chart packager", read("scripts/package-chart.sh"), 'mkdir -p "$outdir"'],
@@ -101,18 +101,19 @@ test("invalid versions are refused before packager or installer mutation", () =>
   try {
     const output = join(scratch, "out");
     const victim = join(scratch, "victim");
-    mkdirSync(join(output, "synveda-profile-x"), { recursive: true });
+    mkdirSync(join(output, "synveda-reference-x"), { recursive: true });
     mkdirSync(join(output, "plugin"), { recursive: true });
     mkdirSync(victim);
     writeFileSync(join(victim, "sentinel"), "preserve\n");
     writeFileSync(join(output, "plugin", "sentinel"), "preserve\n");
 
-    for (const [interpreter, script] of [
-      ["bash", "scripts/package-release.sh"],
-      ["bash", "scripts/package-plugin.sh"],
-      ["sh", "scripts/package-chart.sh"],
+    const digest = `sha256:${"1".repeat(64)}`;
+    for (const [interpreter, script, extra] of [
+      ["bash", "scripts/package-release.sh", ["0".repeat(40), ...Array(6).fill(digest)]],
+      ["bash", "scripts/package-plugin.sh", []],
+      ["sh", "scripts/package-chart.sh", []],
     ]) {
-      const result = spawnSync(interpreter, [script, "x/../../victim", output], {
+      const result = spawnSync(interpreter, [script, "x/../../victim", output, ...extra], {
         cwd: ROOT,
         encoding: "utf8",
       });
@@ -147,7 +148,7 @@ test("invalid versions are refused before packager or installer mutation", () =>
   }
 });
 
-test("release workflow scopes authority and binds the chart plus five images", () => {
+test("release workflow binds the chart and digest-addressed reference images", () => {
   const current = read(".github/workflows/release.yml");
   assert.deepEqual(releaseWorkflowFindings(current), []);
   for (const [index, mutant] of [
@@ -157,7 +158,7 @@ test("release workflow scopes authority and binds the chart plus five images", (
     current.replace("file: deploy/helm/postgres/Dockerfile", "file: deploy/compose/postgres/Dockerfile"),
     current.replace(
       "file: deploy/compose/keycloak/Dockerfile",
-      "file: deploy/compose/gateway/Dockerfile",
+      "file: deploy/compose/product/Dockerfile",
     ),
     current.replace(
       "tags: ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}",
@@ -165,8 +166,8 @@ test("release workflow scopes authority and binds the chart plus five images", (
     ),
     current.replace("- name: Bundled Keycloak", "- name: Omitted Keycloak"),
     current.replace(
-      "for image in gateway postgres keycloak proxy; do",
-      "for image in gateway postgres keycloak; do",
+      "for image in product postgres keycloak proxy browser-acceptance; do",
+      "for image in product postgres keycloak proxy; do",
     ),
     current.replace(
       "          - arch: arm64\n            platform: linux/arm64\n            runs-on: ubuntu-24.04-arm\n",
@@ -178,8 +179,8 @@ test("release workflow scopes authority and binds the chart plus five images", (
       "          file: deploy/compose/keycloak/Dockerfile\n          target: builder\n          platforms:",
     ),
     current.replace(
-      "          file: deploy/compose/gateway/Dockerfile\n          platforms:",
-      "          file: deploy/compose/gateway/Dockerfile\n          target: build\n          platforms:",
+      "          file: deploy/compose/product/Dockerfile\n          platforms:",
+      "          file: deploy/compose/product/Dockerfile\n          target: build\n          platforms:",
     ),
     current.replace(
       "          file: deploy/helm/postgres/Dockerfile\n          platforms:",
@@ -211,12 +212,12 @@ test("release workflow scopes authority and binds the chart plus five images", (
       "      - name: Join the per-architecture image tags\n",
     ),
     current.replace(
-      '          version="${{ needs.version.outputs.version }}"\n          for image in gateway postgres keycloak proxy; do',
-      "          version=latest\n          for image in gateway postgres keycloak proxy; do",
+      '          version="${{ needs.version.outputs.version }}"\n          for image in product postgres keycloak proxy browser-acceptance; do',
+      "          version=latest\n          for image in product postgres keycloak proxy browser-acceptance; do",
     ),
     current.replace(
-      '          version="${{ needs.version.outputs.version }}"\n          for image in gateway postgres keycloak proxy; do',
-      '          version="${{ needs.version.outputs.version }}"\n          version=latest\n          for image in gateway postgres keycloak proxy; do',
+      '          version="${{ needs.version.outputs.version }}"\n          for image in product postgres keycloak proxy browser-acceptance; do',
+      '          version="${{ needs.version.outputs.version }}"\n          version=latest\n          for image in product postgres keycloak proxy browser-acceptance; do',
     ),
     current.replace(
       '--tag "ghcr.io/synveda/$image:$version"',
@@ -227,7 +228,25 @@ test("release workflow scopes authority and binds the chart plus five images", (
       '"ghcr.io/synveda/$image:$version-amd64"',
     ),
     current.replace('cnpg_tag="17.11-synveda-$version"', 'cnpg_tag="$version"'),
+    current.replace(
+      'scripts/package-release.sh "$version" assets "$SOURCE_SHA"',
+      'scripts/package-release.sh "$version" assets "0000000000000000000000000000000000000000"',
+    ),
+    current.replace(
+      'if ! docker buildx imagetools inspect --raw "$image" > "$output"; then',
+      'if docker buildx imagetools inspect --raw "$image" > "$output"; then',
+    ),
+    current.replace('if [ ! -s "$output" ]; then', 'if [ -s "$output" ]; then'),
+    current.replace(
+      "      - name: Package the digest-bound Docker reference\n",
+      "      - name: Package the Docker reference too early\n",
+    ),
     current.replace("sha256sum synveda-*.tar.gz synveda-*.tgz", "sha256sum synveda-*.tar.gz"),
+    current.replace("installed \\`synveda-compose\\` launcher", "installed `synveda-compose` launcher"),
+    current.replace(
+      "scripts/install.sh | SYNVEDA_VERSION=${GITHUB_REF_NAME} sh",
+      "scripts/install.sh | sh",
+    ),
     current.replace('"synveda-$version.tgz"; do', '"synveda-plugin-$version.tar.gz"; do'),
     current.replace(
       "      - name: Publish\n        if: needs.version.outputs.publish == 'true'\n",
@@ -251,13 +270,13 @@ test("workspace and chart default to one versioned GHCR image pair", () => {
     current.with(1, current[1].replace('appVersion: "0.2.0"', 'appVersion: "0.2.1"')),
     current.with(
       2,
-      current[2].replace("repository: ghcr.io/synveda/gateway", "repository: synveda/gateway"),
+      current[2].replace("repository: ghcr.io/synveda/product", "repository: synveda/product"),
     ),
     current.with(2, current[2].replace('  image: ""', "  image: latest")),
     current.with(
       3,
       current[3].replace(
-        "ghcr.io/synveda/enterprise-postgres:17.11-synveda-%s",
+        "ghcr.io/synveda/cnpg-postgres:17.11-synveda-%s",
         "synveda/postgres:17-%s",
       ),
     ),
@@ -301,14 +320,14 @@ test("kind acceptance builds and loads the chart's exact image coordinates", () 
 
   for (const [demoMutant, clientMutant, keycloakMutant] of [
     [
-      demo.replace("ghcr.io/synveda/gateway:$IMAGE_TAG", "synveda/gateway:$IMAGE_TAG"),
+      demo.replace("ghcr.io/synveda/product:$IMAGE_TAG", "synveda/product:$IMAGE_TAG"),
       client,
       keycloak,
     ],
     [
       demo.replace(
-        "ghcr.io/synveda/enterprise-postgres:17.11-synveda-$IMAGE_TAG",
-        "synveda/enterprise-postgres:17",
+        "ghcr.io/synveda/cnpg-postgres:17.11-synveda-$IMAGE_TAG",
+        "synveda/cnpg-postgres:17",
       ),
       client,
       keycloak,
@@ -326,7 +345,7 @@ test("kind acceptance builds and loads the chart's exact image coordinates", () 
       client,
       keycloak,
     ],
-    [demo, client.replace("ghcr.io/synveda/gateway", "synveda/gateway"), keycloak],
+    [demo, client.replace("ghcr.io/synveda/product", "synveda/product"), keycloak],
     [
       demo,
       client.replace(

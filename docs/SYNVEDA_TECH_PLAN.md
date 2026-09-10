@@ -37,7 +37,7 @@ it does not substitute for the still-open restore and failover evidence.
 | Authorisation (PDP) | **Cedar** (embedded) | Apache-2.0 | Amazon's policy language, **pure Rust, in-process** — no network hop on the hot read path; formally verified evaluator; policies-as-data suits VedaFlow versioning |
 | Relationship checks | Cedar entities and governed scope ancestry | Apache-2.0 | The current runtime has one authority engine. AUTHZ-6 tracks an OpenFGA spike; no adapter is implemented or claimed. |
 | Why not OPA | Rego is powerful but adds a Go sidecar + network hop on every context decision; Cedar embeds in-process in the product binaries | | OPA remains a possible adapter for shops that mandate it, not a shipped runtime |
-| OIDC provider (bundled reference) | **Keycloak** (Apache-2.0) | Apache-2.0 | ADR-0102 selects production-mode Keycloak behind the generic OIDC/PKCE boundary. Rauthy remains only until CPR-45 cutover acceptance and is then deleted without a compatibility mode. |
+| OIDC provider (bundled reference) | **Keycloak** (Apache-2.0) | Apache-2.0 | ADR-0102 selects production-mode Keycloak behind the generic OIDC/PKCE boundary. No bundled-provider compatibility mode exists. |
 | Enterprise IdP | Bring-your-own: Entra ID, Okta, Keycloak, Zitadel — standard OIDC + SCIM 2.0 | — | Synveda is an OIDC *client*, never the source of truth for identity |
 | Secrets/PII detection | Rust regex+ML pipeline; **gitleaks** ruleset port for secrets | MIT | Runs in `synveda-ingest` before persistence |
 
@@ -149,7 +149,7 @@ Required approvals resolve from **(asset type × sensitivity × target scope × 
 | Skill version or binding change | live pack matrix, including the invariant security-reviewer requirement; skills are treated like code because they are |
 | Anything `restricted` sensitivity | + distinct `reviewer`; the author cannot review |
 | Policy relaxation under regulated-strict | distinct approvers, separate effect actor + hard expiry mandatory |
-| SMB `standard` pack | most of the above collapses to single-approver or auto-approve |
+| Small-team `standard` pack | most of the above collapses to single-approver or auto-approve |
 
 Reviews happen in Advanced → Reviews or via the proposal CLI. A verdict binds
 the exact commit the reviewer read; the gateway refuses a moved commit before
@@ -217,7 +217,7 @@ global `/v1/recall` route and no direct-store adapter path.
 
 | | Docker reference | Later Helm/on-prem |
 |---|---|---|
-| Footprint | Reverse proxy, separate gateway/worker, PostgreSQL + pgvector, production-mode Keycloak and private OTel Collector; optional TEI, local visibility, Apalis experiment and backup-test services | The same product commands/configuration with Kubernetes-native ingress, jobs, secrets, networks and external dependencies |
+| Footprint | Reverse proxy, separate gateway/worker, PostgreSQL + pgvector, production-mode Keycloak and private OTel Collector; optional local visibility, Apalis experiment and backup-test services. The Compose semantic profile remains pending; TEI is available in the isolated evaluation fixture. | The same product commands/configuration with Kubernetes-native ingress, jobs, secrets, networks and external dependencies; optional TEI is already charted. |
 | Product behaviour | Governed Configuration documents select policy, capture and context behaviour; deployment shape does not. | The same runtime and Configuration model; no edition branch. |
 | Status | Accepted target under CPR-45; no validation claim until clean Linux + desktop acceptance passes. | Existing chart remains one gateway replica and is not promoted by mechanically translating Compose. |
 | Residency | One host/region; no host-loss tolerance. | Single deployment region; OPS-3 regional routing is not implemented. |

@@ -27,36 +27,36 @@ services:
   database-preflight:
     build:
       context: ../..
-      dockerfile: deploy/compose/gateway/Dockerfile
+      dockerfile: deploy/compose/product/Dockerfile
       args:
         <<: *synveda-development-proxy-build-closure
   migrate:
     build:
       context: ../..
-      dockerfile: deploy/compose/gateway/Dockerfile
+      dockerfile: deploy/compose/product/Dockerfile
       args:
         <<: *synveda-development-proxy-build-closure
   tenant-convergence:
     build:
       context: ../..
-      dockerfile: deploy/compose/gateway/Dockerfile
+      dockerfile: deploy/compose/product/Dockerfile
       args:
         <<: *synveda-development-proxy-build-closure
   issuer-diagnostic:
     build:
       context: ../..
-      dockerfile: deploy/compose/gateway/Dockerfile
+      dockerfile: deploy/compose/product/Dockerfile
       args:
         <<: *synveda-development-proxy-build-closure
   gateway:
     build:
       context: ../..
-      dockerfile: deploy/compose/gateway/Dockerfile
+      dockerfile: deploy/compose/product/Dockerfile
       args:
         <<: *synveda-development-proxy-build-closure
   worker:
     build:
       context: ../..
-      dockerfile: deploy/compose/gateway/Dockerfile
+      dockerfile: deploy/compose/product/Dockerfile
       args:
         <<: *synveda-development-proxy-build-closure

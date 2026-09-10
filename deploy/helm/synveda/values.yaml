@@ -15,7 +15,7 @@
 # Carries the gateway, core worker and `synveda` CLI. The install job and an
 # operator's `kubectl exec` use that same immutable artefact (ADR-0102).
 image:
-  repository: ghcr.io/synveda/gateway
+  repository: ghcr.io/synveda/product
   # Empty means Chart.appVersion — the chart deploys the release it names.
   tag: ""
   pullPolicy: IfNotPresent
@@ -126,7 +126,7 @@ ingress:
 postgres:
   # Built from deploy/helm/postgres/Dockerfile: the CNPG base plus pgvector.
   # Empty means
-  # ghcr.io/synveda/enterprise-postgres:17.11-synveda-<Chart.appVersion>.
+  # ghcr.io/synveda/cnpg-postgres:17.11-synveda-<Chart.appVersion>.
   # CloudNativePG requires a direct image tag to begin with its PostgreSQL
   # version; the Synveda release remains paired in the suffix. An operator may
   # still supply an exact registry reference (preferably the version-bearing

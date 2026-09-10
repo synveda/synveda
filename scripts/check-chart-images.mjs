@@ -1,15 +1,9 @@
 #!/usr/bin/env node
 // Asserts that every container image we ship or use for a deployment fixture
-// — the canonical Compose graph's, the Helm chart's, the released single-node
-// profile's, the release workflow's, and every base image in deployment
+// — the canonical Compose graph's, the Helm chart's, the release workflow's,
+// and every base image in deployment
 // Dockerfiles — appears in deploy/helm/IMAGES.md, tag included.
 // Writes nothing, ever.
-//
-// The release profile joined the chart as a surface with OPS-8 (ADR-0065
-// decision 9): those are images a *customer installs*, which is a stronger
-// reason to know their licences than the chart's, not a weaker one. The
-// file and this script keep their chart-shaped names — renaming both plus
-// every reference is churn against OPS-2's artefacts for no reading.
 //
 // Why (OPS-2, ADR-0062 decision 11): the repository licence rule is enforced
 // by cargo-deny over crates, check-npm-licences over packages and
@@ -42,7 +36,6 @@ const INVENTORY = "deploy/helm/IMAGES.md";
 const CHART = "deploy/helm/synveda/Chart.yaml";
 const VALUES = "deploy/helm/synveda/values.yaml";
 const HELPERS = "deploy/helm/synveda/templates/_helpers.tpl";
-const RELEASE_COMPOSE = "deploy/release/docker-compose.yml";
 const COMPOSE_DIRECTORY = "deploy/compose";
 const COMPOSE_DEFAULTS = `${COMPOSE_DIRECTORY}/.env.example`;
 const RETRIEVAL_COMPOSE = "evals/compose.retrieval.yaml";
@@ -111,24 +104,6 @@ for (const ref of helmComputedImageReferences(read(HELPERS))) {
   found.set(ref, `${HELPERS} (Chart.appVersion default)`);
 }
 
-// ── What the released single-node profile runs ───────────────────────────
-// `image: <ref>`, where <ref> may be `${VAR:-default}` (the TEI image, which
-// `synveda init` overrides per architecture) and may carry the packager's
-// `__SYNVEDA_VERSION__` placeholder. The placeholder is inventoried as
-// `<version>` for the same reason the chart's tag is inventoried as
-// `<appVersion>`: pinning it here would mean editing the inventory on every
-// release for no reading.
-const release = read(RELEASE_COMPOSE);
-for (const [, raw] of release.matchAll(/^\s*image:\s+(\S+)\s*$/gm)) {
-  const defaulted = raw.match(/^\$\{[A-Z_]+:-(.+)\}$/);
-  const ref = (defaulted ? defaulted[1] : raw).replace("__SYNVEDA_VERSION__", "<version>");
-  if (ref.includes("$")) {
-    fail(`${RELEASE_COMPOSE}: image ${raw} has no default, so it cannot be inventoried`);
-    continue;
-  }
-  found.set(ref, `${RELEASE_COMPOSE} (image:)`);
-}
-
 // ── What the canonical Compose graph and its fixtures run ────────────────
 // The checked-in non-secret defaults resolve every canonical image selector.
 // Reference deployments replace the locally built Synveda image names with
@@ -186,8 +161,8 @@ for (const path of DOCKERFILES) {
 }
 
 const releaseWorkflowImages = releaseWorkflowImageReferences(read(RELEASE_WORKFLOW));
-if (releaseWorkflowImages.length !== 5) {
-  fail(`${RELEASE_WORKFLOW}: expected exactly five versioned first-party image builds`);
+if (releaseWorkflowImages.length !== 6) {
+  fail(`${RELEASE_WORKFLOW}: expected five product/deployment images and one acceptance fixture`);
 }
 for (const ref of releaseWorkflowImages) {
   found.set(ref, `${RELEASE_WORKFLOW} (tags:)`);
@@ -218,4 +193,4 @@ if (problems.length) {
   console.error(`\n${problems.length} problem(s); the deployment image surface is not fully inventoried.`);
   process.exit(1);
 }
-console.log(`ok: ${found.size} image reference(s) across canonical Compose, the chart, the release profile, the release workflow and deployment Dockerfiles, all inventoried in ${INVENTORY}.`);
+console.log(`ok: ${found.size} image reference(s) across canonical Compose, the chart, the release workflow and deployment Dockerfiles, all inventoried in ${INVENTORY}.`);

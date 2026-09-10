@@ -491,8 +491,8 @@ pub(crate) async fn whoami(
     }
 }
 
-/// One span per request. `otel.name` gives Jaeger the `VERB /route` operation
-/// name; the status code is recorded on response, and `tenant.id` by the
+/// One span per request. `otel.name` gives the exported span its `VERB /route`
+/// operation name; the status code is recorded on response, and `tenant.id` by the
 /// tenant-resolution middleware once resolution succeeds (TEN-1 AC).
 ///
 /// When the caller sent a W3C `traceparent`, this span continues that trace
@@ -555,8 +555,8 @@ fn make_request_span(request: &Request) -> tracing::Span {
 /// reading rather than ours.** W3C requires a version-`00` trace-id to be
 /// exactly 32 hex digits; `TraceContextPropagator` checks the field parses
 /// as hex and not that it is full width, so `00-4bf92f3577b34da6-…` is
-/// accepted and zero-padded into a valid id. The cost is a confusing
-/// Jaeger view — two callers sending the same short id share a trace — and
+/// accepted and zero-padded into a valid id. The cost is a confusing trace
+/// view — two callers sending the same short id share a trace — and
 /// it stops there, because nothing authorises off a trace id. Left as the
 /// SDK has it, and pinned by
 /// `observability.rs::a_short_trace_id_is_accepted_and_padded_by_the_sdk`
@@ -577,7 +577,7 @@ fn make_request_span(request: &Request) -> tracing::Span {
 /// story, not a substitute for it — AUD-1's hash-chained events remain the
 /// tamper-evident record". Nothing authorises off a trace id, no audit event
 /// derives from one, and the PDP never sees one. The blast radius of a
-/// forged `traceparent` is a misleading Jaeger view, which is the same blast
+/// forged `traceparent` is a misleading trace view, which is the same blast
 /// radius as a client that lies in its own logs.
 fn parent_context(headers: &axum::http::HeaderMap) -> Option<opentelemetry::Context> {
     let context = opentelemetry::global::get_text_map_propagator(|propagator| {

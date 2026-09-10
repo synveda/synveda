@@ -1537,7 +1537,7 @@ mod tests {
     #[test]
     fn issuer_config_defaults_apply() {
         let configs = parse_issuers(
-            r#"[{"issuer":"http://localhost:8100/auth/v1","client_id":"synveda","audience":"synveda-api"}]"#,
+            r#"[{"issuer":"https://idp.example.com/realms/synveda","client_id":"synveda","audience":"synveda-api"}]"#,
         )
         .expect("parse");
         assert_eq!(configs.len(), 1);

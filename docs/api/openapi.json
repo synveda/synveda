@@ -19639,7 +19639,7 @@
             "items": {
               "$ref": "#/components/schemas/AnchorCapabilities"
             },
-            "description": "Where this caller stands, most specific first, and what they may do at\neach — **from real policy decisions** (CPR-6, ADR-0073 decision 8).\n\nTheir own scope, the tenant root, and every scope a direct or group\ngrant reaches them at. Nothing here is derived from a plan, an edition\nor a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that\nscope, under that scope's own effective profile, by the same PDP the\nact itself will pass through. A personal deployment and an enterprise\none differ in the rows this reads, never in the code that reads them."
+            "description": "Where this caller stands, most specific first, and what they may do at\neach — **from real policy decisions** (CPR-6, ADR-0073 decision 8).\n\nTheir own scope, the tenant root, and every scope a direct or group\ngrant reaches them at. Nothing here is derived from a plan, an edition\nor a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that\nscope, under that scope's own effective profile, by the same PDP the\nact itself will pass through. Configuration and policy bindings change\nthe rows this reads, never the code that reads them."
           },
           "anchors_not_answered": {
             "type": "integer",

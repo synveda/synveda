@@ -348,7 +348,7 @@ impl SkillQualityConfig {
 
     /// The middle product config (`standard`): a bar low enough that an
     /// ordinary well-made bundle clears it, and no mandatory checklist —
-    /// an SMB's reviewer is often its author's only colleague.
+    /// a small team's reviewer is often its author's only colleague.
     pub const MODERATE: SkillQualityConfig = SkillQualityConfig {
         min_score: 50,
         require_checklist: false,

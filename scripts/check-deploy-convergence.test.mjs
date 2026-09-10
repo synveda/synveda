@@ -41,7 +41,6 @@ function shellFunctionSource(source, name) {
 import {
   authorityFingerprintFixtureFindings,
   dbTestNetworkReservationFindings,
-  developmentInitdbFindings,
   demoFixtureFindings,
   dockerignoreFindings,
   evalFixtureFindings,
@@ -57,6 +56,7 @@ import {
   postgresImageTargetFindings,
   releasePostgresBuildFindings,
   releaseNoteFindings,
+  retiredDeploymentPathFindings,
   retiredFindings,
   serviceBlock,
   shellFunctionOrderFindings,
@@ -66,10 +66,10 @@ import {
 } from "./check-deploy-convergence.mjs";
 
 const PRODUCT_LAUNCHER = fileURLToPath(
-  new URL("../deploy/compose/gateway/synveda-container", import.meta.url),
+  new URL("../deploy/compose/product/synveda-container", import.meta.url),
 );
 const PRODUCT_DOCKERFILE = fileURLToPath(
-  new URL("../deploy/compose/gateway/Dockerfile", import.meta.url),
+  new URL("../deploy/compose/product/Dockerfile", import.meta.url),
 );
 const DOCKERIGNORE = fileURLToPath(new URL("../.dockerignore", import.meta.url));
 const INIT_SOURCE = fileURLToPath(
@@ -94,9 +94,6 @@ const EVAL_LONGMEMEVAL_RUN = fileURLToPath(
 );
 const POSTGRES_DOCKERFILE = fileURLToPath(
   new URL("../deploy/compose/postgres/Dockerfile", import.meta.url),
-);
-const DEVELOPMENT_INITDB = fileURLToPath(
-  new URL("../deploy/compose/postgres/development-initdb.sql", import.meta.url),
 );
 const MAKEFILE = fileURLToPath(new URL("../Makefile", import.meta.url));
 
@@ -123,6 +120,21 @@ test("Temporal runtime markers are rejected without matching temporal domain lan
     ]);
   }
   assert.deepEqual(temporalRuntimeResidueFindings([], true), ["deploy/compose/temporal"]);
+});
+
+test("retired deployment paths form one closed absence contract", () => {
+  const retired = [
+    "deploy/compose/rauthy",
+    "deploy/compose/temporal",
+    "deploy/release",
+    "deploy/compose/docker-compose.yml",
+    "deploy/compose/gateway",
+    "scripts/smoke.sh",
+  ];
+  assert.deepEqual(retiredDeploymentPathFindings(() => false), []);
+  for (const path of retired) {
+    assert.deepEqual(retiredDeploymentPathFindings((candidate) => candidate === path), [path]);
+  }
 });
 
 test("the retired contributor lifecycle is absent and retrieval owns its fixture", () => {
@@ -338,7 +350,7 @@ test("the Helm database authority matrix fails closed", () => {
   }
 });
 
-test("a gateway image cannot copy a deleted workspace manifest", () => {
+test("the product image cannot copy a deleted workspace manifest", () => {
   const dockerfile = `
 COPY package.json pnpm-lock.yaml ./
 COPY sdks/typescript/package.json sdks/typescript/
@@ -789,12 +801,12 @@ ${body}
 NOTES
 `;
   const current = notes(
-    "Docker reference deployment acceptance is pending; this is not a turnkey single-host release.",
+    "Docker reference live clean-host acceptance is tracked separately; this is not a production claim.",
   );
   assert.deepEqual(releaseNoteFindings(current), []);
   assert.deepEqual(
     releaseNoteFindings(
-      notes(`Docker reference deployment acceptance is pending.
+      notes(`Docker reference live clean-host acceptance is tracked separately.
 synveda init --demo
 synveda login
 synveda demo start --profile personal`),
@@ -807,7 +819,7 @@ synveda demo start --profile personal`),
     ],
   );
   assert.deepEqual(releaseNoteFindings(notes("Artifacts only.")), [
-    "Docker reference acceptance notice is missing",
+    "Docker reference live-acceptance boundary is missing",
   ]);
 });
 
@@ -829,11 +841,9 @@ test("the release PostgreSQL build uses the repository-root context", () => {
   );
 });
 
-test("the development PostgreSQL image keeps its isolated init target", () => {
+test("the PostgreSQL image has one bootstrap-owned runtime target", () => {
   const dockerfile = readFileSync(POSTGRES_DOCKERFILE, "utf8");
-  const initdb = readFileSync(DEVELOPMENT_INITDB, "utf8");
   assert.deepEqual(postgresImageTargetFindings(dockerfile), []);
-  assert.deepEqual(developmentInitdbFindings(initdb), []);
   assert.ok(
     postgresImageTargetFindings(
       dockerfile.replace("FROM runtime AS reference", "FROM runtime AS removed-reference"),
@@ -841,11 +851,8 @@ test("the development PostgreSQL image keeps its isolated init target", () => {
   );
   assert.ok(
     postgresImageTargetFindings(
-      dockerfile.replace("FROM runtime AS development", "FROM runtime AS reference-leak"),
+      `${dockerfile}\nFROM runtime AS development\nCOPY unsafe.sql /docker-entrypoint-initdb.d/\n`,
     ).length > 0,
-  );
-  assert.ok(
-    developmentInitdbFindings(`${initdb}\ncreate role unsafe;\n`).length > 0,
   );
 });
 

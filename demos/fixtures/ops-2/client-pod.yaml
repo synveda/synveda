@@ -42,7 +42,7 @@ spec:
             path: keycloak_demo_admin_password
   containers:
     - name: client
-      image: ghcr.io/synveda/gateway:__IMAGE_TAG__
+      image: ghcr.io/synveda/product:__IMAGE_TAG__
       imagePullPolicy: Never
       command: ["/bin/sh", "/scripts/client.sh"]
       env:

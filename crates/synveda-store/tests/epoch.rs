@@ -512,7 +512,7 @@ fn a_current_epoch_database_starts_normally_and_keeps_its_provenance() {
         let first = epoch::verify(&pool).await.expect("a current database");
         let tenant = admit_a_tenant(&pool).await;
 
-        // The idempotent second run every `synveda init` and every test
+        // The idempotent second run every deployment bootstrap and test
         // harness performs.
         synveda_store::migrate(&pool, &scratch.roles)
             .await

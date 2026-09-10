@@ -16,13 +16,13 @@ services:
   apalis-migrate:
     build:
       context: ../..
-      dockerfile: deploy/compose/gateway/Dockerfile
+      dockerfile: deploy/compose/product/Dockerfile
       args:
         <<: *synveda-apalis-build-closure
 
   apalis-worker:
     build:
       context: ../..
-      dockerfile: deploy/compose/gateway/Dockerfile
+      dockerfile: deploy/compose/product/Dockerfile
       args:
         <<: *synveda-apalis-build-closure

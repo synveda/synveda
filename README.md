@@ -86,8 +86,8 @@ configuration is not lifecycle support.
 
 The current top-level gaps are deliberately explicit:
 
-- no tagged release has published and pull-verified the chart plus the
-  five-image Compose/Helm artifact set; none is signed;
+- no tagged release has published and pull-verified the chart, five deployment
+  images and browser-acceptance fixture; none is signed;
 - no production backup, WAL archive, PITR, restore drill, RPO or RTO exists;
 - Helm can now reference an externally owned local key Secret, but custody,
   KEK rotation and joint database/key restore have not passed a production
@@ -125,10 +125,10 @@ The gateway, worker, production-mode Keycloak, PostgreSQL, reverse proxy and
 private OpenTelemetry Collector all run in containers. Named volumes persist
 until the explicitly confirmed `make compose-reset` operation.
 
-For the installed local profile and its key-custody warning, follow
-[docs/INSTALL.md](docs/INSTALL.md). Release archives are currently unsigned;
-verify checksums, and do not treat the installed profile as production-ready.
-The accepted target for the Docker-first portable reference is
+For the digest-bound packaged Docker reference, install layout and key-custody
+warning, follow [docs/INSTALL.md](docs/INSTALL.md). Release archives are
+currently unsigned; verify checksums, and do not treat the reference bundle as
+production-ready. The accepted target for the Docker-first portable reference is
 [docs/DEPLOYMENT_CONTRACT.md](docs/DEPLOYMENT_CONTRACT.md); CPR-45 remains open
 until its clean-volume, identity, worker and recovery acceptance passes.
 
@@ -197,7 +197,7 @@ crates/       14 Rust crates: domain, trust, persistence and application layers
 adapters/     client integrations and conformance fixtures
 console/      generated-contract React application
 policies/     Cedar policy packs
-deploy/       development, release/installed and Helm shapes
+deploy/       canonical Docker reference, evaluation fixtures and Helm
 demos/        runnable acceptance evidence
 evals/        scenarios, corpora and committed baselines
 docs/         current contracts, feature inventory/open briefs, ADRs and OpenAPI

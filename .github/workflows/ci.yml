@@ -163,40 +163,20 @@ jobs:
           path: eval-report/
           if-no-files-found: warn
 
-  # OPS-2's acceptance criterion (ADR-0062 decision 7). The only job that
-  # asks the gateway *image* to serve: ADR-0055 built it and could not
-  # exercise it, because the bundled IdP's issuer is a `localhost` URL and
-  # RFC 6761 makes that the caller's own loopback. A Service DNS name is a
-  # real name, so in a cluster the gateway and the client resolve the
-  # issuer to the same place.
-  #
-  # It asserts a governed round trip, a CloudNativePG failover and a live
-  # RLS backstop — never readiness. "Every pod is Ready" is the shape
-  # EVAL-3's first complete run had: a validity guard that passed when
-  # there was nothing to validate.
+  # OPS-2's live Kind acceptance (ADR-0062 decision 7) proves exact issuer
+  # resolution, a governed round trip, CloudNativePG failover and the runtime
+  # RLS backstop. Pod readiness alone is not acceptance evidence.
   #
   # Budget: 20 minutes, of which the cold Rust release build inside the
   # image is most. If it cannot hold that once layer caching settles, the
   # split is chart-lint on every PR (it already runs in `layering`) and
   # this on a nightly — the same division `eval` makes between its
   # deterministic half and its retrieval half, for the same reason.
-  # OPS-8's acceptance criterion (ADR-0065). The only job that exercises
-  # the *installer* — `scripts/install.sh` itself, against packaged release
-  # artefacts, with `cargo`, `rustc` and `rustup` shadowed by shims that
-  # exit 127. That last part is what makes "no Rust toolchain" a property of
-  # the run rather than a sentence in a README.
-  #
-  # It is also the only job that would notice `deploy/release/` drifting
-  # from the product: it installs from the tarball `scripts/package-release.sh`
-  # produces, not from the tree (ADR-0065 decision 3 chose this over a lint,
-  # because a checker comparing two compose files can only prove they are
-  # similar).
-  #
-  # Budget: 45 minutes, and **unmeasured on a GitHub runner** — the same
-  # honesty OPS-2 recorded about its own. The variables are a cold Rust
-  # release build and the Postgres image, which compiles AGE from source.
-  # If it cannot hold, this moves to a nightly and the unit tests around
-  # `Profile` stay on every PR.
+  # OPS-8/CPR-45 release contract. It executes the real installer against a
+  # freshly packaged digest-bound reference, proves repeat installation keeps
+  # mutable state, and checks the current schema/OpenAPI/Helm boundaries. It
+  # does not publish or pull release images and therefore is not live install
+  # evidence.
   release-install:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -220,9 +200,6 @@ jobs:
           --filter @synveda/console...
           --filter @synveda/claude-code-adapter...
       - run: demos/ops-8-release-install.sh
-      - name: What the install looked like
-        if: failure()
-        run: docker ps -a || true
 
   # OPS-9's acceptance demo (ADR-0066). Separate from `release-install`
   # rather than appended to it, because the two answer different questions

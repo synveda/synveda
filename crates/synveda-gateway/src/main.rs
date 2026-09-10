@@ -18,7 +18,7 @@
 //! synchronous request work. Its embedder is selected by `SYNVEDA_EMBEDDER`
 //! (`deterministic` [default] | `tei` —
 //! deliberately no `off`: embed-or-fail is unconditional); `tei`
-//! requires `SYNVEDA_TEI_URL` (the dev compose serves
+//! requires `SYNVEDA_TEI_URL` (the isolated retrieval-evaluation fixture uses
 //! `http://localhost:8110`) and honours `SYNVEDA_EMBEDDER_MODEL`
 //! (default `BAAI/bge-m3`).
 //!
@@ -28,7 +28,7 @@
 //! search and is persisted, never hidden.
 //!
 //! The standard `OTEL_*` variables configure the OTLP exporter (default
-//! endpoint `http://localhost:4317` — Jaeger in the dev compose).
+//! endpoint `http://localhost:4317`; Compose supplies a private Collector).
 
 #[cfg(all(feature = "test-support", not(test), not(debug_assertions)))]
 compile_error!("the gateway release binary cannot include the test-support feature");

@@ -713,7 +713,7 @@ fn the_quality_bar_rides_the_pack_and_an_unconfigured_pack_gates_nothing() {
     };
 
     // The product packs: a real bar and a mandatory checklist for a bank,
-    // a bar and no mandatory checklist for an SMB, nothing for an open
+    // a bar and no mandatory checklist for a small team, nothing for an open
     // tenant.
     for (pack, expected) in [
         (REGULATED_STRICT, SkillQualityConfig::STRICT),

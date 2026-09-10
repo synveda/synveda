@@ -9,8 +9,7 @@
 //! is fine.
 //!
 //! Every adversarial check runs inside one transaction as `synveda_app`
-//! (non-superuser, no BYPASSRLS — enforcement actually bites, unlike the
-//! compose superuser) with the GUC set transaction-locally via
+//! (non-superuser, no BYPASSRLS) with the GUC set transaction-locally via
 //! `rls::begin_tenant_tx`, exactly the shape data-path code must use.
 
 #[path = "support/tenant_fixture.rs"]
@@ -24,8 +23,8 @@ use synveda_store::{
     access, configuration, context, idempotency, identities, knowledge, policy_packs, projects,
     quarantine, relaxations, repositories, rls, scopes, sessions, workspaces,
 };
-// The generic scope vocabulary, reached through its module because the old
-// hierarchy still owns the root name until Prompt 6 (CPR-3, ADR-0070).
+// Keep the scope vocabulary qualified because `synveda_store::scopes` is also
+// imported above.
 use synveda_types::access::{GrantSource, GrantSubject, GroupSource, RoleKey};
 use synveda_types::knowledge::{
     KnowledgeLifecycleState, KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeSourceType,

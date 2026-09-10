@@ -71,27 +71,9 @@ RUN set -eux; \
         >> /usr/local/share/synveda/extension-fingerprint-assert.psql; \
     chmod 0444 /usr/local/share/synveda/extension-fingerprint-assert.psql
 
-# The retained contributor environment predates the exact-role bootstrap and
-# still migrates one owner-operated development database directly. Keep its
-# two extension prerequisites in an explicit build target so the reference,
-# db-test and release images cannot execute initdb SQL behind the bootstrap.
-FROM runtime AS development
-ARG HTTP_PROXY
-ARG http_proxy
-ARG HTTPS_PROXY
-ARG https_proxy
-ARG NO_PROXY
-ARG no_proxy
-ARG FTP_PROXY
-ARG ftp_proxy
-ARG ALL_PROXY
-ARG all_proxy
-COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
-RUN /usr/local/bin/assert-build-proxy-closed
-COPY --chmod=0444 deploy/compose/postgres/development-initdb.sql /docker-entrypoint-initdb.d/01-synveda-extensions.sql
-
-# Default final stage: all product/reference callers build this stage unless
-# they deliberately select the development target above.
+# Default final stage for development, reference, tests and release builds.
+# Database creation and extensions always use the reviewed bootstrap command;
+# no image-level initdb hook owns schema or role lifecycle.
 FROM runtime AS reference
 ARG HTTP_PROXY
 ARG http_proxy

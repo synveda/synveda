@@ -1395,7 +1395,7 @@ export function browserAcceptanceFindings(browser, expected) {
     if (
       !sameJson(browser.build, {
         context: expected.root,
-        dockerfile: "deploy/compose/gateway/Dockerfile",
+        dockerfile: "deploy/compose/product/Dockerfile",
         target: "browser-acceptance",
         args: Object.fromEntries(CONTAINER_PROXY_ENVIRONMENT.map((name) => [name, ""])),
       })
@@ -4244,7 +4244,7 @@ export function canonicalComposeFindings(model, expected) {
       developmentProductBuilds.push("apalis-migrate", "apalis-worker");
     }
     for (const name of developmentProductBuilds) {
-      if (services[name]?.build?.dockerfile !== "deploy/compose/gateway/Dockerfile") {
+      if (services[name]?.build?.dockerfile !== "deploy/compose/product/Dockerfile") {
         findings.push(`${name} does not use the development product build`);
       }
     }
@@ -4274,7 +4274,7 @@ export function canonicalComposeFindings(model, expected) {
     if (
       expected.browser === true &&
       services["browser-acceptance"]?.build?.dockerfile !==
-        "deploy/compose/gateway/Dockerfile"
+        "deploy/compose/product/Dockerfile"
     ) {
       findings.push("browser acceptance does not use the pinned fixture build");
     }
@@ -4889,7 +4889,7 @@ function checkStaticInputs() {
     "Keycloak convergence lifecycle drifted",
   );
 
-  const product = readFileSync(join(COMPOSE, "gateway/Dockerfile"), "utf8");
+  const product = readFileSync(join(COMPOSE, "product/Dockerfile"), "utf8");
   const productBuilds = product
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("#") && /\bcargo build\b/.test(line));

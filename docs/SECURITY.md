@@ -167,11 +167,6 @@ Keycloak application traffic passes through the public gate only after exact
 realm convergence; its management port and administration surface remain
 private.
 
-Rauthy remains only in the withdrawn install/package/release profile until live
-current-source Keycloak/browser acceptance passes. The contributor topology,
-smoke path and dormant CLI implementation are deleted. Rauthy is not a
-supported alternate provider mode and must not survive as compatibility.
-
 ## Worker and queue boundary
 
 The private worker readiness surface proves schema epoch, exact role, writable
@@ -298,8 +293,6 @@ each scan class detects a violation.
 - The gateway metrics route shares the private application listener. Helm may
   still expose it through transitional ingress configuration and must close
   that gap before promotion.
-- The contributor stack still publishes Jaeger/OTLP development ports; it is
-  not the canonical reference topology.
 - Custom CA and explicit outbound-proxy support are not yet implemented.
 - A local adapter cannot observe a turn before its host hook runs and cannot
   authenticate state against a hostile process in the same local account.

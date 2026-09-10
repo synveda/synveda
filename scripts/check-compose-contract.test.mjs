@@ -1618,7 +1618,7 @@ test("reference browser acceptance is HTTPS, digest-only and build-free", () => 
     const sourceBuild = structuredClone(browser);
     sourceBuild.build = {
       context: ROOT,
-      dockerfile: "deploy/compose/gateway/Dockerfile",
+      dockerfile: "deploy/compose/product/Dockerfile",
       target: "browser-acceptance",
       args: { ...CLOSED_CONTAINER_PROXY_ENVIRONMENT },
     };
@@ -4926,19 +4926,10 @@ test("database authority helper contracts are copied and fail closed", () => {
     const image = readFileSync(dockerfile, "utf8");
     const isHelmImage = dockerfile.includes("deploy/helm/postgres");
     assert.doesNotMatch(image, /deploy\/compose\/postgres\/initdb/);
-    if (isHelmImage) {
-      assert.doesNotMatch(image, /docker-entrypoint-initdb\.d|development-initdb\.sql/);
-    } else {
-      const development = image.indexOf("FROM runtime AS development\n");
-      const reference = image.indexOf("FROM runtime AS reference\n");
-      const developmentCopy =
-        "COPY --chmod=0444 deploy/compose/postgres/development-initdb.sql " +
-        "/docker-entrypoint-initdb.d/01-synveda-extensions.sql";
-      assert.ok(development >= 0 && reference > development);
-      assert.equal(occurrenceCount(image, developmentCopy), 1);
-      assert.ok(image.slice(development, reference).includes(developmentCopy));
-      assert.doesNotMatch(image.slice(reference), /docker-entrypoint-initdb\.d|development-initdb\.sql/);
-    }
+    assert.doesNotMatch(
+      image,
+      /FROM runtime AS development|docker-entrypoint-initdb\.d|development-initdb\.sql/,
+    );
     const expectedBuilder =
       "FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS snapshot-builder";
     assert.equal(occurrenceCount(image, expectedBuilder), 1);
@@ -6833,7 +6824,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           "application-egress": { gw_priority: 1 },
           "synveda-data": {},
         },
-        build: { dockerfile: "deploy/compose/gateway/Dockerfile" },
+        build: { dockerfile: "deploy/compose/product/Dockerfile" },
       },
       gateway: {
         command: ["gateway"],
@@ -7001,7 +6992,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           "app-backend": {},
           "application-egress": { gw_priority: 1 },
         },
-        build: { dockerfile: "deploy/compose/gateway/Dockerfile" },
+        build: { dockerfile: "deploy/compose/product/Dockerfile" },
       },
       migrate: {
         command: ["migrate"],
@@ -7037,7 +7028,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           "application-egress": { gw_priority: 1 },
           "synveda-data": {},
         },
-        build: { dockerfile: "deploy/compose/gateway/Dockerfile" },
+        build: { dockerfile: "deploy/compose/product/Dockerfile" },
       },
       "tenant-convergence": {
         command: ["tenant-converge"],
@@ -7080,7 +7071,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           "application-egress": { gw_priority: 1 },
           "synveda-data": {},
         },
-        build: { dockerfile: "deploy/compose/gateway/Dockerfile" },
+        build: { dockerfile: "deploy/compose/product/Dockerfile" },
       },
       proxy: {
         command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"],
@@ -7196,11 +7187,11 @@ test("model findings reject privilege, port, command and secret regressions", ()
   };
   base.services.gateway.build = {
     context: ROOT,
-    dockerfile: "deploy/compose/gateway/Dockerfile",
+    dockerfile: "deploy/compose/product/Dockerfile",
   };
   base.services.worker.build = {
     context: ROOT,
-    dockerfile: "deploy/compose/gateway/Dockerfile",
+    dockerfile: "deploy/compose/product/Dockerfile",
   };
   closeContainerProxyEnvironment(base);
   closeDevelopmentBuildBoundary(base);
@@ -7350,7 +7341,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
   const extraBuild = structuredClone(base);
   extraBuild.services["otel-collector"].build = {
     context: ROOT,
-    dockerfile: "deploy/compose/gateway/Dockerfile",
+    dockerfile: "deploy/compose/product/Dockerfile",
     args: { ...CLOSED_CONTAINER_PROXY_ENVIRONMENT },
   };
   assert.ok(

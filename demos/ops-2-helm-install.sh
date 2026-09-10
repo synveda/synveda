@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
 # OPS-2 — the acceptance criterion: a kind-cluster install test.
 #
-# What it asserts is deliberately not "every pod is Ready". EVAL-3's first
-# complete run reported a passing retrieval score over blocks the pipeline
-# had not filled, because its validity guard passed precisely when there
-# was nothing to validate; an install test that never asks the installation
-# to do anything is the same instrument. So this asserts three things a
-# readiness check cannot (ADR-0062 decision 7):
+# It asserts three behaviours that pod readiness alone cannot prove
+# (ADR-0062 decision 7):
 #
 #   1. a governed round trip — a real OIDC login, AUTH-2 manufacturing the
 #      org root from it, a PDP-decided hierarchy write, Session delivery,
@@ -16,15 +12,10 @@
 #   2. a failover — delete the CNPG primary and do it again;
 #   3. a live backstop — the gateway's own database role is not a
 #      superuser and holds no BYPASSRLS, so TEN-2's forced RLS is actually
-#      enforced against it. Every deployment before this one connected as
-#      the compose superuser and bypassed it.
+#      enforced against it.
 #
-# It is also the first thing that ever asks the gateway *image* to serve.
-# ADR-0055 built it, could not exercise it — the bundled IdP's issuer is a
-# `localhost` URL and RFC 6761 makes that the caller's own loopback — and
-# recorded this test as where that becomes true. A Service DNS name is a
-# real name, so the gateway pod and the client pod resolve the issuer to
-# the same place and the comparison ADR-0010 makes holds.
+# Keycloak, gateway and client resolve one exact issuer name, preserving the
+# byte-for-byte comparison required by ADR-0010.
 #
 # Usage:  demos/ops-2-helm-install.sh            create, assert, tear down
 #         KEEP=1 demos/ops-2-helm-install.sh     leave the cluster up
@@ -37,24 +28,14 @@ RELEASE=synveda
 CNPG_VERSION=${CNPG_VERSION:-1.30.0}
 CNPG_MANIFEST_SHA256=${CNPG_MANIFEST_SHA256:-f8bede43fe4ee0d478c2355b204a36876b2ae4faac60f2a9452280b293da3b88}
 FIXTURES=demos/fixtures/ops-2
-# The chart's own appVersion, never a copy of it. `values.yaml` leaves
-# `image.tag` empty so `_helpers.tpl` resolves it from appVersion, and this
-# demo builds the image the chart will then ask for by name — with
-# `pullPolicy: Never`, since the exact public-coordinate images are loaded
-# directly into kind rather than pulled from a registry.
-#
-# It was `IMAGE_TAG=0.1.0`, hardcoded, and the first version bump after that
-# broke this demo rather than the chart: the pod stayed on
-# `ErrImageNeverPull` for "synveda/gateway:0.1.1 is not present" while a
-# perfectly good 0.1.0 image sat in the cluster. Two version sources for one
-# artefact, and the failure surfaces ten minutes downstream of the typo.
+# Build and load the exact image tag derived by the chart from appVersion.
 IMAGE_TAG=$(awk -F'"' '/^appVersion:/{print $2; exit}' deploy/helm/synveda/Chart.yaml)
 [ -n "$IMAGE_TAG" ] || { echo "no appVersion in deploy/helm/synveda/Chart.yaml" >&2; exit 1; }
-PRODUCT_IMAGE="ghcr.io/synveda/gateway:$IMAGE_TAG"
+PRODUCT_IMAGE="ghcr.io/synveda/product:$IMAGE_TAG"
 KEYCLOAK_IMAGE="ghcr.io/synveda/keycloak:$IMAGE_TAG"
 # CloudNativePG derives compatibility from the leading PostgreSQL version in a
 # direct image tag. The suffix still binds the image to this application build.
-CNPG_IMAGE="ghcr.io/synveda/enterprise-postgres:17.11-synveda-$IMAGE_TAG"
+CNPG_IMAGE="ghcr.io/synveda/cnpg-postgres:17.11-synveda-$IMAGE_TAG"
 KEEP=${KEEP:-0}
 REUSE=${REUSE:-0}
 SECRET_SCRATCH=""
@@ -122,8 +103,8 @@ kubectl config use-context "kind-$CLUSTER" >/dev/null
 # around a CI-compiled binary: the point of this test is that *this*
 # artefact serves (ADR-0062 decision 9).
 echo "==> building the product image (this is the slow part; layers cache)"
-docker build -t "$PRODUCT_IMAGE" -f deploy/compose/gateway/Dockerfile .
-echo "==> building the enterprise Postgres image (CNPG base + pgvector)"
+docker build -t "$PRODUCT_IMAGE" -f deploy/compose/product/Dockerfile .
+echo "==> building the CloudNativePG Postgres image (CNPG base + pgvector)"
 docker build -t "$CNPG_IMAGE" -f deploy/helm/postgres/Dockerfile .
 echo "==> building the optimized Keycloak image"
 docker build -t "$KEYCLOAK_IMAGE" -f deploy/compose/keycloak/Dockerfile .
@@ -368,10 +349,8 @@ printf '%s' "$JWKS" | node -e '
 echo "    exact issuer and RS256 JWKS survived restart"
 
 # ── assertion 3, first because it is cheap and unconditional ─────────────
-# The backstop. Decision 2 is worth nothing if the chart can be
-# misconfigured back to a superuser DSN with nothing noticing, and until
-# this deployment every gateway connected as the compose superuser — which
-# bypasses row-level security even where it is FORCED.
+# The chart must not accept a superuser runtime DSN: superusers bypass row-level
+# security even where it is forced.
 echo "==> the backstop is live: migration ownership and runtime authority are separate"
 # Prove the generated CloudNativePG application Secret still belongs to the
 # migrator, then derive the runtime identity from the exact Secret mounted by

@@ -1,6 +1,6 @@
 //! FND-5 tests: the ops routes respond, the Prometheus contract (including
 //! `synveda_tokens_per_context_run`) renders from boot, and one readiness request
-//! produces the gateway→core→store span chain the Jaeger AC relies on.
+//! produces the gateway→core→store span chain the exported-trace AC relies on.
 //!
 //! The span-chain test needs a live Postgres: it reads `DATABASE_URL` and
 //! skips with a message when unset (CI has no database); run it locally with
@@ -532,8 +532,8 @@ async fn exported_request_span(request: Request<Body>) -> opentelemetry_sdk::tra
     // subscriber went away would be recorded by nothing.
     drop(_guard);
     // `make_request_span` sets `otel.name` to `VERB /route`, and
-    // tracing-opentelemetry *renames the exported span to it* — which is how
-    // Jaeger shows an operation rather than a literal `http.request`. So the
+    // tracing-opentelemetry *renames the exported span to it* — which is how a
+    // trace backend shows an operation rather than a literal `http.request`. So the
     // span is found by the name an operator would see, not by the macro's.
     exporter
         .get_finished_spans()
@@ -555,7 +555,7 @@ async fn a_callers_traceparent_becomes_this_requests_parent() {
     .await;
     // Same trace as the caller, and a child of the caller's span. Both
     // halves matter: matching the trace id alone would pass on a span that
-    // joined the trace as a second root, which is not one trace in Jaeger.
+    // joined the trace as a second root, which is not one trace in a backend.
     assert_eq!(
         request_span.span_context.trace_id().to_string(),
         CALLER_TRACE,

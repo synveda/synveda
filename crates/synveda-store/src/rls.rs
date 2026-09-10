@@ -45,9 +45,9 @@ pub fn is_backstop_trip(error: &Error) -> bool {
 /// tenant into the next request that borrows it. Callers commit the returned
 /// transaction as usual; dropping it rolls back, GUC included.
 ///
-/// Note: enforcement only bites for roles subject to RLS (`synveda_app`, or
-/// any non-superuser without BYPASSRLS). The dev compose superuser bypasses
-/// policies entirely — see ADR-0009.
+/// Enforcement applies only to roles subject to RLS. An owner, superuser or
+/// role with `BYPASSRLS` could bypass policies, so deployment contracts refuse
+/// those attributes for gateway and worker roles — see ADR-0009.
 #[tracing::instrument(name = "store.rls.begin_tenant_tx", skip_all, fields(tenant.id = %tenant_id), err(Display))]
 pub async fn begin_tenant_tx(
     pool: &PgPool,

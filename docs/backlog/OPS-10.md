@@ -12,71 +12,88 @@ size: M
 
 ## Problem and evidence
 
-The implementation now includes scripts/uninstall.sh, surgical MCP client
-removal and Claude plugin removal. Unit tests cover idempotency, symlink
-refusal and the rule that a default uninstall keeps both persistent volumes
-and data/kms.key. The remaining gap is end-to-end evidence against an actual
-installed release and the vendor-owned client/plugin state. The governing
-boundary is [ADR-0067](../adr/adr-0067-uninstall-and-cleanup.md).
+The canonical launcher can stop an exact Compose project while preserving its
+volumes, or reset that project after an exact confirmation. The release
+installer separates immutable releases from mutable state and backups. It does
+not yet persist a strict ownership receipt that proves the installed launcher,
+project selection, artifact paths and CLI destination. Without that evidence,
+automatic artifact deletion would be guesswork.
+
+`scripts/uninstall.sh` therefore fails closed: normal invocation exits without
+mutation, `--dry-run` is also a no-op, and destructive purge is unsupported.
+It does not call Docker, signal a PID, traverse state, delete credentials or
+guess old volume names. This honest refusal replaces the retired
+profile/host-gateway uninstaller; it is not feature completion.
 
 ## Scope
 
-- Remove only files placed by the installer and stop only the selected Synveda
-  deployment.
-- Preserve Postgres volumes and the matching local KMS key by default.
-- Make purge an explicit coupled destruction of deployment data and key, with
-  a dry-run that names every target.
-- Remove only Synveda-owned entries from supported client configuration and
-  confirm plugin unload through the vendor CLI.
+- Define a strict, non-executable installer receipt for the canonical reference
+  deployment and exact CLI destination.
+- Stop only through the receipt-bound installed `synveda-compose` launcher.
+- Remove only receipt-owned immutable artifacts after a successful stop.
+- Preserve Compose volumes, state, KMS/OIDC material and backups by default.
+- Keep client configuration and plugin removal as separate explicit CLI acts.
+- Make every destructive reset use the launcher's exact project confirmation.
 
 ## Non-goals
 
 - No tenant or data-subject erasure claim; that is TEN-5.
-- No deletion of shared images, hand-written client configuration or binaries
-  copied outside the installer footprint.
-- No automatic client-config or plugin mutation by the shell uninstaller.
-- No claim that destroying a key alone is erasure.
+- No deletion of shared images, external databases, external object stores,
+  hand-written client configuration or unrecorded binaries.
+- No recursive privilege escalation or guessed legacy compatibility path.
+- No automatic deletion of recovery backups.
 
 ## Architecture seam
 
-The shell script mirrors the release installer and Compose profile. Client
-configuration removal stays in the CLI parser that wrote the entry. Plugin
-removal stays behind the Claude CLI. Persistent database data and KMS material
-are one recovery unit; default cleanup must not separate them.
+The receipt must bind one immutable release, its source/environment identity,
+the exact installed launcher, fixed Compose project/provider selection, owned
+artifact roots and CLI destination. It is parsed as an allowlisted data format,
+never sourced or evaluated. Mutable state and backups stay outside the
+immutable release tree.
+
+Default uninstall delegates `down` to that launcher and removes artifacts only
+after success. Destructive deployment reset delegates the existing
+confirmation-gated `reset`; backup deletion remains a separate custody choice.
+The shell boundary never invokes Docker directly.
 
 ## Acceptance criteria
 
-- On every claimed installed platform, default uninstall stops the deployment,
-  removes installer-owned program files, retains the named volumes and KMS key,
-  and reports remaining client entries.
-- Reinstallation against retained data and key can sign in and open previously
-  sealed tenant data.
-- Purge removes volumes and key only after explicit confirmation; if volume
-  removal fails, the key survives and the command exits non-zero.
-- MCP removal preserves adjacent servers and JSONC layout byte-for-byte.
-- Plugin removal is confirmed by the vendor CLI.
-- Default, purge and client/plugin removal are idempotent; every dry-run writes
-  nothing and lists exact targets.
+- A malformed, missing, linked, foreign or ambiguous receipt causes zero
+  filesystem, process and Docker mutation.
+- Default uninstall stops exactly the recorded project, removes only recorded
+  immutable artifacts and CLI, and retains state, volumes and backups.
+- A failed stop preserves the launcher, receipt and all recovery material for
+  retry.
+- Any destructive reset requires the exact launcher confirmation and never
+  targets an external dependency.
+- `--dry-run` lists exact actions and paths while making no lifecycle call or
+  write.
+- Reinstallation against retained state signs in and opens the existing
+  product evidence.
+- Explicit MCP/plugin removal preserves adjacent client configuration and is
+  idempotent.
 
 ## Required tests
 
-- Keep scripts/uninstall.test.mjs and CLI MCP/plugin unit tests.
-- Add an installed-release test using a scratch home, isolated Compose project
-  and retained-data reinstall.
-- Add fault injection for failed Compose teardown and unwritable/linked paths.
-- Run the plugin assertion only when an authenticated supported Claude CLI is
-  available; otherwise record the prerequisite, not a pass.
+- Keep the current fail-closed `scripts/uninstall.test.mjs` boundary until the
+  receipt implementation lands.
+- Add receipt parsing, hostile path/symlink and foreign-project tests.
+- Add installed-reference stop/reinstall evidence using an isolated Compose
+  project.
+- Inject stop/reset/filesystem failures and prove recovery material remains.
+- Run vendor plugin assertions only when an authenticated supported client is
+  available; otherwise report the prerequisite as unavailable.
 
 ## Rollout and rollback
 
-Ship removal alongside the installer version whose footprint it understands.
-Retain compatibility with one supported installed footprint. A failed default
-uninstall is rerunnable and preserves data/key material; purge is irreversible
-and has no rollback beyond independently tested backups.
+Ship receipt-aware removal only alongside the installer version that writes the
+receipt. Until then retain the refusal. A failed default uninstall is rerunnable
+and preserves data; destructive reset has no rollback beyond independently
+verified backups.
 
 ## Dependencies
 
-TEN-5 owns per-tenant erasure. OPS-5 owns recoverability before purge can be
-recommended operationally. Release owners must define supported installer
-versions, confirmation UX and whether system package-manager integration is
-needed.
+OPS-5 owns recoverability before destructive reset can be recommended. TEN-5
+owns per-tenant erasure. Release owners must define supported installer
+versions, confirmation UX and whether a system package manager becomes the
+artifact owner.

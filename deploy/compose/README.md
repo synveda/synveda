@@ -444,6 +444,32 @@ supported algorithms, login scopes and static bootstrap-tenant binding. The
 issuer diagnostic validates discovery, exact issuer, PKCE S256, JWKS and the
 configured algorithm/audience contract before gateway readiness.
 
+Create the mounted file as mode 0600 with the provider's exact values. This is
+the minimal single-tenant shape; add provider-required scopes only when they
+are needed to place the configured group claim in tokens:
+
+```json
+[
+  {
+    "issuer": "https://identity.example.com/realms/example",
+    "client_id": "synveda",
+    "audience": "synveda-api",
+    "algorithms": ["RS256"],
+    "tenant": {
+      "static": {
+        "tenant_id": "019b53c0-7c00-7000-8000-000000000045"
+      }
+    },
+    "groups_claim": "groups",
+    "login_scopes": ["openid", "profile", "email", "groups"]
+  }
+]
+```
+
+The API audience must differ from the login client ID. The provider must emit
+the configured audience and group claim; `synveda-admins` is used only for the
+one-time bootstrap described below, not ongoing Synveda authorisation.
+
 In development, the hosts manager owns only the application .test name in this
 mode. The external provider retains its own DNS name. If no bundled hosts block
 exists, skip its removal; if one exists, remove it before changing selectors so
@@ -555,12 +581,11 @@ still removed.
 
 ## Current validation gaps
 
-The Docker reference implementation covers the source and
-deterministic-contract boundary. It still requires live execution of clean
-development and reference HTTPS installs, the restart/Apalis matrix, paired
-logical backup and isolated restore, and same-schema product upgrade on Linux
-and one Docker Desktop platform. Canonical release/installer cutover and Rauthy
-deletion remain gated on that live Keycloak/browser acceptance.
+The Docker reference implementation covers the source,
+deterministic-contract and packaged-release boundaries. It still requires live
+execution of clean development and reference HTTPS installs, the
+restart/Apalis matrix, paired logical backup and isolated restore, and
+same-schema product upgrade on Linux and one Docker Desktop platform.
 
 A general dashboard platform, ACME, HA, Helm promotion, signed provenance,
 S3/WAL-PITR recovery and enterprise controls remain later production work.

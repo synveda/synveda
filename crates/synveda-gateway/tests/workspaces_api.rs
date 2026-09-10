@@ -82,9 +82,8 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 }
 
 /// Connects, migrates, admits a tenant, and binds the admin subject
-/// tenant-wide `org-admin` — the CLI's bootstrap path, and what a person
-/// running `synveda init` holds after their first login. Enforcement still
-/// runs through the PDP with this row as data.
+/// tenant-wide `org-admin` — the deployment bootstrap boundary after the first
+/// login. Enforcement still runs through the PDP with this row as data.
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
     let url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,

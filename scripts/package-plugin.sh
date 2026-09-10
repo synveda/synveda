@@ -58,8 +58,8 @@ cp -R "$adapter/dist" "$stage/synveda/dist"
 
 # The plugin's version is the release's. `synveda plugin install` reports
 # what it installed and `claude plugin list` shows it, so a plugin claiming
-# a version the CLI beside it does not have is the same confusion ADR-0065
-# decision 5 refuses for the profile bundle.
+# a version the adjacent release artifact does not have is the same confusion
+# ADR-0065 decision 5 refuses.
 manifest="$stage/synveda/.claude-plugin/plugin.json"
 node -e '
   const fs = require("node:fs");
