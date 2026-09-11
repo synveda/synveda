@@ -44,9 +44,26 @@ export function classify(status: number, body: unknown): Outcome {
 
 function messageOf(body: unknown): string {
   if (typeof body === "object" && body !== null) {
-    const message = (body as { message?: unknown }).message;
+    const error = body as {
+      message?: unknown;
+      reason?: unknown;
+      action?: unknown;
+      resource?: unknown;
+    };
+    const message = error.message;
     if (typeof message === "string" && message.length > 0) {
       return message;
+    }
+    if (typeof error.reason === "string" && error.reason.length > 0) {
+      const context = [
+        typeof error.action === "string" && error.action.length > 0
+          ? `Action: ${error.action}.`
+          : null,
+        typeof error.resource === "string" && error.resource.length > 0
+          ? `Resource: ${error.resource}.`
+          : null,
+      ].filter((part): part is string => part !== null);
+      return [error.reason, ...context].join(" ");
     }
   }
   return "the gateway did not say why";

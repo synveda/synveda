@@ -17,35 +17,43 @@ import { test } from "node:test";
 import {
   BASE,
   ROUTES,
+  administrationNav,
   advancedNav,
   hrefOf,
   matchRoute,
   offersRoute,
-  primaryNav,
+  workNav,
   routeOf,
 } from "./routes.mjs";
 
-test("the primary navigation is the product, in this order, for everybody", () => {
+test("the work navigation is the core journey, in this order, for everybody", () => {
   assert.deepEqual(
-    primaryNav().map((route) => route.label),
+    workNav().map((route) => route.label),
     [
       "Home",
-      "Operations",
       "Sessions",
       "Knowledge",
       "New Learnings",
-      "Import / Export",
+      "Context",
       "Skills",
-      "Tools",
-      "People",
-      "Settings",
     ],
   );
-  // No primary route is gated. This is the rule that keeps the shape of the
+  // No work route is gated. This is the rule that keeps the shape of the
   // application the same for every reader (see the module note in routes.mts).
-  for (const route of primaryNav()) {
-    assert.equal(route.capability, undefined, `${route.id} gates the primary menu`);
+  for (const route of workNav()) {
+    assert.equal(route.capability, undefined, `${route.id} gates the work menu`);
     assert.ok(offersRoute(route, {}), `${route.id} is hidden from a caller with no capabilities`);
+  }
+});
+
+test("supported administration remains findable without crowding the work journey", () => {
+  assert.deepEqual(
+    administrationNav().map((route) => route.label),
+    ["Operations", "Import / Export", "Tools", "People", "Settings"],
+  );
+  for (const route of administrationNav()) {
+    assert.equal(route.capability, undefined, `${route.id} gates administration navigation`);
+    assert.ok(offersRoute(route, {}));
   }
 });
 
@@ -83,7 +91,8 @@ test("welcome is reachable but never in a menu", () => {
   const welcome = routeOf("welcome");
   assert.equal(welcome.group, "none");
   assert.deepEqual(matchRoute("/console/welcome"), { id: "welcome", params: {} });
-  assert.ok(!primaryNav().includes(welcome));
+  assert.ok(!workNav().includes(welcome));
+  assert.ok(!administrationNav().includes(welcome));
   assert.ok(!advancedNav({}).includes(welcome));
 });
 
@@ -137,6 +146,17 @@ test("a context run has one linkable inspector address", () => {
   });
   assert.equal(routeOf("context-run").group, "none");
   assert.throws(() => hrefOf("context-run"), /context_run_id/);
+});
+
+test("a proposal review has one linkable governance address", () => {
+  const href = hrefOf("review", { proposal_id: "018f-proposal" });
+  assert.equal(href, "/console/advanced/reviews/018f-proposal");
+  assert.deepEqual(matchRoute(href), {
+    id: "review",
+    params: { proposal_id: "018f-proposal" },
+  });
+  assert.equal(routeOf("review").capability, "proposal.read");
+  assert.throws(() => hrefOf("review"), /proposal_id/);
 });
 
 test("a Knowledge item has a stable address", () => {
@@ -195,13 +215,13 @@ test("a malformed encoded route parameter is not a router crash", () => {
   }
 });
 
-test("the advanced routes live under one prefix, and the primary ones do not", () => {
+test("the governance routes live under one prefix, and menu work does not", () => {
   // Not cosmetic: the segment is what a bookmark and a shared link carry,
   // and "advanced/" is what makes a governance URL legible as one.
   for (const route of ROUTES) {
-    if (route.group === "advanced") {
+    if (route.group === "advanced" || route.id === "review") {
       assert.ok(route.segment.startsWith("advanced/"), route.id);
-    } else {
+    } else if (route.group === "work" || route.group === "administration") {
       assert.ok(!route.segment.startsWith("advanced/"), route.id);
     }
   }

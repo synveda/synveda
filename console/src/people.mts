@@ -27,7 +27,14 @@
  * It is still not enforcement. The gateway decides, at the act's own seam.
  */
 
-import type { GroupRefView, InviteView, MemberView } from "./generated/api.js";
+import type {
+  GroupRefView,
+  GroupView,
+  InviteView,
+  MeView,
+  MemberView,
+  ScopeView,
+} from "./generated/api.js";
 
 /** The six grant keys, in the order a role picker should offer them. */
 export const ROLE_KEYS = [
@@ -77,7 +84,7 @@ export function inheritedMembers(members: MemberView[]): MemberView[] {
  * the directory, a group row by editing the group, a direct row by revoking
  * it here.
  */
-export function accessSource(member: MemberView): string {
+export function accessSource(member: MemberView, groupName?: string): string {
   const clauses = [member.inherited ? "inherited from a scope above" : "granted here"];
   // The group clause survives beside the directory one rather than being
   // replaced by it, and that is deliberate. "Managed by your directory"
@@ -86,7 +93,7 @@ export function accessSource(member: MemberView): string {
   // is dropping the actionable half.
   const group = viaGroup(member);
   if (group) {
-    clauses.push(`through the ${group.slug} group`);
+    clauses.push(`through the ${groupName ?? group.slug} group`);
   }
   if (member.directory_managed) {
     clauses.push("managed by your directory");
@@ -117,19 +124,76 @@ export function accessSource(member: MemberView): string {
 
 /** Whether the page should offer to remove this membership here. */
 export function mayRemove(member: MemberView): boolean {
-  return !member.inherited && !member.directory_managed;
+  return !member.inherited && !member.directory_managed && viaGroup(member) === null;
+}
+
+/** Names already disclosed by ordinary governed reads, keyed by stable ids. */
+export interface AccessLabels {
+  principals: ReadonlyMap<string, string>;
+  scopes: ReadonlyMap<string, string>;
+  groups: ReadonlyMap<string, string>;
+}
+
+/**
+ * Build display labels without creating a second identity or scope model.
+ *
+ * `/v1/me` names the caller and every visible workspace/project. The root
+ * scope listing may additionally disclose principal-scope display names, and
+ * the group listing owns group display names. If either optional read is
+ * denied, renderers keep the exact id instead of guessing a name.
+ */
+export function accessLabels(
+  me: MeView,
+  scopeLevel: { parent?: ScopeView | null; scopes: ScopeView[] } | null,
+  groups: GroupView[] | null,
+): AccessLabels {
+  const principals = new Map<string, string>();
+  const scopes = new Map<string, string>();
+  const groupNames = new Map<string, string>();
+
+  if (me.principal.display_name) {
+    principals.set(me.principal.subject, me.principal.display_name);
+  }
+  for (const workspace of me.workspaces) {
+    scopes.set(workspace.scope_id, `Workspace · ${workspace.display_name}`);
+  }
+  for (const project of me.projects) {
+    scopes.set(project.scope_id, `Project · ${project.display_name}`);
+  }
+
+  const disclosedScopes = scopeLevel
+    ? [...(scopeLevel.parent ? [scopeLevel.parent] : []), ...scopeLevel.scopes]
+    : [];
+  for (const scope of disclosedScopes) {
+    scopes.set(scope.id, `${scope.kind === "principal" ? "Person" : scope.kind} · ${scope.display_name}`);
+    if (scope.kind === "principal" && scope.principal_id) {
+      principals.set(scope.principal_id, scope.display_name);
+    }
+  }
+  for (const group of groups ?? []) {
+    groupNames.set(group.id, group.display_name);
+  }
+
+  return { principals, scopes, groups: groupNames };
+}
+
+/** Whether `/v1/me` currently forecasts access changes at this exact scope. */
+export function mayManageAccessAt(me: MeView, scopeId: string): boolean {
+  return (
+    me.anchors.find((anchor) => anchor.scope_id === scopeId)?.actions["membership.grant"] === true
+  );
 }
 
 /**
  * A stable key for a member row.
  *
- * One entry per (principal, role) is what the API serves — somebody holding
- * two roles appears twice, because the two came from different grants and
- * are revoked separately — so the grant id is the identity of a row, not
- * the principal.
+ * One entry per resolved (principal, role) is what the API serves. A direct
+ * grant normally identifies one row, while one group grant can resolve to
+ * several principals, so the stable render identity needs both the grant and
+ * the resolved subject.
  */
 export function memberKey(member: MemberView): string {
-  return member.grant_id;
+  return `${member.grant_id}:${member.principal_id}:${member.role}`;
 }
 
 /**

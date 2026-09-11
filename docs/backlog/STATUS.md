@@ -196,9 +196,24 @@ The new three-principal retry-review revision passes deterministic fixture and
 deployment contracts, but has not replaced that recorded live evidence. The
 old `synveda-development-acceptance-phase1` containers and networks are gone,
 as are the five selected development image tags. Product data remains retained,
-and the development hostname mapping is absent. The next live run requires
-installation of a fresh project's exact hostname block followed by
-`make compose-acceptance` against that suffixed project.
+the canonical development hostname mapping is installed, and the rebuilt
+`demo` stack passes `make compose-smoke`. A fresh three-principal acceptance
+replay is still required.
+
+The incremental console walkthrough now covers readable Knowledge and Session
+evidence, routed review/apply state, Context requests with exact revision links,
+and actual Skill binding resolution using the existing generated public client.
+Focused console tests, the production build and deterministic contract checks
+pass. On 2026-09-11 the connected in-app Browser and public API exercised an
+allowed invitation, malformed-email validation, pending and accepted state,
+the same viewer denial in UI and API, exact-grant cleanup and final revoked
+state without recording the one-time link. The exercise also fixed custom HTTP
+origin idempotency generation and safe rendering of structured policy denials.
+The administration increment shows governed names beside exact grant scope,
+typed Capture and Context proposals, invitation state and evidence-backed
+Skill, Tool and Operations status without changing the public API or authority
+model. The exact-role `access_api` suite passed all 18 allowed, denied,
+isolation and token-safety cases.
 
 The feature remains open for repeat development runs on Linux and Docker
 Desktop, reference HTTPS, live recovery/upgrade/Apalis execution, live external

@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import * as transport from "./api.mjs";
-import { describe, fillPath, queryString, request } from "./client.mjs";
+import { describe, fillPath, idempotencyKey, queryString, request } from "./client.mjs";
 import { OPERATIONS } from "./generated/api.js";
 
 test("a path template is filled and its values are encoded", () => {
@@ -90,6 +90,28 @@ test("an operation the contract does not call idempotent will not carry a key ei
     () => describe("list_workspaces", { idempotencyKey: "key-1" }),
     /declares no Idempotency-Key/,
   );
+});
+
+test("idempotency keys use the native UUID when the browser offers it", () => {
+  assert.equal(
+    idempotencyKey({
+      randomUUID: () => "native-key",
+      getRandomValues: (array) => array,
+    }),
+    "native-key",
+  );
+});
+
+test("idempotency keys remain available on the Compose HTTP origin", () => {
+  const key = idempotencyKey({
+    getRandomValues: (array) => {
+      array.forEach((_, index) => {
+        array[index] = index;
+      });
+      return array;
+    },
+  });
+  assert.equal(key, "console-000102030405060708090a0b0c0d0e0f");
 });
 
 test("every operation the document declares is callable, and none is invented", () => {

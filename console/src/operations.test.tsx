@@ -221,6 +221,7 @@ test("loading and unavailable signal boundaries are explicit", () => {
   assert.match(text, /Refresh all/);
   assert.match(text, /Sections may have different fetch times and can already be stale/);
   assert.match(text, /Not available through the public API yet/);
+  assert.match(text, /gateway and worker build\/version identity/);
   assert.match(text, /worker last-seen/);
   assert.doesNotMatch(text, /durable operation retry or dead-letter state/);
   assert.match(text, /latest backup and isolated-restore result/);

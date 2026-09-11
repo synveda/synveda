@@ -37,7 +37,10 @@ import {
 } from "./skills/ui.js";
 import type {
   AvailableSkillListView,
+  AvailableSkillView,
   SkillFileBody,
+  SkillBindingListView,
+  SkillBindingView,
   SkillListView,
   SkillVersionListView,
   SkillVersionView,
@@ -71,30 +74,54 @@ export function Skills() {
         current one—privately or to this project. A session sees a Skill only when both its
         binding and the live policy decision permit it.
       </p>
+      <details className="technical-details">
+        <summary>What the Skill states mean</summary>
+        <ul>
+          <li><strong>Installed/current</strong> is the aggregate's applied immutable head.</li>
+          <li><strong>Bound</strong> is configured placement; disabled bindings stay configured.</li>
+          <li><strong>Available</strong> is an enabled binding resolved through a live policy read.</li>
+          <li><strong>Tested</strong> requires an immutable validation run; usage is separate host evidence.</li>
+          <li>A pending VedaFlow change is not installed. Skill versions expose no separate quarantine state.</li>
+        </ul>
+      </details>
       <div className="knowledge-toolbar">
-        <button type="button" onClick={() => setInstalling((value) => !value)}>
-          {installing ? "Close installer" : "Install Skill"}
-        </button>
+        {scopes.some((scope) => scope.canWrite) ? (
+          <button type="button" onClick={() => setInstalling((value) => !value)}>
+            {installing ? "Close installer" : "Install Skill"}
+          </button>
+        ) : (
+          <span className="muted">Skill installation is read-only at the visible placements.</span>
+        )}
       </div>
       {installing ? <InstallSkill scopes={scopes} /> : null}
-      <ScopeAvailability scopes={scopes} />
       <Loaded<SkillListView> entry={entry} what="the Skill catalogue" onRetry={retry}>
         {(body) => {
           const skills = appendSkills(seen, body.skills);
           return (
             <>
-              <h2>Installed Skills</h2>
               {skills.length === 0 ? (
-                <p className="muted">
-                  No installed Skill is visible under this policy. A denied aggregate is omitted,
-                  so this does not disclose whether one exists elsewhere.
-                </p>
+                <>
+                  <h2>Installed Skills</h2>
+                  <p className="muted">
+                    No installed Skill is visible under this policy. A denied aggregate is omitted,
+                    so this does not disclose whether one exists elsewhere.
+                  </p>
+                </>
+              ) : scopes.length > 0 ? (
+                <SkillCatalogue
+                  key={project?.id ?? "personal"}
+                  skills={skills}
+                  scopes={scopes}
+                />
               ) : (
-                <ul className="skill-library-list">
-                  {skills.map((skill) => (
-                    <SkillRow key={skill.id} skill={skill} />
-                  ))}
-                </ul>
+                <>
+                  <div className="banner warning">
+                    No principal or selected-project scope is visible, so binding status cannot be
+                    resolved here.
+                  </div>
+                  <h2>Installed Skills</h2>
+                  <SkillRows skills={skills} status={() => null} />
+                </>
               )}
               {body.next_cursor ? (
                 <p>
@@ -121,10 +148,107 @@ export function Skills() {
   );
 }
 
-function SkillRow({ skill }: { skill: SkillView }) {
+type PlacementStatus = { label: string; tone: "done" | "warn" | "neutral" };
+
+function SkillCatalogue({ skills, scopes }: { skills: SkillView[]; scopes: SkillScopeOption[] }) {
+  const preferred = scopes.find((scope) => scope.kind === "project") ?? scopes[0] as SkillScopeOption;
+  const [scopeId, setScopeId] = useState(preferred.id);
+  useEffect(() => {
+    if (!scopes.some((scope) => scope.id === scopeId)) {
+      setScopeId((scopes.find((scope) => scope.kind === "project") ?? scopes[0] as SkillScopeOption).id);
+    }
+  }, [scopeId, scopes]);
+  const scope = scopes.find((candidate) => candidate.id === scopeId) ?? preferred;
+  const bindingsKey = `skills/bindings/${scope.id}`;
+  const availableKey = `skills/available/${scope.id}`;
+  const bindings = useQuery(bindingsKey, () =>
+    request("list_skill_bindings", { query: { scope_id: scope.id, limit: "200" } }),
+  );
+  const available = useQuery(availableKey, () =>
+    request("list_available_skills", { query: { scope_id: scope.id } }),
+  );
+  const refreshBindings = useRefresh(bindingsKey);
+  const refreshAvailable = useRefresh(availableKey);
+  const bindingRows =
+    bindings.status === "ready" && bindings.outcome.kind === "ok"
+      ? (bindings.outcome.body as SkillBindingListView).bindings
+      : null;
+  const availableRows =
+    available.status === "ready" && available.outcome.kind === "ok"
+      ? (available.outcome.body as AvailableSkillListView).skills
+      : null;
+
+  return (
+    <section className="skill-catalogue">
+      <div className="section-heading">
+        <div>
+          <h2>Installed Skills</h2>
+          <p className="muted">
+            Each row shows its current immutable version and the exact version a Session can
+            discover at the selected placement.
+          </p>
+        </div>
+        <label>
+          <span className="switcher-label">Binding status at</span>
+          <select value={scope.id} onChange={(event) => setScopeId(event.target.value)}>
+            {scopes.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="availability-read">
+        <h3>Available to a session</h3>
+        <Loaded<SkillBindingListView>
+          entry={bindings}
+          what="Skill bindings at this placement"
+          onRetry={refreshBindings}
+        >
+          {() => (
+            <Loaded<AvailableSkillListView>
+              entry={available}
+              what="session Skill availability"
+              onRetry={refreshAvailable}
+            >
+              {(body) => (
+                <p className="muted">
+                  {body.skills.length === 0
+                    ? `No enabled, policy-visible binding resolves at ${scope.label}.`
+                    : `${body.skills.length} ${body.skills.length === 1 ? "Skill resolves" : "Skills resolve"} to an exact version at ${scope.label}.`}
+                </p>
+              )}
+            </Loaded>
+          )}
+        </Loaded>
+      </div>
+      <SkillRows
+        skills={skills}
+        status={(skill) => placementStatus(skill, scope, scopes, bindingRows, availableRows)}
+      />
+    </section>
+  );
+}
+
+function SkillRows({
+  skills,
+  status,
+}: {
+  skills: SkillView[];
+  status: (skill: SkillView) => PlacementStatus | null;
+}) {
+  return (
+    <ul className="skill-library-list">
+      {skills.map((skill) => (
+        <SkillRow key={skill.id} skill={skill} placement={status(skill)} />
+      ))}
+    </ul>
+  );
+}
+
+function SkillRow({ skill, placement }: { skill: SkillView; placement: PlacementStatus | null }) {
   const manifest = manifestSummary(skill.current_version.manifest);
   return (
-    <li>
+    <li className="skill-library-row">
       <Link href={hrefOf("skill-item", { skill_id: skill.id })} className="row">
         <strong>{skill.name}</strong>{" "}
         <span className={`tag ${skill.current_version.sensitivity}`}>
@@ -135,68 +259,47 @@ function SkillRow({ skill }: { skill: SkillView }) {
           Current v{skill.current_version.ordinal} · quality {skill.current_version.quality_score}
           /100 · {sourceLabel(skill.current_version)} · updated {whenOf(skill.updated_at)}
         </div>
-        <div className="mono breakable">{skill.current_version.bundle_digest}</div>
+        <div className="skill-binding-status">
+          <span className={`tag ${placement?.tone === "neutral" ? "" : placement?.tone ?? ""}`}>
+            {placement?.label ?? "Binding status unavailable"}
+          </span>
+        </div>
       </Link>
+      <details className="technical-details row-details">
+        <summary>Version integrity evidence</summary>
+        <div className="mono breakable">{skill.current_version.bundle_digest}</div>
+      </details>
     </li>
   );
 }
 
-function ScopeAvailability({ scopes }: { scopes: SkillScopeOption[] }) {
-  const [scopeId, setScopeId] = useState(scopes[0]?.id ?? "");
-  useEffect(() => {
-    if (!scopes.some((scope) => scope.id === scopeId)) setScopeId(scopes[0]?.id ?? "");
-  }, [scopeId, scopes]);
-  if (scopes.length === 0) {
-    return (
-      <div className="banner warning">
-        No principal or selected-project scope is visible, so session availability cannot be
-        resolved here.
-      </div>
-    );
+function placementStatus(
+  skill: SkillView,
+  scope: SkillScopeOption,
+  scopes: SkillScopeOption[],
+  bindings: SkillBindingView[] | null,
+  available: AvailableSkillView[] | null,
+): PlacementStatus | null {
+  const resolved = available?.find((candidate) => candidate.binding.skill_id === skill.id);
+  if (resolved) {
+    const source = scopes.find((candidate) => candidate.id === resolved.binding.scope_id)?.label ??
+      "another visible placement";
+    return {
+      label: `${skill.name} v${resolved.version.ordinal} available · ${resolved.binding.pinned_version_id ? "pinned" : "follows current"} · ${source}`,
+      tone: "done",
+    };
   }
-  return (
-    <section className="skill-availability">
-      <h2>Available to a session</h2>
-      <label>
-        Placement{" "}
-        <select value={scopeId} onChange={(event) => setScopeId(event.target.value)}>
-          {scopes.map((scope) => (
-            <option key={scope.id} value={scope.id}>
-              {scope.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      {scopeId ? <AvailableSkills scopeId={scopeId} /> : null}
-    </section>
-  );
-}
-
-function AvailableSkills({ scopeId }: { scopeId: string }) {
-  const key = `skills/available/${scopeId}`;
-  const entry = useQuery(key, () =>
-    request("list_available_skills", { query: { scope_id: scopeId } }),
-  );
-  return (
-    <Loaded<AvailableSkillListView> entry={entry} what="session Skill availability">
-      {(body) =>
-        body.skills.length === 0 ? (
-          <p className="muted">No enabled, policy-visible binding resolves at this placement.</p>
-        ) : (
-          <ul className="inline-list">
-            {body.skills.map((available) => (
-              <li key={available.binding.id}>
-                <strong>{available.name}</strong> v{available.version.ordinal}{" "}
-                <span className="muted">
-                  ({available.binding.pinned_version_id ? "pinned" : "follows current"})
-                </span>
-              </li>
-            ))}
-          </ul>
-        )
-      }
-    </Loaded>
-  );
+  const binding = bindings?.find((candidate) => candidate.skill_id === skill.id);
+  if (binding && !binding.enabled) {
+    return { label: `Disabled · ${scope.label}`, tone: "warn" };
+  }
+  if (binding) {
+    return { label: `Enabled binding has no policy-visible resolution · ${scope.label}`, tone: "warn" };
+  }
+  if (bindings && available) {
+    return { label: `Not bound · ${scope.label}`, tone: "neutral" };
+  }
+  return null;
 }
 
 function InstallSkill({ scopes }: { scopes: SkillScopeOption[] }) {

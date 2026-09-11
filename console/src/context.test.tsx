@@ -7,7 +7,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import type { Outcome } from "./api.mjs";
 import { cache } from "./cache.mjs";
-import { ContextInspector } from "./Context.js";
+import { Context, ContextInspector } from "./Context.js";
+import { AppProvider, type AppContextValue } from "./Shell.js";
 import { toText } from "./text.mjs";
 import type {
   CaptureCandidateView,
@@ -250,12 +251,90 @@ async function seed(outcome: Outcome): Promise<void> {
   await cache.ensure(CACHE_KEY, async () => outcome);
 }
 
+async function seedKey(key: string, body: unknown): Promise<void> {
+  await cache.ensure(key, async () => ({ kind: "ok", body }));
+}
+
 function render(): { markup: string; text: string } {
   const markup = renderToStaticMarkup(<ContextInspector contextRunId={RUN_ID} />);
   return { markup, text: toText(markup) };
 }
 
 beforeEach(() => cache.clear());
+
+test("the Context workbench requests against a visible Session and lists recent exact runs", async () => {
+  const session = {
+    id: "session-1",
+    workspace_id: "workspace-1",
+    project_id: "project-1",
+    scope_id: "scope-project",
+    principal_id: "bob@example.test",
+    client_name: "claude-code",
+    task_summary: "Trace the request convention",
+    status: "active",
+    started_at: "2026-08-24T09:00:00Z",
+    metadata: {},
+    created_at: "2026-08-24T09:00:00Z",
+    updated_at: "2026-08-24T09:00:00Z",
+  } as const;
+  await Promise.all([
+    seedKey("context/sessions/project-1", { sessions: [session] }),
+    seedKey("context/runs/project-1", { runs: [run()] }),
+  ]);
+  const project = {
+    id: "project-1",
+    workspace_id: "workspace-1",
+    scope_id: "scope-project",
+    slug: "pulseboard-api",
+    display_name: "PulseBoard API",
+    status: "active" as const,
+    revision: 1,
+    created_at: "2026-08-24T08:00:00Z",
+    updated_at: "2026-08-24T08:00:00Z",
+  };
+  const context = {
+    me: {
+      anchors: [{
+        scope_id: "scope-project",
+        kind: "project",
+        source: "selected_project",
+        direct: true,
+        roles: ["member"],
+        actions: { "session.write": true },
+      }],
+      capabilities: { actions: {}, role_keys: [] },
+      principal: { subject: "bob@example.test", quarantined: false },
+      tenant: { id: "tenant-1", slug: "acme", name: "ACME", status: "active" },
+      onboarding: { state: "ready", workspace_count: 1, project_count: 1 },
+      workspaces: [],
+      projects: [project],
+    },
+    selection: { workspaceId: "workspace-1", projectId: "project-1" },
+    workspace: null,
+    project,
+    chooseWorkspace: () => {},
+    chooseProject: () => {},
+    reload: () => {},
+  } as AppContextValue;
+  const markup = renderToStaticMarkup(
+    <AppProvider value={context}><Context /></AppProvider>,
+  );
+  const text = toText(markup);
+  for (const expected of [
+    "Request context",
+    "Trace the request convention",
+    "Task or query",
+    "Token budget",
+    "Maximum sensitivity",
+    "Recent context",
+    "Which correlation header does PulseBoard use?",
+    "37 tokens",
+  ]) {
+    assert.match(text, new RegExp(expected, "i"), expected);
+  }
+  assert.match(markup, /href="\/console\/context-runs\/context-run-1"/);
+  assert.doesNotMatch(markup, /<button type="submit" disabled=""/);
+});
 
 test("a full trace explains selection, evidence, scores, exclusions, versions and exact feedback", async () => {
   await seed({ kind: "ok", body: detail() });
@@ -296,7 +375,10 @@ test("a full trace explains selection, evidence, scores, exclusions, versions an
     assert.ok(text.includes(expected), `missing inspector fact ${JSON.stringify(expected)}`);
   }
   assert.ok(markup.includes('href="/console/sessions/session-1"'));
-  assert.ok(markup.includes('href="/console/knowledge/knowledge-current"'));
+  assert.ok(
+    markup.includes('href="/console/knowledge/knowledge-current#revision-revision-current"'),
+    "the selection links the exact immutable revision",
+  );
 });
 
 test("redacted mode keeps exact reasons and feedback targets without task or Knowledge content", async () => {

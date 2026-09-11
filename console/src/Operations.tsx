@@ -325,6 +325,7 @@ function UnavailableSignals() {
         pages:
       </p>
       <ul>
+        <li>gateway and worker build/version identity;</li>
         <li>dependency health and degraded external providers;</li>
         <li>worker last-seen;</li>
         <li>context latency and token aggregates;</li>

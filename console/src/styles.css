@@ -9,8 +9,10 @@
   --ink: #16181d;
   --muted: #5d6470;
   --line: #d9dde4;
-  --bg: #fbfbfc;
-  --accent: #1f4fd8;
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-subtle: #f0f2f5;
+  --accent: #3157c8;
   --error-bg: #fdf1f0;
   --error-line: #d98d86;
   color-scheme: light dark;
@@ -22,6 +24,8 @@
     --muted: #9aa2b1;
     --line: #333944;
     --bg: #14161b;
+    --surface: #1a1d23;
+    --surface-subtle: #20242c;
     --accent: #7fa0ff;
     --error-bg: #2a1a19;
     --error-line: #8a4b45;
@@ -37,6 +41,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 main {
@@ -56,17 +61,17 @@ header {
 }
 
 h1 {
-  font-size: 1.1rem;
-  letter-spacing: 0.02em;
+  font-size: 1.45rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
 h2 {
-  font-size: 0.95rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin: 0 0 0.6rem;
+  font-size: 1.15rem;
+  line-height: 1.3;
+  color: var(--ink);
+  margin: 0 0 0.65rem;
 }
 
 section {
@@ -102,7 +107,7 @@ button,
   display: inline-block;
   font: inherit;
   border: 1px solid var(--line);
-  background: transparent;
+  background: var(--surface);
   color: var(--ink);
   border-radius: 6px;
   padding: 0.35rem 0.85rem;
@@ -118,6 +123,16 @@ button,
 button:hover,
 .button:hover {
   border-color: var(--accent);
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 2px;
 }
 
 /*
@@ -163,11 +178,10 @@ button:hover,
 }
 
 h3 {
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin: 1.6rem 0 0.5rem;
+  font-size: 1rem;
+  line-height: 1.35;
+  color: var(--ink);
+  margin: 1.5rem 0 0.5rem;
 }
 
 h4 {
@@ -185,6 +199,16 @@ ul.queue {
 
 ul.queue li + li {
   margin-top: 0.4rem;
+}
+
+ul.queue a.row {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+}
+
+ul.queue a.row:hover .row-title {
+  text-decoration: underline;
 }
 
 .row {
@@ -301,8 +325,7 @@ button:disabled {
   padding: 0 0.5rem;
   margin-left: 0.4rem;
   font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 600;
   color: var(--muted);
 }
 
@@ -476,6 +499,10 @@ ul.actions-list {
   flex-wrap: wrap;
   border-bottom: 1px solid var(--line);
   padding: 0.75rem 1.25rem;
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .brand {
@@ -526,7 +553,7 @@ input,
 textarea {
   font: inherit;
   color: var(--ink);
-  background: transparent;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.3rem 0.5rem;
@@ -537,7 +564,7 @@ textarea {
   grid-template-columns: 13rem 1fr;
   align-items: start;
   gap: 2rem;
-  max-width: 78rem;
+  max-width: 86rem;
   margin: 0 auto;
   padding: 1.5rem 1.25rem 4rem;
 }
@@ -560,7 +587,7 @@ textarea {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
-  margin: 1.5rem 0 0.4rem;
+  margin: 1.35rem 0 0.4rem;
 }
 
 ul.nav {
@@ -571,7 +598,7 @@ ul.nav {
 
 .nav-link {
   display: block;
-  padding: 0.3rem 0.55rem;
+  padding: 0.38rem 0.6rem;
   border-radius: 6px;
   color: var(--ink);
   text-decoration: none;
@@ -590,6 +617,8 @@ ul.nav {
 
 .page {
   min-width: 0;
+  max-width: 72rem;
+  width: 100%;
 }
 
 .page-heading {
@@ -600,7 +629,7 @@ ul.nav {
 }
 
 .page-heading h1 {
-  font-size: 1.35rem;
+  font-size: 1.65rem;
   text-transform: none;
   letter-spacing: 0;
 }
@@ -725,6 +754,28 @@ table.audit td {
   max-width: 34rem;
 }
 
+.configuration-editor {
+  max-width: 52rem;
+}
+
+.configuration-editor fieldset {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.configuration-editor .choice {
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+.configuration-editor .choice input {
+  margin-top: 0.2rem;
+}
+
 .inline-form label,
 .stacked-form label {
   display: flex;
@@ -807,7 +858,8 @@ ul.sessions li.incomplete {
 }
 
 .tag.done {
-  opacity: 0.7;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--accent);
 }
 
 .timeline {
@@ -946,6 +998,58 @@ button.link {
   font-size: 0.85rem;
 }
 
+.capture-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 1.25rem;
+  margin-top: 2rem;
+}
+
+.section-heading,
+.result-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.section-heading > div > :last-child,
+.result-heading > div > :last-child {
+  margin-bottom: 0;
+}
+
+.capture-rows {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+.capture-rows > li {
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.capture-rows p {
+  margin: 0.3rem 0;
+}
+
+.technical-details {
+  margin-top: 0.65rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.technical-details > summary,
+.filter-details > summary,
+.secondary-panel > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.technical-details[open] > summary,
+.filter-details[open] > summary,
+.secondary-panel[open] > summary {
+  color: var(--ink);
+}
+
 /* ── Knowledge Browser + conflict/freshness review (CPR-17/37) ───────── */
 
 .knowledge-toolbar {
@@ -960,11 +1064,36 @@ button.link {
   padding: 0.8rem;
   border: 1px solid var(--line);
   border-radius: 8px;
+  background: var(--surface);
 }
 
 .knowledge-filters input,
 .knowledge-filters select {
   max-width: 16rem;
+}
+
+.wide-field {
+  grid-column: 1 / -1;
+}
+
+.filter-details {
+  flex-basis: 100%;
+  border-top: 1px solid var(--line);
+  padding-top: 0.65rem;
+}
+
+.filter-grid {
+  margin-bottom: 0;
+}
+
+.secondary-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+  margin: 2rem 0;
+}
+
+.secondary-panel > summary {
+  font-weight: 600;
 }
 
 ul.knowledge-list {
@@ -1028,6 +1157,10 @@ ul.knowledge-list a.row:hover strong {
 .revision-history li,
 .knowledge-columns li {
   margin: 0.5rem 0;
+}
+
+.revision-history li[id] {
+  scroll-margin-top: 6rem;
 }
 
 .knowledge-action {
@@ -1311,10 +1444,57 @@ button.danger {
   margin-top: 1rem;
 }
 
+.inline-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  padding: 0.7rem;
+  border-left: 3px solid var(--error-line);
+  background: var(--error-bg);
+}
+
 /* ── Context Inspector (CPR-21, ADR-0084) ────────────────────────────── */
 
 .context-inspector {
   max-width: 72rem;
+}
+
+.workbench-section {
+  border-top: 1px solid var(--line);
+  padding-top: 1.25rem;
+}
+
+.context-request {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1.5fr) minmax(12rem, 1fr);
+  gap: 0.85rem 1rem;
+  max-width: 52rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.context-request label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.context-request textarea {
+  margin: 0;
+}
+
+.workbench-result {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem;
+  background: var(--surface);
+}
+
+.compact-list .row {
+  gap: 0.3rem;
 }
 
 .context-run-heading,
@@ -1405,6 +1585,40 @@ dl.context-scores dd {
 
 .skills-intro {
   max-width: 52rem;
+}
+
+.skill-catalogue {
+  margin-top: 1rem;
+}
+
+.skill-catalogue > .section-heading {
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.skill-catalogue > .section-heading label {
+  min-width: 15rem;
+}
+
+.availability-read h3 {
+  margin-bottom: 0.15rem;
+}
+
+.availability-read p {
+  margin-top: 0;
+}
+
+.skill-binding-status {
+  margin-top: 0.35rem;
+}
+
+.skill-binding-status .tag {
+  margin-left: 0;
+  white-space: normal;
+}
+
+.row-details {
+  margin: -0.35rem 0 0.45rem 0.7rem;
 }
 
 .skill-availability,
@@ -1634,6 +1848,7 @@ ul.tool-catalogue-list a.row:hover strong {
   }
 
   .form-grid,
+  .context-request,
   .skill-binding-grid,
   .skill-version,
   .tool-version,
@@ -1648,6 +1863,16 @@ ul.tool-catalogue-list a.row:hover strong {
 
   .learning-batch > header {
     display: block;
+  }
+
+  .section-heading,
+  .result-heading {
+    display: block;
+  }
+
+  .skill-catalogue > .section-heading label {
+    display: block;
+    margin-top: 0.75rem;
   }
 
   .batch-progress {

@@ -8,7 +8,7 @@
  * one aggregate sentence that API permits.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { idempotencyKey, request, type Answer } from "./client.mjs";
 import {
@@ -28,37 +28,297 @@ import {
 } from "./context.mjs";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
 import { Link } from "./Router.js";
-import { PageHeading } from "./Shell.js";
+import { PageHeading, useApp } from "./Shell.js";
 import { whenOf } from "./people.mjs";
 import { hrefOf } from "./routes.mjs";
+import { runDescription, runTitle, statusLabel } from "./sessions.mjs";
 import type {
   ContextCandidateView,
   ContextFeedbackView,
   ContextGraphStepView,
   ContextRunDetailView,
+  ContextRunListView,
   ContextRunView,
   ContextSelectionView,
   KnowledgeSourceView,
+  MeView,
+  SessionList,
+  SessionView,
 } from "./generated/api.js";
 
+/** Core Context journey: choose a visible Session, request, then inspect. */
+export function Context() {
+  const { me, project } = useApp();
+  return (
+    <>
+      <PageHeading route="context" />
+      {project ? (
+        <ContextWorkbench me={me} projectId={project.id} />
+      ) : (
+        <section>
+          <h2>Select a project</h2>
+          <p className="muted">
+            Context is requested for a Session in one selected project. Choose a project above;
+            no tenant-wide fallback is inferred.
+          </p>
+        </section>
+      )}
+    </>
+  );
+}
+
+function ContextWorkbench({ me, projectId }: { me: MeView; projectId: string }) {
+  const sessionsKey = `context/sessions/${projectId}`;
+  const runsKey = `context/runs/${projectId}`;
+  const sessions = useQuery(sessionsKey, () =>
+    request("list_sessions", { query: { project_id: projectId, limit: "50" } }),
+  );
+  const runs = useQuery(runsKey, () =>
+    request("list_context_runs", { query: { project_id: projectId, limit: "12" } }),
+  );
+  const refreshSessions = useRefresh(sessionsKey);
+  const refreshRuns = useRefresh(runsKey);
+  const [created, setCreated] = useState<ContextRunView | null>(null);
+
+  return (
+    <>
+      <section className="workbench-section">
+        <h2>Request context</h2>
+        <p className="muted">
+          Synveda composes policy-visible Knowledge for an existing Session. The governed
+          configuration may narrow the requested budget or sensitivity.
+        </p>
+        <Loaded<SessionList>
+          entry={sessions}
+          what="sessions available for context"
+          onRetry={refreshSessions}
+        >
+          {(body) => (
+            <ContextRequestForm
+              key={projectId}
+              me={me}
+              sessions={body.sessions}
+              onCreated={(run) => {
+                setCreated(run);
+                invalidate(runsKey);
+              }}
+            />
+          )}
+        </Loaded>
+      </section>
+
+      {created ? (
+        <section className="workbench-result" aria-live="polite">
+          <div className="result-heading">
+            <div>
+              <span className="eyebrow">Returned context</span>
+              <h2>{created.query ?? "Session context"}</h2>
+            </div>
+            <span className={`tag ${created.completion_status === "completed" ? "done" : "warn"}`}>
+              {created.completion_status}
+            </span>
+          </div>
+          <p className="muted">
+            {created.tokens} tokens · {created.selection_count} selected revisions · trace {created.trace_retention_mode}
+          </p>
+          <ContextRunDetail contextRunId={created.id} embedded />
+        </section>
+      ) : null}
+
+      <section className="workbench-section">
+        <h2>Recent context</h2>
+        <Loaded<ContextRunListView> entry={runs} what="recent context" onRetry={refreshRuns}>
+          {(body) => <ContextRunRows rows={body.runs} />}
+        </Loaded>
+      </section>
+    </>
+  );
+}
+
+function ContextRequestForm({
+  me,
+  sessions,
+  onCreated,
+}: {
+  me: MeView;
+  sessions: SessionView[];
+  onCreated: (run: ContextRunView) => void;
+}) {
+  const [sessionId, setSessionId] = useState(sessions[0]?.id ?? "");
+  const [query, setQuery] = useState("");
+  const [budget, setBudget] = useState("");
+  const [sensitivity, setSensitivity] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selected = sessions.find((session) => session.id === sessionId) ?? null;
+  const mayRequest = selected ? offersSessionWrite(me, selected) : false;
+
+  useEffect(() => {
+    if (!sessions.some((session) => session.id === sessionId)) {
+      setSessionId(sessions[0]?.id ?? "");
+    }
+  }, [sessionId, sessions]);
+
+  if (sessions.length === 0) {
+    return (
+      <p className="muted">
+        No policy-visible Session exists in this project yet. An agent opens Sessions; the
+        console does not create a run that never ran.
+      </p>
+    );
+  }
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selected || !mayRequest) return;
+    setBusy(true);
+    setError(null);
+    const answer = await request("create_context_run", {
+      path: { session_id: selected.id },
+      body: {
+        ...(query.trim() ? { query: query.trim() } : {}),
+        ...(budget ? { budget_tokens: Number(budget) } : {}),
+        ...(sensitivity ? { max_sensitivity: sensitivity } : {}),
+      },
+      idempotencyKey: idempotencyKey(),
+    });
+    setBusy(false);
+    if (answer.kind === "ok") {
+      onCreated(answer.body);
+    } else {
+      setError(
+        answer.kind === "unauthenticated"
+          ? "Your session expired before context was requested."
+          : answer.message,
+      );
+    }
+  };
+
+  return (
+    <form className="context-request" onSubmit={(event) => void submit(event)}>
+      <label>
+        <span>Session</span>
+        <select value={sessionId} onChange={(event) => setSessionId(event.target.value)}>
+          {sessions.map((session) => (
+            <option key={session.id} value={session.id}>
+              {runTitle(session)} · {statusLabel(session.status)} · {runDescription(session)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="wide-field">
+        <span>Task or query</span>
+        <textarea
+          rows={3}
+          value={query}
+          placeholder="What should the agent know for this task?"
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
+      <label>
+        <span>Token budget <span className="muted">(optional)</span></span>
+        <input
+          type="number"
+          min={1}
+          max={4294967295}
+          step={1}
+          inputMode="numeric"
+          value={budget}
+          placeholder="Governed default"
+          onChange={(event) => setBudget(event.target.value)}
+        />
+      </label>
+      <label>
+        <span>Maximum sensitivity <span className="muted">(optional)</span></span>
+        <select value={sensitivity} onChange={(event) => setSensitivity(event.target.value)}>
+          <option value="">Governed default</option>
+          <option value="public">Public</option>
+          <option value="internal">Internal</option>
+          <option value="confidential">Confidential</option>
+          <option value="restricted">Restricted</option>
+        </select>
+      </label>
+      <div className="form-actions wide-field">
+        <button type="submit" disabled={busy || !mayRequest}>
+          {busy ? "Requesting…" : "Request context"}
+        </button>
+        {mayRequest ? null : (
+          <span className="muted">
+            Your current capability forecast does not offer session.write at this Session&rsquo;s
+            scope. The gateway remains authoritative.
+          </span>
+        )}
+      </div>
+      {error ? <div className="banner error wide-field" role="alert">{error}</div> : null}
+    </form>
+  );
+}
+
+function offersSessionWrite(me: MeView, session: SessionView): boolean {
+  const anchor = me.anchors.find((candidate) => candidate.scope_id === session.scope_id);
+  return (anchor?.actions ?? me.capabilities.actions)["session.write"] === true;
+}
+
+function ContextRunRows({ rows }: { rows: ContextRunView[] }) {
+  if (rows.length === 0) {
+    return <p className="muted">No policy-visible context has been requested for this project.</p>;
+  }
+  return (
+    <ul className="sessions compact-list">
+      {rows.map((run) => (
+        <li key={run.id}>
+          <Link href={hrefOf("context-run", { context_run_id: run.id })} className="row">
+            <strong>{run.query ?? "Session context"}</strong>{" "}
+            <span className={`tag ${run.completion_status === "completed" ? "done" : "warn"}`}>
+              {run.completion_status}
+            </span>
+            <span className="muted">
+              {whenOf(run.created_at)} · {run.tokens} tokens · {run.selection_count} selections
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ContextInspector({ contextRunId }: { contextRunId: string }) {
+  return (
+    <>
+      <PageHeading route="context-run" />
+      <ContextRunDetail contextRunId={contextRunId} />
+    </>
+  );
+}
+
+function ContextRunDetail({
+  contextRunId,
+  embedded = false,
+}: {
+  contextRunId: string;
+  embedded?: boolean;
+}) {
   const cacheKey = `context-runs/${contextRunId}`;
   const entry = useQuery(cacheKey, () =>
     request("get_context_run", { path: { id: contextRunId } }),
   );
   const retry = useRefresh(cacheKey);
-
   return (
-    <>
-      <PageHeading route="context-run" />
-      <Loaded<ContextRunDetailView> entry={entry} what="this context run" onRetry={retry}>
-        {(detail) => <Inspector detail={detail} cacheKey={cacheKey} />}
-      </Loaded>
-    </>
+    <Loaded<ContextRunDetailView> entry={entry} what="this context run" onRetry={retry}>
+      {(detail) => <Inspector detail={detail} cacheKey={cacheKey} embedded={embedded} />}
+    </Loaded>
   );
 }
 
-function Inspector({ detail, cacheKey }: { detail: ContextRunDetailView; cacheKey: string }) {
+function Inspector({
+  detail,
+  cacheKey,
+  embedded,
+}: {
+  detail: ContextRunDetailView;
+  cacheKey: string;
+  embedded: boolean;
+}) {
   const { run } = detail;
   const exclusions = excludedCandidates(detail.candidates);
   const policyMessage = detail.policy_exclusion_message ?? run.policy_exclusion_message;
@@ -67,13 +327,15 @@ function Inspector({ detail, cacheKey }: { detail: ContextRunDetailView; cacheKe
       <p>
         <Link href={hrefOf("session", { session_id: run.session_id })}>← Session timeline</Link>
       </p>
-      <header className="context-run-heading">
-        <div>
-          <span className="eyebrow">Context run {run.id}</span>
-          <h2>{run.query ?? "Task text not retained"}</h2>
-        </div>
-        <span className="tag done">{run.completion_status}</span>
-      </header>
+      {embedded ? null : (
+        <header className="context-run-heading">
+          <div>
+            <span className="eyebrow">Context run {run.id}</span>
+            <h2>{run.query ?? "Task text not retained"}</h2>
+          </div>
+          <span className="tag done">{run.completion_status}</span>
+        </header>
+      )}
 
       <div className="banner" role="status">
         {retentionDescription(run.trace_retention_mode)}
@@ -84,12 +346,12 @@ function Inspector({ detail, cacheKey }: { detail: ContextRunDetailView; cacheKe
         </div>
       ) : null}
 
-      <RunFacts run={run} />
       <TaskAndRendered run={run} />
       <Selections
         detail={detail}
         cacheKey={cacheKey}
       />
+      <RunFacts run={run} />
       <Exclusions run={run} candidates={exclusions} />
       <FeedbackHistory feedback={detail.feedback} />
     </article>
@@ -117,23 +379,20 @@ function RunFacts({ run }: { run: ContextRunView }) {
         <dd>
           {run.selection_count} selected · {run.candidate_count} candidates · {run.entry_count} rendered entries
         </dd>
-        <dt>Retrieval</dt>
-        <dd>{run.retrieval_version}</dd>
-        <dt>Index</dt>
-        <dd>{run.index_version}</dd>
-        <dt>Embedding</dt>
-        <dd>{run.embedding_model ?? "not run"}</dd>
-        <dt>Graph</dt>
-        <dd>{run.graph_version ?? "not run"}</dd>
-        <dt>Rendered context hash</dt>
-        <dd className="mono">{run.block_hash}</dd>
-        {run.query_hash ? (
-          <>
-            <dt>Task hash</dt>
-            <dd className="mono">{run.query_hash}</dd>
-          </>
-        ) : null}
+        <dt>Trace retention</dt>
+        <dd>{run.trace_retention_mode.replaceAll("_", " ")}</dd>
       </dl>
+      <details className="technical-details">
+        <summary>Planner versions and integrity evidence</summary>
+        <dl className="facts">
+          <dt>Retrieval</dt><dd>{run.retrieval_version}</dd>
+          <dt>Index</dt><dd>{run.index_version}</dd>
+          <dt>Embedding</dt><dd>{run.embedding_model ?? "not run"}</dd>
+          <dt>Graph</dt><dd>{run.graph_version ?? "not run"}</dd>
+          <dt>Rendered context hash</dt><dd className="mono breakable">{run.block_hash}</dd>
+          {run.query_hash ? <><dt>Task hash</dt><dd className="mono breakable">{run.query_hash}</dd></> : null}
+        </dl>
+      </details>
       {run.degraded.length > 0 ? (
         <div className="banner warning" role="status">
           Degraded retrieval: {run.degraded.join(" · ")}. The planner recorded this fallback; it did not silently claim the missing leg ran.
@@ -251,7 +510,15 @@ function Selection({
         <p className="muted">Context content was not retained in this {mode} trace.</p>
       )}
       {selection.knowledge_item_id ? (
-        <p><Link href={hrefOf("knowledge-item", { knowledge_id: selection.knowledge_item_id })}>Open current Knowledge item</Link></p>
+        <p>
+          <Link
+            href={`${hrefOf("knowledge-item", { knowledge_id: selection.knowledge_item_id })}${
+              revision ? `#revision-${revision.id}` : ""
+            }`}
+          >
+            {revision ? `Open selected Knowledge revision ${revision.revision_number}` : "Open current Knowledge item"}
+          </Link>
+        </p>
       ) : null}
       <p className="mono muted">Content hash {selection.content_hash}</p>
       <ScoreBreakdown scores={scores} />

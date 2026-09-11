@@ -165,12 +165,26 @@ export async function request<K extends OperationId>(
 /**
  * A fresh idempotency key.
  *
- * `crypto.randomUUID` is in every browser that runs this bundle and needs
- * no dependency. A key is the client's claim that "this is that request
- * again", so it is minted once per *attempt the user makes* and reused
- * across retries of it — the callers here mint one when a form is
- * submitted, not when a request is sent.
+ * A key is the client's claim that "this is that request again", so it is
+ * minted once per *attempt the user makes* and reused across retries of it —
+ * the callers here mint one when a form is submitted, not when a request is
+ * sent.
+ *
+ * `randomUUID` is restricted to secure contexts by browsers, while the local
+ * Compose contract deliberately uses HTTP on a named loopback origin. The
+ * Web Crypto `getRandomValues` fallback keeps the key unpredictable on that
+ * supported origin without introducing a second UUID dependency; the API
+ * contract requires a bounded printable key, not a UUID wire shape.
  */
-export function idempotencyKey(): string {
-  return crypto.randomUUID();
+export function idempotencyKey(
+  source: {
+    randomUUID?: () => string;
+    getRandomValues: (array: Uint8Array) => Uint8Array;
+  } = crypto,
+): string {
+  if (typeof source.randomUUID === "function") {
+    return source.randomUUID();
+  }
+  const bytes = source.getRandomValues(new Uint8Array(16));
+  return `console-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }

@@ -111,13 +111,52 @@ stops before Capture, uses Avery Author, Riley Reviewer and Vera Restricted
 Viewer with existing role keys, refuses an unintended gateway or conflicting
 curator file, and never resets product data.
 
+The console walkthrough now exposes those same governed surfaces as a coherent
+work journey: readable Knowledge and Session evidence, routed review state, a
+small Context request workbench with exact revision links, and Skill placement
+resolution. It reuses the generated public client and existing capability
+forecasts; no browser-side authority or local-only product model was added.
+Focused console tests, production type/build checks and deterministic API and
+security-contract checks pass. The administrative increment now discloses
+governed person and group names beside exact subjects, scopes and grant ids;
+uses exact-grant revocation; explains pending and settled invitations; limits
+normal configuration editing to the demo's bounded Capture and Context fields;
+and labels Skill, Tool and Operations state only from existing evidence. It
+retains the generated public client, Cedar decisions, RLS, VedaFlow review and
+the Keycloak administration boundary.
+
+On 2026-09-11 the current console was rebuilt into the canonical `demo`
+profile and `make compose-smoke` passed with the development `.test` mapping
+installed. The fresh exact-role `access_api` suite also passed all 18 tests,
+including exact grant revocation, invitation lifecycle, policy denial,
+unauthenticated refusal, tenant non-disclosure and token-free audit evidence.
+The connected in-app Browser then exercised the access-action acceptance
+sequence against that stack. Native email validation refused malformed input;
+Avery Author created a labelled workspace-viewer invitation and saw its exact
+pending state without retaining the one-time link; the API created and Vera
+Restricted Viewer accepted a second labelled invitation; and Vera's repeated
+invitation attempt was refused by both UI and API with HTTP 403, the stable
+`policy_denied` kind, action, resource and safe policy reason. The temporary
+viewer grant was revoked and the pending UI invitation was withdrawn through
+the public API, with the final `revoked` state and absence of the temporary
+grant verified.
+
+That execution exposed and fixed two console-only failures: custom HTTP `.test`
+origins lacked `crypto.randomUUID()`, so idempotent mutations now use a Web
+Crypto random-byte fallback; and structured gateway denials without a
+`message` lost their actionable reason, so the console now renders the safe
+reason, action and resource. Focused tests cover both paths. No invitation
+secret, browser credential or Keycloak administrator capability was recorded
+or added. A local walkthrough does not change the production-readiness
+boundary.
+
 Deterministic replay and public-resource status contracts pass for this
 three-principal revision, but its fresh live replay is not yet recorded. The
 old `synveda-development-acceptance-phase1` containers and networks are gone,
 as are the five selected development image tags. Its product data remains
-retained, and the development hostname mapping is absent. The next action is
-installation of a fresh project's exact hostname block followed by
-`make compose-acceptance` in that suffixed project.
+retained. The canonical development hostname mapping is now installed and the
+current `demo` stack passes smoke; a fresh three-principal acceptance replay is
+still not recorded.
 
 ### Recorded development evidence
 

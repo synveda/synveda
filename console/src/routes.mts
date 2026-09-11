@@ -5,14 +5,18 @@
  * data, so that the shell renders a table rather than a hand-written menu
  * — and so that the gating rule can be tested without rendering anything.
  *
- * # Two groups, and the difference between them is the product's shape
+ * # Three groups, and the difference between them is the product's shape
  *
- * The **primary** group is the product: what somebody came here to do.
+ * The **work** group is the product journey: what somebody came here to do.
  * It is shown to everybody, unconditionally, because a nav item that
  * appears and disappears with a role turns the shape of the application
  * into a function of who is looking at it — and the first question a new
  * user asks ("what is this thing?") should have the same answer for all
  * of them.
+ *
+ * The **administration** group keeps supported setup and operational surfaces
+ * easy to find without giving each one equal weight in the walkthrough. Like
+ * work, it is unconditional: the gateway still decides every operation.
  *
  * The **advanced** group is governance: reviews, scopes, Configuration, audit,
  * service identities. Those are shown only to a caller whose capability
@@ -42,6 +46,7 @@ export type RouteId =
   | "operations"
   | "sessions"
   | "session"
+  | "context"
   | "context-run"
   | "knowledge"
   | "knowledge-item"
@@ -54,6 +59,7 @@ export type RouteId =
   | "people"
   | "settings"
   | "reviews"
+  | "review"
   | "scopes"
   | "configuration"
   | "audit"
@@ -61,7 +67,7 @@ export type RouteId =
   | "welcome";
 
 /** Which menu a route belongs to, or neither. */
-export type NavGroup = "primary" | "advanced" | "none";
+export type NavGroup = "work" | "administration" | "advanced" | "none";
 
 export interface RouteDef {
   id: RouteId;
@@ -79,8 +85,8 @@ export interface RouteDef {
   group: NavGroup;
   /**
    * The tenant-plane action a caller must be forecast to hold. Absent means
-   * the route is offered to everybody — which is every primary route, by
-   * the group's own rule above.
+   * the route is offered to everybody — which is every work and
+   * administration route, by the group's own rule above.
    *
    * The strings are `synveda_policy::Action::as_str()`'s, because that is
    * what `/v1/me` keys its map by. A name that drifts is a route that
@@ -104,21 +110,21 @@ export const ROUTES: readonly RouteDef[] = [
     id: "home",
     segment: "",
     label: "Home",
-    group: "primary",
+    group: "work",
     blurb: "Where you are, what you have, and what to do next.",
   },
   {
     id: "operations",
     segment: "operations",
     label: "Operations",
-    group: "primary",
+    group: "administration",
     blurb: "Recent authorised activity and what this console cannot yet measure.",
   },
   {
     id: "sessions",
     segment: "sessions",
     label: "Sessions",
-    group: "primary",
+    group: "work",
     blurb: "Every run of an agent against this project.",
   },
   {
@@ -139,7 +145,7 @@ export const ROUTES: readonly RouteDef[] = [
     id: "knowledge",
     segment: "knowledge",
     label: "Knowledge",
-    group: "primary",
+    group: "work",
     blurb: "What has been reviewed and published.",
   },
   {
@@ -153,21 +159,28 @@ export const ROUTES: readonly RouteDef[] = [
     id: "learnings",
     segment: "learnings",
     label: "New Learnings",
-    group: "primary",
+    group: "work",
     blurb: "What your sessions produced and nobody has stood behind yet.",
+  },
+  {
+    id: "context",
+    segment: "context",
+    label: "Context",
+    group: "work",
+    blurb: "Request governed context and inspect what was selected and why.",
   },
   {
     id: "okf",
     segment: "okf",
     label: "Import / Export",
-    group: "primary",
+    group: "administration",
     blurb: "Validate, review and exchange project Knowledge as pinned OKF v0.2.",
   },
   {
     id: "skills",
     segment: "skills",
     label: "Skills",
-    group: "primary",
+    group: "work",
     blurb: "Immutable Skills, exact bindings, tests and activation evidence.",
   },
   {
@@ -181,7 +194,7 @@ export const ROUTES: readonly RouteDef[] = [
     id: "tools",
     segment: "tools",
     label: "Tools",
-    group: "primary",
+    group: "administration",
     blurb: "Trusted MCP servers, immutable versions and exact project bindings.",
   },
   {
@@ -195,14 +208,14 @@ export const ROUTES: readonly RouteDef[] = [
     id: "people",
     segment: "people",
     label: "People",
-    group: "primary",
+    group: "administration",
     blurb: "Who may act here, why, and what you can change about it.",
   },
   {
     id: "settings",
     segment: "settings",
     label: "Settings",
-    group: "primary",
+    group: "administration",
     blurb: "This workspace, this project, and the repositories it is about.",
   },
   {
@@ -212,6 +225,14 @@ export const ROUTES: readonly RouteDef[] = [
     group: "advanced",
     capability: "proposal.read",
     blurb: "The proposals waiting on a verdict.",
+  },
+  {
+    id: "review",
+    segment: "advanced/reviews/:proposal_id",
+    label: "Review",
+    group: "none",
+    capability: "proposal.read",
+    blurb: "Evidence, proposed changes and the exact review and apply state.",
   },
   {
     id: "scopes",
@@ -355,9 +376,14 @@ export function offersRoute(route: RouteDef, actions: Record<string, boolean>): 
   return route.capability === undefined || actions[route.capability] === true;
 }
 
-/** The primary menu — every primary route, for everybody. */
-export function primaryNav(): RouteDef[] {
-  return ROUTES.filter((route) => route.group === "primary");
+/** The work menu — the core product journey, for everybody. */
+export function workNav(): RouteDef[] {
+  return ROUTES.filter((route) => route.group === "work");
+}
+
+/** Supported setup and operational surfaces, for everybody. */
+export function administrationNav(): RouteDef[] {
+  return ROUTES.filter((route) => route.group === "administration");
 }
 
 /** The advanced menu — only the planes this caller is forecast to read. */

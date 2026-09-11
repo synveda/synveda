@@ -11,11 +11,14 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { idempotencyKey, request } from "./client.mjs";
 import {
+  TRACE_RETENTION_OPTIONS,
+  applyDemoConfigurationDraft,
   configurationSummary,
   configurationTarget,
+  demoConfigurationDraft,
   mutationMessage,
-  parseConfiguration,
   renderConfiguration,
+  type DemoConfigurationDraft,
 } from "./configuration.mjs";
 import type {
   ConfigurationArtifactListView,
@@ -35,6 +38,8 @@ import type {
 } from "./generated/api.js";
 import { whenOf } from "./people.mjs";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
+import { hrefOf } from "./routes.mjs";
+import { Link } from "./Router.js";
 import { PageHeading, useApp } from "./Shell.js";
 
 type Notice = { result?: ConfigurationMutationView; error?: string };
@@ -78,7 +83,7 @@ export function Configuration() {
       ) : (
         <div className="banner warning">Select a workspace or project to manage Configuration.</div>
       )}
-      <Effective entry={effective} />
+      <Effective entry={effective} targetLabel={target?.label ?? "selected scope"} />
       <Loaded<ConfigurationTemplateListView>
         entry={templates}
         what="Configuration templates"
@@ -99,21 +104,39 @@ export function Configuration() {
   );
 }
 
-function Effective({ entry }: { entry: ReturnType<typeof useQuery> }) {
+function Effective({
+  entry,
+  targetLabel,
+}: {
+  entry: ReturnType<typeof useQuery>;
+  targetLabel: string;
+}) {
   return (
     <section>
-      <h2>Effective here</h2>
+      <h2>Effective now at {targetLabel}</h2>
       <Loaded<EffectiveConfigurationView> entry={entry} what="effective Configuration">
         {(body) => (
           <>
-            <p>
-              <strong>{body.fail_safe ? "Enterprise fail-safe" : configurationSummary(body.document)}</strong>
-            </p>
-            <p className="muted">
-              {body.fail_safe
-                ? "No enabled binding applies. The conservative built-in document is active."
-                : `Version ${body.version_id} · ${body.content_hash} · binding scope ${body.binding_scope_id}`}
-            </p>
+            <div className={`banner ${body.fail_safe ? "warning" : "success"}`} role="status">
+              <strong>{body.fail_safe ? "Built-in fail-safe is effective" : "A governed version is effective"}</strong>
+              <p>{configurationSummary(body.document)}</p>
+              <p className="muted">
+                {body.fail_safe
+                  ? "No enabled binding applies. This is conservative fallback behavior, not a configured or reviewed version."
+                  : "A proposed version or binding does not replace this evidence until VedaFlow applies it."}
+              </p>
+            </div>
+            <details className="technical-details">
+              <summary>Effective version and selector evidence</summary>
+              <dl>
+                <dt>Requested scope</dt><dd className="mono breakable">{body.scope_id}</dd>
+                <dt>Artifact</dt><dd className="mono breakable">{body.artifact_id ?? "unavailable — fail-safe"}</dd>
+                <dt>Version</dt><dd className="mono breakable">{body.version_id ?? "unavailable — fail-safe"}</dd>
+                <dt>Binding</dt><dd className="mono breakable">{body.binding_id ?? "unavailable — fail-safe"}</dd>
+                <dt>Binding scope</dt><dd className="mono breakable">{body.binding_scope_id ?? "unavailable — fail-safe"}</dd>
+                <dt>Content hash</dt><dd className="mono breakable">{body.content_hash}</dd>
+              </dl>
+            </details>
           </>
         )}
       </Loaded>
@@ -175,7 +198,8 @@ function Templates({
       <h2>Seeded templates</h2>
       <p className="muted">
         Personal, team and enterprise are complete source documents—not editions. Creating one
-        copies it into ordinary immutable history, and binding is a separate governed change.
+        proposes an ordinary immutable version. Only when that applies does this page submit the
+        separate governed binding; either change may require review.
       </p>
       <ul className="packs">
         {templates.map((template) => (
@@ -187,7 +211,7 @@ function Templates({
               disabled={!target || busy !== null}
               onClick={() => void create(template)}
             >
-              {busy === template.name ? "Opening change…" : `Create and bind to ${target?.label ?? "scope"}`}
+              {busy === template.name ? "Opening governed change…" : `Propose ${template.name} at ${target?.label ?? "scope"}`}
             </button>
           </li>
         ))}
@@ -258,7 +282,11 @@ function Artifact({
     <article className="node-detail">
       <h3>{artifact.name}</h3>
       <p className="muted">
-        Stable id {artifact.id} · governed at {artifact.governing_scope_id} · current {artifact.current_version_id} · updated {whenOf(artifact.updated_at)}
+        Stable id {artifact.id} · governed at {artifact.governing_scope_id} · artifact current {artifact.current_version_id} · updated {whenOf(artifact.updated_at)}
+      </p>
+      <p className="muted">
+        “Artifact current” is version history, not proof this artifact is effective at the selected
+        scope. The binding and Effective now panels answer that separately.
       </p>
       <Loaded<ConfigurationVersionListView>
         entry={versions}
@@ -298,7 +326,9 @@ function ArtifactControls({
   targetScopeId: string | null;
 }) {
   const current = versions.find((version) => version.id === artifact.current_version_id) ?? versions[0];
-  const [draft, setDraft] = useState(current ? renderConfiguration(current.document) : "{}");
+  const [draft, setDraft] = useState<DemoConfigurationDraft | null>(
+    current ? demoConfigurationDraft(current.document) : null,
+  );
   const [from, setFrom] = useState(versions[1]?.id ?? versions[0]?.id ?? "");
   const [to, setTo] = useState(versions[0]?.id ?? "");
   const [comparison, setComparison] = useState<ConfigurationComparisonView | null>(null);
@@ -306,7 +336,7 @@ function ArtifactControls({
   const [notice, setNotice] = useState<Notice>({});
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (current) setDraft(renderConfiguration(current.document));
+    setDraft(current ? demoConfigurationDraft(current.document) : null);
   }, [current?.id]);
 
   const changed = async () => {
@@ -323,11 +353,16 @@ function ArtifactControls({
     event.preventDefault();
     setBusy(true);
     setNotice({});
+    if (!current || !draft) {
+      setNotice({ error: "No immutable version is available to edit." });
+      setBusy(false);
+      return;
+    }
     let document: ConfigurationDocumentBody;
     try {
-      document = parseConfiguration(draft);
+      document = applyDemoConfigurationDraft(current.document, draft);
     } catch (error) {
-      setNotice({ error: error instanceof Error ? error.message : "invalid JSON" });
+      setNotice({ error: error instanceof Error ? error.message : "The settings are invalid." });
       setBusy(false);
       return;
     }
@@ -341,6 +376,20 @@ function ArtifactControls({
     else setNotice({ error: outcome.kind === "unauthenticated" ? "Your session expired." : outcome.message });
     refreshConfiguration();
   };
+
+  const updateDraft = (next: Partial<DemoConfigurationDraft>) => {
+    setDraft((value) => (value ? { ...value, ...next } : value));
+  };
+
+  let preview: ConfigurationDocumentBody | null = null;
+  if (current && draft) {
+    try {
+      preview = applyDemoConfigurationDraft(current.document, draft);
+    } catch {
+      // The submit path renders the contract-aligned error. Until then the
+      // disclosure stays explicit rather than showing a stale preview.
+    }
+  }
 
   const bind = async () => {
     if (!targetScopeId) return;
@@ -410,12 +459,157 @@ function ArtifactControls({
           {comparison ? <p>{comparison.changed_fields.length === 0 ? "Documents are identical." : `Changed: ${comparison.changed_fields.join(", ")}`}</p> : null}
         </div>
       ) : null}
-      <form className="stacked-form" onSubmit={(event) => void publish(event)}>
-        <h4>Publish a new version</h4>
-        <textarea rows={18} className="mono" value={draft} onChange={(event) => setDraft(event.target.value)} />
-        <p className="muted">The whole validated document is published under expected current version {artifact.current_version_id}.</p>
-        <button type="submit" disabled={busy}>Publish through VedaFlow</button>
-      </form>
+      {draft && current ? (
+        <form className="stacked-form configuration-editor" noValidate onSubmit={(event) => void publish(event)}>
+          <h4>Propose Capture and Context settings</h4>
+          <p className="muted">
+            These are the demo's supported everyday settings. Every other field is copied
+            unchanged from v{current.ordinal}; the gateway validates the complete document again.
+          </p>
+
+          <fieldset>
+            <legend>Capture</legend>
+            <label className="choice">
+              <input
+                type="checkbox"
+                checked={draft.captureEnabled}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  updateDraft({
+                    captureEnabled: enabled,
+                    ...(enabled
+                      ? {}
+                      : { captureOnSessionEnd: false, captureExplicitRequest: false }),
+                  });
+                }}
+              />
+              <span>
+                <strong>Enable Capture</strong>
+                <span className="muted"> Allow configured extraction from Session evidence.</span>
+              </span>
+            </label>
+            <label className="choice">
+              <input
+                type="checkbox"
+                disabled={!draft.captureEnabled}
+                checked={draft.captureOnSessionEnd}
+                onChange={(event) => updateDraft({ captureOnSessionEnd: event.target.checked })}
+              />
+              <span>
+                <strong>On Session end</strong>
+                <span className="muted"> Freeze a batch when a Session reaches a terminal state.</span>
+              </span>
+            </label>
+            <label className="choice">
+              <input
+                type="checkbox"
+                disabled={!draft.captureEnabled}
+                checked={draft.captureExplicitRequest}
+                onChange={(event) => updateDraft({ captureExplicitRequest: event.target.checked })}
+              />
+              <span>
+                <strong>On explicit request</strong>
+                <span className="muted"> Permit the authenticated Capture endpoint to freeze a batch.</span>
+              </span>
+            </label>
+            <label>
+              Minimum confidence (0–1000)
+              <input
+                required
+                type="number"
+                min="0"
+                max="1000"
+                step="1"
+                value={draft.captureMinimumConfidencePermille}
+                onChange={(event) => updateDraft({ captureMinimumConfidencePermille: event.target.value })}
+              />
+              <span className="muted">Candidates below this integer score are not retained.</span>
+            </label>
+            <label>
+              Maximum candidates per batch (1–256)
+              <input
+                required
+                type="number"
+                min="1"
+                max="256"
+                step="1"
+                value={draft.captureMaximumCandidatesPerBatch}
+                onChange={(event) => updateDraft({ captureMaximumCandidatesPerBatch: event.target.value })}
+              />
+              <span className="muted">A hard bound after extraction and validation.</span>
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Context</legend>
+            <label>
+              Maximum token budget (1–100000)
+              <input
+                required
+                type="number"
+                min="1"
+                max="100000"
+                step="1"
+                value={draft.contextTokenBudget}
+                onChange={(event) => updateDraft({ contextTokenBudget: event.target.value })}
+              />
+              <span className="muted">Requests may narrow this delivery ceiling, never widen it.</span>
+            </label>
+            <label>
+              Trace retention
+              <select
+                value={draft.contextTraceRetention}
+                onChange={(event) =>
+                  updateDraft({
+                    contextTraceRetention: event.target.value as DemoConfigurationDraft["contextTraceRetention"],
+                  })
+                }
+              >
+                {TRACE_RETENTION_OPTIONS.map((mode) => (
+                  <option key={mode} value={mode}>{mode.replaceAll("_", " ")}</option>
+                ))}
+              </select>
+              <span className="muted">
+                Full retains visible references and scores; redacted omits sensitive diagnostics;
+                hashes only removes Knowledge addresses; disabled keeps only the minimal run envelope.
+              </span>
+            </label>
+            <label className="choice">
+              <input
+                type="checkbox"
+                checked={draft.contextIncludeUnreviewedCandidates}
+                onChange={(event) =>
+                  updateDraft({ contextIncludeUnreviewedCandidates: event.target.checked })
+                }
+              />
+              <span>
+                <strong>Include visibly unreviewed candidates</strong>
+                <span className="muted">
+                  {" "}Adds the supported unreviewed channel; it does not publish candidates or bypass PDP reads.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+
+          <details className="technical-details">
+            <summary>Complete immutable document to propose</summary>
+            {preview ? (
+              <pre className="json-value">{renderConfiguration(preview)}</pre>
+            ) : (
+              <p className="muted">Unavailable until every visible field passes validation.</p>
+            )}
+          </details>
+          <p className="muted">
+            Submitting names expected current version {artifact.current_version_id} and opens a
+            VedaFlow change. Review policy may leave it pending; pending is not effective.
+          </p>
+          <button type="submit" disabled={busy}>
+            {busy ? "Submitting proposal…" : "Propose immutable version through VedaFlow"}
+          </button>
+        </form>
+      ) : (
+        <p className="muted">No immutable version is available to edit.</p>
+      )}
       <div className="stacked-form">
         <h4>Binding at selected scope</h4>
         {binding ? (
@@ -438,7 +632,9 @@ function ArtifactControls({
             ) : null}
           </>
         ) : (
-          <button type="button" disabled={busy || !targetScopeId} onClick={() => void bind()}>Bind this artifact here</button>
+          <button type="button" disabled={busy || !targetScopeId} onClick={() => void bind()}>
+            Propose binding this artifact here
+          </button>
         )}
       </div>
       <NoticeView notice={notice} />
@@ -483,8 +679,22 @@ function GovernedRelaxations() {
   );
 }
 
-function NoticeView({ notice }: { notice: Notice }) {
+export function NoticeView({ notice }: { notice: Notice }) {
   if (notice.error) return <div className="banner error" role="alert">{notice.error}</div>;
-  if (notice.result) return <div className={`banner ${notice.result.outcome === "applied" ? "success" : "warning"}`}>{mutationMessage(notice.result)}</div>;
+  if (notice.result) {
+    return (
+      <div
+        className={`banner ${notice.result.outcome === "applied" ? "success" : notice.result.outcome === "rejected" ? "error" : "warning"}`}
+        role={notice.result.outcome === "rejected" ? "alert" : "status"}
+      >
+        {mutationMessage(notice.result)}{" "}
+        {notice.result.outcome === "pending_review" ? (
+          <Link href={hrefOf("review", { proposal_id: notice.result.change_id })}>
+            Open this governed change
+          </Link>
+        ) : null}
+      </div>
+    );
+  }
   return null;
 }

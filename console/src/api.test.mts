@@ -72,6 +72,34 @@ test("the gateway's own sentence is displayed rather than recomposed", () => {
   );
 });
 
+test("a structured policy denial names its safe reason, action and resource", () => {
+  // Policy errors deliberately use structured fields rather than `message`.
+  // Dropping them turns a genuine Cedar refusal into "did not say why",
+  // which gives an operator no way to identify the denied operation or scope.
+  const outcome = classify(403, {
+    kind: "policy_denied",
+    action: "membership.grant",
+    resource: "workspace 01a08d37-77b1-7d52-97ae-62e09ce1df87",
+    reason: "pack standard@23 denied (no policy permitted it)",
+  });
+  assert.equal(
+    outcome.kind === "forbidden" ? outcome.message : "",
+    "pack standard@23 denied (no policy permitted it) Action: membership.grant. " +
+      "Resource: workspace 01a08d37-77b1-7d52-97ae-62e09ce1df87.",
+  );
+});
+
+test("a policy reason remains useful when optional context is absent", () => {
+  const outcome = classify(403, {
+    kind: "policy_denied",
+    reason: "the policy in force denied this operation",
+  });
+  assert.equal(
+    outcome.kind === "forbidden" ? outcome.message : "",
+    "the policy in force denied this operation",
+  );
+});
+
 // ── The call wrapper ─────────────────────────────────────────────────────────
 
 test("a dead gateway is unavailable rather than signed out", () => {
