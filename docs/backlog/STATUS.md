@@ -200,6 +200,17 @@ the canonical development hostname mapping is installed, and the rebuilt
 `demo` stack passes `make compose-smoke`. A fresh three-principal acceptance
 replay is still required.
 
+On 2026-09-11, the root README's current-checkout first-run path was audited
+against that live default project, including real browser login and seeded UI
+labels, CLI build, Compose configuration, smoke, non-destructive down/up and
+the documentation/deployment gates. A fresh disposable replay stopped before
+mutation because the managed `/etc/hosts` handoff required an unavailable
+interactive administrator credential. The default project was restored and
+smoked with its original volume, KMS key and issuer inputs intact. The next
+action remains an operator-assisted hosts handoff followed by
+`make compose-acceptance`, or the same gate on a clean supported host; no fresh
+acceptance result is claimed.
+
 The incremental console walkthrough now covers readable Knowledge and Session
 evidence, routed review/apply state, Context requests with exact revision links,
 and actual Skill binding resolution using the existing generated public client.

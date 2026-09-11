@@ -33,8 +33,9 @@ recovery, upgrade and exact-confirmation reset. Follow it from a clean,
 reviewed checkout; do not combine fragments or abbreviated commands from other
 documents.
 
-The root README is only a short entry point to that guide. The security model
-and trusted-host boundary are documented separately in
+The root README provides the verified first-run path; the Compose guide remains
+the sole detailed source-checkout operating procedure. The security model and
+trusted-host boundary are documented separately in
 [SECURITY.md](SECURITY.md#docker-reference-boundary).
 
 ### Packaged reference

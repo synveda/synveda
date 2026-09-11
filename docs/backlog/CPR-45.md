@@ -158,6 +158,26 @@ retained. The canonical development hostname mapping is now installed and the
 current `demo` stack passes smoke; a fresh three-principal acceptance replay is
 still not recorded.
 
+### README first-run documentation audit
+
+On 2026-09-11 at commit `810c5b1`, the root README was recut and its current-
+checkout first-run commands were audited on the recorded macOS/OrbStack host.
+`SYNVEDA_COMPOSE_PROFILES=demo make compose-smoke`, browser login as Avery
+Author, the seeded Home, Sessions, Knowledge, Reviews, Skills and Context
+surfaces, `cargo build --locked -p synveda-cli`, Compose configuration and the
+documentation, demo, adapter and deployment contract gates were exercised. A
+credential-free screenshot records the real seeded Knowledge page.
+
+A new suffixed disposable replay could not begin because transferring the one
+managed `/etc/hosts` block requires an interactive macOS administrator
+credential that was unavailable to the non-interactive run. The exact
+confirmed `make compose-hosts-remove` invocation refused before mutation. The
+default project was restarted and smoked with the same PostgreSQL volume and
+byte-identical KMS-key and issuer inputs. `make compose-acceptance` was not run
+and no fresh acceptance result is claimed. The next action is an operator-
+assisted hosts handoff followed by that gate, or the same gate on a clean
+supported host.
+
 ### Recorded development evidence
 
 On 2026-09-10, `make compose-acceptance` passed from a clean project volume on

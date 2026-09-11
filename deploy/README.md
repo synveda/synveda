@@ -28,8 +28,8 @@ freshness or Skill/Tool advertisement.
   exact-confirmation `reset` lifecycle, plus optional observability and Apalis
   canary profiles.
   Deterministic lifecycle tests are implementation evidence, not a validated
-  reference claim: clean-volume browser/Keycloak and recovery acceptance are
-  still open.
+  reference claim. One macOS/OrbStack clean-volume development run passed;
+  Linux, Docker Desktop, reference HTTPS and recovery acceptance remain open.
   This is also the only source-development product topology. Evaluation-only
   dependencies use isolated fixtures and do not define another Synveda stack.
 - `helm/` is the Kubernetes infrastructure: separate gateway and worker

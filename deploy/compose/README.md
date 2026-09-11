@@ -7,6 +7,10 @@ OpenTelemetry Collector. Optional settings add a bounded local Prometheus
 operator view, external trace export or one experimental Apalis-backed
 Skill-validation worker.
 
+For the concise developer-first path and a real seeded-console walkthrough,
+start with the root [Quick start](../../README.md#quick-start-from-a-source-checkout),
+then return here for the complete lifecycle and optional modes.
+
 It supports development and reference configuration. A clean development
 acceptance passed on macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0 and
 Compose 5.1.2 on 2026-09-10. Linux and Docker Desktop development runs,
