@@ -10,6 +10,22 @@ PARENT = "00-11111111111111111111111111111111-2222222222222222-01"
 
 
 class ClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_gateway_response_trace_after_edge_replacement(self):
+        server_trace = "abcdef0123456789abcdef0123456789"
+        header, status = server_trace, 200
+        def handler(request):
+            self.assertEqual(request.headers["traceparent"], PARENT)
+            return httpx.Response(status, headers={"x-synveda-trace-id": header}, json={"kind": "forbidden"})
+        client = await self.client(handler)
+        self.assertEqual((await client.request("get_me", traceparent=PARENT)).trace_id, server_trace)
+        status = 403
+        with self.assertRaises(ApiError) as caught:
+            await client.request("get_me", traceparent=PARENT)
+        self.assertEqual(caught.exception.trace_id, server_trace)
+        status = 200
+        for header in ("invalid", "0" * 32, "f" * 33):
+            self.assertEqual((await client.request("get_me", traceparent=PARENT)).trace_id, PARENT[3:35])
+
     async def client(self, handler, token=None, **options):
         async def default_token(_refresh):
             return "synthetic-token"

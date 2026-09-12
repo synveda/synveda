@@ -27,7 +27,8 @@ assert.ok(skill, "only an approved bound version may be selected");
 const skillPath = { id: scenario.skill_id, version_id: skill.version.id };
 await client.request("get_skill_version", { path: skillPath, traceparent });
 const file = await client.request("get_skill_version_file", { path: { ...skillPath, path: "SKILL.md" }, traceparent });
-assert.ok(file.data.content.includes("# Code Review"));
+assert.equal(typeof scenario.skill_marker, "string");
+assert.ok(scenario.skill_marker.length > 0 && file.data.content.includes(scenario.skill_marker));
 
 const observed = await client.request("append_session_events", { path, traceparent, body: { events: [{
   client_event_id: `${key}-skill`, event_type: "skill.loaded", occurred_at: new Date().toISOString(),

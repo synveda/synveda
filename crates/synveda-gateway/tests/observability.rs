@@ -137,10 +137,16 @@ async fn body_text(response: axum::response::Response) -> String {
 async fn healthz_is_alive_without_a_database() {
     let _serial = serial().await;
     let response = router(state(UNREACHABLE_URL))
-        .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/healthz")
+                .header("x-synveda-trace-id", "forged")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.headers().get("x-synveda-trace-id").is_none());
 }
 
 #[tokio::test]
@@ -521,6 +527,10 @@ async fn exported_request_span(request: Request<Body>) -> opentelemetry_sdk::tra
     // `/healthz` touches no database, so this runs without one — the trace
     // shape is the subject here, not the readiness leg.
     assert_eq!(response.status(), StatusCode::OK);
+    let response_trace = response.headers()["x-synveda-trace-id"]
+        .to_str()
+        .expect("ASCII trace identifier")
+        .to_owned();
     // The response body keeps `TraceLayer`'s span open, and an OTel span is
     // exported when its `tracing` span *closes*. Draining the body before
     // flushing is the difference between reading the request span and
@@ -535,12 +545,14 @@ async fn exported_request_span(request: Request<Body>) -> opentelemetry_sdk::tra
     // tracing-opentelemetry *renames the exported span to it* — which is how a
     // trace backend shows an operation rather than a literal `http.request`. So the
     // span is found by the name an operator would see, not by the macro's.
-    exporter
+    let span = exporter
         .get_finished_spans()
         .expect("exported spans")
         .into_iter()
         .find(|span| span.name == "GET /healthz")
-        .expect("the request span reached the exporter")
+        .expect("the request span reached the exporter");
+    assert_eq!(response_trace, span.span_context.trace_id().to_string());
+    span
 }
 
 #[tokio::test]

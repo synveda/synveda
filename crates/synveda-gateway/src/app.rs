@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::{MatchedPath, Query, Request, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
@@ -329,6 +329,7 @@ fn application_routes(state: &AppState) -> Router<AppState> {
 fn finish_router(state: AppState, application: Router<AppState>, ops: Router<AppState>) -> Router {
     ops.merge(application)
         .layer(middleware::from_fn(track_http_metrics))
+        .layer(middleware::from_fn(response_trace_id))
         // Added last so the request span is outermost and every inner span —
         // middleware included — nests under it.
         .layer(
@@ -337,6 +338,24 @@ fn finish_router(state: AppState, application: Router<AppState>, ops: Router<App
                 .on_response(record_response),
         )
         .with_state(state)
+}
+
+/// The public edge may start a new trace. Return the gateway's actual ID for
+/// audit correlation, never the caller's claim or any span attributes.
+async fn response_trace_id(request: Request, next: Next) -> Response {
+    let context = tracing::Span::current().context();
+    let span = context.span();
+    let span_context = span.span_context();
+    let trace_id = span_context
+        .is_valid()
+        .then(|| span_context.trace_id().to_string());
+    let mut response = next.run(request).await;
+    if let Some(trace_id) = trace_id
+        && let Ok(value) = HeaderValue::from_str(&trace_id)
+    {
+        response.headers_mut().insert("x-synveda-trace-id", value);
+    }
+    response
 }
 
 async fn require_authority(

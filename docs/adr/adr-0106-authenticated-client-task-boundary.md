@@ -42,6 +42,14 @@ bound response reads and retries, refuse redirects with credentials, and only
 replay requests with the existing public idempotency contract. Gateway policy,
 retrieval and orchestration never move into an SDK.
 
+The public Compose edge deliberately removes caller trace context. The gateway
+therefore returns its actual OpenTelemetry trace ID in `X-Synveda-Trace-Id` on
+responses when tracing is available. SDK correlation uses that bounded opaque
+ID, with the sent trace ID as a fallback for servers without the header. It is
+diagnostic plumbing, never task identity, authority or proof of an audit event.
+The existing audit API supplies the governed Session/artifact-to-trace link.
+The proxy's request-header sanitisation remains unchanged.
+
 Codex qualification starts with authentic versioned frames and only then adds
 necessary host translation. A filesystem target or successful MCP handshake
 does not establish lifecycle support. Registry promotion still requires every
@@ -55,6 +63,11 @@ are excluded. Oversized or mismatched transcripts are held with diagnostics.
 Reuse the existing adapter's credential, Session and durable delivery functions
 through a narrow workspace export and a closed Claude Code/Codex client identity.
 Codex external IDs are namespaced so two harnesses cannot share a local spool.
+The installed client caps `SessionEnd` at three seconds. After persisting local
+events, Codex uses one two-second deadline for credential resolution and all
+delivery requests, leaving time to save acknowledgements before host shutdown.
+Each in-flight request consumes the remaining delivery budget; pending events
+remain in the existing spool for resume or explicit flush.
 Retry delivery must match the saved gateway and client, including background
 backlogs. This adds no plugin registry, event store or orchestration layer.
 Captured clients may have no Synveda configuration writer. Such entries remain

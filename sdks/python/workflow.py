@@ -36,7 +36,8 @@ async def main():
         skill_path = {"id": scenario["skill_id"], "version_id": skill["version"]["id"]}
         await api.get_skill_version(client, path=skill_path, traceparent=parent)
         file = await api.get_skill_version_file(client, path={**skill_path, "path": "SKILL.md"}, traceparent=parent)
-        assert "# Code Review" in file.data["content"]
+        assert isinstance(scenario["skill_marker"], str) and scenario["skill_marker"]
+        assert scenario["skill_marker"] in file.data["content"]
         observed = await api.append_session_events(client, {"events": [{
             "client_event_id": key + "-skill", "event_type": "skill.loaded",
             "occurred_at": datetime.now(timezone.utc).isoformat(),

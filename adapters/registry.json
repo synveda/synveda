@@ -153,13 +153,13 @@
         ]
       },
       "limitations": [
-        "Authentic MCP and native hook start/tool/stop/end/resume frames are captured; complete authenticated Synveda lifecycle remains unverified.",
+        "Native Keycloak context, approved Skill read, MCP recall, resumed task, SDK handoff, Capture/end and audit passed; complete lifecycle qualification remains open.",
         "Use native Codex MCP configuration; Synveda does not write its TOML file.",
         "SessionEnd reason=other is followed by resume of the same Codex session; it cannot automatically close a Synveda task. Explicit application ownership remains required.",
         "Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version.",
         "Native hook capture requires normal project/hook trust loading. --ignore-user-config did not emit hooks in the probe; CLI 0.152.0 was exercised with GPT-5.5 at low reasoning effort.",
-        "The hook adapter replays startup/resume, durable Stop, outage/retry and runtime exit with a synthetic HTTP responder; native authenticated context consumption and Capture/end/audit qualification remain open.",
-        "Compaction and non-command tool-result formats are unqualified. The native reader holds transcripts over 8 MiB/20,000 records; a host killed before any delivery hook can lose the unfinished turn."
+        "Native startup/resume and text-only MCP events were persisted through the public Docker proxy with both SDKs on one Session. Outage/retry is deterministic replay only; runtime exit stays below the native three-second cap.",
+        "Compaction, non-text MCP results and native outage/recovery are unqualified. The native reader holds transcripts over 8 MiB/20,000 records; a host killed before any delivery hook can lose the unfinished turn."
       ],
       "authentic_fixtures": [
         {
@@ -176,13 +176,88 @@
           "path": "adapters/codex/fixtures/transcript.jsonl",
           "sha256": "57d88963968808bba39b344115604df9e49fd4e21355bef65bc797401dbf9915",
           "kind": "captured-client-transcript"
+        },
+        {
+          "path": "adapters/codex/fixtures/transcript-mcp.jsonl",
+          "sha256": "aa69cffbeec03a5a458388772837b2e28b0ab118393ab0407c939f9771508262",
+          "kind": "captured-client-transcript"
+        },
+        {
+          "path": "adapters/codex/fixtures/keycloak-qualification.json",
+          "sha256": "9b7a2322b6b83f18c8f1904f8af39db15996bfec1c293d393e8c389974573c3b",
+          "kind": "captured-live-client-result"
         }
       ],
       "conformance": {
-        "evidence_level": "captured-protocol",
-        "tested_at": "2026-09-12T16:30:17Z",
+        "evidence_level": "partial-live-client",
+        "tested_at": "2026-09-12T17:48:26Z",
         "tested_version": "0.152.0",
-        "checks": {}
+        "checks": {
+          "session_creation": {
+            "status": "passed",
+            "evidence": [
+              "adapters/codex/fixtures/keycloak-qualification.json"
+            ]
+          },
+          "event_delivery": {
+            "status": "passed",
+            "evidence": [
+              "adapters/codex/fixtures/keycloak-qualification.json"
+            ]
+          },
+          "context_request_delivery": {
+            "status": "passed",
+            "evidence": [
+              "adapters/codex/fixtures/keycloak-qualification.json"
+            ]
+          },
+          "capture": {
+            "status": "passed",
+            "evidence": [
+              "adapters/codex/fixtures/keycloak-qualification.json"
+            ]
+          },
+          "session_end": {
+            "status": "passed",
+            "evidence": [
+              "adapters/codex/fixtures/keycloak-qualification.json"
+            ]
+          },
+          "tool_configuration": {
+            "status": "passed",
+            "evidence": [
+              "adapters/codex/fixtures/keycloak-qualification.json"
+            ]
+          },
+          "cross_session_knowledge_reuse": {
+            "status": "passed",
+            "evidence": [
+              "adapters/codex/fixtures/keycloak-qualification.json"
+            ]
+          },
+          "persisted_audited_outcomes": {
+            "status": "passed",
+            "evidence": [
+              "adapters/codex/fixtures/keycloak-qualification.json"
+            ]
+          },
+          "retry_idempotency": {
+            "status": "not_run",
+            "reason": "Native reconnect/resume and SDK proposal replay passed; a native gateway outage/recovery run remains unqualified.",
+            "evidence": [
+              "adapters/codex/src/hook.test.mts",
+              "adapters/codex/fixtures/keycloak-qualification.json"
+            ]
+          },
+          "skill_advertisement_activation": {
+            "status": "not_applicable",
+            "reason": "Approved Skill materialisation and a native file read were observed; there is no qualified automatic activation callback.",
+            "evidence": [
+              "adapters/codex/fixtures/keycloak-qualification.json",
+              "adapters/codex/README.md"
+            ]
+          }
+        }
       }
     },
     {

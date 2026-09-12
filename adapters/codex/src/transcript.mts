@@ -7,10 +7,11 @@ import type { TranscriptEntry } from "@synveda/claude-code-adapter/session-runti
 export const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 const MAX_RECORDS = 20_000;
 type ObjectValue = Record<string, unknown>;
+type ToolResult = { kind: "command" | "mcp"; failed: boolean };
 
 type InputReason = "input_limit" | "record_limit" | "invalid_json" | "session_mismatch" |
   "missing_identity" | "unreadable" | "size_or_type" | "changed_during_read" |
-  "invalid_tool_arguments" | "tool_result_status_unknown";
+  "invalid_tool_arguments" | "tool_result_status_unknown" | "tool_result_shape_unknown";
 
 /** A closed diagnostic vocabulary; never retain rejected content in logs. */
 export class CodexInputError extends Error {
@@ -23,7 +24,7 @@ export function readCodexTranscript(path: string, sessionId: string): Transcript
   const lines = raw.split("\n");
   if (lines.length > MAX_RECORDS) throw new CodexInputError("record_limit");
   const entries: TranscriptEntry[] = [];
-  const commandFailures = new Map<string, boolean>();
+  const toolResults = new Map<string, ToolResult>();
   let identified = false;
   for (const line of lines) {
     if (line.trim().length === 0) continue;
@@ -40,10 +41,15 @@ export function readCodexTranscript(path: string, sessionId: string): Transcript
     } else if (record.type === "event_msg") {
       const item = object(payload.item);
       if (item.type === "CommandExecution" && typeof item.id === "string" && Number.isSafeInteger(item.exit_code)) {
-        commandFailures.set(item.id, item.exit_code !== 0);
+        toolResults.set(item.id, { kind: "command", failed: item.exit_code !== 0 });
+      } else if (item.type === "McpToolCall" && typeof item.id === "string") {
+        const result = object(item.result);
+        if (typeof result.isError === "boolean" && item.status === (result.isError ? "failed" : "completed")) {
+          toolResults.set(item.id, { kind: "mcp", failed: result.isError });
+        }
       }
     } else if (record.type === "response_item") {
-      const entry = translate(record, payload, commandFailures);
+      const entry = translate(record, payload, toolResults);
       if (entry !== undefined) entries.push(entry);
     }
   }
@@ -78,7 +84,7 @@ function boundedRead(path: string): string | undefined {
 function translate(
   record: ObjectValue,
   payload: ObjectValue,
-  commandFailures: ReadonlyMap<string, boolean>,
+  toolResults: ReadonlyMap<string, ToolResult>,
 ): TranscriptEntry | undefined {
   const id = payload.id;
   const timestamp = record.timestamp;
@@ -106,20 +112,38 @@ function translate(
     let input: unknown;
     try { input = JSON.parse(payload.arguments); }
     catch { throw new CodexInputError("invalid_tool_arguments"); }
+    const name = typeof payload.namespace === "string" ? `${payload.namespace}__${payload.name}` : payload.name;
     return { ...base, type: "assistant", message: { content: [
-      { type: "tool_use", id: payload.call_id, name: payload.name, input },
+      { type: "tool_use", id: payload.call_id, name, input },
     ] } };
   }
-  if (payload.type === "function_call_output" && typeof payload.call_id === "string" && typeof payload.output === "string") {
-    // An output string is not evidence of success. The captured native command
-    // result supplies its exit status; other tool-result formats need capture.
-    const is_error = commandFailures.get(payload.call_id);
-    if (is_error === undefined) throw new CodexInputError("tool_result_status_unknown");
+  if (payload.type === "function_call_output" && typeof payload.call_id === "string") {
+    // Only native completion metadata establishes success. Unknown output
+    // shapes are held, never silently skipped while the cursor advances.
+    const result = toolResults.get(payload.call_id);
+    if (result === undefined) throw new CodexInputError("tool_result_status_unknown");
+    const content = toolOutput(payload.output, result.kind);
     return { ...base, type: "user", message: { content: [
-      { type: "tool_result", tool_use_id: payload.call_id, content: payload.output, is_error },
+      { type: "tool_result", tool_use_id: payload.call_id, content, is_error: result.failed },
     ] } };
   }
   return undefined;
+}
+
+function toolOutput(output: unknown, kind: ToolResult["kind"]): string {
+  if (kind === "command" && typeof output === "string") return output;
+  if (kind === "mcp" && Array.isArray(output) && output.length > 0) {
+    const text: string[] = [];
+    for (const value of output) {
+      const block = object(value);
+      if (block.type !== "input_text" || typeof block.text !== "string") {
+        throw new CodexInputError("tool_result_shape_unknown");
+      }
+      text.push(block.text);
+    }
+    return text.join("\n");
+  }
+  throw new CodexInputError("tool_result_shape_unknown");
 }
 
 function object(value: unknown): ObjectValue {

@@ -107,7 +107,8 @@ export async function deliver(
   let acknowledged = 0;
   let complete = true;
   for (const batch of chunk(pending(spool), MAX_EVENTS_PER_BATCH)) {
-    if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+    const remainingMs = deadlineAt === undefined ? config.timeoutMs : deadlineAt - Date.now();
+    if (remainingMs <= 0) {
       complete = false;
       log("deliver.deadline", {
         session: spool.external_session_id,
@@ -124,7 +125,7 @@ export async function deliver(
         occurred_at: entry.occurred_at,
         payload: entry.payload,
       })),
-    });
+    }, Math.min(config.timeoutMs, remainingMs));
     log("deliver.batch", {
       session: spool.external_session_id,
       events: batch.length,

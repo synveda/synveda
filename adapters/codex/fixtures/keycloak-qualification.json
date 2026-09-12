@@ -1,0 +1,188 @@
+{
+  "provenance": {
+    "kind": "captured-live-client-result",
+    "client": "Codex CLI",
+    "client_version": "0.152.0",
+    "model": "gpt-5.5",
+    "reasoning_effort": "low",
+    "platform": "macOS 26.6.2 arm64",
+    "authentication": "ordinary Keycloak OIDC/PKCE profiles from canonical browser acceptance; distinct approver and author/auditor",
+    "deployment_project": "synveda-development-acceptance-interop",
+    "checkout_base": "0a6dfb5770c153fbe49f3118be97329378c703f7",
+    "scope": "partial lifecycle qualification; no promotion to verified"
+  },
+  "tested_at": "2026-09-12T17:48:26.534382+00:00",
+  "session_id": "01a096b9-e1c1-7a50-aa32-8c1db0efdba8",
+  "external_session_id": "codex:01a096b9-db6b-76d3-a61e-c51898d031ac",
+  "event_counts": {
+    "message.assistant": 4,
+    "message.user": 2,
+    "skill.loaded": 2,
+    "tool.invoked": 3,
+    "tool.result": 3
+  },
+  "event_count": 14,
+  "duplicate_client_event_ids": 0,
+  "capture_batch_id": "01a096bc-1bf5-79d2-b0ca-e022af4d0c13",
+  "capture_state": "completed",
+  "capture_candidate_count": 12,
+  "task_owner_end_status": "ended",
+  "reuse_session_id": "01a096bc-2006-7bf3-bb2b-358f51160a35",
+  "knowledge_id": "01a096a1-9cb3-79b0-a5bd-6316a49499c3",
+  "skill_id": "01a096a1-914d-7c22-8fd0-8e72c0775e72",
+  "skill_version_id": "01a096a1-914d-7c22-8fd0-8e89acc65450",
+  "denied_session_id": "01a096ab-f2ec-79e1-af15-b8687a59b148",
+  "audit_valid": true,
+  "audit_head_seq": 427,
+  "audit_head_hash": "d04985ba9e03846e73d5797e4f865ea51a937e1fb08e8fab1d042f16d885bf7f",
+  "session_audit_events": [
+    {
+      "seq": 360,
+      "action": "context.candidates.retrieved",
+      "trace_id": "e61316306f8e25e2ea4c482148b03840"
+    },
+    {
+      "seq": 361,
+      "action": "context.selections.made",
+      "trace_id": "e61316306f8e25e2ea4c482148b03840"
+    },
+    {
+      "seq": 362,
+      "action": "session.context.composed",
+      "trace_id": "e61316306f8e25e2ea4c482148b03840"
+    },
+    {
+      "seq": 365,
+      "action": "session.events.appended",
+      "trace_id": "08ae001b12923809073afc0582b76d06"
+    },
+    {
+      "seq": 367,
+      "action": "context.candidates.retrieved",
+      "trace_id": "89d4d581dd8c8891232307da798531ca"
+    },
+    {
+      "seq": 368,
+      "action": "context.selections.made",
+      "trace_id": "89d4d581dd8c8891232307da798531ca"
+    },
+    {
+      "seq": 369,
+      "action": "session.context.composed",
+      "trace_id": "89d4d581dd8c8891232307da798531ca"
+    },
+    {
+      "seq": 373,
+      "action": "session.events.appended",
+      "trace_id": "7cf3907ff00c2bf379a002411a7d0445"
+    },
+    {
+      "seq": 378,
+      "action": "authz.decision",
+      "trace_id": "5ba8c1f879330c75882cf8f49af514bd"
+    },
+    {
+      "seq": 380,
+      "action": "context.candidates.retrieved",
+      "trace_id": "ddf8ed7bd1add75a2213fcc2f0138e06"
+    },
+    {
+      "seq": 381,
+      "action": "context.selections.made",
+      "trace_id": "ddf8ed7bd1add75a2213fcc2f0138e06"
+    },
+    {
+      "seq": 382,
+      "action": "session.context.composed",
+      "trace_id": "ddf8ed7bd1add75a2213fcc2f0138e06"
+    },
+    {
+      "seq": 386,
+      "action": "session.events.appended",
+      "trace_id": "9bc0a497228e3b8ca6e66e5b632e5009"
+    },
+    {
+      "seq": 391,
+      "action": "authz.decision",
+      "trace_id": "56ee69a16324d33c73c45b93f9b8f36f"
+    },
+    {
+      "seq": 395,
+      "action": "context.candidates.retrieved",
+      "trace_id": "e763f9b0c8705b44034ff92179950638"
+    },
+    {
+      "seq": 396,
+      "action": "context.selections.made",
+      "trace_id": "e763f9b0c8705b44034ff92179950638"
+    },
+    {
+      "seq": 397,
+      "action": "session.context.composed",
+      "trace_id": "e763f9b0c8705b44034ff92179950638"
+    },
+    {
+      "seq": 400,
+      "action": "session.events.appended",
+      "trace_id": "a79e9feca11466b338336c417e083efb"
+    },
+    {
+      "seq": 417,
+      "action": "capture.batch.created",
+      "trace_id": "e1f42793032c5b5694fa7145b8c19651"
+    },
+    {
+      "seq": 420,
+      "action": "capture.batch.completed",
+      "trace_id": null
+    }
+  ],
+  "sdk_workflows": [
+    {
+      "client": "typescript",
+      "session_id": "01a096b9-e1c1-7a50-aa32-8c1db0efdba8",
+      "context_run_id": "01a096ba-e94a-7c53-9ac6-abad96ef13d6",
+      "proposal_id": "01a096ba-e987-75c1-96ee-b203e8b79938",
+      "trace_id": "89d4d581dd8c8891232307da798531ca"
+    },
+    {
+      "client": "python",
+      "session_id": "01a096b9-e1c1-7a50-aa32-8c1db0efdba8",
+      "context_run_id": "01a096ba-ea38-74a3-8b3a-e99f659d46d3",
+      "proposal_id": "01a096ba-ea62-7a22-95d4-7b84c00b8dda",
+      "trace_id": "ddf8ed7bd1add75a2213fcc2f0138e06"
+    }
+  ],
+  "session_end_audit": {
+    "seq": 422,
+    "action": "session.ended",
+    "resource": "session 01a096b9-e1c1-7a50-aa32-8c1db0efdba8",
+    "trace_id": "7fe2b0b28fda5b32f07c3536c0c9fa96"
+  },
+  "checks": {
+    "native_startup_and_resume_same_session": true,
+    "approved_skill_file_read_by_native_command": true,
+    "authenticated_mcp_recall": true,
+    "typescript_and_python_same_session": true,
+    "cross_workspace_read_status": 403,
+    "proposals_pending_and_idempotent": true,
+    "audit_contains_no_context_or_proposal_markers": true,
+    "public_proxy_replaces_caller_trace": true
+  },
+  "not_qualified": [
+    "native outage and recovery",
+    "compaction and reinjection",
+    "non-text MCP results",
+    "automatic Skill activation callback",
+    "installation packaging",
+    "other client versions/platforms"
+  ],
+  "audit_filter_limitation": "session_id selects top-level payload.session_id and omits lifecycle events under payload.session.id; session.ended was confirmed separately by action",
+  "source_sha256": {
+    "crates/synveda-gateway/src/app.rs": "cd407352c47244372a019eed0d4c742a1de919a63eb6eae547b3862f03523a08",
+    "adapters/claude-code/src/turn.mts": "e7e5cb5cc5fb1ea1d47ecf57648d7fc5dd4d9d9e213f453b4c532b38b2e05169",
+    "adapters/codex/src/transcript.mts": "723373022c55f4d40675ba474defe76d65c39ed4ad0d3980eb5f461b13a0e10e",
+    "sdks/typescript/src/client.mts": "ff3b0a7a0c6b5864a7c2901d525a1184926e425b2f3e318e4d37bb41c07a5c04",
+    "sdks/python/synveda/client.py": "af8a134132b32cc0fff583eccb94bbfa5eef237dc73aae0005c6bd909defdf24"
+  }
+}

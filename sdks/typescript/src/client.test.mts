@@ -118,3 +118,23 @@ test("provider errors never include credentials", async () => {
   await assert.rejects(client.request("get_me", {}),
     (error) => error instanceof TransportError && !error.message.includes("private-credential"));
 });
+
+test("response correlation follows the gateway after an edge replaces the caller trace", async (t) => {
+  const serverTrace = "abcdef0123456789abcdef0123456789";
+  let header = serverTrace;
+  let status = 200;
+  const base = await server(t, (req, res) => {
+    assert.equal(req.headers.traceparent, parent);
+    res.setHeader("x-synveda-trace-id", header);
+    reply(res, status, { kind: "forbidden" });
+  });
+  const client = new Client(base, async () => "token");
+  assert.equal((await client.request("get_me", { traceparent: parent })).traceId, serverTrace);
+  status = 403;
+  await assert.rejects(client.request("get_me", { traceparent: parent }),
+    (error) => error instanceof ApiError && error.traceId === serverTrace);
+  status = 200;
+  for (header of ["invalid", "0".repeat(32), "f".repeat(33)]) {
+    assert.equal((await client.request("get_me", { traceparent: parent })).traceId, parent.slice(3, 35));
+  }
+});

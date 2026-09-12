@@ -16,22 +16,24 @@ Session runtime. It shares credential resolution, configuration, public HTTP
 calls, event mapping and the atomic spool consumed by `synveda session flush`.
 There is no new delivery engine or adapter/plugin registry.
 
-`Stop` records locally. `SessionEnd` flushes within the existing deadline and
+`Stop` records locally. `SessionEnd` gives credentials and delivery a shared
+two-second deadline, below the native client's three-second exit cap, and
 keeps the Synveda task active: the native client can resume that same ID.
 Namespaced external IDs keep different harnesses apart. Startup/resume retries
 only spools for the same client and pinned gateway. An explicit task owner
 uses the public Capture/end APIs; closing an MCP connection does neither.
 
 Input is limited to 64 KiB and transcript reads to 8 MiB/20,000 records. Wrong
-Session IDs, symlinks, non-regular files, partial JSON and unrecognised command
+Session IDs, symlinks, non-regular files, partial JSON and unrecognised tool
 result status are held without advancing the spool cursor. Fixed diagnostic
 reasons go to the existing adapter log. The source transcript stays available
 for recovery; the hook exits successfully so it cannot block coding.
 
 The observed transcript tags distinguish user text from injected environment
 and agent instructions. Only user text, assistant text, function calls and
-command results with native exit status are mapped. Reasoning is excluded.
-Other tool-result formats and compaction need authentic qualification before
+command results with native exit status and text-only MCP results with native
+completion/error status are mapped. MCP namespaces are preserved. Reasoning
+is excluded. Other tool-result formats and compaction need qualification before
 translation. Host death before Stop/SessionEnd can lose the unfinished turn.
 
 ## Fixture provenance
@@ -49,7 +51,16 @@ hook `transcript_path` was replaced with the corresponding fixture path.
 Native IDs, timestamps, prompts, tool outputs and ordering were preserved.
 The registry pins both fixture digests. Unit mutations are separate test inputs.
 
-The capture exercised native model authentication, not Synveda authentication.
-Replay uses a synthetic HTTP responder and proves translation/durability, not
-Cedar, RLS, Keycloak or complete native context consumption. Those require the
-remaining public-API live qualification described in CPR-39.
+`fixtures/transcript-mcp.jsonl` adds seven native records from the same synthetic
+task's failed and successful Synveda recall calls after real Keycloak login.
+It was captured on 2026-09-12 with Codex 0.152.0/GPT-5.5 low. Only Session
+identity/version/source metadata, MCP calls, native completions and model-visible
+outputs were retained. The cwd was replaced with `/synveda/qualification/codex`;
+native IDs, timestamps, status and synthetic returned Knowledge were preserved.
+The first MCP launch lacked the isolated profile directory; allowing the
+existing `XDG_CONFIG_HOME` into the MCP environment corrected authentication.
+
+The original lifecycle capture exercised native model authentication only.
+The later MCP capture also exercised ordinary Synveda Keycloak authentication.
+Replay still uses synthetic HTTP responses and does not itself establish
+Cedar, RLS or complete lifecycle qualification. CPR-39 tracks the live criteria.

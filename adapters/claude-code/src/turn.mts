@@ -51,6 +51,8 @@ import { readTranscript } from "./transcript.mjs";
  * design exists to avoid.
  */
 const END_FLUSH_BUDGET_MS = 3000;
+// Codex 0.152.0 clamps exit hooks to three seconds, including credential work.
+const CODEX_END_BUDGET_MS = 2000;
 
 export async function turn(
   input: HookInput,
@@ -101,7 +103,9 @@ export async function turn(
     return {};
   }
 
-  const bearer = await resolveBearer();
+  const codexDeadline = configured.clientName === "codex"
+    ? hookStarted + CODEX_END_BUDGET_MS : undefined;
+  const bearer = await resolveBearer(codexDeadline);
   // Silent: the session-start hook already told the user to log in, and saying
   // it again on every turn would be noise rather than help. The events are
   // recorded regardless and go out when a credential exists.
@@ -116,7 +120,7 @@ export async function turn(
     spool,
     config,
     bearer.token,
-    Date.now() + END_FLUSH_BUDGET_MS,
+    codexDeadline ?? Date.now() + END_FLUSH_BUDGET_MS,
   );
 
   if (configured.clientName !== "codex") {

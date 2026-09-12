@@ -61,7 +61,6 @@ export class Client {
     if (route.idempotent && !validHeader(options.idempotencyKey)) throw new TypeError("Idempotency key is required (1–200 ASCII characters)");
     const parent = options.traceparent ?? `00-${randomBytes(16).toString("hex")}-${randomBytes(8).toString("hex")}-01`;
     validateTrace(parent);
-    const traceId = parent.slice(3, 35);
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
     try {
@@ -77,6 +76,9 @@ export class Client {
         });
         const data = await readJson(response, this.maxBytes);
         const retryAfter = response.headers.get("retry-after") ?? undefined;
+        const serverTrace = response.headers.get("x-synveda-trace-id");
+        const traceId = serverTrace !== null && /^[0-9a-f]{32}$/.test(serverTrace) && !/^0+$/.test(serverTrace)
+          ? serverTrace : parent.slice(3, 35);
         if (response.ok) return { data: data as Reply<K>, status: response.status, traceId, retryAfter };
         // Refresh once only where replay cannot duplicate a governed effect.
         // Other retry decisions (including Retry-After) remain explicit to the application.

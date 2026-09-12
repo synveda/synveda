@@ -152,6 +152,18 @@ boundary.
 
 ### Current local demonstration validation
 
+A subsequent interoperability run on 2026-09-12 completed the owned hosts handoff
+and fresh `acceptance-interop` acceptance at `0a6dfb5` plus the working-tree client
+increment. Browser seed/login, all six service restarts and final verification
+passed. After the response-trace correction, canonical down/up with retained
+PostgreSQL and secrets and the `demo` profile passed smoke. Native Codex and both
+SDKs then passed the shared ordinary Keycloak workflow through the public proxy,
+including Capture, explicit task end and a valid audit chain. The current local
+project is `synveda-development-acceptance-interop`, pool `10.231.46.0/24`; the
+earlier `acceptance-e2e` product data and secrets remain retained. Details and
+remaining client limits are in `docs/INTEROPERABILITY_PLAN.md`. This adds no new
+platform, reference-HTTPS, HA or SaaS-readiness claim.
+
 The 2026-09-12 run uses `feat/CPR-45` at starting commit
 `d1486929d73dc459ed6dc0bf029c5c825d3a1bb6` plus this working-tree increment.
 The host is macOS 26.6.2 arm64, OrbStack Docker Engine 29.4.0, Compose 5.1.2,

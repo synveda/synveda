@@ -55,14 +55,27 @@ Move the candidate only through experimental/configured to captured and then ver
 
 ## Dependencies
 
-The installed Codex 0.152.0 binary and native model authentication worked with
-GPT-5.5/low after normal project/hook trust review. The prior headless hook
-blocker is resolved. Native context consumption, public Capture/end, audited
-cross-session reuse, non-command tool results and compaction still need live
-qualification; replay alone does not satisfy these criteria. Fresh canonical
-Keycloak acceptance is waiting for the administrator-only hosts-file handoff
-from retained `acceptance-e2e` to `acceptance-interop`. The exact plan and
-preflight steps are in `docs/INTEROPERABILITY_PLAN.md`. Next: complete the
-handoff and run this exact client with ordinary OIDC identities and persisted
-audit evidence. Preserve retained deployment data and the conformance gate.
-Copilot CLI and Pi executables were unavailable; VS Code is not a substitute.
+The installed Codex 0.152.0 binary and native model authentication work with
+GPT-5.5/low after normal project/hook trust review. Fresh canonical Keycloak
+acceptance passed following the completed hosts handoff. Native hooks consumed
+allowed context and the approved Skill; authenticated MCP recall worked after
+allowing the isolated XDG profile directory into the native MCP environment.
+A resumed native ID retained its Synveda Session. Authentic failed/successful
+text-only MCP result frames are now pinned and translated, including namespaces
+and native error status. Exit work uses one two-second credential/delivery
+budget beneath the observed three-second host cap; hung-credential and stalled-
+append tests prove retained events and retry.
+The rebuilt public-proxy workflow passed on one native Session shared by both
+SDKs: 14 unique persisted events, exact Skill bytes, pending/idempotent proposals,
+foreign-workspace denial and correlated content-free audit. Capture completed
+with 12 eligible events and 12 candidates, explicit task-owner end succeeded,
+and another application Session reused approved Knowledge. Audit verification
+passed through sequence 427; lifecycle end event 422 was confirmed separately
+because the existing Session audit filter omits nested lifecycle identities.
+`adapters/codex/fixtures/keycloak-qualification.json` retains the result and source
+digests; the registry records passed criteria but stays `captured`.
+
+Next: correct that audit filter and qualify native outage/recovery and
+compaction/reinjection from authentic frames. Non-text MCP results and
+installation packaging remain explicit limits. Preserve the conformance gate;
+Copilot CLI and Pi executables were unavailable, and VS Code is not a substitute.

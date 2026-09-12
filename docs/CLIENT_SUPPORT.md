@@ -9,7 +9,7 @@ A connection recipe is not a support claim. `captured` means authentic frames re
 | Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. |
 | Cursor | `experimental` | none | Cursor Hooks v1 plus MCP | No Cursor executable or authenticated client was available on 2026-08-25. |
 | Visual Studio Code | `configured` | none | VS Code agent hooks Preview plus MCP | The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive. |
-| Codex CLI | `captured` | 0.152.0 | MCP and minimal native hook translation over the existing Session runtime; live lifecycle unverified | Authentic MCP and native hook start/tool/stop/end/resume frames are captured; complete authenticated Synveda lifecycle remains unverified. |
+| Codex CLI | `captured` | 0.152.0 | MCP and minimal native hook translation over the existing Session runtime; live lifecycle unverified | Native Keycloak context, approved Skill read, MCP recall, resumed task, SDK handoff, Capture/end and audit passed; complete lifecycle qualification remains open. |
 | Claude Desktop | `captured` | 1.25927.0 | MCP tool calls only | Authentic discovery and tool-call frames are replayed, but MCP alone does not prove session capture or end semantics. |
 | Zed | `captured` | 1.13.2 | MCP tool calls only | Authentic non-Anthropic tool frames are replayed, but no session lifecycle/capture contract is available. |
 | Windsurf | `configured` | none | MCP configuration only | Documented config shape only; no authentic exchange or lifecycle run is claimed. |
@@ -102,36 +102,38 @@ Known limits:
 
 ### Codex CLI — `captured`
 
-Contract: Codex CLI 0.152.0 native hooks / MCP 2025-06-18. Evidence level: `captured-protocol`.
+Contract: Codex CLI 0.152.0 native hooks / MCP 2025-06-18. Evidence level: `partial-live-client`.
 
 Authentic fixtures:
 
 - `crates/synveda-cli/fixtures/mcp/codex.json` — captured-client-frames, SHA-256 `d807a328550a652430c35a2c4b65f0c29b193447b8255a7e9c2fcf2d49d71289`
 - `adapters/codex/fixtures/lifecycle.json` — captured-client-hooks, SHA-256 `3bb629ff3d42681b64c1eb8abd21404aebef87bf986f084e90e44dea02b66a39`
 - `adapters/codex/fixtures/transcript.jsonl` — captured-client-transcript, SHA-256 `57d88963968808bba39b344115604df9e49fd4e21355bef65bc797401dbf9915`
+- `adapters/codex/fixtures/transcript-mcp.jsonl` — captured-client-transcript, SHA-256 `aa69cffbeec03a5a458388772837b2e28b0ab118393ab0407c939f9771508262`
+- `adapters/codex/fixtures/keycloak-qualification.json` — captured-live-client-result, SHA-256 `9b7a2322b6b83f18c8f1904f8af39db15996bfec1c293d393e8c389974573c3b`
 
 Conformance:
 
-- `session_creation`: not_run
-- `event_delivery`: not_run
-- `context_request_delivery`: not_run
-- `capture`: not_run
-- `session_end`: not_run
-- `retry_idempotency`: not_run
-- `skill_advertisement_activation`: not_run
-- `tool_configuration`: not_run
-- `cross_session_knowledge_reuse`: not_run
-- `persisted_audited_outcomes`: not_run
+- `session_creation`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
+- `event_delivery`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
+- `context_request_delivery`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
+- `capture`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
+- `session_end`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
+- `retry_idempotency`: not_run — `adapters/codex/src/hook.test.mts`, `adapters/codex/fixtures/keycloak-qualification.json`
+- `skill_advertisement_activation`: not_applicable — `adapters/codex/fixtures/keycloak-qualification.json`, `adapters/codex/README.md`
+- `tool_configuration`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
+- `cross_session_knowledge_reuse`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
+- `persisted_audited_outcomes`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
 
 Known limits:
 
-- Authentic MCP and native hook start/tool/stop/end/resume frames are captured; complete authenticated Synveda lifecycle remains unverified.
+- Native Keycloak context, approved Skill read, MCP recall, resumed task, SDK handoff, Capture/end and audit passed; complete lifecycle qualification remains open.
 - Use native Codex MCP configuration; Synveda does not write its TOML file.
 - SessionEnd reason=other is followed by resume of the same Codex session; it cannot automatically close a Synveda task. Explicit application ownership remains required.
 - Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version.
 - Native hook capture requires normal project/hook trust loading. --ignore-user-config did not emit hooks in the probe; CLI 0.152.0 was exercised with GPT-5.5 at low reasoning effort.
-- The hook adapter replays startup/resume, durable Stop, outage/retry and runtime exit with a synthetic HTTP responder; native authenticated context consumption and Capture/end/audit qualification remain open.
-- Compaction and non-command tool-result formats are unqualified. The native reader holds transcripts over 8 MiB/20,000 records; a host killed before any delivery hook can lose the unfinished turn.
+- Native startup/resume and text-only MCP events were persisted through the public Docker proxy with both SDKs on one Session. Outage/retry is deterministic replay only; runtime exit stays below the native three-second cap.
+- Compaction, non-text MCP results and native outage/recovery are unqualified. The native reader holds transcripts over 8 MiB/20,000 records; a host killed before any delivery hook can lose the unfinished turn.
 
 ### Claude Desktop — `captured`
 

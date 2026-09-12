@@ -2,7 +2,7 @@
 
 ## Problem and evidence
 
-The initial slice in `sdks/` now generates 15 operations and 52 schemas from the checked OpenAPI, with bounded HTTPX/Fetch clients, eight tests per language and a shared real-gateway acceptance workflow. Claude hook replay and both SDKs share authenticated Session identity, approved Skill bytes, pending proposals, workspace denial and correlated content-free audit. Public publication, wider operation coverage, a verified runtime/server matrix and the Keycloak end-to-end run remain open. Framework-specific shims are not a substitute for supported base clients.
+The initial slice in `sdks/` now generates 15 operations and 52 schemas from the checked OpenAPI, with bounded HTTPX/Fetch clients, nine tests per language and a shared real-gateway acceptance workflow. Claude hook replay and both SDKs share authenticated Session identity, approved Skill bytes, pending proposals, workspace denial and correlated content-free audit. Public publication, wider operation coverage and a verified runtime/server matrix remain open. The shared Keycloak workflow passes. Framework-specific shims are not a substitute for supported base clients.
 
 ## Scope
 
@@ -59,11 +59,20 @@ The owner must approve Synveda's repository/package licence, PyPI/npm namespaces
 slice. Both SDKs additionally passed all eight tests on their minimum runtimes
 in pinned Linux arm64 containers: Node 22.23.2 and Python 3.11.16. These are
 runtime tests, not OIDC evidence or a complete platform support matrix.
-Fresh Keycloak acceptance is waiting for the administrator-only owned
-hosts-file handoff from retained `acceptance-e2e` to `acceptance-interop`.
-The corrected shutdown selection is `demo,browser-acceptance`; its retained
-browser volume made the earlier `demo`-only command fail before mutation.
-The complete live inventory now passes read-only contract validation.
-No reset or retained-asset replacement was performed. Next: complete the
-canonical preflight, run the scenario with ordinary Keycloak identities, then
-resolve package ownership, licence and release provenance before publication.
+Fresh Keycloak acceptance passed after the owned hosts handoff. Native Codex
+and both SDKs then completed the shared authenticated workflow through the public
+proxy on Session `01a096b9-e1c1-7a50-aa32-8c1db0efdba8`. Each retrieved allowed
+context and the exact approved Skill, submitted an idempotent pending proposal,
+received cross-workspace denial and correlated content-free audit. The gateway
+returns its actual response trace ID because the proxy removes incoming trace
+context; SDK success/error results prefer it. Nine tests per SDK and all 20
+focused fresh exact-role DB tests pass. Capture, explicit task-owner end,
+cross-session reuse and the audit chain also passed. The content-free result is
+in `adapters/codex/fixtures/keycloak-qualification.json`.
+
+Next: repair the existing Session audit filter, which omits lifecycle rows under
+`payload.session.id`; the end event itself exists and is returned by action.
+Use the smallest shared query correction and a cross-Session/page-isolation
+regression described in `docs/INTEROPERABILITY_PLAN.md`. Package ownership,
+licence, release provenance and broader runtime/server decisions still require
+resolution before publication.

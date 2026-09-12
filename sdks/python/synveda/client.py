@@ -114,15 +114,17 @@ class Client:
                 data = await self._read(response)
                 status = response.status_code
                 retry_after = response.headers.get("retry-after")
+                server_trace = response.headers.get("x-synveda-trace-id", "")
+                trace_id = server_trace if re.fullmatch(r"[0-9a-f]{32}", server_trace) and set(server_trace) != {"0"} else parent[3:35]
             if 200 <= status < 300:
-                return ApiResponse(data, status, parent[3:35], retry_after)
+                return ApiResponse(data, status, trace_id, retry_after)
             if status == 401 and attempt == 0 and (route["method"] == "GET" or route["idempotent"]):
                 refreshed = await self._bearer(True)
                 if refreshed != token:
                     token = refreshed
                     continue
             detail = data if isinstance(data, dict) and isinstance(data.get("kind"), str) else {"kind": "invalid_response"}
-            raise ApiError(status, detail, parent[3:35], retry_after)
+            raise ApiError(status, detail, trace_id, retry_after)
         raise TransportError("transport")
 
     async def _bearer(self, refresh: bool) -> str:

@@ -45,8 +45,8 @@ Status: implemented and tested. Native Claude revalidation is separately blocked
 
 ## Batch 2 — matched base SDK slice (ADPT-4)
 
-Status: initial base slice implemented and tested; live Keycloak acceptance
-is blocked. ADPT-4 remains open for release and wider compatibility obligations.
+Status: initial base slice and shared live Keycloak workflow pass. ADPT-4
+remains open for release and wider compatibility obligations.
 
 - Generate types and operation metadata from the checked OpenAPI contract;
   use maintained HTTP libraries with small ergonomic clients.
@@ -68,7 +68,8 @@ is blocked. ADPT-4 remains open for release and wider compatibility obligations.
 
 Status: authentic Codex CLI 0.152.0 MCP and native lifecycle frames captured.
 The minimal hook translator reuses the existing Session runtime and passes
-deterministic replay. Live OIDC/native context qualification remains open.
+deterministic replay. Native OIDC context, Skill read, MCP recall, resume, SDK
+handoff, Capture/end and audit pass. Full lifecycle qualification remains open.
 
 - Inspect the installed Codex version and capture its actual lifecycle/MCP
   frames before writing host translation. Verify current Skill discovery:
@@ -96,10 +97,14 @@ implementations were reused. No external MCP execution service was added.
 | --- | --- | --- | --- | --- |
 | P1: harness Skill sync | `adapters/claude-code/src/skills.mts`, `syncSkills`; `crates/synveda-cli/src/main.rs`, Skill Sync arguments. Missing required scope made the launched sync fail. | Existing `skill::sync`, `/v1/me` project/principal anchors and approved bindings. | Forward the exact distribution scope; refuse a missing explicit project. Actual CLI/gateway test in `crates/synveda-gateway/tests/skills.rs` proves pending exclusion, immutable version installation, rollback and removal. | Fixed; tests pass. |
 | P1: task/target handoff | `adapters/claude-code/src/mcp-server.mts` and `crates/synveda-cli/src/mcp.rs`, `Server::new` / `resolve_session`. Dropped project selection and a new transport identity fragmented task context and audit. | Public Sessions, authorised Session reads, existing idempotency and `rmcp`. | Forward target/profile; pass host Session ID in context; accept launch/per-call Session IDs or a bounded stable task key. Re-authorise every use and reject conflicting placement. `scripts/interop-mcp.test.mjs` proves reconnect, Unicode keys, interleaving, denial and write ownership. | Fixed; tests pass. |
-| P1: base SDKs absent | Inspected baseline `sdks/`, workspace manifests, generated OpenAPI and console API client. Python/TS applications otherwise hand-built public HTTP calls. | Checked OpenAPI, existing TS generator, maintained Python type generator, HTTPX/Fetch and public domain APIs. | Generate only 15 operations/52 schemas; add bounded auth/error/correlation clients and equivalent examples. `crates/synveda-gateway/tests/support/sdk_interop.rs` runs both SDKs with real gateway policy, Claude hook context and a valid audit chain. | Initial slice passes; package release and Keycloak qualification remain open. |
+| P1: base SDKs absent | Inspected baseline `sdks/`, workspace manifests, generated OpenAPI and console API client. Python/TS applications otherwise hand-built public HTTP calls. | Checked OpenAPI, existing TS generator, maintained Python type generator, HTTPX/Fetch and public domain APIs. | Generate only 15 operations/52 schemas; add bounded auth/error/correlation clients and equivalent examples. `crates/synveda-gateway/tests/support/sdk_interop.rs` runs both SDKs with real gateway policy, Claude hook context and a valid audit chain. | Initial slice and live Keycloak workflow pass; package release remains open. |
 | P2: observation acknowledgement | `crates/synveda-cli/src/mcp.rs`, `render_remember` and `remember_tool`. Successful append incorrectly promised extraction/recallable Knowledge. | Existing Session observation disposition and separate Capture/VedaFlow paths. | Correct acknowledgement/help only; unit and real stdio tests distinguish recorded, duplicate, quarantined and refused observations. | Fixed; tests pass. |
 | P1: background delivery gateway binding | `adapters/claude-code/src/deliver.mts`, `retryBacklog`, inspected after `8f40237`. The active hook checks `bindGateway`, but its retry of other conversations did not: a later login could send stored transcript events to a different deployment. | Existing spool `gateway_url`, `client_name` and ordinary authenticated public event append. | Match the saved gateway/client before any retry or retirement. The two-gateway regression in `hook.test.mts` leaves the original backlog pending and sends no events to the second deployment. | Fixed; no spool format or policy change. |
-| P2: Codex qualification | Baseline registry had no lifecycle entry. Native 0.152.0 subsequently emitted `SessionEnd` and resumed the same native ID: treating that hook as final completion would close a still-resumable task. | Existing stdio server, credential/Session/event/spool runtime and conformance registry. | Pin native hook/transcript frames; translate only observed shapes in `adapters/codex`; namespace IDs, persist at Stop, flush at runtime exit and retain task identity. Replay asserts outage/retry, duplicate hooks and a single open with no implicit end. | Protocol and deterministic translation work; live lifecycle remains unverified. Both Skill roots work, so no Skill-path change. |
+| P2: Codex qualification | Baseline registry had no lifecycle entry. Native 0.152.0 subsequently emitted `SessionEnd` and resumed the same native ID: treating that hook as final completion would close a still-resumable task. | Existing stdio server, credential/Session/event/spool runtime and conformance registry. | Pin native hook/transcript frames; translate only observed shapes in `adapters/codex`; namespace IDs, persist at Stop, flush at runtime exit and retain task identity. Replay asserts outage/retry, duplicate hooks and a single open with no implicit end. | Native authenticated shared workflow passes; full lifecycle remains unverified. Both Skill roots work, so no Skill-path change. |
+| P1: response trace correlation | `deploy/compose/configs/caddy/Caddyfile`, `synveda_upstream`, strips incoming tracing headers; both SDK clients returned their sent trace ID. The real public-proxy workflow failed its audit correlation assertion. | Existing OpenTelemetry request span, Axum middleware, audit API and bounded SDK response handling. | Return `X-Synveda-Trace-Id` from the actual request span; prefer a valid response ID in SDK success/error results. Existing observability tests assert the exported span matches the header; both SDKs test edge replacement and invalid headers. | Fixed; fresh DB and live public-proxy workflows pass. Proxy sanitisation is unchanged. |
+| P1: native exit budget | `adapters/claude-code/src/turn.mts`, `credentials.mts`, `deliver.mts`; installed Codex 0.152.0 clamps SessionEnd to three seconds. Credential work plus an in-flight append could overrun that cap. | Existing CLI bearer resolution, durable spool and bounded Fetch request. | Share a two-second absolute deadline across Codex credentials/delivery and bound each append by remaining time. A hung CLI and stalled append leave six durable events that are delivered on retry. | Fixed; regression and native exit pass. |
+| P2: native MCP result omission | `adapters/codex/src/transcript.mts`, `translate`, previously accepted only string outputs. Captured MCP output is an array; tool results were omitted while the cursor advanced. | Existing Session event mapper and native `McpToolCall` completion metadata. | Translate captured text-only arrays, preserve namespace and native error status; hold unknown shapes. `transcript-mcp.jsonl` pins real failed/successful calls. | Fixed; replay and persisted native result assertions pass. Non-text results remain unqualified. |
+| P2: Session audit filter omits lifecycle rows | `crates/synveda-gateway/src/audit_query.rs`, `payload_filter`, filters top-level `session_id`; `sessions.rs`, `end` / `session_image`, stores the identity under `session.id`. In the live result, session filter omitted end event 422, while action filter returned it. | Existing `EventFilter`, exact resource/action filtering, immutable audit rows and tenant-scoped search. | Match the existing top-level and nested Session identity shapes in the shared query path. Test one Session's open/context/append/Capture/end across pages, exclusion of another Session, and unchanged chain hashes. | Open; the audit event is present. Exact action/resource queries are the current workaround. |
 
 | Area | Classification after this slice | Evidence / boundary |
 | --- | --- | --- |
@@ -107,91 +112,75 @@ implementations were reused. No external MCP execution service was added.
 | HTTP contracts and language SDKs | Partial | Public catalogue/OpenAPI/console peer tests pass; the new Python/TS base slice passes. Broader ADPT-4 release coverage is open. |
 | Skills import, validation, approval, export/install | Implemented and tested | Existing public Skill service, CLI and `crates/synveda-gateway/tests/skills.rs`; actual CLI materialisation/revocation now covered. No registry rebuild. |
 | Context, observations and proposals | Implemented and tested | Existing Session/Context/Knowledge routes; Session suite, Claude lifecycle replay and shared SDK acceptance. Pending proposals remain outside Knowledge. |
-| Authentication, policy and audit | Implemented but unverified as a complete live OIDC workflow in this run | Ordinary authenticated test identities prove policy, workspace denial and audit correlation/hash chain. Fresh Keycloak qualification awaits an administrator-only owned hosts-file handoff. |
+| Authentication, policy and audit | Implemented and tested for the prioritised authenticated workflow; audit filtering is partial | Fresh Keycloak browser acceptance and native Codex/both SDKs pass. Workspace denial, pending proposals, public-edge trace correlation and a valid audit chain are asserted. The existing session audit filter omits lifecycle rows; see the gap below. |
 | Examples, setup and compatibility | Partial | `sdks/README.md`, equivalent runnable examples and `docs/integrations/codex.md`. Claude replay and Codex protocol pass; native lifecycle limits remain explicit. |
 | External MCP servers | Implemented and tested for catalogue/discovery; gateway execution deliberately unsupported | Existing trusted server/version/binding catalogue and bounded discovery: `docs/INSTALL.md` and `crates/synveda-gateway/tests/tools.rs`, now run in the full exact-role database suite. The gateway does not execute imported commands. External server management is not a prerequisite for Synveda serving MCP. |
 
 ## Validation checkpoint (2026-09-12)
 
+The branch began this continuation at `0a6dfb5770c153fbe49f3118be97329378c703f7`.
+The content-free native result and source digests are retained in
+[`adapters/codex/fixtures/keycloak-qualification.json`](../adapters/codex/fixtures/keycloak-qualification.json).
+It is partial live evidence, not a promotion to `verified`.
+
 | Check | Result |
 | --- | --- |
-| `cargo test -p synveda-cli` | 182 unit tests, 3 CLI integration tests and 5 corpus tests pass; corpus includes the real Codex exchange. |
-| `cargo clippy -p synveda-cli -p synveda-gateway --all-targets -- -D warnings`; formatting | Pass. No new production unsafe code, recursion or panic-based boundary. |
-| Claude adapter test suite | 104 passed in the initial slice; 105 pass after the Codex runtime reuse and background gateway-binding regression. |
-| `scripts/interop-mcp.test.mjs` | 3 pass with real stdio and synthetic HTTP replies; gateway policy is tested separately. |
-| `make sdk-check` | Generated drift check and eight tests per language pass: shared wire fixtures, safe refresh/replay, errors/redaction, response bounds and cancellation. |
-| Docker exact-role gateway suite | 33 pass across Skills, Sessions, OpenAPI and Claude replay. Two tests are explicitly ignored by the ordinary invocation: the SDK workflow and native Claude run. The SDK workflow was then explicitly run and passed; native Claude remains blocked. |
-| Shared workflow | Pass against the actual gateway and fresh exact-role Docker schema, using ordinary tenant identities and maintained policy packs. One Claude-created Session is shared with Python and TS; allowed context, approved Skill, pending/idempotent proposal, foreign-workspace denial, W3C correlation and content-free valid audit chain are asserted. Synthetic Hs256 test identities are not Keycloak evidence. |
-| Local Python package | Wheel/source build and fresh-environment wheel import pass, including generated models, operations and contract metadata. |
-| Repository gates | Dependency direction, adapter evidence, generated API, backlog, ADR, docs, npm licences, deployment convergence and Compose render matrix pass. Existing authentic client requests/provenance were preserved; only changed server expectations were regenerated. |
-| Canonical `make compose-smoke` | Blocked, exit 78: retained `synveda-development-acceptance-e2e` container inventory is incomplete. |
-| Canonical `make compose-acceptance` | Blocked, exit 78: project containers were not initially absent. Hosts, resolver, secrets and issuer preflights passed; browser/Keycloak acceptance did not run. |
-| Native Claude preflight | Blocked: installed client exits 1, reporting expired OAuth that cannot refresh. Its full live lifecycle test is not reported as passing. |
-| Full workspace `make ci` at `8f40237` | Pass, including strict workspace Clippy, formatting, Rust/TS/Python tests, build, generated-contract/licence/deployment/evaluation gates. Initially buffered lifecycle reporter output was investigated; its interrupted-build test passed in 2714 ms, so no test/lifecycle workaround was needed. |
-| Full `make db-test` at `8f40237` | Pass against fresh ordinary exact-role PostgreSQL fixtures, including the external Tool catalogue suite and explicit database suites. The script removed its owned containers, volumes, networks and private credentials after success. Ordinary Rust ignored/no-database cases alone are not database evidence. |
-| Minimum SDK runtimes | All eight tests per language pass on Node 22.23.2 and Python 3.11.16 in pinned Linux arm64 containers; generated Python imports also pass. The first Python container attempt stopped before tests because its tmpfs was non-executable; invoking the interpreter directly corrected the runner while preserving mount protections and hash-locked dependencies. |
-| Native Codex 0.152.0 | Actual MCP exchange and ten native hook frames across `exec`/`exec resume` captured on Darwin arm64 with GPT-5.5/low. Normal `/hooks` review resolved the initial headless hook blocker. Native `SessionEnd` is followed by resume of the same ID. Synveda authentication was not exercised by this capture. |
-| Codex translator | Deterministic child-process replay asserts one Session, local Stop durability, failed append/retry, resume and duplicate hooks without implicit end. Reader negatives cover wrong identity, malformed/oversized/non-regular input and unknown command status. This responder is synthetic, so it does not establish native context consumption or gateway enforcement. |
-| Follow-up changes after `8f40237` | All 368 workspace TypeScript tests pass (105 Claude, four Codex, eight SDK, 251 console), with no skips. Formatting, dependency direction, conformance/digests, backlog, accepted ADR, documentation and npm licence gates pass. No Rust source or generated API/SQL changed after the full CI/database run; those entire suites were not redundantly repeated. |
-| Explicitly skipped/not rerun | Native Claude remains blocked by expired upstream OAuth. The shared SDK workflow is ignored by ordinary database invocation and was not rerun in the full database command; its earlier explicit real-gateway pass is recorded above. `live_precision`, real-corpus Skill/rubric tests and `report_live_catalog_fingerprints` remain ignored in this invocation. Live Keycloak SDK/native Codex workflow, other OS/architecture matrices and Copilot CLI/Pi qualification have not run; those client executables were unavailable. |
+| Full `make ci` and `make db-test` at `8f40237` | Passed. The full gates were not repeated for this follow-up; changed paths received the focused checks below. |
+| Fresh canonical `make compose-acceptance` | Passed on macOS 26.6.2 arm64, OrbStack Docker Engine 29.4.0 / Compose 5.1.2 after the administrator completed the owned hosts handoff. Real Keycloak browser login/product seed, all six service restarts and final API verification passed. |
+| Rebuilt deployment after response-trace correction | Canonical down with `demo,browser-acceptance`, then up/smoke with `demo`, passed while retaining PostgreSQL and project secrets. Public unauthenticated response was 401 with a fresh gateway trace ID, not either forged caller header. |
+| Live native Codex plus both SDKs | Passed on one Session `01a096b9-e1c1-7a50-aa32-8c1db0efdba8`. Codex 0.152.0/GPT-5.5 low consumed injected context, read the approved exact Skill, recalled via authenticated MCP and resumed the same native/task identity after both SDK applications ran. Each SDK retrieved allowed context/Skill, submitted an idempotent pending proposal, denied an existing foreign-workspace Session and correlated content-free audit. |
+| Persisted public-API outcomes | 14 unique events: two user, four assistant, three tool calls/results and two SDK Skill-load observations. Capture froze 12 eligible events and completed with 12 reviewable candidates. The task owner explicitly ended the Session. A separate application Session reused approved Knowledge. Audit chain valid through sequence 427; the separate action query confirmed end event 422. |
+| SDK checks | Generated drift and nine tests per language pass on local Node 24.18.0 / Python 3.14.6. Earlier eight-test suites and Python generated imports passed on pinned Linux arm64 Node 22.23.2 / Python 3.11.16; the new correlation case was not repeated on that minimum-runtime matrix. |
+| Adapter checks | All 105 Claude tests and six Codex tests pass. Includes two-second total exit budget, stalled credentials/append, retry, namespace preservation and authentic MCP success/failure. Native outage/recovery is still separate from deterministic replay. |
+| Focused exact-role Docker database suite | All 20 tests pass: 16 observability tests and four Skill/SDK tests, including the explicitly requested shared harness/Python/TypeScript workflow. No ignored/skipped cases in this invocation; owned database fixtures were removed after success. |
+| OpenAPI, Rust discipline and repository gates | Six OpenAPI tests, strict gateway Clippy, formatting, generated API/SDK drift, dependency direction, registry/fixture digests, backlog, accepted ADR and documentation gates pass. No SQL/schema or dependency changes. |
+| Explicitly blocked or not run | Native Claude revalidation remains blocked by expired upstream OAuth. Native Codex outage/recovery, compaction/reinjection, non-text MCP results, packaged installation, other client versions/platforms and Copilot CLI/Pi qualification remain unverified. The Copilot CLI/Pi executables were unavailable. `live_precision`, real-corpus Skill/rubric tests and `report_live_catalog_fingerprints` were not requested in this focused invocation. |
 
-The exact-role fixture was reused between focused runs to avoid rebuilding it;
-its two containers, two volumes, four networks and private credential directory
-were removed after successful checks. The pre-existing Compose deployment was
-preserved. Initial assertion/build-fixture failures were corrected and rerun;
-blocked or ignored tests were never counted as passing.
+The initial live SDK assertion failed because it compared the sent trace ID with
+the proxy's new server trace; the final rerun above passed after the correction.
+The initial native MCP launch lacked the isolated XDG profile directory; native
+`env_vars` forwarding corrected setup, and the same task then authenticated.
+A first generic up with the browser profile was refused before mutation because
+that profile requires fresh assets; the documented down/demo-up transition
+succeeded. These refusals are not counted as passing tests.
+
+The earlier no-database observability invocation exercised 13 cases and skipped
+three database-dependent cases. All three subsequently ran in the fresh exact-
+role suite above. Original retained `acceptance-e2e` data and secrets were not
+reset. No lifecycle contract or policy gate was weakened.
 
 ## Remaining actions
 
-1. Complete the administrator-only owned hosts-file handoff below, then run
-   fresh canonical Compose acceptance and the shared SDK workflow with ordinary
-   Keycloak identities. Preserve the retained project's data and secrets.
-2. Qualify the captured Codex translator with native context consumption,
-   explicit task-owner Capture/end and persisted audited outcomes. Capture
-   non-command tool results and compaction before widening its translation.
-   Satisfy every ADR-0098 criterion before promotion. Copilot CLI/Pi remain
-   separate candidates requiring their own installed clients and evidence.
-3. Complete ADPT-4's existing package ownership/licence, release provenance and
-   tested runtime/server compatibility decisions before public publication.
+1. Repair the existing Session audit filter's lifecycle omission with the
+   focused correlation/tenant-isolation acceptance above (CPR-33/ADPT-4).
+2. Complete native Codex outage/recovery and compaction/reinjection qualification
+   from authentic frames, preserving the captured level until every applicable
+   ADR-0098 criterion passes. Non-text results and installation packaging remain
+   explicit limits. Copilot CLI and Pi require their own installed versions and
+   evidence; generic MCP/Skills compatibility does not qualify them.
+3. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
+   runtime/server matrix and release ownership before public distribution.
 
-These are the remaining work in batches 2 and 3, not new implementation batches.
+These continue the original client batches; no new orchestration, plugin
+system or protocol implementation is proposed.
 
-### Fresh Keycloak acceptance preflight
+### Current local deployment
 
-The retained `synveda-development-acceptance-e2e` deployment owns the hostnames
-and listener. It uses pool `10.231.47.0/24`; shutdown must select
-`demo,browser-acceptance` because the browser profile still owns a volume even
-when its container is absent. The fresh test
-project is `synveda-development-acceptance-interop`, pool `10.231.46.0/24`.
-`sudo -n true` reports that a password is required; the agent cannot perform
-the documented privileged host edit unattended. Its handoff is pending owner
-action, not a passing preflight. Acquire the administrator credential before
-stopping the retained stack; these canonical commands preserve PostgreSQL data
-and generated secrets. Down removes the profile-owned disposable browser
-credential/receipt volume after validating its ownership:
+The owned hosts handoff is complete. `synveda-development-acceptance-interop`
+uses `10.231.46.0/24` and the `demo` profile after the documented retained-data
+rebuild. Its public UI is `http://app.synveda.test:8080/console/`. Use:
 
 ```sh
-sudo -v
-SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-e2e SYNVEDA_COMPOSE_IPV4_POOL=10.231.47.0/24 SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance make compose-down
-SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-e2e SYNVEDA_CONFIRM_HOSTS_REMOVE=remove:127.0.0.1:synveda-development-acceptance-e2e:app.synveda.test:auth.synveda.test make compose-hosts-remove
-SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-interop SYNVEDA_CONFIRM_HOSTS_INSTALL=install:127.0.0.1:synveda-development-acceptance-interop:app.synveda.test:auth.synveda.test make compose-hosts-install
-sudo dscacheutil -flushcache
-sudo killall -HUP mDNSResponder
-SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-interop make compose-hosts-status
-SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-interop make compose-resolver-check
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-interop SYNVEDA_COMPOSE_IPV4_POOL=10.231.46.0/24 SYNVEDA_COMPOSE_PROFILES=demo make compose-smoke
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-interop SYNVEDA_COMPOSE_IPV4_POOL=10.231.46.0/24 SYNVEDA_COMPOSE_PROFILES=demo make compose-down
 ```
 
-After that handoff, continue through the documented portable lifecycle:
+Follow `deploy/compose/README.md` for any later profile/hosts handoff. Retained
+profile-owned volumes must remain in the shutdown contract even when a profile's
+container is absent. No `compose-reset` is needed for an ordinary transition.
 
-```sh
-SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-interop SYNVEDA_COMPOSE_IPV4_POOL=10.231.46.0/24 SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance make compose-acceptance
-```
-
-No `compose-reset` is needed. Reinspect ownership, pool and prerequisites if
-the retained deployment changes before handoff. The macOS DNS flush is a local
-resolver step; the underlying deployment contract remains portable.
-
-Minimum-runtime image digests used for the SDK evidence:
+Minimum-runtime image digests used for the earlier SDK evidence:
 `node@sha256:7725a5c2c83eed1d36258c66efae14b1ceccd021db9ed1d9559d3335ed3d68ed`
 and `python@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534`.
-No package publication or broader support-policy claim follows from these tests.
+No package publication, HA, SaaS readiness or broader certification follows
+from this single-host workflow.

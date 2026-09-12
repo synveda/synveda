@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -104,4 +106,71 @@ test("missing identity, unsupported events and project opt-out cause no API call
     assert.equal(await hook(root, gateway.url, start, { SYNVEDA_DISABLED: "1" }), "");
     assert.ok(!existsSync(join(root, "synveda", "spool")));
   } finally { await gateway.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("exit shares its deadline across credentials and a stalled append, retaining events for retry", async () => {
+  const root = mkdtempSync(join(tmpdir(), "synveda-codex-deadline-"));
+  const path = join(root, "transcript.jsonl");
+  const cli = join(root, "credential.mjs");
+  let appends = 0;
+  let stalled = true;
+  const server = createServer((request, response) => {
+    let body = "";
+    request.on("data", (piece) => { body += String(piece); });
+    request.on("end", () => {
+      let result: unknown;
+      if (request.url === "/v1/sessions") result = { id: session, workspace_id: workspace, status: "active" };
+      else if (request.url?.endsWith("/context-runs")) result = { rendered: "allowed", tokens: 1, entry_count: 1 };
+      else if (request.url?.endsWith("/events")) {
+        appends += 1;
+        if (stalled) return;
+        result = { events: JSON.parse(body).events.map((entry: { client_event_id: string }) => ({
+          client_event_id: entry.client_event_id, outcome: "appended",
+        })), denied: 0, quarantined: 0 };
+      } else assert.fail(`unexpected request ${request.url}`);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(result));
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address !== null && typeof address === "object");
+  const gateway = `http://127.0.0.1:${address.port}`;
+  const frame = (name: string) => ({ ...lifecycle.invocations[0].frames[0],
+    hook_event_name: name, cwd: root, transcript_path: path });
+  const saved = () => {
+    const directory = join(root, "synveda", "spool");
+    const files = readdirSync(directory).filter((name) => name.endsWith(".json"));
+    assert.equal(files.length, 1);
+    return JSON.parse(readFileSync(join(directory, files[0]), "utf8"));
+  };
+  try {
+    writeFileSync(path, transcript.split("\n")[0] + "\n");
+    await hook(root, gateway, frame("SessionStart"));
+    writeFileSync(path, transcript);
+    await hook(root, gateway, frame("Stop"));
+    for (const body of [
+      "setTimeout(() => {}, 60_000)",
+      `setTimeout(() => console.log(JSON.stringify({ access_token: "synthetic-codex-bearer", gateway_url: ${JSON.stringify(gateway)} })), 700)`,
+    ]) {
+      writeFileSync(cli, `#!${process.execPath}\n${body}\n`);
+      chmodSync(cli, 0o700);
+      const started = Date.now();
+      await hook(root, gateway, frame("SessionEnd"), { SYNVEDA_TOKEN: "", SYNVEDA_CLI: cli, SYNVEDA_TIMEOUT_MS: "10000" });
+      assert.ok(Date.now() - started < 3000, "native exit must finish before the host's three-second cap");
+      assert.equal(saved().entries.filter((entry: { acknowledged: boolean }) => !entry.acknowledged).length, 6);
+      assert.equal(saved().close_requested, false);
+    }
+    assert.equal(appends, 1, "a resolved credential must leave only the remaining budget for delivery");
+    stalled = false;
+    await hook(root, gateway, frame("SessionEnd"));
+    assert.equal(saved().entries.filter((entry: { acknowledged: boolean }) => !entry.acknowledged).length, 0);
+    assert.equal(saved().session_id, session);
+  } finally {
+    server.closeAllConnections();
+    server.close();
+    await once(server, "close");
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -58,6 +58,7 @@ async fn shared_authenticated_harness_python_typescript_workflow() {
         "scope_id": world.project, "project_id": world.project_id, "workspace_id": workspace,
         "skill_id": skill, "version_id": version, "knowledge_id": knowledge["knowledge_item_id"],
         "denied_session_id": denied, "allowed_marker": ALLOWED, "proposal_marker": PENDING,
+        "skill_marker": "# Code Review",
         "query": "Interoperability", "run_key": world.tenant.id.to_string()});
     std::fs::write(cli.root.join("scenario.json"), scenario.to_string()).expect("scenario file");
     private_token(&cli.root.join("member.token"), &world.alice);

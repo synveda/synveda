@@ -24,6 +24,26 @@ test("native transcript preserves six user/assistant/tool events and excludes in
   assert.ok(text.includes("call_Kn1FWjstIIz43WFfedeXfxs2"));
 });
 
+test("captured native MCP success and failure preserve namespace, output and terminal status", () => {
+  const fixture = new URL("../fixtures/transcript-mcp.jsonl", import.meta.url);
+  const nativeId = "01a096ac-d6e8-7052-ab28-d84f23056169";
+  const events = toSessionEvents(readCodexTranscript(fixture.pathname, nativeId), "gpt-5.5");
+  assert.deepEqual(events.map((entry) => entry.event_type), ["tool.invoked", "tool.result", "tool.invoked", "tool.result"]);
+  assert.ok(JSON.stringify(events[0]).includes("mcp__synveda__recall"));
+  assert.ok(JSON.stringify(events[1]).includes('"is_error":true'));
+  assert.ok(JSON.stringify(events[3]).includes('"is_error":false'));
+  assert.ok(JSON.stringify(events[3]).includes("Retried ingestion requests must reuse"));
+  const root = mkdtempSync(join(tmpdir(), "synveda-codex-mcp-"));
+  const path = join(root, "transcript.jsonl");
+  const raw = readFileSync(fixture, "utf8");
+  try {
+    writeFileSync(path, raw.replace('"status":"completed"', '"status":"in_progress"'));
+    assert.throws(() => readCodexTranscript(path, nativeId), /tool_result_status_unknown/);
+    writeFileSync(path, raw.replace('"type":"input_text"', '"type":"input_image"'));
+    assert.throws(() => readCodexTranscript(path, nativeId), /tool_result_shape_unknown/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("foreign, malformed, oversized and symlinked transcripts are refused without losing source bytes", () => {
   const root = mkdtempSync(join(tmpdir(), "synveda-codex-reader-"));
   try {

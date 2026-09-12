@@ -67,6 +67,11 @@ recall routes are neither mounted nor documented.
 resolution. A response is always scoped to the caller's tenant, which is why \
 no response body echoes a tenant id.
 
+**Correlation.** Responses include `X-Synveda-Trace-Id` when OpenTelemetry is \
+available: the gateway request's 32-character lowercase hexadecimal trace id. \
+Public proxies may remove incoming trace context, so use this response header \
+for audit correlation. A trace id is diagnostic metadata, never authority.
+
 **Idempotency.** Operations that accept `Idempotency-Key` declare it on that \
 operation. Reusing a key with the same request replays the original result; \
 reusing it with a different request is `409`. Session-event delivery is \

@@ -60,7 +60,7 @@ For a controlled qualification checkout, enable `hooks = true` in the
   "hooks": {
     "SessionStart": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 12}]}],
     "Stop": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 12}]}],
-    "SessionEnd": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 12}]}]
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 3}]}]
   }
 }
 ```
@@ -76,31 +76,46 @@ the **Synveda Session ID** returned in SessionStart context to each recall
 call. Do not combine the hook-created Session with a separate `--task` key;
 the dedicated tool-only recipe above is a different write-owner arrangement.
 
+If login uses an isolated `XDG_CONFIG_HOME`, allow that existing variable into
+the native MCP subprocess with `env_vars = ["XDG_CONFIG_HOME"]` in
+`[mcp_servers.synveda]`, and select the same `--profile` as the hooks. The
+qualification run also forwarded `SYNVEDA_INSECURE_DEVELOPMENT_HTTP` for the
+documented local HTTP deployment. Do not put a bearer in project configuration.
+Codex filters subprocess environments; a working hook login alone does not
+prove that its MCP process sees the same profile. See the
+[native MCP environment contract](https://learn.chatgpt.com/docs/extend/mcp).
+
 The native ID maps to `codex:<native-id>` in the existing local spool. Stop
-records user/assistant text and captured command calls/results; runtime exit
+records user/assistant text, command calls/results and text-only MCP results;
+runtime exit
 flushes them. A resumed invocation uses the same Synveda Session. The task
 owner explicitly requests Capture and ends that Session through the public
 API/SDK when finished. No native hook establishes final task completion.
 
 ## Evidence limits
 
-The native protocol capture deliberately had no Synveda credential and
-received the server's actionable sign-in error. Authenticated API, task
-isolation and audit behavior are covered separately by the gateway/SDK
-acceptance suite. Neither result establishes a complete Codex lifecycle.
+The original protocol capture deliberately had no Synveda credential and
+received the server's sign-in error. A later real Keycloak run exercised native
+context consumption, approved Skill file reading, authenticated MCP recall and
+resume of the same task. Both SDKs used that Session through the public proxy;
+14 unique events persisted, Capture completed, the task owner explicitly ended
+it and a separate application Session reused allowed Knowledge. The audit chain
+verified through sequence 427. The digest-pinned content-free result is
+`adapters/codex/fixtures/keycloak-qualification.json`.
 
-Normal trusted-hook review produced six authentic event types and a resumed
-turn with the same native Session ID. Fixtures and deterministic replay cover
-the minimal adapter's start/Stop/exit translation, durable outage/retry and
-duplicate delivery. Native context consumption and the complete authenticated
-Capture/end/audit workflow remain unverified against Keycloak.
+The adapter translates captured startup/resume, Stop/exit, command results and
+text-only MCP results. Unknown output/status shapes are held. Native exit gets
+one two-second deadline for credentials and delivery below the observed
+three-second host cap. Startup/resume and persisted tool results passed live;
+outage/retry is still deterministic replay evidence only.
 
-Only startup/resume and observed transcript shapes are handled. Compaction,
-non-command tool-result formats, installation packaging and other client
-versions remain unqualified. Reads over 8 MiB/20,000 records are held with a
-diagnostic; unfinished turns can be lost if no hook runs before host death.
-See `adapters/codex/README.md` for bounds and provenance. CPR-39 remains open
-until all ADR-0098 criteria pass.
+Compaction/reinjection, native outage/recovery, non-text MCP results,
+installation packaging and other versions/platforms remain unqualified. Reads
+over 8 MiB/20,000 records are held; unfinished turns can be lost if no hook runs
+before host death. Skill file reading is observed, but automatic activation is
+not claimed. The existing audit `session_id` filter omits lifecycle events under
+nested Session identities; action/resource queries still retrieve them.
+CPR-39 remains open until all applicable ADR-0098 criteria pass.
 
 GitHub Copilot CLI and Pi remain separate, unqualified candidates. They have
 no Synveda lifecycle adapter in this checkout. The VS Code registry entry is

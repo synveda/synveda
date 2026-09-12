@@ -20,6 +20,14 @@ remote job was not executed in this local run. The full local CI and fresh
 database suite passed at `8f40237`. These checks do not qualify live OIDC.
 No public npm/PyPI package is published by this work.
 
+The later live Keycloak run passed both examples through the canonical Docker
+public proxy on a native Codex-created Session. It covered allowed context,
+approved Skill bytes, pending/idempotent proposals, workspace denial and audit
+correlation. Capture, explicit task-owner end, cross-session reuse and audit-
+chain verification also passed. See `docs/INTEROPERABILITY_PLAN.md` and the
+content-free `adapters/codex/fixtures/keycloak-qualification.json` result.
+
+
 ```sh
 pnpm install --frozen-lockfile
 python3 -m venv sdks/python/.venv
@@ -75,7 +83,11 @@ The default total deadline is 30 seconds (maximum 120); request and response
 bodies default to 8 MiB (maximum 64 MiB). Python cancellation propagates as
 `asyncio.CancelledError`; TypeScript accepts a caller signal. Credential
 providers must cooperate with cancellation. Responses expose status, trace ID
-and Retry-After; typed API errors retain the public error taxonomy. The SDK
+and Retry-After; typed API errors retain the public error taxonomy. Correlation
+prefers the gateway's `X-Synveda-Trace-Id` response header because the public
+Compose proxy removes incoming trace context. Missing or invalid response IDs
+fall back to the sent trace ID, which may differ from the server's trace on an
+older deployment. Session and artifact IDs remain the durable audit anchors. The SDK
 does not log requests, credentials or returned content and refuses redirects.
 
 After a 401, only GET or an operation with a required public idempotency key
@@ -96,10 +108,11 @@ their inputs through existing tenant fixtures and public APIs.
 
 To run them against a separately prepared deployment, supply one scenario JSON
 with `gateway`, `session_id`, `scope_id`, `project_id`, `workspace_id`, `skill_id`,
-`version_id`, `knowledge_id`, `denied_session_id`, `allowed_marker`,
+`version_id`, `knowledge_id`, `denied_session_id`, `allowed_marker`, `skill_marker`,
 `proposal_marker`, `query` and a unique `run_key`. The named Session and
 Knowledge must be readable by the ordinary member; the Skill must have an
-approved enabled binding; the policy must require Knowledge review; the
+approved enabled binding and its exact `SKILL.md` must contain the nonempty
+`skill_marker`; the policy must require Knowledge review; the
 unrelated Session must actually exist in another workspace. An auditor is a
 separate principal with the tenant audit grant.
 

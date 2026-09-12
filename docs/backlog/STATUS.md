@@ -15,13 +15,18 @@ Node 22/Python 3.11 SDK runtime checks also pass. Codex 0.152.0 now has authenti
 MCP and native start/tool/Stop/exit/resume frames, plus a small hook translator
 reusing the existing durable Session runtime. Its runtime exit keeps the task
 open; lifecycle replay is separate from live qualification. Fresh Keycloak
-acceptance awaits the administrator-only owned hosts-file handoff from the
-retained acceptance project to `acceptance-interop`; no retained data was reset.
-The handoff's shutdown selects `demo,browser-acceptance`: a retained browser
-volume remains in its contract even when that profile's container is absent.
-The corrected profile selection passes live read-only inventory validation.
-Next: complete that canonical preflight and run ordinary OIDC SDK/native Codex
-acceptance. SDK release decisions and a second verified lifecycle remain open.
+acceptance passed after the owned hosts-file handoff. The rebuilt public-proxy
+workflow then passed with native Codex and both SDKs on one Session: allowed
+context, approved Skill, pending/idempotent proposals, workspace denial and
+correlated audit. Fourteen unique events persisted, Capture completed, the task
+owner ended the Session and cross-session Knowledge reuse passed; the audit
+chain verified through sequence 427. Response trace IDs, Codex exit deadlines
+and text-only MCP result capture now have focused regressions; 20 fresh exact-
+role DB tests, strict gateway Clippy and generated-contract gates pass.
+Next: correct the existing Session audit filter's omission of lifecycle rows,
+then qualify native outage/recovery and compaction. SDK release decisions and
+a second fully verified lifecycle remain open. Codex retains `captured` with
+criterion-level partial live evidence in the registry.
 
 ## Phase 0 — Foundation (wk 1)
 

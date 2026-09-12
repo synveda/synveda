@@ -69,6 +69,7 @@ export async function appendEvents(
   bearer: string,
   sessionId: string,
   request: AppendEventsRequest,
+  timeoutMs?: number,
 ): Promise<CallResult<AppendEventsResponse>> {
   return call<AppendEventsResponse>(
     config,
@@ -76,6 +77,8 @@ export async function appendEvents(
     "POST",
     `/v1/sessions/${encodeURIComponent(sessionId)}/events`,
     request,
+    undefined,
+    timeoutMs,
   );
 }
 
