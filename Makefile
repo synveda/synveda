@@ -222,6 +222,23 @@ eval-read:
 db-test:
 	bash scripts/db-test.sh
 
+# ADPT-4: base clients share one ordinary authenticated application workflow.
+# Install sdks/python/requirements-dev.lock first; no dependency downloads here.
+SYNVEDA_PYTHON ?= python3
+.PHONY: sdk-check interop-acceptance
+sdk-check:
+	SYNVEDA_DATAMODEL_CODEGEN="$(SYNVEDA_DATAMODEL_CODEGEN)" node scripts/generate-sdk-contract.mjs --check
+	pnpm --filter @synveda/sdk test
+	PYTHONPATH=sdks/python $(SYNVEDA_PYTHON) -m unittest discover -s sdks/python/tests -v
+
+interop-acceptance:
+	cargo build -q -p synveda-cli
+	pnpm --filter @synveda/claude-code-adapter build
+	pnpm --filter @synveda/sdk build
+	node --test --test-timeout=30000 scripts/interop-mcp.test.mjs
+	SYNVEDA_PYTHON="$(SYNVEDA_PYTHON)" bash scripts/db-test.sh \
+		-p synveda-gateway --test skills -- --include-ignored --test-threads=1
+
 # CPR-14's deterministic tier: authentic Claude Code frames through the built
 # hook, the real gateway/PDP/schema, persisted events, timeline and audit chain.
 # A fresh scratch database is created and dropped by db-test.sh.
@@ -394,4 +411,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check sdk-check ts-build check-npm-licences ts-test

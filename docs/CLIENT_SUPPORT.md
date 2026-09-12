@@ -9,6 +9,7 @@ A connection recipe is not a support claim. `captured` means authentic frames re
 | Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. |
 | Cursor | `experimental` | none | Cursor Hooks v1 plus MCP | No Cursor executable or authenticated client was available on 2026-08-25. |
 | Visual Studio Code | `configured` | none | VS Code agent hooks Preview plus MCP | The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive. |
+| Codex CLI | `captured` | 0.152.0 | MCP tool calls; lifecycle adapter unverified | Authentic MCP discovery and recall frames replay; no complete authenticated Codex lifecycle is claimed. |
 | Claude Desktop | `captured` | 1.25927.0 | MCP tool calls only | Authentic discovery and tool-call frames are replayed, but MCP alone does not prove session capture or end semantics. |
 | Zed | `captured` | 1.13.2 | MCP tool calls only | Authentic non-Anthropic tool frames are replayed, but no session lifecycle/capture contract is available. |
 | Windsurf | `configured` | none | MCP configuration only | Documented config shape only; no authentic exchange or lifecycle run is claimed. |
@@ -99,14 +100,42 @@ Known limits:
 - VS Code 1.133.0 was installed locally, but no authenticated agent profile or real run was available.
 - MCP configuration alone does not provide reliable capture lifecycle semantics.
 
+### Codex CLI — `captured`
+
+Contract: Codex CLI 0.152.0 / MCP 2025-06-18. Evidence level: `captured-protocol`.
+
+Authentic fixtures:
+
+- `crates/synveda-cli/fixtures/mcp/codex.json` — captured-client-frames, SHA-256 `d807a328550a652430c35a2c4b65f0c29b193447b8255a7e9c2fcf2d49d71289`
+
+Conformance:
+
+- `session_creation`: not_run
+- `event_delivery`: not_run
+- `context_request_delivery`: not_run
+- `capture`: not_run
+- `session_end`: not_run
+- `retry_idempotency`: not_run
+- `skill_advertisement_activation`: not_run
+- `tool_configuration`: not_run
+- `cross_session_knowledge_reuse`: not_run
+- `persisted_audited_outcomes`: not_run
+
+Known limits:
+
+- Authentic MCP discovery and recall frames replay; no complete authenticated Codex lifecycle is claimed.
+- Use native Codex MCP configuration; Synveda does not write its TOML file.
+- Lifecycle hooks did not execute in the isolated headless qualification; Session creation, Capture and end require explicit application ownership.
+- Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version.
+
 ### Claude Desktop — `captured`
 
 Contract: MCP 2025-11-25 captured. Evidence level: `captured-protocol`.
 
 Authentic fixtures:
 
-- `crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json` — captured-client-frames, SHA-256 `08defbfbddbe99a48271ffa9ca203e658782e431d601ae97478b532981e5a022`
-- `crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json` — captured-client-frames, SHA-256 `8ac8fac8d07913a562f440933ae8cbd77ebbacb26e70f851304ab0498e6389d9`
+- `crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json` — captured-client-frames, SHA-256 `71b69ccbfefdd67a0d0aafa7b2ae8692892d49a909769710ac06c1ee91b421eb`
+- `crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json` — captured-client-frames, SHA-256 `cd54bc373b89495bd730da8bf6656d51a06ff238a2330b925ff274cdda6e68ac`
 
 Conformance:
 
@@ -131,7 +160,7 @@ Contract: MCP 2025-11-25 captured. Evidence level: `captured-protocol`.
 
 Authentic fixtures:
 
-- `crates/synveda-cli/fixtures/mcp/zed.json` — captured-client-frames, SHA-256 `8248caaa969cdae1606ba3c6c0ba39ee30b89702f29b49c901a3181e7d81cb3b`
+- `crates/synveda-cli/fixtures/mcp/zed.json` — captured-client-frames, SHA-256 `ebb6ce26f329d653cba2f4061160708c34e9ce17dbd82d0bde8830e03fc3b3d5`
 
 Conformance:
 

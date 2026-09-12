@@ -292,7 +292,7 @@ test("a degraded composition still delivers context and says nothing to the user
   }
 });
 
-test("an empty block contributes no context and is not an error", async () => {
+test("an empty Knowledge block still supplies the task Session ID for MCP", async () => {
   const mock = await gateway(
     script((request) =>
       request.path.endsWith("/context-runs")
@@ -305,7 +305,9 @@ test("an empty block contributes no context and is not an error", async () => {
       { hook_event_name: "SessionStart", session_id: "s5", source: "startup" },
       config(mock.url),
     );
-    assert.deepEqual(output, {});
+    assert.match(output.hookSpecificOutput?.additionalContext ?? "",
+      /Synveda Session ID: 22222222-2222-2222-2222-222222222222/);
+    assert.match(output.hookSpecificOutput?.additionalContext ?? "", /session_id/);
   } finally {
     await mock.close();
   }

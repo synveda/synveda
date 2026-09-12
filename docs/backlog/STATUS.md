@@ -7,6 +7,16 @@ retains their implementation evidence. Open entries link to current briefs.
 
 110 delivered; 32 open. The inventory and open-brief shape are checked in CI.
 
+The 2026-09-12 [interoperability execution plan](../INTEROPERABILITY_PLAN.md)
+repairs ADPT-1/2 and CPR-12/23 client defects, delivers an initial ADPT-4 slice
+and qualifies Codex under CPR-39. ADR-0106 records the accepted public-client
+boundary. Existing harness defects and the initial SDK slice pass focused
+acceptance; Codex 0.152.0 is captured at the MCP protocol level. Remaining
+blockers are the retained Compose inventory/fresh-asset preflight and absent
+authentic Codex lifecycle hooks in isolated headless runs. Next: qualify a
+fresh Keycloak deployment and capture Codex through its normal trusted hook
+flow. SDK release support and a second verified lifecycle remain open.
+
 ## Phase 0 — Foundation (wk 1)
 
 - [x] FND-1: Workspace scaffold — delivered 2026-07-16

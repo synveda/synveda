@@ -154,14 +154,14 @@ platform remains later supportability work.
 
 `adapters/registry.json` is the executable support authority. It distinguishes a
 configuration recipe, captured frames, deterministic replay and a live verified
-lifecycle (`adapters/registry.json:2-20`). Only Claude Code is one of the four
-harnesses below and appears in that registry; a Codex Skill output directory is
-not lifecycle support (`crates/synveda-cli/src/skill.rs:20-23`).
+lifecycle (`adapters/registry.json:2-20`). Claude Code has verified lifecycle evidence; Codex CLI now has captured MCP
+protocol evidence. A Codex Skill output directory does not establish lifecycle
+support (`crates/synveda-cli/src/skill.rs:20-23`).
 
 | Harness | Configured | Authentic frames captured | Deterministic replay | Live verified | Lifecycle events | Durable spool | Context delivery | Skill support | MCP support | Compaction/checkpoint support | Current tested version | Limitations |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Claude Code | Yes, plugin | Yes, digest-pinned manifest | Yes | Yes, recorded 2026-08-24 | SessionStart, UserPromptSubmit, Pre/PostToolUse, PreCompact, Stop, SessionEnd | Yes, atomic local event spool | Yes, at SessionStart/resume | Sync/advertise; activation is not observable | Yes, plugin-owned launch | PreCompact durably records before rewrite; reinjection only when SessionStart fires with compact source | 2.1.241 live; 2.1.220 also tested | Host death before a hook is invisible; Stop/PreCompact cross only local durability; same-account attacker can rewrite/re-hash spool; skill activation is not claimed (`adapters/registry.json:24-65`). |
-| Codex | No lifecycle integration in registry | No | No | No | None established | No | No | Filesystem materialisation target only; no activation/lifecycle evidence | No registered conformance | None established | None | The `.codex/skills` target is a distribution convenience, not captured frames, context delivery or support. |
+| Codex CLI | Native MCP configuration; no Synveda TOML writer | Yes, MCP discovery and recall | Yes, MCP corpus | No | No hook frames in isolated headless probe | No lifecycle adapter | Authenticated native delivery unverified | Installed client loaded both `.agents/skills` and `.codex/skills`; no activation claim | Captured MCP 2025-06-18 | None established | 0.152.0 protocol capture | See `docs/integrations/codex.md`; normal trusted hook capture and the Keycloak lifecycle gate remain open. |
 | GitHub Copilot | No | No | No | No | None established | No | No | No conformance evidence | No registered conformance | None established | None | Absent from the authoritative registry; do not infer support from generic MCP/Skills compatibility. |
 | Pi | No | No | No | No | None established | No | No | No conformance evidence | No registered conformance | None established | None | Absent from the authoritative registry; no contract, fixture, replay or live run is committed. |
 

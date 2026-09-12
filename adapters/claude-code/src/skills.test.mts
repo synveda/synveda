@@ -19,11 +19,24 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
+import { startGateway } from "./mock-gateway.mjs";
+import { loadConfig } from "./config.mjs";
 
 process.env.XDG_STATE_HOME = mkdtempSync(join(tmpdir(), "synveda-skills-state-"));
 
-const { governedRoot, syncSkills } = await import("./skills.mjs");
+const { governedRoot, syncSkills, distributionScope } = await import("./skills.mjs");
+
+const principalScope = "00000000-0000-4000-8000-000000000001";
+const gateway = await startGateway(() => ({
+  status: 200,
+  body: { anchors: [{ kind: "principal", source: "principal_scope", scope_id: principalScope }] },
+}));
+after(gateway.close);
+process.env.SYNVEDA_GATEWAY = gateway.url;
+process.env.SYNVEDA_TOKEN = "synthetic-skill-test-token";
+delete process.env.SYNVEDA_WORKSPACE;
+delete process.env.SYNVEDA_PROJECT;
 
 const binDir = mkdtempSync(join(tmpdir(), "synveda-fake-skill-cli-"));
 
@@ -89,12 +102,25 @@ test("the sync is delegated to the CLI, into the plugin's own root", async () =>
   assert.deepEqual(argv, [
     "skill",
     "sync",
+    "--scope",
+    principalScope,
     "--client",
     "claude-code",
     "--root",
     join(pluginRoot, "skills"),
     "--json",
   ]);
+});
+
+test("an explicit project selects its scope and never falls back when refused or mismatched", () => {
+  const personal = { kind: "principal", source: "principal_scope", scope_id: principalScope };
+  const me = { anchors: [personal], projects: [{ id: "p1", workspace_id: "w1", scope_id: "s1" }] };
+  const config = { ...loadConfig(undefined), workspaceId: "w1", projectId: "p1" };
+  assert.equal(distributionScope(me, config), "s1");
+  assert.equal(distributionScope(me, { ...config, projectId: "denied" }), undefined);
+  assert.equal(distributionScope(me, { ...config, workspaceId: "w2" }), undefined);
+  assert.equal(distributionScope(me, { ...config, projectId: undefined }), principalScope);
+  assert.equal(distributionScope({}, { ...config, projectId: undefined }), undefined);
 });
 
 test("a profile is passed through, because a sync runs as somebody", async () => {

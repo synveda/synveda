@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling==1.30.1"]
+build-backend = "hatchling.build"
+
+[project]
+name = "synveda-sdk"
+version = "0.1.0"
+description = "Initial authenticated Synveda public API client slice"
+requires-python = ">=3.11"
+dependencies = ["httpx==0.28.1", "typing-extensions==4.16.0"]
+
+[project.optional-dependencies]
+dev = ["datamodel-code-generator==0.53.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["synveda"]

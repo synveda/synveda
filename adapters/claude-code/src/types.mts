@@ -144,4 +144,6 @@ export interface EndSessionRequest {
 /** As much of `GET /v1/me` as choosing a workspace needs. */
 export interface MeResponse {
   workspaces?: { id?: unknown; name?: unknown }[];
+  projects?: { id?: unknown; workspace_id?: unknown; scope_id?: unknown }[];
+  anchors?: { kind?: unknown; source?: unknown; scope_id?: unknown }[];
 }

@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import {
   readmeSupportFindings,
   readmeSupportStatement,
+  renderTypescript,
   validateRegistry,
 } from "./check-adapter-conformance.mjs";
 
@@ -48,4 +49,16 @@ test("captured evidence is content addressed", () => {
   const registry = copy();
   registry.clients.find((client) => client.id === "zed").authentic_fixtures[0].sha256 = "0".repeat(64);
   assert.match(validateRegistry(registry, root).join("\n"), /fixture digest drift/);
+});
+
+test("a capture without an installer is not offered as an installable client", () => {
+  const registry = copy();
+  const client = registry.clients.find((client) => client.id === "zed");
+  client.configuration = null;
+  assert.deepEqual(validateRegistry(registry, root), []);
+  assert.ok(!renderTypescript(registry).includes('"id": "zed"'));
+  client.support_level = "configured";
+  assert.match(validateRegistry(registry, root).join("\n"), /MCP configuration needs/);
+  client.support_level = "verified";
+  assert.match(validateRegistry(registry, root).join("\n"), /verified requires live-client evidence/);
 });

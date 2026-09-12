@@ -2,11 +2,18 @@
 
 ## Problem and evidence
 
-ADR-0098's conformance model is already implemented: `adapters/registry.json` is authoritative, CI checks it, and generated onboarding/support views distinguish configured, captured, experimental, unsupported, and verified evidence. Claude Code 2.1.241 is the only verified lifecycle. Claude Desktop 1.25927.0 and Zed 1.13.2 are captured tool protocols only. Cursor is experimental because its Hooks v1 contract appears sufficient, but this environment has no Cursor executable, authenticated account, or authentic frame; VS Code 1.133 Preview lacks `SessionEnd` and documents that `Stop` is not session inactivity. A second verified client remains externally blocked.
+ADR-0098's conformance model is already implemented: `adapters/registry.json` is authoritative, CI checks it, and generated onboarding/support views distinguish configured, captured, experimental, unsupported, and verified evidence. Claude Code 2.1.241 is the only verified lifecycle. Claude Desktop 1.25927.0 and Zed 1.13.2 are captured tool protocols only. Cursor is experimental because its Hooks v1 contract appears sufficient, but this environment has no Cursor executable, authenticated account, or authentic frame; VS Code 1.133 Preview lacks `SessionEnd` and documents that `Stop` is not session inactivity. Codex CLI 0.152.0 now has captured, replayed MCP 2025-06-18 discovery and recall frames; a second verified lifecycle remains open.
 
 ## Scope
 
-- Acquire one named non-Claude-Code client/version with a credible complete lifecycle; Cursor local IDE is the current candidate, while any substitute must satisfy the same registry criteria.
+The 2026-09-12 [interoperability plan](../INTEROPERABILITY_PLAN.md) selects
+installed Codex CLI 0.152.0 for the next qualification attempt. Its current
+vendor documentation provides Session IDs and SessionEnd. Actual MCP frames
+are now digest-pinned, but three isolated headless probes emitted no hooks;
+no complete Synveda lifecycle is claimed. Copilot CLI and Pi remain
+separate later candidates, not inferred support from VS Code or MCP alone.
+
+- Acquire one named non-Claude-Code client/version with a credible complete lifecycle; installed Codex CLI is the current candidate and must satisfy the same registry criteria.
 - Capture authentic versioned client frames, digest-pin them, implement the adapter without inventing missing events, and retain exact limitations.
 - Run the real client through session creation, event delivery, context request, capture, session end, retry/idempotency, available Skill/Tool seams, cross-session Knowledge reuse, and persisted audited outcomes over public APIs.
 - Update the authoritative registry and regenerate projections only from that evidence; keep unavailable criteria `not_applicable`, failed, or incomplete with reasons.
@@ -45,4 +52,4 @@ Move the candidate only through experimental/configured to captured and then ver
 
 ## Dependencies
 
-Completion requires externally supplied access to a proprietary candidate executable, authenticated account/credential, and a stable local lifecycle contract. The owner must choose and provision that client and approve the tested edition/version. If Cursor remains unavailable or its live hooks fail, another client must independently meet the full gate; VS Code's currently documented lifecycle is not an acceptable fallback.
+The installed Codex binary and its model authentication worked for the synthetic protocol probe. Next action: capture hooks using its normal trusted-source review flow, then run that exact version against a fresh documented Keycloak deployment with persisted audit evidence. The isolated headless configuration did not yield hook events, and the retained Compose project failed its inventory preflight. Do not infer missing lifecycle semantics, weaken trust/conformance, or reset someone else's deployment to obtain a passing run. Copilot CLI and Pi executables were not available for qualification; VS Code's incomplete lifecycle is not an interchangeable fallback.

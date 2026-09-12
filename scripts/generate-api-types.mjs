@@ -28,11 +28,15 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 const DOCUMENT = "docs/api/openapi.json";
-const OUTPUT = "console/src/generated/api.ts";
+// ADPT-4 reuses this generator for an OpenAPI-selected public SDK slice.
+const inputIndex = process.argv.indexOf("--input");
+const outputIndex = process.argv.indexOf("--output");
+const INPUT = inputIndex < 0 ? DOCUMENT : process.argv[inputIndex + 1];
+const OUTPUT = outputIndex < 0 ? "console/src/generated/api.ts" : process.argv[outputIndex + 1];
 
 const check = process.argv.includes("--check");
 
-const document = JSON.parse(readFileSync(DOCUMENT, "utf8"));
+const document = JSON.parse(readFileSync(INPUT, "utf8"));
 
 // ── Schema → TypeScript ──────────────────────────────────────────────────────
 
@@ -155,9 +159,9 @@ parts.push(`// GENERATED FILE — DO NOT EDIT.
 // decision 7). Editing this file is editing the wrong end of the chain: change
 // the Rust, run \`cargo test -p synveda-gateway --test openapi\` with
 // SYNVEDA_WRITE_OPENAPI=1 to refresh the document, then
-// \`node scripts/generate-api-types.mjs\`.
+// \`node scripts/${inputIndex < 0 ? "generate-api-types" : "generate-sdk-contract"}.mjs\`.
 //
-// \`make check-api-types\` fails when this file and the document disagree.
+// \`make ${inputIndex < 0 ? "check-api-types" : "sdk-check"}\` fails when this file and the document disagree.
 //
 // Source document: ${document.info?.title ?? "Synveda"} ${document.info?.version ?? ""}
 `);

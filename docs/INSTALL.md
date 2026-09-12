@@ -417,8 +417,9 @@ currently experimental and has not been run by a real Cursor client here.
 
 `synveda mcp` serves governed context to any MCP client over stdio: `recall`
 uses the ordinary Knowledge query on the caller's public session, and
-`remember` appends an assertion event to that session for later capture in
-your own personal scope. Recall returns exact immutable revision and source
+`remember` appends an assertion event to that Session's governed scope for
+later Capture. Appending does not start extraction or publish Knowledge.
+Recall returns exact immutable revision and source
 addresses; it neither consumes a context token budget nor opens the separately
 authorised diagnostics enumeration lens. The deleted tenant-global
 `/v1/recall` route has not returned. You do not have to write the config by
@@ -433,6 +434,17 @@ It changes one key in the client's own config file and writes everything else
 back as it found it, so your other MCP servers are untouched. An existing
 `synveda` entry that differs is reported rather than replaced; pass `--force`
 if you meant to replace it. Restart the client afterwards.
+
+Authenticated calls require application identity independently of the MCP
+connection. Supply `session_id` per tool call when a host shares a server
+between conversations. A dedicated process may instead launch with
+`synveda mcp --session <existing-session-uuid>` or `synveda mcp --task
+<stable-application-key> --project <project-uuid>`. Reuse a task key only for
+the same application task across reconnects; transport disconnect never ends
+it. The outer `--session`/`--task` selectors are also preserved by `mcp install`.
+Claude's hook supplies its Session ID in context. See
+[Codex CLI setup](integrations/codex.md) for its native configuration and the
+[language clients](../sdks/README.md) for shared application workflows.
 
 For a client this release does not know, `synveda mcp install --print` gives you
 the entry to place yourself, and `--config <path>` writes a config kept

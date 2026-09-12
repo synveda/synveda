@@ -130,6 +130,42 @@
       "conformance": { "evidence_level": "not-run", "tested_at": null, "tested_version": null, "checks": {} }
     },
     {
+      "id": "codex",
+      "display_name": "Codex CLI",
+      "support_level": "captured",
+      "connection": "mcp",
+      "tested_versions": [
+        "0.152.0"
+      ],
+      "configuration": null,
+      "lifecycle": {
+        "mechanism": "MCP tool calls; lifecycle adapter unverified",
+        "contract_version": "Codex CLI 0.152.0 / MCP 2025-06-18",
+        "status": "tool-only",
+        "source": "docs/integrations/codex.md",
+        "events": []
+      },
+      "limitations": [
+        "Authentic MCP discovery and recall frames replay; no complete authenticated Codex lifecycle is claimed.",
+        "Use native Codex MCP configuration; Synveda does not write its TOML file.",
+        "Lifecycle hooks did not execute in the isolated headless qualification; Session creation, Capture and end require explicit application ownership.",
+        "Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version."
+      ],
+      "authentic_fixtures": [
+        {
+          "path": "crates/synveda-cli/fixtures/mcp/codex.json",
+          "sha256": "d807a328550a652430c35a2c4b65f0c29b193447b8255a7e9c2fcf2d49d71289",
+          "kind": "captured-client-frames"
+        }
+      ],
+      "conformance": {
+        "evidence_level": "captured-protocol",
+        "tested_at": "2026-09-12T14:50:38Z",
+        "tested_version": "0.152.0",
+        "checks": {}
+      }
+    },
+    {
       "id": "claude-desktop",
       "display_name": "Claude Desktop",
       "support_level": "captured",
@@ -153,8 +189,8 @@
       },
       "limitations": ["Authentic discovery and tool-call frames are replayed, but MCP alone does not prove session capture or end semantics."],
       "authentic_fixtures": [
-        { "path": "crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json", "sha256": "08defbfbddbe99a48271ffa9ca203e658782e431d601ae97478b532981e5a022", "kind": "captured-client-frames" },
-        { "path": "crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json", "sha256": "8ac8fac8d07913a562f440933ae8cbd77ebbacb26e70f851304ab0498e6389d9", "kind": "captured-client-frames" }
+        { "path": "crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json", "sha256": "71b69ccbfefdd67a0d0aafa7b2ae8692892d49a909769710ac06c1ee91b421eb", "kind": "captured-client-frames" },
+        { "path": "crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json", "sha256": "cd54bc373b89495bd730da8bf6656d51a06ff238a2330b925ff274cdda6e68ac", "kind": "captured-client-frames" }
       ],
       "conformance": { "evidence_level": "captured-protocol", "tested_at": "2026-08-05T00:00:00Z", "tested_version": "1.25927.0", "checks": {} }
     },
@@ -179,7 +215,7 @@
       },
       "limitations": ["Authentic non-Anthropic tool frames are replayed, but no session lifecycle/capture contract is available."],
       "authentic_fixtures": [
-        { "path": "crates/synveda-cli/fixtures/mcp/zed.json", "sha256": "8248caaa969cdae1606ba3c6c0ba39ee30b89702f29b49c901a3181e7d81cb3b", "kind": "captured-client-frames" }
+        { "path": "crates/synveda-cli/fixtures/mcp/zed.json", "sha256": "ebb6ce26f329d653cba2f4061160708c34e9ce17dbd82d0bde8830e03fc3b3d5", "kind": "captured-client-frames" }
       ],
       "conformance": { "evidence_level": "captured-protocol", "tested_at": "2026-08-05T00:00:00Z", "tested_version": "1.13.2", "checks": {} }
     },

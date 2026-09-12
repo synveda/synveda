@@ -2,9 +2,14 @@
 
 ## Problem and evidence
 
-OpenAPI and the TypeScript console contract are generated from the executable REST catalogue, but `sdks/` contains no tracked Python or TypeScript SDK implementation. External integrations must currently hand-build HTTP, authentication, pagination, retries, and error handling, which invites contract drift and unsafe retry behaviour. Framework-specific shims are not a substitute for supported base clients.
+The initial slice in `sdks/` now generates 15 operations and 52 schemas from the checked OpenAPI, with bounded HTTPX/Fetch clients, eight tests per language and a shared real-gateway acceptance workflow. Claude hook replay and both SDKs share authenticated Session identity, approved Skill bytes, pending proposals, workspace denial and correlated content-free audit. Public publication, wider operation coverage, a verified runtime/server matrix and the Keycloak end-to-end run remain open. Framework-specific shims are not a substitute for supported base clients.
 
 ## Scope
+
+The authorised initial slice and execution checkpoints are in
+[the interoperability plan](../INTEROPERABILITY_PLAN.md), under ADR-0106.
+It adds approved Skill retrieval and typed Knowledge proposal submission to
+the shared authenticated scenario without closing the wider release scope.
 
 - Generate or mechanically derive typed Python and TypeScript clients from the checked OpenAPI contract, then add a small maintained ergonomic layer.
 - Cover OIDC bearer injection/refresh hooks, sessions and ordered events, context runs, Knowledge query, capture, keyset pagination, idempotency keys, typed errors, timeouts, cancellation, and user-agent/version reporting.
@@ -46,3 +51,12 @@ Publish pre-1.0 prereleases against a pinned server version, run the shared conf
 ## Dependencies
 
 The owner must approve Synveda's repository/package licence, PyPI/npm namespaces, signing/provenance custody, supported runtime matrix, release ownership, and compatibility window before public distribution. The clients depend on stable generated OpenAPI and test OIDC credentials. gRPC support, if accepted under ADPT-3, is separate.
+
+**Current checkpoint (2026-09-12)**
+
+`make sdk-check` and the exact-role gateway shared workflow pass locally. The
+canonical Compose smoke path exits 78 because the retained acceptance project
+has an incomplete container inventory; no reset or asset replacement was
+performed. Next action: prepare the documented fresh acceptance project, run
+the same scenario with ordinary Keycloak identities, then resolve the existing
+package ownership, licence and release-provenance decisions before publication.

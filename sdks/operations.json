@@ -1,0 +1,17 @@
+[
+  "get_me",
+  "open_session",
+  "get_session",
+  "append_session_events",
+  "create_context_run",
+  "query_session_knowledge",
+  "create_capture_batch",
+  "end_session",
+  "list_available_skills",
+  "get_skill_version",
+  "list_skill_version_files",
+  "get_skill_version_file",
+  "create_knowledge",
+  "get_proposal",
+  "list_audit_events"
+]

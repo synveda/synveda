@@ -764,9 +764,10 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
         context_run.1.is_empty(),
         "the legacy composer must not translate accepted Knowledge: {context_run:?}"
     );
-    assert!(
-        first.context().is_none(),
-        "the hook must not manufacture context when composition selected nothing"
+    assert_eq!(
+        first.context().as_deref(),
+        Some(format!("Synveda Session ID: {session_id}. Pass this as session_id to Synveda MCP tools for this task.").as_str()),
+        "empty retrieval supplies only the explicit task handoff, never manufactured Knowledge"
     );
     assert!(
         context_run.2.len() == 64 && context_run.2.bytes().all(|byte| byte.is_ascii_hexdigit()),

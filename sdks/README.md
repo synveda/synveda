@@ -1,0 +1,115 @@
+# Authenticated public API clients (ADPT-4)
+
+This initial, unpublished slice covers 15 operations from Synveda's checked
+OpenAPI: Sessions, observations, Context, approved immutable Skills, Knowledge
+proposals and audit pages. The generated contracts include the source SHA-256;
+they target the 0.2.0 API in this checkout. Broader API coverage, published
+packages and a supported server/runtime matrix remain in `docs/backlog/ADPT-4.md`.
+
+TypeScript uses Node's maintained Fetch implementation; Python uses HTTPX.
+Neither client implements retrieval, policy, OAuth, orchestration or automatic
+task completion. The gateway owns Cedar, RLS, VedaFlow and audit.
+
+## Install locally and check
+
+Node 22+ and Python 3.11+ are required. The local acceptance run used Node
+24.18.0 and Python 3.14.6; CI additionally declares Node 22/Python 3.11.
+No public npm/PyPI package is published by this work.
+
+```sh
+pnpm install --frozen-lockfile
+python3 -m venv sdks/python/.venv
+. sdks/python/.venv/bin/activate
+python -m pip install --require-hashes -r sdks/python/requirements-dev.lock
+python -m pip install --no-deps -e sdks/python
+make sdk-check
+make interop-acceptance
+```
+
+The final command builds the existing CLI and Claude adapter, runs MCP boundary
+tests, then uses `scripts/db-test.sh` for a fresh exact-role Docker PostgreSQL
+fixture. Its real gateway uses ordinary tenant identities and maintained test
+policy packs. It runs authentic Claude hook replay and both language examples
+against one Session. This is not an OIDC or live vendor-client qualification.
+Missing prerequisites fail this explicit target; the SDK test is explicitly
+ignored in ordinary Rust runs that do not install language dependencies.
+
+Regenerate after an intentional public contract change:
+
+```sh
+node scripts/generate-sdk-contract.mjs
+make sdk-check
+```
+
+`SYNVEDA_PYTHON` and `SYNVEDA_DATAMODEL_CODEGEN` can name an existing environment's
+executables. Python runtime and generator dependencies are hash-locked; the
+TypeScript package uses the repository pnpm lock. The Python wheel includes
+generated types, operation bindings, contract metadata and `py.typed`.
+
+## Application boundary
+
+Create or obtain a Synveda Session once for an application task. Save its ID
+with the application's task state and pass that same ID to subsequent SDK and
+MCP calls. Reconnects do not create or end tasks. The task owner explicitly
+requests Capture and ends the Session when appropriate.
+
+Python imports `Client`, `ApiError` and `TransportError` from `synveda`, with
+typed operations in `synveda.operations`. TypeScript imports them from the
+local `@synveda/sdk` workspace package and calls `client.request(operationId,
+options)`. Request/response types and operation paths are generated, while
+path and query argument names are checked against generated metadata at runtime.
+Only the allowlisted contract slice can be called.
+
+Supply an async bearer provider: Python receives `refresh: bool`; TypeScript
+receives `refresh: boolean` and an `AbortSignal`. Reuse the application's
+maintained OIDC client or the existing `synveda auth token --json` command
+after `synveda login`. When using CLI credentials, bind the client to the
+returned `gateway_url`; a repository setting must not redirect that bearer.
+Keycloak remains the Compose reference IdP through generic OIDC/PKCE.
+
+The default total deadline is 30 seconds (maximum 120); request and response
+bodies default to 8 MiB (maximum 64 MiB). Python cancellation propagates as
+`asyncio.CancelledError`; TypeScript accepts a caller signal. Credential
+providers must cooperate with cancellation. Responses expose status, trace ID
+and Retry-After; typed API errors retain the public error taxonomy. The SDK
+does not log requests, credentials or returned content and refuses redirects.
+
+After a 401, only GET or an operation with a required public idempotency key
+may refresh and retry once, using changed credentials and identical request
+bytes/key/trace. Rate limits, transient failures and ambiguous writes return
+to the application. Event append uses stable `client_event_id` values and is
+never automatically replayed. Pagination is explicit: supply the returned
+`after`/cursor value to the next bounded request.
+
+## Shared workflow example
+
+`typescript/src/workflow.mts` and `python/workflow.py` execute the same scenario:
+allowed context, exact approved Skill file, observation, pending proposal,
+idempotent proposal replay, cross-workspace denial and content-free audit
+correlation. They are acceptance examples for synthetic data, not an agent loop.
+The fixture in `crates/synveda-gateway/tests/support/sdk_interop.rs` provisions
+their inputs through existing tenant fixtures and public APIs.
+
+To run them against a separately prepared deployment, supply one scenario JSON
+with `gateway`, `session_id`, `scope_id`, `project_id`, `workspace_id`, `skill_id`,
+`version_id`, `knowledge_id`, `denied_session_id`, `allowed_marker`,
+`proposal_marker`, `query` and a unique `run_key`. The named Session and
+Knowledge must be readable by the ordinary member; the Skill must have an
+approved enabled binding; the policy must require Knowledge review; the
+unrelated Session must actually exist in another workspace. An auditor is a
+separate principal with the tenant audit grant.
+
+Point `SYNVEDA_TOKEN_FILE` and `SYNVEDA_AUDITOR_TOKEN_FILE` at private token files
+obtained through the deployment's ordinary authentication. Keep token files
+outside the checkout, with owner-only permissions. The examples re-read them
+through the bearer callback; the application remains responsible for rotation.
+
+```sh
+node sdks/typescript/dist/workflow.mjs /path/to/scenario.json
+python sdks/python/workflow.py /path/to/scenario.json
+```
+
+Their output contains only client, Session, ContextRun, proposal and trace IDs.
+Follow `deploy/compose/README.md` for the canonical Keycloak/issuer/hosts/secret
+setup. Reusing an old deployment is not evidence of passing fresh Compose
+acceptance; the execution results are recorded in `docs/INTEROPERABILITY_PLAN.md`.

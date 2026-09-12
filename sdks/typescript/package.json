@@ -1,0 +1,14 @@
+{
+  "name": "@synveda/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": { "types": "./dist/client.d.mts", "import": "./dist/client.mjs" } },
+  "files": ["dist"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test --test-timeout=30000 'dist/*.test.mjs'"
+  },
+  "devDependencies": { "@types/node": "^22.10.0", "typescript": "^5.7.0" }
+}

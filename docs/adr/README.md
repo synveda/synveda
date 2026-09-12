@@ -86,7 +86,7 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0066](adr-0066-beta-demo-profile.md) | Operator-seeded beta demo | Proposed; amended once | Current (partially superseded by ADR-0100) | OPS-9 | ADR-0100 provides the resumable public-API PulseBoard demo; externally dependent beta evidence remains open. |
 | [ADR-0067](adr-0067-uninstall-and-cleanup.md) | Uninstall and cleanup | Proposed | Current (partially superseded by ADR-0102) | OPS-10 | Canonical Compose owns lifecycle and reset. Automatic artifact removal remains fail-closed until the installer persists a strict ownership receipt. |
 
-## ADR-0068 through ADR-0105
+## ADR-0068 through ADR-0106
 
 | ADR | Concise title | Header status | Current classification | Features | Replacement/removal |
 | --- | --- | --- | --- | --- | --- |
@@ -128,3 +128,4 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0103](adr-0103-cooperative-live-provider-reservation.md) | Cooperative aggregate live-provider reservation | Superseded by ADR-0105 | Removed | CPR-45 | The non-executing provider-reservation fixture was deleted; a supported Docker engine is an operator-owned prerequisite. |
 | [ADR-0104](adr-0104-indivisible-live-provider-effect-generation.md) | Indivisible live-provider effect generation | Superseded by ADR-0105 | Removed | CPR-45 | The fixture-only provider-effect grammar was deleted; acceptance now exercises the canonical Compose graph directly. |
 | [ADR-0105](adr-0105-direct-compose-acceptance.md) | Direct Docker Compose acceptance | Accepted | Current | CPR-45 | Supersedes ADR-0103/0104 and removes container-engine simulation. Logical recovery, Operations and the Apalis canary are implemented; live Docker/upgrade/external acceptance remains, while S3/WAL-PITR stays with OPS-5. |
+| [ADR-0106](adr-0106-authenticated-client-task-boundary.md) | Explicit task identity and public client interoperability | Accepted | Current | ADPT-1, ADPT-2, ADPT-4, CPR-12, CPR-23, CPR-39 | Amends ADR-0057's launch identity; preserves public API enforcement and ADR-0098 evidence gates. |

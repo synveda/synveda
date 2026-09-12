@@ -144,9 +144,11 @@ export async function sessionStart(
 
   const output: HookOutput = {};
   const text = result.value.rendered.trim();
-  if (text.length > 0) {
-    output.hookSpecificOutput = { hookEventName: "SessionStart", additionalContext: text };
-  }
+  const identity = `Synveda Session ID: ${spool.session_id}. Pass this as session_id to Synveda MCP tools for this task.`;
+  output.hookSpecificOutput = {
+    hookEventName: "SessionStart",
+    additionalContext: text.length > 0 ? `${identity}\n\n${text}` : identity,
+  };
   const disclosure = disclose(input.cwd, config);
   if (disclosure !== undefined) output.systemMessage = disclosure;
   return output;

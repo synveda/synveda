@@ -55,11 +55,11 @@ function fakeCli(name: string, body: string): { path: string; argv: () => string
   };
 }
 
-function run(cli: string, stdin = ""): Promise<Run> {
+function run(cli: string, stdin = "", settings: Record<string, string> = {}): Promise<Run> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [launcher], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, SYNVEDA_CLI: cli, XDG_STATE_HOME: scratch },
+      env: { ...process.env, SYNVEDA_CLI: cli, XDG_STATE_HOME: scratch, ...settings },
     });
     let stdout = "";
     let stderr = "";
@@ -81,6 +81,18 @@ test("it execs the CLI the credential seam resolves, with --writes host", async 
     "ADR-0057 decision 6: this plugin's Stop hook already observes its turns, so the " +
       "model must not also be offered a write tool — the same turn would be stored twice",
   );
+});
+
+test("the launcher forwards explicit project, workspace and credential profile", async () => {
+  const cli = fakeCli("target-and-profile", "exit 0");
+  const result = await run(cli.path, "", {
+    SYNVEDA_WORKSPACE: "workspace-a",
+    SYNVEDA_PROJECT: "project-a",
+    SYNVEDA_PROFILE: "work",
+  });
+  assert.equal(result.code, 0);
+  assert.deepEqual(cli.argv(), ["mcp", "--writes", "host", "--workspace", "workspace-a",
+    "--project", "project-a", "--profile", "work"]);
 });
 
 test("SYNVEDA_CLI is honoured, which is why the manifest names this file", async () => {

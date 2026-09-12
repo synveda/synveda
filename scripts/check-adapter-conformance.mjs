@@ -48,10 +48,13 @@ export function validateRegistry(registry, root = ROOT) {
 
     if (client.connection === "mcp" && client.support_level !== "unsupported") {
       const config = client.configuration;
-      if (!config || !config.key || !["json", "jsonc"].includes(config.syntax) || !config.restart) {
+      // Captured protocol evidence can precede an installer for the host's
+      // config format. Only an explicitly configured client promises a recipe.
+      const noInstaller = config === null && client.support_level !== "configured";
+      if (!noInstaller && (!config || !config.key || !["json", "jsonc"].includes(config.syntax) || !config.restart)) {
         fail(`${at}: MCP configuration needs key, syntax and restart`);
       }
-      if (!config?.path || Object.keys(config.path).length === 0) fail(`${at}: MCP configuration has no documented path`);
+      if (!noInstaller && (!config?.path || Object.keys(config.path).length === 0)) fail(`${at}: MCP configuration has no documented path`);
     }
 
     for (const fixture of client.authentic_fixtures ?? []) {
@@ -116,7 +119,7 @@ export function renderMatrix(registry) {
 }
 
 export function renderTypescript(registry) {
-  const clients = registry.clients.map((client) => ({
+  const clients = registry.clients.filter((client) => client.connection === "plugin" || client.configuration !== null).map((client) => ({
     id: client.id,
     label: client.display_name,
     via: client.connection,

@@ -34,6 +34,9 @@ use tower::ServiceExt;
 #[path = "support/configuration.rs"]
 mod configuration_support;
 
+#[path = "support/sdk_interop.rs"]
+mod sdk_interop;
+
 const SECRET: &[u8] = b"cpr-23-versioned-skills";
 
 async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
@@ -268,6 +271,73 @@ async fn call(
     (status, value)
 }
 
+/// Exercise the shipped filesystem client against the real policy-enforced
+/// gateway. This fixture owns only its unique temporary directory/listener.
+struct CliSync {
+    root: std::path::PathBuf,
+    url: String,
+    server: tokio::task::JoinHandle<()>,
+}
+
+impl CliSync {
+    async fn start(world: &World) -> Self {
+        let root = std::env::temp_dir().join(format!("synveda-skill-interop-{}", world.tenant.id));
+        std::fs::create_dir(&root).expect("create owned CLI fixture");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind gateway");
+        let url = format!("http://{}", listener.local_addr().expect("gateway address"));
+        let app = world.app.clone();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve gateway");
+        });
+        Self { root, url, server }
+    }
+
+    async fn sync(&self, world: &World) -> Value {
+        let binary =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/synveda");
+        let mut command = tokio::process::Command::new(binary);
+        command
+            .args([
+                "skill",
+                "sync",
+                "--scope",
+                &world.project.to_string(),
+                "--client",
+                "claude-code",
+                "--root",
+            ])
+            .arg(self.root.join("skills"))
+            .arg("--json")
+            .env("SYNVEDA_GATEWAY", &self.url)
+            .env("SYNVEDA_TOKEN", &world.alice)
+            .env("XDG_STATE_HOME", self.root.join("state"))
+            .kill_on_drop(true);
+        let output = tokio::time::timeout(Duration::from_secs(30), command.output())
+            .await
+            .expect("CLI sync deadline")
+            .expect("run built CLI; cargo build -p synveda-cli first");
+        assert!(
+            output.status.success(),
+            "CLI sync failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).expect("CLI sync JSON")
+    }
+
+    fn skill(&self) -> std::path::PathBuf {
+        self.root.join("skills/code-review/SKILL.md")
+    }
+}
+
+impl Drop for CliSync {
+    fn drop(&mut self) {
+        self.server.abort();
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
 fn bundle(version: &str, instruction: &str) -> Value {
     json!({
         "governing_scope_id": Value::Null,
@@ -452,6 +522,7 @@ async fn make_dispatch_due(pool: &PgPool, tenant: TenantId, operation: DurableOp
 async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
     let _serial = serial().await;
     let Some(world) = world().await else { return };
+    let cli = CliSync::start(&world).await;
 
     let installed = open_install(&world).await;
     let change = installed["change_id"].as_str().expect("change id");
@@ -472,6 +543,11 @@ async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
         before["skills"].as_array().map(Vec::len),
         Some(0),
         "a pending VedaFlow change is not an installed Skill"
+    );
+    assert_eq!(cli.sync(&world).await["written"], json!([]));
+    assert!(
+        !cli.skill().exists(),
+        "pending Skills must not be materialised"
     );
 
     let applied = approve_and_apply(&world, change).await;
@@ -727,6 +803,17 @@ async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
     .await;
     assert_eq!(status, StatusCode::OK, "{rolled_back}");
     assert_eq!(rolled_back["skills"][0]["version"]["id"], version_v1);
+    assert_eq!(
+        cli.sync(&world).await["written"]
+            .as_array()
+            .expect("written Skills")
+            .len(),
+        1
+    );
+    assert_eq!(
+        std::fs::read_to_string(cli.skill()).expect("approved Skill bytes"),
+        old_file["content"].as_str().expect("exact version content")
+    );
 
     let mut tx = rls::begin_tenant_tx(&world.pool, world.tenant.id)
         .await
@@ -746,6 +833,11 @@ async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
     .await;
     assert_eq!(status, StatusCode::OK, "{suppressed}");
     assert_eq!(suppressed["skills"], json!([]));
+    assert_eq!(cli.sync(&world).await["removed"], json!(["code-review"]));
+    assert!(
+        !cli.skill().exists(),
+        "withdrawn advertisement removes owned Skill files"
+    );
 
     let second_tenant_id = TenantId::new();
     let second_tenant = tenant_fixture::create(
