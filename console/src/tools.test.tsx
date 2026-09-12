@@ -283,6 +283,8 @@ test("the catalogue shows stable heads and a masked exact project configuration"
     APPROVED_ID,
     "configured",
     "never grants execution authority",
+    "Configured means a masked secret reference is present, not that it works",
+    "Quarantined versions cannot be bound",
   ]) {
     assert.match(text, new RegExp(expected, "i"), expected);
   }
@@ -322,7 +324,7 @@ test("one server exposes quarantined drift capabilities bindings health and revi
     "repo://pulseboard/runbooks",
     "triage",
     "grant no authorisation",
-    "Latest health",
+    "Latest reported result",
     "remote_http_adapter",
     "pulseboard-adapter/2.1",
     "23ms",
@@ -334,7 +336,7 @@ test("one server exposes quarantined drift capabilities bindings health and revi
     "Repin exact version",
     "Remove binding",
     "Report stateless discovery",
-    "Record trusted adapter test",
+    "Record external adapter report",
   ]) {
     assert.match(
       text,
@@ -358,11 +360,11 @@ test("write forecasts hide every mutation while immutable evidence remains reada
   const text = toText(markup);
   assert.match(text, /does not forecast tool\.write/i);
   assert.match(text, /Quarantined changed version/i);
-  assert.match(text, /Latest health/i);
+  assert.match(text, /Latest reported result/i);
   assert.match(text, /Policy does not offer binding changes/i);
   for (const action of [
     "Report stateless discovery",
-    "Record trusted adapter test",
+    "Record external adapter report",
     "Disable",
     "Repin exact version",
     "Remove binding",

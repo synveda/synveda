@@ -16,7 +16,14 @@ import {
   validateCliLoginUrl,
   validateDemoReceipt,
   validateDemoStatus,
+  validateRetryReviewInspection,
+  validateRetryReviewProposal,
+  validateRetryReviewReceipt,
+  validateRetryReviewRerun,
+  validateRetryReviewStatus,
+  validateRetryReviewVerification,
 } from "../deploy/compose/browser/product-demo-contract.mjs";
+import { runConsoleProductCheckpoint } from "../deploy/compose/browser/console-product-runner.mjs";
 import { runProductAcceptance } from "../deploy/compose/browser/product-demo-runner.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -44,7 +51,6 @@ const RESOURCE_NAMES = [
   "current_session",
   "current_context",
   "release_skill",
-  "release_skill_validation",
 ];
 const STATUS_NAMES = [
   "workspace",
@@ -57,7 +63,6 @@ const STATUS_NAMES = [
   "private_knowledge",
   "reuse_context",
   "current_context",
-  "release_skill_validation",
 ];
 
 const uuid = (value) =>
@@ -236,6 +241,7 @@ function receipt() {
         private_knowledge_id: ids.privateKnowledge,
         inspected_count: 1,
         private_knowledge_absent: true,
+        evidence_kind: "owner_scope",
       },
       current_session: session(ids.currentSession, "bob-subject"),
       current_context: context(
@@ -339,6 +345,427 @@ function status() {
   };
 }
 
+function pendingPrivateReceipt() {
+  const value = receipt();
+  delete value.resources.private_knowledge.revision_id;
+  value.resources.private_knowledge.change_id = uuid(28);
+  value.resources.private_knowledge.outcome = "pending_review";
+  value.resources.private_isolation.evidence_kind =
+    "pending_review_not_published";
+  value.notices = [
+    "private quick-test preference remains pending in Advanced Reviews; the demo does not claim it as active Knowledge",
+  ];
+  return value;
+}
+
+function pendingPrivateStatus() {
+  const value = status();
+  value.receipt = pendingPrivateReceipt();
+  value.live.private_knowledge = {
+    status: "unavailable",
+    reason: "not published",
+  };
+  return value;
+}
+
+function pendingSkillReceipt(value = receipt()) {
+  value.resources.release_skill.outcome = "pending_review";
+  value.resources.release_skill.change_id = uuid(29);
+  delete value.resources.release_skill_validation;
+  value.notices ??= [];
+  value.notices.push(
+    "Release Skill installation is in Advanced > Reviews; no unreviewed version was advertised or pinned",
+    "Release Skill validation remains pending until its governed version is applied",
+  );
+  return value;
+}
+
+function governedStatus() {
+  const value = pendingPrivateStatus();
+  value.receipt = pendingSkillReceipt(value.receipt);
+  delete value.live.release_skill_validation;
+  return value;
+}
+
+const RETRY_RULE =
+  "Retried ingestion requests must reuse the original Idempotency-Key. While the original request is running, the retry returns 409; after completion, it replays the stored response without starting a second ingestion.";
+
+function retryReceipt(state = "seeded") {
+  const ids = {
+    tenantScope: uuid(100),
+    workspace: uuid(101),
+    workspaceScope: uuid(102),
+    project: uuid(103),
+    projectScope: uuid(104),
+    repository: uuid(105),
+    reviewerGrant: uuid(106),
+    administratorGrant: uuid(107),
+    approverGrant: uuid(126),
+    viewerGrant: uuid(108),
+    baselineChange: uuid(109),
+    baselineKnowledge: uuid(110),
+    baselineRevision: uuid(111),
+    skillChange: uuid(112),
+    skill: uuid(113),
+    skillVersion: uuid(114),
+    session: uuid(115),
+    event: uuid(116),
+    capture: uuid(117),
+    candidate: uuid(118),
+    learning: uuid(119),
+    learningChange: uuid(120),
+    bindingChange: uuid(121),
+    binding: uuid(122),
+    learningRevision: uuid(123),
+    contextSession: uuid(124),
+    contextRun: uuid(125),
+  };
+  const author = {
+    label: "Avery Author",
+    subject: "author-subject",
+    credential_profile: "author",
+  };
+  const reviewer = {
+    label: "Riley Reviewer",
+    subject: "reviewer-subject",
+    credential_profile: "reviewer",
+  };
+  const approver = {
+    label: "Morgan Approver",
+    subject: "approver-subject",
+    credential_profile: "approver",
+  };
+  const viewer = {
+    label: "Vera Restricted Viewer",
+    subject: "viewer-subject",
+    credential_profile: "viewer",
+  };
+  const workspace = {
+    id: ids.workspace,
+    scope_id: ids.workspaceScope,
+    slug: "northstar-delivery-demo",
+    display_name: "Northstar Delivery",
+    description: "Northstar delivery workspace",
+    status: "active",
+    revision: 1,
+    created_by: author.subject,
+    created_at: "2026-09-10T09:00:00Z",
+    updated_at: "2026-09-10T09:00:00Z",
+  };
+  const project = {
+    id: ids.project,
+    workspace_id: ids.workspace,
+    scope_id: ids.projectScope,
+    slug: "ingestion-api",
+    status: "active",
+  };
+  const grant = (id, principal_id, role) => ({
+    id,
+    subject_kind: "principal",
+    principal_id,
+    role,
+    scope_id: ids.workspaceScope,
+    source: "direct",
+    directory_managed: false,
+  });
+  const sourceSession = {
+    id: ids.session,
+    workspace_id: ids.workspace,
+    project_id: ids.project,
+    scope_id: ids.projectScope,
+    repository_id: ids.repository,
+    principal_id: author.subject,
+    client_name: "synveda-demo",
+    external_session_id: "cpr45-retry-review-v1",
+    status: "active",
+    created_at: "2026-09-10T09:01:00Z",
+    last_observed_at: "2026-09-10T09:00:00Z",
+    updated_at: "2026-09-10T09:01:01Z",
+  };
+  const sourceEvent = {
+    id: ids.event,
+    session_id: ids.session,
+    payload: { text: RETRY_RULE, synthetic: true, replay: true },
+  };
+  const resources = {
+    workspace,
+    project,
+    repository: {
+      id: ids.repository,
+      project_id: ids.project,
+      canonical_uri: "https://github.com/northstar-demo/ingestion-api",
+    },
+    grant_reviewer: grant(ids.reviewerGrant, reviewer.subject, "reviewer"),
+    grant_administrator: grant(
+      ids.administratorGrant,
+      reviewer.subject,
+      "administrator",
+    ),
+    grant_approver: grant(
+      ids.approverGrant,
+      approver.subject,
+      "administrator",
+    ),
+    grant_viewer: grant(ids.viewerGrant, viewer.subject, "viewer"),
+    baseline_knowledge: {
+      outcome: "applied",
+      change_id: ids.baselineChange,
+      knowledge_item_id: ids.baselineKnowledge,
+      revision_id: ids.baselineRevision,
+    },
+    baseline_provenance: {
+      sources: [
+        {
+          source_type: "repository",
+          source_revision: "northstar-demo-baseline-v1",
+        },
+      ],
+    },
+    curator_rule: {
+      effective_at: ids.projectScope,
+      source: `knowledge/* @${reviewer.subject}\n`,
+    },
+    skill_install: {
+      outcome: ["binding_pending", "verified"].includes(state)
+        ? "applied"
+        : "pending_review",
+      change_id: ids.skillChange,
+      skill_id: ids.skill,
+      version_id: ids.skillVersion,
+    },
+    source_session: sourceSession,
+    source_event: sourceEvent,
+  };
+  if (state !== "seeded") {
+    Object.assign(resources, {
+      capture_batch: {
+        id: ids.capture,
+        session_id: ids.session,
+        project_id: ids.project,
+        scope_id: ids.projectScope,
+        state: "completed",
+      },
+      capture_candidates: {
+        candidates: [
+          {
+            id: ids.candidate,
+            source_event_ids: [ids.event],
+          },
+        ],
+      },
+      learning: {
+        id: ids.learning,
+        candidate_id: ids.candidate,
+        change_id: ids.learningChange,
+        outcome: "pending_review",
+      },
+      source_session_closed: { ...sourceSession, status: "ended" },
+    });
+  }
+  if (["binding_pending", "verified"].includes(state)) {
+    resources.skill_binding = {
+      outcome: "pending_review",
+      change_id: ids.bindingChange,
+      binding_id: ids.binding,
+      skill_id: ids.skill,
+      version_id: ids.skillVersion,
+    };
+  }
+  if (state === "verified") {
+    resources.context_session = { id: ids.contextSession };
+    resources.context_run = { id: ids.contextRun };
+    resources.verification = {
+      knowledge_item_id: ids.learning,
+      knowledge_revision_id: ids.learningRevision,
+      source_event_id: ids.event,
+      skill_id: ids.skill,
+      skill_version_id: ids.skillVersion,
+      skill_binding_id: ids.binding,
+      context_run_id: ids.contextRun,
+      audit_head_seq: 42,
+    };
+  }
+  return {
+    receipt_version: 2,
+    fixture: "cpr45-retry-review-v1",
+    gateway_url: SETTINGS.appOrigin,
+    state,
+    author,
+    reviewer,
+    approver,
+    viewer,
+    resources,
+  };
+}
+
+function retryRerunReceipt() {
+  const value = retryReceipt();
+  value.resources.workspace.description =
+    "Operator-edited CPR-45 acceptance description retained across seed replay.";
+  value.resources.workspace.revision = 2;
+  value.resources.workspace.updated_at = "2026-09-10T09:01:00Z";
+  return value;
+}
+
+function retryInspection(seed = retryReceipt()) {
+  return {
+    synthetic: true,
+    session: seed.resources.source_session,
+    timeline: { events: [seed.resources.source_event] },
+    source_event: seed.resources.source_event,
+  };
+}
+
+function retryProposal(id) {
+  return {
+    id,
+    state: "open",
+    commit: "c".repeat(64),
+    artifact_references: [{ family: "knowledge", artifact_id: uuid(130) }],
+  };
+}
+
+function retryVerification(binding = retryReceipt("binding_pending")) {
+  const resources = binding.resources;
+  const revision = uuid(123);
+  return {
+    synthetic: true,
+    knowledge: {
+      id: resources.learning.id,
+      current_revision: { id: revision, body_markdown: RETRY_RULE },
+    },
+    provenance: {
+      sources: [
+        {
+          source_type: "session_event",
+          session_event_id: resources.source_event.id,
+        },
+      ],
+    },
+    skill_version: { id: resources.skill_install.version_id },
+    skill_binding: {
+      id: resources.skill_binding.binding_id,
+      pinned_version_id: resources.skill_install.version_id,
+      enabled: true,
+    },
+    available_skills: {
+      skills: [
+        {
+          binding: { id: resources.skill_binding.binding_id },
+          version: { id: resources.skill_install.version_id },
+        },
+      ],
+    },
+    context: {
+      selections: [
+        {
+          knowledge_item_id: resources.learning.id,
+          knowledge_revision_id: revision,
+        },
+      ],
+    },
+    audit: {
+      knowledge: { events: [{ id: uuid(131) }] },
+      skill_binding: { events: [{ id: uuid(132) }] },
+      session: { events: [{ id: uuid(133) }] },
+      context: { events: [{ id: uuid(134) }] },
+      chain: { valid: true, head_seq: 42 },
+    },
+  };
+}
+
+function retryStatus() {
+  const receipt = retryReceipt("verified");
+  const value = (id) => ({ id });
+  const revision = receipt.resources.verification.knowledge_revision_id;
+  return {
+    receipt,
+    live: {
+      workspace: { status: "visible", value: value(receipt.resources.workspace.id) },
+      project: { status: "visible", value: value(receipt.resources.project.id) },
+      source_session: {
+        status: "visible",
+        value: {
+          id: receipt.resources.source_session.id,
+          status: "ended",
+        },
+      },
+      capture_batch: {
+        status: "visible",
+        value: {
+          id: receipt.resources.capture_batch.id,
+          state: "completed",
+        },
+      },
+      context_session: {
+        status: "visible",
+        value: value(receipt.resources.context_session.id),
+      },
+      context_run: {
+        status: "visible",
+        value: {
+          run: value(receipt.resources.verification.context_run_id),
+          selections: [
+            {
+              knowledge_item_id: receipt.resources.learning.id,
+              knowledge_revision_id: revision,
+            },
+          ],
+        },
+      },
+      baseline_knowledge: {
+        status: "visible",
+        value: {
+          id: receipt.resources.baseline_knowledge.knowledge_item_id,
+          current_revision: {
+            id: receipt.resources.baseline_knowledge.revision_id,
+          },
+        },
+      },
+      learning: {
+        status: "visible",
+        value: {
+          id: receipt.resources.learning.id,
+          current_revision: { id: revision },
+        },
+      },
+      learning_provenance: {
+        status: "visible",
+        value: {
+          sources: [
+            {
+              source_type: "session_event",
+              session_event_id: receipt.resources.source_event.id,
+            },
+          ],
+        },
+      },
+      skill_install: {
+        status: "visible",
+        value: {
+          id: receipt.resources.skill_install.skill_id,
+          current_version_id: receipt.resources.skill_install.version_id,
+        },
+      },
+      skill_binding: {
+        status: "visible",
+        value: {
+          id: receipt.resources.skill_binding.binding_id,
+          pinned_version_id: receipt.resources.skill_install.version_id,
+          enabled: true,
+        },
+      },
+      audit_chain: {
+        status: "visible",
+        value: {
+          valid: true,
+          head_seq: receipt.resources.verification.audit_head_seq,
+        },
+      },
+    },
+  };
+}
+
 function fakeChild() {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
@@ -350,14 +777,16 @@ function successfulSpawn(outputs, calls) {
   return (file, args, options) => {
     const child = fakeChild();
     const output = outputs.shift();
+    const result = output?.__result ?? { code: 0, stdout: JSON.stringify(output), stderr: "" };
     calls.push({ file, args, options });
     child.kill = () => true;
     queueMicrotask(() => {
-      child.emit("exit", 0, null);
-      child.stdout.write(JSON.stringify(output));
+      child.emit("exit", result.code, null);
+      child.stdout.write(result.stdout ?? "");
       child.stdout.end();
+      child.stderr.write(result.stderr ?? "");
       child.stderr.end();
-      setImmediate(() => child.emit("close", 0, null));
+      setImmediate(() => child.emit("close", result.code, null));
     });
     return child;
   };
@@ -407,6 +836,11 @@ test("CLI login and loopback handoff URLs are exact and secret-free", () => {
 test("the product receipt requires the real team, Capture, Knowledge and reuse legs", () => {
   assert.equal(validateDemoReceipt(receipt()), true);
   assert.equal(validateDemoStatus(status()), true);
+  assert.equal(validateDemoReceipt(pendingPrivateReceipt()), true);
+  assert.equal(validateDemoStatus(pendingPrivateStatus()), true);
+  assert.equal(validateDemoReceipt(pendingSkillReceipt()), true);
+  assert.equal(validateDemoReceipt(governedStatus().receipt), true);
+  assert.equal(validateDemoStatus(governedStatus()), true);
   for (const name of RESOURCE_NAMES) {
     const mutant = receipt();
     delete mutant.resources[name];
@@ -427,9 +861,33 @@ test("the product receipt requires the real team, Capture, Knowledge and reuse l
     },
     (value) => { value.resources.reuse_context.rendered = "test-fast"; },
     (value) => { value.resources.private_isolation.private_knowledge_absent = false; },
+    (value) => { value.resources.private_isolation.evidence_kind = "pending_review_not_published"; },
     (value) => { value.resources.release_skill_validation.state = "dead_lettered"; },
   ]) {
     const mutant = receipt();
+    mutate(mutant);
+    refuse(() => validateDemoReceipt(mutant), "product-demo");
+  }
+
+  for (const mutate of [
+    (value) => { value.notices = []; },
+    (value) => {
+      value.resources.release_skill_validation =
+        receipt().resources.release_skill_validation;
+    },
+    (value) => { delete value.resources.release_skill.change_id; },
+  ]) {
+    const mutant = pendingSkillReceipt();
+    mutate(mutant);
+    refuse(() => validateDemoReceipt(mutant), "product-demo");
+  }
+
+  for (const mutate of [
+    (value) => { value.notices = []; },
+    (value) => { value.resources.private_knowledge.revision_id = uuid(29); },
+    (value) => { value.resources.private_isolation.evidence_kind = "owner_scope"; },
+  ]) {
+    const mutant = pendingPrivateReceipt();
     mutate(mutant);
     refuse(() => validateDemoReceipt(mutant), "product-demo");
   }
@@ -451,17 +909,181 @@ test("the product receipt requires the real team, Capture, Knowledge and reuse l
   }
 });
 
-test("seed uses two real CLI profiles, one existing demo flow and a receipt reopen", async () => {
+test("the retry-review contract proves first run, rerun and persisted evidence", () => {
+  const seeded = retryReceipt();
+  const rerun = retryRerunReceipt();
+  const captured = retryReceipt("learning_pending");
+  const binding = retryReceipt("binding_pending");
+  assert.equal(validateRetryReviewReceipt(seeded), true);
+  assert.equal(validateRetryReviewRerun(seeded, rerun), true);
+  for (const mutate of [
+    (value) => { value.resources.workspace.description = seeded.resources.workspace.description; },
+    (value) => { value.resources.workspace.revision = 3; },
+    (value) => { value.resources.workspace.updated_at = seeded.resources.workspace.updated_at; },
+    (value) => { value.resources.workspace.display_name = "Repointed local fixture"; },
+    (value) => { value.resources.project.description = "Changed by the second seed"; },
+    (value) => { value.resources.source_session.updated_at = "2026-09-12T10:00:00Z"; },
+  ]) {
+    const mutant = structuredClone(rerun);
+    mutate(mutant);
+    refuse(() => validateRetryReviewRerun(seeded, mutant), "retry-review-rerun");
+  }
+  assert.equal(validateRetryReviewInspection(retryInspection(seeded), seeded), true);
+  assert.equal(validateRetryReviewReceipt(captured, "learning_pending"), true);
+  assert.equal(
+    validateRetryReviewProposal(
+      retryProposal(captured.resources.learning.change_id),
+      captured.resources.learning.change_id,
+    ),
+    true,
+  );
+  assert.equal(validateRetryReviewReceipt(binding, "binding_pending"), true);
+  assert.equal(
+    validateRetryReviewVerification(retryVerification(binding), binding),
+    true,
+  );
+  assert.equal(validateRetryReviewStatus(retryStatus()), true);
+  const repeatedBinding = retryStatus();
+  repeatedBinding.receipt.resources.skill_binding.outcome = "applied";
+  assert.equal(validateRetryReviewStatus(repeatedBinding), true);
+
+  const repointed = retryReceipt();
+  repointed.resources.workspace.display_name = "Repointed local fixture";
+  refuse(
+    () => validateRetryReviewRerun(seeded, repointed),
+    "retry-review-rerun",
+  );
+
+  const groupGrant = retryReceipt();
+  groupGrant.resources.grant_viewer.subject_kind = "group";
+  refuse(() => validateRetryReviewReceipt(groupGrant), "retry-review");
+});
+
+test("console checkpoints keep author reviewer and viewer browser identities separate", async () => {
+  const receipt = retryReceipt("learning_pending");
+  const proposal = retryProposal(receipt.resources.learning.change_id);
+  const status = retryStatus();
+  const sessions = [];
+  const runSession = async (options) => {
+    sessions.push(options);
+    return true;
+  };
+
+  for (const checkpoint of [
+    "seeded-edit",
+    "seeded-preserved",
+    "viewer-denial",
+    "reviewer-open",
+    "approved-not-applied",
+  ]) {
+    assert.equal(
+      await runConsoleProductCheckpoint({
+        chromium: {},
+        checkpoint,
+        proposal,
+        receipt,
+        runSession,
+      }),
+      true,
+    );
+  }
+  assert.equal(
+    await runConsoleProductCheckpoint({
+      chromium: {},
+      checkpoint: "verified",
+      runSession,
+      status,
+    }),
+    true,
+  );
+
+  assert.deepEqual(
+    sessions.map(({ admissionStage, expectedSubject, passwordFile, requiredRoleKeys, username }) => ({
+      admissionStage,
+      expectedSubject,
+      passwordFile,
+      requiredRoleKeys,
+      username,
+    })),
+    [
+      ...Array.from({ length: 2 }, () => ({
+        admissionStage: "author-admission",
+        expectedSubject: receipt.author.subject,
+        passwordFile: "/run/secrets/keycloak_demo_admin_password",
+        requiredRoleKeys: ["administrator"],
+        username: "synveda-demo-admin",
+      })),
+      {
+        admissionStage: "viewer-admission",
+        expectedSubject: receipt.viewer.subject,
+        passwordFile: "/run/secrets/keycloak_demo_viewer_password",
+        requiredRoleKeys: [],
+        username: "synveda-demo-viewer",
+      },
+      {
+        admissionStage: "reviewer-admission",
+        expectedSubject: receipt.reviewer.subject,
+        passwordFile: "/run/secrets/keycloak_demo_member_password",
+        requiredRoleKeys: [],
+        username: "synveda-demo-member",
+      },
+      {
+        admissionStage: "author-admission",
+        expectedSubject: receipt.author.subject,
+        passwordFile: "/run/secrets/keycloak_demo_admin_password",
+        requiredRoleKeys: ["administrator"],
+        username: "synveda-demo-admin",
+      },
+      {
+        admissionStage: "author-admission",
+        expectedSubject: status.receipt.author.subject,
+        passwordFile: "/run/secrets/keycloak_demo_admin_password",
+        requiredRoleKeys: ["administrator"],
+        username: "synveda-demo-admin",
+      },
+    ],
+  );
+});
+
+test("seed replays the staged fixture through four real identities and one denied review", async () => {
   const calls = [];
-  const passwords = [Buffer.from("a".repeat(64)), Buffer.from("b".repeat(64))];
+  const passwords = [
+    Buffer.from("a".repeat(64)),
+    Buffer.from("b".repeat(64)),
+    Buffer.from("c".repeat(64)),
+    Buffer.from("d".repeat(64)),
+  ];
   let passwordIndex = 0;
-  const command = async (args) => {
-    calls.push(["command", ...args]);
-    return args[1] === "status" ? status() : receipt();
+  let seedCount = 0;
+  const command = async (args, _environment, _timeout, _spawn, expectation = "json") => {
+    calls.push(["command", expectation, ...args]);
+    if (args[0] === "proposal") {
+      return args[1] === "show" ? retryProposal(args[2]) : true;
+    }
+    switch (args[2]) {
+      case "seed":
+        seedCount += 1;
+        return seedCount === 1 ? retryReceipt() : retryRerunReceipt();
+      case "inspect": return retryInspection();
+      case "capture": return retryReceipt("learning_pending");
+      case "bind-skill": return retryReceipt("binding_pending");
+      case "verify": return retryVerification();
+      case "status": return retryStatus();
+      default: throw new Error(`unexpected command ${args.join(" ")}`);
+    }
   };
   const login = async ({ profile, username, password }) => {
     calls.push(["login", profile, username]);
     assert.equal(password.length, 64);
+  };
+  const browserCheckpoint = async ({ checkpoint, receipt, proposal, status }) => {
+    calls.push([
+      "browser",
+      checkpoint,
+      receipt?.fixture ?? status?.receipt?.fixture,
+      proposal?.id,
+    ]);
+    return true;
   };
   assert.equal(
     await runProductAcceptance({
@@ -473,44 +1095,67 @@ test("seed uses two real CLI profiles, one existing demo flow and a receipt reop
       readPassword: () => passwords[passwordIndex++],
       login,
       command,
+      browserCheckpoint,
     }),
     true,
   );
-  assert.deepEqual(calls, [
-    ["login", "alice", "synveda-demo-admin"],
-    ["login", "bob", "synveda-demo-member"],
-    [
-      "command",
-      "demo",
-      "start",
-      "--profile",
-      "team",
-      "--credentials",
-      "alice",
-      "--bob-credentials",
-      "bob",
-      "--json",
-    ],
-    [
-      "command",
-      "demo",
-      "start",
-      "--profile",
-      "team",
-      "--credentials",
-      "alice",
-      "--bob-credentials",
-      "bob",
-      "--json",
-    ],
-    ["command", "demo", "status", "--credentials", "alice", "--json"],
+  assert.deepEqual(calls.slice(0, 4), [
+    ["login", "author", "synveda-demo-admin"],
+    ["login", "reviewer", "synveda-demo-member"],
+    ["login", "approver", "synveda-demo-approver"],
+    ["login", "viewer", "synveda-demo-viewer"],
   ]);
+  const commands = calls.filter(([kind]) => kind === "command");
+  assert.equal(commands.length, 18);
+  assert.equal(commands.filter((call) => call[4] === "seed").length, 2);
+  assert.equal(
+    commands.filter(
+      (call) =>
+        call[2] === "proposal" && call[3] === "approve" && call.includes("viewer"),
+    ).length,
+    0,
+  );
+  assert.equal(
+    commands.filter(
+      (call) => call[2] === "proposal" && call[3] === "approve" && call.includes("reviewer"),
+    ).length,
+    3,
+  );
+  assert.equal(
+    commands.filter(
+      (call) => call[2] === "proposal" && call[3] === "approve" && call.includes("approver"),
+    ).length,
+    2,
+  );
+  assert.equal(
+    commands.filter(
+      (call) => call[2] === "proposal" && call[3] === "apply" && call.includes("author"),
+    ).length,
+    3,
+  );
+  assert.deepEqual(commands.at(-1).slice(1, 5), [
+    "json",
+    "demo",
+    "retry-review",
+    "status",
+  ]);
+  assert.deepEqual(
+    calls.filter(([kind]) => kind === "browser").map((call) => call[1]),
+    [
+      "seeded-edit",
+      "seeded-preserved",
+      "viewer-denial",
+      "reviewer-open",
+      "approved-not-applied",
+      "verified",
+    ],
+  );
   for (const password of passwords) {
     assert.ok(password.every((value) => value === 0));
   }
 });
 
-test("post-restart verification requires the persisted receipt and only Alice's login", async () => {
+test("post-restart verification requires the persisted receipt and only the author login", async () => {
   const calls = [];
   const adminPassword = Buffer.from("a".repeat(64));
   assert.equal(
@@ -531,17 +1176,71 @@ test("post-restart verification requires the persisted receipt and only Alice's 
       },
       command: async (args) => {
         calls.push(["command", ...args]);
-        return status();
+        return retryStatus();
       },
+      browserCheckpoint: async () => true,
     }),
     true,
   );
   assert.deepEqual(calls, [
     ["password", "/run/secrets/keycloak_demo_admin_password"],
-    ["login", "alice", "synveda-demo-admin"],
-    ["command", "demo", "status", "--credentials", "alice", "--json"],
+    ["login", "author", "synveda-demo-admin"],
+    [
+      "command",
+      "demo",
+      "retry-review",
+      "status",
+      "--author-credentials",
+      "author",
+      "--json",
+    ],
   ]);
   assert.ok(adminPassword.every((value) => value === 0));
+});
+
+test("the reference acceptance path retains the existing portable product receipt", async () => {
+  const reference = validateSettings(
+    "https://synveda.example.com",
+    "https://identity.example.com/realms/synveda",
+  );
+  const calls = [];
+  const passwords = [Buffer.from("a".repeat(64)), Buffer.from("b".repeat(64))];
+  const command = async (args) => {
+    calls.push(["command", ...args]);
+    return args[1] === "status" ? status() : receipt();
+  };
+  assert.equal(
+    await runProductAcceptance({
+      chromium: { launch: async () => {} },
+      environment: {
+        SYNVEDA_BROWSER_APP_URL: reference.appOrigin,
+        SYNVEDA_BROWSER_ISSUER: reference.issuer,
+      },
+      readPassword: () => passwords.shift(),
+      login: async ({ profile, username, password }) => {
+        calls.push(["login", profile, username]);
+        password.fill(0);
+      },
+      command,
+    }),
+    true,
+  );
+  assert.deepEqual(calls.slice(0, 2), [
+    ["login", "alice", "synveda-demo-admin"],
+    ["login", "bob", "synveda-demo-member"],
+  ]);
+  assert.equal(
+    calls.filter((call) => call[0] === "command" && call[2] === "start").length,
+    2,
+  );
+  assert.deepEqual(calls.at(-1), [
+    "command",
+    "demo",
+    "status",
+    "--credentials",
+    "alice",
+    "--json",
+  ]);
 });
 
 test("the product runner refuses unknown phases before reading a secret", async () => {
@@ -567,6 +1266,7 @@ test("the product runner refuses unknown phases before reading a secret", async 
 
 test("a partial password read failure clears the first secret and stops", async () => {
   const adminPassword = Buffer.from("a".repeat(64));
+  const memberPassword = Buffer.from("b".repeat(64));
   let reads = 0;
   await assert.rejects(
     runProductAcceptance({
@@ -578,7 +1278,8 @@ test("a partial password read failure clears the first secret and stops", async 
       readPassword: () => {
         reads += 1;
         if (reads === 1) return adminPassword;
-        throw new Error("member secret unavailable");
+        if (reads === 2) return memberPassword;
+        throw new Error("viewer secret unavailable");
       },
       login: async () => {
         throw new Error("login must not run");
@@ -589,11 +1290,41 @@ test("a partial password read failure clears the first secret and stops", async 
     }),
   );
   assert.ok(adminPassword.every((value) => value === 0));
+  assert.ok(memberPassword.every((value) => value === 0));
 });
 
 test("the exact CLI is spawned with a closed environment and waits for close", async () => {
   const calls = [];
-  const passwords = [Buffer.from("a".repeat(64)), Buffer.from("b".repeat(64))];
+  const passwords = [
+    Buffer.from("a".repeat(64)),
+    Buffer.from("b".repeat(64)),
+    Buffer.from("c".repeat(64)),
+    Buffer.from("d".repeat(64)),
+  ];
+  const seeded = retryReceipt();
+  const captured = retryReceipt("learning_pending");
+  const binding = retryReceipt("binding_pending");
+  const ok = { __result: { code: 0, stdout: "", stderr: "" } };
+  const outputs = [
+    seeded,
+    retryRerunReceipt(),
+    retryInspection(seeded),
+    captured,
+    retryProposal(captured.resources.learning.change_id),
+    ok,
+    ok,
+    retryProposal(captured.resources.skill_install.change_id),
+    ok,
+    ok,
+    ok,
+    binding,
+    retryProposal(binding.resources.skill_binding.change_id),
+    ok,
+    ok,
+    ok,
+    retryVerification(binding),
+    retryStatus(),
+  ];
   assert.equal(
     await runProductAcceptance({
       chromium: { launch: async () => {} },
@@ -610,11 +1341,12 @@ test("the exact CLI is spawned with a closed environment and waits for close", a
       },
       readPassword: () => passwords.shift(),
       login: async ({ password }) => password.fill(0),
-      spawnProcess: successfulSpawn([receipt(), receipt(), status()], calls),
+      browserCheckpoint: async () => true,
+      spawnProcess: successfulSpawn(outputs, calls),
     }),
     true,
   );
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 18);
   for (const call of calls) {
     assert.equal(call.file, "/usr/local/bin/synveda");
     assert.deepEqual(Object.keys(call.options.env).sort(), [
@@ -654,7 +1386,12 @@ test("CLI timeout escalates to SIGKILL and oversized output fails closed", async
       }
       return child;
     };
-    const passwords = [Buffer.from("a".repeat(64)), Buffer.from("b".repeat(64))];
+    const passwords = [
+      Buffer.from("a".repeat(64)),
+      Buffer.from("b".repeat(64)),
+      Buffer.from("c".repeat(64)),
+      Buffer.from("d".repeat(64)),
+    ];
     await assert.rejects(
       runProductAcceptance({
         chromium: { launch: async () => {} },
@@ -687,6 +1424,10 @@ test("the fixture copies the product CLI and exposes no token-transfer shortcut"
     join(ROOT, "deploy/compose/browser/product-demo-runner.mjs"),
     "utf8",
   );
+  const consoleRunner = readFileSync(
+    join(ROOT, "deploy/compose/browser/console-product-runner.mjs"),
+    "utf8",
+  );
   const lifecycle = readFileSync(
     join(ROOT, "deploy/compose/scripts/compose.sh"),
     "utf8",
@@ -709,9 +1450,26 @@ test("the fixture copies the product CLI and exposes no token-transfer shortcut"
     /storageState\s*[:(]/,
     /ignoreHTTPSErrors/,
     /--no-sandbox/,
-  ]) assert.doesNotMatch(runner, forbidden);
+  ]) {
+    assert.doesNotMatch(runner, forbidden);
+    assert.doesNotMatch(consoleRunner, forbidden);
+  }
   assert.match(runner, /"login",\s*"--gateway"/);
-  assert.match(runner, /"demo",\s*"start"/);
+  assert.match(runner, /"demo",\s*"retry-review",\s*"seed"/);
+  assert.match(runner, /profile:\s*"viewer"/);
+  assert.match(runner, /checkpoint:\s*"viewer-denial"/);
+  assert.match(consoleRunner, /expectedSubject:\s*receipt\?\.viewer\?\.subject/);
+  assert.match(
+    consoleRunner,
+    /\^Synthetic replay: determine ingestion retry behaviour\\s\+running\$/,
+  );
+  assert.match(consoleRunner, /atProductStage\("console-seeded-session"/);
+  assert.match(consoleRunner, /atProductStage\("console-seeded-review-page"/);
+  assert.match(consoleRunner, /atProductStage\("console-seeded-review-state"/);
+  assert.match(consoleRunner, /atProductStage\("console-confirmation-open"/);
+  assert.match(consoleRunner, /atProductStage\("console-confirmation-dismiss"/);
+  assert.match(consoleRunner, /getByRole\("combobox", \{ name: \/\^workspace\$\/i \}\)/);
+  assert.match(consoleRunner, /getByRole\("textbox", \{ name: \/\^description\$\/i \}\)/);
   assert.match(
     lifecycle,
     /run_product_acceptance seed "\$@"[\s\S]*restart_service_name=postgres[\s\S]*rerun_browser_acceptance "\$@"[\s\S]*run_product_acceptance verify "\$@"/,

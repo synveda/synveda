@@ -1678,9 +1678,9 @@ test("Keycloak convergence publishes only after bounded proof and cleanup", () =
     [
       "additive direct gate write",
       source.replace(
-        "    unset bootstrap_password convergence_password demo_admin_password demo_member_password\n",
+        "    unset bootstrap_password convergence_password demo_admin_password\n    unset demo_approver_password demo_member_password demo_viewer_password\n",
         "    printf '%s\\n' \"$contract\" > \"$public_gate\"\n" +
-          "    unset bootstrap_password convergence_password demo_admin_password demo_member_password\n",
+          "    unset bootstrap_password convergence_password demo_admin_password\n    unset demo_approver_password demo_member_password demo_viewer_password\n",
       ),
     ],
     [
@@ -2944,7 +2944,7 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
     const files = readdirSync(secrets)
       .filter((name) => !name.startsWith(".") && statSync(join(secrets, name)).isFile())
       .sort();
-    assert.equal(files.length, 17);
+    assert.equal(files.length, 19);
     for (const name of files) {
       const value = readFileSync(join(secrets, name), "utf8").trim();
       assert.ok(value.length > 0, `${name} is empty`);
@@ -3126,10 +3126,14 @@ exec "$SYNVEDA_TEST_REAL_OPENSSL" "$@"
     );
 
     rmSync(join(secrets, "keycloak_demo_admin_password"));
+    rmSync(join(secrets, "keycloak_demo_approver_password"));
     rmSync(join(secrets, "keycloak_demo_member_password"));
+    rmSync(join(secrets, "keycloak_demo_viewer_password"));
     await serialisedRun();
     assert.equal(existsSync(join(secrets, "keycloak_demo_admin_password")), true);
+    assert.equal(existsSync(join(secrets, "keycloak_demo_approver_password")), true);
     assert.equal(existsSync(join(secrets, "keycloak_demo_member_password")), true);
+    assert.equal(existsSync(join(secrets, "keycloak_demo_viewer_password")), true);
     assert.equal(
       readdirSync(projectRoot).some((name) => name.startsWith(".synveda-demo-secret-stage.")),
       false,
@@ -3336,7 +3340,9 @@ exec "$SYNVEDA_TEST_REAL_CHMOD" "$@"
         });
         assert.equal(prepared.status, 0, prepared.stderr);
         rmSync(join(secrets, "keycloak_demo_admin_password"));
+        rmSync(join(secrets, "keycloak_demo_approver_password"));
         rmSync(join(secrets, "keycloak_demo_member_password"));
+        rmSync(join(secrets, "keycloak_demo_viewer_password"));
       }
       const target =
         kind === "fresh" ? secrets : join(secrets, "keycloak_demo_admin_password");
@@ -3358,7 +3364,9 @@ exec "$SYNVEDA_TEST_REAL_CHMOD" "$@"
       } else {
         assert.match(refused.stderr, /demo secret extension could not be installed/);
         assert.equal(readFileSync(target, "utf8"), "foreign-demo\n");
+        assert.equal(existsSync(join(secrets, "keycloak_demo_approver_password")), false);
         assert.equal(existsSync(join(secrets, "keycloak_demo_member_password")), false);
+        assert.equal(existsSync(join(secrets, "keycloak_demo_viewer_password")), false);
       }
       assert.equal(
         readdirSync(projectRoot).some((name) => name.startsWith(".synveda-")),
@@ -3516,7 +3524,9 @@ test("the secret generator extends safe optional secret pairs without rotation",
     rmSync(join(secrets, "apalis_owner_password"));
     rmSync(join(secrets, "apalis_runtime_password"));
     rmSync(join(secrets, "keycloak_demo_admin_password"));
+    rmSync(join(secrets, "keycloak_demo_approver_password"));
     rmSync(join(secrets, "keycloak_demo_member_password"));
+    rmSync(join(secrets, "keycloak_demo_viewer_password"));
 
     const extended = spawnSync(GENERATOR, ["--if-missing"], {
       cwd: ROOT,
@@ -3528,13 +3538,22 @@ test("the secret generator extends safe optional secret pairs without rotation",
     const apalisOwner = readFileSync(join(secrets, "apalis_owner_password"), "utf8");
     const apalisRuntime = readFileSync(join(secrets, "apalis_runtime_password"), "utf8");
     const admin = readFileSync(join(secrets, "keycloak_demo_admin_password"), "utf8");
+    const approver = readFileSync(join(secrets, "keycloak_demo_approver_password"), "utf8");
     const member = readFileSync(join(secrets, "keycloak_demo_member_password"), "utf8");
+    const viewer = readFileSync(join(secrets, "keycloak_demo_viewer_password"), "utf8");
     assert.notEqual(apalisOwner, apalisRuntime);
     assert.notEqual(admin, member);
+    assert.notEqual(admin, viewer);
+    assert.notEqual(admin, approver);
+    assert.notEqual(approver, member);
+    assert.notEqual(approver, viewer);
+    assert.notEqual(member, viewer);
     assert.ok(!`${extended.stdout}${extended.stderr}`.includes(apalisOwner.trim()));
     assert.ok(!`${extended.stdout}${extended.stderr}`.includes(apalisRuntime.trim()));
     assert.ok(!`${extended.stdout}${extended.stderr}`.includes(admin.trim()));
+    assert.ok(!`${extended.stdout}${extended.stderr}`.includes(approver.trim()));
     assert.ok(!`${extended.stdout}${extended.stderr}`.includes(member.trim()));
+    assert.ok(!`${extended.stdout}${extended.stderr}`.includes(viewer.trim()));
 
     const rerun = spawnSync(GENERATOR, ["--if-missing"], {
       cwd: ROOT,
@@ -3545,7 +3564,12 @@ test("the secret generator extends safe optional secret pairs without rotation",
     assert.equal(readFileSync(join(secrets, "apalis_owner_password"), "utf8"), apalisOwner);
     assert.equal(readFileSync(join(secrets, "apalis_runtime_password"), "utf8"), apalisRuntime);
     assert.equal(readFileSync(join(secrets, "keycloak_demo_admin_password"), "utf8"), admin);
+    assert.equal(
+      readFileSync(join(secrets, "keycloak_demo_approver_password"), "utf8"),
+      approver,
+    );
     assert.equal(readFileSync(join(secrets, "keycloak_demo_member_password"), "utf8"), member);
+    assert.equal(readFileSync(join(secrets, "keycloak_demo_viewer_password"), "utf8"), viewer);
 
     rmSync(join(secrets, "apalis_runtime_password"));
     const partial = spawnSync(GENERATOR, ["--if-missing"], {
@@ -3649,7 +3673,9 @@ test("the secret generator refuses a colliding partial demo extension", () => {
     const kmsBefore = readFileSync(join(secrets, "synveda_kms_key"), "utf8");
 
     rmSync(join(secrets, "keycloak_demo_admin_password"));
+    rmSync(join(secrets, "keycloak_demo_approver_password"));
     rmSync(join(secrets, "keycloak_demo_member_password"));
+    rmSync(join(secrets, "keycloak_demo_viewer_password"));
     writeFileSync(join(secrets, "keycloak_demo_admin_password"), protectedAdmin, {
       mode: 0o600,
     });
@@ -3660,9 +3686,12 @@ test("the secret generator refuses a colliding partial demo extension", () => {
     });
     assert.equal(adminCollision.status, 73);
     assert.match(adminCollision.stderr, /existing demo secret extension is unsafe/);
+    assert.equal(existsSync(join(secrets, "keycloak_demo_approver_password")), false);
     assert.equal(existsSync(join(secrets, "keycloak_demo_member_password")), false);
+    assert.equal(existsSync(join(secrets, "keycloak_demo_viewer_password")), false);
 
     rmSync(join(secrets, "keycloak_demo_admin_password"));
+    rmSync(join(secrets, "keycloak_demo_approver_password"), { force: true });
     writeFileSync(join(secrets, "keycloak_demo_member_password"), protectedConvergence, {
       mode: 0o600,
     });
@@ -3674,6 +3703,8 @@ test("the secret generator refuses a colliding partial demo extension", () => {
     assert.equal(memberCollision.status, 73);
     assert.match(memberCollision.stderr, /existing demo secret extension is unsafe/);
     assert.equal(existsSync(join(secrets, "keycloak_demo_admin_password")), false);
+    assert.equal(existsSync(join(secrets, "keycloak_demo_approver_password")), false);
+    assert.equal(existsSync(join(secrets, "keycloak_demo_viewer_password")), false);
     assert.equal(readFileSync(join(secrets, "synveda_kms_key"), "utf8"), kmsBefore);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
@@ -7588,7 +7619,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
       test: ["CMD", "/opt/keycloak/bin/synveda-generation-gate", "ready"],
       interval: "5s",
       timeout: "3s",
-      retries: 36,
+      retries: 48,
       start_period: "15s",
     },
     secrets: [

@@ -74,6 +74,29 @@ test("feedback names one context selection and its exact immutable revision", ()
   }
 });
 
+test("a Context workbench request uses the generated Session route and retry identity", () => {
+  const request = describe("create_context_run", {
+    path: { session_id: "session-3" },
+    body: {
+      query: "Which request header should this change preserve?",
+      budget_tokens: 800,
+      max_sensitivity: "internal",
+    },
+    idempotencyKey: "context-attempt-1",
+  });
+  assert.equal(request.path, "/sessions/session-3/context-runs");
+  assert.equal(request.init.method, "POST");
+  assert.equal(
+    (request.init.headers as Record<string, string>)["idempotency-key"],
+    "context-attempt-1",
+  );
+  assert.deepEqual(JSON.parse(request.init.body as string), {
+    query: "Which request header should this change preserve?",
+    budget_tokens: 800,
+    max_sensitivity: "internal",
+  });
+});
+
 test("hashes-only selections cannot manufacture a feedback target", () => {
   const retained = selection({ knowledge_item_id: undefined, knowledge_revision_id: undefined });
   assert.equal(canGiveFeedback(retained), false);

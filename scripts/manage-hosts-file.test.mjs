@@ -184,7 +184,10 @@ test("install and remove preserve unrelated bytes and POSIX ownership metadata",
     const before = statSync(state.hosts);
     assert.equal(manage(state, "status", BUNDLED, undefined), "absent");
     assert.equal(manage(state, "install"), "installed");
-    assert.deepEqual(readFileSync(state.hosts), Buffer.concat([state.source, expectedBlock(BUNDLED)]));
+    assert.deepEqual(
+      readFileSync(state.hosts),
+      Buffer.concat([state.source, expectedBlock(BUNDLED)]),
+    );
     assert.equal(manage(state, "status", BUNDLED, undefined), "installed");
     assert.equal(manage(state, "install"), "installed");
     const installed = statSync(state.hosts);
@@ -464,6 +467,33 @@ test("a non-writable target is refused before sidecar or target mutation", () =>
     assert.equal(existsSync(join(state.scratch, LOCK)), false);
   } finally {
     chmodSync(state.hosts, 0o644);
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("install snapshots metadata after the protected target is opened for writing", () => {
+  const state = fixture();
+  try {
+    let writableOpens = 0;
+    assert.equal(
+      manage(state, "install", BUNDLED, confirmation("install"), {
+        hooks: {
+          afterWritableSnapshotOpen: () => {
+            writableOpens += 1;
+            // Models macOS attaching provenance metadata on the first writable
+            // open without changing the file's final authority or contents.
+            chmodSync(state.hosts, 0o600);
+            chmodSync(state.hosts, 0o644);
+          },
+        },
+      }),
+      "installed",
+    );
+    assert.equal(writableOpens, 1);
+    assert.deepEqual(readFileSync(state.hosts), Buffer.concat([state.source, expectedBlock(BUNDLED)]));
+    assert.equal(manage(state, "status", BUNDLED, undefined), "installed");
+    assert.equal(manage(state, "remove"), "absent");
+  } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }
 });

@@ -14,7 +14,7 @@
  * their own capability, where somebody goes to govern rather than lands to
  * work.
  *
- * The shell carries four things: the two switchers, the two menus, the
+ * The shell carries four things: the two switchers, the grouped navigation, the
  * caller's identity, and the outlet. Nothing else — a shell that reached
  * into a page's data would be a second place a page's state lives.
  */
@@ -24,7 +24,15 @@ import { createContext, useCallback, useContext } from "react";
 import { signOut } from "./api.mjs";
 import { invalidate } from "./Query.js";
 import { Link } from "./Router.js";
-import { advancedNav, hrefOf, primaryNav, routeOf, type RouteDef, type RouteId } from "./routes.mjs";
+import {
+  administrationNav,
+  advancedNav,
+  hrefOf,
+  routeOf,
+  workNav,
+  type RouteDef,
+  type RouteId,
+} from "./routes.mjs";
 import {
   orderedWorkspaces,
   projectsOf,
@@ -134,9 +142,15 @@ export function Shell({
       </header>
 
       <div className="shell-body">
-        <nav className="sidebar" aria-label="Primary">
+        <nav className="sidebar" aria-label="Product navigation">
           <ul className="nav">
-            {primaryNav().map((item) => (
+            {workNav().map((item) => (
+              <NavItem key={item.id} item={item} current={route} />
+            ))}
+          </ul>
+          <h2 className="nav-heading">Administration</h2>
+          <ul className="nav">
+            {administrationNav().map((item) => (
               <NavItem key={item.id} item={item} current={route} />
             ))}
           </ul>

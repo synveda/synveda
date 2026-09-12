@@ -41,6 +41,7 @@ import type {
   KnowledgeSourcesView,
   KnowledgeUsageListView,
   MergeKnowledgeBody,
+  MeView,
   ResolveConflictBody,
   SupersedeKnowledgeBody,
 } from "./generated/api.js";
@@ -93,9 +94,13 @@ export function Knowledge() {
     <>
       <PageHeading route="knowledge" />
       <div className="knowledge-toolbar">
-        <button type="button" onClick={() => setCreating((value) => !value)}>
-          {creating ? "Close new item" : "Add Knowledge"}
-        </button>
+        {scopes.length > 0 ? (
+          <button type="button" onClick={() => setCreating((value) => !value)}>
+            {creating ? "Close new item" : "Add Knowledge"}
+          </button>
+        ) : (
+          <span className="muted">Knowledge is read-only at the scopes currently selected.</span>
+        )}
         <button type="button" onClick={() => {
           const next = { ...draft, stale: "true" as const, lifecycle: "" };
           setDraft(next); setFilters(next); setSeen([]); setCursor(null);
@@ -116,15 +121,13 @@ export function Knowledge() {
           }}
         />
       ) : null}
-      <ConflictQueue />
-      {policyScopeId ? <FreshnessPolicySummary scopeId={policyScopeId} /> : null}
       <KnowledgeFilterBar
         filters={draft}
         onChange={(next) => setDraft((current) => ({ ...current, ...next }))}
         onApply={applyFilters}
         onClear={() => {
-          setDraft(EMPTY_KNOWLEDGE_FILTERS);
-          setFilters(EMPTY_KNOWLEDGE_FILTERS);
+          setDraft(initial);
+          setFilters(initial);
           setSeen([]);
           setCursor(null);
         }}
@@ -144,7 +147,7 @@ export function Knowledge() {
               ) : (
                 <ul className="knowledge-list">
                   {rows.map((item) => (
-                    <KnowledgeRow key={item.id} item={item} />
+                    <KnowledgeRow key={item.id} item={item} scopeLabel={knowledgeScopeLabel(me, item)} />
                   ))}
                 </ul>
               )}
@@ -171,6 +174,11 @@ export function Knowledge() {
           );
         }}
       </Loaded>
+      <details className="secondary-panel">
+        <summary>Knowledge governance queues and freshness policy</summary>
+        <ConflictQueue me={me} />
+        {policyScopeId ? <FreshnessPolicySummary scopeId={policyScopeId} /> : null}
+      </details>
     </>
   );
 }
@@ -204,7 +212,7 @@ function SearchMode({ body }: { body: KnowledgeListView }) {
   );
 }
 
-export function KnowledgeRow({ item }: { item: KnowledgeItemView }) {
+export function KnowledgeRow({ item, scopeLabel }: { item: KnowledgeItemView; scopeLabel?: string }) {
   const revision = item.current_revision;
   return (
     <li>
@@ -216,7 +224,7 @@ export function KnowledgeRow({ item }: { item: KnowledgeItemView }) {
         {revision.stale ? <span className="tag warn">verification due</span> : null}
         <p>{revision.summary}</p>
         <div className="muted">
-          {item.knowledge_type} · {visibilityLabel(item)} · revision {revision.revision_number} ·{" "}
+          {item.knowledge_type.replaceAll("_", " ")} · {scopeLabel ?? visibilityLabel(item)} · revision {revision.revision_number} ·{" "}
           {whenOf(item.updated_at)}
           {item.match_score == null ? "" : ` · score ${item.match_score.toFixed(4)}`}
         </div>
@@ -227,6 +235,7 @@ export function KnowledgeRow({ item }: { item: KnowledgeItemView }) {
 }
 
 function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
+  const { me } = useApp();
   const revision = item.current_revision;
   const historyKey = `knowledge/item/${item.id}/history`;
   const sourcesKey = `knowledge/item/${item.id}/sources`;
@@ -252,7 +261,7 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
       <header>
         <h2>{revision.title}</h2>
         <p className="muted">
-          {item.knowledge_type} · {item.origin} · {item.lifecycle_state} · {visibilityLabel(item)}
+          {item.knowledge_type.replaceAll("_", " ")} · {item.origin.replaceAll("_", " ")} · {item.lifecycle_state.replaceAll("_", " ")} · {knowledgeScopeLabel(me, item)}
         </p>
         <TagList tags={revision.tags} />
       </header>
@@ -270,10 +279,14 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
         <dl className="facts">
           <dt>Summary</dt>
           <dd>{revision.summary}</dd>
+          <dt>Scope</dt>
+          <dd>{knowledgeScopeLabel(me, item)}</dd>
+          <dt>Lifecycle</dt>
+          <dd>{item.lifecycle_state.replaceAll("_", " ")}</dd>
+          <dt>Origin</dt>
+          <dd>{item.origin.replaceAll("_", " ")}</dd>
           <dt>Revision</dt>
-          <dd className="mono breakable">{revision.id}</dd>
-          <dt>Content hash</dt>
-          <dd className="mono breakable">{revision.content_hash}</dd>
+          <dd>{revision.revision_number} · recorded {whenOf(revision.transaction_time)}</dd>
           <dt>Sensitivity</dt>
           <dd>{revision.sensitivity}</dd>
           <dt>Confidence</dt>
@@ -291,9 +304,16 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
               ? ` · ${revision.freshness_reasons.join(", ").replaceAll("_", " ")}`
               : ""}
           </dd>
-          <dt>Transaction time</dt>
-          <dd>{whenOf(revision.transaction_time)}</dd>
         </dl>
+        <details className="technical-details">
+          <summary>Revision identifiers and integrity evidence</summary>
+          <dl className="facts">
+            <dt>Knowledge item</dt><dd className="mono breakable">{item.id}</dd>
+            <dt>Revision</dt><dd className="mono breakable">{revision.id}</dd>
+            <dt>Content hash</dt><dd className="mono breakable">{revision.content_hash}</dd>
+            <dt>Transaction time</dt><dd>{whenOf(revision.transaction_time)}</dd>
+          </dl>
+        </details>
       </section>
       <section className="knowledge-columns">
         <Panel title="Revision history">
@@ -304,10 +324,14 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
               ) : (
                 <ol className="revision-history">
                   {body.revisions.map((entry) => (
-                    <li key={entry.id}>
+                    <li key={entry.id} id={`revision-${entry.id}`}>
                       <strong>Revision {entry.revision_number}</strong> · {whenOf(entry.transaction_time)}
                       <p>{entry.summary}</p>
-                      <span className="mono breakable">{entry.content_hash}</span>
+                      <details className="technical-details">
+                        <summary>Revision integrity evidence</summary>
+                        <div className="mono breakable">{entry.id}</div>
+                        <div className="mono breakable">{entry.content_hash}</div>
+                      </details>
                     </li>
                   ))}
                 </ol>
@@ -324,7 +348,7 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
                 <ul>
                   {body.sources.map((source) => (
                     <li key={source.id}>
-                      <strong>{source.source_type}</strong> · scope {source.scope_id}
+                      <strong>{source.source_type.replaceAll("_", " ")}</strong> · {scopeName(me, source.scope_id)}
                       {source.locator ? <div className="breakable">{source.locator}</div> : null}
                       {source.source_revision ? <div>Revision {source.source_revision}</div> : null}
                       {source.session_event_id ? (
@@ -349,8 +373,12 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
                 <ul>
                   {body.usages.map((entry) => (
                     <li key={`${entry.context_run_id}-${entry.revision_id}`}>
-                      {whenOf(entry.selected_at)} · {entry.reason_codes.join(", ")}
-                      <div className="mono breakable">{entry.context_run_id}</div>
+                      {whenOf(entry.selected_at)} · {entry.reason_codes.join(", ").replaceAll("_", " ")}
+                      <div>
+                        <Link href={hrefOf("context-run", { context_run_id: entry.context_run_id })}>Inspect context</Link>
+                        {" · "}
+                        <Link href={hrefOf("session", { session_id: entry.session_id })}>Session timeline</Link>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -381,21 +409,30 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
       </section>
       <section>
         <h3>Governed actions</h3>
-        <p className="muted">
-          Every action below creates a VedaFlow change. A permissive profile may apply it
-          immediately; a stricter one leaves it in Advanced Reviews.
-        </p>
-        <EditForm item={item} onSettled={settled} />
-        <VerifyForm item={item} onSettled={settled} />
-        <SupersedeForm item={item} onSettled={settled} />
-        <MergeForm item={item} onSettled={settled} />
-        <LifecycleForms item={item} onSettled={settled} />
+        {canWriteKnowledge(me, item.scope_id) ? (
+          <>
+            <p className="muted">
+              Every action below creates a VedaFlow change. A permissive profile may apply it
+              immediately; a stricter one leaves it in Advanced Reviews.
+            </p>
+            <EditForm item={item} onSettled={settled} />
+            <VerifyForm item={item} onSettled={settled} />
+            <SupersedeForm item={item} onSettled={settled} />
+            <MergeForm item={item} onSettled={settled} />
+            <LifecycleForms item={item} onSettled={settled} />
+          </>
+        ) : (
+          <p className="muted">
+            Your current capability forecast does not offer knowledge.write at this item&rsquo;s
+            scope, so no mutation is offered. The gateway remains authoritative.
+          </p>
+        )}
       </section>
     </article>
   );
 }
 
-function ConflictQueue() {
+function ConflictQueue({ me }: { me: MeView }) {
   const key = "knowledge/conflicts/open";
   const entry = useQuery(key, () =>
     request("list_knowledge_conflicts", { query: { limit: "50" } }),
@@ -422,7 +459,11 @@ function ConflictQueue() {
             ) : (
               <div className="knowledge-conflict-list">
                 {body.conflicts.map((conflict) => (
-                  <ConflictReview key={`${conflict.id}-${conflict.revision}`} conflict={conflict} />
+                  <ConflictReview
+                    key={`${conflict.id}-${conflict.revision}`}
+                    conflict={conflict}
+                    mayResolve={canWriteKnowledge(me, conflict.scope_id)}
+                  />
                 ))}
               </div>
             )}
@@ -433,7 +474,13 @@ function ConflictQueue() {
   );
 }
 
-export function ConflictReview({ conflict }: { conflict: ConflictSetView }) {
+export function ConflictReview({
+  conflict,
+  mayResolve = true,
+}: {
+  conflict: ConflictSetView;
+  mayResolve?: boolean;
+}) {
   const [resolution, setResolution] = useState<ResolveConflictBody["resolution"]>(
     conflict.classification === "transition" ? "transition" :
       conflict.classification === "supersession" ? "supersede" :
@@ -465,7 +512,7 @@ export function ConflictReview({ conflict }: { conflict: ConflictSetView }) {
         <p>
           This challenger is still a capture candidate. Resolve it in <Link href={hrefOf("learnings")}>New Learnings</Link> so publication remains candidate-governed.
         </p>
-      ) : conflict.status === "open" ? (
+      ) : conflict.status === "open" && mayResolve ? (
         <form className="stacked-form" onSubmit={async (event) => {
           event.preventDefault(); setBusy(true); setStatus(null);
           const body: ResolveConflictBody = {
@@ -499,6 +546,11 @@ export function ConflictReview({ conflict }: { conflict: ConflictSetView }) {
           <button type="submit" disabled={busy || !reason.trim()}>{busy ? "Submitting…" : "Resolve through VedaFlow"}</button>
           {status ? <p role="status">{status}</p> : null}
         </form>
+      ) : conflict.status === "open" ? (
+        <p className="muted">
+          This conflict is read-only because your current forecast does not offer knowledge.write
+          at its scope.
+        </p>
       ) : null}
     </details>
   );
@@ -585,49 +637,54 @@ function KnowledgeFilterBar({
         />
       </Field>
       <Select label="Type" value={filters.knowledgeType} values={KNOWLEDGE_TYPES} onChange={(value) => onChange({ knowledgeType: value })} />
-      <Select label="Origin" value={filters.origin} values={ORIGINS} onChange={(value) => onChange({ origin: value })} />
       <Select label="State" value={filters.lifecycle} values={LIFECYCLES} onChange={(value) => onChange({ lifecycle: value })} />
-      <Select label="Source" value={filters.source} values={SOURCE_TYPES} onChange={(value) => onChange({ source: value })} />
-      <Field label="Tag">
-        <input value={filters.tag} onChange={(event) => onChange({ tag: event.target.value })} />
-      </Field>
-      <Field label="Owner">
-        <input value={filters.owner} onChange={(event) => onChange({ owner: event.target.value })} />
-      </Field>
-      <Field label="Scope ID">
-        <input value={filters.scopeId} onChange={(event) => onChange({ scopeId: event.target.value })} />
-      </Field>
-      <Field label="Workspace ID">
-        <input value={filters.workspaceId} onChange={(event) => onChange({ workspaceId: event.target.value })} />
-      </Field>
-      <Field label="Project ID">
-        <input value={filters.projectId} onChange={(event) => onChange({ projectId: event.target.value })} />
-      </Field>
-      <Field label="Updated from">
-        <input type="datetime-local" value={filters.updatedFrom} onChange={(event) => onChange({ updatedFrom: event.target.value })} />
-      </Field>
-      <Field label="Updated before">
-        <input type="datetime-local" value={filters.updatedBefore} onChange={(event) => onChange({ updatedBefore: event.target.value })} />
-      </Field>
-      <Select label="Staleness" value={filters.stale} values={["true", "false"] as const} onChange={(value) => onChange({ stale: value as KnowledgeFilters["stale"] })} />
-      <Field label="Valid at">
-        <input type="datetime-local" value={filters.asOf} onChange={(event) => onChange({ asOf: event.target.value })} />
-      </Field>
-      <Field label="As known at">
-        <input type="datetime-local" value={filters.asKnownAt} onChange={(event) => onChange({ asKnownAt: event.target.value })} />
-      </Field>
-      <label className="choice">
-        <input type="checkbox" checked={filters.includeHistory} onChange={(event) => onChange({ includeHistory: event.target.checked })} />
-        Include stale, superseded and archived history
-      </label>
-      <label className="choice">
-        <input type="checkbox" checked={filters.includeTransitional} onChange={(event) => onChange({ includeTransitional: event.target.checked })} />
-        Include unresolved and future transitions
-      </label>
       <button type="submit">Search</button>
       {knowledgeIsFiltered(filters) ? (
         <button type="button" onClick={onClear}>Clear</button>
       ) : null}
+      <details className="filter-details wide-field">
+        <summary>More filters</summary>
+        <div className="filters filter-grid">
+          <Select label="Origin" value={filters.origin} values={ORIGINS} onChange={(value) => onChange({ origin: value })} />
+          <Select label="Source" value={filters.source} values={SOURCE_TYPES} onChange={(value) => onChange({ source: value })} />
+          <Field label="Tag">
+            <input value={filters.tag} onChange={(event) => onChange({ tag: event.target.value })} />
+          </Field>
+          <Field label="Owner">
+            <input value={filters.owner} onChange={(event) => onChange({ owner: event.target.value })} />
+          </Field>
+          <Field label="Scope ID">
+            <input value={filters.scopeId} onChange={(event) => onChange({ scopeId: event.target.value })} />
+          </Field>
+          <Field label="Workspace ID">
+            <input value={filters.workspaceId} onChange={(event) => onChange({ workspaceId: event.target.value })} />
+          </Field>
+          <Field label="Project ID">
+            <input value={filters.projectId} onChange={(event) => onChange({ projectId: event.target.value })} />
+          </Field>
+          <Field label="Updated from">
+            <input type="datetime-local" value={filters.updatedFrom} onChange={(event) => onChange({ updatedFrom: event.target.value })} />
+          </Field>
+          <Field label="Updated before">
+            <input type="datetime-local" value={filters.updatedBefore} onChange={(event) => onChange({ updatedBefore: event.target.value })} />
+          </Field>
+          <Select label="Staleness" value={filters.stale} values={["true", "false"] as const} onChange={(value) => onChange({ stale: value as KnowledgeFilters["stale"] })} />
+          <Field label="Valid at">
+            <input type="datetime-local" value={filters.asOf} onChange={(event) => onChange({ asOf: event.target.value })} />
+          </Field>
+          <Field label="As known at">
+            <input type="datetime-local" value={filters.asKnownAt} onChange={(event) => onChange({ asKnownAt: event.target.value })} />
+          </Field>
+          <label className="choice">
+            <input type="checkbox" checked={filters.includeHistory} onChange={(event) => onChange({ includeHistory: event.target.checked })} />
+            Include stale, superseded and archived history
+          </label>
+          <label className="choice">
+            <input type="checkbox" checked={filters.includeTransitional} onChange={(event) => onChange({ includeTransitional: event.target.checked })} />
+            Include unresolved and future transitions
+          </label>
+        </div>
+      </details>
     </form>
   );
 }
@@ -879,6 +936,30 @@ function appendItems(seen: KnowledgeItemView[], next: KnowledgeItemView[]): Know
   const rows = new Map(seen.map((item) => [item.id, item]));
   for (const item of next) rows.set(item.id, item);
   return [...rows.values()];
+}
+
+function scopeName(me: MeView, scopeId: string): string {
+  const project = me.projects.find((candidate) => candidate.scope_id === scopeId);
+  if (project) return `Project · ${project.display_name}`;
+  const workspace = me.workspaces.find((candidate) => candidate.scope_id === scopeId);
+  if (workspace) return `Workspace · ${workspace.display_name}`;
+  const anchor = me.anchors.find((candidate) => candidate.scope_id === scopeId);
+  if (anchor?.source === "principal_scope") return "Private to me";
+  return `Governed scope · ${scopeId}`;
+}
+
+function knowledgeScopeLabel(me: MeView, item: KnowledgeItemView): string {
+  if (item.owner_principal_id) {
+    return item.owner_principal_id === me.principal.identity_id ||
+      item.owner_principal_id === me.principal.subject
+      ? "Private to me"
+      : `Private to ${item.owner_principal_id}`;
+  }
+  return scopeName(me, item.scope_id);
+}
+
+function canWriteKnowledge(me: MeView, scopeId: string): boolean {
+  return me.anchors.find((anchor) => anchor.scope_id === scopeId)?.actions["knowledge.write"] === true;
 }
 
 function writableScopes(

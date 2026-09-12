@@ -131,7 +131,7 @@ COPY deploy/compose/browser/package.json deploy/compose/browser/package.json
 RUN pnpm install --frozen-lockfile --prod --filter @synveda/compose-browser-acceptance...
 COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 COPY --chmod=0555 deploy/compose/browser/console-login.mjs deploy/compose/browser/product-demo.mjs deploy/compose/browser/
-COPY --chmod=0444 deploy/compose/browser/console-login-runner.mjs deploy/compose/browser/console-login-contract.mjs deploy/compose/browser/product-demo-runner.mjs deploy/compose/browser/product-demo-contract.mjs deploy/compose/browser/
+COPY --chmod=0444 deploy/compose/browser/console-login-runner.mjs deploy/compose/browser/console-login-contract.mjs deploy/compose/browser/console-product-runner.mjs deploy/compose/browser/product-demo-runner.mjs deploy/compose/browser/product-demo-contract.mjs deploy/compose/browser/
 COPY --chmod=0444 deploy/compose/browser/PLAYWRIGHT-LICENSE deploy/compose/browser/PLAYWRIGHT-NOTICE deploy/compose/browser/seccomp_profile.NOTICE /usr/share/licenses/synveda-browser-acceptance/
 
 # Docker populates a new named volume from this sticky, otherwise empty mount

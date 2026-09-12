@@ -26,14 +26,17 @@ bootstrap_password=${SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD:-}
 convergence_password=${SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD:-}
 demo_enabled=${SYNVEDA_KEYCLOAK_DEMO_ENABLED:-false}
 demo_admin_password=${SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD:-}
+demo_approver_password=${SYNVEDA_KEYCLOAK_DEMO_APPROVER_PASSWORD:-}
 demo_member_password=${SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD:-}
+demo_viewer_password=${SYNVEDA_KEYCLOAK_DEMO_VIEWER_PASSWORD:-}
 public_app_url=${SYNVEDA_PUBLIC_APP_URL:-}
 public_auth_url=${SYNVEDA_PUBLIC_AUTH_URL:-}
 ssl_required=${SYNVEDA_KEYCLOAK_SSL_REQUIRED:-}
 unset SYNVEDA_KEYCLOAK_ADMIN_USERNAME SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD
 unset SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD SYNVEDA_KEYCLOAK_GENERATION
 unset SYNVEDA_KEYCLOAK_DEMO_ENABLED SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD
-unset SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD
+unset SYNVEDA_KEYCLOAK_DEMO_APPROVER_PASSWORD SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD
+unset SYNVEDA_KEYCLOAK_DEMO_VIEWER_PASSWORD
 
 refuse() {
     echo "keycloak-converge: configuration was refused" >&2
@@ -82,15 +85,28 @@ esac
 [ "$bootstrap_password" != "$convergence_password" ] || refuse
 case "$demo_enabled" in
     true)
-        [ -n "$demo_admin_password" ] && [ -n "$demo_member_password" ] && \
+        [ -n "$demo_admin_password" ] && [ -n "$demo_approver_password" ] && \
+            [ -n "$demo_member_password" ] && \
+            [ -n "$demo_viewer_password" ] && \
+            [ "$demo_admin_password" != "$demo_approver_password" ] && \
             [ "$demo_admin_password" != "$demo_member_password" ] && \
+            [ "$demo_admin_password" != "$demo_viewer_password" ] && \
+            [ "$demo_approver_password" != "$demo_member_password" ] && \
+            [ "$demo_approver_password" != "$demo_viewer_password" ] && \
+            [ "$demo_member_password" != "$demo_viewer_password" ] && \
             [ "$demo_admin_password" != "$bootstrap_password" ] && \
             [ "$demo_admin_password" != "$convergence_password" ] && \
+            [ "$demo_approver_password" != "$bootstrap_password" ] && \
+            [ "$demo_approver_password" != "$convergence_password" ] && \
             [ "$demo_member_password" != "$bootstrap_password" ] && \
-            [ "$demo_member_password" != "$convergence_password" ] || refuse
+            [ "$demo_member_password" != "$convergence_password" ] && \
+            [ "$demo_viewer_password" != "$bootstrap_password" ] && \
+            [ "$demo_viewer_password" != "$convergence_password" ] || refuse
         ;;
     false)
-        [ -z "$demo_admin_password" ] && [ -z "$demo_member_password" ] || refuse
+        [ -z "$demo_admin_password" ] && [ -z "$demo_approver_password" ] && \
+            [ -z "$demo_member_password" ] && \
+            [ -z "$demo_viewer_password" ] || refuse
         ;;
     *) refuse ;;
 esac
@@ -273,11 +289,11 @@ admin_quiet() {
 demo_mutations=0
 consume_demo_mutation() {
     demo_mutations=$((demo_mutations + 1))
-    # A clean Keycloak user receives one default realm-role mapping. Two user
-    # creates, exact updates, permanent passwords, those two removals and the
-    # administrator group join require nine mutations; allow one bounded
+    # A clean Keycloak user receives one default realm-role mapping. Four user
+    # creates, exact updates, permanent passwords, those four removals and the
+    # administrator group join require seventeen mutations; allow one bounded
     # repair beyond that clean projection and refuse further drift.
-    [ "$demo_mutations" -le 10 ] || {
+    [ "$demo_mutations" -le 18 ] || {
         echo "keycloak-converge: demo mutation budget was exhausted" >&2
         exit 70
     }
@@ -726,7 +742,8 @@ cleanup() {
             cleanup_status=70
         fi
     fi
-    unset bootstrap_password convergence_password demo_admin_password demo_member_password
+    unset bootstrap_password convergence_password demo_admin_password
+    unset demo_approver_password demo_member_password demo_viewer_password
     exit "$cleanup_status"
 }
 
@@ -875,7 +892,9 @@ demo_user_contract_state() {
 parse_demo_inventory() {
     inventory_file=$1
     inventory_admin_id=
+    inventory_approver_id=
     inventory_member_id=
+    inventory_viewer_id=
     while IFS= read -r inventory_entry; do
         [ -n "$inventory_entry" ] || continue
         case "$inventory_entry" in
@@ -884,10 +903,20 @@ parse_demo_inventory() {
                 inventory_admin_id=${inventory_entry#admin=}
                 is_uuid "$inventory_admin_id" || exit 70
                 ;;
+            approver=*)
+                [ -z "$inventory_approver_id" ] || exit 70
+                inventory_approver_id=${inventory_entry#approver=}
+                is_uuid "$inventory_approver_id" || exit 70
+                ;;
             member=*)
                 [ -z "$inventory_member_id" ] || exit 70
                 inventory_member_id=${inventory_entry#member=}
                 is_uuid "$inventory_member_id" || exit 70
+                ;;
+            viewer=*)
+                [ -z "$inventory_viewer_id" ] || exit 70
+                inventory_viewer_id=${inventory_entry#viewer=}
+                is_uuid "$inventory_viewer_id" || exit 70
                 ;;
             *) exit 70 ;;
         esac
@@ -904,7 +933,7 @@ query_demo_inventory() {
     inventory_output=$state_dir/demo-inventory-$inventory_label.out
     admin_to_file "$inventory_config" "$inventory_json" \
         "demo-inventory-$inventory_label-read" get users -r "$realm" \
-        -q "q=$inventory_query" -q first=0 -q max=3 \
+        -q "q=$inventory_query" -q first=0 -q max=5 \
         -q briefRepresentation=false
     if [ -n "$inventory_kind" ]; then
         project_to_file "$inventory_output" "demo-inventory-$inventory_label" \
@@ -921,24 +950,46 @@ refresh_demo_inventory() {
         synvedaDemoContract:cpr45-demo-v1 demo-owned-users
     parse_demo_inventory "$state_dir/demo-inventory-contract.out"
     contract_admin_id=$inventory_admin_id
+    contract_approver_id=$inventory_approver_id
     contract_member_id=$inventory_member_id
+    contract_viewer_id=$inventory_viewer_id
 
     query_demo_inventory "$inventory_config" admin synvedaDemoKind:admin \
         demo-owned-user-kind admin
     parse_demo_inventory "$state_dir/demo-inventory-admin.out"
-    [ -z "$inventory_member_id" ] || exit 70
+    [ -z "$inventory_approver_id" ] && [ -z "$inventory_member_id" ] && \
+        [ -z "$inventory_viewer_id" ] || exit 70
     kind_admin_id=$inventory_admin_id
+
+    query_demo_inventory "$inventory_config" approver synvedaDemoKind:approver \
+        demo-owned-user-kind approver
+    parse_demo_inventory "$state_dir/demo-inventory-approver.out"
+    [ -z "$inventory_admin_id" ] && [ -z "$inventory_member_id" ] && \
+        [ -z "$inventory_viewer_id" ] || exit 70
+    kind_approver_id=$inventory_approver_id
 
     query_demo_inventory "$inventory_config" member synvedaDemoKind:member \
         demo-owned-user-kind member
     parse_demo_inventory "$state_dir/demo-inventory-member.out"
-    [ -z "$inventory_admin_id" ] || exit 70
+    [ -z "$inventory_admin_id" ] && [ -z "$inventory_approver_id" ] && \
+        [ -z "$inventory_viewer_id" ] || exit 70
     kind_member_id=$inventory_member_id
 
+    query_demo_inventory "$inventory_config" viewer synvedaDemoKind:viewer \
+        demo-owned-user-kind viewer
+    parse_demo_inventory "$state_dir/demo-inventory-viewer.out"
+    [ -z "$inventory_admin_id" ] && [ -z "$inventory_approver_id" ] && \
+        [ -z "$inventory_member_id" ] || exit 70
+    kind_viewer_id=$inventory_viewer_id
+
     [ "$contract_admin_id" = "$kind_admin_id" ] && \
-        [ "$contract_member_id" = "$kind_member_id" ] || exit 70
+        [ "$contract_approver_id" = "$kind_approver_id" ] && \
+        [ "$contract_member_id" = "$kind_member_id" ] && \
+        [ "$contract_viewer_id" = "$kind_viewer_id" ] || exit 70
     demo_inventory_admin_id=$contract_admin_id
+    demo_inventory_approver_id=$contract_approver_id
     demo_inventory_member_id=$contract_member_id
+    demo_inventory_viewer_id=$contract_viewer_id
 }
 
 try_prove_user_profile() {
@@ -1117,11 +1168,16 @@ reconcile_demo_user() {
     fi
     if [ "$demo_user_id" = missing ]; then
         demo_email=$demo_kind@demo.synveda.invalid
-        demo_last_name='Demo Member'
-        [ "$demo_kind" = admin ] && demo_last_name='Demo Admin'
+        case "$demo_kind" in
+            admin) demo_first_name=Avery; demo_last_name=Author ;;
+            approver) demo_first_name=Morgan; demo_last_name=Approver ;;
+            member) demo_first_name=Riley; demo_last_name=Reviewer ;;
+            viewer) demo_first_name=Vera; demo_last_name='Restricted Viewer' ;;
+            *) exit 70 ;;
+        esac
         demo_admin_quiet "$demo_config" "demo-$demo_kind-user-create" create users -r "$realm" \
             -s "username=$demo_username" -s "email=$demo_email" \
-            -s firstName=Synveda -s "lastName=$demo_last_name" \
+            -s "firstName=$demo_first_name" -s "lastName=$demo_last_name" \
             -s enabled=true -s emailVerified=true -s 'requiredActions=[]' \
             -s "attributes={\"synvedaDemoContract\":[\"cpr45-demo-v1\"],\"synvedaDemoKind\":[\"$demo_kind\"]}"
         demo_user_id=$(query_target_user_id "$demo_config" "$demo_username")
@@ -1137,12 +1193,17 @@ reconcile_demo_user() {
             "$state_dir/demo-$demo_kind-owned.json" "$demo_username" "$demo_kind"
     fi
     demo_email=$demo_kind@demo.synveda.invalid
-    demo_last_name='Demo Member'
-    [ "$demo_kind" = admin ] && demo_last_name='Demo Admin'
+    case "$demo_kind" in
+        admin) demo_first_name=Avery; demo_last_name=Author ;;
+        approver) demo_first_name=Morgan; demo_last_name=Approver ;;
+        member) demo_first_name=Riley; demo_last_name=Reviewer ;;
+        viewer) demo_first_name=Vera; demo_last_name='Restricted Viewer' ;;
+        *) exit 70 ;;
+    esac
     demo_admin_quiet "$demo_config" "demo-$demo_kind-user-update" \
         update "users/$demo_user_id" -r "$realm" \
         -s "username=$demo_username" -s "email=$demo_email" \
-        -s firstName=Synveda -s "lastName=$demo_last_name" \
+        -s "firstName=$demo_first_name" -s "lastName=$demo_last_name" \
         -s enabled=true -s emailVerified=true -s 'requiredActions=[]' \
         -s "attributes={\"synvedaDemoContract\":[\"cpr45-demo-v1\"],\"synvedaDemoKind\":[\"$demo_kind\"]}"
 
@@ -1177,7 +1238,9 @@ reconcile_demo_user() {
         "$demo_kind" "$demo_group_id"
     case "$demo_kind" in
         admin) demo_admin_user_id=$demo_user_id ;;
+        approver) demo_approver_user_id=$demo_user_id ;;
         member) demo_member_user_id=$demo_user_id ;;
+        viewer) demo_viewer_user_id=$demo_user_id ;;
         *) exit 70 ;;
     esac
 }
@@ -1328,13 +1391,17 @@ try_complete_projection() {
 require_current_generation_or_exit
 user_profile_valid=false
 demo_inventory_admin_id=
+demo_inventory_approver_id=
 demo_inventory_member_id=
+demo_inventory_viewer_id=
 if try_prove_user_profile "$authority_config" initial; then
     user_profile_valid=true
     refresh_demo_inventory "$authority_config"
 fi
 managed_demo_residue=false
-if [ -n "$demo_inventory_admin_id" ] || [ -n "$demo_inventory_member_id" ]; then
+if [ -n "$demo_inventory_admin_id" ] || [ -n "$demo_inventory_approver_id" ] || \
+    [ -n "$demo_inventory_member_id" ] || \
+    [ -n "$demo_inventory_viewer_id" ]; then
     managed_demo_residue=true
 fi
 if [ "$realm_was_open" = true ] && \
@@ -1530,7 +1597,9 @@ prove_user_profile "$authority_config" repaired
 refresh_demo_inventory "$authority_config"
 if [ "$user_profile_valid" = false ] && \
     { [ -n "$demo_inventory_admin_id" ] || \
-      [ -n "$demo_inventory_member_id" ]; }; then
+      [ -n "$demo_inventory_approver_id" ] || \
+      [ -n "$demo_inventory_member_id" ] || \
+      [ -n "$demo_inventory_viewer_id" ]; }; then
     echo "keycloak-converge: demo marker provenance was refused; reset or operator recovery is required" >&2
     exit 70
 fi
@@ -1707,24 +1776,37 @@ verified_group_id=$(query_group_projection "$authority_config" group)
 reconcile_admin_group_security "$authority_config" "$group_id"
 
 demo_admin_user_id=
+demo_approver_user_id=
 demo_member_user_id=
+demo_viewer_user_id=
 if [ "$demo_enabled" = true ]; then
     reconcile_demo_user "$authority_config" admin synveda-demo-admin \
         "$demo_admin_password" "$group_id" "$demo_inventory_admin_id"
+    reconcile_demo_user "$authority_config" approver synveda-demo-approver \
+        "$demo_approver_password" "" "$demo_inventory_approver_id"
     reconcile_demo_user "$authority_config" member synveda-demo-member \
         "$demo_member_password" "" "$demo_inventory_member_id"
+    reconcile_demo_user "$authority_config" viewer synveda-demo-viewer \
+        "$demo_viewer_password" "" "$demo_inventory_viewer_id"
     refresh_demo_inventory "$authority_config"
     [ "$demo_inventory_admin_id" = "$demo_admin_user_id" ] && \
-        [ "$demo_inventory_member_id" = "$demo_member_user_id" ] || exit 70
+        [ "$demo_inventory_approver_id" = "$demo_approver_user_id" ] && \
+        [ "$demo_inventory_member_id" = "$demo_member_user_id" ] && \
+        [ "$demo_inventory_viewer_id" = "$demo_viewer_user_id" ] || exit 70
     verify_demo_admin_group_members "$authority_config" "$group_id" \
         "$demo_admin_user_id"
-    unset demo_admin_password demo_member_password
+    unset demo_admin_password demo_approver_password demo_member_password
+    unset demo_viewer_password
 else
     retire_demo_user "$authority_config" admin "$demo_inventory_admin_id"
+    retire_demo_user "$authority_config" approver "$demo_inventory_approver_id"
     retire_demo_user "$authority_config" member "$demo_inventory_member_id"
+    retire_demo_user "$authority_config" viewer "$demo_inventory_viewer_id"
     refresh_demo_inventory "$authority_config"
     [ -z "$demo_inventory_admin_id" ] && \
-        [ -z "$demo_inventory_member_id" ] || exit 70
+        [ -z "$demo_inventory_approver_id" ] && \
+        [ -z "$demo_inventory_member_id" ] && \
+        [ -z "$demo_inventory_viewer_id" ] || exit 70
 fi
 
 admin_to_file "$authority_config" "$realm_json" closed-realm-read get "realms/$realm"
@@ -1746,8 +1828,12 @@ try_complete_projection "$authority_config" || {
 if [ "$demo_enabled" = true ]; then
     verify_demo_user_projection "$authority_config" "$demo_admin_user_id" \
         synveda-demo-admin admin "$group_id"
+    verify_demo_user_projection "$authority_config" "$demo_approver_user_id" \
+        synveda-demo-approver approver ""
     verify_demo_user_projection "$authority_config" "$demo_member_user_id" \
         synveda-demo-member member ""
+    verify_demo_user_projection "$authority_config" "$demo_viewer_user_id" \
+        synveda-demo-viewer viewer ""
     verify_demo_admin_group_members "$authority_config" "$group_id" \
         "$demo_admin_user_id"
 fi

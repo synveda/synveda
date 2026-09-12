@@ -58,6 +58,11 @@ export async function runBrowserAcceptance({
   chromium,
   environment = process.env,
   passwordFile = PASSWORD_FILE,
+  username = USERNAME,
+  requiredRoleKeys = ["administrator"],
+  expectedSubject,
+  admissionStage = "administrator-admission",
+  afterLogin,
   readPassword = readDemoPassword,
   timeout = TIMEOUT,
 } = {}) {
@@ -70,7 +75,9 @@ export async function runBrowserAcceptance({
   let completed = false;
   let primaryError;
   let routeError;
+  let requestListener;
   const pendingRoutes = new Set();
+  const inspectedRequests = new WeakMap();
   const requireCleanRoutes = () => {
     if (routeError !== undefined) throw routeError;
   };
@@ -83,7 +90,19 @@ export async function runBrowserAcceptance({
     const expectedTenantId = validateTenantId(
       environment.SYNVEDA_BOOTSTRAP_TENANT_ID,
     );
-    if (typeof chromium?.launch !== "function" || typeof readPassword !== "function") {
+    if (
+      typeof chromium?.launch !== "function" ||
+      typeof readPassword !== "function" ||
+      typeof username !== "string" ||
+      username.length === 0 ||
+      !Array.isArray(requiredRoleKeys) ||
+      requiredRoleKeys.some((role) => typeof role !== "string" || role.length === 0) ||
+      (expectedSubject !== undefined &&
+        (typeof expectedSubject !== "string" || expectedSubject.length === 0)) ||
+      typeof admissionStage !== "string" ||
+      admissionStage.length === 0 ||
+      (afterLogin !== undefined && typeof afterLogin !== "function")
+    ) {
       throw new BrowserContractError("configuration");
     }
     password = readPassword(passwordFile);
@@ -116,32 +135,58 @@ export async function runBrowserAcceptance({
       }),
     );
     page = await atStage("browser-launch", () => context.newPage());
+    const inspectRequest = (request) => {
+      const prior = inspectedRequests.get(request);
+      if (prior === true) return;
+      if (prior instanceof BrowserContractError) throw prior;
+      try {
+        const raw = request.url();
+        if (!allowedRequest(raw, settings)) {
+          throw new BrowserContractError("network-boundary");
+        }
+        const parsed = new URL(raw);
+        if (
+          parsed.origin === settings.issuerOrigin &&
+          parsed.pathname === settings.authorizationPath
+        ) {
+          if (authorizationState !== undefined) {
+            throw new BrowserContractError("authorization-request");
+          }
+          authorizationState = validateAuthorizationUrl(raw, settings);
+        }
+        if (
+          parsed.origin === settings.appOrigin &&
+          parsed.pathname === "/auth/callback"
+        ) {
+          if (callbackSeen) throw new BrowserContractError("callback");
+          validateCallbackUrl(raw, settings, authorizationState);
+          callbackSeen = true;
+        }
+        inspectedRequests.set(request, true);
+      } catch (error) {
+        const failure =
+          error instanceof BrowserContractError
+            ? error
+            : new BrowserContractError("network-boundary");
+        inspectedRequests.set(request, failure);
+        routeError ??= failure;
+        throw failure;
+      }
+    };
+    // Playwright does not route the redirect targets of an intercepted request.
+    // Request events cover those hops; routing still aborts every routable
+    // request outside this closed browser contract.
+    requestListener = (request) => {
+      try {
+        inspectRequest(request);
+      } catch {}
+    };
+    page.on("request", requestListener);
     await atStage("browser-launch", () =>
       page.route("**/*", (route) => {
         const operation = (async () => {
-          const raw = route.request().url();
           try {
-            if (!allowedRequest(raw, settings)) {
-              throw new BrowserContractError("network-boundary");
-            }
-            const parsed = new URL(raw);
-            if (
-              parsed.origin === settings.issuerOrigin &&
-              parsed.pathname === settings.authorizationPath
-            ) {
-              if (authorizationState !== undefined) {
-                throw new BrowserContractError("authorization-request");
-              }
-              authorizationState = validateAuthorizationUrl(raw, settings);
-            }
-            if (
-              parsed.origin === settings.appOrigin &&
-              parsed.pathname === "/auth/callback"
-            ) {
-              if (callbackSeen) throw new BrowserContractError("callback");
-              validateCallbackUrl(raw, settings, authorizationState);
-              callbackSeen = true;
-            }
+            inspectRequest(route.request());
             await route.continue();
           } catch (error) {
             const failure = error instanceof BrowserContractError
@@ -183,7 +228,7 @@ export async function runBrowserAcceptance({
     requireCleanRoutes();
 
     await atStage("credential-submit", async () => {
-      await page.locator("#username").fill(USERNAME);
+      await page.locator("#username").fill(username);
       await page.locator("#password").fill(password.toString("ascii"));
       password.fill(0);
       await page.locator("#kc-login").click({ timeout });
@@ -203,8 +248,13 @@ export async function runBrowserAcceptance({
     });
     requireCleanRoutes();
 
-    const admission = await atStage("administrator-admission", () =>
-      boundedEvaluation(page, async ({ fetchTimeout, expectedTenantId }) => {
+    const admission = await atStage(admissionStage, () =>
+      boundedEvaluation(page, async ({
+        fetchTimeout,
+        expectedTenantId,
+        expectedSubject,
+        requiredRoleKeys,
+      }) => {
         const controller = new AbortController();
         const deadline = setTimeout(() => controller.abort(), fetchTimeout);
         try {
@@ -216,27 +266,40 @@ export async function runBrowserAcceptance({
           const value = await response.json();
           return {
             authenticated: true,
-            administrator:
+            rolesMatch:
               Array.isArray(value?.capabilities?.role_keys) &&
-              value.capabilities.role_keys.includes("administrator"),
+              requiredRoleKeys.every((role) => value.capabilities.role_keys.includes(role)),
             subjectPresent:
               typeof value?.subject === "string" && value.subject.length > 0,
+            subjectMatches:
+              expectedSubject === undefined || value?.subject === expectedSubject,
             tenantMatches: value?.tenant?.id === expectedTenantId,
           };
         } finally {
           clearTimeout(deadline);
         }
-      }, { fetchTimeout: FETCH_TIMEOUT, expectedTenantId }, Math.min(timeout, FETCH_TIMEOUT + 1_000)),
+      }, {
+        fetchTimeout: FETCH_TIMEOUT,
+        expectedSubject,
+        expectedTenantId,
+        requiredRoleKeys,
+      }, Math.min(timeout, FETCH_TIMEOUT + 1_000)),
     );
     if (
       admission.authenticated !== true ||
-      admission.administrator !== true ||
+      admission.rolesMatch !== true ||
       admission.subjectPresent !== true ||
+      admission.subjectMatches !== true ||
       admission.tenantMatches !== true
     ) {
-      throw new BrowserContractError("administrator-admission");
+      throw new BrowserContractError(admissionStage);
     }
     requireCleanRoutes();
+
+    if (afterLogin !== undefined) {
+      await atStage("console-product", () => afterLogin({ page, settings, timeout }));
+      requireCleanRoutes();
+    }
 
     await atStage("session-cleanup", async () => {
       await page.getByRole("button", { name: "Sign out", exact: true }).click({ timeout });
@@ -267,6 +330,13 @@ export async function runBrowserAcceptance({
   } finally {
     if (password !== undefined) password.fill(0);
     let cleanupFailed = false;
+    if (requestListener !== undefined && typeof page?.off === "function") {
+      try {
+        page.off("request", requestListener);
+      } catch {
+        cleanupFailed = true;
+      }
+    }
     if (typeof page?.unrouteAll === "function") {
       cleanupFailed = !(await boundedCleanup(
         () => page.unrouteAll({ behavior: "ignoreErrors" }),
@@ -288,7 +358,7 @@ export async function runBrowserAcceptance({
         () => Promise.allSettled([...pendingRoutes]),
       )) || cleanupFailed;
     }
-    if (primaryError === undefined && routeError !== undefined) primaryError = routeError;
+    if (routeError !== undefined) primaryError = routeError;
     if (primaryError === undefined && cleanupFailed) {
       primaryError = new BrowserContractError("browser-cleanup");
     }

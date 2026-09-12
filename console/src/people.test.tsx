@@ -10,16 +10,20 @@
  */
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { describe } from "./client.mjs";
+import { cache } from "./cache.mjs";
 import {
   ROLE_KEYS,
+  accessLabels,
   accessSource,
   directMembers,
   hasLapsed,
   inheritedMembers,
+  mayManageAccessAt,
   mayRemove,
   memberKey,
   pendingInvites,
@@ -27,8 +31,19 @@ import {
   viaGroup,
   whenOf,
 } from "./people.mjs";
+import { People } from "./People.js";
+import { reconcile } from "./selection.mjs";
+import { AppProvider, appContext } from "./Shell.js";
 import { toText } from "./text.mjs";
-import type { InviteView, MemberView } from "./generated/api.js";
+import type {
+  GroupView,
+  InviteView,
+  MeView,
+  MemberView,
+  ProjectView,
+  ScopeView,
+  WorkspaceView,
+} from "./generated/api.js";
 
 function member(overrides: Partial<MemberView> = {}): MemberView {
   return {
@@ -56,6 +71,8 @@ function invite(overrides: Partial<InviteView> = {}): InviteView {
   };
 }
 
+beforeEach(() => cache.clear());
+
 test("project-only is derived from the row's own inherited flag", () => {
   // Not by diffing the workspace list against the project list: the API
   // answers it per row, and a diff would disagree with it the first time
@@ -65,16 +82,17 @@ test("project-only is derived from the row's own inherited flag", () => {
     member({ grant_id: "g-2", inherited: true, scope_id: "scope-workspace" }),
     member({ grant_id: "g-3", inherited: false, role: "viewer" }),
   ];
-  assert.deepEqual(directMembers(rows).map(memberKey), ["g-1", "g-3"]);
-  assert.deepEqual(inheritedMembers(rows).map(memberKey), ["g-2"]);
+  assert.deepEqual(directMembers(rows).map((row) => row.grant_id), ["g-1", "g-3"]);
+  assert.deepEqual(inheritedMembers(rows).map((row) => row.grant_id), ["g-2"]);
 });
 
-test("a row's key is its grant, not its principal", () => {
-  // One entry per (principal, role): somebody holding two roles appears
-  // twice, because the two came from different grants and are revoked
-  // separately.
+test("a row key distinguishes roles and principals resolved through one group grant", () => {
   const two = [member({ grant_id: "g-1", role: "member" }), member({ grant_id: "g-2", role: "curator" })];
   assert.notEqual(memberKey(two[0] as MemberView), memberKey(two[1] as MemberView));
+  assert.notEqual(
+    memberKey(member({ grant_id: "group-grant", principal_id: "subject-riley" })),
+    memberKey(member({ grant_id: "group-grant", principal_id: "subject-vera" })),
+  );
 });
 
 test("access source names the mechanism, because that is what you have to change", () => {
@@ -121,6 +139,53 @@ test("remove is offered only where the API would accept it", () => {
     false,
     "a directory would put it straight back",
   );
+  assert.equal(
+    mayRemove(member({ via_group: { id: "g", slug: "engineering" } })),
+    false,
+    "a member row must not make one group grant look like one-person access",
+  );
+});
+
+test("governed scope and group reads add names while exact ids remain the authority", () => {
+  const me = {
+    principal: { subject: "subject-avery", display_name: "Avery Author" },
+    workspaces: [
+      { scope_id: "scope-workspace", display_name: "Demo workspace", slug: "demo" },
+    ],
+    projects: [{ scope_id: "scope-project", display_name: "Retry review", slug: "retry" }],
+    anchors: [
+      {
+        scope_id: "scope-project",
+        actions: { "membership.grant": true },
+      },
+    ],
+  } as unknown as MeView;
+  const rileyScope = {
+    id: "scope-riley",
+    kind: "principal",
+    principal_id: "subject-riley",
+    display_name: "Riley Reviewer",
+  } as ScopeView;
+  const group = {
+    id: "group-reviewers",
+    display_name: "Release reviewers",
+  } as GroupView;
+  const labels = accessLabels(me, { scopes: [rileyScope] }, [group]);
+
+  assert.equal(labels.principals.get("subject-avery"), "Avery Author");
+  assert.equal(labels.principals.get("subject-riley"), "Riley Reviewer");
+  assert.equal(labels.scopes.get("scope-workspace"), "Workspace · Demo workspace");
+  assert.equal(labels.scopes.get("scope-project"), "Project · Retry review");
+  assert.equal(labels.groups.get("group-reviewers"), "Release reviewers");
+  assert.equal(mayManageAccessAt(me, "scope-project"), true);
+  assert.equal(mayManageAccessAt(me, "scope-workspace"), false);
+});
+
+test("the access UI revokes one exact grant through the generated application API", () => {
+  const call = describe("revoke_grant", { path: { grant_id: "grant-reviewer" } });
+  assert.equal(call.path, "/admin/grants/grant-reviewer");
+  assert.equal(call.init.method, "DELETE");
+  assert.equal(call.init.body, undefined);
 });
 
 test("invitations split into what is actionable and what is history", () => {
@@ -188,4 +253,139 @@ test("a rendered row answers why, without an audit log", () => {
   assert.ok(rendered.includes("engineering group"));
   assert.ok(rendered.includes("directory"));
   assert.ok(rendered.includes("2026-08-21 09:30 UTC"));
+});
+
+test("the People surface joins disclosed names to exact scoped access and real invite state", async () => {
+  const workspace = {
+    id: "workspace-demo",
+    scope_id: "scope-workspace-full",
+    slug: "demo",
+    display_name: "Demo workspace",
+    status: "active",
+  } as WorkspaceView;
+  const project = {
+    id: "project-retry",
+    workspace_id: workspace.id,
+    scope_id: "scope-project-full",
+    slug: "retry-review",
+    display_name: "Retry review",
+    status: "active",
+  } as ProjectView;
+  const me = {
+    principal: { subject: "subject-avery", display_name: "Avery Author", quarantined: false },
+    tenant: { id: "tenant-demo", slug: "demo", name: "Demo tenant", status: "active" },
+    onboarding: { state: "ready", workspace_count: 1, project_count: 1 },
+    capabilities: { actions: {}, role_keys: ["administrator"] },
+    anchors: [
+      {
+        scope_id: workspace.scope_id,
+        kind: "workspace",
+        source: "grant",
+        direct: true,
+        roles: ["owner"],
+        actions: { "membership.grant": true },
+      },
+      {
+        scope_id: project.scope_id,
+        kind: "project",
+        source: "selected_project",
+        direct: false,
+        roles: ["owner"],
+        actions: { "membership.grant": true },
+      },
+    ],
+    workspaces: [workspace],
+    projects: [project],
+  } as MeView;
+  const riley = member({
+    principal_id: "subject-riley",
+    scope_id: workspace.scope_id,
+    role: "reviewer",
+    grant_id: "grant-riley-reviewer",
+  });
+  const group = {
+    id: "group-release-reviewers",
+    slug: "release-reviewers",
+    display_name: "Release reviewers",
+    source: "direct",
+    status: "active",
+    revision: 2,
+    members: [{ identity_id: "identity-riley", principal_id: "subject-riley" }],
+    created_at: "2026-08-21T09:00:00Z",
+    updated_at: "2026-08-21T09:00:00Z",
+  } as GroupView;
+  const ok = (body: unknown) => ({ kind: "ok" as const, body });
+  await Promise.all([
+    cache.ensure("access/reference/scopes", async () =>
+      ok({
+        scopes: [
+          {
+            id: "scope-riley",
+            kind: "principal",
+            principal_id: "subject-riley",
+            display_name: "Riley Reviewer",
+            slug: "riley",
+          },
+        ],
+      }),
+    ),
+    cache.ensure("access/reference/groups", async () => ok({ groups: [group] })),
+    cache.ensure(`workspaces/${workspace.id}/members`, async () => ok({ members: [riley] })),
+    cache.ensure(`projects/${project.id}/members`, async () =>
+      ok({ members: [{ ...riley, inherited: true }] }),
+    ),
+    cache.ensure(`access/grants/${workspace.scope_id}`, async () =>
+      ok({
+        grants: [
+          {
+            id: riley.grant_id,
+            scope_id: workspace.scope_id,
+            subject_kind: "principal",
+            principal_id: riley.principal_id,
+            role: riley.role,
+            source: "direct",
+            directory_managed: false,
+            created_at: riley.granted_at,
+          },
+        ],
+      }),
+    ),
+    cache.ensure(`access/grants/${project.scope_id}`, async () => ok({ grants: [] })),
+    cache.ensure(`workspaces/${workspace.id}/invites`, async () =>
+      ok({
+        invites: [
+          invite({ id: "invite-pending", scope_id: workspace.scope_id, email: "vera@example.test" }),
+          invite({
+            id: "invite-accepted",
+            scope_id: workspace.scope_id,
+            status: "accepted",
+            accepted_at: "2026-08-22T09:00:00Z",
+          }),
+        ],
+      }),
+    ),
+  ]);
+
+  const selection = reconcile({ workspaceId: workspace.id, projectId: project.id }, me);
+  const markup = renderToStaticMarkup(
+    <AppProvider value={appContext(me, selection, () => {})}>
+      <People />
+    </AppProvider>,
+  );
+  const text = toText(markup);
+  for (const expected of [
+    "Riley Reviewer",
+    "subject-riley",
+    "scope-workspace-full",
+    "Exact access grants",
+    "grant-riley-reviewer",
+    "Release reviewers",
+    "pending member vera@example.test",
+    "accepted",
+    "Create pending invitation",
+    "Keycloak owns sign-in profiles",
+  ]) {
+    assert.match(text, new RegExp(expected, "i"), expected);
+  }
+  assert.doesNotMatch(text, /Groups and tenant-wide grants live under Advanced/);
 });

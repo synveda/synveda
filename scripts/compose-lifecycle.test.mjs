@@ -1163,6 +1163,45 @@ test("canonical up prepares once, reruns convergence, and keeps credentials stab
     const password = readFileSync(join(state.secrets, "keycloak_demo_admin_password"), "utf8");
     const issuer = readFileSync(state.issuer, "utf8");
     assert.doesNotMatch(`${first.stdout}${first.stderr}${readFileSync(state.log, "utf8")}`, new RegExp(password.trim()));
+    assert.match(first.stdout, /Compose preflight for synveda-development-/);
+    assert.match(first.stdout, /Docker Engine 28\.0\.0\+/);
+    assert.match(first.stdout, /Docker Compose 2\.33\.1\+/);
+    assert.match(first.stdout, /required public binding: 127\.0\.0\.1:8080\/tcp/);
+    assert.match(first.stdout, /browser URL: http:\/\/app\.synveda\.test:8080\/console\//);
+    assert.match(
+      first.stdout,
+      /login accounts: synveda-demo-admin \(author\), synveda-demo-member \(reviewer\), synveda-demo-approver \(second approver\), synveda-demo-viewer \(restricted viewer\)/,
+    );
+    assert.ok(
+      first.stdout.includes(
+        `author password file: ${join(state.secrets, "keycloak_demo_admin_password")}`,
+      ),
+      first.stdout,
+    );
+    assert.ok(
+      first.stdout.includes(
+        `reviewer password file: ${join(state.secrets, "keycloak_demo_member_password")}`,
+      ),
+      first.stdout,
+    );
+    assert.ok(
+      first.stdout.includes(
+        `approver password file: ${join(state.secrets, "keycloak_demo_approver_password")}`,
+      ),
+      first.stdout,
+    );
+    assert.ok(
+      first.stdout.includes(
+        `viewer password file: ${join(state.secrets, "keycloak_demo_viewer_password")}`,
+      ),
+      first.stdout,
+    );
+    assert.match(first.stdout, /status: .*make compose-smoke/);
+    assert.ok(
+      first.stdout.includes(`gateway logs: docker logs --tail 200 ${state.project}-gateway-1`),
+      first.stdout,
+    );
+    assert.match(first.stdout, /stop: .*make compose-down/);
 
     const second = run(state, "up");
     assert.equal(second.status, 0, second.stderr);
@@ -2362,6 +2401,10 @@ test("owned development host state precedes every Docker prerequisite", () => {
       const refused = run(state, action, { SYNVEDA_FAKE_HOSTS_STATUS: "absent" });
       assert.equal(refused.status, 78, `${action}: ${refused.stderr}`);
       assert.match(refused.stderr, /hosts mapping is absent, expected installed/);
+      assert.match(refused.stderr, /development hostname prerequisite failed/);
+      assert.match(refused.stderr, /make compose-hosts-status and make compose-hosts-plan/);
+      assert.match(refused.stderr, /SYNVEDA_CONFIRM_HOSTS_INSTALL=install:127\.0\.0\.1:/);
+      assert.match(refused.stderr, /make compose-resolver-check/);
       const calls = readFileSync(state.log, "utf8");
       assert.match(
         calls,
@@ -3299,6 +3342,11 @@ test("Compose acceptance holds one project lock across the fixed restart matrix"
       /<--no-recreate> <keycloak> <keycloak-realm-convergence> <otel-collector> <worker> <gateway> <proxy>/,
     );
     assert.equal((calls.match(/check-runtime-smoke\.mjs/g) ?? []).length, 8);
+    assert.equal(
+      (calls.match(/<--readiness-wait-ms> <180000>/g) ?? []).length,
+      6,
+      calls,
+    );
     assert.equal(
       (calls.match(/<up> <--no-build> <--detach> <--no-deps> <--force-recreate> <browser-acceptance>/g) ?? []).length,
       2,

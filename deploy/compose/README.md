@@ -1,16 +1,23 @@
-# Canonical Docker Compose deployment
+# Canonical source-checkout Docker Compose guide
 
-This directory is Synveda's canonical single-host deployment for CPR-45. It
-runs the gateway and worker as separate processes with PostgreSQL, bundled
-Keycloak, a reverse proxy and a private OpenTelemetry Collector. Optional
-settings add a bounded local Prometheus operator view, external trace export or
-one experimental Apalis-backed Skill-validation worker.
+This is the sole detailed source-checkout guide for Synveda's canonical
+single-host deployment under CPR-45. It runs the gateway and worker as separate
+processes with PostgreSQL, bundled Keycloak, a reverse proxy and a private
+OpenTelemetry Collector. Optional settings add a bounded local Prometheus
+operator view, external trace export or one experimental Apalis-backed
+Skill-validation worker.
 
-It supports development and reference configuration. Logical backup, isolated
-restore and same-schema product upgrade commands are implemented, but live
-browser, reference-HTTPS, recovery and upgrade evidence is still required
-before this implementation can be called validated for controlled single-host use. It is not an HA,
-disaster-recovery, hosted-SaaS or enterprise-certification claim.
+For the concise developer-first path and a real seeded-console walkthrough,
+start with the root [Quick start](../../README.md#quick-start-from-a-source-checkout),
+then return here for the complete lifecycle and optional modes.
+
+It supports development and reference configuration. A clean development
+acceptance passed on macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0 and
+Compose 5.1.2 on 2026-09-12. Linux and Docker Desktop development runs,
+reference HTTPS, recovery, upgrade and Apalis live evidence are still required
+before this implementation can be called validated for controlled single-host
+use. It is not an HA, disaster-recovery, hosted-SaaS or
+enterprise-certification claim.
 
 Use deploy/compose/scripts/compose.sh through the Make targets. Do not assemble
 Compose fragments manually.
@@ -19,8 +26,11 @@ Compose fragments manually.
 
 - Docker Engine 28 or newer, reached through its local Unix socket;
 - Docker Compose 2.33.1 or newer;
+- for development source builds, Docker Buildx with the running embedded
+  `default` builder and local `docker` driver;
 - Node.js 22 or newer;
-- OpenSSL;
+- OpenSSL when generating bundled-provider secrets or running restore;
+- GNU Make for the documented targets;
 - a non-root Unix operator.
 
 Hosts install/remove additionally requires root-owned, non-writable,
@@ -33,6 +43,21 @@ selected .test hostnames to resolve only to 127.0.0.1.
 
 The default names are app.synveda.test and auth.synveda.test. The browser,
 gateway, discovery document and tokens use the same issuer authority.
+
+The reviewed checkout, fixed root-owned Node binary, Docker/Compose/Buildx
+binaries, credential helpers, daemon mirrors, daemon proxy/CA and embedded
+BuildKit policy are part of the trusted host. The lifecycle does not sandbox a
+checkout from its owner. It empties ambient Docker client proxy variables for
+runtime services and development builds; explicit outbound-proxy and custom-CA
+support are not implemented.
+
+Development builds also refuse ambient BuildKit, Buildx and Bake selectors,
+pin the validated local Engine, use private Buildx state outside the repository
+and start the graph with `--no-build` only after the explicit build succeeds.
+Registry authentication is retained opaquely. If `DOCKER_CONFIG` is not set,
+an accessible `HOME` is required; any existing `config.json` must be a regular
+file rather than a symlink. The complete boundary and residual risks are in
+[the security model](../../docs/SECURITY.md#docker-reference-boundary).
 
 ## Development hostname setup
 
@@ -48,15 +73,49 @@ confirmation printed by the plan. For the default project:
       make compose-hosts-install
 
 Run only that target with the required privilege escalation; do not run Docker,
-the lifecycle or Make generally as root. Flush the active resolver cache, then
-verify both the owned text and operating-system resolution:
+the lifecycle or Make generally as root. Flush the active resolver cache. On
+macOS:
+
+    sudo dscacheutil -flushcache
+    sudo killall -HUP mDNSResponder
+
+On a Linux host using systemd-resolved:
+
+    sudo resolvectl flush-caches
+
+For another local resolver, use that resolver's documented cache-flush action.
+Then verify both the owned text and operating-system resolution:
 
     make compose-hosts-status
     make compose-resolver-check
 
-The manager owns at most one marked block in /etc/hosts, refuses drift or
-foreign equivalent rows, and keeps a private recovery record. Reference mode
-uses operator DNS and never edits /etc/hosts.
+The manager owns at most one marked block in `/etc/hosts`, refuses unmarked,
+duplicate, foreign or drifted ownership, and keeps a root-only recovery copy
+without printing existing host-file content. It modifies only a terminal
+managed suffix and preserves the existing inode metadata. Noncanonical,
+ACL-bearing, multiply linked or incorrectly owned targets are refused.
+Interrupted append recovery requires a newly confirmed exact-prefix action;
+this is a recovery contract, not an old-or-new power-loss atomicity claim.
+External-OIDC development owns only the application hostname. Reference mode
+uses operator DNS and never reads or edits `/etc/hosts`.
+
+### Removing development hostname ownership
+
+`compose-down` and confirmed `compose-reset` retain the host-wide hostname
+prerequisite. When the development project is no longer needed, stop it first,
+then ask the removal action for its configuration-bound confirmation. The first
+call is expected to refuse without mutation:
+
+    make compose-down
+    make compose-hosts-remove
+
+Inspect the exact value it prints, then rerun with that value and the same
+selectors:
+
+    SYNVEDA_CONFIRM_HOSTS_REMOVE="<exact value printed above>" make compose-hosts-remove
+
+Flush the resolver cache again and run `make compose-hosts-status` to prove the
+owned block is absent. The helper never removes unrelated hostname rows.
 
 ## Default lifecycle
 
@@ -67,6 +126,16 @@ Development with bundled PostgreSQL and bundled Keycloak is the default:
     make compose-smoke
     make compose-restart-gateway
     make compose-down
+
+For a ready-to-use local demo, select the existing demo profile before start:
+
+    export SYNVEDA_COMPOSE_PROFILES=demo
+    make compose-up
+
+Successful startup prints the actual `/console/` browser URL, the four demo
+account names, the protected password-file paths, and exact status, bounded-log
+and stop instructions. It never prints a password. Keep the same `SYNVEDA_*`
+selectors for every later lifecycle command.
 
 compose-up:
 
@@ -87,16 +156,22 @@ and console routes, OIDC discovery and the refusal of management/metrics
 routes. It is not a browser-login test.
 
 `make compose-acceptance` is the fresh-project gate. It requires the explicit
-acceptance suffix and private `/24`, runs the real browser login, then uses two
-real CLI login profiles to seed the existing public-API PulseBoard team
-scenario. This includes Alice issuing and Bob redeeming a one-time workspace
-invitation and one durable non-executing Skill validation. A second start
-reopens and checks the active receipt; it does not repeat the mutations. The
-gate then restarts PostgreSQL, Keycloak, Collector, worker, gateway and proxy
-one at a time, runs the full smoke after each, repeats browser login and
-verifies the existing receipt against live product rows. One project lock and
-one bounded deadline cover the run. The identity admission, operation and
-PulseBoard rows are persisted-state witnesses across the matrix.
+acceptance suffix and private `/24`. Development uses the four-principal
+ingestion-retry walkthrough below: real Keycloak browser and CLI login,
+idempotent seed with preservation of a browser edit, worker-completed Capture,
+distinct review and apply, strict two-person Skill approval, exact Knowledge
+provenance, redacted Context revision links and direct restricted-viewer
+denials. Reference HTTPS retains the two-principal public-API PulseBoard team
+scenario; its private Knowledge and Skill decisions may remain honestly
+`pending_review` under strict policy. Neither fixture advertises pending
+changes as published or bypasses review. The gate then restarts
+PostgreSQL, Keycloak, Collector, worker, gateway and proxy one at a time, runs
+the full smoke after each, repeats browser login and verifies the existing
+receipt against live product rows. Transient network or HTTP 5xx recovery is
+re-probed for at most 180 seconds after each restart; an exposed refusal route,
+wrong issuer document or other contract failure is immediate. One project lock
+and one bounded deadline cover the run. Identity admission, Capture and
+receipt-owned product rows are persisted-state witnesses across the matrix.
 Success leaves the stack running for inspection and later recovery/upgrade
 gates; reset remains separately confirmed.
 
@@ -215,14 +290,134 @@ has access to the other product's database.
 
 ## Demo and browser acceptance
 
-The demo profile adds two short-lived, convergence-owned users:
+The demo profile adds four convergence-owned users for the fictional Northstar
+Delivery team:
+
+- `synveda-demo-admin` — Avery Author, initially admitted through the existing
+  `synveda-admins` bootstrap boundary;
+- `synveda-demo-member` — Riley Reviewer, granted the existing `reviewer` and
+  `administrator` roles at the demo workspace by the fixture;
+- `synveda-demo-approver` — Morgan Approver, granted the existing
+  `administrator` role at the demo workspace so strict Skill approvals use a
+  second person;
+- `synveda-demo-viewer` — Vera Restricted Viewer, granted only the existing
+  `viewer` role at the demo workspace.
+
+Start the opt-in profile without resetting an existing project:
 
     SYNVEDA_COMPOSE_PROFILES=demo make compose-up
     SYNVEDA_COMPOSE_PROFILES=demo make compose-smoke
 
-Their passwords are generated into project-scoped secret files and should be
-read only through a local password-input mechanism. The administrator belongs
-to synveda-admins; the member receives no Keycloak domain role.
+Their passwords are generated into the mode-0600
+`keycloak_demo_admin_password`, `keycloak_demo_member_password`,
+`keycloak_demo_approver_password` and
+`keycloak_demo_viewer_password` files below the printed mode-0700 project
+secret directory. Read them only through a local password-input mechanism.
+Only Avery belongs to the Keycloak `synveda-admins` group; Riley, Morgan and
+Vera receive no Keycloak domain role. Synveda's Cedar-governed grants remain
+the application authority.
+
+### Governed ingestion-retry walkthrough
+
+This walkthrough uses public APIs and the normal deterministic Capture and
+retrieval paths. The Session and events are synthetic replay; no model, paid
+service or live coding-agent subscription is involved. Set the explicit HTTP
+relaxation only for this loopback development origin, then create four stored
+login profiles. For each command, open the printed URL in a fresh private
+browser session and sign in as the named user with that user's password file:
+
+```sh
+export SYNVEDA_GATEWAY=http://app.synveda.test:8080
+export SYNVEDA_INSECURE_DEVELOPMENT_HTTP=true
+
+synveda login --gateway "$SYNVEDA_GATEWAY" --profile author --no-browser
+# Avery Author: synveda-demo-admin
+synveda login --gateway "$SYNVEDA_GATEWAY" --profile reviewer --no-browser
+# Riley Reviewer: synveda-demo-member
+synveda login --gateway "$SYNVEDA_GATEWAY" --profile approver --no-browser
+# Morgan Approver: synveda-demo-approver
+synveda login --gateway "$SYNVEDA_GATEWAY" --profile viewer --no-browser
+# Vera Restricted Viewer: synveda-demo-viewer
+```
+
+Seed is deliberately incomplete. It creates or reopens the stable
+`northstar-delivery-demo` workspace and `ingestion-api` project, verifies the
+four grants, creates one already-approved Knowledge revision with repository
+provenance, opens a versioned Skill install proposal, and appends one synthetic
+finding to a Session. It does not capture that Session:
+
+```sh
+synveda demo retry-review seed \
+  --author-credentials author \
+  --reviewer-credentials reviewer \
+  --approver-credentials approver \
+  --viewer-credentials viewer \
+  --confirm-target "$SYNVEDA_GATEWAY"
+synveda demo retry-review inspect --author-credentials author
+synveda demo retry-review capture \
+  --author-credentials author \
+  --confirm-target "$SYNVEDA_GATEWAY"
+```
+
+The expected finding says that retries reuse the original `Idempotency-Key`,
+return 409 while the first ingestion runs, and replay its stored response once
+complete. Capture prints two exact IDs: `<learning-change-id>` and
+`<skill-change-id>`. Riley inspects each proposal. Vera's attempted learning
+approval must exit non-zero without granting or applying anything. Riley alone
+can approve the Knowledge change. Skill changes require Riley and Morgan as two
+distinct approvers before Avery applies each typed change:
+
+```sh
+synveda proposal show <learning-change-id> --profile reviewer
+synveda proposal approve <learning-change-id> --profile viewer \
+  --comment "Not authorised to review"
+# expected: denied; no state transition
+synveda proposal approve <learning-change-id> --profile reviewer \
+  --comment "Retry contract matches the reviewed Session evidence"
+synveda proposal apply <learning-change-id> --profile author
+
+synveda proposal show <skill-change-id> --profile reviewer
+synveda proposal approve <skill-change-id> --profile reviewer \
+  --comment "Skill instructions preserve idempotency and content-free evidence"
+synveda proposal approve <skill-change-id> --profile approver \
+  --comment "Distinct administrator approval for the reviewed Skill"
+synveda proposal apply <skill-change-id> --profile author
+```
+
+Now open the project binding, substitute the printed
+`<binding-change-id>`, and keep review and effect execution separate:
+
+```sh
+synveda demo retry-review bind-skill \
+  --author-credentials author \
+  --confirm-target "$SYNVEDA_GATEWAY"
+synveda proposal show <binding-change-id> --profile reviewer
+synveda proposal approve <binding-change-id> --profile reviewer \
+  --comment "Pin the reviewed Skill version at the ingestion project"
+synveda proposal approve <binding-change-id> --profile approver \
+  --comment "Distinct administrator approval for the exact binding"
+synveda proposal apply <binding-change-id> --profile author
+
+synveda demo retry-review verify \
+  --author-credentials author \
+  --reviewer-credentials reviewer \
+  --confirm-target "$SYNVEDA_GATEWAY" \
+  --json
+synveda demo retry-review status --author-credentials author --json
+```
+
+`verify` first reads the applied Knowledge head and its Session-event
+provenance, then requests Riley's authorised context, checks that it selected
+that exact revision, reads the enabled pinned Skill version, and finally reads
+content-free Knowledge, Skill, Session and context audit pages plus the chain
+verification result. The team's redacted Context trace does not retain task
+or Knowledge text; its selected-item links still address the exact immutable
+Knowledge revisions. `status` reopens the recorded Knowledge, Session,
+Capture, Skill, Context and audit addresses through the public API. Re-running
+`seed` uses stable idempotency keys and must retain the same addresses; it
+refuses a different gateway, different identities, a
+different effective curator file or changed receipt ownership. There is no
+fixture reset endpoint and no business-table SQL.
 
 The existing isolated browser acceptance starts from an explicitly fresh,
 suffixed project. If the ordinary development block is installed, stop that
@@ -243,11 +438,18 @@ Then select and install the acceptance project:
     make compose-resolver-check
     make compose-acceptance
 
-It exercises real authorization-code login, PKCE S256, issuer/audience claims
-and first-administrator admission through the same proxy authority used by
-containers. It requires a real Docker Engine; deterministic fixture tests are
-not live evidence. After inspecting the result, stop and reset that exact
-project, then remove its owned hosts block:
+It replays the same staged scenario through four real authorization-code
+logins, PKCE S256, issuer/audience claims and first-administrator admission
+through the same proxy authority used by containers. The automated reviews
+are labelled synthetic acceptance replay; they are not evidence of a human
+reviewing a live agent execution. Redirect hops are validated from Playwright request events while
+routable foreign requests are aborted. The fixture keeps every capability
+dropped and uses the reviewed Playwright seccomp profile with one documented
+local change: `chroot` is unconditional so Chromium can enter its unprivileged
+sandbox after Docker has dropped `CAP_SYS_CHROOT`. The profile bytes, digest
+and notice are checked before use. It requires a real Docker Engine;
+deterministic fixture tests are not live evidence. After inspecting the result,
+stop and reset that exact project, then remove its owned hosts block:
 
     SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance make compose-down
     SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance \
@@ -582,10 +784,14 @@ still removed.
 ## Current validation gaps
 
 The Docker reference implementation covers the source,
-deterministic-contract and packaged-release boundaries. It still requires live
-execution of clean development and reference HTTPS installs, the
-restart/Apalis matrix, paired logical backup and isolated restore, and
-same-schema product upgrade on Linux and one Docker Desktop platform.
+deterministic-contract and packaged-release boundaries. The 2026-09-10
+macOS/OrbStack clean-volume development run proved packaged-console login,
+public-API product use, worker Capture completion, the native restart matrix,
+persisted receipt verification and a non-destructive down/up that retained the
+product-data volume and generated key set. Confirmed reset separately retained
+the project keys. It still requires repetition on Linux and Docker Desktop,
+reference HTTPS, live Apalis execution, paired logical backup and isolated
+restore, and the same-schema product upgrade.
 
 A general dashboard platform, ACME, HA, Helm promotion, signed provenance,
 S3/WAL-PITR recovery and enterprise controls remain later production work.

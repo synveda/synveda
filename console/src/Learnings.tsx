@@ -912,24 +912,36 @@ function DismissAction({
   onSubmit: (reason: string) => Promise<void>;
 }) {
   const [reason, setReason] = useState("");
+  const [confirm, setConfirm] = useState(false);
   return (
     <details className="candidate-action">
       <summary>Dismiss</summary>
-      <form
-        className="stacked-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void onSubmit(reason);
-        }}
-      >
+      <div className="stacked-form">
         <Field label="Reason (optional)">
           <input value={reason} maxLength={1000} onChange={(event) => setReason(event.target.value)} />
         </Field>
         <p className="muted">Dismissal records the decision and publishes no Knowledge.</p>
-        <button type="submit" className="danger" disabled={busy}>
-          Dismiss
-        </button>
-      </form>
+        {confirm ? (
+          <div className="inline-confirm" role="group" aria-label="Confirm dismissal">
+            <span>Keep this candidate out of Knowledge?</span>
+            <button
+              type="button"
+              className="danger"
+              disabled={busy}
+              onClick={() => void onSubmit(reason)}
+            >
+              Confirm dismissal
+            </button>
+            <button type="button" disabled={busy} onClick={() => setConfirm(false)}>
+              Keep candidate
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="danger" disabled={busy} onClick={() => setConfirm(true)}>
+            Dismiss
+          </button>
+        )}
+      </div>
     </details>
   );
 }

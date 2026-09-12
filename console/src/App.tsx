@@ -38,13 +38,13 @@ import type { MeView } from "./generated/api.js";
 
 import { Home } from "./Home.js";
 import { Knowledge, KnowledgeItem } from "./Knowledge.js";
-import { ContextInspector } from "./Context.js";
+import { Context, ContextInspector } from "./Context.js";
 import { Learnings } from "./Learnings.js";
 import { Onboarding } from "./Onboarding.js";
 import { OkfExchange } from "./Okf.js";
 import { Operations } from "./Operations.js";
 import { People } from "./People.js";
-import { Reviews } from "./Reviews.js";
+import { ProposalReview, Reviews } from "./Reviews.js";
 import { Session } from "./Session.js";
 import { Sessions } from "./Sessions.js";
 import { Scopes } from "./Scopes.js";
@@ -211,6 +211,8 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
       // The id comes from the URL, so a refresh and a pasted link land on
       // the same run. `matchRoute` cannot produce this route without it.
       return <Session sessionId={route.params.session_id as string} />;
+    case "context":
+      return <Context />;
     case "context-run":
       return <ContextInspector contextRunId={route.params.context_run_id as string} />;
     case "knowledge":
@@ -227,6 +229,8 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
       return <ToolServerItem serverId={route.params.server_id as string} />;
     case "reviews":
       return <Reviews />;
+    case "review":
+      return <ProposalReview proposalId={route.params.proposal_id as string} />;
     case "scopes":
       return <Scopes />;
     case "configuration":

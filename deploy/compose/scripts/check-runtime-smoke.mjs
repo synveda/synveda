@@ -8,6 +8,8 @@ const MAX_STATUS_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 5_000;
 const METRICS_WAIT_MS = 45_000;
 const METRICS_POLL_MS = 1_000;
+const PUBLIC_READINESS_POLL_MS = 1_000;
+const MAX_PUBLIC_READINESS_WAIT_MS = 300_000;
 const HOST_TRUST_ENVIRONMENT = Object.freeze([
   "NODE_OPTIONS",
   "NODE_EXTRA_CA_CERTS",
@@ -135,6 +137,7 @@ export function parseArguments(argv) {
     "--app-url",
     "--issuer",
     "--prometheus-url",
+    "--readiness-wait-ms",
   ]);
   if ([...values.keys()].some((key) => !allowed.has(key))) return undefined;
   const selection = Object.fromEntries([...values].map(([key, value]) => [key.slice(2), value]));
@@ -164,6 +167,12 @@ export function parseArguments(argv) {
     const port = Number(match?.[1]);
     if (match === null || port < 1024 || port > 65535) return undefined;
   }
+  const readinessWait = selection["readiness-wait-ms"] ?? "0";
+  if (
+    !/^(?:0|[1-9]\d*)$/.test(readinessWait) ||
+    Number(readinessWait) > MAX_PUBLIC_READINESS_WAIT_MS
+  ) return undefined;
+  selection["readiness-wait-ms"] = Number(readinessWait);
   try {
     const app = new URL(selection["app-url"]);
     const issuer = new URL(selection.issuer);
@@ -240,6 +249,8 @@ export async function waitForLocalMetrics(
   throw new Error("local metrics visibility probe failed");
 }
 
+class RetryableProbeError extends Error {}
+
 async function probe(url, expectedStatus, stage) {
   let response;
   try {
@@ -249,9 +260,15 @@ async function probe(url, expectedStatus, stage) {
       headers: { "user-agent": "synveda-compose-smoke/1" },
     });
   } catch {
+    throw new RetryableProbeError(stage);
+  }
+  if (response.status !== expectedStatus) {
+    await response.body?.cancel().catch(() => {});
+    if (response.status >= 500 && response.status <= 599) {
+      throw new RetryableProbeError(stage);
+    }
     throw new Error(stage);
   }
-  if (response.status !== expectedStatus) throw new Error(stage);
   return response;
 }
 
@@ -280,6 +297,92 @@ export async function boundedResponseBody(response, maximumBytes) {
     reader.releaseLock();
   }
   return Buffer.concat(chunks, bytes);
+}
+
+async function probePublicEndpoints(selection) {
+  const appUrl = selection["app-url"].replace(/\/$/, "");
+  await probe(`${appUrl}/healthz`, 200, "application liveness probe failed");
+  await probe(`${appUrl}/readyz`, 200, "application readiness probe failed");
+  await probe(`${appUrl}/console/`, 200, "console probe failed");
+  await probe(`${appUrl}/metrics`, 404, "public metrics refusal probe failed");
+  if (selection.oidc === "bundled") {
+    const discovery = await probe(
+      `${selection.issuer}/.well-known/openid-configuration`,
+      200,
+      "OIDC discovery probe failed",
+    );
+    let document;
+    try {
+      const body = await boundedResponseBody(discovery, MAX_STATUS_BYTES);
+      document = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+    } catch {
+      throw new Error("OIDC discovery contract failed");
+    }
+    if (document?.issuer !== selection.issuer) {
+      throw new Error("OIDC discovery contract failed");
+    }
+    const identityOrigin = new URL(selection.issuer).origin;
+    await probe(
+      `${identityOrigin}/health/ready`,
+      404,
+      "identity management refusal probe failed",
+    );
+    await probe(
+      `${identityOrigin}/metrics`,
+      404,
+      "identity metrics refusal probe failed",
+    );
+    await probe(
+      `${identityOrigin}/admin/`,
+      404,
+      "identity administration refusal probe failed",
+    );
+    await probe(
+      `${identityOrigin}/realms/master/.well-known/openid-configuration`,
+      404,
+      "identity master realm refusal probe failed",
+    );
+  }
+  if (selection.observability === "true") {
+    const prometheusUrl = selection["prometheus-url"];
+    await probe(
+      `${prometheusUrl}/-/ready`,
+      200,
+      "local metrics backend readiness probe failed",
+    );
+    await waitForLocalMetrics(prometheusUrl);
+  }
+}
+
+export async function waitForPublicEndpoints(
+  selection,
+  waitMilliseconds = selection?.["readiness-wait-ms"] ?? 0,
+  pollMilliseconds = PUBLIC_READINESS_POLL_MS,
+) {
+  if (
+    !Number.isSafeInteger(waitMilliseconds) ||
+    waitMilliseconds < 0 ||
+    waitMilliseconds > MAX_PUBLIC_READINESS_WAIT_MS ||
+    !Number.isSafeInteger(pollMilliseconds) ||
+    pollMilliseconds <= 0
+  ) {
+    throw new Error("public readiness boundary was refused");
+  }
+  const deadline = Date.now() + waitMilliseconds;
+  while (true) {
+    try {
+      await probePublicEndpoints(selection);
+      return;
+    } catch (error) {
+      if (!(error instanceof RetryableProbeError) || Date.now() >= deadline) {
+        throw error;
+      }
+      const remaining = deadline - Date.now();
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(pollMilliseconds, Math.max(1, remaining))),
+      );
+    }
+  }
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -327,45 +430,8 @@ export async function main(argv = process.argv.slice(2)) {
     return;
   }
 
-  const appUrl = selection["app-url"].replace(/\/$/, "");
   try {
-    await probe(`${appUrl}/healthz`, 200, "application liveness probe failed");
-    await probe(`${appUrl}/readyz`, 200, "application readiness probe failed");
-    await probe(`${appUrl}/console/`, 200, "console probe failed");
-    await probe(`${appUrl}/metrics`, 404, "public metrics refusal probe failed");
-    if (selection.oidc === "bundled") {
-      const discovery = await probe(
-        `${selection.issuer}/.well-known/openid-configuration`,
-        200,
-        "OIDC discovery probe failed",
-      );
-      let document;
-      try {
-        const body = await boundedResponseBody(discovery, MAX_STATUS_BYTES);
-        document = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
-      } catch {
-        throw new Error("OIDC discovery contract failed");
-      }
-      if (document?.issuer !== selection.issuer) throw new Error("OIDC discovery contract failed");
-      const identityOrigin = new URL(selection.issuer).origin;
-      await probe(`${identityOrigin}/health/ready`, 404, "identity management refusal probe failed");
-      await probe(`${identityOrigin}/metrics`, 404, "identity metrics refusal probe failed");
-      await probe(`${identityOrigin}/admin/`, 404, "identity administration refusal probe failed");
-      await probe(
-        `${identityOrigin}/realms/master/.well-known/openid-configuration`,
-        404,
-        "identity master realm refusal probe failed",
-      );
-    }
-    if (selection.observability === "true") {
-      const prometheusUrl = selection["prometheus-url"];
-      await probe(
-        `${prometheusUrl}/-/ready`,
-        200,
-        "local metrics backend readiness probe failed",
-      );
-      await waitForLocalMetrics(prometheusUrl);
-    }
+    await waitForPublicEndpoints(selection);
   } catch (error) {
     const stage = error instanceof Error ? error.message : "public endpoint probe failed";
     console.error(`compose-smoke: ${stage}`);

@@ -1,11 +1,10 @@
 /**
  * Advanced ▸ Reviews (CNSL-1; re-homed by CPR-8) — the queue, and the
- * review beside it.
+ * a stable route for each review.
  *
  * The screen CNSL-1 exists for. FLOW-6 established that a full review is
- * possible without a console; what a console adds is that the queue and the
- * thing being reviewed are visible at once, which a terminal cannot do and
- * which is most of why a reviewer with forty open proposals prefers one.
+ * possible without a console; what a console adds is a readable queue and a
+ * refreshable address for the evidence and exact change under review.
  *
  * It calls no endpoint the CLI does not (ADR-0056 decision 9): `GET
  * /v1/proposals`, `GET /v1/proposals/{id}`, and the two verdict routes.
@@ -16,7 +15,8 @@
  * other people's publications and the wrong one for the person who just
  * installed the product. It is now a route under Advanced, behind
  * `proposal.read`, where somebody goes to govern rather than lands to work.
- * Not one line of the review itself moved.
+ * CPR-45 made queue selection a route instead of transient component state;
+ * the review API, capability forecast and commit preconditions are unchanged.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -26,12 +26,13 @@ import { request } from "./client.mjs";
 import { offers, type Capabilities, type CapabilityBatch } from "./explorer.mjs";
 import type { MeView } from "./generated/api.js";
 import { Review } from "./Review.js";
+import { Link } from "./Router.js";
 import { PageHeading } from "./Shell.js";
+import { hrefOf } from "./routes.mjs";
 import type { Proposal, ProposalDetail } from "./review.mjs";
 
 export function Reviews() {
   const [queue, setQueue] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
-  const [selected, setSelected] = useState<string | null>(null);
   const [family, setFamily] = useState("");
 
   const load = useCallback(async () => {
@@ -64,36 +65,29 @@ export function Reviews() {
           <option value="context_pack">Context packs</option>
         </select>
       </label>
-      <div className="split">
-        <Queue state={queue} selected={selected} onSelect={setSelected} onRetry={() => void load()} />
-        {selected ? (
-          <Detail
-            key={selected}
-            id={selected}
-            // A verdict changes the queue — the state moves, the
-            // outstanding line shrinks — so the list is re-read rather
-            // than patched. A surface that edited its own copy of a
-            // requirement would be the second implementation of a
-            // judgement this feature spent two decisions removing.
-            onSettled={() => void load()}
-          />
-        ) : (
-          <p className="muted">Choose a proposal to review it.</p>
-        )}
-      </div>
+      <Queue state={queue} onRetry={() => void load()} />
     </section>
+  );
+}
+
+/** One review at a stable, refreshable URL (CPR-45 amendment to ADR-0075). */
+export function ProposalReview({ proposalId }: { proposalId: string }) {
+  return (
+    <>
+      <PageHeading route="review" />
+      <p>
+        <Link href={hrefOf("reviews")}>← Review queue</Link>
+      </p>
+      <Detail id={proposalId} onSettled={() => {}} />
+    </>
   );
 }
 
 function Queue({
   state,
-  selected,
-  onSelect,
   onRetry,
 }: {
   state: Outcome | { kind: "loading" };
-  selected: string | null;
-  onSelect: (id: string) => void;
   onRetry: () => void;
 }) {
   if (state.kind === "loading") {
@@ -110,10 +104,9 @@ function Queue({
     <ul className="queue">
       {proposals.map((proposal) => (
         <li key={proposal.id}>
-          <button
-            type="button"
-            className={proposal.id === selected ? "row selected" : "row"}
-            onClick={() => onSelect(proposal.id)}
+          <Link
+            className="row"
+            href={hrefOf("review", { proposal_id: proposal.id })}
           >
             <span className="row-title">{proposal.title}</span>
             <span className="muted">
@@ -127,7 +120,7 @@ function Queue({
             <span className="muted">
               {Array.from(new Set(proposal.artifact_references.map((reference) => reference.family))).join(", ")}
             </span>
-          </button>
+          </Link>
         </li>
       ))}
     </ul>

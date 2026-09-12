@@ -55,14 +55,18 @@ export function MutationNoticeView({ notice }: { notice: MutationNotice | null }
       </div>
     );
   }
+  const pending = notice.result.outcome === "pending_review";
+  const rejected = notice.result.outcome === "rejected";
   return (
     <div
-      className={`banner ${notice.result.outcome === "rejected" ? "error" : "success"}`}
-      role="status"
+      className={`banner ${rejected ? "error" : pending ? "warning" : "success"}`}
+      role={rejected ? "alert" : "status"}
     >
       {skillMutationMessage(notice.result)} Change {notice.result.change_id}.{" "}
-      {notice.result.outcome === "pending_review" ? (
-        <Link href={hrefOf("reviews")}>Open Advanced Reviews</Link>
+      {pending ? (
+        <Link href={hrefOf("review", { proposal_id: notice.result.change_id })}>
+          Open this governed change
+        </Link>
       ) : null}
     </div>
   );

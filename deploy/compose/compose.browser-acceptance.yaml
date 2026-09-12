@@ -37,7 +37,7 @@ services:
       SYNVEDA_BOOTSTRAP_TENANT_ID: ${SYNVEDA_BOOTSTRAP_TENANT_ID:?set SYNVEDA_BOOTSTRAP_TENANT_ID}
       SYNVEDA_INSECURE_DEVELOPMENT_HTTP: ${SYNVEDA_INSECURE_DEVELOPMENT_HTTP:?set SYNVEDA_INSECURE_DEVELOPMENT_HTTP}
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=256m
     volumes:
       - type: volume
         source: browser-acceptance-state
@@ -47,8 +47,12 @@ services:
     secrets:
       - source: keycloak_demo_admin_password
         target: keycloak_demo_admin_password
+      - source: keycloak_demo_approver_password
+        target: keycloak_demo_approver_password
       - source: keycloak_demo_member_password
         target: keycloak_demo_member_password
+      - source: keycloak_demo_viewer_password
+        target: keycloak_demo_viewer_password
     depends_on:
       gateway:
         condition: service_healthy

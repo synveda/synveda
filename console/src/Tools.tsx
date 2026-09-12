@@ -31,6 +31,16 @@ export function Tools() {
         Synveda does not launch imported commands or proxy <code>tools/call</code>. Credentials
         stay behind secret references resolved by a trusted client adapter.
       </div>
+      <details className="technical-details">
+        <summary>What the MCP server states mean</summary>
+        <ul>
+          <li><strong>Configured</strong> means a masked secret reference is present, not that it works.</li>
+          <li><strong>Approved</strong> means VedaFlow applied that immutable version.</li>
+          <li><strong>Bound</strong> names one approved version at the project; it grants no execution authority.</li>
+          <li><strong>Tested</strong> requires a retained report from a named trusted adapter.</li>
+          <li><strong>Quarantined</strong> versions cannot be bound and do not replace the approved head.</li>
+        </ul>
+      </details>
       <ToolCatalogue project={project} canImport={canImport} />
       {project ? <ProjectConfiguration project={project} /> : null}
     </>

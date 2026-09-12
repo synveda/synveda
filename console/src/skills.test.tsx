@@ -9,7 +9,11 @@ import type { Outcome } from "./api.mjs";
 import { cache } from "./cache.mjs";
 import { AppProvider, type AppContextValue } from "./Shell.js";
 import { SkillItem, Skills } from "./Skills.js";
-import { applyMutationOutcome, type MutationNotice } from "./skills/ui.js";
+import {
+  applyMutationOutcome,
+  MutationNoticeView,
+  type MutationNotice,
+} from "./skills/ui.js";
 import { toText } from "./text.mjs";
 import type {
   AnchorCapabilities,
@@ -323,9 +327,26 @@ test("the catalogue shows installed immutable heads and exact session availabili
     "release-check v1",
     "pinned",
     "Install Skill",
+    "Installed/current is the aggregate's applied immutable head",
+    "Available is an enabled binding resolved through a live policy read",
+    "pending VedaFlow change is not installed",
   ]) {
     assert.match(text, new RegExp(expected, "i"), expected);
   }
+});
+
+test("a pending Skill change is warning state linked to its exact review", () => {
+  const markup = renderToStaticMarkup(
+    <MutationNoticeView
+      notice={{
+        kind: "result",
+        result: { change_id: "change-skill-pending", outcome: "pending_review" },
+      }}
+    />,
+  );
+  assert.match(markup, /banner warning/);
+  assert.match(markup, /href="\/console\/advanced\/reviews\/change-skill-pending"/);
+  assert.match(toText(markup), /waiting for review.*unchanged/i);
 });
 
 test("one Skill exposes versions, files, provenance, bindings, tests and distinct usage evidence", async () => {

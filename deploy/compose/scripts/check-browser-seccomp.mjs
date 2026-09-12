@@ -2,8 +2,8 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 
-const EXPECTED_SHA256 = "cc3e61cabda6bbc1e53e54d27ba4d55a9d3be829b6dd1a596f4a7b31b1cc7849";
-const EXPECTED_BYTES = 12_997;
+const EXPECTED_SHA256 = "73d645b1e29aa74da459e6f2f751d6bf565712a4cd6be73d41960b0c71e9733d";
+const EXPECTED_BYTES = 13_027;
 
 function fail(message, status = 78) {
   process.stderr.write(`browser-seccomp: ${message}\n`);
@@ -44,6 +44,7 @@ try {
   fail("profile JSON was refused");
 }
 const namespaceRule = profile?.syscalls?.[0];
+const chrootRules = profile?.syscalls?.filter(({ names }) => names?.includes("chroot"));
 if (
   profile?.defaultAction !== "SCMP_ACT_ERRNO" ||
   !profile?.archMap?.some(({ architecture }) => architecture === "SCMP_ARCH_X86_64") ||
@@ -53,6 +54,15 @@ if (
     names: ["clone", "setns", "unshare"],
     action: "SCMP_ACT_ALLOW",
     args: [],
+    includes: {},
+    excludes: {},
+  }) ||
+  chrootRules?.length !== 1 ||
+  JSON.stringify(chrootRules[0]) !== JSON.stringify({
+    names: ["chroot"],
+    action: "SCMP_ACT_ALLOW",
+    args: [],
+    comment: "Allow Chromium sandbox chroot after entering its unprivileged user namespace",
     includes: {},
     excludes: {},
   })

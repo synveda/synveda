@@ -357,6 +357,79 @@ test("raw payloads are not on the page, and the expansion is offered only where 
   assert.match(privileged, /Show raw payload/);
 });
 
+test("capture shows frozen source evidence and is offered only with Session write authority", async () => {
+  await Promise.all([
+    seed("sessions/one/s-1", ok(session({ task_summary: "Record the retry decision" }))),
+    seed("sessions/timeline/s-1", ok(timeline({ event_counts: { "message.user": 2 } }))),
+    seed("projects/p-1/repositories", ok({ repositories: [] })),
+    seed("capture/session/s-1/batches", ok({
+      batches: [{
+        id: "batch-1",
+        session_id: "s-1",
+        project_id: "p-1",
+        scope_id: PROJECT_SCOPE,
+        source_kind: "session",
+        state: "completed",
+        event_count: 2,
+        candidate_count: 1,
+        attempts: 1,
+        input_hash: "evidence-hash",
+        configuration_hash: "configuration-hash",
+        extractor_method: "rules",
+        model_version: "capture-rules-v1",
+        created_at: "2026-08-23T10:10:00Z",
+        completed_at: "2026-08-23T10:10:01Z",
+      }],
+    })),
+    seed("capture/session/s-1/candidates", ok({
+      candidates: [{
+        id: "candidate-1",
+        batch_id: "batch-1",
+        session_id: "s-1",
+        source_kind: "session",
+        ordinal: 0,
+        proposed_scope_id: PROJECT_SCOPE,
+        proposed_project_id: "p-1",
+        knowledge_type: "decision",
+        origin: "observed",
+        content: {
+          title: "Retry by provider event ID",
+          summary: "Retries preserve the provider event address.",
+          body_markdown: "Retry by provider event ID.",
+          tags: [],
+          sensitivity: "internal",
+          confidence_permille: 920,
+        },
+        content_hash: "candidate-hash",
+        state: "pending",
+        source_event_ids: ["event-1", "event-2"],
+        source_artifact_ids: [],
+        matches: [],
+        content_erased: false,
+        created_at: "2026-08-23T10:10:01Z",
+      }],
+    })),
+  ]);
+
+  const writable = renderDetail(me({ "session.write": true }));
+  for (const expected of [
+    "Capture evidence",
+    "Capture this Session",
+    "2 frozen events",
+    "completed",
+    "Retry by provider event ID",
+    "source evidence 2 exact events",
+    "Source event addresses",
+  ]) {
+    assert.match(writable, new RegExp(expected, "i"), expected);
+  }
+
+  const readOnly = renderDetail(me());
+  assert.match(readOnly, /capture is read-only here/i);
+  assert.doesNotMatch(readOnly, /Capture this Session/);
+  assert.match(readOnly, /Retry by provider event ID/);
+});
+
 test("the database-backed Claude replay timeline renders without transcript content", async () => {
   await seed(
     "sessions/one/s-1",

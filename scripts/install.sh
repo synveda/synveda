@@ -1,7 +1,8 @@
 #!/bin/sh
 # Synveda installer (OPS-8, ADR-0065).
 #
-#   curl -fsSL https://synveda.dev/install.sh | sh
+# Invoke only the tag-bound copy named by a published release after inspecting
+# it. The mutable source-branch script is not a public installation command.
 #
 # Downloads one release's binaries, console bundle and digest-bound Docker
 # reference bundle. It installs artifacts only and never starts the deployment.
@@ -29,7 +30,9 @@
 # from a pipe.
 #
 # Environment:
-#   SYNVEDA_VERSION   release tag to install (default: the latest release)
+#   SYNVEDA_VERSION   compatible release tag. Omitting it queries the
+#                     repository's latest release; do so only when that
+#                     release's instructions declare this installer compatible.
 #   SYNVEDA_HOME      install root                    (default ~/.synveda)
 #   SYNVEDA_BIN       where the CLI goes              (default /usr/local/bin)
 #   SYNVEDA_BASE_URL  where to fetch assets from instead of a GitHub release.
@@ -134,14 +137,10 @@ case "$os/$arch" in
     die "no release build for $os/$arch.
 
   This release ships macOS arm64 (Apple Silicon) and Linux x86_64.
-  Everything still works from source on any platform Rust and Docker do:
-
-    git clone https://github.com/$REPO
-    cd synveda && cargo build --release -p synveda-cli -p synveda-gateway --bins
-
-  That builds development/evaluation artifacts only. The Docker reference
-  lifecycle is unavailable until CPR-45 clean-volume acceptance passes; see
-  docs/INSTALL.md in the checkout.
+  A source build may be possible on another platform, but the supported product
+  topology is not a pair of ad hoc binaries. Use a reviewed checkout and follow
+  deploy/compose/README.md, the canonical source-checkout guide. Its documented
+  Docker prerequisites and still-pending live platform evidence apply.
 
   If this platform matters to you, say so — adding one is a build matrix row."
     ;;
@@ -176,7 +175,8 @@ if [ -z "$version" ]; then
   version="$(fetch_stdout "https://api.github.com/repos/$REPO/releases/latest" \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
   [ -n "$version" ] || die "could not determine the latest release of $REPO.
-  Pick one explicitly:  SYNVEDA_VERSION=v0.2.0 sh install.sh"
+  Pick a compatible published tag explicitly:
+  SYNVEDA_VERSION=vMAJOR.MINOR.PATCH sh install.sh"
   select_release_version "$version"
 fi
 # Assets are named by the normalized plain version; GitHub tags retain one

@@ -51,6 +51,7 @@ export function Review({
   error,
   busy,
 }: ReviewProps) {
+  const [confirmCancel, setConfirmCancel] = useState(false);
   return (
     <article className="review">
       <Heading detail={detail} />
@@ -81,9 +82,21 @@ export function Review({
               </button>
             ) : null}
             {onCancel ? (
-              <button type="button" disabled={busy} onClick={onCancel}>
-                Cancel proposal
-              </button>
+              confirmCancel ? (
+                <span className="inline-confirm" role="group" aria-label="Confirm cancellation">
+                  <span>Cancel this proposal without applying its change?</span>
+                  <button type="button" className="danger" disabled={busy} onClick={onCancel}>
+                    Confirm cancellation
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => setConfirmCancel(false)}>
+                    Keep proposal
+                  </button>
+                </span>
+              ) : (
+                <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)}>
+                  Cancel proposal
+                </button>
+              )
             ) : null}
           </div>
         </section>
@@ -156,10 +169,6 @@ function Heading({ detail }: { detail: ProposalDetail }) {
         <dd>
           {detail.proposer_subject} at {instant(detail.created_at)}
         </dd>
-        <dt>commit</dt>
-        <dd>
-          <code>{detail.commit}</code>
-        </dd>
         <dt>requires</dt>
         <dd>{describeRequirement(detail.required)}</dd>
         <dt>outstanding</dt>
@@ -171,6 +180,10 @@ function Heading({ detail }: { detail: ProposalDetail }) {
           </>
         ) : null}
       </dl>
+      <details className="technical-details">
+        <summary>Proposal commit evidence</summary>
+        <code className="breakable">{detail.commit}</code>
+      </details>
     </section>
   );
 }
@@ -243,10 +256,13 @@ function MemberRow({ member }: { member: Member }) {
           ))}
         </pre>
       ) : null}
-      <p className="muted addresses">
-        {member.baseline ? <>replacing object <code>{member.baseline.object_hash.slice(0, 12)}</code>; </> : null}
-        proposed object <code>{member.object_hash.slice(0, 12)}</code>
-      </p>
+      <details className="technical-details addresses">
+        <summary>Content addresses</summary>
+        <p className="muted">
+          {member.baseline ? <>replacing object <code>{member.baseline.object_hash.slice(0, 12)}</code>; </> : null}
+          proposed object <code>{member.object_hash.slice(0, 12)}</code>
+        </p>
+      </details>
     </div>
   );
 }

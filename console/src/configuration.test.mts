@@ -5,8 +5,10 @@ import { test } from "node:test";
 
 import { describe } from "./client.mjs";
 import {
+  applyDemoConfigurationDraft,
   configurationSummary,
   configurationTarget,
+  demoConfigurationDraft,
   mutationMessage,
   parseConfiguration,
   renderConfiguration,
@@ -59,6 +61,80 @@ test("the complete immutable document round-trips without a second DTO", () => {
   assert.deepEqual(parseConfiguration(renderConfiguration(document)), document);
   assert.match(configurationSummary(document), /standard · 1500 tokens · redacted traces/);
   assert.throws(() => parseConfiguration("[]"), /complete JSON object/);
+});
+
+test("the demo form edits bounded Capture and Context fields without dropping the document", () => {
+  const draft = {
+    ...demoConfigurationDraft(document),
+    captureMinimumConfidencePermille: "725",
+    captureMaximumCandidatesPerBatch: "12",
+    contextTokenBudget: "2048",
+    contextTraceRetention: "hashes_only" as const,
+    contextIncludeUnreviewedCandidates: true,
+  };
+  const proposed = applyDemoConfigurationDraft(document, draft);
+
+  assert.deepEqual(proposed.capture, {
+    ...document.capture,
+    minimum_confidence_permille: 725,
+    maximum_candidates_per_batch: 12,
+  });
+  assert.deepEqual(proposed.context, {
+    ...document.context,
+    token_budget: 2048,
+    trace_retention: "hashes_only",
+    channels: ["current_knowledge", "unreviewed_candidates"],
+  });
+  assert.deepEqual(proposed.freshness, document.freshness);
+  assert.deepEqual(proposed.advertisement, document.advertisement);
+  assert.deepEqual(proposed.relaxations, document.relaxations);
+  assert.deepEqual(proposed.allowed_external_providers, document.allowed_external_providers);
+  assert.equal(proposed.policy_pack, document.policy_pack);
+});
+
+test("the unreviewed toggle does not invent a current-Knowledge channel", () => {
+  const noCurrentKnowledge = {
+    ...document,
+    context: { ...document.context, channels: [] },
+  };
+  const draft = {
+    ...demoConfigurationDraft(noCurrentKnowledge),
+    contextIncludeUnreviewedCandidates: true,
+  };
+
+  assert.deepEqual(
+    applyDemoConfigurationDraft(noCurrentKnowledge, draft).context.channels,
+    ["unreviewed_candidates"],
+  );
+});
+
+test("the form repeats the contract bounds before the gateway validates again", () => {
+  const valid = demoConfigurationDraft(document);
+  assert.throws(
+    () => applyDemoConfigurationDraft(document, { ...valid, contextTokenBudget: "100001" }),
+    /1 through 100000/,
+  );
+  assert.throws(
+    () =>
+      applyDemoConfigurationDraft(document, {
+        ...valid,
+        captureMaximumCandidatesPerBatch: "0",
+      }),
+    /1 through 256/,
+  );
+  assert.throws(
+    () =>
+      applyDemoConfigurationDraft(document, {
+        ...valid,
+        captureEnabled: false,
+        captureOnSessionEnd: true,
+      }),
+    /Disabled Capture/,
+  );
+  assert.throws(
+    () => applyDemoConfigurationDraft(document, { ...valid, contextTokenBudget: "1.5" }),
+    /whole number/,
+  );
 });
 
 test("the selected project is the nearest configuration target", () => {

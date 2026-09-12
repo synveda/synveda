@@ -1,8 +1,11 @@
 # Contributing
 
 Synveda's trust boundaries are part of its product contract. Read
-[AGENTS.md](AGENTS.md), the Seed invariants and the relevant accepted ADRs
-before changing code.
+[AGENTS.md](AGENTS.md), the
+[Seed invariants](docs/SYNVEDA_SEED.md#2-product-principles-non-negotiable) and the
+relevant accepted ADRs before changing code. The root
+[documentation index](README.md#documentation) separates local use, product
+use, architecture and deployment limits.
 
 ## Workflow
 

@@ -1,5 +1,11 @@
 # Deployment
 
+This file is the infrastructure-shape overview. Source-checkout operator steps
+live in the [canonical Compose guide](compose/README.md); the normative mapping
+across deployment shapes lives in the
+[deployment contract](../docs/DEPLOYMENT_CONTRACT.md), and unproved operational
+claims remain in [production readiness](../docs/PRODUCTION_READINESS.md).
+
 Synveda has one context-platform runtime. Direct binaries, source/release
 Compose services and Helm Deployments use the same product commands, schema
 epoch, generated `/v1` contract, embedded Cedar PDP, VedaFlow effects and
@@ -22,8 +28,8 @@ freshness or Skill/Tool advertisement.
   exact-confirmation `reset` lifecycle, plus optional observability and Apalis
   canary profiles.
   Deterministic lifecycle tests are implementation evidence, not a validated
-  reference claim: clean-volume browser/Keycloak and recovery acceptance are
-  still open.
+  reference claim. One macOS/OrbStack clean-volume development run passed;
+  Linux, Docker Desktop, reference HTTPS and recovery acceptance remain open.
   This is also the only source-development product topology. Evaluation-only
   dependencies use isolated fixtures and do not define another Synveda stack.
 - `helm/` is the Kubernetes infrastructure: separate gateway and worker

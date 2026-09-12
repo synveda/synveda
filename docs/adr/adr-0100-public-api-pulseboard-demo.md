@@ -72,6 +72,29 @@ violate the platform's central governance claim.
    embedder is labelled as lexical-only. The walkthrough points to the
    supported TEI/BGE-M3 option for a semantic demonstration and never renames
    hashing as semantic retrieval.
+9. **The local review fixture is staged and target-bound.** CPR-45 adds one
+   opt-in software-delivery fixture beneath `synveda demo` for a synthetic
+   Session that identifies the retry contract for ingestion requests. Its
+   seed step creates only the workspace/project, four authenticated demo
+   principals' existing workspace-scoped grants, one approved authored
+   Knowledge revision with repository provenance, one pending Skill install and the un-captured
+   Session. Capture, Knowledge review/apply, Skill review/apply and binding
+   review/apply remain explicit later steps. Stable fixture-wide idempotency
+   keys and a private receipt make an interrupted first run and a second run
+   converge on the same resources; a different effective curator file,
+   stable resource address or receipt owner is refused rather than repointed.
+   Every mutating fixture
+   command requires the caller to repeat the exact credential-bound gateway
+   URL and accepts only the bundled development names or loopback hosts. This
+   is a protection against pointing demo data at an unintended deployment,
+   not an authentication or server-authorisation substitute.
+10. **Acceptance automation is labelled replay evidence.** The Compose gate
+    may drive the staged actions using four real OIDC identities to prove
+    persisted public-API transitions, the two-distinct-approver Skill matrix
+    and denial behaviour. Those rows are
+    synthetic acceptance replay, not evidence that a human reviewed a live
+    agent execution. The presenter walkthrough starts from the seed boundary
+    and leaves its review and apply acts to the signed-in people named there.
 
 ## Options considered
 
@@ -97,7 +120,10 @@ violate the platform's central governance claim.
   prerequisites; real teammate evidence needs a second credential; uncertain
   one-time invitation issuance may require revocation and a fresh demo; strict
   Skill/Tool matrices can leave those demo changes pending until reviewers act;
-  reset intentionally retains historical evidence.
+  reset intentionally retains historical evidence. The staged local fixture
+  needs four demo logins and an exact target confirmation, and deliberately
+  takes more than one command because review and effect execution are distinct
+  product acts.
 - Reversal trigger: the public application gains a governed first-tenant
   operator-enrolment workflow that can adopt Configuration before ordinary
   login → remove the first-profile outcome rule and use that workflow.

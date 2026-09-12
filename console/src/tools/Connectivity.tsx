@@ -35,7 +35,7 @@ export function ToolConnectivityEvidence({
   );
   return (
     <section>
-      <h4>Read-only connectivity evidence</h4>
+      <h4>Read-only reported test evidence</h4>
       <div className="banner warning">
         A named trusted adapter performs discovery/list checks and reports the result. This page
         records that evidence; the gateway does not connect to the server or execute a tool.
@@ -44,12 +44,15 @@ export function ToolConnectivityEvidence({
         {(body) => (
           <>
             {body.runs.length === 0 ? (
-              <p className="muted">Health: not tested for this exact version.</p>
+              <p className="muted">
+                No trusted adapter test report exists for this exact version. Availability is
+                unknown, not healthy.
+              </p>
             ) : (
               <ul className="tool-test-runs">
                 {body.runs.map((run, index) => (
                   <li key={run.id}>
-                    <strong>{index === 0 ? "Latest health" : "Historical result"}: </strong>
+                    <strong>{index === 0 ? "Latest reported result" : "Historical reported result"}: </strong>
                     <span className={`tag ${run.outcome === "passed" ? "done" : "quarantined"}`}>
                       {run.outcome}
                     </span>{" "}
@@ -124,10 +127,14 @@ function TestReportForm({
   return (
     <div className="tool-test-form">
       <button type="button" onClick={() => setOpen((value) => !value)}>
-        {open ? "Close reporter" : "Record trusted adapter test"}
+        {open ? "Close reporter" : "Record external adapter report"}
       </button>
       {open ? (
         <form onSubmit={(event) => void submit(event)}>
+          <p className="muted">
+            Use this only to retain a result already produced by the named trusted adapter. The
+            console does not run discovery, contact the server or verify credentials.
+          </p>
           <div className="form-grid">
             <label>
               Reporter boundary

@@ -3,9 +3,13 @@
 Status: current contract for CPR-45 and ADR-0102, as amended by ADR-0105.
 
 This document defines the application/deployment boundary shared by direct
-binary execution, Docker Compose and later Kubernetes packaging. The
-authoritative implementation is the product image, its commands, the
-configuration readers, the database schema and the generated public API.
+binary execution, Docker Compose, the current Helm chart and future Kubernetes
+promotion. The authoritative implementation is the product image, its commands,
+the configuration readers, the database schema and the generated public API.
+
+Source-checkout operator steps live only in the
+[canonical Compose guide](../deploy/compose/README.md). This document is the
+normative cross-deployment mapping, not another quickstart.
 
 ## Principles
 
@@ -449,14 +453,17 @@ Implemented:
 
 compose-acceptance requires a fresh suffixed bundled project and the exact
 demo/browser profiles, optionally plus Apalis. Under one lock and deadline it
-performs browser login, seeds the existing two-principal public-API team demo,
-creates and polls one `skill_validation@1` operation, reopens and checks the
-active receipt, then runs the fixed product/provider restart matrix and the full
+performs real browser login and a public-API product walkthrough. Development
+uses four principals for staged ingestion-retry Capture, review, permitted
+apply, Skill approval/binding, Context and restricted-viewer refusal;
+reference HTTPS retains the two-principal team fixture. The active receipt
+is rechecked against live rows before and after the fixed product/provider
+restart matrix and the full
 smoke after every restart. The normal matrix has six services; selecting Apalis
 adds its worker as a seventh restart while its queue remains running.
 The gate repeats browser login and verifies the existing receipt against live
-product rows. It leaves the successful stack running. Identity admission, the
-operation and the demo rows are restart-state witnesses. With the same profiles
+product rows. It leaves the successful stack running. Identity admission,
+Capture and the demo rows are restart-state witnesses. With the same profiles
 selected, compose-down removes the disposable browser credential-and-receipt
 volume after exact ownership checks while retaining product data; confirmed
 compose-reset also removes it and any selected Apalis transport volume.

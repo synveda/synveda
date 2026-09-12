@@ -430,6 +430,90 @@ enum DemoCommand {
         #[arg(long)]
         credentials: Option<String>,
     },
+    /// Stage the local ingestion-retry learning and review walkthrough.
+    ///
+    /// This fixture uses only authenticated public APIs. `seed` stops before
+    /// capture; proposal review and apply remain explicit acts by the named
+    /// identities.
+    #[command(subcommand, name = "retry-review")]
+    RetryReview(RetryReviewCommand),
+}
+
+#[derive(Subcommand)]
+enum RetryReviewCommand {
+    /// Create or resume the local-only fixture, stopping before capture.
+    Seed {
+        /// Author login profile. Defaults to SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        author_credentials: Option<String>,
+        /// Distinct reviewer login profile.
+        #[arg(long, default_value = "reviewer")]
+        reviewer_credentials: String,
+        /// Distinct administrator approver login profile.
+        #[arg(long, default_value = "approver")]
+        approver_credentials: String,
+        /// Distinct read-only viewer login profile.
+        #[arg(long, default_value = "viewer")]
+        viewer_credentials: String,
+        /// Repeat the exact gateway URL stored with the author credential.
+        #[arg(long)]
+        confirm_target: String,
+        /// Print the fixture receipt as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect the synthetic Session timeline and its exact source event.
+    Inspect {
+        #[arg(long)]
+        author_credentials: Option<String>,
+        /// Print machine-readable evidence.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Freeze the Session, extract its candidate and propose the learning.
+    Capture {
+        #[arg(long)]
+        author_credentials: Option<String>,
+        /// Repeat the exact gateway URL stored with the author credential.
+        #[arg(long)]
+        confirm_target: String,
+        /// Print the updated fixture receipt as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create the Skill binding after its install and the learning are applied.
+    BindSkill {
+        #[arg(long)]
+        author_credentials: Option<String>,
+        /// Repeat the exact gateway URL stored with the author credential.
+        #[arg(long)]
+        confirm_target: String,
+        /// Print the updated fixture receipt as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Prove the revision, provenance, binding, context selection and audit chain.
+    Verify {
+        #[arg(long)]
+        author_credentials: Option<String>,
+        /// Login profile that receives the authorised context.
+        #[arg(long, default_value = "reviewer")]
+        reviewer_credentials: String,
+        /// Repeat the exact gateway URL stored with the author credential.
+        #[arg(long)]
+        confirm_target: String,
+        /// Print machine-readable evidence.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read the fixture's recorded addresses and live public resources.
+    Status {
+        #[arg(long)]
+        author_credentials: Option<String>,
+        /// Print machine-readable evidence.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2960,6 +3044,72 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Demo(DemoCommand::Reset { force, credentials }) => {
             demo::reset(&profile_name(credentials)?, force).await
         }
+        Command::Demo(DemoCommand::RetryReview(command)) => match command {
+            RetryReviewCommand::Seed {
+                author_credentials,
+                reviewer_credentials,
+                approver_credentials,
+                viewer_credentials,
+                confirm_target,
+                json,
+            } => {
+                demo::retry_review_seed(
+                    &profile_name(author_credentials)?,
+                    &reviewer_credentials,
+                    &approver_credentials,
+                    &viewer_credentials,
+                    &confirm_target,
+                    json,
+                )
+                .await
+            }
+            RetryReviewCommand::Inspect {
+                author_credentials,
+                json,
+            } => demo::retry_review_inspect(&profile_name(author_credentials)?, json).await,
+            RetryReviewCommand::Capture {
+                author_credentials,
+                confirm_target,
+                json,
+            } => {
+                demo::retry_review_capture(
+                    &profile_name(author_credentials)?,
+                    &confirm_target,
+                    json,
+                )
+                .await
+            }
+            RetryReviewCommand::BindSkill {
+                author_credentials,
+                confirm_target,
+                json,
+            } => {
+                demo::retry_review_bind_skill(
+                    &profile_name(author_credentials)?,
+                    &confirm_target,
+                    json,
+                )
+                .await
+            }
+            RetryReviewCommand::Verify {
+                author_credentials,
+                reviewer_credentials,
+                confirm_target,
+                json,
+            } => {
+                demo::retry_review_verify(
+                    &profile_name(author_credentials)?,
+                    &reviewer_credentials,
+                    &confirm_target,
+                    json,
+                )
+                .await
+            }
+            RetryReviewCommand::Status {
+                author_credentials,
+                json,
+            } => demo::retry_review_status(&profile_name(author_credentials)?, json).await,
+        },
         Command::Channel(command) => match command {
             ChannelCommand::Status {
                 scope,

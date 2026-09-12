@@ -173,16 +173,53 @@ gateway/worker commands, mounted secrets and a private Collector. The
 digest-bound reference archive and environment manifest use that same graph.
 Retired provider, workflow-scheduler, contributor, installed-profile and host-
 gateway paths are deleted; `synveda init` is a side-effect-free refusal.
+The root documentation index now points source users to one detailed Compose
+guide and labels the unverified packaged-reference workflow separately.
 
-Deterministic gates cover the provider/runtime matrix, two-principal browser
-scenario, restart lifecycle, logical database/key recovery, same-schema image
+Deterministic gates cover the provider/runtime matrix, a four-principal
+governed retry-review browser scenario, restart lifecycle, logical database/key recovery, same-schema image
 upgrade, external dependency wiring, bounded local metrics, customer-safe
 Operations view and the disabled-by-default Apalis 0.7.4 Skill-validation
 transport. PostgreSQL operation/outbox state remains authoritative and the
 native worker is the rollback.
 
-The feature remains open for clean development and reference HTTPS runs on
-Linux and Docker Desktop, live recovery/upgrade/Apalis execution, live external
+On 2026-09-12 the current four-principal revision passed clean-volume
+development acceptance on macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0
+and Compose 5.1.2, at
+`d1486929d73dc459ed6dc0bf029c5c825d3a1bb6` plus the working-tree increment,
+using only `synveda-development-acceptance-e2e` and synthetic identities. The
+full deployment gate, 251 console tests/build, 189 CLI tests/strict Clippy,
+77 policy tests, six OpenAPI tests and 18 fresh exact-role access API tests
+pass. The real seed replay preserves a browser edit; the viewer's raw
+Session-content and approval requests are denied. Capture, distinct review and
+apply, Knowledge provenance, exact redacted Context links, two-person Skill
+approval and the administration controls pass in the existing browser suite.
+All six native service restarts and final live receipt/browser verification
+pass. Canonical down/up reused the same product volume and byte-identical
+keys/issuer; a fresh browser login reopened the same persisted pages. Safe
+desktop/laptop screenshots were inspected. The isolated demo remains running
+for inspection. The normal stack is stopped, its volume and existing
+keys/issuer are unchanged, and returning to it requires the documented
+operator hosts-block handoff. No normal-project reset was performed.
+See the [current validation record](CPR-45.md#current-local-demonstration-validation).
+
+The incremental console walkthrough now covers readable Knowledge and Session
+evidence, routed review/apply state, Context requests with exact revision links,
+and actual Skill binding resolution using the existing generated public client.
+Focused console tests, the production build and deterministic contract checks
+pass. On 2026-09-11 the connected in-app Browser and public API exercised an
+allowed invitation, malformed-email validation, pending and accepted state,
+the same viewer denial in UI and API, exact-grant cleanup and final revoked
+state without recording the one-time link. The exercise also fixed custom HTTP
+origin idempotency generation and safe rendering of structured policy denials.
+The administration increment shows governed names beside exact grant scope,
+typed Capture and Context proposals, invitation state and evidence-backed
+Skill, Tool and Operations status without changing the public API or authority
+model. The exact-role `access_api` suite passed all 18 allowed, denied,
+isolation and token-safety cases.
+
+The feature remains open for repeat development runs on Linux and Docker
+Desktop, reference HTTPS, live recovery/upgrade/Apalis execution, live external
 providers, and one published-registry installed-reference run. This evidence
 would support controlled single-host use only. It would not establish HA,
 host-loss tolerance, DR/RPO/RTO, SaaS readiness, signing or Helm production

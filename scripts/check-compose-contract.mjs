@@ -30,19 +30,19 @@ const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   ],
   [
     "keycloak/keycloak-entrypoint",
-    "80e78357463d4a861e559e2b4e62488ff9c77eac6ee9504203e6aa03137c8023",
+    "51957362efc4201c6a45549be06157222405594bad355570424083c16e7acd89",
   ],
   [
     "keycloak/SynvedaKeycloakProjection.java",
-    "def438c114730f33fca924a1480f24e09155ef496a7efc934d4f229c6f242c75",
+    "c8127f14ead0d94e1f4266e1685fd37d33fa0e0b8b102dc859ff128dc17bfedf",
   ],
   [
     "keycloak/SynvedaKeycloakProjectionSelfTest.java",
-    "e8f791897c92636610cd4d18e8a8a7bdc934cc32b0e4dc84c80411fa9d9d9608",
+    "a8dd5dea269f944a5d3424b9175652b1a9dc57a67128895fbd930aaddf8b2565",
   ],
   [
     "keycloak/synveda-projection-self-test",
-    "7cfa8642a07737d44ef6325e8c12b8ea7fab8091d1fd20a2675d4749f0f596ae",
+    "a3544484cb7dc17fd856be445a92154bbb979218bf41a40b53b1912bcf4758e4",
   ],
   [
     "keycloak/synveda-authority-stage",
@@ -62,11 +62,11 @@ const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   ],
   [
     "keycloak/synveda-user-profile.json",
-    "7f38f5f3e142ac0a8ca5d0a3c03cc5b97f0849079f5a3f3f99065fb40455933f",
+    "730f9b2489fe1896c86c9656f31b86ae08f34275e4fcd56d6ac91ad26e5f4e4b",
   ],
   [
     "keycloak/synveda-realm-converge",
-    "0a2db127b3d500860a8a9574e2ed440e033e150d2e5b2d57496b2f490feec9d2",
+    "9847075095d0140293278223f802ede1faa9e9de1350e68ba53707ac7e97a475",
   ],
   [
     "keycloak/synveda-generation-gate",
@@ -275,7 +275,9 @@ const PROVIDER_SECRETS = [
   "keycloak_admin_password",
   "keycloak_convergence_admin_password",
   "keycloak_demo_admin_password",
+  "keycloak_demo_approver_password",
   "keycloak_demo_member_password",
+  "keycloak_demo_viewer_password",
 ];
 const CONTAINER_PROXY_ENVIRONMENT = Object.freeze([
   "HTTP_PROXY",
@@ -1378,7 +1380,7 @@ export function browserAcceptanceFindings(browser, expected) {
     normalizedByteSize(browser.shm_size) !== 256 * 1024 ** 2 ||
     Number(browser.cpus) !== 1 ||
     JSON.stringify(browser.tmpfs) !==
-      JSON.stringify(["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"])
+      JSON.stringify(["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=256m"])
   ) findings.push("browser acceptance sandbox or resource boundary drifted");
   const stateMount = (browser.volumes ?? []).find(
     (mount) => mount.target === "/var/lib/synveda-browser",
@@ -1407,7 +1409,9 @@ export function browserAcceptanceFindings(browser, expected) {
     JSON.stringify(secretBindings(browser)) !==
       JSON.stringify([
         "keycloak_demo_admin_password:keycloak_demo_admin_password",
+        "keycloak_demo_approver_password:keycloak_demo_approver_password",
         "keycloak_demo_member_password:keycloak_demo_member_password",
+        "keycloak_demo_viewer_password:keycloak_demo_viewer_password",
       ]) ||
     JSON.stringify(dependencyBindings(browser)) !==
       JSON.stringify([
@@ -2466,7 +2470,9 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.demo === true) {
     Object.assign(expectedTopLevelSecrets, {
       keycloak_demo_admin_password: "keycloak_demo_admin_password",
+      keycloak_demo_approver_password: "keycloak_demo_approver_password",
       keycloak_demo_member_password: "keycloak_demo_member_password",
+      keycloak_demo_viewer_password: "keycloak_demo_viewer_password",
     });
   }
   if (expected.apalis === true) {
@@ -2797,7 +2803,7 @@ export function canonicalComposeFindings(model, expected) {
       test: ["CMD", "/opt/keycloak/bin/synveda-generation-gate", "ready"],
       interval: "5s",
       timeout: "3s",
-      retries: 36,
+      retries: 48,
       start_period: "15s",
     };
   }
@@ -3661,14 +3667,18 @@ export function canonicalComposeFindings(model, expected) {
     if (expected.demo === true) {
       expectedSecrets["keycloak-realm-convergence"].push(
         "keycloak_demo_admin_password:keycloak_demo_admin_password",
+        "keycloak_demo_approver_password:keycloak_demo_approver_password",
         "keycloak_demo_member_password:keycloak_demo_member_password",
+        "keycloak_demo_viewer_password:keycloak_demo_viewer_password",
       );
     }
   }
   if (expected.browser === true) {
     expectedSecrets["browser-acceptance"] = [
       "keycloak_demo_admin_password:keycloak_demo_admin_password",
+      "keycloak_demo_approver_password:keycloak_demo_approver_password",
       "keycloak_demo_member_password:keycloak_demo_member_password",
+      "keycloak_demo_viewer_password:keycloak_demo_viewer_password",
     ];
   }
   if (expected.runtime === "reference") {
@@ -3744,7 +3754,9 @@ export function canonicalComposeFindings(model, expected) {
           ...(expected.demo === true
             ? [
                 "keycloak_demo_admin_password:keycloak_demo_admin_password",
+                "keycloak_demo_approver_password:keycloak_demo_approver_password",
                 "keycloak_demo_member_password:keycloak_demo_member_password",
+                "keycloak_demo_viewer_password:keycloak_demo_viewer_password",
               ]
             : []),
         ]),
@@ -3831,8 +3843,14 @@ export function canonicalComposeFindings(model, expected) {
         ?.SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE !==
         (expected.demo === true ? "/run/secrets/keycloak_demo_admin_password" : undefined) ||
       services["keycloak-realm-convergence"]?.environment
+        ?.SYNVEDA_KEYCLOAK_DEMO_APPROVER_PASSWORD_FILE !==
+        (expected.demo === true ? "/run/secrets/keycloak_demo_approver_password" : undefined) ||
+      services["keycloak-realm-convergence"]?.environment
         ?.SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE !==
-        (expected.demo === true ? "/run/secrets/keycloak_demo_member_password" : undefined))
+        (expected.demo === true ? "/run/secrets/keycloak_demo_member_password" : undefined) ||
+      services["keycloak-realm-convergence"]?.environment
+        ?.SYNVEDA_KEYCLOAK_DEMO_VIEWER_PASSWORD_FILE !==
+        (expected.demo === true ? "/run/secrets/keycloak_demo_viewer_password" : undefined))
   ) {
     findings.push("Keycloak realm convergence file-secret settings drifted");
   }
@@ -3858,7 +3876,9 @@ export function canonicalComposeFindings(model, expected) {
     "KC_BOOTSTRAP_ADMIN_PASSWORD",
     "SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD",
     "SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD",
+    "SYNVEDA_KEYCLOAK_DEMO_APPROVER_PASSWORD",
     "SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD",
+    "SYNVEDA_KEYCLOAK_DEMO_VIEWER_PASSWORD",
   ]);
   for (const [name, service] of Object.entries(services)) {
     for (const key of Object.keys(service.environment ?? {})) {
@@ -4030,8 +4050,10 @@ export function canonicalComposeFindings(model, expected) {
     if (expected.demo === true) {
       expectedEnvironmentKeys["keycloak-realm-convergence"].push(
         "SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE",
+        "SYNVEDA_KEYCLOAK_DEMO_APPROVER_PASSWORD_FILE",
         "SYNVEDA_KEYCLOAK_DEMO_ENABLED",
         "SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE",
+        "SYNVEDA_KEYCLOAK_DEMO_VIEWER_PASSWORD_FILE",
       );
     }
   }

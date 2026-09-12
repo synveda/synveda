@@ -7,23 +7,42 @@ import {
   validateCallbackUrl,
   validateSettings,
 } from "./console-login-contract.mjs";
+import { runConsoleProductCheckpoint } from "./console-product-runner.mjs";
 import {
   allowedCliRequest,
   validateCliHandoffUrl,
   validateCliLoginUrl,
   validateDemoReceipt,
   validateDemoStatus,
+  validateRetryReviewInspection,
+  validateRetryReviewProposal,
+  validateRetryReviewReceipt,
+  validateRetryReviewRerun,
+  validateRetryReviewStatus,
+  validateRetryReviewVerification,
 } from "./product-demo-contract.mjs";
 
 const CLI = "/usr/local/bin/synveda";
 const ADMIN_PASSWORD_FILE = "/run/secrets/keycloak_demo_admin_password";
+const APPROVER_PASSWORD_FILE = "/run/secrets/keycloak_demo_approver_password";
 const MEMBER_PASSWORD_FILE = "/run/secrets/keycloak_demo_member_password";
+const VIEWER_PASSWORD_FILE = "/run/secrets/keycloak_demo_viewer_password";
 const MAX_LOGIN_OUTPUT = 16 * 1024;
 const MAX_DEMO_OUTPUT = 2 * 1024 * 1024;
 const LOGIN_TIMEOUT = 90_000;
 const DEMO_TIMEOUT = 10 * 60_000;
 const CLEANUP_TIMEOUT = 5_000;
 const CHILD_STOP_TIMEOUT = 1_000;
+
+function isLocalRetryReviewTarget(settings) {
+  const host = new URL(settings.appOrigin).hostname;
+  return (
+    host === "app.synveda.test" ||
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "[::1]"
+  );
+}
 
 function failure(stage) {
   return new BrowserContractError(stage);
@@ -192,7 +211,9 @@ async function driveCliBrowser({
   let handoffSeen = false;
   let routeError;
   let primaryError;
+  let requestListener;
   const pendingRoutes = new Set();
+  const inspectedRequests = new WeakMap();
   try {
     browser = await chromium.launch({
       headless: true,
@@ -217,39 +238,65 @@ async function driveCliBrowser({
       viewport: { width: 1280, height: 800 },
     });
     page = await context.newPage();
+    const inspectRequest = (request) => {
+      const prior = inspectedRequests.get(request);
+      if (prior === true) return;
+      if (prior instanceof BrowserContractError) throw prior;
+      try {
+        const raw = request.url();
+        if (!allowedCliRequest(raw, settings, login)) {
+          throw failure("network-boundary");
+        }
+        const parsed = new URL(raw);
+        if (
+          parsed.origin === settings.issuerOrigin &&
+          parsed.pathname === settings.authorizationPath
+        ) {
+          if (authorizationState !== undefined) {
+            throw failure("authorization-request");
+          }
+          authorizationState = validateAuthorizationUrl(raw, settings);
+        }
+        if (
+          parsed.origin === settings.appOrigin &&
+          parsed.pathname === "/auth/callback"
+        ) {
+          if (callbackSeen) throw failure("callback");
+          validateCallbackUrl(raw, settings, authorizationState);
+          callbackSeen = true;
+        }
+        if (
+          parsed.origin === login.redirectOrigin &&
+          `${parsed.origin}${parsed.pathname}` === login.redirect
+        ) {
+          if (handoffSeen) throw failure("cli-handoff");
+          validateCliHandoffUrl(raw, login);
+          handoffSeen = true;
+        }
+        inspectedRequests.set(request, true);
+      } catch (error) {
+        const closed =
+          error instanceof BrowserContractError
+            ? error
+            : failure("network-boundary");
+        inspectedRequests.set(request, closed);
+        routeError ??= closed;
+        throw closed;
+      }
+    };
+    // Redirect targets bypass Playwright route handlers. Observe every request
+    // to validate those hops, while routing aborts any routable request outside
+    // the closed app, issuer and exact loopback-handoff contract.
+    requestListener = (request) => {
+      try {
+        inspectRequest(request);
+      } catch {}
+    };
+    page.on("request", requestListener);
     await page.route("**/*", (route) => {
       const operation = (async () => {
-        const raw = route.request().url();
         try {
-          if (!allowedCliRequest(raw, settings, login)) {
-            throw failure("network-boundary");
-          }
-          const parsed = new URL(raw);
-          if (
-            parsed.origin === settings.issuerOrigin &&
-            parsed.pathname === settings.authorizationPath
-          ) {
-            if (authorizationState !== undefined) {
-              throw failure("authorization-request");
-            }
-            authorizationState = validateAuthorizationUrl(raw, settings);
-          }
-          if (
-            parsed.origin === settings.appOrigin &&
-            parsed.pathname === "/auth/callback"
-          ) {
-            if (callbackSeen) throw failure("callback");
-            validateCallbackUrl(raw, settings, authorizationState);
-            callbackSeen = true;
-          }
-          if (
-            parsed.origin === login.redirectOrigin &&
-            `${parsed.origin}${parsed.pathname}` === login.redirect
-          ) {
-            if (handoffSeen) throw failure("cli-handoff");
-            validateCliHandoffUrl(raw, login);
-            handoffSeen = true;
-          }
+          inspectRequest(route.request());
           await route.continue();
         } catch (error) {
           const closed =
@@ -296,6 +343,13 @@ async function driveCliBrowser({
   } finally {
     password.fill(0);
     let cleanupFailed = false;
+    if (requestListener !== undefined && typeof page?.off === "function") {
+      try {
+        page.off("request", requestListener);
+      } catch {
+        cleanupFailed = true;
+      }
+    }
     if (typeof page?.unrouteAll === "function") {
       cleanupFailed =
         !(await boundedCleanup(() =>
@@ -321,9 +375,7 @@ async function driveCliBrowser({
         !(await boundedCleanup(() => Promise.allSettled([...pendingRoutes]))) ||
         cleanupFailed;
     }
-    if (primaryError === undefined && routeError !== undefined) {
-      primaryError = routeError;
-    }
+    if (routeError !== undefined) primaryError = routeError;
     if (primaryError === undefined && cleanupFailed) {
       primaryError = failure("browser-cleanup");
     }
@@ -393,7 +445,16 @@ async function loginIdentity({
   }
 }
 
-async function runCli(args, environment, timeout, spawnProcess) {
+async function runCli(
+  args,
+  environment,
+  timeout,
+  spawnProcess,
+  expectation = "json",
+) {
+  if (!["json", "success", "denied"].includes(expectation)) {
+    throw failure("configuration");
+  }
   const process = launchChild(
     args,
     environment,
@@ -413,13 +474,27 @@ async function runCli(args, environment, timeout, spawnProcess) {
       timeout,
       "product-demo",
     );
-    if (
-      process.overLimit ||
-      result.error === true ||
-      result.code !== 0 ||
-      result.signal !== null
-    ) throw failure("product-demo");
+    const cleanExit =
+      !process.overLimit &&
+      result.error !== true &&
+      result.code === 0 &&
+      result.signal === null;
+    if (expectation === "denied") {
+      if (
+        process.overLimit ||
+        result.error === true ||
+        result.code === 0 ||
+        result.code === null ||
+        result.signal !== null ||
+        result.stdout.length !== 0 ||
+        result.stderr.toString("utf8").includes("Idempotency-Key")
+      ) throw failure("product-demo-denial");
+      completed = true;
+      return true;
+    }
+    if (!cleanExit) throw failure("product-demo");
     completed = true;
+    if (expectation === "success") return true;
     try {
       return JSON.parse(result.stdout.toString("utf8"));
     } catch {
@@ -437,6 +512,7 @@ export async function runProductAcceptance({
   readPassword = readDemoPassword,
   login = loginIdentity,
   command = runCli,
+  browserCheckpoint = runConsoleProductCheckpoint,
   spawnProcess = spawn,
   loginTimeout = LOGIN_TIMEOUT,
   demoTimeout = DEMO_TIMEOUT,
@@ -448,18 +524,28 @@ export async function runProductAcceptance({
   if (
     !["seed", "verify"].includes(phase) ||
     typeof chromium?.launch !== "function" ||
-    typeof readPassword !== "function"
+    typeof readPassword !== "function" ||
+    typeof browserCheckpoint !== "function"
   ) throw failure("configuration");
+  const localRetryReview = isLocalRetryReviewTarget(settings);
   let adminPassword;
+  let approverPassword;
   let memberPassword;
+  let viewerPassword;
   try {
     adminPassword = readPassword(ADMIN_PASSWORD_FILE);
     if (phase === "seed") {
       memberPassword = readPassword(MEMBER_PASSWORD_FILE);
+      if (localRetryReview) {
+        approverPassword = readPassword(APPROVER_PASSWORD_FILE);
+        viewerPassword = readPassword(VIEWER_PASSWORD_FILE);
+      }
     }
     if (
       !Buffer.isBuffer(adminPassword) ||
-      (phase === "seed" && !Buffer.isBuffer(memberPassword))
+      (phase === "seed" && !Buffer.isBuffer(memberPassword)) ||
+      (phase === "seed" && localRetryReview && !Buffer.isBuffer(approverPassword)) ||
+      (phase === "seed" && localRetryReview && !Buffer.isBuffer(viewerPassword))
     ) {
       throw failure("password-file");
     }
@@ -467,7 +553,7 @@ export async function runProductAcceptance({
       chromium,
       environment,
       settings,
-      profile: "alice",
+      profile: localRetryReview ? "author" : "alice",
       username: "synveda-demo-admin",
       password: adminPassword,
       timeout: loginTimeout,
@@ -478,43 +564,308 @@ export async function runProductAcceptance({
         chromium,
         environment,
         settings,
-        profile: "bob",
+        profile: localRetryReview ? "reviewer" : "bob",
         username: "synveda-demo-member",
         password: memberPassword,
         timeout: loginTimeout,
         spawnProcess,
       });
+      if (localRetryReview) {
+        await login({
+          chromium,
+          environment,
+          settings,
+          profile: "approver",
+          username: "synveda-demo-approver",
+          password: approverPassword,
+          timeout: loginTimeout,
+          spawnProcess,
+        });
+        await login({
+          chromium,
+          environment,
+          settings,
+          profile: "viewer",
+          username: "synveda-demo-viewer",
+          password: viewerPassword,
+          timeout: loginTimeout,
+          spawnProcess,
+        });
+      }
     }
   } finally {
     adminPassword?.fill?.(0);
+    approverPassword?.fill?.(0);
     memberPassword?.fill?.(0);
+    viewerPassword?.fill?.(0);
+  }
+  if (!localRetryReview) {
+    if (phase === "seed") {
+      const args = [
+        "demo",
+        "start",
+        "--profile",
+        "team",
+        "--credentials",
+        "alice",
+        "--bob-credentials",
+        "bob",
+        "--json",
+      ];
+      validateDemoReceipt(
+        await command(args, environment, demoTimeout, spawnProcess),
+      );
+      validateDemoReceipt(
+        await command(args, environment, demoTimeout, spawnProcess),
+      );
+    }
+    validateDemoStatus(
+      await command(
+        ["demo", "status", "--credentials", "alice", "--json"],
+        environment,
+        demoTimeout,
+        spawnProcess,
+      ),
+    );
+    return true;
   }
   if (phase === "seed") {
-    const args = [
+    const seedArgs = [
       "demo",
-      "start",
-      "--profile",
-      "team",
-      "--credentials",
-      "alice",
-      "--bob-credentials",
-      "bob",
+      "retry-review",
+      "seed",
+      "--author-credentials",
+      "author",
+      "--reviewer-credentials",
+      "reviewer",
+      "--approver-credentials",
+      "approver",
+      "--viewer-credentials",
+      "viewer",
+      "--confirm-target",
+      settings.appOrigin,
       "--json",
     ];
-    validateDemoReceipt(
-      await command(args, environment, demoTimeout, spawnProcess),
-    );
-    validateDemoReceipt(
-      await command(args, environment, demoTimeout, spawnProcess),
-    );
-  }
-  validateDemoStatus(
-    await command(
-      ["demo", "status", "--credentials", "alice", "--json"],
+    const first = await command(
+      seedArgs,
       environment,
       demoTimeout,
       spawnProcess,
-    ),
+    );
+    validateRetryReviewReceipt(first, "seeded");
+    await browserCheckpoint({
+      chromium,
+      environment,
+      checkpoint: "seeded-edit",
+      receipt: first,
+      timeout: loginTimeout,
+    });
+    const second = await command(
+      seedArgs,
+      environment,
+      demoTimeout,
+      spawnProcess,
+    );
+    validateRetryReviewRerun(first, second);
+    await browserCheckpoint({
+      chromium,
+      environment,
+      checkpoint: "seeded-preserved",
+      receipt: second,
+      timeout: loginTimeout,
+    });
+
+    validateRetryReviewInspection(
+      await command(
+        [
+          "demo",
+          "retry-review",
+          "inspect",
+          "--author-credentials",
+          "author",
+          "--json",
+        ],
+        environment,
+        demoTimeout,
+        spawnProcess,
+      ),
+      second,
+    );
+    const captured = await command(
+      [
+        "demo",
+        "retry-review",
+        "capture",
+        "--author-credentials",
+        "author",
+        "--confirm-target",
+        settings.appOrigin,
+        "--json",
+      ],
+      environment,
+      demoTimeout,
+      spawnProcess,
+    );
+    validateRetryReviewReceipt(captured, "learning_pending");
+
+    const inspectProposal = async (id) => {
+      const proposal = await command(
+        ["proposal", "show", id, "--profile", "reviewer", "--json"],
+        environment,
+        demoTimeout,
+        spawnProcess,
+      );
+      validateRetryReviewProposal(proposal, id);
+      return proposal;
+    };
+    const approveAndApply = async (id, distinctAdministrator) => {
+      await inspectProposal(id);
+      await command(
+        [
+          "proposal",
+          "approve",
+          id,
+          "--profile",
+          "reviewer",
+          "--comment",
+          "Synthetic CPR-45 acceptance replay review",
+        ],
+        environment,
+        demoTimeout,
+        spawnProcess,
+        "success",
+      );
+      if (distinctAdministrator) {
+        await command(
+          [
+            "proposal",
+            "approve",
+            id,
+            "--profile",
+            "approver",
+            "--comment",
+            "Synthetic CPR-45 distinct administrator approval",
+          ],
+          environment,
+          demoTimeout,
+          spawnProcess,
+          "success",
+        );
+      }
+      await command(
+        ["proposal", "apply", id, "--profile", "author"],
+        environment,
+        demoTimeout,
+        spawnProcess,
+        "success",
+      );
+    };
+    const learningChange = captured.resources.learning.change_id;
+    const learningProposal = await inspectProposal(learningChange);
+    await browserCheckpoint({
+      chromium,
+      environment,
+      checkpoint: "viewer-denial",
+      proposal: learningProposal,
+      receipt: captured,
+      timeout: loginTimeout,
+    });
+    await browserCheckpoint({
+      chromium,
+      environment,
+      checkpoint: "reviewer-open",
+      proposal: learningProposal,
+      receipt: captured,
+      timeout: loginTimeout,
+    });
+    await command(
+      [
+        "proposal",
+        "approve",
+        learningChange,
+        "--profile",
+        "reviewer",
+        "--comment",
+        "Synthetic CPR-45 acceptance replay review",
+      ],
+      environment,
+      demoTimeout,
+      spawnProcess,
+      "success",
+    );
+    await browserCheckpoint({
+      chromium,
+      environment,
+      checkpoint: "approved-not-applied",
+      proposal: learningProposal,
+      receipt: captured,
+      timeout: loginTimeout,
+    });
+    await command(
+      ["proposal", "apply", learningChange, "--profile", "author"],
+      environment,
+      demoTimeout,
+      spawnProcess,
+      "success",
+    );
+    await approveAndApply(captured.resources.skill_install.change_id, true);
+
+    const binding = await command(
+      [
+        "demo",
+        "retry-review",
+        "bind-skill",
+        "--author-credentials",
+        "author",
+        "--confirm-target",
+        settings.appOrigin,
+        "--json",
+      ],
+      environment,
+      demoTimeout,
+      spawnProcess,
+    );
+    validateRetryReviewReceipt(binding, "binding_pending");
+    await approveAndApply(binding.resources.skill_binding.change_id, true);
+    const verification = await command(
+      [
+        "demo",
+        "retry-review",
+        "verify",
+        "--author-credentials",
+        "author",
+        "--reviewer-credentials",
+        "reviewer",
+        "--confirm-target",
+        settings.appOrigin,
+        "--json",
+      ],
+      environment,
+      demoTimeout,
+      spawnProcess,
+    );
+    validateRetryReviewVerification(verification, binding);
+  }
+  const status = await command(
+    [
+      "demo",
+      "retry-review",
+      "status",
+      "--author-credentials",
+      "author",
+      "--json",
+    ],
+    environment,
+    demoTimeout,
+    spawnProcess,
   );
+  validateRetryReviewStatus(status);
+  await browserCheckpoint({
+    chromium,
+    environment,
+    checkpoint: "verified",
+    status,
+    timeout: loginTimeout,
+  });
   return true;
 }

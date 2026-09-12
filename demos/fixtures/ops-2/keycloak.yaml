@@ -172,7 +172,9 @@ spec:
               cp /source/keycloak_admin_password /convergence-secrets/keycloak_admin_password
               cp /source/keycloak_convergence_admin_password /convergence-secrets/keycloak_convergence_admin_password
               cp /source/keycloak_demo_admin_password /convergence-secrets/keycloak_demo_admin_password
+              cp /source/keycloak_demo_approver_password /convergence-secrets/keycloak_demo_approver_password
               cp /source/keycloak_demo_member_password /convergence-secrets/keycloak_demo_member_password
+              cp /source/keycloak_demo_viewer_password /convergence-secrets/keycloak_demo_viewer_password
               chmod 0600 /server-secrets/* /convergence-secrets/*
           securityContext:
             allowPrivilegeEscalation: false
@@ -246,7 +248,9 @@ spec:
             - { name: KC_BOOTSTRAP_ADMIN_PASSWORD_FILE, value: /run/secrets/keycloak_admin_password }
             - { name: SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE, value: /run/secrets/keycloak_convergence_admin_password }
             - { name: SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE, value: /run/secrets/keycloak_demo_admin_password }
+            - { name: SYNVEDA_KEYCLOAK_DEMO_APPROVER_PASSWORD_FILE, value: /run/secrets/keycloak_demo_approver_password }
             - { name: SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE, value: /run/secrets/keycloak_demo_member_password }
+            - { name: SYNVEDA_KEYCLOAK_DEMO_VIEWER_PASSWORD_FILE, value: /run/secrets/keycloak_demo_viewer_password }
             - { name: SYNVEDA_KEYCLOAK_DEMO_ENABLED, value: "true" }
             - { name: SYNVEDA_PUBLIC_APP_URL, value: "http://synveda.synveda-test.svc.cluster.local:8120" }
             - { name: SYNVEDA_PUBLIC_AUTH_URL, value: "http://keycloak.synveda-test.svc.cluster.local:8080" }
@@ -280,7 +284,9 @@ spec:
               - { key: keycloak_admin_password, path: keycloak_admin_password }
               - { key: keycloak_convergence_admin_password, path: keycloak_convergence_admin_password }
               - { key: keycloak_demo_admin_password, path: keycloak_demo_admin_password }
+              - { key: keycloak_demo_approver_password, path: keycloak_demo_approver_password }
               - { key: keycloak_demo_member_password, path: keycloak_demo_member_password }
+              - { key: keycloak_demo_viewer_password, path: keycloak_demo_viewer_password }
         - name: server-secrets
           emptyDir:
             medium: Memory

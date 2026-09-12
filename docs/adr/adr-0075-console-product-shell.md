@@ -2,8 +2,52 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-21
-- **Feature(s)**: CPR-8
+- **Feature(s)**: CPR-8, CPR-45
 - **Deciders**: Prompt 8 of the CPR programme
+
+## Amendment: CPR-45 local product walkthrough (2026-09-10)
+
+The Docker reference walkthrough keeps this route-based shell and the existing
+Home landing, but tightens its information architecture around the current
+product journey. `Context` is now an unconditional work route beside Sessions,
+Knowledge, Learnings and Skills; it creates a context run for a selected,
+policy-visible Session through the generated public client and links to the
+existing immutable inspector route. Secondary supported surfaces remain
+reachable under an unconditional Administration navigation group, while the
+capability-forecasted governance routes remain under Advanced. This is
+presentation grouping only: it hides no supported route, adds no console-only
+operation and grants no authority.
+
+Review selection also gains a parameterised, refreshable route using the
+router shape already accepted by CPR-11. The proposal API and exact commit
+preconditions are unchanged. A proposal detail does not require the tenant-wide
+`proposal.read` forecast: the existing per-proposal read decides visibility,
+then the proposal's target-scope capability probe forecasts its controls.
+This keeps a workspace reviewer able to open an authorised deep link without
+granting tenant-wide access; denied reads still render the gateway's refusal.
+Lists and details may translate known generated
+fields into readable labels and place hashes, raw payloads and extensible JSON
+inside optional evidence disclosures; they must not infer protected objects or
+recompute a server verdict.
+
+The local administration walkthrough follows the same boundary. People may
+join member rows to names already returned by governed scope and group reads,
+but a missing or denied enrichment remains an explicit identifier rather than
+an inferred identity. A row is revoked by its exact grant id so another role
+held by the same principal is not silently removed; directory-owned rows remain
+read-only. Keycloak still performs authentication and initial bootstrap only,
+and the console neither receives nor calls with identity-provider administrator
+credentials.
+
+Configuration's normal editor exposes only the bounded Capture and Context
+fields exercised by the demo. It produces a complete immutable document by
+copying every unedited field from the selected version, shows that full document
+as read-only evidence, and submits through the existing VedaFlow operation.
+`pending_review` is a proposal, never an effective save; effective selection is
+still whatever the server resolves at the chosen scope. Skills and Tools label
+configured, available, tested and quarantined state only from existing public
+responses, and Operations reports absent version, dependency and worker signals
+as unavailable rather than deriving health from unrelated reads.
 
 ## Context
 

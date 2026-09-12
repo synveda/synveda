@@ -129,12 +129,42 @@ public final class SynvedaKeycloakProjectionSelfTest {
         String demoAdmin = "{\"id\":\"00000000-0000-4000-8000-000000000045\","
             + "\"username\":\"synveda-demo-admin\",\"enabled\":true,"
             + "\"emailVerified\":true,\"email\":\"admin@demo.synveda.invalid\","
-            + "\"firstName\":\"Synveda\",\"lastName\":\"Demo Admin\","
+            + "\"firstName\":\"Avery\",\"lastName\":\"Author\","
             + "\"requiredActions\":[],\"attributes\":{"
             + "\"synvedaDemoContract\":[\"cpr45-demo-v1\"],"
             + "\"synvedaDemoKind\":[\"admin\"]}}";
         accept(() -> SynvedaKeycloakProjection.verifyDemoUser(
             bytes(demoAdmin), "synveda-demo-admin", "admin", true
+        ));
+        String demoApprover = demoAdmin
+            .replace("000000000045", "000000000048")
+            .replace("synveda-demo-admin", "synveda-demo-approver")
+            .replace("admin@demo", "approver@demo")
+            .replace("Avery", "Morgan")
+            .replace("Author", "Approver")
+            .replace("[\"admin\"]", "[\"approver\"]");
+        accept(() -> SynvedaKeycloakProjection.verifyDemoUser(
+            bytes(demoApprover), "synveda-demo-approver", "approver", true
+        ));
+        String demoMember = demoAdmin
+            .replace("000000000045", "000000000046")
+            .replace("synveda-demo-admin", "synveda-demo-member")
+            .replace("admin@demo", "member@demo")
+            .replace("Avery", "Riley")
+            .replace("Author", "Reviewer")
+            .replace("[\"admin\"]", "[\"member\"]");
+        accept(() -> SynvedaKeycloakProjection.verifyDemoUser(
+            bytes(demoMember), "synveda-demo-member", "member", true
+        ));
+        String demoViewer = demoAdmin
+            .replace("000000000045", "000000000047")
+            .replace("synveda-demo-admin", "synveda-demo-viewer")
+            .replace("admin@demo", "viewer@demo")
+            .replace("Avery", "Vera")
+            .replace("Author", "Restricted Viewer")
+            .replace("[\"admin\"]", "[\"viewer\"]");
+        accept(() -> SynvedaKeycloakProjection.verifyDemoUser(
+            bytes(demoViewer), "synveda-demo-viewer", "viewer", true
         ));
         accept(() -> SynvedaKeycloakProjection.verifyDemoUser(
             bytes(demoAdmin.replace("\"enabled\":true", "\"enabled\":false")),

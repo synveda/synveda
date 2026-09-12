@@ -3,10 +3,11 @@
 Frames exchanged with `synveda mcp`, on disk and replayed by
 `crates/synveda-cli/tests/mcp_corpus.rs`.
 
-ADPT-2's acceptance criterion is *works in Claude Desktop + one non-Anthropic
-client*, and CNSL-1 established both the pattern and the reason: a criterion
-phrased "works in X" is unfalsifiable until what X exchanges is on disk and
-replayed. These files are that turned into something a test can fail.
+ADPT-2 originally named Claude Desktop and one non-Anthropic client. A claim
+that something "works in X" is unfalsifiable until what X exchanges is on disk
+and replayed, so these files make protocol compatibility testable. They support
+the `captured` level only; `adapters/registry.json` and generated
+`docs/CLIENT_SUPPORT.md` govern current client-support claims.
 
 ```sh
 cargo test -p synveda-cli --test mcp_corpus                    # verify
@@ -43,8 +44,8 @@ An id of `0` is falsy in every language a client is written in and an absent
 these are not cosmetic. The server answered all of them correctly, which is
 the point: the corpus stopped being a transcript of its author's assumptions.
 
-The last row is the one that reaches beyond this directory. **No shipping
-client opens in the modern era.**
+The last row is the one that reaches beyond this directory. **Neither captured
+client version in this corpus opens in the modern era.**
 
 ## Capturing the real thing
 

@@ -38,6 +38,10 @@ const DRIVER = join(ROOT, "deploy/compose/browser/console-login.mjs");
 const RUNNER = join(ROOT, "deploy/compose/browser/console-login-runner.mjs");
 const PRODUCT_DRIVER = join(ROOT, "deploy/compose/browser/product-demo.mjs");
 const PRODUCT_RUNNER = join(ROOT, "deploy/compose/browser/product-demo-runner.mjs");
+const CONSOLE_PRODUCT_RUNNER = join(
+  ROOT,
+  "deploy/compose/browser/console-product-runner.mjs",
+);
 const DOCKERFILE = join(ROOT, "deploy/compose/product/Dockerfile");
 const MAKEFILE = join(ROOT, "Makefile");
 const SECCOMP = join(ROOT, "deploy/compose/browser/seccomp_profile.json");
@@ -382,7 +386,13 @@ test("the demo password reader revalidates and zeroes its opened descriptor", ()
 
 test("the one-shot image and driver forbid capture and TLS bypass surfaces", () => {
   const dockerfile = readFileSync(DOCKERFILE, "utf8");
-  const driver = [DRIVER, RUNNER, PRODUCT_DRIVER, PRODUCT_RUNNER]
+  const driver = [
+    DRIVER,
+    RUNNER,
+    CONSOLE_PRODUCT_RUNNER,
+    PRODUCT_DRIVER,
+    PRODUCT_RUNNER,
+  ]
     .map((path) => readFileSync(path, "utf8"))
     .join("\n");
   const makefile = readFileSync(MAKEFILE, "utf8");
@@ -444,11 +454,11 @@ test("the one-shot image and driver forbid capture and TLS bypass surfaces", () 
   assert.doesNotMatch(referenceDriver, /\beval\b|sh -c/);
 });
 
-test("the vendored Playwright sandbox profile is exact, default-deny and licensed", () => {
+test("the reviewed Playwright sandbox profile is exact, default-deny and licensed", () => {
   const bytes = readFileSync(SECCOMP);
   assert.equal(
     createHash("sha256").update(bytes).digest("hex"),
-    "cc3e61cabda6bbc1e53e54d27ba4d55a9d3be829b6dd1a596f4a7b31b1cc7849",
+    "73d645b1e29aa74da459e6f2f751d6bf565712a4cd6be73d41960b0c71e9733d",
   );
   const profile = JSON.parse(bytes.toString("utf8"));
   assert.equal(profile.defaultAction, "SCMP_ACT_ERRNO");
@@ -462,10 +472,21 @@ test("the vendored Playwright sandbox profile is exact, default-deny and license
     includes: {},
     excludes: {},
   });
+  assert.deepEqual(
+    profile.syscalls.filter(({ names }) => names.includes("chroot")),
+    [{
+      names: ["chroot"],
+      action: "SCMP_ACT_ALLOW",
+      args: [],
+      comment: "Allow Chromium sandbox chroot after entering its unprivileged user namespace",
+      includes: {},
+      excludes: {},
+    }],
+  );
   const notice = readFileSync(SECCOMP_NOTICE, "utf8");
   assert.match(notice, /v1\.62\.1/);
   assert.match(notice, /26a9e470a7b3c7822084b09fb7f13902c5f37b51/);
-  assert.match(notice, /Modifications: none/);
+  assert.match(notice, /capability dropped/);
   const license = readFileSync(PLAYWRIGHT_LICENSE);
   assert.equal(license.length, 11399);
   assert.equal(
@@ -521,15 +542,19 @@ function fakeBrowserFlow({
   tenantMismatch = false,
 } = {}) {
   let routeHandler;
+  const requestListeners = new Set();
   let evaluation = 0;
   const evaluatedSources = [];
   const closed = { browser: 0, context: 0, page: 0 };
-  const cleanup = { unrouted: 0 };
+  const cleanup = { requestListeners: 0, unrouted: 0 };
   const routes = { aborted: 0, continued: 0 };
 
-  async function dispatch(raw) {
+  async function dispatch(raw, routed) {
+    const request = { url: () => raw };
+    for (const listener of requestListeners) listener(request);
+    if (!routed) return;
     const route = {
-      request: () => ({ url: () => raw }),
+      request: () => request,
       abort: async () => {
         routes.aborted += 1;
       },
@@ -541,6 +566,15 @@ function fakeBrowserFlow({
   }
 
   const page = {
+    on: (event, listener) => {
+      assert.equal(event, "request");
+      requestListeners.add(listener);
+    },
+    off: (event, listener) => {
+      assert.equal(event, "request");
+      assert.equal(requestListeners.delete(listener), true);
+      cleanup.requestListeners += 1;
+    },
     route: async (_pattern, handler) => {
       routeHandler = handler;
     },
@@ -550,10 +584,13 @@ function fakeBrowserFlow({
       click: async () => {
         if (role === "link" && options.name === "Sign in") {
           for (let index = 0; index < authorizationCount; index += 1) {
-            await dispatch(foreign ? "http://foreign.invalid/" : authorizationUrl());
+            await dispatch(
+              foreign ? "http://foreign.invalid/" : authorizationUrl(),
+              false,
+            );
           }
           if (backgroundForeign) {
-            await dispatch("http://foreign.invalid/background").catch(() => {});
+            await dispatch("http://foreign.invalid/background", true).catch(() => {});
           }
         }
       },
@@ -568,6 +605,7 @@ function fakeBrowserFlow({
               invalidCallback
                 ? callbackUrl({ iss: "http://foreign.invalid/realms/synveda" })
                 : callbackUrl(),
+              false,
             );
           }
         }
@@ -582,10 +620,11 @@ function fakeBrowserFlow({
       if (evaluationHang) return new Promise(() => {});
       evaluation += 1;
       return evaluation === 1
-        ? {
+          ? {
             authenticated: true,
-            administrator: true,
+            rolesMatch: true,
             subjectPresent: true,
+            subjectMatches: true,
             tenantMatches: !tenantMismatch,
           }
         : true;
@@ -634,8 +673,8 @@ test("the injected browser flow correlates login and exports only bounded aggreg
   const password = Buffer.from("a".repeat(64));
   assert.equal(await runInjected(flow, password), true);
   assert.deepEqual(flow.closed, { browser: 1, context: 1, page: 1 });
-  assert.deepEqual(flow.cleanup, { unrouted: 1 });
-  assert.deepEqual(flow.routes, { aborted: 0, continued: 2 });
+  assert.deepEqual(flow.cleanup, { requestListeners: 1, unrouted: 1 });
+  assert.deepEqual(flow.routes, { aborted: 0, continued: 0 });
   assert.ok(password.every((value) => value === 0));
   assert.equal(flow.evaluatedSources.length, 2);
   for (const source of flow.evaluatedSources) {
@@ -646,6 +685,37 @@ test("the injected browser flow correlates login and exports only bounded aggreg
   }
   assert.doesNotMatch(flow.evaluatedSources[0], /return\s+(?:response|value)(?:\.|;)/);
   assert.match(flow.evaluatedSources[1], /return response\.status === 401/);
+});
+
+test("the browser flow admits an exact synthetic identity before a product checkpoint", async () => {
+  const flow = fakeBrowserFlow();
+  const password = Buffer.from("f".repeat(64));
+  let checkpoint = 0;
+  assert.equal(
+    await runBrowserAcceptance({
+      chromium: flow.chromium,
+      environment: {
+        SYNVEDA_BROWSER_APP_URL: "http://app.synveda.test:8080",
+        SYNVEDA_BROWSER_ISSUER: "http://auth.synveda.test:8080/realms/synveda",
+        SYNVEDA_BOOTSTRAP_TENANT_ID: TENANT_ID,
+      },
+      username: "synveda-demo-viewer",
+      requiredRoleKeys: [],
+      expectedSubject: "viewer-subject",
+      admissionStage: "viewer-admission",
+      afterLogin: async ({ page, settings, timeout }) => {
+        checkpoint += 1;
+        assert.ok(page);
+        assert.equal(settings.appOrigin, SETTINGS.appOrigin);
+        assert.equal(timeout, 60_000);
+        assert.ok(password.every((value) => value === 0));
+      },
+      readPassword: () => password,
+    }),
+    true,
+  );
+  assert.equal(checkpoint, 1);
+  assert.ok(password.every((value) => value === 0));
 });
 
 test("the injected browser flow refuses missing, duplicate and foreign redirects", async () => {
@@ -667,17 +737,17 @@ test("the injected browser flow refuses missing, duplicate and foreign redirects
       return true;
     });
     assert.deepEqual(flow.closed, { browser: 1, context: 1, page: 1 });
-    assert.deepEqual(flow.cleanup, { unrouted: 1 });
+    assert.deepEqual(flow.cleanup, { requestListeners: 1, unrouted: 1 });
     assert.ok(password.every((value) => value === 0));
     if (
       options.foreign === true ||
       options.backgroundForeign === true ||
       options.invalidCallback === true
     ) {
-      assert.equal(flow.routes.aborted, 1);
+      assert.equal(flow.routes.aborted, options.backgroundForeign === true ? 1 : 0);
       assert.equal(
         flow.routes.continued,
-        options.invalidCallback === true || options.backgroundForeign === true ? 1 : 0,
+        0,
       );
     }
   }
@@ -697,7 +767,7 @@ test("browser evaluation and cleanup failures are bounded and content-free", asy
       return true;
     });
     assert.deepEqual(flow.closed, { browser: 1, context: 1, page: 1 });
-    assert.deepEqual(flow.cleanup, { unrouted: 1 });
+    assert.deepEqual(flow.cleanup, { requestListeners: 1, unrouted: 1 });
     assert.ok(password.every((value) => value === 0));
   }
 });
