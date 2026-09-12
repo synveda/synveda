@@ -223,26 +223,32 @@ supported-host/reference repetition below. This is one-host local evidence,
 not Docker Desktop/Linux, reference HTTPS, recovery, upgrade, Apalis,
 installed-release or production evidence.
 
-### Current deterministic gate blocker (2026-09-12)
+### Deterministic gate progress (2026-09-12)
 
-During OPS-8/CPR-39 archive validation from `d17bd4d`, `make check-deploy`
-stalled in `scripts/compose-lifecycle.test.mjs` at `interrupted build retains
-its exact lock and removes private Buildx state`, after the preceding timeout
-case passed. This occurred both inside and outside the restricted tool sandbox
-on macOS arm64 Node 24.18.0. Both full runs were terminated and are not passes.
-The interruption case alone passed in 2.6 seconds; selecting it with the preceding
-timeout case passed both in 6.0 seconds. No lifecycle implementation/test or
-live Compose project was changed by that packaging batch.
+The apparent interrupted-build stall recorded during archive validation was
+delayed test reporting. At `f06926a`, the unchanged 89-test lifecycle suite
+passed in 360 seconds on macOS arm64 Node 24.18.0 with a 30-second per-test
+deadline and zero skips. The interrupted-build case completed in 2.5 seconds;
+later backup, restore and upgrade fixtures kept running while its result was
+buffered. A process sample showed synchronous fixture execution nested inside
+the child-exit callback. The two earlier terminated full gates remain incomplete
+runs, not passes.
 
-Next action: reproduce the full-suite interaction with bounded test deadlines,
-isolate the preceding lifecycle cases, and inspect child/pipe/signal cleanup
-before changing the existing teardown contract. Keep the full gate blocked until
-an unchanged invocation finishes; do not substitute a filtered pass. The focused
-probe is:
+`scripts/compose-lifecycle.test.mjs` now yields to the event loop after each
+case so pending report I/O can flush. Assertions, test selection, production
+deadlines, signal cleanup and exact-project lock retention are unchanged.
+This is a test scheduling correction under ADR-0105's deterministic evidence
+class, with no architecture or deployment-contract change.
 
-```sh
-node --test --test-name-pattern='^(timed-out|interrupted) build retains its exact lock and removes private Buildx state$' --test-timeout=30000 scripts/compose-lifecycle.test.mjs
-```
+The complete unfiltered `make check-deploy` passes all 342 tests with zero
+failures, cancellations or skips, including the 169 combined script checks,
+the Compose render matrix and final deployment convergence. Results now flush
+past the interrupted-build case while later fixtures are still running. Four
+focused build/failure/interruption checks also pass on pinned Node 22.23.2
+Linux arm64 Docker as the ordinary `node` user. Formatting and backlog/ADR/docs
+checks pass; no Rust changed, so strict Clippy is not applicable to this fix.
+Full CI, database and live deployment acceptance were not rerun. This closes
+the deterministic-gate checkpoint without changing the remaining live criteria.
 
 ### Remaining live acceptance
 

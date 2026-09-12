@@ -34,16 +34,20 @@ the extracted archive on Node 22/Linux arm64 and Node 24/macOS arm64. The
 installer preserves client configuration, replaces the hook on upgrade and
 refuses an incomplete runtime before mutation. Native execution from a published
 installation, non-text Codex results and other client versions/platforms remain
-unqualified. After resolving the deployment-gate blocker below, qualify the
-now-installed Copilot CLI 1.0.83 using its actual contract and authentic frames;
+unqualified. Next, qualify the now-installed Copilot CLI 1.0.83 using its actual
+contract and authentic frames;
 it has no registry/support claim yet. Pi is not
 on the current PATH. These are independent of the public-release decisions.
 
-The broader deployment gate is currently blocked by a full-suite stall at the
-existing interrupted-build lifecycle test. Both full runs were terminated;
-the isolated case and timeout/interruption pair pass. Packaging, installer and
-conformance checks pass. [CPR-45](CPR-45.md#current-deterministic-gate-blocker-2026-09-12)
-records the exact reproduction and next action before claiming that gate green.
+The apparent deployment-gate stall was delayed reporting: the unchanged
+89-test lifecycle suite passed in 360 seconds, and the interrupted build itself
+exited in 2.5 seconds. A test-only event-loop yield now lets results flush between
+synchronous fixtures. The full unfiltered `make check-deploy` passes all 342
+tests with zero skips plus the Compose render and deployment-convergence checks.
+Four focused checks also pass on Node 22/Linux arm64 Docker as an ordinary user.
+[CPR-45](CPR-45.md#deterministic-gate-progress-2026-09-12) records the closed
+checkpoint and the remaining live acceptance. The two earlier terminated gates
+remain incomplete runs, not passes.
 
 ## Phase 0 — Foundation (wk 1)
 

@@ -361,19 +361,47 @@ remote CI/release jobs remain unverified in this batch.
 Validation: all 16 release-parity/installer tests, ten adapter-conformance
 tests, formatting, dependency direction, generated types, backlog, ADR status,
 docs and shell/JavaScript/YAML checks pass. The full `make check-deploy` did
-not finish: both runs stalled at the existing interrupted-build lifecycle test
+not finish: both runs stopped reporting before the interrupted-build result
 and were terminated. The case alone and its timeout/interruption pair pass;
 this does not substitute for a passing full gate. The exact blocker and next
-action are in [CPR-45](backlog/CPR-45.md#current-deterministic-gate-blocker-2026-09-12).
+action are in [CPR-45](backlog/CPR-45.md#deterministic-gate-progress-2026-09-12).
 No full CI/database or live Keycloak/Compose lifecycle was rerun for this batch.
 The remaining deployment convergence/uninstall suite passed 48 checks in the
 restricted invocation; its one loopback-listener case was blocked by `EPERM`
 and then passed with that permission. The final static convergence check passed.
-Those results leave the separate full lifecycle-gate stall unresolved.
+Those results did not establish a passing full lifecycle gate.
+
+### CPR-45 deployment gate progress (2026-09-12)
+
+At `f06926a`, the unchanged lifecycle suite passed all 89 tests in 360 seconds
+on macOS arm64 Node 24.18.0, using a 30-second per-test deadline. The apparent
+stall was delayed reporting: the interrupted-build case exited in 2.5 seconds,
+while later synchronous fixtures kept the child-exit callback occupied and
+buffered its result. A process sample and progressing backup/restore/upgrade
+children distinguished this from a stuck Compose process. Both interruption
+cases also passed together. The earlier terminated gates remain incomplete.
+
+A single `afterEach` event-loop yield now lets the report flush between
+fixtures. No product script, assertion, test selector, deadline or cleanup
+contract changes. The complete unfiltered `make check-deploy` passes all 342
+tests, including the 169 combined script checks, with zero failures,
+cancellations or skips. Compose rendering and final deployment convergence
+pass, and the report advances between cases while the suite is running.
+Formatting and backlog/ADR/docs checks also pass. No Rust changed; strict
+Clippy is not applicable. Full CI, database tests and live deployment
+acceptance were not rerun for this test-only fix.
+
+The four focused build/failure/interruption cases also pass with zero skips on
+pinned Node 22.23.2/Linux arm64 in Docker, using the image's ordinary `node`
+user, no network, a read-only checkout and disposable temporary state. The
+first root-user invocation failed all four checks at or after Compose's existing
+non-zero UID/GID refusal; it is not counted as a pass. No runtime-user rule was
+changed to obtain the successful rerun.
 
 ## Remaining actions
 
-Resolve the CPR-45 full-suite interaction above before the next client batch.
+The CPR-45 deterministic-gate checkpoint is closed. Wider live reference
+acceptance remains in its open brief.
 
 1. Qualify the installed Copilot CLI 1.0.83 from its actual contract and authentic
    frames. `copilot --version` confirmed it during the archive batch; no Copilot
