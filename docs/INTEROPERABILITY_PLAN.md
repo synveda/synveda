@@ -159,16 +159,20 @@ These are the remaining work in batches 2 and 3, not new implementation batches.
 ### Fresh Keycloak acceptance preflight
 
 The retained `synveda-development-acceptance-e2e` deployment owns the hostnames
-and listener. It uses pool `10.231.47.0/24` and profile `demo`. The fresh test
+and listener. It uses pool `10.231.47.0/24`; shutdown must select
+`demo,browser-acceptance` because the browser profile still owns a volume even
+when its container is absent. The fresh test
 project is `synveda-development-acceptance-interop`, pool `10.231.46.0/24`.
 `sudo -n true` reports that a password is required; the agent cannot perform
 the documented privileged host edit unattended. Its handoff is pending owner
 action, not a passing preflight. Acquire the administrator credential before
-stopping the retained stack; these canonical commands preserve volumes/secrets:
+stopping the retained stack; these canonical commands preserve PostgreSQL data
+and generated secrets. Down removes the profile-owned disposable browser
+credential/receipt volume after validating its ownership:
 
 ```sh
 sudo -v
-SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-e2e SYNVEDA_COMPOSE_IPV4_POOL=10.231.47.0/24 SYNVEDA_COMPOSE_PROFILES=demo make compose-down
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-e2e SYNVEDA_COMPOSE_IPV4_POOL=10.231.47.0/24 SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance make compose-down
 SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-e2e SYNVEDA_CONFIRM_HOSTS_REMOVE=remove:127.0.0.1:synveda-development-acceptance-e2e:app.synveda.test:auth.synveda.test make compose-hosts-remove
 SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-interop SYNVEDA_CONFIRM_HOSTS_INSTALL=install:127.0.0.1:synveda-development-acceptance-interop:app.synveda.test:auth.synveda.test make compose-hosts-install
 sudo dscacheutil -flushcache

@@ -61,6 +61,9 @@ in pinned Linux arm64 containers: Node 22.23.2 and Python 3.11.16. These are
 runtime tests, not OIDC evidence or a complete platform support matrix.
 Fresh Keycloak acceptance is waiting for the administrator-only owned
 hosts-file handoff from retained `acceptance-e2e` to `acceptance-interop`.
+The corrected shutdown selection is `demo,browser-acceptance`; its retained
+browser volume made the earlier `demo`-only command fail before mutation.
+The complete live inventory now passes read-only contract validation.
 No reset or retained-asset replacement was performed. Next: complete the
 canonical preflight, run the scenario with ordinary Keycloak identities, then
 resolve package ownership, licence and release provenance before publication.

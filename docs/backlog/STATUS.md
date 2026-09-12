@@ -17,6 +17,9 @@ reusing the existing durable Session runtime. Its runtime exit keeps the task
 open; lifecycle replay is separate from live qualification. Fresh Keycloak
 acceptance awaits the administrator-only owned hosts-file handoff from the
 retained acceptance project to `acceptance-interop`; no retained data was reset.
+The handoff's shutdown selects `demo,browser-acceptance`: a retained browser
+volume remains in its contract even when that profile's container is absent.
+The corrected profile selection passes live read-only inventory validation.
 Next: complete that canonical preflight and run ordinary OIDC SDK/native Codex
 acceptance. SDK release decisions and a second verified lifecycle remain open.
 
