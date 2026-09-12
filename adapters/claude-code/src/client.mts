@@ -125,7 +125,7 @@ async function call<T>(
   let status: number | undefined;
   const headers: Record<string, string> = {
     authorization: `Bearer ${bearer}`,
-    "x-synveda-client": `${CLIENT_NAME}/${CLIENT_VERSION}`,
+    "x-synveda-client": `${config.clientName ?? CLIENT_NAME}/${CLIENT_VERSION}`,
     traceparent: traceparent(),
   };
   if (body !== undefined) headers["content-type"] = "application/json";

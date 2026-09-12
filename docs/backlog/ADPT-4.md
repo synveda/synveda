@@ -54,9 +54,13 @@ The owner must approve Synveda's repository/package licence, PyPI/npm namespaces
 
 **Current checkpoint (2026-09-12)**
 
-`make sdk-check` and the exact-role gateway shared workflow pass locally. The
-canonical Compose smoke path exits 78 because the retained acceptance project
-has an incomplete container inventory; no reset or asset replacement was
-performed. Next action: prepare the documented fresh acceptance project, run
-the same scenario with ordinary Keycloak identities, then resolve the existing
-package ownership, licence and release-provenance decisions before publication.
+`make sdk-check`, full CI and the fresh exact-role database suite pass at
+`8f40237`; the explicit shared gateway workflow passed in that implementation
+slice. Both SDKs additionally passed all eight tests on their minimum runtimes
+in pinned Linux arm64 containers: Node 22.23.2 and Python 3.11.16. These are
+runtime tests, not OIDC evidence or a complete platform support matrix.
+Fresh Keycloak acceptance is waiting for the administrator-only owned
+hosts-file handoff from retained `acceptance-e2e` to `acceptance-interop`.
+No reset or retained-asset replacement was performed. Next: complete the
+canonical preflight, run the scenario with ordinary Keycloak identities, then
+resolve package ownership, licence and release provenance before publication.

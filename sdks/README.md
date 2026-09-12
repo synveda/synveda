@@ -13,7 +13,11 @@ task completion. The gateway owns Cedar, RLS, VedaFlow and audit.
 ## Install locally and check
 
 Node 22+ and Python 3.11+ are required. The local acceptance run used Node
-24.18.0 and Python 3.14.6; CI additionally declares Node 22/Python 3.11.
+24.18.0 and Python 3.14.6. All eight tests per SDK also passed in pinned Linux
+arm64 containers on Node 22.23.2 and Python 3.11.16, including generated Python
+model/operation imports. CI declares Node 22/Python 3.11 on Linux amd64; that
+remote job was not executed in this local run. The full local CI and fresh
+database suite passed at `8f40237`. These checks do not qualify live OIDC.
 No public npm/PyPI package is published by this work.
 
 ```sh

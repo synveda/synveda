@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "client": {
+    "name": "Codex CLI",
+    "version": "0.152.0"
+  },
+  "provenance": {
+    "kind": "captured-real-client",
+    "captured_at": "2026-09-12T16:30:17Z",
+    "source": "Installed native CLI, project hooks reviewed and trusted through /hooks, then exec and exec resume in the same synthetic repository. No hook-trust bypass.",
+    "platform": "Darwin arm64",
+    "model": "gpt-5.5",
+    "reasoning_effort": "low",
+    "sanitised_fields": [
+      "cwd",
+      "transcript_path"
+    ],
+    "synveda_authentication": "not exercised by this hook capture"
+  },
+  "invocations": [
+    {
+      "mode": "exec",
+      "frames": [
+        {
+          "session_id": "01a09672-099f-7f30-929d-8a5b72389a67",
+          "transcript_path": "/synveda/qualification/codex/transcript.jsonl",
+          "cwd": "/synveda/qualification/codex",
+          "hook_event_name": "SessionStart",
+          "model": "gpt-5.5",
+          "permission_mode": "default",
+          "source": "startup"
+        },
+        {
+          "session_id": "01a09672-099f-7f30-929d-8a5b72389a67",
+          "turn_id": "01a09672-09f4-7303-b397-d73b500e3662",
+          "transcript_path": "/synveda/qualification/codex/transcript.jsonl",
+          "cwd": "/synveda/qualification/codex",
+          "hook_event_name": "UserPromptSubmit",
+          "model": "gpt-5.5",
+          "permission_mode": "default",
+          "prompt": "Run cat fixture.txt once, then reply with Synveda lifecycle capture complete. Do not read other files, change files, or make network calls."
+        },
+        {
+          "session_id": "01a09672-099f-7f30-929d-8a5b72389a67",
+          "turn_id": "01a09672-09f4-7303-b397-d73b500e3662",
+          "transcript_path": "/synveda/qualification/codex/transcript.jsonl",
+          "cwd": "/synveda/qualification/codex",
+          "hook_event_name": "PreToolUse",
+          "model": "gpt-5.5",
+          "permission_mode": "default",
+          "tool_name": "Bash",
+          "tool_input": {
+            "command": "cat fixture.txt"
+          },
+          "tool_use_id": "call_Kn1FWjstIIz43WFfedeXfxs2"
+        },
+        {
+          "session_id": "01a09672-099f-7f30-929d-8a5b72389a67",
+          "turn_id": "01a09672-09f4-7303-b397-d73b500e3662",
+          "transcript_path": "/synveda/qualification/codex/transcript.jsonl",
+          "cwd": "/synveda/qualification/codex",
+          "hook_event_name": "PostToolUse",
+          "model": "gpt-5.5",
+          "permission_mode": "default",
+          "tool_name": "Bash",
+          "tool_input": {
+            "command": "cat fixture.txt"
+          },
+          "tool_response": "Synveda lifecycle qualification fixture.\n",
+          "tool_use_id": "call_Kn1FWjstIIz43WFfedeXfxs2"
+        },
+        {
+          "session_id": "01a09672-099f-7f30-929d-8a5b72389a67",
+          "turn_id": "01a09672-09f4-7303-b397-d73b500e3662",
+          "transcript_path": "/synveda/qualification/codex/transcript.jsonl",
+          "cwd": "/synveda/qualification/codex",
+          "hook_event_name": "Stop",
+          "model": "gpt-5.5",
+          "permission_mode": "default",
+          "stop_hook_active": false,
+          "last_assistant_message": "Synveda lifecycle capture complete."
+        },
+        {
+          "session_id": "01a09672-099f-7f30-929d-8a5b72389a67",
+          "transcript_path": "/synveda/qualification/codex/transcript.jsonl",
+          "cwd": "/synveda/qualification/codex",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        }
+      ]
+    },
+    {
+      "mode": "exec resume",
+      "frames": [
+        {
+          "session_id": "01a09672-099f-7f30-929d-8a5b72389a67",
+          "transcript_path": "/synveda/qualification/codex/transcript.jsonl",
+          "cwd": "/synveda/qualification/codex",
+          "hook_event_name": "SessionStart",
+          "model": "gpt-5.5",
+          "permission_mode": "default",
+          "source": "resume"
+        },
+        {
+          "session_id": "01a09672-099f-7f30-929d-8a5b72389a67",
+          "turn_id": "01a09674-88d7-77f3-a0c5-5a235b0d4d8d",
+          "transcript_path": "/synveda/qualification/codex/transcript.jsonl",
+          "cwd": "/synveda/qualification/codex",
+          "hook_event_name": "UserPromptSubmit",
+          "model": "gpt-5.5",
+          "permission_mode": "default",
+          "prompt": "Reply only: Synveda lifecycle resume complete. Do not use tools."
+        },
+        {
+          "session_id": "01a09672-099f-7f30-929d-8a5b72389a67",
+          "turn_id": "01a09674-88d7-77f3-a0c5-5a235b0d4d8d",
+          "transcript_path": "/synveda/qualification/codex/transcript.jsonl",
+          "cwd": "/synveda/qualification/codex",
+          "hook_event_name": "Stop",
+          "model": "gpt-5.5",
+          "permission_mode": "default",
+          "stop_hook_active": false,
+          "last_assistant_message": "Synveda lifecycle resume complete."
+        },
+        {
+          "session_id": "01a09672-099f-7f30-929d-8a5b72389a67",
+          "transcript_path": "/synveda/qualification/codex/transcript.jsonl",
+          "cwd": "/synveda/qualification/codex",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        }
+      ]
+    }
+  ]
+}

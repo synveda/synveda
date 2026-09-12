@@ -42,6 +42,46 @@ Synveda does not currently write Codex TOML configuration. The native
 `codex mcp add synveda -- /absolute/path/to/synveda mcp` command can register an
 unbound shared server; the caller must then supply a Synveda Session ID.
 
+## Captured hook adapter
+
+The workspace now includes `adapters/codex`. Build with
+`pnpm --filter @synveda/codex-adapter... build` after the normal frozen-lockfile
+install. Sign in with `synveda login` and select the target through
+`SYNVEDA_WORKSPACE`/`SYNVEDA_PROJECT` or `.synveda/config.json`, as with the
+existing adapter. CLI credentials pin the gateway; project settings cannot
+redirect them. `SYNVEDA_DISABLED=1` disables the hooks.
+
+For a controlled qualification checkout, enable `hooks = true` in the
+`[features]` table of its `.codex/config.toml`. Merge these entries into its
+`.codex/hooks.json`, replacing the Node and built hook paths:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 12}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 12}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 12}]}]
+  }
+}
+```
+
+Use the normal project trust and `/hooks` review flow to activate that exact
+source. Do not disable hook trust. Codex 0.152.0 was exercised with GPT-5.5 and
+low reasoning effort; `--ignore-user-config` did not load these trusted hooks.
+See the [vendor hook contract](https://learn.chatgpt.com/docs/hooks).
+
+With hooks observing turns, configure the MCP command as
+`synveda mcp --writes host --project <project-id>`. Leave it unbound and pass
+the **Synveda Session ID** returned in SessionStart context to each recall
+call. Do not combine the hook-created Session with a separate `--task` key;
+the dedicated tool-only recipe above is a different write-owner arrangement.
+
+The native ID maps to `codex:<native-id>` in the existing local spool. Stop
+records user/assistant text and captured command calls/results; runtime exit
+flushes them. A resumed invocation uses the same Synveda Session. The task
+owner explicitly requests Capture and ends that Session through the public
+API/SDK when finished. No native hook establishes final task completion.
+
 ## Evidence limits
 
 The native protocol capture deliberately had no Synveda credential and
@@ -49,14 +89,18 @@ received the server's actionable sign-in error. Authenticated API, task
 isolation and audit behavior are covered separately by the gateway/SDK
 acceptance suite. Neither result establishes a complete Codex lifecycle.
 
-The isolated headless probe emitted no lifecycle hook frames after trying
-inline overrides and a project hooks file with the hooks feature enabled.
-Do not translate undocumented or missing events, or infer SessionEnd from an
-MCP disconnect. Next qualification requires a trusted hook source in the
-installed client's normal hook review flow, followed by captured start,
-observation, context, Capture, end and resume behavior against Keycloak.
-The [vendor hook contract](https://learn.chatgpt.com/docs/hooks) describes that
-trust flow. CPR-39 remains open until all ADR-0098 criteria pass.
+Normal trusted-hook review produced six authentic event types and a resumed
+turn with the same native Session ID. Fixtures and deterministic replay cover
+the minimal adapter's start/Stop/exit translation, durable outage/retry and
+duplicate delivery. Native context consumption and the complete authenticated
+Capture/end/audit workflow remain unverified against Keycloak.
+
+Only startup/resume and observed transcript shapes are handled. Compaction,
+non-command tool-result formats, installation packaging and other client
+versions remain unqualified. Reads over 8 MiB/20,000 records are held with a
+diagnostic; unfinished turns can be lost if no hook runs before host death.
+See `adapters/codex/README.md` for bounds and provenance. CPR-39 remains open
+until all ADR-0098 criteria pass.
 
 GitHub Copilot CLI and Pi remain separate, unqualified candidates. They have
 no Synveda lifecycle adapter in this checkout. The VS Code registry entry is

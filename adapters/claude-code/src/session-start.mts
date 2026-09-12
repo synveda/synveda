@@ -52,9 +52,10 @@ const BACKLOG_BUDGET_MS = 2000;
 export async function sessionStart(
   input: HookInput,
   configured: AdapterConfig,
+  readEntries: typeof readTranscript = readTranscript,
 ): Promise<HookOutput> {
   const externalId = harnessSessionId(input.session_id);
-  const spool = loadOrCreateSpool(externalId, CLIENT_NAME, installationId());
+  const spool = loadOrCreateSpool(externalId, configured.clientName ?? CLIENT_NAME, installationId());
   if (spool === undefined) return {};
   // Placement is fixed before the first open. Once a run exists, its
   // workspace/project pair is server-owned and a later config edit cannot
@@ -71,7 +72,7 @@ export async function sessionStart(
     // Record anyway. A conversation that starts before anybody has logged in
     // still happened, and the events are worth keeping for the session that
     // follows the login.
-    recordDelta(spool, input.transcript_path);
+    recordDelta(spool, input.transcript_path, readEntries);
     saveSpool(spool);
     return { systemMessage: SIGN_IN_MESSAGE };
   }
@@ -87,13 +88,14 @@ export async function sessionStart(
   if (!opened) {
     // No run and therefore nowhere to compose from. Events keep accumulating
     // locally and the next start tries again.
-    recordDelta(spool, input.transcript_path);
+    recordDelta(spool, input.transcript_path, readEntries);
     saveSpool(spool);
     return {};
   }
 
   // 2. The backlog — this conversation's, then everything else's.
-  recordDelta(spool, input.transcript_path);
+  recordDelta(spool, input.transcript_path, readEntries);
+  if (!saveSpool(spool)) return {};
   await deliver(spool, config, bearer.token, Date.now() + BACKLOG_BUDGET_MS);
   saveSpool(spool);
   await retryBacklog(config, bearer.token, externalId, Date.now() + BACKLOG_BUDGET_MS);
@@ -102,7 +104,7 @@ export async function sessionStart(
   if (!configured.inject) return disclosureOnly(input, config);
 
   const request: { query?: string; budget_tokens?: number } = {};
-  const task = deriveTask(input.source, spool.transcript_path);
+  const task = deriveTask(input.source, spool.transcript_path, readEntries);
   if (task !== undefined) request.query = task;
   const budget = budgetFor(input.source, config);
   if (budget !== undefined) request.budget_tokens = budget;
@@ -115,7 +117,7 @@ export async function sessionStart(
     request,
     // A fresh key per start: a resumed conversation composing again is a new
     // composition over a corpus that may have moved, not a retry.
-    `cc-ctx-${randomUUID()}`,
+    `${config.clientName === "codex" ? "codex" : "cc"}-ctx-${randomUUID()}`,
   );
   const elapsedMs = Date.now() - started;
 
@@ -188,16 +190,16 @@ async function resolveRun(
     {
       workspace_id: workspace,
       ...(spool.project_id === undefined ? {} : { project_id: spool.project_id }),
-      client_name: CLIENT_NAME,
+      client_name: config.clientName ?? CLIENT_NAME,
       client_version: CLIENT_VERSION,
       client_installation_id: spool.client_installation_id,
       external_session_id: spool.external_session_id,
-      agent_name: "claude-code",
+      agent_name: config.clientName ?? CLIENT_NAME,
       ...(input.model === undefined ? {} : { model_name: input.model }),
     },
     // Derived from the harness id rather than random: a SessionStart that
     // times out and fires again must land on the same run.
-    `cc-open-${spool.external_session_id}`,
+    `${config.clientName === "codex" ? "codex" : "cc"}-open-${spool.external_session_id}`,
   );
   if (!result.ok) {
     log("session.open_failed", {
@@ -256,10 +258,11 @@ function disclosureOnly(input: HookInput, config: AdapterConfig): HookOutput {
 function deriveTask(
   source: string | undefined,
   transcriptPath: string | undefined,
+  readEntries: typeof readTranscript,
 ): string | undefined {
   if (source !== "resume" && source !== "compact" && source !== "fork") return undefined;
   if (transcriptPath === undefined) return undefined;
-  return lastUserPrompt(readTranscript(transcriptPath));
+  return lastUserPrompt(readEntries(transcriptPath));
 }
 
 /**

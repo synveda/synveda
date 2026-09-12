@@ -40,6 +40,7 @@ import {
 } from "./spool.mjs";
 import { harnessSessionId } from "./session-start.mjs";
 import type { HookInput, HookOutput } from "./types.mjs";
+import { readTranscript } from "./transcript.mjs";
 
 /**
  * How long `SessionEnd`'s flush gets.
@@ -51,7 +52,11 @@ import type { HookInput, HookOutput } from "./types.mjs";
  */
 const END_FLUSH_BUDGET_MS = 3000;
 
-export async function turn(input: HookInput, configured: AdapterConfig): Promise<HookOutput> {
+export async function turn(
+  input: HookInput,
+  configured: AdapterConfig,
+  readEntries: typeof readTranscript = readTranscript,
+): Promise<HookOutput> {
   const hookStarted = Date.now();
   if (!configured.observe) return {};
   if (
@@ -63,13 +68,13 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
     return {};
   }
   const externalId = harnessSessionId(input.session_id);
-  const spool = loadOrCreateSpool(externalId, CLIENT_NAME, installationId());
+  const spool = loadOrCreateSpool(externalId, configured.clientName ?? CLIENT_NAME, installationId());
   if (spool === undefined) return {};
   if (input.transcript_path !== undefined) spool.transcript_path = input.transcript_path;
 
   // Record first, always, and persist before anything touches the network.
   // This is the step the previous design did not have.
-  const recorded = recordDelta(spool, input.transcript_path);
+  const recorded = recordDelta(spool, input.transcript_path, readEntries);
   const durable = saveSpool(spool);
   if (!durable) {
     // The spool did not land. Delivering anyway would risk sending events
@@ -114,9 +119,11 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
     Date.now() + END_FLUSH_BUDGET_MS,
   );
 
-  await closeRun(spool, config, bearer.token, endReason(input, result.complete));
+  if (configured.clientName !== "codex") {
+    await closeRun(spool, config, bearer.token, endReason(input, result.complete));
+  }
   saveSpool(spool);
-  retireIfComplete(spool);
+  if (configured.clientName !== "codex") retireIfComplete(spool);
 
   log("turn.done", {
     session: externalId,

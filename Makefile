@@ -306,7 +306,7 @@ check-demos:
 # deliberately different support levels. This also checks the fixture hashes
 # and the generated public support/onboarding surfaces plus README summary.
 check-adapters:
-	node --test scripts/check-adapter-conformance.test.mjs
+	node --test scripts/check-adapter-conformance.test.mjs scripts/check-codex-fixtures.test.mjs
 	node scripts/check-adapter-conformance.mjs
 
 # CPR-42: the Rust/TypeScript suites execute each adversarial case; this

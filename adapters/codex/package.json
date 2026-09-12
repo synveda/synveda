@@ -1,15 +1,15 @@
 {
-  "name": "@synveda/claude-code-adapter",
+  "name": "@synveda/codex-adapter",
   "version": "0.2.0",
   "private": true,
-  "description": "Claude Code plugin: SessionStart context run + durable Stop/PreCompact/SessionEnd delivery (ADPT-1, ADR-0027; ADR-0078)",
+  "description": "Captured Codex 0.152.0 hooks over the existing Synveda Session runtime (CPR-39)",
   "type": "module",
-  "exports": {
-    "./session-runtime": "./dist/session-runtime.mjs"
-  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node --test --test-timeout=60000 \"dist/*.test.mjs\""
+  },
+  "dependencies": {
+    "@synveda/claude-code-adapter": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -22,6 +22,8 @@ const DEFAULT_GATEWAY = "http://127.0.0.1:8120";
 const DEFAULT_TIMEOUT_MS = 3000;
 
 export interface AdapterConfig {
+  /** Set by the adapter entry point, never by project configuration. */
+  clientName?: "claude-code" | "codex";
   /** `SYNVEDA_DISABLED=1`, or `disabled` in the project config. */
   disabled: boolean;
   inject: boolean;

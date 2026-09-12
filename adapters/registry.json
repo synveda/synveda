@@ -139,28 +139,48 @@
       ],
       "configuration": null,
       "lifecycle": {
-        "mechanism": "MCP tool calls; lifecycle adapter unverified",
-        "contract_version": "Codex CLI 0.152.0 / MCP 2025-06-18",
-        "status": "tool-only",
+        "mechanism": "MCP and minimal native hook translation over the existing Session runtime; live lifecycle unverified",
+        "contract_version": "Codex CLI 0.152.0 native hooks / MCP 2025-06-18",
+        "status": "captured",
         "source": "docs/integrations/codex.md",
-        "events": []
+        "events": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "PreToolUse",
+          "PostToolUse",
+          "Stop",
+          "SessionEnd"
+        ]
       },
       "limitations": [
-        "Authentic MCP discovery and recall frames replay; no complete authenticated Codex lifecycle is claimed.",
+        "Authentic MCP and native hook start/tool/stop/end/resume frames are captured; complete authenticated Synveda lifecycle remains unverified.",
         "Use native Codex MCP configuration; Synveda does not write its TOML file.",
-        "Lifecycle hooks did not execute in the isolated headless qualification; Session creation, Capture and end require explicit application ownership.",
-        "Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version."
+        "SessionEnd reason=other is followed by resume of the same Codex session; it cannot automatically close a Synveda task. Explicit application ownership remains required.",
+        "Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version.",
+        "Native hook capture requires normal project/hook trust loading. --ignore-user-config did not emit hooks in the probe; CLI 0.152.0 was exercised with GPT-5.5 at low reasoning effort.",
+        "The hook adapter replays startup/resume, durable Stop, outage/retry and runtime exit with a synthetic HTTP responder; native authenticated context consumption and Capture/end/audit qualification remain open.",
+        "Compaction and non-command tool-result formats are unqualified. The native reader holds transcripts over 8 MiB/20,000 records; a host killed before any delivery hook can lose the unfinished turn."
       ],
       "authentic_fixtures": [
         {
           "path": "crates/synveda-cli/fixtures/mcp/codex.json",
           "sha256": "d807a328550a652430c35a2c4b65f0c29b193447b8255a7e9c2fcf2d49d71289",
           "kind": "captured-client-frames"
+        },
+        {
+          "path": "adapters/codex/fixtures/lifecycle.json",
+          "sha256": "3bb629ff3d42681b64c1eb8abd21404aebef87bf986f084e90e44dea02b66a39",
+          "kind": "captured-client-hooks"
+        },
+        {
+          "path": "adapters/codex/fixtures/transcript.jsonl",
+          "sha256": "57d88963968808bba39b344115604df9e49fd4e21355bef65bc797401dbf9915",
+          "kind": "captured-client-transcript"
         }
       ],
       "conformance": {
         "evidence_level": "captured-protocol",
-        "tested_at": "2026-09-12T14:50:38Z",
+        "tested_at": "2026-09-12T16:30:17Z",
         "tested_version": "0.152.0",
         "checks": {}
       }

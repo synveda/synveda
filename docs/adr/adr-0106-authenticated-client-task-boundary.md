@@ -46,6 +46,17 @@ Codex qualification starts with authentic versioned frames and only then adds
 necessary host translation. A filesystem target or successful MCP handshake
 does not establish lifecycle support. Registry promotion still requires every
 applicable ADR-0098 criterion; absent credentials remain a blocker.
+The captured 0.152.0 lifecycle emits `SessionEnd` at runtime exit and subsequently
+resumes the same native Session ID. Its adapter therefore flushes on that hook;
+only an explicit task-owner API call freezes Capture or ends the Synveda Session.
+`Stop` records the bounded native transcript before network delivery. Only
+captured message/tool shapes are translated; injected instructions and reasoning
+are excluded. Oversized or mismatched transcripts are held with diagnostics.
+Reuse the existing adapter's credential, Session and durable delivery functions
+through a narrow workspace export and a closed Claude Code/Codex client identity.
+Codex external IDs are namespaced so two harnesses cannot share a local spool.
+Retry delivery must match the saved gateway and client, including background
+backlogs. This adds no plugin registry, event store or orchestration layer.
 Captured clients may have no Synveda configuration writer. Such entries remain
 visible in the support matrix but are excluded from generated installation
 choices; protocol evidence never justifies writing a host's unsupported format.

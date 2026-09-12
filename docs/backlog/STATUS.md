@@ -10,12 +10,15 @@ retains their implementation evidence. Open entries link to current briefs.
 The 2026-09-12 [interoperability execution plan](../INTEROPERABILITY_PLAN.md)
 repairs ADPT-1/2 and CPR-12/23 client defects, delivers an initial ADPT-4 slice
 and qualifies Codex under CPR-39. ADR-0106 records the accepted public-client
-boundary. Existing harness defects and the initial SDK slice pass focused
-acceptance; Codex 0.152.0 is captured at the MCP protocol level. Remaining
-blockers are the retained Compose inventory/fresh-asset preflight and absent
-authentic Codex lifecycle hooks in isolated headless runs. Next: qualify a
-fresh Keycloak deployment and capture Codex through its normal trusted hook
-flow. SDK release support and a second verified lifecycle remain open.
+boundary. Full CI and the fresh exact-role database suite pass at `8f40237`;
+Node 22/Python 3.11 SDK runtime checks also pass. Codex 0.152.0 now has authentic
+MCP and native start/tool/Stop/exit/resume frames, plus a small hook translator
+reusing the existing durable Session runtime. Its runtime exit keeps the task
+open; lifecycle replay is separate from live qualification. Fresh Keycloak
+acceptance awaits the administrator-only owned hosts-file handoff from the
+retained acceptance project to `acceptance-interop`; no retained data was reset.
+Next: complete that canonical preflight and run ordinary OIDC SDK/native Codex
+acceptance. SDK release decisions and a second verified lifecycle remain open.
 
 ## Phase 0 — Foundation (wk 1)
 
