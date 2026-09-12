@@ -231,7 +231,8 @@ export const ROUTES: readonly RouteDef[] = [
     segment: "advanced/reviews/:proposal_id",
     label: "Review",
     group: "none",
-    capability: "proposal.read",
+    // A workspace reviewer may lack the tenant-plane forecast. The detail
+    // reads the exact proposal and probes its target scope before offering acts.
     blurb: "Evidence, proposed changes and the exact review and apply state.",
   },
   {

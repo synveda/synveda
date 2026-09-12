@@ -155,7 +155,12 @@ test("a proposal review has one linkable governance address", () => {
     id: "review",
     params: { proposal_id: "018f-proposal" },
   });
-  assert.equal(routeOf("review").capability, "proposal.read");
+  assert.equal(routeOf("review").capability, undefined);
+  assert.ok(
+    offersRoute(routeOf("review"), { "proposal.read": false }),
+    "an exact proposal read, not a tenant-wide forecast, decides a scoped review link",
+  );
+  assert.equal(offersRoute(routeOf("reviews"), { "proposal.read": false }), false);
   assert.throws(() => hrefOf("review"), /proposal_id/);
 });
 

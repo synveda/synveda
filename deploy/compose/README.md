@@ -13,7 +13,7 @@ then return here for the complete lifecycle and optional modes.
 
 It supports development and reference configuration. A clean development
 acceptance passed on macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0 and
-Compose 5.1.2 on 2026-09-10. Linux and Docker Desktop development runs,
+Compose 5.1.2 on 2026-09-12. Linux and Docker Desktop development runs,
 reference HTTPS, recovery, upgrade and Apalis live evidence are still required
 before this implementation can be called validated for controlled single-host
 use. It is not an HA, disaster-recovery, hosted-SaaS or
@@ -132,7 +132,7 @@ For a ready-to-use local demo, select the existing demo profile before start:
     export SYNVEDA_COMPOSE_PROFILES=demo
     make compose-up
 
-Successful startup prints the actual `/console/` browser URL, the two demo
+Successful startup prints the actual `/console/` browser URL, the four demo
 account names, the protected password-file paths, and exact status, bounded-log
 and stop instructions. It never prints a password. Keep the same `SYNVEDA_*`
 selectors for every later lifecycle command.
@@ -156,22 +156,22 @@ and console routes, OIDC discovery and the refusal of management/metrics
 routes. It is not a browser-login test.
 
 `make compose-acceptance` is the fresh-project gate. It requires the explicit
-acceptance suffix and private `/24`, runs the real browser login, then uses two
-real CLI login profiles to seed the existing public-API PulseBoard team
-scenario. This includes Alice issuing and Bob redeeming a one-time workspace
-invitation, worker-completed Capture, governed Knowledge decisions and a
-non-executing Skill decision. Under the current strict policy, private
-Knowledge and the Skill honestly remain `pending_review`; no revision or Skill
-validation is advertised as applied. The witness also accepts and verifies the
-applied path when policy permits it. A second start reopens and checks the
-active receipt; it does not repeat the mutations. The gate then restarts
+acceptance suffix and private `/24`. Development uses the four-principal
+ingestion-retry walkthrough below: real Keycloak browser and CLI login,
+idempotent seed with preservation of a browser edit, worker-completed Capture,
+distinct review and apply, strict two-person Skill approval, exact Knowledge
+provenance, redacted Context revision links and direct restricted-viewer
+denials. Reference HTTPS retains the two-principal public-API PulseBoard team
+scenario; its private Knowledge and Skill decisions may remain honestly
+`pending_review` under strict policy. Neither fixture advertises pending
+changes as published or bypasses review. The gate then restarts
 PostgreSQL, Keycloak, Collector, worker, gateway and proxy one at a time, runs
 the full smoke after each, repeats browser login and verifies the existing
 receipt against live product rows. Transient network or HTTP 5xx recovery is
 re-probed for at most 180 seconds after each restart; an exposed refusal route,
 wrong issuer document or other contract failure is immediate. One project lock
-and one bounded deadline cover the run. The identity admission, Capture and
-PulseBoard rows are persisted-state witnesses across the matrix.
+and one bounded deadline cover the run. Identity admission, Capture and
+receipt-owned product rows are persisted-state witnesses across the matrix.
 Success leaves the stack running for inspection and later recovery/upgrade
 gates; reset remains separately confirmed.
 
@@ -290,15 +290,18 @@ has access to the other product's database.
 
 ## Demo and browser acceptance
 
-The demo profile adds three convergence-owned users for the fictional Northstar
+The demo profile adds four convergence-owned users for the fictional Northstar
 Delivery team:
 
 - `synveda-demo-admin` — Avery Author, initially admitted through the existing
   `synveda-admins` bootstrap boundary;
 - `synveda-demo-member` — Riley Reviewer, granted the existing `reviewer` and
-  `administrator` roles at the demo project by the fixture;
+  `administrator` roles at the demo workspace by the fixture;
+- `synveda-demo-approver` — Morgan Approver, granted the existing
+  `administrator` role at the demo workspace so strict Skill approvals use a
+  second person;
 - `synveda-demo-viewer` — Vera Restricted Viewer, granted only the existing
-  `viewer` role at that project.
+  `viewer` role at the demo workspace.
 
 Start the opt-in profile without resetting an existing project:
 
@@ -306,19 +309,20 @@ Start the opt-in profile without resetting an existing project:
     SYNVEDA_COMPOSE_PROFILES=demo make compose-smoke
 
 Their passwords are generated into the mode-0600
-`keycloak_demo_admin_password`, `keycloak_demo_member_password` and
+`keycloak_demo_admin_password`, `keycloak_demo_member_password`,
+`keycloak_demo_approver_password` and
 `keycloak_demo_viewer_password` files below the printed mode-0700 project
 secret directory. Read them only through a local password-input mechanism.
-Only Avery belongs to the Keycloak `synveda-admins` group; Riley and Vera
-receive no Keycloak domain role. Synveda's Cedar-governed grants remain the
-application authority.
+Only Avery belongs to the Keycloak `synveda-admins` group; Riley, Morgan and
+Vera receive no Keycloak domain role. Synveda's Cedar-governed grants remain
+the application authority.
 
 ### Governed ingestion-retry walkthrough
 
 This walkthrough uses public APIs and the normal deterministic Capture and
 retrieval paths. The Session and events are synthetic replay; no model, paid
 service or live coding-agent subscription is involved. Set the explicit HTTP
-relaxation only for this loopback development origin, then create three stored
+relaxation only for this loopback development origin, then create four stored
 login profiles. For each command, open the printed URL in a fresh private
 browser session and sign in as the named user with that user's password file:
 
@@ -330,13 +334,15 @@ synveda login --gateway "$SYNVEDA_GATEWAY" --profile author --no-browser
 # Avery Author: synveda-demo-admin
 synveda login --gateway "$SYNVEDA_GATEWAY" --profile reviewer --no-browser
 # Riley Reviewer: synveda-demo-member
+synveda login --gateway "$SYNVEDA_GATEWAY" --profile approver --no-browser
+# Morgan Approver: synveda-demo-approver
 synveda login --gateway "$SYNVEDA_GATEWAY" --profile viewer --no-browser
 # Vera Restricted Viewer: synveda-demo-viewer
 ```
 
 Seed is deliberately incomplete. It creates or reopens the stable
 `northstar-delivery-demo` workspace and `ingestion-api` project, verifies the
-three grants, creates one already-approved Knowledge revision with repository
+four grants, creates one already-approved Knowledge revision with repository
 provenance, opens a versioned Skill install proposal, and appends one synthetic
 finding to a Session. It does not capture that Session:
 
@@ -344,6 +350,7 @@ finding to a Session. It does not capture that Session:
 synveda demo retry-review seed \
   --author-credentials author \
   --reviewer-credentials reviewer \
+  --approver-credentials approver \
   --viewer-credentials viewer \
   --confirm-target "$SYNVEDA_GATEWAY"
 synveda demo retry-review inspect --author-credentials author
@@ -356,8 +363,9 @@ The expected finding says that retries reuse the original `Idempotency-Key`,
 return 409 while the first ingestion runs, and replay its stored response once
 complete. Capture prints two exact IDs: `<learning-change-id>` and
 `<skill-change-id>`. Riley inspects each proposal. Vera's attempted learning
-approval must exit non-zero without granting or applying anything; then Riley
-reviews and Avery applies each typed change:
+approval must exit non-zero without granting or applying anything. Riley alone
+can approve the Knowledge change. Skill changes require Riley and Morgan as two
+distinct approvers before Avery applies each typed change:
 
 ```sh
 synveda proposal show <learning-change-id> --profile reviewer
@@ -371,6 +379,8 @@ synveda proposal apply <learning-change-id> --profile author
 synveda proposal show <skill-change-id> --profile reviewer
 synveda proposal approve <skill-change-id> --profile reviewer \
   --comment "Skill instructions preserve idempotency and content-free evidence"
+synveda proposal approve <skill-change-id> --profile approver \
+  --comment "Distinct administrator approval for the reviewed Skill"
 synveda proposal apply <skill-change-id> --profile author
 ```
 
@@ -384,6 +394,8 @@ synveda demo retry-review bind-skill \
 synveda proposal show <binding-change-id> --profile reviewer
 synveda proposal approve <binding-change-id> --profile reviewer \
   --comment "Pin the reviewed Skill version at the ingestion project"
+synveda proposal approve <binding-change-id> --profile approver \
+  --comment "Distinct administrator approval for the exact binding"
 synveda proposal apply <binding-change-id> --profile author
 
 synveda demo retry-review verify \
@@ -398,7 +410,9 @@ synveda demo retry-review status --author-credentials author --json
 provenance, then requests Riley's authorised context, checks that it selected
 that exact revision, reads the enabled pinned Skill version, and finally reads
 content-free Knowledge, Skill, Session and context audit pages plus the chain
-verification result. `status` reopens the recorded Knowledge, Session,
+verification result. The team's redacted Context trace does not retain task
+or Knowledge text; its selected-item links still address the exact immutable
+Knowledge revisions. `status` reopens the recorded Knowledge, Session,
 Capture, Skill, Context and audit addresses through the public API. Re-running
 `seed` uses stable idempotency keys and must retain the same addresses; it
 refuses a different gateway, different identities, a
@@ -424,7 +438,7 @@ Then select and install the acceptance project:
     make compose-resolver-check
     make compose-acceptance
 
-It replays the same staged scenario through three real authorization-code
+It replays the same staged scenario through four real authorization-code
 logins, PKCE S256, issuer/audience claims and first-administrator admission
 through the same proxy authority used by containers. The automated reviews
 are labelled synthetic acceptance replay; they are not evidence of a human

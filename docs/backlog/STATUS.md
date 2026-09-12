@@ -176,40 +176,32 @@ gateway paths are deleted; `synveda init` is a side-effect-free refusal.
 The root documentation index now points source users to one detailed Compose
 guide and labels the unverified packaged-reference workflow separately.
 
-Deterministic gates cover the provider/runtime matrix, a three-principal
+Deterministic gates cover the provider/runtime matrix, a four-principal
 governed retry-review browser scenario, restart lifecycle, logical database/key recovery, same-schema image
 upgrade, external dependency wiring, bounded local metrics, customer-safe
 Operations view and the disabled-by-default Apalis 0.7.4 Skill-validation
 transport. PostgreSQL operation/outbox state remains authoritative and the
 native worker is the rollback.
 
-On 2026-09-10, clean-volume development acceptance passed on macOS 26.6.2
-arm64 with OrbStack Docker Engine 29.4.0 and Compose 5.1.2. It proved packaged
-console serving, Keycloak PKCE login and exact discovery, worker-completed
-Capture, the public-API team scenario, all six native service restarts and
-persisted receipt verification. A canonical down/up retained the exact product
-volume and generated key set; exact-project reset separately retained the
-issuer, KMS key and demo credentials. Strict policy outcomes remained visibly
-pending where review was required.
-
-The new three-principal retry-review revision passes deterministic fixture and
-deployment contracts, but has not replaced that recorded live evidence. The
-old `synveda-development-acceptance-phase1` containers and networks are gone,
-as are the five selected development image tags. Product data remains retained,
-the canonical development hostname mapping is installed, and the rebuilt
-`demo` stack passes `make compose-smoke`. A fresh three-principal acceptance
-replay is still required.
-
-On 2026-09-11, the root README's current-checkout first-run path was audited
-against that live default project, including real browser login and seeded UI
-labels, CLI build, Compose configuration, smoke, non-destructive down/up and
-the documentation/deployment gates. A fresh disposable replay stopped before
-mutation because the managed `/etc/hosts` handoff required an unavailable
-interactive administrator credential. The default project was restored and
-smoked with its original volume, KMS key and issuer inputs intact. The next
-action remains an operator-assisted hosts handoff followed by
-`make compose-acceptance`, or the same gate on a clean supported host; no fresh
-acceptance result is claimed.
+On 2026-09-12 the current four-principal revision passed clean-volume
+development acceptance on macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0
+and Compose 5.1.2, at
+`d1486929d73dc459ed6dc0bf029c5c825d3a1bb6` plus the working-tree increment,
+using only `synveda-development-acceptance-e2e` and synthetic identities. The
+full deployment gate, 251 console tests/build, 189 CLI tests/strict Clippy,
+77 policy tests, six OpenAPI tests and 18 fresh exact-role access API tests
+pass. The real seed replay preserves a browser edit; the viewer's raw
+Session-content and approval requests are denied. Capture, distinct review and
+apply, Knowledge provenance, exact redacted Context links, two-person Skill
+approval and the administration controls pass in the existing browser suite.
+All six native service restarts and final live receipt/browser verification
+pass. Canonical down/up reused the same product volume and byte-identical
+keys/issuer; a fresh browser login reopened the same persisted pages. Safe
+desktop/laptop screenshots were inspected. The isolated demo remains running
+for inspection. The normal stack is stopped, its volume and existing
+keys/issuer are unchanged, and returning to it requires the documented
+operator hosts-block handoff. No normal-project reset was performed.
+See the [current validation record](CPR-45.md#current-local-demonstration-validation).
 
 The incremental console walkthrough now covers readable Knowledge and Session
 evidence, routed review/apply state, Context requests with exact revision links,

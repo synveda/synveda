@@ -43,9 +43,10 @@ Bundled PostgreSQL and Keycloak additionally use:
 - `keycloak_admin_password`
 - `keycloak_convergence_admin_password`
 
-The opt-in demo profile additionally uses three distinct generated credentials:
+The opt-in demo profile additionally uses four distinct generated credentials:
 
 - `keycloak_demo_admin_password`
+- `keycloak_demo_approver_password`
 - `keycloak_demo_member_password`
 - `keycloak_demo_viewer_password`
 

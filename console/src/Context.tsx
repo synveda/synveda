@@ -470,6 +470,7 @@ function Selection({
   const scores = scoresOf(candidate?.scores);
   const title = revision?.title ?? proposal?.content.title ?? `Content ${selection.content_hash.slice(0, 16)}…`;
   const state = selectionState(candidate, revision);
+  const revisionAddress = selection.knowledge_revision_id ?? revision?.id;
   return (
     <li className="context-selection">
       <header>
@@ -513,10 +514,14 @@ function Selection({
         <p>
           <Link
             href={`${hrefOf("knowledge-item", { knowledge_id: selection.knowledge_item_id })}${
-              revision ? `#revision-${revision.id}` : ""
+              revisionAddress ? `#revision-${revisionAddress}` : ""
             }`}
           >
-            {revision ? `Open selected Knowledge revision ${revision.revision_number}` : "Open current Knowledge item"}
+            {revision
+              ? `Open selected Knowledge revision ${revision.revision_number}`
+              : revisionAddress
+                ? "Open selected Knowledge revision"
+                : "Open current Knowledge item"}
           </Link>
         </p>
       ) : null}

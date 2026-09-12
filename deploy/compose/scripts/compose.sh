@@ -1332,7 +1332,8 @@ for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABA
     SYNVEDA_APALIS_OWNER_PASSWORD SYNVEDA_APALIS_DATABASE_PASSWORD \
     SYNVEDA_KMS_KEY SYNVEDA_KMS_KEY_REF POSTGRES_PASSWORD KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME \
     KC_BOOTSTRAP_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD \
-    SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD \
+    SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_DEMO_APPROVER_PASSWORD \
+    SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD \
     SYNVEDA_KEYCLOAK_DEMO_VIEWER_PASSWORD; do
     case "$setting" in
         DATABASE_URL) present=${DATABASE_URL+x} ;;
@@ -1349,6 +1350,7 @@ for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABA
         KC_BOOTSTRAP_ADMIN_PASSWORD) present=${KC_BOOTSTRAP_ADMIN_PASSWORD+x} ;;
         SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD) present=${SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD+x} ;;
         SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD) present=${SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD+x} ;;
+        SYNVEDA_KEYCLOAK_DEMO_APPROVER_PASSWORD) present=${SYNVEDA_KEYCLOAK_DEMO_APPROVER_PASSWORD+x} ;;
         SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD) present=${SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD+x} ;;
         SYNVEDA_KEYCLOAK_DEMO_VIEWER_PASSWORD) present=${SYNVEDA_KEYCLOAK_DEMO_VIEWER_PASSWORD+x} ;;
     esac
@@ -1685,6 +1687,8 @@ if [ "$oidc_mode" = bundled ]; then
     if [ "$demo_profile" = true ]; then
         require_private_file "$secret_dir/keycloak_demo_admin_password" \
             keycloak_demo_admin_password
+        require_private_file "$secret_dir/keycloak_demo_approver_password" \
+            keycloak_demo_approver_password
         require_private_file "$secret_dir/keycloak_demo_member_password" \
             keycloak_demo_member_password
         require_private_file "$secret_dir/keycloak_demo_viewer_password" \
@@ -2423,9 +2427,10 @@ run_runtime_smoke() {
 print_operator_summary() {
     echo "browser URL: $public_app_url/console/"
     if [ "$demo_profile" = true ]; then
-        echo "login accounts: synveda-demo-admin (author), synveda-demo-member (reviewer), synveda-demo-viewer (restricted viewer)"
+        echo "login accounts: synveda-demo-admin (author), synveda-demo-member (reviewer), synveda-demo-approver (second approver), synveda-demo-viewer (restricted viewer)"
         echo "author password file: $secret_dir/keycloak_demo_admin_password"
         echo "reviewer password file: $secret_dir/keycloak_demo_member_password"
+        echo "approver password file: $secret_dir/keycloak_demo_approver_password"
         echo "viewer password file: $secret_dir/keycloak_demo_viewer_password"
     else
         echo "login accounts: no demo accounts selected; use SYNVEDA_COMPOSE_PROFILES=demo for the local demo identities"

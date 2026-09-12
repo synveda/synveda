@@ -1170,7 +1170,7 @@ test("canonical up prepares once, reruns convergence, and keeps credentials stab
     assert.match(first.stdout, /browser URL: http:\/\/app\.synveda\.test:8080\/console\//);
     assert.match(
       first.stdout,
-      /login accounts: synveda-demo-admin \(author\), synveda-demo-member \(reviewer\), synveda-demo-viewer \(restricted viewer\)/,
+      /login accounts: synveda-demo-admin \(author\), synveda-demo-member \(reviewer\), synveda-demo-approver \(second approver\), synveda-demo-viewer \(restricted viewer\)/,
     );
     assert.ok(
       first.stdout.includes(
@@ -1181,6 +1181,12 @@ test("canonical up prepares once, reruns convergence, and keeps credentials stab
     assert.ok(
       first.stdout.includes(
         `reviewer password file: ${join(state.secrets, "keycloak_demo_member_password")}`,
+      ),
+      first.stdout,
+    );
+    assert.ok(
+      first.stdout.includes(
+        `approver password file: ${join(state.secrets, "keycloak_demo_approver_password")}`,
       ),
       first.stdout,
     );

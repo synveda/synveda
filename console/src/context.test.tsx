@@ -403,7 +403,11 @@ test("redacted mode keeps exact reasons and feedback targets without task or Kno
   assert.match(text, /original task is unavailable/);
   assert.match(text, /Context content was not retained in this redacted trace/);
   assert.match(text, /Referenced by agent/);
-  assert.ok(markup.includes('href="/console/knowledge/knowledge-current"'));
+  assert.ok(
+    markup.includes('href="/console/knowledge/knowledge-current#revision-revision-current"'),
+    "redaction keeps the exact immutable revision address",
+  );
+  assert.match(text, /Open selected Knowledge revision/);
   assert.doesNotMatch(text, /traceparent/);
   assert.doesNotMatch(text, /session event event-17/);
 });

@@ -449,6 +449,9 @@ enum RetryReviewCommand {
         /// Distinct reviewer login profile.
         #[arg(long, default_value = "reviewer")]
         reviewer_credentials: String,
+        /// Distinct administrator approver login profile.
+        #[arg(long, default_value = "approver")]
+        approver_credentials: String,
         /// Distinct read-only viewer login profile.
         #[arg(long, default_value = "viewer")]
         viewer_credentials: String,
@@ -3045,6 +3048,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             RetryReviewCommand::Seed {
                 author_credentials,
                 reviewer_credentials,
+                approver_credentials,
                 viewer_credentials,
                 confirm_target,
                 json,
@@ -3052,6 +3056,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 demo::retry_review_seed(
                     &profile_name(author_credentials)?,
                     &reviewer_credentials,
+                    &approver_credentials,
                     &viewer_credentials,
                     &confirm_target,
                     json,

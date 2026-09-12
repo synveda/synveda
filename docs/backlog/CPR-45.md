@@ -48,7 +48,7 @@ the only bundled identity provider. Temporal is absent.
   roles under the existing Cedar, forced-RLS, VedaFlow and audit invariants.
 - Support bundled or external OIDC and bundled or external PostgreSQL with the
   same product image; external dependencies remain operator-owned.
-- Exercise a clean three-principal public-API review scenario across the fixed
+- Exercise a clean four-principal public-API review scenario across the fixed
   restart matrix, including a denied restricted-viewer action.
 - Back up both product databases with separately held KMS/identity recovery
   material and restore only into a fresh isolated target.
@@ -107,8 +107,8 @@ deployment evidence or change the remaining acceptance boundary.
 The current local fixture uses the existing public API, deterministic Session
 Capture, VedaFlow review/apply, Knowledge provenance, Context and Skill
 binding surfaces for a synthetic ingestion-retry learning. Its stable seed
-stops before Capture, uses Avery Author, Riley Reviewer and Vera Restricted
-Viewer with existing role keys, refuses an unintended gateway or conflicting
+stops before Capture, uses Avery Author, Riley Reviewer, Morgan Approver and
+Vera Restricted Viewer with existing role keys, refuses an unintended gateway or conflicting
 curator file, and never resets product data.
 
 The console walkthrough now exposes those same governed surfaces as a coherent
@@ -150,54 +150,66 @@ secret, browser credential or Keycloak administrator capability was recorded
 or added. A local walkthrough does not change the production-readiness
 boundary.
 
-Deterministic replay and public-resource status contracts pass for this
-three-principal revision, but its fresh live replay is not yet recorded. The
-old `synveda-development-acceptance-phase1` containers and networks are gone,
-as are the five selected development image tags. Its product data remains
-retained. The canonical development hostname mapping is now installed and the
-current `demo` stack passes smoke; a fresh three-principal acceptance replay is
-still not recorded.
+### Current local demonstration validation
 
-### README first-run documentation audit
+The 2026-09-12 run uses `feat/CPR-45` at starting commit
+`d1486929d73dc459ed6dc0bf029c5c825d3a1bb6` plus this working-tree increment.
+The host is macOS 26.6.2 arm64, OrbStack Docker Engine 29.4.0, Compose 5.1.2,
+Node.js 24.18.0, Rust/Cargo 1.96.0 and Playwright 1.62.1. The isolated project
+is `synveda-development-acceptance-e2e` on `10.231.47.0/24`; the normal
+`synveda-development` data volume is never a reset target.
 
-On 2026-09-11 at commit `810c5b1`, the root README was recut and its current-
-checkout first-run commands were audited on the recorded macOS/OrbStack host.
-`SYNVEDA_COMPOSE_PROFILES=demo make compose-smoke`, browser login as Avery
-Author, the seeded Home, Sessions, Knowledge, Reviews, Skills and Context
-surfaces, `cargo build --locked -p synveda-cli`, Compose configuration and the
-documentation, demo, adapter and deployment contract gates were exercised. A
-credential-free screenshot records the real seeded Knowledge page.
+Live execution exposed stale workspace/Session receipt observations and a
+tenant-plane console guard that incorrectly blocked a workspace-authorised
+review deep link. The receipt now records the post-mutation public reads, and
+the detail page uses its existing per-proposal read and target-scope control
+forecast. Redacted Context selection links also retain their exact immutable
+revision address. The four-person fixture supplies the second distinct Skill
+approver through workspace-scoped grants; it does not lower approval policy.
+Chromium's private temporary storage and Keycloak's convergence health window
+are bounded to accommodate the observed real execution.
 
-A new suffixed disposable replay could not begin because transferring the one
-managed `/etc/hosts` block requires an interactive macOS administrator
-credential that was unavailable to the non-interactive run. The exact
-confirmed `make compose-hosts-remove` invocation refused before mutation. The
-default project was restarted and smoked with the same PostgreSQL volume and
-byte-identical KMS-key and issuer inputs. `make compose-acceptance` was not run
-and no fresh acceptance result is claimed. The next action is an operator-
-assisted hosts handoff followed by that gate, or the same gate on a clean
-supported host.
+The full deployment gate passes, including all 169 combined lifecycle/recovery
+tests and the Compose render matrix. All 251 console tests, the production
+build, all 189 CLI tests, strict CLI Clippy, all 77 policy tests, six OpenAPI
+tests, the fresh exact-role 18-test access API suite, dependency/API/security
+contracts and documentation gates pass. The final clean-volume
+`make compose-acceptance` passes: the seed replay preserves a real browser edit;
+direct raw-Session-content and approval requests are denied to the restricted
+viewer; worker-completed Capture leads through separate review and apply to
+persisted Knowledge, exact provenance, redacted Context revision links and an
+available pinned Skill. Skill install and binding retain their two-person
+approval requirement. Open and approved-but-not-applied changes are checked
+before publication. All six native service restarts, full smoke after each,
+repeat browser login and final live receipt verification pass.
 
-### Recorded development evidence
+Safe Knowledge and People desktop screenshots and a 1024-pixel-wide Context
+screen were inspected; no credentials, headers, login screens or one-time
+invitation links were captured. Keyboard focus/navigation, native labels,
+invalid email validation, exact-grant confirmation dismissal, empty/pending
+states and no horizontal overflow are covered by the existing browser suite.
+Context honestly displays the unconfigured embedder fallback and redacted
+content, not a claim that every retrieval leg ran.
 
-On 2026-09-10, `make compose-acceptance` passed from a clean project volume on
-macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0 and Compose 5.1.2. The run
-validated and reused the project-scoped credentials, built and served the
-console assets from the product image, converged PostgreSQL schema epoch 3 and
-Keycloak, completed real PKCE browser login, and seeded the two-principal
-scenario through the public API. Capture completion witnessed worker activity.
-The fixed restart matrix then recovered public application and exact-issuer
-discovery readiness and verified the original receipt against live rows.
-A subsequent canonical down/up retained the exact PostgreSQL volume and left
-the stopped-state issuer and generated secret set byte-identical after start.
-Confirmed project reset was also exercised and retained the existing issuer,
-KMS key and demo credential files byte-for-byte.
+Canonical `compose-down`, `compose-up` and `compose-smoke` also pass, reusing the
+exact isolated product volume. Down removes the disposable browser
+credential/receipt volume; a fresh browser login then reopens the same
+persisted Knowledge, Context and grant addresses without restored auth state.
+Byte comparisons across the separately confirmed isolated resets, acceptance
+and down/up prove both projects' complete secret sets and issuers are
+unchanged; the normal product volume retains its identity. No normal-project
+reset was performed.
 
-This is implementation evidence for one local VM-backed Engine, not Docker
-Desktop/Linux, reference HTTPS, recovery, upgrade, Apalis, installed-release or
-production evidence. Strict review policy left the private Knowledge and
-release Skill decisions pending; the witness preserved those governed outcomes
-instead of advertising unreviewed revisions or executing Skill validation.
+The isolated demo is left running for inspection, with its hosts block still
+installed. The normal stack remains stopped. No manual host action is needed
+to inspect the demo; returning to normal development requires canonical down
+and the confirmed hosts removal/install plus resolver-cache steps in the
+[Compose guide](../../deploy/compose/README.md#governed-ingestion-retry-walkthrough),
+using the exact `acceptance-e2e` suffix for this deployment. Local demo phase
+acceptance has no remaining blocker. The next wider-feature action is the
+supported-host/reference repetition below. This is one-host local evidence,
+not Docker Desktop/Linux, reference HTTPS, recovery, upgrade, Apalis,
+installed-release or production evidence.
 
 ### Remaining live acceptance
 
@@ -225,7 +237,7 @@ instead of advertising unreviewed revisions or executing Skill validation.
   token cases fail.
 - Separate database roles cannot cross product boundaries and forced RLS holds
   for runtime work.
-- The public-API scenario creates a workspace/project, maps three distinct
+- The public-API scenario creates a workspace/project, maps four distinct
   identities to existing grants, records and captures a synthetic Session,
   denies the viewer's review attempt, separately reviews/applies Knowledge and
   a versioned Skill binding, then reuses the exact Knowledge revision with

@@ -591,8 +591,8 @@ public final class SynvedaKeycloakProjection {
             "synvedaDemoKind",
             "Synveda demo kind",
             5,
-            6,
-            Set.of("admin", "member", "viewer")
+            8,
+            Set.of("admin", "approver", "member", "viewer")
         );
 
         JsonNode groups = node.path("groups");
@@ -766,12 +766,14 @@ public final class SynvedaKeycloakProjection {
         text(node, "email", expectedKind + "@demo.synveda.invalid");
         String expectedFirstName = switch (expectedKind) {
             case "admin" -> "Avery";
+            case "approver" -> "Morgan";
             case "member" -> "Riley";
             case "viewer" -> "Vera";
             default -> throw new IllegalArgumentException();
         };
         String expectedLastName = switch (expectedKind) {
             case "admin" -> "Author";
+            case "approver" -> "Approver";
             case "member" -> "Reviewer";
             case "viewer" -> "Restricted Viewer";
             default -> throw new IllegalArgumentException();
@@ -782,7 +784,7 @@ public final class SynvedaKeycloakProjection {
     }
 
     private static void verifyDemoOwnership(JsonNode node, String expectedKind) {
-        if (!Set.of("admin", "member", "viewer").contains(expectedKind)) {
+        if (!Set.of("admin", "approver", "member", "viewer").contains(expectedKind)) {
             throw new IllegalArgumentException();
         }
         JsonNode attributes = node.path("attributes");
@@ -809,7 +811,7 @@ public final class SynvedaKeycloakProjection {
 
     private static void verifyDemoOwnedUsers(JsonNode node, String expectedKind) {
         requireArray(node);
-        if (node.size() > 3 || (expectedKind != null && node.size() > 1)) {
+        if (node.size() > 4 || (expectedKind != null && node.size() > 1)) {
             throw new IllegalArgumentException();
         }
         Map<String, String> ids = new TreeMap<>();
@@ -830,7 +832,7 @@ public final class SynvedaKeycloakProjection {
                 throw new IllegalArgumentException();
             }
         }
-        for (String kind : List.of("admin", "member", "viewer")) {
+        for (String kind : List.of("admin", "approver", "member", "viewer")) {
             if (ids.containsKey(kind)) {
                 emit(kind + "=" + ids.get(kind));
             }

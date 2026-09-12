@@ -206,6 +206,7 @@ generate_secrets_cleanup() {
     fi
     if [ -n "$demo_stage" ]; then
         rm -f -- "$demo_stage/keycloak_demo_admin_password" \
+            "$demo_stage/keycloak_demo_approver_password" \
             "$demo_stage/keycloak_demo_member_password" \
             "$demo_stage/keycloak_demo_viewer_password" 2>/dev/null || true
         rmdir -- "$demo_stage" 2>/dev/null || true
@@ -249,6 +250,7 @@ synveda_kms_key_ref'
 apalis_files='apalis_owner_password
 apalis_runtime_password'
 demo_files='keycloak_demo_admin_password
+keycloak_demo_approver_password
 keycloak_demo_member_password
 keycloak_demo_viewer_password'
 files="$base_files
@@ -272,7 +274,8 @@ validate_secret_inventory() {
             keycloak_admin_password|keycloak_convergence_admin_password|\
             synveda_migrator_database_url|synveda_gateway_database_url|\
             synveda_worker_database_url|synveda_kms_key|synveda_kms_key_ref|\
-            keycloak_demo_admin_password|keycloak_demo_member_password|\
+            keycloak_demo_admin_password|keycloak_demo_approver_password|\
+            keycloak_demo_member_password|\
             keycloak_demo_viewer_password) ;;
             *)
                 echo "generate-secrets: existing secret set contains an unknown entry" >&2
@@ -461,7 +464,7 @@ if [ -e "$secret_dir" ] || [ -L "$secret_dir" ]; then
             }
         done
     done
-    if [ "$demo_present" -lt 3 ]; then
+    if [ "$demo_present" -lt 4 ]; then
         [ "$if_missing" -eq 1 ] || [ "$force" -eq 1 ] || {
             echo "generate-secrets: refusing to replace an existing secret set" >&2
             exit 73
@@ -621,6 +624,7 @@ if [ "$existing_secret_set" = true ] && [ "$if_missing" -eq 1 ]; then
         cleanup_demo_stage() {
             [ -n "$demo_stage" ] || return 0
             rm -f -- "$demo_stage/keycloak_demo_admin_password" \
+                "$demo_stage/keycloak_demo_approver_password" \
                 "$demo_stage/keycloak_demo_member_password" \
                 "$demo_stage/keycloak_demo_viewer_password" 2>/dev/null || return 1
             rmdir -- "$demo_stage" 2>/dev/null
@@ -692,6 +696,7 @@ keycloak_password=$(openssl rand -hex 32)
 admin_password=$(openssl rand -hex 32)
 convergence_admin_password=$(openssl rand -hex 32)
 demo_admin_password=$(openssl rand -hex 32)
+demo_approver_password=$(openssl rand -hex 32)
 demo_member_password=$(openssl rand -hex 32)
 demo_viewer_password=$(openssl rand -hex 32)
 kms_key=$(openssl rand -hex 32)
@@ -716,6 +721,7 @@ write_secret keycloak_admin_username synveda-bootstrap
 write_secret keycloak_admin_password "$admin_password"
 write_secret keycloak_convergence_admin_password "$convergence_admin_password"
 write_secret keycloak_demo_admin_password "$demo_admin_password"
+write_secret keycloak_demo_approver_password "$demo_approver_password"
 write_secret keycloak_demo_member_password "$demo_member_password"
 write_secret keycloak_demo_viewer_password "$demo_viewer_password"
 write_secret synveda_migrator_database_url \
@@ -730,7 +736,8 @@ write_secret synveda_kms_key_ref "local:${kms_ref}"
 unset owner_password migrator_password gateway_password worker_password
 unset apalis_owner_password apalis_runtime_password
 unset keycloak_password admin_password convergence_admin_password
-unset demo_admin_password demo_member_password demo_viewer_password kms_key kms_ref
+unset demo_admin_password demo_approver_password demo_member_password
+unset demo_viewer_password kms_key kms_ref
 
 publish_secret_stage() {
     [ ! -e "$secret_dir" ] && [ ! -L "$secret_dir" ] || return 1

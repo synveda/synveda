@@ -147,7 +147,8 @@ else
   printf '%s' 'synveda-bootstrap' > "$SECRET_SCRATCH/keycloak_admin_username"
   for secret_name in postgres_owner_password keycloak_database_password \
     keycloak_admin_password keycloak_convergence_admin_password \
-    keycloak_demo_admin_password keycloak_demo_member_password \
+    keycloak_demo_admin_password keycloak_demo_approver_password \
+    keycloak_demo_member_password \
     keycloak_demo_viewer_password; do
     openssl rand -hex 32 > "$SECRET_SCRATCH/$secret_name"
   done
@@ -159,6 +160,7 @@ else
     --from-file=keycloak_admin_password="$SECRET_SCRATCH/keycloak_admin_password" \
     --from-file=keycloak_convergence_admin_password="$SECRET_SCRATCH/keycloak_convergence_admin_password" \
     --from-file=keycloak_demo_admin_password="$SECRET_SCRATCH/keycloak_demo_admin_password" \
+    --from-file=keycloak_demo_approver_password="$SECRET_SCRATCH/keycloak_demo_approver_password" \
     --from-file=keycloak_demo_member_password="$SECRET_SCRATCH/keycloak_demo_member_password" \
     --from-file=keycloak_demo_viewer_password="$SECRET_SCRATCH/keycloak_demo_viewer_password" >/dev/null
 fi

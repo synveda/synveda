@@ -58,6 +58,11 @@ export async function runBrowserAcceptance({
   chromium,
   environment = process.env,
   passwordFile = PASSWORD_FILE,
+  username = USERNAME,
+  requiredRoleKeys = ["administrator"],
+  expectedSubject,
+  admissionStage = "administrator-admission",
+  afterLogin,
   readPassword = readDemoPassword,
   timeout = TIMEOUT,
 } = {}) {
@@ -85,7 +90,19 @@ export async function runBrowserAcceptance({
     const expectedTenantId = validateTenantId(
       environment.SYNVEDA_BOOTSTRAP_TENANT_ID,
     );
-    if (typeof chromium?.launch !== "function" || typeof readPassword !== "function") {
+    if (
+      typeof chromium?.launch !== "function" ||
+      typeof readPassword !== "function" ||
+      typeof username !== "string" ||
+      username.length === 0 ||
+      !Array.isArray(requiredRoleKeys) ||
+      requiredRoleKeys.some((role) => typeof role !== "string" || role.length === 0) ||
+      (expectedSubject !== undefined &&
+        (typeof expectedSubject !== "string" || expectedSubject.length === 0)) ||
+      typeof admissionStage !== "string" ||
+      admissionStage.length === 0 ||
+      (afterLogin !== undefined && typeof afterLogin !== "function")
+    ) {
       throw new BrowserContractError("configuration");
     }
     password = readPassword(passwordFile);
@@ -211,7 +228,7 @@ export async function runBrowserAcceptance({
     requireCleanRoutes();
 
     await atStage("credential-submit", async () => {
-      await page.locator("#username").fill(USERNAME);
+      await page.locator("#username").fill(username);
       await page.locator("#password").fill(password.toString("ascii"));
       password.fill(0);
       await page.locator("#kc-login").click({ timeout });
@@ -231,8 +248,13 @@ export async function runBrowserAcceptance({
     });
     requireCleanRoutes();
 
-    const admission = await atStage("administrator-admission", () =>
-      boundedEvaluation(page, async ({ fetchTimeout, expectedTenantId }) => {
+    const admission = await atStage(admissionStage, () =>
+      boundedEvaluation(page, async ({
+        fetchTimeout,
+        expectedTenantId,
+        expectedSubject,
+        requiredRoleKeys,
+      }) => {
         const controller = new AbortController();
         const deadline = setTimeout(() => controller.abort(), fetchTimeout);
         try {
@@ -244,27 +266,40 @@ export async function runBrowserAcceptance({
           const value = await response.json();
           return {
             authenticated: true,
-            administrator:
+            rolesMatch:
               Array.isArray(value?.capabilities?.role_keys) &&
-              value.capabilities.role_keys.includes("administrator"),
+              requiredRoleKeys.every((role) => value.capabilities.role_keys.includes(role)),
             subjectPresent:
               typeof value?.subject === "string" && value.subject.length > 0,
+            subjectMatches:
+              expectedSubject === undefined || value?.subject === expectedSubject,
             tenantMatches: value?.tenant?.id === expectedTenantId,
           };
         } finally {
           clearTimeout(deadline);
         }
-      }, { fetchTimeout: FETCH_TIMEOUT, expectedTenantId }, Math.min(timeout, FETCH_TIMEOUT + 1_000)),
+      }, {
+        fetchTimeout: FETCH_TIMEOUT,
+        expectedSubject,
+        expectedTenantId,
+        requiredRoleKeys,
+      }, Math.min(timeout, FETCH_TIMEOUT + 1_000)),
     );
     if (
       admission.authenticated !== true ||
-      admission.administrator !== true ||
+      admission.rolesMatch !== true ||
       admission.subjectPresent !== true ||
+      admission.subjectMatches !== true ||
       admission.tenantMatches !== true
     ) {
-      throw new BrowserContractError("administrator-admission");
+      throw new BrowserContractError(admissionStage);
     }
     requireCleanRoutes();
+
+    if (afterLogin !== undefined) {
+      await atStage("console-product", () => afterLogin({ page, settings, timeout }));
+      requireCleanRoutes();
+    }
 
     await atStage("session-cleanup", async () => {
       await page.getByRole("button", { name: "Sign out", exact: true }).click({ timeout });

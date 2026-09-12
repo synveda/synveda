@@ -20,7 +20,12 @@ operation and grants no authority.
 
 Review selection also gains a parameterised, refreshable route using the
 router shape already accepted by CPR-11. The proposal API and exact commit
-preconditions are unchanged. Lists and details may translate known generated
+preconditions are unchanged. A proposal detail does not require the tenant-wide
+`proposal.read` forecast: the existing per-proposal read decides visibility,
+then the proposal's target-scope capability probe forecasts its controls.
+This keeps a workspace reviewer able to open an authorised deep link without
+granting tenant-wide access; denied reads still render the gateway's refusal.
+Lists and details may translate known generated
 fields into readable labels and place hashes, raw payloads and extensible JSON
 inside optional evidence disclosures; they must not infer protected objects or
 recompute a server verdict.

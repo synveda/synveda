@@ -38,6 +38,10 @@ const DRIVER = join(ROOT, "deploy/compose/browser/console-login.mjs");
 const RUNNER = join(ROOT, "deploy/compose/browser/console-login-runner.mjs");
 const PRODUCT_DRIVER = join(ROOT, "deploy/compose/browser/product-demo.mjs");
 const PRODUCT_RUNNER = join(ROOT, "deploy/compose/browser/product-demo-runner.mjs");
+const CONSOLE_PRODUCT_RUNNER = join(
+  ROOT,
+  "deploy/compose/browser/console-product-runner.mjs",
+);
 const DOCKERFILE = join(ROOT, "deploy/compose/product/Dockerfile");
 const MAKEFILE = join(ROOT, "Makefile");
 const SECCOMP = join(ROOT, "deploy/compose/browser/seccomp_profile.json");
@@ -382,7 +386,13 @@ test("the demo password reader revalidates and zeroes its opened descriptor", ()
 
 test("the one-shot image and driver forbid capture and TLS bypass surfaces", () => {
   const dockerfile = readFileSync(DOCKERFILE, "utf8");
-  const driver = [DRIVER, RUNNER, PRODUCT_DRIVER, PRODUCT_RUNNER]
+  const driver = [
+    DRIVER,
+    RUNNER,
+    CONSOLE_PRODUCT_RUNNER,
+    PRODUCT_DRIVER,
+    PRODUCT_RUNNER,
+  ]
     .map((path) => readFileSync(path, "utf8"))
     .join("\n");
   const makefile = readFileSync(MAKEFILE, "utf8");
@@ -610,10 +620,11 @@ function fakeBrowserFlow({
       if (evaluationHang) return new Promise(() => {});
       evaluation += 1;
       return evaluation === 1
-        ? {
+          ? {
             authenticated: true,
-            administrator: true,
+            rolesMatch: true,
             subjectPresent: true,
+            subjectMatches: true,
             tenantMatches: !tenantMismatch,
           }
         : true;
@@ -674,6 +685,37 @@ test("the injected browser flow correlates login and exports only bounded aggreg
   }
   assert.doesNotMatch(flow.evaluatedSources[0], /return\s+(?:response|value)(?:\.|;)/);
   assert.match(flow.evaluatedSources[1], /return response\.status === 401/);
+});
+
+test("the browser flow admits an exact synthetic identity before a product checkpoint", async () => {
+  const flow = fakeBrowserFlow();
+  const password = Buffer.from("f".repeat(64));
+  let checkpoint = 0;
+  assert.equal(
+    await runBrowserAcceptance({
+      chromium: flow.chromium,
+      environment: {
+        SYNVEDA_BROWSER_APP_URL: "http://app.synveda.test:8080",
+        SYNVEDA_BROWSER_ISSUER: "http://auth.synveda.test:8080/realms/synveda",
+        SYNVEDA_BOOTSTRAP_TENANT_ID: TENANT_ID,
+      },
+      username: "synveda-demo-viewer",
+      requiredRoleKeys: [],
+      expectedSubject: "viewer-subject",
+      admissionStage: "viewer-admission",
+      afterLogin: async ({ page, settings, timeout }) => {
+        checkpoint += 1;
+        assert.ok(page);
+        assert.equal(settings.appOrigin, SETTINGS.appOrigin);
+        assert.equal(timeout, 60_000);
+        assert.ok(password.every((value) => value === 0));
+      },
+      readPassword: () => password,
+    }),
+    true,
+  );
+  assert.equal(checkpoint, 1);
+  assert.ok(password.every((value) => value === 0));
 });
 
 test("the injected browser flow refuses missing, duplicate and foreign redirects", async () => {

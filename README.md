@@ -23,8 +23,8 @@ application, orchestrator or vector-database wrapper. Agent clients use its
 public APIs; the server remains the authority.
 
 > **Current status: useful local evaluation, not production-ready.** The
-> source-checkout Docker demo has passed one clean-volume run on macOS with
-> OrbStack. Linux, Docker Desktop, reference HTTPS, published-release,
+> source-checkout Docker demo has passed clean-volume acceptance on one macOS
+> host with OrbStack. Linux, Docker Desktop, reference HTTPS, published-release,
 > production backup/PITR, key-custody and high-availability evidence remain
 > open. See [Production readiness](docs/PRODUCTION_READINESS.md) for the
 > maintained limitations and exit criteria.
@@ -119,7 +119,7 @@ make compose-smoke
 contract, builds the development images, creates the isolated database roles,
 applies the schema, converges Keycloak and starts the gateway and worker. It is
 safe to rerun and does not rotate existing secrets. The `demo` profile creates
-three Keycloak demo identities; it does not bypass the public API to insert
+four Keycloak demo identities; it does not bypass the public API to insert
 product data.
 
 Open [http://app.synveda.test:8080/console/](http://app.synveda.test:8080/console/).
@@ -130,7 +130,7 @@ password is in:
 deploy/compose/runtime/synveda-development/secrets/keycloak_demo_admin_password
 ```
 
-`compose-up` prints the resolved URL and all three password-file paths, never
+`compose-up` prints the resolved URL and all four password-file paths, never
 the passwords. Read the file only through a local password-input mechanism; do
 not put its contents in a command, log or committed file. On a completely fresh
 product database, the console opens **Getting started** and asks you to create a
@@ -143,7 +143,7 @@ then shows your selected workspace/project and the left navigation starts with
 ### 3. Seed the governed Northstar example (optional)
 
 The normal first-run UI is ready after step 2. To reproduce the real records in
-the screenshot, build the existing source CLI and create three local login
+the screenshot, build the existing source CLI and create four local login
 profiles:
 
 ```sh
@@ -153,6 +153,7 @@ export SYNVEDA_INSECURE_DEVELOPMENT_HTTP=true
 
 ./target/debug/synveda login --gateway "$SYNVEDA_GATEWAY" --profile author --no-browser
 ./target/debug/synveda login --gateway "$SYNVEDA_GATEWAY" --profile reviewer --no-browser
+./target/debug/synveda login --gateway "$SYNVEDA_GATEWAY" --profile approver --no-browser
 ./target/debug/synveda login --gateway "$SYNVEDA_GATEWAY" --profile viewer --no-browser
 ```
 
@@ -163,9 +164,10 @@ local credential:
 | --- | --- | --- |
 | `author` | `synveda-demo-admin` (Avery Author) | `keycloak_demo_admin_password` |
 | `reviewer` | `synveda-demo-member` (Riley Reviewer) | `keycloak_demo_member_password` |
+| `approver` | `synveda-demo-approver` (Morgan Approver) | `keycloak_demo_approver_password` |
 | `viewer` | `synveda-demo-viewer` (Vera Restricted Viewer) | `keycloak_demo_viewer_password` |
 
-All three password files are in the generated
+All four password files are in the generated
 deploy/compose/runtime/synveda-development/secrets directory. Once the logins
 finish:
 
@@ -173,6 +175,7 @@ finish:
 ./target/debug/synveda demo retry-review seed \
   --author-credentials author \
   --reviewer-credentials reviewer \
+  --approver-credentials approver \
   --viewer-credentials viewer \
   --confirm-target "$SYNVEDA_GATEWAY"
 ./target/debug/synveda demo retry-review inspect --author-credentials author
@@ -199,8 +202,9 @@ After the optional seed, sign in to the console as Avery Author:
    for `ingestion-api` is open; **Skills** truthfully remains empty until its
    governed change is reviewed and applied.
 5. Continue with the [governed ingestion-retry walkthrough](deploy/compose/README.md#governed-ingestion-retry-walkthrough)
-   to Capture the Session, observe Vera's denied review, let Riley review and
-   Avery apply, bind the exact Skill version, and request Context that cites the
+   to Capture the Session, observe Vera's denied review, let Riley and Morgan
+   satisfy the Skill matrix before Avery applies, bind the exact Skill version,
+   and request Context that cites the
    resulting Knowledge revision.
 
 This is deterministic synthetic replay: it needs no model API, paid service or

@@ -18,7 +18,7 @@ use crate::api::{Api, Origin};
 use super::{knowledge_handle, object_id, poll_capture, required_str, write_private};
 
 const FIXTURE: &str = "cpr45-retry-review-v1";
-const RECEIPT_VERSION: u32 = 1;
+const RECEIPT_VERSION: u32 = 2;
 const RECEIPT_NAME: &str = "retry-review-demo.json";
 const WORKSPACE_SLUG: &str = "northstar-delivery-demo";
 const PROJECT_SLUG: &str = "ingestion-api";
@@ -62,6 +62,7 @@ struct ReviewReceipt {
     state: ReviewState,
     author: IdentityReceipt,
     reviewer: IdentityReceipt,
+    approver: IdentityReceipt,
     viewer: IdentityReceipt,
     #[serde(default)]
     resources: BTreeMap<String, Value>,
@@ -70,12 +71,10 @@ struct ReviewReceipt {
 impl ReviewReceipt {
     fn new(
         gateway_url: &str,
-        author_profile: &str,
-        author_subject: &str,
-        reviewer_profile: &str,
-        reviewer_subject: &str,
-        viewer_profile: &str,
-        viewer_subject: &str,
+        (author_profile, author_subject): (&str, &str),
+        (reviewer_profile, reviewer_subject): (&str, &str),
+        (approver_profile, approver_subject): (&str, &str),
+        (viewer_profile, viewer_subject): (&str, &str),
     ) -> Self {
         Self {
             receipt_version: RECEIPT_VERSION,
@@ -91,6 +90,11 @@ impl ReviewReceipt {
                 label: "Riley Reviewer".to_owned(),
                 subject: reviewer_subject.to_owned(),
                 credential_profile: reviewer_profile.to_owned(),
+            },
+            approver: IdentityReceipt {
+                label: "Morgan Approver".to_owned(),
+                subject: approver_subject.to_owned(),
+                credential_profile: approver_profile.to_owned(),
             },
             viewer: IdentityReceipt {
                 label: "Vera Restricted Viewer".to_owned(),
@@ -134,6 +138,7 @@ impl ReviewReceipt {
 pub async fn seed(
     author_profile: &str,
     reviewer_profile: &str,
+    approver_profile: &str,
     viewer_profile: &str,
     confirm_target: &str,
     json_output: bool,
@@ -141,18 +146,18 @@ pub async fn seed(
     let author = connect_person(author_profile, "author").await?;
     require_local_target(author.gateway(), confirm_target)?;
     let reviewer = connect_person_without_admission(reviewer_profile, "reviewer").await?;
+    let approver = connect_person_without_admission(approver_profile, "approver").await?;
     let viewer = connect_person_without_admission(viewer_profile, "restricted viewer").await?;
     require_same_gateway(&author, &reviewer, "reviewer")?;
+    require_same_gateway(&author, &approver, "approver")?;
     require_same_gateway(&author, &viewer, "restricted viewer")?;
-    require_distinct_identities(&author, &reviewer, &viewer)?;
+    require_distinct_identities(&author, &reviewer, &approver, &viewer)?;
 
     let mut receipt = begin_or_resume(
-        &author,
-        author_profile,
-        &reviewer,
-        reviewer_profile,
-        &viewer,
-        viewer_profile,
+        (&author, author_profile),
+        (&reviewer, reviewer_profile),
+        (&approver, approver_profile),
+        (&viewer, viewer_profile),
     )?;
     ensure_workspace(&author, &mut receipt).await?;
     ensure_configuration(&author, &mut receipt).await?;
@@ -160,10 +165,45 @@ pub async fn seed(
     ensure_repository(&author, &mut receipt).await?;
 
     require_admitted(&reviewer, "reviewer").await?;
+    require_admitted(&approver, "approver").await?;
     require_admitted(&viewer, "restricted viewer").await?;
-    ensure_grant(&author, &mut receipt, &reviewer.subject, "reviewer").await?;
-    ensure_grant(&author, &mut receipt, &reviewer.subject, "administrator").await?;
-    ensure_grant(&author, &mut receipt, &viewer.subject, "viewer").await?;
+    let workspace_scope_id = required_str(&receipt.require("workspace")?, "scope_id")?.to_owned();
+    ensure_grant(
+        &author,
+        &mut receipt,
+        &workspace_scope_id,
+        &reviewer.subject,
+        "reviewer",
+        "reviewer",
+    )
+    .await?;
+    ensure_grant(
+        &author,
+        &mut receipt,
+        &workspace_scope_id,
+        &reviewer.subject,
+        "administrator",
+        "administrator",
+    )
+    .await?;
+    ensure_grant(
+        &author,
+        &mut receipt,
+        &workspace_scope_id,
+        &approver.subject,
+        "administrator",
+        "approver",
+    )
+    .await?;
+    ensure_grant(
+        &author,
+        &mut receipt,
+        &workspace_scope_id,
+        &viewer.subject,
+        "viewer",
+        "viewer",
+    )
+    .await?;
     verify_role_shape(&author, &receipt).await?;
 
     ensure_baseline_knowledge(&author, &mut receipt).await?;
@@ -601,11 +641,22 @@ fn require_same_gateway(author: &Api, other: &Api, label: &str) -> Result<(), St
     Ok(())
 }
 
-fn require_distinct_identities(author: &Api, reviewer: &Api, viewer: &Api) -> Result<(), String> {
-    let subjects = [&author.subject, &reviewer.subject, &viewer.subject];
+fn require_distinct_identities(
+    author: &Api,
+    reviewer: &Api,
+    approver: &Api,
+    viewer: &Api,
+) -> Result<(), String> {
+    let subjects = [
+        &author.subject,
+        &reviewer.subject,
+        &approver.subject,
+        &viewer.subject,
+    ];
     if subjects.iter().collect::<BTreeSet<_>>().len() != subjects.len() {
         return Err(
-            "author, reviewer and restricted viewer must be three distinct principals".to_owned(),
+            "author, reviewer, approver and restricted viewer must be four distinct principals"
+                .to_owned(),
         );
     }
     Ok(())
@@ -640,19 +691,19 @@ fn require_local_target(gateway: &str, confirmation: &str) -> Result<(), String>
 }
 
 fn begin_or_resume(
-    author: &Api,
-    author_profile: &str,
-    reviewer: &Api,
-    reviewer_profile: &str,
-    viewer: &Api,
-    viewer_profile: &str,
+    (author, author_profile): (&Api, &str),
+    (reviewer, reviewer_profile): (&Api, &str),
+    (approver, approver_profile): (&Api, &str),
+    (viewer, viewer_profile): (&Api, &str),
 ) -> Result<ReviewReceipt, String> {
     if let Some(receipt) = load_receipt()? {
         require_receipt_actor(&receipt, author)?;
-        if receipt.reviewer.subject != reviewer.subject || receipt.viewer.subject != viewer.subject
+        if receipt.reviewer.subject != reviewer.subject
+            || receipt.approver.subject != approver.subject
+            || receipt.viewer.subject != viewer.subject
         {
             return Err(
-                "the retry-review receipt belongs to different reviewer/viewer principals; it will not be repointed"
+                "the retry-review receipt belongs to different reviewer/approver/viewer principals; it will not be repointed"
                     .to_owned(),
             );
         }
@@ -660,12 +711,10 @@ fn begin_or_resume(
     }
     let receipt = ReviewReceipt::new(
         author.gateway(),
-        author_profile,
-        &author.subject,
-        reviewer_profile,
-        &reviewer.subject,
-        viewer_profile,
-        &viewer.subject,
+        (author_profile, &author.subject),
+        (reviewer_profile, &reviewer.subject),
+        (approver_profile, &approver.subject),
+        (viewer_profile, &viewer.subject),
     );
     save_receipt(&receipt)?;
     Ok(receipt)
@@ -699,14 +748,15 @@ async fn ensure_workspace(api: &Api, receipt: &mut ReviewReceipt) -> Result<(), 
     if value["slug"] != WORKSPACE_SLUG || value["status"] != "active" {
         return Err("the fixture workspace is not active with its expected slug".to_owned());
     }
-    receipt.record("workspace", value.clone())?;
     let live = api
         .get(&format!("/v1/workspaces/{}", required_str(&value, "id")?))
         .await?;
     if live["slug"] != WORKSPACE_SLUG || live["status"] != "active" {
         return Err("the live fixture workspace was changed or archived".to_owned());
     }
-    Ok(())
+    // The idempotent create response is immutable. Persist the live response
+    // so a repeated seed records, but never overwrites, operator edits.
+    receipt.record("workspace", live)
 }
 
 async fn ensure_configuration(api: &Api, receipt: &mut ReviewReceipt) -> Result<(), String> {
@@ -796,24 +846,31 @@ async fn ensure_repository(api: &Api, receipt: &mut ReviewReceipt) -> Result<(),
 async fn ensure_grant(
     api: &Api,
     receipt: &mut ReviewReceipt,
+    scope_id: &str,
     subject: &str,
     role: &str,
+    resource_name: &str,
 ) -> Result<(), String> {
-    let project = receipt.require("project")?;
-    let project_id = required_str(&project, "id")?;
     let value: Value = api
         .post_idempotent_as(
-            &format!("/v1/projects/{project_id}/members"),
-            Some(json!({"principal_id": subject, "role": role})),
-            &receipt.key(&format!("grant-{role}")),
+            "/v1/admin/grants",
+            Some(json!({
+                "scope_id": scope_id,
+                "principal_id": subject,
+                "role": role,
+            })),
+            &receipt.key(&format!("grant-{resource_name}")),
         )
         .await?;
-    if value["principal_id"].as_str() != Some(subject) || value["role"].as_str() != Some(role) {
+    if value["scope_id"].as_str() != Some(scope_id)
+        || value["principal_id"].as_str() != Some(subject)
+        || value["role"].as_str() != Some(role)
+    {
         return Err(format!(
-            "the {role} grant response names another principal or role"
+            "the {role} grant response names another scope, principal or role"
         ));
     }
-    receipt.record(&format!("grant_{role}"), value)
+    receipt.record(&format!("grant_{resource_name}"), value)
 }
 
 async fn verify_role_shape(api: &Api, receipt: &ReviewReceipt) -> Result<(), String> {
@@ -842,6 +899,12 @@ async fn verify_role_shape(api: &Api, receipt: &ReviewReceipt) -> Result<(), Str
     if !reviewer_roles.contains("reviewer") || !reviewer_roles.contains("administrator") {
         return Err(
             "Riley Reviewer does not hold the existing reviewer and administrator grants"
+                .to_owned(),
+        );
+    }
+    if !roles_for(&receipt.approver.subject).contains("administrator") {
+        return Err(
+            "Morgan Approver does not hold the administrator grant required for a distinct Skill approval"
                 .to_owned(),
         );
     }
@@ -1063,7 +1126,11 @@ async fn ensure_source_session(api: &Api, receipt: &mut ReviewReceipt) -> Result
     {
         return Err("source Session replay resolved to different event content".to_owned());
     }
-    receipt.record("source_event", event)
+    receipt.record("source_event", event)?;
+    // Appending the event updates Session observation metadata. Record the
+    // completed seed state so the first receipt and a replay agree.
+    let current = api.get(&format!("/v1/sessions/{session_id}")).await?;
+    receipt.record("source_session", current)
 }
 
 async fn end_source_session(api: &Api, receipt: &mut ReviewReceipt) -> Result<(), String> {
@@ -1245,6 +1312,10 @@ fn render_seed(receipt: &ReviewReceipt, json_output: bool) -> Result<(), String>
         receipt.reviewer.label, receipt.reviewer.subject
     );
     println!(
+        "    approver    {} ({}) · administrator grant",
+        receipt.approver.label, receipt.approver.subject
+    );
+    println!(
         "    viewer      {} ({}) · viewer grant only",
         receipt.viewer.label, receipt.viewer.subject
     );
@@ -1296,7 +1367,7 @@ fn render_capture(receipt: &ReviewReceipt, json_output: bool) -> Result<(), Stri
         required_str(&skill, "outcome")?
     );
     println!(
-        "    next               inspect as Riley, try the denied viewer approval, then approve as Riley and apply as Avery"
+        "    next               inspect as Riley, try the denied viewer approval, then approve Skills as Riley and Morgan before Avery applies"
     );
     Ok(())
 }
@@ -1310,7 +1381,7 @@ fn render_binding(receipt: &ReviewReceipt, json_output: bool) -> Result<(), Stri
     println!("    proposal  {}", required_str(&binding, "change_id")?);
     println!("    binding   {}", required_str(&binding, "binding_id")?);
     println!("    outcome   {}", required_str(&binding, "outcome")?);
-    println!("    next      review as Riley, apply as Avery, then run verify");
+    println!("    next      approve as Riley and Morgan, apply as Avery, then run verify");
     Ok(())
 }
 
@@ -1424,12 +1495,10 @@ mod tests {
     fn fixture_keys_and_source_event_are_stable_across_retries() {
         let receipt = ReviewReceipt::new(
             "http://app.synveda.test:8080",
-            "author",
-            "author-subject",
-            "reviewer",
-            "reviewer-subject",
-            "viewer",
-            "viewer-subject",
+            ("author", "author-subject"),
+            ("reviewer", "reviewer-subject"),
+            ("approver", "approver-subject"),
+            ("viewer", "viewer-subject"),
         );
         assert_eq!(receipt.key("workspace"), "cpr45-retry-review-v1-workspace");
         assert_eq!(receipt.key("workspace"), receipt.key("workspace"));

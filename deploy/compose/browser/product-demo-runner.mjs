@@ -7,6 +7,7 @@ import {
   validateCallbackUrl,
   validateSettings,
 } from "./console-login-contract.mjs";
+import { runConsoleProductCheckpoint } from "./console-product-runner.mjs";
 import {
   allowedCliRequest,
   validateCliHandoffUrl,
@@ -23,6 +24,7 @@ import {
 
 const CLI = "/usr/local/bin/synveda";
 const ADMIN_PASSWORD_FILE = "/run/secrets/keycloak_demo_admin_password";
+const APPROVER_PASSWORD_FILE = "/run/secrets/keycloak_demo_approver_password";
 const MEMBER_PASSWORD_FILE = "/run/secrets/keycloak_demo_member_password";
 const VIEWER_PASSWORD_FILE = "/run/secrets/keycloak_demo_viewer_password";
 const MAX_LOGIN_OUTPUT = 16 * 1024;
@@ -510,6 +512,7 @@ export async function runProductAcceptance({
   readPassword = readDemoPassword,
   login = loginIdentity,
   command = runCli,
+  browserCheckpoint = runConsoleProductCheckpoint,
   spawnProcess = spawn,
   loginTimeout = LOGIN_TIMEOUT,
   demoTimeout = DEMO_TIMEOUT,
@@ -521,10 +524,12 @@ export async function runProductAcceptance({
   if (
     !["seed", "verify"].includes(phase) ||
     typeof chromium?.launch !== "function" ||
-    typeof readPassword !== "function"
+    typeof readPassword !== "function" ||
+    typeof browserCheckpoint !== "function"
   ) throw failure("configuration");
   const localRetryReview = isLocalRetryReviewTarget(settings);
   let adminPassword;
+  let approverPassword;
   let memberPassword;
   let viewerPassword;
   try {
@@ -532,12 +537,14 @@ export async function runProductAcceptance({
     if (phase === "seed") {
       memberPassword = readPassword(MEMBER_PASSWORD_FILE);
       if (localRetryReview) {
+        approverPassword = readPassword(APPROVER_PASSWORD_FILE);
         viewerPassword = readPassword(VIEWER_PASSWORD_FILE);
       }
     }
     if (
       !Buffer.isBuffer(adminPassword) ||
       (phase === "seed" && !Buffer.isBuffer(memberPassword)) ||
+      (phase === "seed" && localRetryReview && !Buffer.isBuffer(approverPassword)) ||
       (phase === "seed" && localRetryReview && !Buffer.isBuffer(viewerPassword))
     ) {
       throw failure("password-file");
@@ -568,6 +575,16 @@ export async function runProductAcceptance({
           chromium,
           environment,
           settings,
+          profile: "approver",
+          username: "synveda-demo-approver",
+          password: approverPassword,
+          timeout: loginTimeout,
+          spawnProcess,
+        });
+        await login({
+          chromium,
+          environment,
+          settings,
           profile: "viewer",
           username: "synveda-demo-viewer",
           password: viewerPassword,
@@ -578,6 +595,7 @@ export async function runProductAcceptance({
     }
   } finally {
     adminPassword?.fill?.(0);
+    approverPassword?.fill?.(0);
     memberPassword?.fill?.(0);
     viewerPassword?.fill?.(0);
   }
@@ -620,6 +638,8 @@ export async function runProductAcceptance({
       "author",
       "--reviewer-credentials",
       "reviewer",
+      "--approver-credentials",
+      "approver",
       "--viewer-credentials",
       "viewer",
       "--confirm-target",
@@ -633,6 +653,13 @@ export async function runProductAcceptance({
       spawnProcess,
     );
     validateRetryReviewReceipt(first, "seeded");
+    await browserCheckpoint({
+      chromium,
+      environment,
+      checkpoint: "seeded-edit",
+      receipt: first,
+      timeout: loginTimeout,
+    });
     const second = await command(
       seedArgs,
       environment,
@@ -640,6 +667,13 @@ export async function runProductAcceptance({
       spawnProcess,
     );
     validateRetryReviewRerun(first, second);
+    await browserCheckpoint({
+      chromium,
+      environment,
+      checkpoint: "seeded-preserved",
+      receipt: second,
+      timeout: loginTimeout,
+    });
 
     validateRetryReviewInspection(
       await command(
@@ -675,17 +709,16 @@ export async function runProductAcceptance({
     validateRetryReviewReceipt(captured, "learning_pending");
 
     const inspectProposal = async (id) => {
-      validateRetryReviewProposal(
-        await command(
-          ["proposal", "show", id, "--profile", "reviewer", "--json"],
-          environment,
-          demoTimeout,
-          spawnProcess,
-        ),
-        id,
+      const proposal = await command(
+        ["proposal", "show", id, "--profile", "reviewer", "--json"],
+        environment,
+        demoTimeout,
+        spawnProcess,
       );
+      validateRetryReviewProposal(proposal, id);
+      return proposal;
     };
-    const approveAndApply = async (id) => {
+    const approveAndApply = async (id, distinctAdministrator) => {
       await inspectProposal(id);
       await command(
         [
@@ -702,6 +735,23 @@ export async function runProductAcceptance({
         spawnProcess,
         "success",
       );
+      if (distinctAdministrator) {
+        await command(
+          [
+            "proposal",
+            "approve",
+            id,
+            "--profile",
+            "approver",
+            "--comment",
+            "Synthetic CPR-45 distinct administrator approval",
+          ],
+          environment,
+          demoTimeout,
+          spawnProcess,
+          "success",
+        );
+      }
       await command(
         ["proposal", "apply", id, "--profile", "author"],
         environment,
@@ -711,22 +761,23 @@ export async function runProductAcceptance({
       );
     };
     const learningChange = captured.resources.learning.change_id;
-    await inspectProposal(learningChange);
-    await command(
-      [
-        "proposal",
-        "approve",
-        learningChange,
-        "--profile",
-        "viewer",
-        "--comment",
-        "Synthetic CPR-45 acceptance replay denial probe",
-      ],
+    const learningProposal = await inspectProposal(learningChange);
+    await browserCheckpoint({
+      chromium,
       environment,
-      demoTimeout,
-      spawnProcess,
-      "denied",
-    );
+      checkpoint: "viewer-denial",
+      proposal: learningProposal,
+      receipt: captured,
+      timeout: loginTimeout,
+    });
+    await browserCheckpoint({
+      chromium,
+      environment,
+      checkpoint: "reviewer-open",
+      proposal: learningProposal,
+      receipt: captured,
+      timeout: loginTimeout,
+    });
     await command(
       [
         "proposal",
@@ -742,6 +793,14 @@ export async function runProductAcceptance({
       spawnProcess,
       "success",
     );
+    await browserCheckpoint({
+      chromium,
+      environment,
+      checkpoint: "approved-not-applied",
+      proposal: learningProposal,
+      receipt: captured,
+      timeout: loginTimeout,
+    });
     await command(
       ["proposal", "apply", learningChange, "--profile", "author"],
       environment,
@@ -749,7 +808,7 @@ export async function runProductAcceptance({
       spawnProcess,
       "success",
     );
-    await approveAndApply(captured.resources.skill_install.change_id);
+    await approveAndApply(captured.resources.skill_install.change_id, true);
 
     const binding = await command(
       [
@@ -767,42 +826,46 @@ export async function runProductAcceptance({
       spawnProcess,
     );
     validateRetryReviewReceipt(binding, "binding_pending");
-    await approveAndApply(binding.resources.skill_binding.change_id);
-    validateRetryReviewVerification(
-      await command(
-        [
-          "demo",
-          "retry-review",
-          "verify",
-          "--author-credentials",
-          "author",
-          "--reviewer-credentials",
-          "reviewer",
-          "--confirm-target",
-          settings.appOrigin,
-          "--json",
-        ],
-        environment,
-        demoTimeout,
-        spawnProcess,
-      ),
-      binding,
-    );
-  }
-  validateRetryReviewStatus(
-    await command(
+    await approveAndApply(binding.resources.skill_binding.change_id, true);
+    const verification = await command(
       [
         "demo",
         "retry-review",
-        "status",
+        "verify",
         "--author-credentials",
         "author",
+        "--reviewer-credentials",
+        "reviewer",
+        "--confirm-target",
+        settings.appOrigin,
         "--json",
       ],
       environment,
       demoTimeout,
       spawnProcess,
-    ),
+    );
+    validateRetryReviewVerification(verification, binding);
+  }
+  const status = await command(
+    [
+      "demo",
+      "retry-review",
+      "status",
+      "--author-credentials",
+      "author",
+      "--json",
+    ],
+    environment,
+    demoTimeout,
+    spawnProcess,
   );
+  validateRetryReviewStatus(status);
+  await browserCheckpoint({
+    chromium,
+    environment,
+    checkpoint: "verified",
+    status,
+    timeout: loginTimeout,
+  });
   return true;
 }

@@ -136,6 +136,16 @@ public final class SynvedaKeycloakProjectionSelfTest {
         accept(() -> SynvedaKeycloakProjection.verifyDemoUser(
             bytes(demoAdmin), "synveda-demo-admin", "admin", true
         ));
+        String demoApprover = demoAdmin
+            .replace("000000000045", "000000000048")
+            .replace("synveda-demo-admin", "synveda-demo-approver")
+            .replace("admin@demo", "approver@demo")
+            .replace("Avery", "Morgan")
+            .replace("Author", "Approver")
+            .replace("[\"admin\"]", "[\"approver\"]");
+        accept(() -> SynvedaKeycloakProjection.verifyDemoUser(
+            bytes(demoApprover), "synveda-demo-approver", "approver", true
+        ));
         String demoMember = demoAdmin
             .replace("000000000045", "000000000046")
             .replace("synveda-demo-admin", "synveda-demo-member")

@@ -425,6 +425,7 @@ export function helmAcceptanceFindings(demo, clientPod, keycloakFixture) {
     "keycloak_admin_password",
     "keycloak_convergence_admin_password",
     "keycloak_demo_admin_password",
+    "keycloak_demo_approver_password",
     "keycloak_demo_member_password",
     "keycloak_demo_viewer_password",
   ]) {

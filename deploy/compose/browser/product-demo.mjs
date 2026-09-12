@@ -15,6 +15,15 @@ try {
 } catch (error) {
   const stage =
     error instanceof BrowserContractError ? error.stage : "unexpected";
-  process.stderr.write(`compose-product: ${stage} failed\n`);
+  const cause = error?.cause?.message;
+  const detail =
+    stage === "retry-review-rerun" &&
+    typeof cause === "string" &&
+    /^(workspace-(stable-fields|description|revision|updated-at)|resource-[a-z_]+)$/.test(
+      cause,
+    )
+      ? `/${cause}`
+      : "";
+  process.stderr.write(`compose-product: ${stage}${detail} failed\n`);
   process.exitCode = 78;
 }

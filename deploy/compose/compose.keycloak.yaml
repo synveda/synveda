@@ -190,11 +190,13 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
+    # Four synthetic identities require bounded realm, credential and role
+    # reconciliation before the immutable generation gate can become ready.
     healthcheck:
       test: ["CMD", "/opt/keycloak/bin/synveda-generation-gate", "ready"]
       interval: 5s
       timeout: 3s
-      retries: 36
+      retries: 48
       start_period: 15s
     secrets:
       - source: keycloak_admin_username

@@ -49,6 +49,7 @@ const RETRY_BASE_RESOURCES = Object.freeze([
   "repository",
   "grant_reviewer",
   "grant_administrator",
+  "grant_approver",
   "grant_viewer",
   "baseline_knowledge",
   "baseline_provenance",
@@ -60,6 +61,12 @@ const RETRY_BASE_RESOURCES = Object.freeze([
 
 function refuse(stage) {
   throw new BrowserContractError(stage);
+}
+
+function refuseRerun(detail) {
+  const error = new BrowserContractError("retry-review-rerun");
+  error.cause = new Error(detail);
+  throw error;
 }
 
 function one(search, name, stage) {
@@ -548,18 +555,20 @@ function retryHandle(value, expectedOutcome) {
 function retryBase(value, expectedState) {
   if (
     !object(value) ||
-    value.receipt_version !== 1 ||
+    value.receipt_version !== 2 ||
     value.fixture !== RETRY_FIXTURE ||
     value.gateway_url !== "http://app.synveda.test:8080" ||
     value.state !== expectedState ||
     !retryIdentity(value.author, "Avery Author", "author") ||
     !retryIdentity(value.reviewer, "Riley Reviewer", "reviewer") ||
+    !retryIdentity(value.approver, "Morgan Approver", "approver") ||
     !retryIdentity(value.viewer, "Vera Restricted Viewer", "viewer") ||
     new Set([
       value.author.subject,
       value.reviewer.subject,
+      value.approver.subject,
       value.viewer.subject,
-    ]).size !== 3 ||
+    ]).size !== 4 ||
     !object(value.resources) ||
     RETRY_BASE_RESOURCES.some((name) => !object(value.resources[name]))
   ) refuse("retry-review");
@@ -578,18 +587,24 @@ function retryBase(value, expectedState) {
       "https://github.com/northstar-demo/ingestion-api"
   ) refuse("retry-review");
 
+  const grantScopeId = resources.grant_reviewer.scope_id;
+  if (!uuid(grantScopeId) || grantScopeId !== workspace.scope_id) {
+    refuse("retry-review");
+  }
   for (const [name, role, subject] of [
     ["grant_reviewer", "reviewer", value.reviewer.subject],
     ["grant_administrator", "administrator", value.reviewer.subject],
+    ["grant_approver", "administrator", value.approver.subject],
     ["grant_viewer", "viewer", value.viewer.subject],
   ]) {
     const grant = resources[name];
     if (
-      !uuid(grant.grant_id) ||
-      grant.scope_id !== project.scope_id ||
+      !uuid(grant.id) ||
+      grant.scope_id !== grantScopeId ||
+      grant.subject_kind !== "principal" ||
       grant.principal_id !== subject ||
       grant.role !== role ||
-      grant.inherited !== false ||
+      grant.source !== "direct" ||
       grant.directory_managed !== false
     ) refuse("retry-review");
   }
@@ -694,9 +709,36 @@ export function validateRetryReviewReceipt(value, expectedState = "seeded") {
 export function validateRetryReviewRerun(first, second) {
   validateRetryReviewReceipt(first, "seeded");
   validateRetryReviewReceipt(second, "seeded");
+  const {
+    description: firstDescription,
+    revision: firstRevision,
+    updated_at: firstUpdatedAt,
+    ...firstStableWorkspace
+  } = first.resources.workspace;
+  const {
+    description: secondDescription,
+    revision: secondRevision,
+    updated_at: secondUpdatedAt,
+    ...secondStableWorkspace
+  } = second.resources.workspace;
+  if (JSON.stringify(firstStableWorkspace) !== JSON.stringify(secondStableWorkspace)) {
+    refuseRerun("workspace-stable-fields");
+  }
+  if (
+    !text(firstDescription) ||
+    !text(secondDescription) ||
+    secondDescription === firstDescription
+  ) refuseRerun("workspace-description");
+  if (!Number.isSafeInteger(firstRevision) || secondRevision !== firstRevision + 1) {
+    refuseRerun("workspace-revision");
+  }
+  if (!text(firstUpdatedAt) || !text(secondUpdatedAt) || secondUpdatedAt === firstUpdatedAt) {
+    refuseRerun("workspace-updated-at");
+  }
   for (const name of RETRY_BASE_RESOURCES) {
+    if (name === "workspace") continue;
     if (JSON.stringify(first.resources[name]) !== JSON.stringify(second.resources[name])) {
-      refuse("retry-review-rerun");
+      refuseRerun(`resource-${name}`);
     }
   }
   return true;
@@ -720,6 +762,8 @@ export function validateRetryReviewProposal(value, id) {
     !object(value) ||
     value.id !== id ||
     value.state !== "open" ||
+    typeof value.commit !== "string" ||
+    !/^[0-9a-f]{64}$/.test(value.commit) ||
     !Array.isArray(value.artifact_references) ||
     value.artifact_references.length < 1
   ) refuse("retry-review-proposal");
