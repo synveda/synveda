@@ -225,11 +225,17 @@ db-test:
 # ADPT-4: base clients share one ordinary authenticated application workflow.
 # Install sdks/python/requirements-dev.lock first; no dependency downloads here.
 SYNVEDA_PYTHON ?= python3
-.PHONY: sdk-check interop-acceptance
+.PHONY: sdk-check sdk-package-check interop-acceptance
 sdk-check:
 	SYNVEDA_DATAMODEL_CODEGEN="$(SYNVEDA_DATAMODEL_CODEGEN)" node scripts/generate-sdk-contract.mjs --check
 	pnpm --filter @synveda/sdk test
 	PYTHONPATH=sdks/python $(SYNVEDA_PYTHON) -m unittest discover -s sdks/python/tests -v
+
+# Prepared wheelhouse and locked development dependencies are prerequisites;
+# both consumers install offline and reuse the existing SDK test suites.
+sdk-package-check:
+	node scripts/check-sdk-package.mjs
+	$(SYNVEDA_PYTHON) scripts/check-sdk-package.py
 
 interop-acceptance:
 	cargo build -q -p synveda-cli

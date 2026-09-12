@@ -3,8 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
 import { test, type TestContext } from "node:test";
-import { ApiError, Client, TransportError } from "./client.mjs";
-import type { OperationId } from "./generated/api.js";
+import { ApiError, Client, TransportError, type OperationId } from "@synveda/sdk";
 
 const parent = "00-11111111111111111111111111111111-2222222222222222-01";
 async function server(t: TestContext, handle: (req: IncomingMessage, res: ServerResponse) => void) {

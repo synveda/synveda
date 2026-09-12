@@ -42,6 +42,17 @@ bound response reads and retries, refuse redirects with credentials, and only
 replay requests with the existing public idempotency contract. Gateway policy,
 retrieval and orchestration never move into an SDK.
 
+Package validation builds in fresh staging directories and installs the actual
+npm archive and Python wheel into separate consumers. npm's standard `prepack`
+hook runs the existing TypeScript compiler so a clean pack cannot omit its
+entry point; only the runtime and generated declarations enter that archive.
+Python uses its existing pinned Hatchling backend, also in the development lock
+for offline checks. Reuse the SDK wire suites against the installed packages,
+check exported types and packaged contract resources, and compare two clean
+builds. Installation uses a prepared hash-locked wheelhouse and no network.
+This is local artifact evidence; public names, licences, signing custody and
+release support policy remain owner decisions under ADPT-4.
+
 The public Compose edge deliberately removes caller trace context. The gateway
 therefore returns its actual OpenTelemetry trace ID in `X-Synveda-Trace-Id` on
 responses when tracing is available. SDK correlation uses that bounded opaque

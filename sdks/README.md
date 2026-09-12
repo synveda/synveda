@@ -12,12 +12,14 @@ task completion. The gateway owns Cedar, RLS, VedaFlow and audit.
 
 ## Install locally and check
 
-Node 22+ and Python 3.11+ are required. The local acceptance run used Node
-24.18.0 and Python 3.14.6. All eight tests per SDK also passed in pinned Linux
-arm64 containers on Node 22.23.2 and Python 3.11.16, including generated Python
-model/operation imports. CI declares Node 22/Python 3.11 on Linux amd64; that
-remote job was not executed in this local run. The full local CI and fresh
-database suite passed at `8f40237`. These checks do not qualify live OIDC.
+Node 22+ and Python 3.11+ are required. Installed-archive validation passed all
+nine tests per SDK in pinned Linux arm64 containers on Node 22.23.2/Python
+3.11.16 and locally on macOS arm64 Node 24.18.0/Python 3.14.6. Each run built
+twice from clean staging directories, installed offline into separate consumers
+and checked exported types/resources. Both runs produced identical archives.
+CI declares Node 22/Python 3.11 on Linux amd64; that remote job was not executed
+locally. The full local CI and fresh database suite passed at `8f40237`;
+neither was rerun for the packaging change. These checks do not qualify live OIDC.
 No public npm/PyPI package is published by this work.
 
 The later live Keycloak run passed both examples through the canonical Docker
@@ -64,6 +66,56 @@ make sdk-check
 executables. Python runtime and generator dependencies are hash-locked; the
 TypeScript package uses the repository pnpm lock. The Python wheel includes
 generated types, operation bindings, contract metadata and `py.typed`.
+
+## Check local package archives
+
+After installing the locked development dependencies above, prepare a wheelhouse
+for the Python runtime/platform being tested. The explicit check requires it;
+missing prerequisites fail. It builds the existing Hatchling sdist and then a
+wheel from that sdist, uses npm's `prepack` build hook, and reuses the existing
+wire tests through the installed packages. Test/workflow files stay outside the
+npm archive. It also checks TypeScript declarations and Python's packaged
+OpenAPI digest, generated imports and `py.typed` without development packages
+in either consumer. Scratch consumers are removed when the check finishes.
+
+```sh
+export SYNVEDA_SDK_WHEELHOUSE="$(mktemp -d)"
+python -m pip download --require-hashes --only-binary=:all: \
+  -r sdks/python/requirements-dev.lock --dest "$SYNVEDA_SDK_WHEELHOUSE"
+make sdk-package-check
+```
+
+For Docker-first minimum-runtime validation, use the pinned images below.
+The checkout needs its frozen pnpm dependencies; the Python download and build
+both run in the target image so native development wheels match its platform.
+Only dependency preparation needs network access. These disposable containers
+do not require a running gateway or credentials.
+
+```sh
+SYNVEDA_SDK_NODE_IMAGE=node@sha256:7725a5c2c83eed1d36258c66efae14b1ceccd021db9ed1d9559d3335ed3d68ed
+SYNVEDA_SDK_PYTHON_IMAGE=python@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
+export SYNVEDA_SDK_WHEELHOUSE="$(mktemp -d)"
+docker run --rm -v "$PWD:/source:ro" -v "$SYNVEDA_SDK_WHEELHOUSE:/wheels" \
+  "$SYNVEDA_SDK_PYTHON_IMAGE" python -m pip download --no-cache-dir \
+  --require-hashes --only-binary=:all: \
+  -r /source/sdks/python/requirements-dev.lock --dest /wheels
+docker run --rm --network none -v "$PWD:/source:ro" -w /source \
+  "$SYNVEDA_SDK_NODE_IMAGE" node scripts/check-sdk-package.mjs
+docker run --rm --network none -v "$PWD:/source:ro" \
+  -v "$SYNVEDA_SDK_WHEELHOUSE:/wheels:ro" -w /source \
+  -e SYNVEDA_SDK_WHEELHOUSE=/wheels "$SYNVEDA_SDK_PYTHON_IMAGE" sh -ec '
+    python -m venv /tmp/builder
+    /tmp/builder/bin/python -m pip install --no-index --no-cache-dir \
+      --only-binary=:all: --find-links /wheels --require-hashes \
+      -r sdks/python/requirements-dev.lock
+    /tmp/builder/bin/python scripts/check-sdk-package.py'
+```
+
+The scripts print archive SHA-256 values and runtime versions. Python builds
+use a fixed `SOURCE_DATE_EPOCH`; matching clean builds are reproducibility
+evidence for those inputs, not signatures or a release support commitment.
+Public namespace, licence and signing/provenance ownership remain open in
+[ADPT-4](../docs/backlog/ADPT-4.md).
 
 ## Application boundary
 

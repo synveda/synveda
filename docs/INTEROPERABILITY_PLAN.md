@@ -107,11 +107,12 @@ implementations were reused. No external MCP execution service was added.
 | P2: native MCP result omission | `adapters/codex/src/transcript.mts`, `translate`, previously accepted only string outputs. Captured MCP output is an array; tool results were omitted while the cursor advanced. | Existing Session event mapper and native `McpToolCall` completion metadata. | Translate captured text-only arrays, preserve namespace and native error status; hold unknown shapes. `transcript-mcp.jsonl` pins real failed/successful calls. | Fixed; replay and persisted native result assertions pass. Non-text results remain unqualified. |
 | P2: Session audit filter omits lifecycle rows | `crates/synveda-gateway/src/audit_query.rs`, `payload_filter`, filters top-level `session_id`; `sessions.rs`, `end` / `session_image`, stores the identity under `session.id`. In the live result, session filter omitted end event 422, while action filter returned it. | Existing `EventFilter`, exact resource/action filtering, immutable audit rows and tenant-scoped search. | Use a typed `EventFilter::session_id` and two exact containment shapes in `synveda_audit::search`, conjoined with the existing filters before pagination. `session_filter_covers_lifecycle_pages_without_crossing_sessions_or_tenants` checks all seven lifecycle/delivery events over four pages, combined filters, foreign/unknown Sessions, tenant AuditRead and an unchanged frozen export. | Fixed; 42 focused exact-role Docker DB tests and retained-data Compose/public-proxy verification pass. |
 | P1: Codex compaction filter | `adapters/codex/src/hook.mts`, `readInput`, rejected PreCompact and compact SessionStart. `adapters/codex/fixtures/compaction.json` captures both native boundaries; compact-start output was empty. Users received no fresh governed context at that boundary. | Existing `turn` local persistence, `sessionStart`, compact token budget and durable Session identity. | Accept PreCompact with the documented trigger vocabulary and SessionStart `source: "compact"`. Captured replay proves durable writes, budgeted context and no duplicates; live manual and automatic runs prove context reinjection and preserved events. | Fixed; eight adapter tests and native Keycloak manual/automatic compaction pass. No further product change was needed. |
+| P2: clean npm archive has no entry point | At `265eb6b`, `sdks/typescript/package.json` exported `dist/client.mjs` but had no pack build hook. Clean `npm pack` contained only `package.json`; installing it succeeded but importing `@synveda/sdk` raised `ERR_MODULE_NOT_FOUND`. | Existing TypeScript compiler/build script, npm lifecycle, generated API and nine wire tests. | Add `prepack`, include runtime/type outputs, then run the existing suite and consumer type checks against the installed archive using `scripts/check-sdk-package.mjs`. | Fixed; Node 22/24 installed-package tests pass. Python packaging also passes through its existing Hatchling backend; no Python runtime fix was needed. |
 
 | Area | Classification after this slice | Evidence / boundary |
 | --- | --- | --- |
 | Synveda MCP server | Implemented and tested | `crates/synveda-cli/src/mcp.rs`; authentic and specification corpus in `crates/synveda-cli/tests/mcp_corpus.rs`. Stdio legacy/modern protocol and recall/remember remain maintained-library paths. This does not add a remote HTTP MCP endpoint. |
-| HTTP contracts and language SDKs | Partial | Public catalogue/OpenAPI/console peer tests pass; the new Python/TS base slice passes. Broader ADPT-4 release coverage is open. |
+| HTTP contracts and language SDKs | Partial | Public catalogue/OpenAPI/console peer tests, the Python/TS base slice and installed archives pass. Broader ADPT-4 release coverage is open. |
 | Skills import, validation, approval, export/install | Implemented and tested | Existing public Skill service, CLI and `crates/synveda-gateway/tests/skills.rs`; actual CLI materialisation/revocation now covered. No registry rebuild. |
 | Context, observations and proposals | Implemented and tested | Existing Session/Context/Knowledge routes; Session suite, Claude lifecycle replay and shared SDK acceptance. Pending proposals remain outside Knowledge. |
 | Authentication, policy and audit | Implemented and tested for the prioritised authenticated workflow | Fresh Keycloak browser acceptance and native Codex/both SDKs pass. Workspace denial, pending proposals, public-edge trace correlation and a valid audit chain are asserted. Session lifecycle and delivery filtering pass the focused exact-role DB regression and live Keycloak public-proxy verification. |
@@ -280,16 +281,63 @@ automatic Skill activation, packaged installation and other versions/platforms
 are not inferred. Reproduction steps are in
 [the Codex guide](integrations/codex.md#reproduce-the-qualification-boundaries).
 
+### ADPT-4 installed archive checkpoint (2026-09-12)
+
+Started from `265eb6b7ff9f3c902558f0cc4fdaf71a5b159390` on
+`codex/authenticated-client-interoperability`, after committing the native
+qualification. The npm failure above was reproduced without generated `dist`
+files. The correction uses npm's existing build lifecycle. Python retains its
+existing Hatchling backend; adding it to the development lock enables offline
+checks. New build-only dependencies are Hatchling (MIT), Pluggy (MIT) and Trove
+Classifiers (Apache-2.0); existing locked versions/hashes remain unchanged.
+
+`make sdk-package-check` runs bounded clean builds and separate offline consumers.
+Python builds a wheel from its sdist and checks `py.typed`, generated imports
+and the OpenAPI digest without the generator/backend in the consumer. TypeScript
+checks the installed public exports, positive/negative consumer typing and a
+seven-file archive that excludes tests/workflow code. Both reuse their existing
+nine wire tests. Each archive is built twice and compared byte-for-byte.
+
+| Executed environment | Result |
+| --- | --- |
+| Pinned Docker Linux arm64 Node 22.23.2 / Python 3.11.16 | Nine tests per installed SDK passed, zero skips; exports/types/resources, offline installs and matching clean builds passed. Source and prepared wheels were mounted read-only; package checks ran with networking disabled. |
+| Local macOS arm64 Node 24.18.0 / Python 3.14.6 | `make sdk-package-check` passed the same 18 tests and archive assertions, zero skips. Hashes also matched the minimum-runtime containers. |
+
+Archive SHA-256 values for this source and fixed Python build epoch:
+
+| Archive | SHA-256 |
+| --- | --- |
+| npm | `938bc0053e861691090ee0e1725049cdfe786c256c8457147af1895befc74b43` |
+| Python sdist | `dc78f473e2ecf199abe3e282d13de5f07c7361fde9ac721c8fdc2a1045f284af` |
+| Python wheel | `96bee3f2668726d793a052bf4c60b883563456585ef7ae64dd789e268c9b1776` |
+
+The initial offline Python build was blocked by an uncached Hatchling dependency.
+The prepared hash-locked wheelhouse resolved that prerequisite. The first local
+Node suite was blocked by sandbox loopback restrictions; the first Python Docker
+install was blocked by a non-executable temporary mount. Both were rerun with
+the required test permissions and passed. Those failed attempts are not passes.
+The new staging harness also initially resolved a pnpm bin shim relative to its
+temporary location; it now references the locked compiler directly.
+
+SDK generator drift (15 operations, 52 schemas), repository formatting,
+dependency direction, generated console types, backlog, ADR status and docs
+checks passed. Python formatting, JavaScript syntax and the CI YAML/invocation
+check also passed. Reproduction and minimum-runtime Docker commands are in
+[the SDK guide](../sdks/README.md).
+The existing CI SDK job now prepares locked wheels and invokes the same target;
+that remote Linux amd64 job was not run here. Full CI, fresh database, live
+Keycloak and Compose lifecycle suites were not rerun for packaging-only changes;
+their prior evidence remains dated above. No Rust changed in this batch.
+
 ## Remaining actions
 
-1. Under ADPT-4, build/install/import local wheel and npm archives on the declared
-   minimum runtimes. Keep packages unpublished and reuse the current SDK slice.
-2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
+1. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
-3. Qualify further clients only from named installed versions and authentic
+   Local archive build/install/import is verified; packages remain unpublished.
+2. Qualify further clients only from named installed versions and authentic
    evidence. Copilot CLI and Pi remain separate candidates; generic MCP/Skills
    compatibility does not qualify them. Non-text Codex results and installation
-   packaging likewise require their own evidence.
+   packaging for the harness likewise require their own evidence.
 
 These continue the original client batches; no new orchestration, plugin
 system or protocol implementation is proposed.
@@ -309,7 +357,7 @@ Follow `deploy/compose/README.md` for any later profile/hosts handoff. Retained
 profile-owned volumes must remain in the shutdown contract even when a profile's
 container is absent. No `compose-reset` is needed for an ordinary transition.
 
-Minimum-runtime image digests used for the earlier SDK evidence:
+Minimum-runtime image digests used for SDK runtime and installed-archive evidence:
 `node@sha256:7725a5c2c83eed1d36258c66efae14b1ceccd021db9ed1d9559d3335ed3d68ed`
 and `python@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534`.
 No package publication, HA, SaaS readiness or broader certification follows

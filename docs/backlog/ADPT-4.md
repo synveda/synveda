@@ -86,6 +86,22 @@ revocation/re-authorisation with one unchanged Python client and bearer.
 The fixture `adapters/codex/fixtures/live-qualification.json` records 19 unique
 events, 17 Capture candidates, explicit end, reuse and audit verification
 through sequence 858. Existing product policy and SDK code needed no change.
-Next: build and install the local wheel/npm archives on the declared minimum
-runtimes, retaining the current unpublished status while owner decisions remain
-open. Do not expand the API slice or add framework adapters to do that check.
+
+The package check from `265eb6b` found that a clean `npm pack` included only
+`package.json`: importing the installed SDK failed with `ERR_MODULE_NOT_FOUND`.
+The standard `prepack` hook now runs the existing compiler and packages only
+runtime/type outputs. The Python wheel already worked; its existing Hatchling
+backend now joins the hash-locked development dependencies for offline checks.
+`make sdk-package-check` builds each archive twice, installs into isolated
+consumers, verifies public types/resources and reuses all nine tests per SDK.
+It passed on pinned Docker Linux arm64 Node 22.23.2/Python 3.11.16 and macOS
+arm64 Node 24.18.0/Python 3.14.6, with identical archive hashes and no skips.
+CI now invokes the same check; that remote job and the broader CI/database
+suites were not rerun for this packaging-only batch. Exact hashes, corrected
+environment failures and reproduction are in `docs/INTEROPERABILITY_PLAN.md`
+and `sdks/README.md`.
+
+Next: resolve the owner decisions listed under Dependencies before public
+distribution, then implement only the approved release path and compatibility
+matrix. Local packaging is verified; no API expansion or framework adapter is
+needed for it. ADPT-4 remains open for its wider scope.

@@ -19,10 +19,15 @@ Eight Codex tests replay the authentic manual/automatic boundaries and retain
 bounded delivery and stable task identity. No product code changed for this
 qualification; broader CI/database evidence remains dated in the plan.
 
-Next under [ADPT-4](ADPT-4.md): exercise local package build/install/import on
-the declared minimum runtimes. Public distribution awaits owner decisions on
+Under [ADPT-4](ADPT-4.md), clean npm packing now builds its entry point instead
+of producing an unusable archive. Installed npm/wheel validation passed nine
+tests per SDK on Docker Linux arm64 Node 22.23.2/Python 3.11.16 and macOS arm64
+Node 24.18.0/Python 3.14.6, with matching clean-build hashes and no skips.
+`make sdk-package-check` also checks exported types and packaged contract
+resources; CI invokes it, but the remote job was not run locally.
+Next: public distribution awaits owner decisions on
 licence, namespaces, provenance custody and the supported server/runtime window.
-Non-text Codex results, packaged installation, other versions/platforms,
+Non-text Codex results, packaged harness installation, other versions/platforms,
 Copilot CLI and Pi still require separate evidence.
 
 ## Phase 0 — Foundation (wk 1)

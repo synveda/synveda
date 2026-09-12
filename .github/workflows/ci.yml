@@ -22,7 +22,12 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install --require-hashes -r sdks/python/requirements-dev.lock
       - run: pnpm install --frozen-lockfile
-      - run: make sdk-check interop-acceptance
+      - run: |
+          python -m pip download --require-hashes --only-binary=:all: \
+            -r sdks/python/requirements-dev.lock --dest "$RUNNER_TEMP/sdk-wheelhouse"
+      - run: make sdk-check sdk-package-check interop-acceptance
+        env:
+          SYNVEDA_SDK_WHEELHOUSE: ${{ runner.temp }}/sdk-wheelhouse
 
   # CPR-14 tier 2: captured real-client frames, but no Claude credential,
   # through the public session API and a real current-epoch database. This is
