@@ -68,6 +68,13 @@ events, Codex uses one two-second deadline for credential resolution and all
 delivery requests, leaving time to save acknowledgements before host shutdown.
 Each in-flight request consumes the remaining delivery budget; pending events
 remain in the existing spool for resume or explicit flush.
+Captured manual compaction emits `PreCompact`, `PostCompact` and, before the
+next model request, `SessionStart` with `source: "compact"`. Route PreCompact
+through the existing local durable record path and compact SessionStart through
+the existing bounded context composition. Both keep the same task identity;
+PostCompact needs no second write or injection path. Accept the documented
+manual/auto trigger vocabulary; automatic compaction remains separately
+unverified until exercised by the native client.
 Retry delivery must match the saved gateway and client, including background
 backlogs. This adds no plugin registry, event store or orchestration layer.
 Captured clients may have no Synveda configuration writer. Such entries remain

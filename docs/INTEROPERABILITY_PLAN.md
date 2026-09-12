@@ -68,8 +68,9 @@ remains open for release and wider compatibility obligations.
 
 Status: authentic Codex CLI 0.152.0 MCP and native lifecycle frames captured.
 The minimal hook translator reuses the existing Session runtime and passes
-deterministic replay. Native OIDC context, Skill read, MCP recall, resume, SDK
-handoff, Capture/end and audit pass. Full lifecycle qualification remains open.
+deterministic replay. Native OIDC context, Skill read, MCP recall, resume,
+outage/recovery, manual compaction, SDK handoff, Capture/end and audit pass.
+Automatic compaction and complete qualification remain open.
 
 - Inspect the installed Codex version and capture its actual lifecycle/MCP
   frames before writing host translation. Verify current Skill discovery:
@@ -105,6 +106,7 @@ implementations were reused. No external MCP execution service was added.
 | P1: native exit budget | `adapters/claude-code/src/turn.mts`, `credentials.mts`, `deliver.mts`; installed Codex 0.152.0 clamps SessionEnd to three seconds. Credential work plus an in-flight append could overrun that cap. | Existing CLI bearer resolution, durable spool and bounded Fetch request. | Share a two-second absolute deadline across Codex credentials/delivery and bound each append by remaining time. A hung CLI and stalled append leave six durable events that are delivered on retry. | Fixed; regression and native exit pass. |
 | P2: native MCP result omission | `adapters/codex/src/transcript.mts`, `translate`, previously accepted only string outputs. Captured MCP output is an array; tool results were omitted while the cursor advanced. | Existing Session event mapper and native `McpToolCall` completion metadata. | Translate captured text-only arrays, preserve namespace and native error status; hold unknown shapes. `transcript-mcp.jsonl` pins real failed/successful calls. | Fixed; replay and persisted native result assertions pass. Non-text results remain unqualified. |
 | P2: Session audit filter omits lifecycle rows | `crates/synveda-gateway/src/audit_query.rs`, `payload_filter`, filters top-level `session_id`; `sessions.rs`, `end` / `session_image`, stores the identity under `session.id`. In the live result, session filter omitted end event 422, while action filter returned it. | Existing `EventFilter`, exact resource/action filtering, immutable audit rows and tenant-scoped search. | Use a typed `EventFilter::session_id` and two exact containment shapes in `synveda_audit::search`, conjoined with the existing filters before pagination. `session_filter_covers_lifecycle_pages_without_crossing_sessions_or_tenants` checks all seven lifecycle/delivery events over four pages, combined filters, foreign/unknown Sessions, tenant AuditRead and an unchanged frozen export. | Fixed; 42 focused exact-role Docker DB tests and retained-data Compose/public-proxy verification pass. |
+| P1: Codex compaction filter | `adapters/codex/src/hook.mts`, `readInput`, rejected PreCompact and compact SessionStart. `adapters/codex/fixtures/compaction.json` captures both native boundaries; compact-start output was empty. Users received no fresh governed context at that boundary. | Existing `turn` local persistence, `sessionStart`, compact token budget and durable Session identity. | Accept PreCompact with the documented trigger vocabulary and SessionStart `source: "compact"`. Captured replay proves durable writes, budgeted context and no duplicates; the live manual rerun proves context reinjection and preserved events. | Fixed; seven adapter tests and the native Keycloak manual-compaction workflow pass. Automatic compaction remains unverified. |
 
 | Area | Classification after this slice | Evidence / boundary |
 | --- | --- | --- |
@@ -189,27 +191,59 @@ receipt remains unchanged; the native client qualification limits still apply.
 
 ## Native qualification checkpoint (2026-09-12)
 
-Starting from `b4f4856f31ff8be869d3a2a06960b76dd6e3ee53`, the retained-data
-canonical Compose smoke and eight conformance/fixture checks pass. All six
-Codex adapter tests pass with no skipped cases, using the installed TypeScript
-compiler and Node test runner. The initial pnpm launcher stalled before tests
-started and was interrupted; it is not counted as a successful invocation.
+Starting from `8ff38a6a944f7e17ed2b21e3957bff0ba1140a7d`, the owner explicitly
+approved the synthetic Skill/context/transcript payload for OpenAI GPT-5.5.
+The installed native client remains 0.152.0 with normal project/hook trust;
+credentials remain local. No client update or trust bypass was used.
 
-The next native outage/recovery and compaction run did not start. Automatic
-approval review rejected the native client's transmission of the synthetic
-Skill, retrieved context and test transcript to OpenAI GPT-5.5 pending specific
-owner consent. Credentials stay local. The approval request is pending and
-the exact resume procedure is in [CPR-39](backlog/CPR-39.md). There is no new
-live fixture, adapter change or support promotion. Full CI/database and fresh
-Compose acceptance were not repeated at this checkpoint.
+- Native outage/recovery passed: eight baseline observations, five pending
+  events after a turn with only the owned gateway paused, and 15 persisted
+  events after resume. All pending IDs appeared once on the same Session.
+  The gateway was restored unconditionally. Existing delivery code was reused.
+- Authentic manual PreCompact/PostCompact and compact SessionStart frames
+  exposed the filter omission before implementation. After the small filter
+  correction, compact-start output included fresh allowed context and the
+  original Session ID. The original observations survived compaction; replay
+  also proves the configured compact budget and local-only PreCompact writes.
+- Both existing SDK examples passed again, followed by native resume on the
+  same Session `01a09702-10aa-79b2-ae1a-fca231deb5af`. All 25 unique events
+  persisted, including two SDK Skill observations. Capture produced 23
+  candidates; explicit task-owner end and cross-session Knowledge reuse passed.
+  At 19:22:16 UTC the audit chain verified through sequence 655, hash
+  `5b87c20f708fe946584865b42e5b7ead041021b9905dec682f4735b1c206c849`.
+  The Session-filtered history included open, Capture and end events.
+- Seven Codex adapter tests pass with no skipped cases using the installed
+  TypeScript compiler and Node runner. New manual fixtures and the content-free
+  `adapters/codex/fixtures/recovery-qualification.json` are pinned in the registry;
+  the earlier captures remain unchanged. No Rust, dependency, schema or public
+  API changes were needed.
+- Canonical retained-data Compose smoke passed after the fault was restored.
+  All nine conformance/fixture checks, formatting, dependency direction,
+  generated support, backlog, ADR and documentation gates pass. Strict Clippy
+  was not rerun because no Rust crate changed.
+- The initial SDK invocation stopped before running when the auditor's
+  Keycloak session had expired. Both synthetic profiles completed ordinary
+  browser/CLI PKCE renewal using the existing Compose acceptance image; the
+  subsequent SDK invocation passed.
+
+The automatic-compaction attempt used the documented
+`model_auto_compact_token_limit=1000` override on `exec resume`. It completed a
+normal turn but emitted no compaction hooks, so it is not a passing automatic
+compaction test. Live revoke/re-authorisation, non-text results, packaging and
+other versions/platforms were not exercised. Full CI/database and fresh Compose
+acceptance were not repeated for this adapter-only correction. Codex remains
+`captured` pending complete qualification.
 
 ## Remaining actions
 
-1. Complete native Codex outage/recovery and compaction/reinjection qualification
-   from authentic frames, preserving the captured level until every applicable
-   ADR-0098 criterion passes. Non-text results and installation packaging remain
-   explicit limits. Copilot CLI and Pi require their own installed versions and
-   evidence; generic MCP/Skills compatibility does not qualify them.
+1. Complete native Codex automatic compaction/reinjection and live revoke/
+   re-authorisation qualification. The automatic probe emitted no boundary;
+   diagnose and capture the native trigger before making another adapter change.
+   Reuse existing public grants and context APIs with disposable synthetic grants
+   for revocation. Preserve the captured level until qualification is complete.
+   Non-text results and installation packaging remain explicit limits. Copilot
+   CLI and Pi require their own installed versions and evidence; generic MCP/
+   Skills compatibility does not qualify them.
 2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
 

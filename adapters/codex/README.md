@@ -1,7 +1,8 @@
 # Codex lifecycle translation (CPR-39)
 
 This internal workspace adapter translates captured Codex CLI 0.152.0 start,
-Stop and runtime-exit hooks. It is **captured**, not live verified. Follow
+PreCompact, Stop and runtime-exit hooks. It remains **captured** with partial
+live qualification. Follow
 [`docs/integrations/codex.md`](../../docs/integrations/codex.md) for setup,
 write ownership and the remaining qualification limits.
 
@@ -16,12 +17,14 @@ Session runtime. It shares credential resolution, configuration, public HTTP
 calls, event mapping and the atomic spool consumed by `synveda session flush`.
 There is no new delivery engine or adapter/plugin registry.
 
-`Stop` records locally. `SessionEnd` gives credentials and delivery a shared
+`Stop` and `PreCompact` record locally. `SessionEnd` gives credentials and delivery a shared
 two-second deadline, below the native client's three-second exit cap, and
 keeps the Synveda task active: the native client can resume that same ID.
 Namespaced external IDs keep different harnesses apart. Startup/resume retries
 only spools for the same client and pinned gateway. An explicit task owner
 uses the public Capture/end APIs; closing an MCP connection does neither.
+`SessionStart` with `source: "compact"` reuses the context path and its configured
+`compact_budget_tokens`. PostCompact has no separate write or injection path.
 
 Input is limited to 64 KiB and transcript reads to 8 MiB/20,000 records. Wrong
 Session IDs, symlinks, non-regular files, partial JSON and unrecognised tool
@@ -33,8 +36,9 @@ The observed transcript tags distinguish user text from injected environment
 and agent instructions. Only user text, assistant text, function calls and
 command results with native exit status and text-only MCP results with native
 completion/error status are mapped. MCP namespaces are preserved. Reasoning
-is excluded. Other tool-result formats and compaction need qualification before
-translation. Host death before Stop/SessionEnd can lose the unfinished turn.
+is excluded. Non-text tool results remain unqualified. Manual compaction passed
+live; the automatic-trigger probe did not emit compaction hooks and remains
+unverified. Host death before a recording hook can lose the unfinished turn.
 
 ## Fixture provenance
 
@@ -64,3 +68,19 @@ The original lifecycle capture exercised native model authentication only.
 The later MCP capture also exercised ordinary Synveda Keycloak authentication.
 Replay still uses synthetic HTTP responses and does not itself establish
 Cedar, RLS or complete lifecycle qualification. CPR-39 tracks the live criteria.
+
+`fixtures/compaction.json` pins the native manual PreCompact/PostCompact and
+subsequent compact SessionStart sequence, captured before the filter correction.
+`fixtures/transcript-compaction.jsonl` retains the last authored user/assistant
+pair on each side, Session identity and compacted metadata. The opaque replacement
+history, other records and unrelated Session metadata are omitted; message fields,
+IDs, ordinals and timestamps remain unchanged. Hook paths use the same synthetic
+path substitution described above. Authored automatic-trigger mutations in tests
+are distinct from these native manual frames.
+
+`fixtures/recovery-qualification.json` records the later Keycloak run: five
+events survived a paused gateway and arrived once after native resume; manual
+compaction reinjected context on the same task after the filter correction.
+Both SDK workflows, explicit Capture/end, cross-session reuse and the audit
+chain passed. The automatic-threshold probe completed a normal resumed turn
+without compaction hooks, so it supplies no automatic-compaction qualification.

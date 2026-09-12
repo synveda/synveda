@@ -31,3 +31,19 @@ test("a native runtime end is followed by resume of the same Codex session", () 
   assert.notEqual(initial.frames[1].turn_id, resumed.frames[1].turn_id);
   assert.equal(resumed.frames.at(-1).reason, "other");
 });
+
+test("native manual compaction requests fresh context before the next prompt", () => {
+  const compact = JSON.parse(readFileSync(new URL("../adapters/codex/fixtures/compaction.json", import.meta.url), "utf8"));
+  assert.equal(compact.client.version, "0.152.0");
+  assert.equal(compact.provenance.kind, "captured-real-client");
+  const [before, after, resume, start, prompt, stop] = compact.frames;
+  assert.deepEqual(compact.frames.map((frame) => frame.hook_event_name),
+    ["PreCompact", "PostCompact", "SessionStart", "SessionStart", "UserPromptSubmit", "Stop"]);
+  assert.equal(before.trigger, "manual");
+  assert.equal(after.trigger, "manual");
+  assert.equal(before.turn_id, after.turn_id);
+  assert.equal(resume.source, "resume");
+  assert.equal(start.source, "compact");
+  assert.equal(prompt.turn_id, stop.turn_id);
+  assert.equal(new Set(compact.frames.map((frame) => frame.session_id)).size, 1);
+});

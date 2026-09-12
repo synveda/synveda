@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** CPR-39: only the captured synchronous start/Stop/runtime-exit boundaries.
+/** CPR-39: captured start/compaction/Stop/runtime-exit boundaries.
  * The watchdog never blocks the host. Saved observations survive API outages.
  */
 import { isAbsolute } from "node:path";
@@ -44,7 +44,7 @@ async function readInput(): Promise<HookInput | undefined> {
   }
   const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const input = value as HookInput;
+  const input = value as HookInput & { trigger?: unknown };
   if (
     typeof input.session_id !== "string" ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.session_id) ||
@@ -53,7 +53,10 @@ async function readInput(): Promise<HookInput | undefined> {
     (input.model !== undefined && (typeof input.model !== "string" || input.model.length > 200))
   ) return undefined;
   if (input.hook_event_name === "SessionStart") {
-    return input.source === "startup" || input.source === "resume" ? input : undefined;
+    return input.source === "startup" || input.source === "resume" || input.source === "compact" ? input : undefined;
+  }
+  if (input.hook_event_name === "PreCompact") {
+    return input.trigger === "manual" || input.trigger === "auto" ? input : undefined;
   }
   return input.hook_event_name === "Stop" || input.hook_event_name === "SessionEnd" ? input : undefined;
 }

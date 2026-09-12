@@ -75,28 +75,42 @@ because that build's Session audit filter omitted nested lifecycle identities.
 `adapters/codex/fixtures/keycloak-qualification.json` retains the result and source
 digests; the registry records passed criteria but stays `captured`.
 
-The shared Session audit filter correction now passes 42 focused exact-role DB
+The shared Session audit filter correction passes 42 focused exact-role DB
 tests and live Keycloak queries after canonical Compose up/smoke: all 23 saved
 events, including open/end, return across 12 pages with unchanged hashes. The
-earlier captured receipt remains unchanged. Next: qualify native outage/
-recovery and compaction/reinjection from authentic frames. Non-text MCP results
-and installation packaging remain explicit limits. Preserve the conformance gate;
+earlier captured receipt remains unchanged. Non-text MCP results and installation
+packaging remain explicit limits. Preserve the conformance gate;
 Copilot CLI and Pi executables were unavailable, and VS Code is not a substitute.
 
-**Continuation checkpoint (2026-09-12, source `b4f4856`)**
+**Continuation checkpoint (2026-09-12, source `8ff38a6`)**
 
-Retained-data canonical Compose smoke, all six Codex adapter tests and eight
-conformance/fixture checks pass. No native outage or compaction run started:
-automatic execution approval rejected sending the isolated fixture's synthetic
-approved Skill, retrieved context and test transcript to OpenAI GPT-5.5 without
-specific owner consent. That approval is pending; credentials remain local.
-This is an execution-approval blocker, not a failed Synveda lifecycle test.
+The owner approved the synthetic Skill/context/transcript payload for OpenAI
+GPT-5.5; execution approval is resolved. Native outage/recovery passed on a new
+task: Codex completed a turn with the owned gateway paused, saved five pending
+events and delivered them once after restoration. Runtime exit retained the same
+active Synveda Session. The durable delivery code needed no change.
 
-After approval, start a new synthetic native task with the existing trusted
-hooks and ordinary Keycloak profile. Pause only the owned gateway during one
-resumed turn, restore it even if the probe fails, then prove durable retry and
-unique persisted events on the same Synveda Session. Capture authentic native
-compaction frames before changing the Codex event filter; reuse the existing
-PreCompact persistence and SessionStart context composition. The filter
-currently accepts startup/resume, Stop and runtime exit only. Do not promote
-support or substitute authored frames for the blocked live evidence.
+Authentic manual compaction emitted PreCompact, PostCompact and compact
+SessionStart. The Codex filter ignored both applicable boundaries. ADR-0106 now
+routes them to the existing local persistence/context functions. Seven adapter
+tests pass, including captured-frame replay, context budgeting, duplicate hooks,
+malformed inputs and the existing exit deadline. The native rerun returned
+fresh allowed context and the same task ID. New frames/transcript projections
+and `recovery-qualification.json` are digest-pinned; old fixtures are unchanged.
+
+Both SDK examples then passed on that Session, including approved Skill,
+pending/idempotent proposals, workspace denial and audit correlation. Native
+resume after SDK handoff passed. All 25 unique events persisted; Capture
+completed with 23 candidates, task-owner end and cross-session Knowledge reuse
+passed, and the audit chain verified through sequence 655. The initial SDK
+attempt stopped before running because the auditor's Keycloak session expired;
+ordinary browser/CLI PKCE renewal and the subsequent run passed.
+
+Next: capture an actual automatic compaction and verify context reinjection,
+then exercise live revoke/re-authorisation through existing public APIs with
+disposable synthetic grants. The attempted `exec resume` override
+`model_auto_compact_token_limit=1000` emitted no compaction hooks, so automatic
+compaction is unverified. Diagnose the native trigger before changing Synveda.
+Keep the task independent of connections and retain `captured` until complete
+qualification. Non-text results, installation packaging and other client
+versions/platforms still need their own evidence; no speculative adapter work.

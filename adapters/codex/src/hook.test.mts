@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,8 @@ import { startGateway } from "../../claude-code/dist/mock-gateway.mjs";
 
 const lifecycle = JSON.parse(readFileSync(new URL("../fixtures/lifecycle.json", import.meta.url), "utf8"));
 const transcript = readFileSync(new URL("../fixtures/transcript.jsonl", import.meta.url), "utf8");
+const compaction = JSON.parse(readFileSync(new URL("../fixtures/compaction.json", import.meta.url), "utf8"));
+const compactedTranscript = readFileSync(new URL("../fixtures/transcript-compaction.jsonl", import.meta.url), "utf8");
 const nativeId = lifecycle.invocations[0].frames[0].session_id;
 const workspace = "11111111-1111-1111-1111-111111111111";
 const session = "22222222-2222-2222-2222-222222222222";
@@ -93,13 +95,72 @@ test("native start, durable Stop, outage, runtime exit, resume and duplicate hoo
   } finally { await gateway.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("captured compaction persists locally then refreshes bounded context on the same task", async () => {
+  const root = mkdtempSync(join(tmpdir(), "synveda-codex-compact-"));
+  const path = join(root, "transcript.jsonl");
+  const records = compactedTranscript.trim().split("\n");
+  const compactIndex = records.findIndex((line) => JSON.parse(line).type === "compacted");
+  const accepted = new Set<string>();
+  const gateway = await startGateway((request) => {
+    if (request.path === "/v1/sessions") return { status: 201, body: { id: session, workspace_id: workspace } };
+    if (request.path.endsWith("/context-runs")) return { status: 201, body: { rendered: "fresh permitted context", tokens: 5, entry_count: 1 } };
+    if (request.path.endsWith("/events")) return { status: 200, body: {
+      events: (request.body.events as { client_event_id: string }[]).map((entry) => {
+        assert.ok(!accepted.has(entry.client_event_id), "compaction must not replay acknowledged observations");
+        accepted.add(entry.client_event_id);
+        return { ...entry, outcome: "appended" };
+      }), denied: 0, quarantined: 0,
+    } };
+    assert.fail(`unexpected API operation ${request.path}`);
+  });
+  const invoke = (frame: unknown) => hook(root, gateway.url,
+    { ...(frame as Record<string, unknown>), cwd: root, transcript_path: path });
+  try {
+    mkdirSync(join(root, ".synveda"));
+    writeFileSync(join(root, ".synveda", "config.json"), JSON.stringify({ compact_budget_tokens: 512 }));
+    writeFileSync(path, records[0] + "\n");
+    await invoke(compaction.frames[2]); // Native resume before the compact start.
+    writeFileSync(path, records.slice(0, compactIndex).join("\n") + "\n");
+    const calls = gateway.requests.length;
+    await invoke(compaction.frames[0]);
+    // Authored alternate trigger coverage, not native automatic-compaction evidence.
+    await invoke({ ...compaction.frames[0], trigger: "auto" });
+    const directory = join(root, "synveda", "spool");
+    const files = readdirSync(directory).filter((name) => name.endsWith(".json"));
+    assert.equal(files.length, 1);
+    const saved = JSON.parse(readFileSync(join(directory, files[0]), "utf8"));
+    assert.equal(saved.entries.filter((entry: { acknowledged: boolean }) => !entry.acknowledged).length, 2);
+    assert.equal(gateway.requests.length, calls, "PreCompact records without a network request");
+    writeFileSync(path, records.slice(0, compactIndex + 1).join("\n") + "\n");
+    assert.equal(await invoke(compaction.frames[1]), "", "PostCompact has no separate delivery path");
+    assert.ok((await invoke(compaction.frames[3])).includes("fresh permitted context"));
+    const context = gateway.requests.filter((request) => request.path.endsWith("/context-runs"));
+    assert.equal(context.length, 2);
+    assert.equal(context[1].body.budget_tokens, 512);
+    assert.ok(String(context[1].body.query).includes("gateway recovery"));
+    writeFileSync(path, compactedTranscript);
+    await invoke(compaction.frames[5]);
+    await invoke(compaction.frames[3]);
+    await invoke(compaction.frames[5]);
+    await invoke(compaction.frames[3]);
+    assert.equal(accepted.size, 4);
+    assert.equal(gateway.requests.filter((request) => request.path === "/v1/sessions").length, 1);
+    assert.ok(!gateway.requests.some((request) => request.path.endsWith("/end")));
+    const final = JSON.parse(readFileSync(join(directory, files[0]), "utf8"));
+    assert.equal(final.session_id, session);
+    assert.equal(final.close_requested, false);
+    assert.ok(final.entries.every((entry: { acknowledged: boolean }) => entry.acknowledged));
+  } finally { await gateway.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("missing identity, unsupported events and project opt-out cause no API calls or spool", async () => {
   const root = mkdtempSync(join(tmpdir(), "synveda-codex-optout-"));
   const gateway = await startGateway(() => assert.fail("invalid or disabled hook reached the API"));
   try {
     const start = { ...lifecycle.invocations[0].frames[0], cwd: root, transcript_path: join(root, "missing") };
     for (const input of [{}, { ...start, session_id: undefined }, { ...start, session_id: "" },
-      { ...start, hook_event_name: "PreCompact" }, { ...start, source: "compact" },
+      { ...start, hook_event_name: "PreCompact" }, { ...start, hook_event_name: "PreCompact", trigger: "unknown" },
+      { ...start, source: "unknown" }, { ...start, hook_event_name: "PostCompact" },
       { ...start, model: "x".repeat(70_000) }]) {
       assert.equal(await hook(root, gateway.url, input), "");
     }

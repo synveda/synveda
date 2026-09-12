@@ -59,6 +59,7 @@ For a controlled qualification checkout, enable `hooks = true` in the
 {
   "hooks": {
     "SessionStart": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 12}]}],
+    "PreCompact": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 12}]}],
     "Stop": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 12}]}],
     "SessionEnd": [{"hooks": [{"type": "command", "command": "/absolute/path/to/node /absolute/path/to/synveda/adapters/codex/dist/hook.mjs", "timeout": 3}]}]
   }
@@ -85,12 +86,17 @@ Codex filters subprocess environments; a working hook login alone does not
 prove that its MCP process sees the same profile. See the
 [native MCP environment contract](https://learn.chatgpt.com/docs/extend/mcp).
 
-The native ID maps to `codex:<native-id>` in the existing local spool. Stop
+The native ID maps to `codex:<native-id>` in the existing local spool. Stop and PreCompact
 records user/assistant text, command calls/results and text-only MCP results;
 runtime exit
 flushes them. A resumed invocation uses the same Synveda Session. The task
 owner explicitly requests Capture and ends that Session through the public
 API/SDK when finished. No native hook establishes final task completion.
+After compaction, `SessionStart` with `source: "compact"` composes fresh allowed
+context through the same API, using `compact_budget_tokens` from
+`.synveda/config.json` when configured. PostCompact needs no additional hook
+registration. The adapter accepts the vendor's manual/auto trigger vocabulary;
+the live evidence below distinguishes which paths actually ran.
 
 ## Evidence limits
 
@@ -103,14 +109,29 @@ it and a separate application Session reused allowed Knowledge. The audit chain
 verified through sequence 427. The digest-pinned content-free result is
 `adapters/codex/fixtures/keycloak-qualification.json`.
 
-The adapter translates captured startup/resume, Stop/exit, command results and
-text-only MCP results. Unknown output/status shapes are held. Native exit gets
+The adapter translates captured startup/resume/compact, PreCompact, Stop/exit,
+command results and text-only MCP results. Unknown output/status shapes are held. Native exit gets
 one two-second deadline for credentials and delivery below the observed
-three-second host cap. Startup/resume and persisted tool results passed live;
-outage/retry is still deterministic replay evidence only.
+three-second host cap.
 
-Compaction/reinjection, native outage/recovery, non-text MCP results,
-installation packaging and other versions/platforms remain unqualified. Reads
+The follow-up `fixtures/recovery-qualification.json` under `adapters/codex`
+records native outage/recovery and manual compaction on Session
+`01a09702-10aa-79b2-ae1a-fca231deb5af`. With only the owned gateway paused,
+Codex completed a turn and retained five pending events. Resume delivered all
+five once. The manual compact-start hook initially returned no context; after
+the filter correction it returned allowed context and the same Session ID.
+Both SDKs then completed their workflows and Codex resumed again. All 25 unique
+events persisted, Capture produced 23 candidates, explicit end and cross-session
+reuse passed, and the audit chain verified through sequence 655, including
+Session open/end in the Session-filtered history.
+
+An `exec resume` probe using `model_auto_compact_token_limit=1000` completed a
+normal turn but emitted no compaction hooks. It does not qualify automatic
+compaction. The setting is documented in the
+[OpenAI configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference);
+its observed behaviour on this invocation is the limit of the evidence.
+Automatic compaction/reinjection, live revoke/re-authorisation, non-text MCP
+results, installation packaging and other versions/platforms remain unqualified. Reads
 over 8 MiB/20,000 records are held; unfinished turns can be lost if no hook runs
 before host death. Skill file reading is observed, but automatic activation is
 not claimed. The audit `session_id` filter now matches both delivery identities

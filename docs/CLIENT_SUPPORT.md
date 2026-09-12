@@ -9,7 +9,7 @@ A connection recipe is not a support claim. `captured` means authentic frames re
 | Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. |
 | Cursor | `experimental` | none | Cursor Hooks v1 plus MCP | No Cursor executable or authenticated client was available on 2026-08-25. |
 | Visual Studio Code | `configured` | none | VS Code agent hooks Preview plus MCP | The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive. |
-| Codex CLI | `captured` | 0.152.0 | MCP and minimal native hook translation over the existing Session runtime; live lifecycle unverified | Native Keycloak context, approved Skill read, MCP recall, resumed task, SDK handoff, Capture/end and audit passed; complete lifecycle qualification remains open. |
+| Codex CLI | `captured` | 0.152.0 | MCP and native hook translation over the existing Session runtime; outage/recovery and manual compaction exercised | Native Keycloak context, approved Skill read, MCP recall, outage/recovery, manual compaction, SDK handoff, Capture/end and audit pass; automatic compaction and complete qualification remain open. |
 | Claude Desktop | `captured` | 1.25927.0 | MCP tool calls only | Authentic discovery and tool-call frames are replayed, but MCP alone does not prove session capture or end semantics. |
 | Zed | `captured` | 1.13.2 | MCP tool calls only | Authentic non-Anthropic tool frames are replayed, but no session lifecycle/capture contract is available. |
 | Windsurf | `configured` | none | MCP configuration only | Documented config shape only; no authentic exchange or lifecycle run is claimed. |
@@ -111,29 +111,32 @@ Authentic fixtures:
 - `adapters/codex/fixtures/transcript.jsonl` — captured-client-transcript, SHA-256 `57d88963968808bba39b344115604df9e49fd4e21355bef65bc797401dbf9915`
 - `adapters/codex/fixtures/transcript-mcp.jsonl` — captured-client-transcript, SHA-256 `aa69cffbeec03a5a458388772837b2e28b0ab118393ab0407c939f9771508262`
 - `adapters/codex/fixtures/keycloak-qualification.json` — captured-live-client-result, SHA-256 `9b7a2322b6b83f18c8f1904f8af39db15996bfec1c293d393e8c389974573c3b`
+- `adapters/codex/fixtures/compaction.json` — captured-client-hooks, SHA-256 `bf179cf50f92137645803a6760a168d5a390f297bbda6c7ec91e5c90f248f902`
+- `adapters/codex/fixtures/transcript-compaction.jsonl` — captured-client-transcript, SHA-256 `6df542215f9b7e269adef11e8151747346d59d603631ad9785ec33b46127454f`
+- `adapters/codex/fixtures/recovery-qualification.json` — captured-live-client-result, SHA-256 `6712dd6c475d0e323838d4130924bf1d7e57f013d4747d13b8f07b0906f22003`
 
 Conformance:
 
-- `session_creation`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
-- `event_delivery`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
-- `context_request_delivery`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
-- `capture`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
-- `session_end`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
-- `retry_idempotency`: not_run — `adapters/codex/src/hook.test.mts`, `adapters/codex/fixtures/keycloak-qualification.json`
+- `session_creation`: passed — `adapters/codex/fixtures/recovery-qualification.json`
+- `event_delivery`: passed — `adapters/codex/fixtures/recovery-qualification.json`
+- `context_request_delivery`: passed — `adapters/codex/fixtures/recovery-qualification.json`
+- `capture`: passed — `adapters/codex/fixtures/recovery-qualification.json`
+- `session_end`: passed — `adapters/codex/fixtures/recovery-qualification.json`
+- `retry_idempotency`: passed — `adapters/codex/fixtures/recovery-qualification.json`, `adapters/codex/src/hook.test.mts`
 - `skill_advertisement_activation`: not_applicable — `adapters/codex/fixtures/keycloak-qualification.json`, `adapters/codex/README.md`
-- `tool_configuration`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
-- `cross_session_knowledge_reuse`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
-- `persisted_audited_outcomes`: passed — `adapters/codex/fixtures/keycloak-qualification.json`
+- `tool_configuration`: passed — `adapters/codex/fixtures/recovery-qualification.json`
+- `cross_session_knowledge_reuse`: passed — `adapters/codex/fixtures/recovery-qualification.json`
+- `persisted_audited_outcomes`: passed — `adapters/codex/fixtures/recovery-qualification.json`
 
 Known limits:
 
-- Native Keycloak context, approved Skill read, MCP recall, resumed task, SDK handoff, Capture/end and audit passed; complete lifecycle qualification remains open.
+- Native Keycloak context, approved Skill read, MCP recall, outage/recovery, manual compaction, SDK handoff, Capture/end and audit pass; automatic compaction and complete qualification remain open.
 - Use native Codex MCP configuration; Synveda does not write its TOML file.
 - SessionEnd reason=other is followed by resume of the same Codex session; it cannot automatically close a Synveda task. Explicit application ownership remains required.
 - Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version.
 - Native hook capture requires normal project/hook trust loading. --ignore-user-config did not emit hooks in the probe; CLI 0.152.0 was exercised with GPT-5.5 at low reasoning effort.
-- Native startup/resume and text-only MCP events were persisted through the public Docker proxy with both SDKs on one Session. Outage/retry is deterministic replay only; runtime exit stays below the native three-second cap.
-- Compaction, non-text MCP results and native outage/recovery are unqualified. The native reader holds transcripts over 8 MiB/20,000 records; a host killed before any delivery hook can lose the unfinished turn.
+- Native retry delivered all five outage events once on the same task. Manual compaction now persists and refreshes context; runtime exit stays below the native three-second cap.
+- An exec-resume probe with model_auto_compact_token_limit=1000 emitted no compaction hooks: automatic compaction remains unverified. Live revoke/re-authorisation, non-text MCP results and installation packaging are unqualified. The reader holds transcripts over 8 MiB/20,000 records; host death before a hook can lose an unfinished turn.
 
 ### Claude Desktop — `captured`
 
