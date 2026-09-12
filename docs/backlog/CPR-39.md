@@ -82,3 +82,21 @@ earlier captured receipt remains unchanged. Next: qualify native outage/
 recovery and compaction/reinjection from authentic frames. Non-text MCP results
 and installation packaging remain explicit limits. Preserve the conformance gate;
 Copilot CLI and Pi executables were unavailable, and VS Code is not a substitute.
+
+**Continuation checkpoint (2026-09-12, source `b4f4856`)**
+
+Retained-data canonical Compose smoke, all six Codex adapter tests and eight
+conformance/fixture checks pass. No native outage or compaction run started:
+automatic execution approval rejected sending the isolated fixture's synthetic
+approved Skill, retrieved context and test transcript to OpenAI GPT-5.5 without
+specific owner consent. That approval is pending; credentials remain local.
+This is an execution-approval blocker, not a failed Synveda lifecycle test.
+
+After approval, start a new synthetic native task with the existing trusted
+hooks and ordinary Keycloak profile. Pause only the owned gateway during one
+resumed turn, restore it even if the probe fails, then prove durable retry and
+unique persisted events on the same Synveda Session. Capture authentic native
+compaction frames before changing the Codex event filter; reuse the existing
+PreCompact persistence and SessionStart context composition. The filter
+currently accepts startup/resume, Stop and runtime exit only. Do not promote
+support or substitute authored frames for the blocked live evidence.

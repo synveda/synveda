@@ -27,9 +27,14 @@ The Session audit filter now includes lifecycle and delivery identities; 42
 focused exact-role DB tests and live Keycloak public-proxy verification pass.
 The saved audit prefix is unchanged, open/end rows are returned across pages,
 and workspace denial still holds.
-Next: qualify native outage/recovery and compaction. SDK release decisions and
-a second fully verified lifecycle remain open. Codex retains `captured` with
-criterion-level partial live evidence in the registry.
+Next: qualify native outage/recovery and compaction. At `b4f4856`, retained-data
+Compose smoke, all six Codex adapter tests and eight conformance checks pass.
+The next native run is blocked before execution by automatic approval review:
+specific owner consent is pending to send the synthetic Skill, context and test
+transcript to OpenAI GPT-5.5. Resume the live run after that approval; the exact
+next steps are in [CPR-39](CPR-39.md). SDK release decisions and a second fully
+verified lifecycle remain open. Codex retains `captured` with criterion-level
+partial live evidence in the registry.
 
 ## Phase 0 — Foundation (wk 1)
 

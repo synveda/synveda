@@ -187,6 +187,22 @@ Full workspace CI/database gates and full fresh-project Compose acceptance
 were not repeated for this correction. The earlier dated client qualification
 receipt remains unchanged; the native client qualification limits still apply.
 
+## Native qualification checkpoint (2026-09-12)
+
+Starting from `b4f4856f31ff8be869d3a2a06960b76dd6e3ee53`, the retained-data
+canonical Compose smoke and eight conformance/fixture checks pass. All six
+Codex adapter tests pass with no skipped cases, using the installed TypeScript
+compiler and Node test runner. The initial pnpm launcher stalled before tests
+started and was interrupted; it is not counted as a successful invocation.
+
+The next native outage/recovery and compaction run did not start. Automatic
+approval review rejected the native client's transmission of the synthetic
+Skill, retrieved context and test transcript to OpenAI GPT-5.5 pending specific
+owner consent. Credentials stay local. The approval request is pending and
+the exact resume procedure is in [CPR-39](backlog/CPR-39.md). There is no new
+live fixture, adapter change or support promotion. Full CI/database and fresh
+Compose acceptance were not repeated at this checkpoint.
+
 ## Remaining actions
 
 1. Complete native Codex outage/recovery and compaction/reinjection qualification
