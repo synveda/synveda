@@ -223,6 +223,27 @@ supported-host/reference repetition below. This is one-host local evidence,
 not Docker Desktop/Linux, reference HTTPS, recovery, upgrade, Apalis,
 installed-release or production evidence.
 
+### Current deterministic gate blocker (2026-09-12)
+
+During OPS-8/CPR-39 archive validation from `d17bd4d`, `make check-deploy`
+stalled in `scripts/compose-lifecycle.test.mjs` at `interrupted build retains
+its exact lock and removes private Buildx state`, after the preceding timeout
+case passed. This occurred both inside and outside the restricted tool sandbox
+on macOS arm64 Node 24.18.0. Both full runs were terminated and are not passes.
+The interruption case alone passed in 2.6 seconds; selecting it with the preceding
+timeout case passed both in 6.0 seconds. No lifecycle implementation/test or
+live Compose project was changed by that packaging batch.
+
+Next action: reproduce the full-suite interaction with bounded test deadlines,
+isolate the preceding lifecycle cases, and inspect child/pipe/signal cleanup
+before changing the existing teardown contract. Keep the full gate blocked until
+an unchanged invocation finishes; do not substitute a filtered pass. The focused
+probe is:
+
+```sh
+node --test --test-name-pattern='^(timed-out|interrupted) build retains its exact lock and removes private Buildx state$' --test-timeout=30000 scripts/compose-lifecycle.test.mjs
+```
+
 ### Remaining live acceptance
 
 1. Repeat clean development acceptance on Linux and Docker Desktop, and run

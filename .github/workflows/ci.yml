@@ -290,6 +290,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
+      - run: make plugin-package-check
       # The npm counterpart to cargo-deny; it reads the resolved install.
       - run: node scripts/check-npm-licences.mjs
       # The adapter suites (ADPT-1) and the console's (CNSL-1); packages

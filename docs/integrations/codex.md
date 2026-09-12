@@ -45,6 +45,33 @@ unbound shared server; the caller must then supply a Synveda Session ID.
 
 ## Hook adapter
 
+The release archive now carries the same compiled adapter at
+`$SYNVEDA_HOME/plugin/codex/dist/hook.mjs` (by default,
+`~/.synveda/plugin/codex/dist/hook.mjs`). Use Node 22+ and keep the whole
+`plugin/codex/` directory: its private `node_modules` contains the existing
+shared Session runtime. No compiler, checkout or npm install is needed to
+execute that artifact. The installer prints its path and replaces it on
+upgrade; it does not configure Codex. Use that absolute hook path in the
+trusted-hook configuration below, and `synveda login` for ordinary credentials.
+Keep MCP/task ownership exactly as documented below.
+
+To build and validate the archive locally:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @synveda/codex-adapter... build
+make plugin-package-check
+scripts/package-plugin.sh 0.2.0 /path/to/output
+```
+
+The check extracts the real archive outside the checkout, checks its local
+dependency resolution and replays the existing eight captured lifecycle/reader
+tests through those bytes. It passed on Linux arm64 Node 22.23.2 in an offline
+Docker container and macOS arm64 Node 24.18.0. This is archive/replay evidence;
+a native session from a published installation remains unqualified. The
+existing installer suite separately proves replacement on upgrade, preserved
+user configuration and refusal of an incomplete runtime before mutation.
+
 The workspace now includes `adapters/codex`. Build with
 `pnpm --filter @synveda/codex-adapter... build` after the normal frozen-lockfile
 install. Sign in with `synveda login` and select the target through
@@ -135,8 +162,8 @@ An unchanged Python client and bearer saw deny/allow/revoke/re-authorise/deny
 on an existing synthetic foreign-workspace Session. Only new disposable grants
 were removed; grant and denial audit events correlate to response trace IDs.
 
-Non-text MCP results, installation packaging and other versions/platforms
-remain unqualified. Reads
+Non-text MCP results, native execution from a published installation and other
+client versions/platforms remain unqualified. Reads
 over 8 MiB/20,000 records are held; unfinished turns can be lost if no hook runs
 before host death. Skill file reading is observed, but automatic activation is
 not claimed. The audit `session_id` filter now matches both delivery identities

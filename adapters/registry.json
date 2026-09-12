@@ -155,7 +155,8 @@
         ]
       },
       "limitations": [
-        "Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, packaged installation and other versions/platforms remain unqualified.",
+        "Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, native execution from a published installation and other client versions/platforms remain unqualified.",
+        "The release archive includes the compiled hook and its existing shared runtime. All eight captured tests pass from that archive on Node 22/Linux arm64 and Node 24/macOS arm64; this is archive replay, not a native-client installation run.",
         "Use native Codex MCP configuration and normal trusted-hook setup; Synveda does not write its TOML file.",
         "SessionEnd reason=other is followed by resume of the same Codex session; it cannot automatically close a Synveda task. Explicit application ownership remains required.",
         "Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version. File reading is observed; automatic activation is not claimed.",

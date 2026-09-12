@@ -965,8 +965,9 @@ byte-for-byte. No shell removal command deletes editor or AI-client state.
 
 ## Install a release artifact
 
-The release workflow produces native binaries, the console, the Claude plugin,
-the Helm chart and `synveda-reference-<version>.tar.gz`. The reference archive
+The release workflow produces native binaries, the console, a client archive
+containing the Claude marketplace and Codex runtime, the Helm chart and
+`synveda-reference-<version>.tar.gz`. The reference archive
 contains the HTTPS-only canonical Compose runtime and `environment.json`, which
 binds its source SHA and image digests. No tagged candidate has yet completed a
 registry-backed install, so there is no current public installation command.
@@ -992,11 +993,17 @@ certificates and supported external-dependency inputs.
 | `synveda` | the CLI, on your `PATH` |
 | `~/.synveda/bin/{synveda-gateway,synveda-worker}` | direct-binary artifacts; the reference runs their image-contained commands |
 | `~/.synveda/console/` | the admin console bundle |
-| `~/.synveda/plugin/` | the Claude Code marketplace, installed into no client |
+| `~/.synveda/plugin/` | the Claude Code marketplace and Codex hook runtime, configured in no client |
 | `~/.synveda/reference/releases/<version>-<source-sha>/` | immutable digest-bound Docker reference |
 | `~/.synveda/reference/current` | validated symlink to the selected immutable release |
 | `~/.synveda/state/synveda-reference/` | mode-0700 deployment inputs, including keys and issuer state; preserved across upgrades |
 | `~/.synveda/backups/{database,secrets}/synveda-reference/` | separate recovery roots; preserved across upgrades |
+
+For Codex, use Node 22+ with the complete
+`~/.synveda/plugin/codex/` tree and point normal trusted hooks at its
+`dist/hook.mjs`. The installer prints the exact path and source-bound setup
+guide. See [Codex setup and evidence](integrations/codex.md). Local archive
+replay is tested; a published installation/native-client run remains open.
 
 `SYNVEDA_HOME` moves all of it; `SYNVEDA_BIN` moves the CLI.
 

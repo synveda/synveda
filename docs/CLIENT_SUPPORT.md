@@ -9,7 +9,7 @@ A connection recipe is not a support claim. `captured` means authentic frames re
 | Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. |
 | Cursor | `experimental` | none | Cursor Hooks v1 plus MCP | No Cursor executable or authenticated client was available on 2026-08-25. |
 | Visual Studio Code | `configured` | none | VS Code agent hooks Preview plus MCP | The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive. |
-| Codex CLI | `verified` | 0.152.0 | Native hooks and MCP over the existing Session runtime; manual/automatic compaction and outage/recovery verified | Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, packaged installation and other versions/platforms remain unqualified. |
+| Codex CLI | `verified` | 0.152.0 | Native hooks and MCP over the existing Session runtime; manual/automatic compaction and outage/recovery verified | Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, native execution from a published installation and other client versions/platforms remain unqualified. |
 | Claude Desktop | `captured` | 1.25927.0 | MCP tool calls only | Authentic discovery and tool-call frames are replayed, but MCP alone does not prove session capture or end semantics. |
 | Zed | `captured` | 1.13.2 | MCP tool calls only | Authentic non-Anthropic tool frames are replayed, but no session lifecycle/capture contract is available. |
 | Windsurf | `configured` | none | MCP configuration only | Documented config shape only; no authentic exchange or lifecycle run is claimed. |
@@ -133,7 +133,8 @@ Conformance:
 
 Known limits:
 
-- Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, packaged installation and other versions/platforms remain unqualified.
+- Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, native execution from a published installation and other client versions/platforms remain unqualified.
+- The release archive includes the compiled hook and its existing shared runtime. All eight captured tests pass from that archive on Node 22/Linux arm64 and Node 24/macOS arm64; this is archive replay, not a native-client installation run.
 - Use native Codex MCP configuration and normal trusted-hook setup; Synveda does not write its TOML file.
 - SessionEnd reason=other is followed by resume of the same Codex session; it cannot automatically close a Synveda task. Explicit application ownership remains required.
 - Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version. File reading is observed; automatic activation is not claimed.

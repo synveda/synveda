@@ -38,7 +38,12 @@ command results with native exit status and text-only MCP results with native
 completion/error status are mapped. MCP namespaces are preserved. Reasoning
 is excluded. Non-text tool results remain unqualified. Manual and automatic
 compaction passed live. Host death before a recording hook can lose the
-unfinished turn. Packaged installation and other versions/platforms are unqualified.
+unfinished turn. The release archive now includes this adapter and its private
+shared runtime under `plugin/codex/`; `make plugin-package-check` passes all
+eight captured tests from the extracted archive on Node 22/Linux arm64 and
+Node 24/macOS arm64. Native execution from a published installation and other
+client versions/platforms remain unqualified. See the integration guide above
+for the installed path and normal trusted-hook setup.
 
 ## Fixture provenance
 

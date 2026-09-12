@@ -383,6 +383,12 @@ check-release-parity:
 	node --test scripts/check-release-parity.test.mjs scripts/install.test.mjs
 	node scripts/check-release-parity.mjs
 
+# OPS-8/CPR-39: both adapters must already be built from the frozen lockfile.
+# Replay the captured lifecycle through the actual, extracted release archive.
+.PHONY: plugin-package-check
+plugin-package-check:
+	node scripts/check-plugin-package.mjs
+
 # The Helm chart renders in both shapes CI covers: the
 # minimum a real install must state, and every optional path at once.
 # Needs helm. The chart's defaults deliberately do not render — five values
@@ -417,4 +423,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check sdk-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check sdk-check ts-build plugin-package-check check-npm-licences ts-test

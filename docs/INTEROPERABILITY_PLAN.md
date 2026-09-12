@@ -108,6 +108,7 @@ implementations were reused. No external MCP execution service was added.
 | P2: Session audit filter omits lifecycle rows | `crates/synveda-gateway/src/audit_query.rs`, `payload_filter`, filters top-level `session_id`; `sessions.rs`, `end` / `session_image`, stores the identity under `session.id`. In the live result, session filter omitted end event 422, while action filter returned it. | Existing `EventFilter`, exact resource/action filtering, immutable audit rows and tenant-scoped search. | Use a typed `EventFilter::session_id` and two exact containment shapes in `synveda_audit::search`, conjoined with the existing filters before pagination. `session_filter_covers_lifecycle_pages_without_crossing_sessions_or_tenants` checks all seven lifecycle/delivery events over four pages, combined filters, foreign/unknown Sessions, tenant AuditRead and an unchanged frozen export. | Fixed; 42 focused exact-role Docker DB tests and retained-data Compose/public-proxy verification pass. |
 | P1: Codex compaction filter | `adapters/codex/src/hook.mts`, `readInput`, rejected PreCompact and compact SessionStart. `adapters/codex/fixtures/compaction.json` captures both native boundaries; compact-start output was empty. Users received no fresh governed context at that boundary. | Existing `turn` local persistence, `sessionStart`, compact token budget and durable Session identity. | Accept PreCompact with the documented trigger vocabulary and SessionStart `source: "compact"`. Captured replay proves durable writes, budgeted context and no duplicates; live manual and automatic runs prove context reinjection and preserved events. | Fixed; eight adapter tests and native Keycloak manual/automatic compaction pass. No further product change was needed. |
 | P2: clean npm archive has no entry point | At `265eb6b`, `sdks/typescript/package.json` exported `dist/client.mjs` but had no pack build hook. Clean `npm pack` contained only `package.json`; installing it succeeded but importing `@synveda/sdk` raised `ERR_MODULE_NOT_FOUND`. | Existing TypeScript compiler/build script, npm lifecycle, generated API and nine wire tests. | Add `prepack`, include runtime/type outputs, then run the existing suite and consumer type checks against the installed archive using `scripts/check-sdk-package.mjs`. | Fixed; Node 22/24 installed-package tests pass. Python packaging also passes through its existing Hatchling backend; no Python runtime fix was needed. |
+| P2: Codex runtime absent from release archive | At `d17bd4d`, `scripts/package-plugin.sh` produced 106 entries and no Codex runtime; the release workflow built only Claude. The verified Codex hook required a workspace checkout/compiler. | Existing Codex hook/reader, private shared Session runtime, Node package resolution and the current archive/installer. | Package the compiled runtime under `plugin/codex/`, build both adapters in release CI and reuse the eight captured tests through `scripts/check-plugin-package.mjs`. Installer tests prove upgrade replacement, preserved user configuration and pre-mutation refusal of an incomplete bundle. | Local archive replay passes on Node 22/24. Native execution from a published installation remains unqualified. |
 
 | Area | Classification after this slice | Evidence / boundary |
 | --- | --- | --- |
@@ -329,15 +330,62 @@ that remote Linux amd64 job was not run here. Full CI, fresh database, live
 Keycloak and Compose lifecycle suites were not rerun for packaging-only changes;
 their prior evidence remains dated above. No Rust changed in this batch.
 
+### OPS-8/CPR-39 harness archive checkpoint (2026-09-12)
+
+Local harness packaging started at
+`d17bd4d3e37bc65d2e416e43e8b374d3306d8b43`. The existing release archive contains
+the unchanged Claude marketplace and now adds 17 Codex runtime/manifest files,
+including its existing shared Session runtime. The runtime resolves inside the
+extracted archive with no checkout dependencies, compiler or package install.
+ADR-0065 amendment 9 records the packaging boundary.
+
+`make plugin-package-check` passed all eight captured lifecycle/reader tests on
+macOS arm64 Node 24.18.0 and pinned Docker Linux arm64 Node 22.23.2. Both had
+zero skips; Docker mounted source read-only and ran with networking disabled.
+The tests exercise task identity, context, local persistence, outage/recovery,
+manual/automatic compaction, MCP text results and the bounded native-exit budget.
+They are captured replay against a synthetic HTTP fixture, not a new native
+Codex or live Keycloak run. Production module bytes are compared with the built
+adapter before test helpers are added outside the archive. An initial staging
+error omitted a dependency of the transcript test helper; both corrected runs
+passed. The failed attempts were not counted as passes.
+
+The existing installer tests now include Codex bytes in initial/repeated installs
+and upgrades, preserved user-owned Codex configuration, and pre-mutation refusal
+of a checksum-valid archive missing the shared runtime entry point. CI and the
+release job invoke archive replay after building both adapters. No dependency,
+protocol, domain API or Rust implementation was added. Publication, native
+execution from an installed release, broader client/platform versions and the
+remote CI/release jobs remain unverified in this batch.
+
+Validation: all 16 release-parity/installer tests, ten adapter-conformance
+tests, formatting, dependency direction, generated types, backlog, ADR status,
+docs and shell/JavaScript/YAML checks pass. The full `make check-deploy` did
+not finish: both runs stalled at the existing interrupted-build lifecycle test
+and were terminated. The case alone and its timeout/interruption pair pass;
+this does not substitute for a passing full gate. The exact blocker and next
+action are in [CPR-45](backlog/CPR-45.md#current-deterministic-gate-blocker-2026-09-12).
+No full CI/database or live Keycloak/Compose lifecycle was rerun for this batch.
+The remaining deployment convergence/uninstall suite passed 48 checks in the
+restricted invocation; its one loopback-listener case was blocked by `EPERM`
+and then passed with that permission. The final static convergence check passed.
+Those results leave the separate full lifecycle-gate stall unresolved.
+
 ## Remaining actions
 
-1. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
+Resolve the CPR-45 full-suite interaction above before the next client batch.
+
+1. Qualify the installed Copilot CLI 1.0.83 from its actual contract and authentic
+   frames. `copilot --version` confirmed it during the archive batch; no Copilot
+   authentication, protocol or lifecycle test has run yet and no registry entry
+   is inferred. Pi was absent from PATH. Reuse the current public API and MCP
+   implementation; add translation only when authentic evidence requires it.
+2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
    Local archive build/install/import is verified; packages remain unpublished.
-2. Qualify further clients only from named installed versions and authentic
-   evidence. Copilot CLI and Pi remain separate candidates; generic MCP/Skills
-   compatibility does not qualify them. Non-text Codex results and installation
-   packaging for the harness likewise require their own evidence.
+3. Native Codex execution from a published installation, non-text results and
+   other client versions/platforms require their own evidence. Generic
+   MCP/Skills compatibility and archive replay do not qualify those workflows.
 
 These continue the original client batches; no new orchestration, plugin
 system or protocol implementation is proposed.

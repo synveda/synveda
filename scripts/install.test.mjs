@@ -67,6 +67,14 @@ function buildAssets(scratch, releaseVersion = version, releaseSourceSha = sourc
   archive(consoleStage, join(assets, `synveda-console-${releaseVersion}.tar.gz`), ["console"]);
   mkdirSync(join(pluginStage, "plugin"), { recursive: true });
   writeFileSync(join(pluginStage, "plugin/manifest.json"), "{}\n");
+  mkdirSync(join(pluginStage, "plugin/codex/dist"), { recursive: true });
+  writeFileSync(join(pluginStage, "plugin/codex/dist/hook.mjs"), `// fixture ${releaseVersion}\n`);
+  writeFileSync(join(pluginStage, "plugin/codex/dist/transcript.mjs"), "// fixture\n");
+  writeFileSync(join(pluginStage, "plugin/codex/package.json"), "{}\n");
+  const shared = join(pluginStage, "plugin/codex/node_modules/@synveda/claude-code-adapter");
+  mkdirSync(join(shared, "dist"), { recursive: true });
+  writeFileSync(join(shared, "package.json"), "{}\n");
+  writeFileSync(join(shared, "dist/session-runtime.mjs"), "// fixture\n");
   archive(pluginStage, join(assets, `synveda-plugin-${releaseVersion}.tar.gz`), ["plugin"]);
   execFileSync(
     "bash",
@@ -135,6 +143,13 @@ test("installer converges the canonical reference and preserves mutable state", 
   assert.equal(existsSync(join(current, "deploy/compose/rauthy")), false);
   assert.equal(existsSync(join(current, "deploy/compose/compose.dev.yaml")), false);
   assert.equal(statSync(join(fixture.home, "state")).mode & 0o777, 0o700);
+  const codexHook = join(fixture.home, "plugin/codex/dist/hook.mjs");
+  assert.ok(first.stdout.includes(codexHook));
+  assert.equal(readFileSync(codexHook, "utf8"), `// fixture ${version}\n`);
+  const clientConfig = join(fixture.env.HOME, ".codex/config.toml");
+  assert.equal(existsSync(clientConfig), false, "install must not configure Codex");
+  mkdirSync(join(fixture.env.HOME, ".codex"), { recursive: true });
+  writeFileSync(clientConfig, "# user-owned configuration\n");
 
   const sentinel = join(fixture.home, "state/synveda-reference/operator-sentinel");
   writeFileSync(sentinel, "preserve\n");
@@ -144,6 +159,8 @@ test("installer converges the canonical reference and preserves mutable state", 
     env: fixture.env,
   });
   assert.equal(second.status, 0, second.stderr);
+  assert.equal(readFileSync(codexHook, "utf8"), `// fixture ${version}\n`);
+  assert.equal(readFileSync(clientConfig, "utf8"), "# user-owned configuration\n");
   assert.equal(readFileSync(sentinel, "utf8"), "preserve\n");
   assert.equal(readFileSync(join(fixture.bin, "synveda"), "utf8").startsWith("#!/bin/sh"), true);
 
@@ -162,6 +179,8 @@ test("installer converges the canonical reference and preserves mutable state", 
     },
   });
   assert.equal(upgrade.status, 0, upgrade.stderr);
+  assert.equal(readFileSync(codexHook, "utf8"), `// fixture ${nextVersion}\n`);
+  assert.equal(readFileSync(clientConfig, "utf8"), "# user-owned configuration\n");
   assert.equal(
     readlinkSync(join(fixture.home, "reference/current")),
     `releases/${nextVersion}-${nextSourceSha}`,
@@ -260,6 +279,25 @@ test("installer refuses symlinks in checksum-valid release archives before mutat
   });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /release archives must not contain symbolic links/);
+  assert.equal(existsSync(fixture.home), false);
+  assert.equal(existsSync(fixture.bin), false);
+});
+
+test("installer refuses an incomplete Codex runtime before mutation", (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-install-codex-missing-"));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const assets = buildAssets(scratch);
+  const fixture = installEnv(scratch, assets);
+  const stage = join(scratch, "plugin-stage");
+  rmSync(join(stage, "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/session-runtime.mjs"));
+  archive(stage, join(assets, `synveda-plugin-${version}.tar.gz`), ["plugin"]);
+  writeChecksums(assets, version);
+
+  const result = spawnSync("/bin/sh", [installer], {
+    cwd: root, encoding: "utf8", env: fixture.env,
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Codex .*session-runtime\.mjs was missing/);
   assert.equal(existsSync(fixture.home), false);
   assert.equal(existsSync(fixture.bin), false);
 });

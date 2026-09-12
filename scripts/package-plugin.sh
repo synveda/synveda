@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Assembles the Claude Code plugin bundle (OPS-8, ADR-0065 amendment 2) —
-# the marketplace `synveda plugin install` points Claude Code at.
+# Assembles the Claude marketplace and Codex hook runtime (OPS-8,
+# ADR-0065 amendments 2 and 9). Client configuration is a separate step.
 #
 # Usage: scripts/package-plugin.sh <version> <output-dir>
 #
@@ -11,6 +11,7 @@
 #   plugin/synveda/.mcp.json                  the MCP server, auto-discovered
 #   plugin/synveda/hooks/hooks.json           the four seams, auto-discovered
 #   plugin/synveda/dist/                      the prebuilt, dependency-free JS
+#   plugin/codex/                            the private, self-contained hook runtime
 #
 # A **marketplace** rather than a bare plugin directory because that is the
 # unit Claude Code installs: `claude plugin marketplace add <path>` then
@@ -20,7 +21,7 @@
 # not a location Claude Code reads.
 #
 # `dist/` is gitignored, so the caller builds it first:
-#   pnpm --filter @synveda/claude-code-adapter build
+#   pnpm --filter @synveda/codex-adapter... build
 #
 # It writes nothing outside <output-dir>.
 set -euo pipefail
@@ -46,6 +47,22 @@ adapter="adapters/claude-code"
   exit 1
 }
 
+# Keep the existing shared runtime's artifact closure explicit. Extracted
+# lifecycle tests catch missing modules; no workspace symlink reaches users.
+shared_modules="client config credentials deliver events install-id log paths session-runtime session-start spool transcript turn"
+for module in $shared_modules; do
+  [ -f "$adapter/dist/$module.mjs" ] && [ ! -L "$adapter/dist/$module.mjs" ] || {
+    echo "package-plugin: shared runtime module $module is not built as a regular file" >&2
+    exit 1
+  }
+done
+for module in hook transcript; do
+  [ -f "adapters/codex/dist/$module.mjs" ] && [ ! -L "adapters/codex/dist/$module.mjs" ] || {
+    echo "package-plugin: build both adapters with pnpm --filter @synveda/codex-adapter... build" >&2
+    exit 1
+  }
+done
+
 stage="$outdir/plugin"
 rm -rf "$stage"
 mkdir -p "$stage/.claude-plugin" "$stage/synveda"
@@ -55,6 +72,27 @@ cp -R "$adapter/.claude-plugin" "$stage/synveda/.claude-plugin"
 cp "$adapter/.mcp.json" "$stage/synveda/.mcp.json"
 cp -R "$adapter/hooks" "$stage/synveda/hooks"
 cp -R "$adapter/dist" "$stage/synveda/dist"
+
+codex="$stage/codex"
+shared="$codex/node_modules/@synveda/claude-code-adapter"
+mkdir -p "$codex/dist" "$shared/dist"
+for module in hook transcript; do
+  cp "adapters/codex/dist/$module.mjs" "$codex/dist/$module.mjs"
+done
+for module in $shared_modules; do
+  cp "$adapter/dist/$module.mjs" "$shared/dist/$module.mjs"
+done
+node -e '
+  const fs = require("node:fs");
+  const [version, codex, shared] = process.argv.slice(1);
+  for (const [source, destination] of [["adapters/codex", codex], ["adapters/claude-code", shared]]) {
+    const sourceManifest = JSON.parse(fs.readFileSync(`${source}/package.json`, "utf8"));
+    const manifest = { name: sourceManifest.name, version, private: true, type: sourceManifest.type };
+    if (sourceManifest.exports) manifest.exports = sourceManifest.exports;
+    if (sourceManifest.dependencies) manifest.dependencies = { "@synveda/claude-code-adapter": version };
+    fs.writeFileSync(`${destination}/package.json`, JSON.stringify(manifest, null, 2) + "\n");
+  }
+' "$version" "$codex" "$shared"
 
 # The plugin's version is the release's. `synveda plugin install` reports
 # what it installed and `claude plugin list` shows it, so a plugin claiming

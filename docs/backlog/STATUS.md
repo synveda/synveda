@@ -25,10 +25,25 @@ tests per SDK on Docker Linux arm64 Node 22.23.2/Python 3.11.16 and macOS arm64
 Node 24.18.0/Python 3.14.6, with matching clean-build hashes and no skips.
 `make sdk-package-check` also checks exported types and packaged contract
 resources; CI invokes it, but the remote job was not run locally.
-Next: public distribution awaits owner decisions on
+Public distribution awaits owner decisions on
 licence, namespaces, provenance custody and the supported server/runtime window.
-Non-text Codex results, packaged harness installation, other versions/platforms,
-Copilot CLI and Pi still require separate evidence.
+
+OPS-8/CPR-39 now includes the compiled Codex hook and its existing shared
+Session runtime in the current plugin archive. Eight captured tests pass from
+the extracted archive on Node 22/Linux arm64 and Node 24/macOS arm64. The
+installer preserves client configuration, replaces the hook on upgrade and
+refuses an incomplete runtime before mutation. Native execution from a published
+installation, non-text Codex results and other client versions/platforms remain
+unqualified. After resolving the deployment-gate blocker below, qualify the
+now-installed Copilot CLI 1.0.83 using its actual contract and authentic frames;
+it has no registry/support claim yet. Pi is not
+on the current PATH. These are independent of the public-release decisions.
+
+The broader deployment gate is currently blocked by a full-suite stall at the
+existing interrupted-build lifecycle test. Both full runs were terminated;
+the isolated case and timeout/interruption pair pass. Packaging, installer and
+conformance checks pass. [CPR-45](CPR-45.md#current-deterministic-gate-blocker-2026-09-12)
+records the exact reproduction and next action before claiming that gate green.
 
 ## Phase 0 — Foundation (wk 1)
 

@@ -186,7 +186,7 @@ jobs:
           tar -tzf "synveda-console-$version.tar.gz" | sed -n '1,3p'
       - name: The Helm chart
         run: sh scripts/package-chart.sh "${{ needs.version.outputs.version }}" .
-      - name: The Claude Code plugin
+      - name: The Claude Code marketplace and Codex hook runtime
         # A marketplace, not a plugin directory — that is the unit Claude
         # Code installs, and dropping a plugin under `~/.claude/plugins/`
         # (which is what this repository's docs said to do) installs
@@ -194,8 +194,9 @@ jobs:
         # own CLI to install from it.
         run: |
           set -euo pipefail
-          pnpm install --frozen-lockfile --filter @synveda/claude-code-adapter...
-          pnpm --filter @synveda/claude-code-adapter build
+          pnpm install --frozen-lockfile --filter @synveda/codex-adapter...
+          pnpm --filter @synveda/codex-adapter... build
+          make plugin-package-check
           scripts/package-plugin.sh "${{ needs.version.outputs.version }}" .
       - name: The plugin manifest is one Claude Code accepts
         # `claude plugin validate` is the vendor's own check. It is advisory
