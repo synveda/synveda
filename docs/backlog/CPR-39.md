@@ -71,11 +71,14 @@ foreign-workspace denial and correlated content-free audit. Capture completed
 with 12 eligible events and 12 candidates, explicit task-owner end succeeded,
 and another application Session reused approved Knowledge. Audit verification
 passed through sequence 427; lifecycle end event 422 was confirmed separately
-because the existing Session audit filter omits nested lifecycle identities.
+because that build's Session audit filter omitted nested lifecycle identities.
 `adapters/codex/fixtures/keycloak-qualification.json` retains the result and source
 digests; the registry records passed criteria but stays `captured`.
 
-Next: correct that audit filter and qualify native outage/recovery and
-compaction/reinjection from authentic frames. Non-text MCP results and
-installation packaging remain explicit limits. Preserve the conformance gate;
+The shared Session audit filter correction now passes 42 focused exact-role DB
+tests and live Keycloak queries after canonical Compose up/smoke: all 23 saved
+events, including open/end, return across 12 pages with unchanged hashes. The
+earlier captured receipt remains unchanged. Next: qualify native outage/
+recovery and compaction/reinjection from authentic frames. Non-text MCP results
+and installation packaging remain explicit limits. Preserve the conformance gate;
 Copilot CLI and Pi executables were unavailable, and VS Code is not a substitute.

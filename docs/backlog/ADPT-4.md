@@ -70,9 +70,12 @@ focused fresh exact-role DB tests pass. Capture, explicit task-owner end,
 cross-session reuse and the audit chain also passed. The content-free result is
 in `adapters/codex/fixtures/keycloak-qualification.json`.
 
-Next: repair the existing Session audit filter, which omits lifecycle rows under
-`payload.session.id`; the end event itself exists and is returned by action.
-Use the smallest shared query correction and a cross-Session/page-isolation
-regression described in `docs/INTEROPERABILITY_PLAN.md`. Package ownership,
-licence, release provenance and broader runtime/server decisions still require
-resolution before publication.
+CPR-33/ADPT-4 now corrects the Session audit filter through the existing shared
+query. It matches lifecycle snapshots and delivery identities before pagination;
+42 focused exact-role DB tests pass, including combined filters, Session/tenant
+isolation and unchanged canonical hashes. Canonical Compose up/smoke and live
+Keycloak queries returned all 23 saved events, including open/end, across 12
+pages with unchanged prefix hashes and continued workspace denial; see
+`docs/INTEROPERABILITY_PLAN.md`. Package ownership, licence, release
+provenance and broader runtime/server decisions still require resolution before
+publication.

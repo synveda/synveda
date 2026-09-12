@@ -23,8 +23,11 @@ owner ended the Session and cross-session Knowledge reuse passed; the audit
 chain verified through sequence 427. Response trace IDs, Codex exit deadlines
 and text-only MCP result capture now have focused regressions; 20 fresh exact-
 role DB tests, strict gateway Clippy and generated-contract gates pass.
-Next: correct the existing Session audit filter's omission of lifecycle rows,
-then qualify native outage/recovery and compaction. SDK release decisions and
+The Session audit filter now includes lifecycle and delivery identities; 42
+focused exact-role DB tests and live Keycloak public-proxy verification pass.
+The saved audit prefix is unchanged, open/end rows are returned across pages,
+and workspace denial still holds.
+Next: qualify native outage/recovery and compaction. SDK release decisions and
 a second fully verified lifecycle remain open. Codex retains `captured` with
 criterion-level partial live evidence in the registry.
 

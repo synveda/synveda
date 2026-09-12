@@ -104,7 +104,7 @@ implementations were reused. No external MCP execution service was added.
 | P1: response trace correlation | `deploy/compose/configs/caddy/Caddyfile`, `synveda_upstream`, strips incoming tracing headers; both SDK clients returned their sent trace ID. The real public-proxy workflow failed its audit correlation assertion. | Existing OpenTelemetry request span, Axum middleware, audit API and bounded SDK response handling. | Return `X-Synveda-Trace-Id` from the actual request span; prefer a valid response ID in SDK success/error results. Existing observability tests assert the exported span matches the header; both SDKs test edge replacement and invalid headers. | Fixed; fresh DB and live public-proxy workflows pass. Proxy sanitisation is unchanged. |
 | P1: native exit budget | `adapters/claude-code/src/turn.mts`, `credentials.mts`, `deliver.mts`; installed Codex 0.152.0 clamps SessionEnd to three seconds. Credential work plus an in-flight append could overrun that cap. | Existing CLI bearer resolution, durable spool and bounded Fetch request. | Share a two-second absolute deadline across Codex credentials/delivery and bound each append by remaining time. A hung CLI and stalled append leave six durable events that are delivered on retry. | Fixed; regression and native exit pass. |
 | P2: native MCP result omission | `adapters/codex/src/transcript.mts`, `translate`, previously accepted only string outputs. Captured MCP output is an array; tool results were omitted while the cursor advanced. | Existing Session event mapper and native `McpToolCall` completion metadata. | Translate captured text-only arrays, preserve namespace and native error status; hold unknown shapes. `transcript-mcp.jsonl` pins real failed/successful calls. | Fixed; replay and persisted native result assertions pass. Non-text results remain unqualified. |
-| P2: Session audit filter omits lifecycle rows | `crates/synveda-gateway/src/audit_query.rs`, `payload_filter`, filters top-level `session_id`; `sessions.rs`, `end` / `session_image`, stores the identity under `session.id`. In the live result, session filter omitted end event 422, while action filter returned it. | Existing `EventFilter`, exact resource/action filtering, immutable audit rows and tenant-scoped search. | Match the existing top-level and nested Session identity shapes in the shared query path. Test one Session's open/context/append/Capture/end across pages, exclusion of another Session, and unchanged chain hashes. | Open; the audit event is present. Exact action/resource queries are the current workaround. |
+| P2: Session audit filter omits lifecycle rows | `crates/synveda-gateway/src/audit_query.rs`, `payload_filter`, filters top-level `session_id`; `sessions.rs`, `end` / `session_image`, stores the identity under `session.id`. In the live result, session filter omitted end event 422, while action filter returned it. | Existing `EventFilter`, exact resource/action filtering, immutable audit rows and tenant-scoped search. | Use a typed `EventFilter::session_id` and two exact containment shapes in `synveda_audit::search`, conjoined with the existing filters before pagination. `session_filter_covers_lifecycle_pages_without_crossing_sessions_or_tenants` checks all seven lifecycle/delivery events over four pages, combined filters, foreign/unknown Sessions, tenant AuditRead and an unchanged frozen export. | Fixed; 42 focused exact-role Docker DB tests and retained-data Compose/public-proxy verification pass. |
 
 | Area | Classification after this slice | Evidence / boundary |
 | --- | --- | --- |
@@ -112,7 +112,7 @@ implementations were reused. No external MCP execution service was added.
 | HTTP contracts and language SDKs | Partial | Public catalogue/OpenAPI/console peer tests pass; the new Python/TS base slice passes. Broader ADPT-4 release coverage is open. |
 | Skills import, validation, approval, export/install | Implemented and tested | Existing public Skill service, CLI and `crates/synveda-gateway/tests/skills.rs`; actual CLI materialisation/revocation now covered. No registry rebuild. |
 | Context, observations and proposals | Implemented and tested | Existing Session/Context/Knowledge routes; Session suite, Claude lifecycle replay and shared SDK acceptance. Pending proposals remain outside Knowledge. |
-| Authentication, policy and audit | Implemented and tested for the prioritised authenticated workflow; audit filtering is partial | Fresh Keycloak browser acceptance and native Codex/both SDKs pass. Workspace denial, pending proposals, public-edge trace correlation and a valid audit chain are asserted. The existing session audit filter omits lifecycle rows; see the gap below. |
+| Authentication, policy and audit | Implemented and tested for the prioritised authenticated workflow | Fresh Keycloak browser acceptance and native Codex/both SDKs pass. Workspace denial, pending proposals, public-edge trace correlation and a valid audit chain are asserted. Session lifecycle and delivery filtering pass the focused exact-role DB regression and live Keycloak public-proxy verification. |
 | Examples, setup and compatibility | Partial | `sdks/README.md`, equivalent runnable examples and `docs/integrations/codex.md`. Claude replay and Codex protocol pass; native lifecycle limits remain explicit. |
 | External MCP servers | Implemented and tested for catalogue/discovery; gateway execution deliberately unsupported | Existing trusted server/version/binding catalogue and bounded discovery: `docs/INSTALL.md` and `crates/synveda-gateway/tests/tools.rs`, now run in the full exact-role database suite. The gateway does not execute imported commands. External server management is not a prerequisite for Synveda serving MCP. |
 
@@ -149,16 +149,52 @@ three database-dependent cases. All three subsequently ran in the fresh exact-
 role suite above. Original retained `acceptance-e2e` data and secrets were not
 reset. No lifecycle contract or policy gate was weakened.
 
+## Session audit-filter correction (2026-09-12)
+
+CPR-33/ADPT-4 starts from `8ef2e722d01a7007a72d00043ad0e805bb5ea2e9` on
+`codex/authenticated-client-interoperability`. ADR-0092 clarifies the two current
+payload shapes before implementation. The correction changes one existing
+SQLx-checked query and its typed selector; it adds no storage model, dependency,
+public operation or authority path.
+
+- All 42 focused exact-role Docker DB tests pass: 17 audit-query, three audit-
+  event and 22 Session API tests. The first attempt failed because the new test
+  omitted the two already-emitted retrieval-stage events from its expected
+  history; the corrected test checks all seven. The rerun used the retained
+  disposable fixture with the same ordinary gateway role. Its two databases,
+  four reserved networks, image tag and private credentials were then removed.
+- All 24 audit unit tests and six OpenAPI tests pass. Strict Clippy for
+  `synveda-audit` and `synveda-gateway`, formatting and contract/document gates
+  pass. OpenAPI and the console client remain current without regeneration.
+- `SYNVEDA_DB_TEST_TASK=sqlx-prepare bash scripts/db-test.sh` regenerated and
+  checked metadata against a fresh Docker database. Only query hash `610bda2`
+  changes to `5f528cf`; result columns/nullability are identical, with two
+  bounded JSON parameters added. No schema or unrelated metadata changed.
+- Ordinary Keycloak refresh was refused; both synthetic profiles completed
+  browser/CLI PKCE login again using the existing browser-acceptance code and
+  image. The pre-rebuild public API reproduced missing open/end events 359 and
+  422. After canonical `make compose-up` and `make compose-smoke`, the public
+  API returned all 23 saved Session audit events across 12 pages, including
+  both rows. The exact frozen export through sequence 431 remained unchanged
+  (hash `19bb2a12a53b62730a617958618fbd63a8f6a419d4dc24793de0a661ebba9277`).
+  Combined resource filtering stayed empty for another Session; the workspace-
+  scoped principal still received 403 for AuditRead and foreign-workspace
+  Session access. At 18:47:45 UTC the chain verified through sequence 452
+  (hash `46e849292bcc29bd9ad55527ab469ad6faadefdb3ec22631a9c08680d6c36947`).
+
+No tests were ignored or skipped in the focused successful invocations.
+Full workspace CI/database gates and full fresh-project Compose acceptance
+were not repeated for this correction. The earlier dated client qualification
+receipt remains unchanged; the native client qualification limits still apply.
+
 ## Remaining actions
 
-1. Repair the existing Session audit filter's lifecycle omission with the
-   focused correlation/tenant-isolation acceptance above (CPR-33/ADPT-4).
-2. Complete native Codex outage/recovery and compaction/reinjection qualification
+1. Complete native Codex outage/recovery and compaction/reinjection qualification
    from authentic frames, preserving the captured level until every applicable
    ADR-0098 criterion passes. Non-text results and installation packaging remain
    explicit limits. Copilot CLI and Pi require their own installed versions and
    evidence; generic MCP/Skills compatibility does not qualify them.
-3. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
+2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
 
 These continue the original client batches; no new orchestration, plugin

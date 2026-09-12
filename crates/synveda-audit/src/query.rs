@@ -23,7 +23,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sqlx::PgConnection;
-use synveda_types::{Error, KnowledgeItemId, Result, TenantId};
+use synveda_types::{Error, KnowledgeItemId, Result, SessionId, TenantId};
 
 use crate::chain::StoredEvent;
 use crate::event::{AuditAction, Outcome};
@@ -126,10 +126,13 @@ pub struct EventFilter {
     pub from: Option<DateTime<Utc>>,
     /// Exclusive upper bound on `occurred_at`.
     pub until: Option<DateTime<Utc>>,
+    /// Exact Session identity in delivery/Capture payloads (`session_id`)
+    /// or lifecycle snapshots (`session.id`), conjoined with other filters.
+    pub session_id: Option<SessionId>,
     /// Exact JSON containment predicate over the canonical payload.
     ///
-    /// The gateway constructs this only from validated typed artifact,
-    /// session and context-run identifiers. Keeping the predicate structured
+    /// The gateway constructs this only from validated typed artifact and
+    /// context-run identifiers. Keeping the predicate structured
     /// means no query interprets display strings or searches arbitrary JSON
     /// text (CPR-33, ADR-0092 decision 1).
     pub payload_contains: Option<Value>,
@@ -188,6 +191,10 @@ pub async fn search(
             .map(|action| action.as_str().to_owned())
             .collect()
     });
+    // Both shapes are recorded by current producers. Match them before the
+    // cursor/limit without rewriting canonical rows or parsing resources.
+    let session = filter.session_id.map(|id| json!({"session_id": id}));
+    let lifecycle = filter.session_id.map(|id| json!({"session": {"id": id}}));
 
     // Nullable predicates keep every filter combination in one
     // compile-time-checked statement.
@@ -205,8 +212,9 @@ pub async fn search(
              and ($7::timestamptz is null or occurred_at >= $7)
              and ($8::timestamptz is null or occurred_at < $8)
              and ($9::jsonb is null or payload @> $9)
+             and ($10::jsonb is null or payload @> $10 or payload @> $11::jsonb)
            order by seq
-           limit $10"#,
+           limit $12"#,
         tenant.as_uuid(),
         after,
         filter.actor_subject.as_deref(),
@@ -216,6 +224,8 @@ pub async fn search(
         filter.from,
         filter.until,
         filter.payload_contains.as_ref(),
+        session.as_ref(),
+        lifecycle.as_ref(),
         limit,
     )
     .fetch_all(&mut *conn)

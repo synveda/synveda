@@ -113,8 +113,11 @@ Compaction/reinjection, native outage/recovery, non-text MCP results,
 installation packaging and other versions/platforms remain unqualified. Reads
 over 8 MiB/20,000 records are held; unfinished turns can be lost if no hook runs
 before host death. Skill file reading is observed, but automatic activation is
-not claimed. The existing audit `session_id` filter omits lifecycle events under
-nested Session identities; action/resource queries still retrieve them.
+not claimed. The audit `session_id` filter now matches both delivery identities
+and lifecycle snapshots. For a completed history across pages, hold `until`
+fixed: audit reads append their own evidence. The earlier qualification receipt
+retains the original filter failure; the correction and its validation are
+recorded in the [interoperability plan](../INTEROPERABILITY_PLAN.md).
 CPR-39 remains open until all applicable ADR-0098 criteria pass.
 
 GitHub Copilot CLI and Pi remain separate, unqualified candidates. They have
