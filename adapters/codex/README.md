@@ -1,8 +1,8 @@
 # Codex lifecycle translation (CPR-39)
 
 This internal workspace adapter translates captured Codex CLI 0.152.0 start,
-PreCompact, Stop and runtime-exit hooks. It remains **captured** with partial
-live qualification. Follow
+PreCompact, Stop and runtime-exit hooks. Its lifecycle is **verified** on
+macOS arm64 with GPT-5.5/low and the documented Keycloak setup. Follow
 [`docs/integrations/codex.md`](../../docs/integrations/codex.md) for setup,
 write ownership and the remaining qualification limits.
 
@@ -36,9 +36,9 @@ The observed transcript tags distinguish user text from injected environment
 and agent instructions. Only user text, assistant text, function calls and
 command results with native exit status and text-only MCP results with native
 completion/error status are mapped. MCP namespaces are preserved. Reasoning
-is excluded. Non-text tool results remain unqualified. Manual compaction passed
-live; the automatic-trigger probe did not emit compaction hooks and remains
-unverified. Host death before a recording hook can lose the unfinished turn.
+is excluded. Non-text tool results remain unqualified. Manual and automatic
+compaction passed live. Host death before a recording hook can lose the
+unfinished turn. Packaged installation and other versions/platforms are unqualified.
 
 ## Fixture provenance
 
@@ -75,8 +75,7 @@ subsequent compact SessionStart sequence, captured before the filter correction.
 pair on each side, Session identity and compacted metadata. The opaque replacement
 history, other records and unrelated Session metadata are omitted; message fields,
 IDs, ordinals and timestamps remain unchanged. Hook paths use the same synthetic
-path substitution described above. Authored automatic-trigger mutations in tests
-are distinct from these native manual frames.
+path substitution described above. Automatic frames have separate provenance.
 
 `fixtures/recovery-qualification.json` records the later Keycloak run: five
 events survived a paused gateway and arrived once after native resume; manual
@@ -84,3 +83,21 @@ compaction reinjected context on the same task after the filter correction.
 Both SDK workflows, explicit Capture/end, cross-session reuse and the audit
 chain passed. The automatic-threshold probe completed a normal resumed turn
 without compaction hooks, so it supplies no automatic-compaction qualification.
+
+`fixtures/auto-compaction.json` captures the first completed interactive turn
+with a temporary 1000-token compaction threshold: startup, approved Skill read,
+automatic PreCompact/PostCompact, compact SessionStart and final Stop.
+`fixtures/transcript-auto-compaction.jsonl` projects seven corresponding native
+records, including command completion status and the compacted boundary. Paths
+are normalised as above; instructions, reasoning, replacement history and
+unrelated metadata are omitted. Both manual and automatic fixtures are replayed
+through the same test, proving bounded context and four unique observations.
+
+`fixtures/live-qualification.json` records the complete native task and shared
+SDK run on unchanged product code at `8e90358`: automatic context reinjection,
+authenticated MCP, four pending outage events delivered once, 19 unique events,
+Capture/end, Knowledge reuse and a valid audit chain through sequence 858.
+The companion Python/public-API probe uses an unchanged bearer and client for
+deny/allow/revoke/re-authorise/deny, removing only its disposable grants.
+The receipt states the interrupted low-threshold follow-up and corrected
+test-only audit filter; neither is counted as a passing probe.

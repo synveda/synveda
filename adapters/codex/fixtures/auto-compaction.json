@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "client": {
+    "name": "Codex CLI",
+    "version": "0.152.0"
+  },
+  "provenance": {
+    "kind": "captured-real-client",
+    "captured_at": "2026-09-12T19:38:05.716832+00:00",
+    "source": "Installed interactive CLI, first read-only Skill turn with model_auto_compact_token_limit=1000 and model_auto_compact_token_limit_scope=total; normal trusted project hooks. Automatic compaction occurred between the command result and final answer.",
+    "platform": "Darwin arm64",
+    "model": "gpt-5.5",
+    "reasoning_effort": "low",
+    "sanitised_fields": [
+      "cwd",
+      "transcript_path"
+    ],
+    "synveda_authentication": "ordinary Keycloak OIDC/PKCE workspace-member profile",
+    "transcript_projection": "Native Session identity, authored user/assistant text, command call/completion/output and first compacted metadata. Replacement history, instructions, reasoning and unrelated records omitted. Only fixture paths normalised; native IDs, ordinals, timestamps and retained fields unchanged."
+  },
+  "frames": [
+    {
+      "session_id": "01a09720-42b8-7e42-a179-c99ad434712e",
+      "transcript_path": "/synveda/qualification/codex/transcript-auto-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "SessionStart",
+      "model": "gpt-5.5",
+      "permission_mode": "default",
+      "source": "startup"
+    },
+    {
+      "session_id": "01a09720-42b8-7e42-a179-c99ad434712e",
+      "turn_id": "01a09720-81ff-7363-a650-9a60251caa96",
+      "transcript_path": "/synveda/qualification/codex/transcript-auto-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "UserPromptSubmit",
+      "model": "gpt-5.5",
+      "permission_mode": "default",
+      "prompt": "Read only .codex/skills/ingestion-retry-review/SKILL.md using one read-only command, then state the ingestion retry rule in one sentence. Do not edit files or use any other tool."
+    },
+    {
+      "session_id": "01a09720-42b8-7e42-a179-c99ad434712e",
+      "turn_id": "01a09720-81ff-7363-a650-9a60251caa96",
+      "transcript_path": "/synveda/qualification/codex/transcript-auto-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-5.5",
+      "permission_mode": "default",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .codex/skills/ingestion-retry-review/SKILL.md"
+      },
+      "tool_use_id": "call_BhfElfQ25qnBM7KTZ3RZH6Px"
+    },
+    {
+      "session_id": "01a09720-42b8-7e42-a179-c99ad434712e",
+      "turn_id": "01a09720-81ff-7363-a650-9a60251caa96",
+      "transcript_path": "/synveda/qualification/codex/transcript-auto-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "PostToolUse",
+      "model": "gpt-5.5",
+      "permission_mode": "default",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .codex/skills/ingestion-retry-review/SKILL.md"
+      },
+      "tool_response": "---\nname: ingestion-retry-review\ndescription: Verify ingestion retry behaviour against an exact idempotency contract. Use when changing request admission or replay handling.\nlicense: Apache-2.0\ncompatibility: Requires an HTTP client that can set Idempotency-Key.\nmetadata:\n  version: 1.0.0\n---\n\n# Ingestion retry review\n\n## Steps\n\n1. Send an ingestion request with a stable Idempotency-Key.\n2. Retry while the original is running and require a conflict response.\n3. Retry after completion and require the stored response without a second ingestion.\n4. Report the exact request hash and response evidence; do not log payload content.\n",
+      "tool_use_id": "call_BhfElfQ25qnBM7KTZ3RZH6Px"
+    },
+    {
+      "session_id": "01a09720-42b8-7e42-a179-c99ad434712e",
+      "turn_id": "01a09720-81ff-7363-a650-9a60251caa96",
+      "transcript_path": "/synveda/qualification/codex/transcript-auto-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "PreCompact",
+      "model": "gpt-5.5",
+      "trigger": "auto"
+    },
+    {
+      "session_id": "01a09720-42b8-7e42-a179-c99ad434712e",
+      "turn_id": "01a09720-81ff-7363-a650-9a60251caa96",
+      "transcript_path": "/synveda/qualification/codex/transcript-auto-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "PostCompact",
+      "model": "gpt-5.5",
+      "trigger": "auto"
+    },
+    {
+      "session_id": "01a09720-42b8-7e42-a179-c99ad434712e",
+      "transcript_path": "/synveda/qualification/codex/transcript-auto-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "SessionStart",
+      "model": "gpt-5.5",
+      "permission_mode": "default",
+      "source": "compact"
+    },
+    {
+      "session_id": "01a09720-42b8-7e42-a179-c99ad434712e",
+      "turn_id": "01a09720-81ff-7363-a650-9a60251caa96",
+      "transcript_path": "/synveda/qualification/codex/transcript-auto-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "Stop",
+      "model": "gpt-5.5",
+      "permission_mode": "default",
+      "stop_hook_active": false,
+      "last_assistant_message": "Use a stable `Idempotency-Key`: retries while the original ingestion is running must return `409`, and retries after completion must replay the stored response without starting a second ingestion."
+    }
+  ]
+}

@@ -5,39 +5,25 @@ phase and delivered/open state. Delivered names identify historical slices;
 current contracts live in code, generated artefacts and accepted ADRs, while git
 retains their implementation evidence. Open entries link to current briefs.
 
-110 delivered; 32 open. The inventory and open-brief shape are checked in CI.
+111 delivered; 31 open. The inventory and open-brief shape are checked in CI.
 
 The 2026-09-12 [interoperability execution plan](../INTEROPERABILITY_PLAN.md)
-repairs ADPT-1/2 and CPR-12/23 client defects, delivers an initial ADPT-4 slice
-and qualifies Codex under CPR-39. ADR-0106 records the accepted public-client
-boundary. Full CI and the fresh exact-role database suite pass at `8f40237`;
-Node 22/Python 3.11 SDK runtime checks also pass. Codex 0.152.0 now has authentic
-MCP and native start/tool/Stop/exit/resume frames, plus a small hook translator
-reusing the existing durable Session runtime. Its runtime exit keeps the task
-open; lifecycle replay is separate from live qualification. Fresh Keycloak
-acceptance passed after the owned hosts-file handoff. The rebuilt public-proxy
-workflow then passed with native Codex and both SDKs on one Session: allowed
-context, approved Skill, pending/idempotent proposals, workspace denial and
-correlated audit. Fourteen unique events persisted, Capture completed, the task
-owner ended the Session and cross-session Knowledge reuse passed; the audit
-chain verified through sequence 427. Response trace IDs, Codex exit deadlines
-and text-only MCP result capture now have focused regressions; 20 fresh exact-
-role DB tests, strict gateway Clippy and generated-contract gates pass.
-The Session audit filter now includes lifecycle and delivery identities; 42
-focused exact-role DB tests and live Keycloak public-proxy verification pass.
-The saved audit prefix is unchanged, open/end rows are returned across pages,
-and workspace denial still holds.
-The approved continuation from `8ff38a6` proves native outage/recovery and manual
-compaction on one task. Five pending events survived a paused gateway and were
-delivered once. The small Codex filter correction reuses PreCompact persistence
-and compact SessionStart context composition; all seven adapter tests pass.
-The shared SDK workflow passed again: 25 unique events, Capture with 23
-candidates, explicit end, cross-session reuse and a valid audit chain through
-sequence 655. An automatic-threshold probe emitted no compaction hooks and is
-unverified. Next: authentic automatic compaction and live revoke/re-authorisation
-under [CPR-39](CPR-39.md), then the existing packaging/release obligations.
-Codex retains `captured`; SDK release decisions and a second fully verified
-lifecycle remain open.
+records ADPT-1/2 and CPR-12/23 repairs, the initial ADPT-4 SDK slice and CPR-39
+delivery. Codex CLI 0.152.0 joins Claude Code as a verified lifecycle in the
+authoritative registry. Its native Keycloak run covered automatic compaction,
+approved Skill reading, MCP recall, outage/recovery and both SDKs on one task:
+19 unique events, 17 Capture candidates, explicit end, Knowledge reuse and a
+valid audit chain through sequence 858. Disposable public-API grants proved
+live deny/allow/revoke/re-authorisation with one unchanged bearer and client.
+Eight Codex tests replay the authentic manual/automatic boundaries and retain
+bounded delivery and stable task identity. No product code changed for this
+qualification; broader CI/database evidence remains dated in the plan.
+
+Next under [ADPT-4](ADPT-4.md): exercise local package build/install/import on
+the declared minimum runtimes. Public distribution awaits owner decisions on
+licence, namespaces, provenance custody and the supported server/runtime window.
+Non-text Codex results, packaged installation, other versions/platforms,
+Copilot CLI and Pi still require separate evidence.
 
 ## Phase 0 — Foundation (wk 1)
 
@@ -190,7 +176,7 @@ lifecycle remain open.
 - [x] CPR-36: One-runtime deployment convergence — delivered 2026-08-25; ADR-0095
 - [x] CPR-37: Conflict, supersession and freshness engine — delivered 2026-08-25; ADR-0096
 - [x] CPR-38: Bounded graph-augmented retrieval — delivered 2026-08-25; ADR-0097
-- [ ] [CPR-39: Second verified client](CPR-39.md) — open
+- [x] CPR-39: Second verified client — delivered 2026-09-12; ADR-0098, ADR-0106
 - [x] CPR-40: Context-platform product and trust evaluation — delivered 2026-08-26; ADR-0099
 - [x] CPR-41: One-command realistic product demo — delivered 2026-08-26; ADR-0100
 - [x] CPR-42: Context-platform security and product-integrity audit — delivered 2026-08-26; ADR-0078

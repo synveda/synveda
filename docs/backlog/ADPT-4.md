@@ -79,3 +79,13 @@ pages with unchanged prefix hashes and continued workspace denial; see
 `docs/INTEROPERABILITY_PLAN.md`. Package ownership, licence, release
 provenance and broader runtime/server decisions still require resolution before
 publication.
+
+The completed CPR-39 run at `8e90358` adds automatic compaction and native
+outage/recovery on the same task used by both SDKs, plus live public-API grant
+revocation/re-authorisation with one unchanged Python client and bearer.
+The fixture `adapters/codex/fixtures/live-qualification.json` records 19 unique
+events, 17 Capture candidates, explicit end, reuse and audit verification
+through sequence 858. Existing product policy and SDK code needed no change.
+Next: build and install the local wheel/npm archives on the declared minimum
+runtimes, retaining the current unpublished status while owner decisions remain
+open. Do not expand the API slice or add framework adapters to do that check.

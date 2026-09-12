@@ -40,9 +40,11 @@ test("a configured recipe cannot be promoted to verified without a real lifecycl
 });
 
 test("a verified client cannot lose a required criterion", () => {
-  const registry = copy();
-  delete registry.clients.find((client) => client.id === "claude-code").conformance.checks.capture;
-  assert.match(validateRegistry(registry, root).join("\n"), /missing capture/);
+  for (const client of source.clients.filter((entry) => entry.support_level === "verified")) {
+    const registry = copy();
+    delete registry.clients.find((entry) => entry.id === client.id).conformance.checks.capture;
+    assert.match(validateRegistry(registry, root).join("\n"), /missing capture/);
+  }
 });
 
 test("captured evidence is content addressed", () => {

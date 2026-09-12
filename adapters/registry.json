@@ -132,16 +132,16 @@
     {
       "id": "codex",
       "display_name": "Codex CLI",
-      "support_level": "captured",
+      "support_level": "verified",
       "connection": "mcp",
       "tested_versions": [
         "0.152.0"
       ],
       "configuration": null,
       "lifecycle": {
-        "mechanism": "MCP and native hook translation over the existing Session runtime; outage/recovery and manual compaction exercised",
+        "mechanism": "Native hooks and MCP over the existing Session runtime; manual/automatic compaction and outage/recovery verified",
         "contract_version": "Codex CLI 0.152.0 native hooks / MCP 2025-06-18",
-        "status": "captured",
+        "status": "verified",
         "source": "docs/integrations/codex.md",
         "events": [
           "SessionStart",
@@ -155,13 +155,13 @@
         ]
       },
       "limitations": [
-        "Native Keycloak context, approved Skill read, MCP recall, outage/recovery, manual compaction, SDK handoff, Capture/end and audit pass; automatic compaction and complete qualification remain open.",
-        "Use native Codex MCP configuration; Synveda does not write its TOML file.",
+        "Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, packaged installation and other versions/platforms remain unqualified.",
+        "Use native Codex MCP configuration and normal trusted-hook setup; Synveda does not write its TOML file.",
         "SessionEnd reason=other is followed by resume of the same Codex session; it cannot automatically close a Synveda task. Explicit application ownership remains required.",
-        "Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version.",
-        "Native hook capture requires normal project/hook trust loading. --ignore-user-config did not emit hooks in the probe; CLI 0.152.0 was exercised with GPT-5.5 at low reasoning effort.",
-        "Native retry delivered all five outage events once on the same task. Manual compaction now persists and refreshes context; runtime exit stays below the native three-second cap.",
-        "An exec-resume probe with model_auto_compact_token_limit=1000 emitted no compaction hooks: automatic compaction remains unverified. Live revoke/re-authorisation, non-text MCP results and installation packaging are unqualified. The reader holds transcripts over 8 MiB/20,000 records; host death before a hook can lose an unfinished turn."
+        "Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version. File reading is observed; automatic activation is not claimed.",
+        "Native hook capture requires normal project/hook trust loading. --ignore-user-config did not emit hooks in the probe.",
+        "Native recovery delivered four pending outage events once. Manual and automatic compaction preserve the task and reinject allowed context. A companion Python/public-API probe verified live revoke/re-authorisation with an unchanged bearer and client.",
+        "The 1000-token threshold is a qualification override only: a second interactive turn repeatedly compacted and was interrupted; normal-settings resume succeeded. The reader holds transcripts over 8 MiB/20,000 records; host death before a hook can lose an unfinished turn."
       ],
       "authentic_fixtures": [
         {
@@ -203,65 +203,80 @@
           "path": "adapters/codex/fixtures/recovery-qualification.json",
           "sha256": "6712dd6c475d0e323838d4130924bf1d7e57f013d4747d13b8f07b0906f22003",
           "kind": "captured-live-client-result"
+        },
+        {
+          "path": "adapters/codex/fixtures/auto-compaction.json",
+          "sha256": "185cc368cafc7e76ba964cb58fca42482655355115eaa5e97cf559d6838b2a06",
+          "kind": "captured-client-hooks"
+        },
+        {
+          "path": "adapters/codex/fixtures/transcript-auto-compaction.jsonl",
+          "sha256": "bbed4be2a90887364cba6a2c495a73bee90a5cbbe2f623fbc9ece6c0a164bcc9",
+          "kind": "captured-client-transcript"
+        },
+        {
+          "path": "adapters/codex/fixtures/live-qualification.json",
+          "sha256": "05f19af7bb451693964fb334cda3b460bf2561f615b6b9c1f07790fcd242e31f",
+          "kind": "captured-live-client-result"
         }
       ],
       "conformance": {
-        "evidence_level": "partial-live-client",
-        "tested_at": "2026-09-12T19:22:16.641665+00:00",
+        "evidence_level": "live-client",
+        "tested_at": "2026-09-12T19:44:02.103818+00:00",
         "tested_version": "0.152.0",
         "checks": {
           "session_creation": {
             "status": "passed",
             "evidence": [
-              "adapters/codex/fixtures/recovery-qualification.json"
+              "adapters/codex/fixtures/live-qualification.json"
             ]
           },
           "event_delivery": {
             "status": "passed",
             "evidence": [
-              "adapters/codex/fixtures/recovery-qualification.json"
+              "adapters/codex/fixtures/live-qualification.json"
             ]
           },
           "context_request_delivery": {
             "status": "passed",
             "evidence": [
-              "adapters/codex/fixtures/recovery-qualification.json"
+              "adapters/codex/fixtures/live-qualification.json"
             ]
           },
           "capture": {
             "status": "passed",
             "evidence": [
-              "adapters/codex/fixtures/recovery-qualification.json"
+              "adapters/codex/fixtures/live-qualification.json"
             ]
           },
           "session_end": {
             "status": "passed",
             "evidence": [
-              "adapters/codex/fixtures/recovery-qualification.json"
+              "adapters/codex/fixtures/live-qualification.json"
             ]
           },
           "tool_configuration": {
             "status": "passed",
             "evidence": [
-              "adapters/codex/fixtures/recovery-qualification.json"
+              "adapters/codex/fixtures/live-qualification.json"
             ]
           },
           "cross_session_knowledge_reuse": {
             "status": "passed",
             "evidence": [
-              "adapters/codex/fixtures/recovery-qualification.json"
+              "adapters/codex/fixtures/live-qualification.json"
             ]
           },
           "persisted_audited_outcomes": {
             "status": "passed",
             "evidence": [
-              "adapters/codex/fixtures/recovery-qualification.json"
+              "adapters/codex/fixtures/live-qualification.json"
             ]
           },
           "retry_idempotency": {
             "status": "passed",
             "evidence": [
-              "adapters/codex/fixtures/recovery-qualification.json",
+              "adapters/codex/fixtures/live-qualification.json",
               "adapters/codex/src/hook.test.mts"
             ]
           },
@@ -269,7 +284,7 @@
             "status": "not_applicable",
             "reason": "Approved Skill materialisation and a native file read were observed; there is no qualified automatic activation callback.",
             "evidence": [
-              "adapters/codex/fixtures/keycloak-qualification.json",
+              "adapters/codex/fixtures/live-qualification.json",
               "adapters/codex/README.md"
             ]
           }

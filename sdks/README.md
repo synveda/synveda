@@ -27,6 +27,13 @@ correlation. Capture, explicit task-owner end, cross-session reuse and audit-
 chain verification also passed. See `docs/INTEROPERABILITY_PLAN.md` and the
 content-free `adapters/codex/fixtures/keycloak-qualification.json` result.
 
+The completed Codex 0.152.0 qualification additionally exercised native
+automatic compaction and outage/recovery, followed by both existing examples
+on the same task. An unchanged Python client/bearer observed live grant,
+revocation and re-authorisation through the public API. Temporary grants were
+removed and audit correlation passed. The content-free result is
+`adapters/codex/fixtures/live-qualification.json`; package release remains open.
+
 
 ```sh
 pnpm install --frozen-lockfile

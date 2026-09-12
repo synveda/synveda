@@ -269,7 +269,7 @@ procedures.
 projection and distinguishes configuration, authentic captured frames,
 deterministic replay and live verification.
 
-Claude Code 2.1.241 is the only verified lifecycle. Other clients remain at
+Verified client lifecycles: Claude Code 2.1.241, Codex CLI 0.152.0. Other clients remain at
 their evidenced registry level; a connection recipe or generic MCP
 configuration is not lifecycle support.
 

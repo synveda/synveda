@@ -290,7 +290,8 @@ implemented. Live Entra/Okta evidence, scale-out, tenancy operations and
 regional routing remain open in the backlog.
 
 **Phase 4 — Ecosystem (open)**
-SDKs, importers and additional harness adapters are not current product claims.
+The initial Python/TypeScript SDK slice and two named harness lifecycles have
+checked evidence; package publication, importers and wider client support remain open.
 The committed evaluation suite covers the implemented context platform.
 
 **Phase 5 — Context platform hard cut (current runtime)**
@@ -298,7 +299,8 @@ One scope tree and role vocabulary; workspace/project/session runtime; stable
 Knowledge with immutable revisions and provenance; capture candidates;
 explainable context planning; versioned skills/tools/configuration; public API
 and generated console client; adversarial acceptance; one clean pre-1.0 schema.
-The second verified client remains externally blocked under CPR-39.
+CPR-39's second verified lifecycle is Codex CLI 0.152.0; the registry and
+generated client-support matrix define its tested setup and limits.
 
 ---
 

@@ -1,0 +1,548 @@
+{
+  "provenance": {
+    "kind": "captured-live-client-result",
+    "client": "Codex CLI",
+    "client_version": "0.152.0",
+    "model": "gpt-5.5",
+    "reasoning_effort": "low",
+    "platform": "macOS 26.6.2 arm64",
+    "authentication": "ordinary Keycloak OIDC/PKCE profiles; separate workspace member and tenant auditor",
+    "deployment_project": "synveda-development-acceptance-interop",
+    "checkout_base": "8e903583e58e85bce49cc2e8146ddbe6fba5b2c7",
+    "scope": "One native task: automatic compaction, approved Skill read, authenticated MCP, outage/recovery, shared SDK workflow, Capture/end and Knowledge reuse; companion live public-API deny/revoke/re-authorisation probe.",
+    "product_source_changed_during_run": false
+  },
+  "tested_at": "2026-09-12T19:44:02.103818+00:00",
+  "session_id": "01a09720-83cb-7f02-9bd5-182a9c4c1b75",
+  "external_session_id": "codex:01a09720-42b8-7e42-a179-c99ad434712e",
+  "event_counts": {
+    "message.assistant": 5,
+    "message.user": 6,
+    "skill.loaded": 2,
+    "tool.invoked": 3,
+    "tool.result": 3
+  },
+  "event_count": 19,
+  "duplicate_client_event_ids": 0,
+  "capture_batch_id": "01a09725-efc3-7512-932d-046edf348f23",
+  "capture_state": "completed",
+  "capture_candidate_count": 17,
+  "task_owner_end_status": "ended",
+  "reuse_session_id": "01a09725-f3ed-7d31-bf86-7f2d7cb3f2fd",
+  "knowledge_id": "01a096a1-9cb3-79b0-a5bd-6316a49499c3",
+  "skill_id": "01a096a1-914d-7c22-8fd0-8e72c0775e72",
+  "skill_version_id": "01a096a1-914d-7c22-8fd0-8e89acc65450",
+  "denied_session_id": "01a096ab-f2ec-79e1-af15-b8687a59b148",
+  "audit_valid": true,
+  "audit_head_seq": 858,
+  "audit_head_hash": "6ba873fee702f21d7b2107c6d8ed094133453ff4d85c820616c13f8700540697",
+  "session_audit_events": [
+    {
+      "seq": 661,
+      "action": "session.opened",
+      "trace_id": "55c9f628639437f408d7b8c6f4c1b056"
+    },
+    {
+      "seq": 662,
+      "action": "context.candidates.retrieved",
+      "trace_id": "6d5b5d37bb7a9d3fe0e99f0eb02b2f0b"
+    },
+    {
+      "seq": 663,
+      "action": "context.selections.made",
+      "trace_id": "6d5b5d37bb7a9d3fe0e99f0eb02b2f0b"
+    },
+    {
+      "seq": 664,
+      "action": "session.context.composed",
+      "trace_id": "6d5b5d37bb7a9d3fe0e99f0eb02b2f0b"
+    },
+    {
+      "seq": 665,
+      "action": "session.events.appended",
+      "trace_id": "a341aeae9b4fdfa22ffbf23b0a790761"
+    },
+    {
+      "seq": 666,
+      "action": "context.candidates.retrieved",
+      "trace_id": "5573ad272817d5d4da5542df215dbe44"
+    },
+    {
+      "seq": 667,
+      "action": "context.selections.made",
+      "trace_id": "5573ad272817d5d4da5542df215dbe44"
+    },
+    {
+      "seq": 668,
+      "action": "session.context.composed",
+      "trace_id": "5573ad272817d5d4da5542df215dbe44"
+    },
+    {
+      "seq": 669,
+      "action": "session.events.appended",
+      "trace_id": "e391cbda17fea1cf45c8a10ef4729507"
+    },
+    {
+      "seq": 670,
+      "action": "context.candidates.retrieved",
+      "trace_id": "3a8c4ea13b35141aa3778ff184825b41"
+    },
+    {
+      "seq": 671,
+      "action": "context.selections.made",
+      "trace_id": "3a8c4ea13b35141aa3778ff184825b41"
+    },
+    {
+      "seq": 672,
+      "action": "session.context.composed",
+      "trace_id": "3a8c4ea13b35141aa3778ff184825b41"
+    },
+    {
+      "seq": 673,
+      "action": "session.events.appended",
+      "trace_id": "01e09f57f96e290a89375ede2da79172"
+    },
+    {
+      "seq": 674,
+      "action": "context.candidates.retrieved",
+      "trace_id": "06dd33851f06fbd165bb07475a7fae2f"
+    },
+    {
+      "seq": 675,
+      "action": "context.selections.made",
+      "trace_id": "06dd33851f06fbd165bb07475a7fae2f"
+    },
+    {
+      "seq": 676,
+      "action": "session.context.composed",
+      "trace_id": "06dd33851f06fbd165bb07475a7fae2f"
+    },
+    {
+      "seq": 677,
+      "action": "context.candidates.retrieved",
+      "trace_id": "7c1f656c8672bded04b4aadfa48a629c"
+    },
+    {
+      "seq": 678,
+      "action": "context.selections.made",
+      "trace_id": "7c1f656c8672bded04b4aadfa48a629c"
+    },
+    {
+      "seq": 679,
+      "action": "session.context.composed",
+      "trace_id": "7c1f656c8672bded04b4aadfa48a629c"
+    },
+    {
+      "seq": 683,
+      "action": "context.candidates.retrieved",
+      "trace_id": "9093b0ad91ec45182381ba924399961d"
+    },
+    {
+      "seq": 684,
+      "action": "context.selections.made",
+      "trace_id": "9093b0ad91ec45182381ba924399961d"
+    },
+    {
+      "seq": 685,
+      "action": "session.context.composed",
+      "trace_id": "9093b0ad91ec45182381ba924399961d"
+    },
+    {
+      "seq": 688,
+      "action": "session.events.appended",
+      "trace_id": "582e7a34e0f202a11e127a8e2ecfc6e5"
+    },
+    {
+      "seq": 751,
+      "action": "session.events.appended",
+      "trace_id": "f0edfbbaba881150370f91070f5b5776"
+    },
+    {
+      "seq": 752,
+      "action": "context.candidates.retrieved",
+      "trace_id": "3c35268eb4b789d4b9ed567c645e88ce"
+    },
+    {
+      "seq": 753,
+      "action": "context.selections.made",
+      "trace_id": "3c35268eb4b789d4b9ed567c645e88ce"
+    },
+    {
+      "seq": 754,
+      "action": "session.context.composed",
+      "trace_id": "3c35268eb4b789d4b9ed567c645e88ce"
+    },
+    {
+      "seq": 755,
+      "action": "session.events.appended",
+      "trace_id": "3992174aa0d695b31f483b0a11ba0622"
+    },
+    {
+      "seq": 774,
+      "action": "context.candidates.retrieved",
+      "trace_id": "1b3b5bb36e36d28823d2502035b60d4d"
+    },
+    {
+      "seq": 775,
+      "action": "context.selections.made",
+      "trace_id": "1b3b5bb36e36d28823d2502035b60d4d"
+    },
+    {
+      "seq": 776,
+      "action": "session.context.composed",
+      "trace_id": "1b3b5bb36e36d28823d2502035b60d4d"
+    },
+    {
+      "seq": 780,
+      "action": "session.events.appended",
+      "trace_id": "9b12c4aa735d8b19c1cf9a008e13fe3a"
+    },
+    {
+      "seq": 785,
+      "action": "authz.decision",
+      "trace_id": "e5564230a0ba3c8a9fa21016f1af40cf"
+    },
+    {
+      "seq": 787,
+      "action": "context.candidates.retrieved",
+      "trace_id": "35a690edbef7b20716d2d82c26aa1668"
+    },
+    {
+      "seq": 788,
+      "action": "context.selections.made",
+      "trace_id": "35a690edbef7b20716d2d82c26aa1668"
+    },
+    {
+      "seq": 789,
+      "action": "session.context.composed",
+      "trace_id": "35a690edbef7b20716d2d82c26aa1668"
+    },
+    {
+      "seq": 793,
+      "action": "session.events.appended",
+      "trace_id": "925086d1633eb30de18d240413afd20e"
+    },
+    {
+      "seq": 798,
+      "action": "authz.decision",
+      "trace_id": "a71020981f39c1c9674fbab532ef18ee"
+    },
+    {
+      "seq": 802,
+      "action": "context.candidates.retrieved",
+      "trace_id": "2f5751d2dd54c671f4ddba8c92290321"
+    },
+    {
+      "seq": 803,
+      "action": "context.selections.made",
+      "trace_id": "2f5751d2dd54c671f4ddba8c92290321"
+    },
+    {
+      "seq": 804,
+      "action": "session.context.composed",
+      "trace_id": "2f5751d2dd54c671f4ddba8c92290321"
+    },
+    {
+      "seq": 805,
+      "action": "session.events.appended",
+      "trace_id": "d289ca4569bdd145a2637b553b4bff7c"
+    },
+    {
+      "seq": 848,
+      "action": "capture.batch.created",
+      "trace_id": "19175bfe18de783694d8002416a585e7"
+    },
+    {
+      "seq": 851,
+      "action": "capture.batch.completed",
+      "trace_id": null
+    },
+    {
+      "seq": 853,
+      "action": "session.ended",
+      "trace_id": "613a304907460bba3c70762b6bcfdb34"
+    }
+  ],
+  "sdk_workflows": [
+    {
+      "client": "typescript",
+      "session_id": "01a09720-83cb-7f02-9bd5-182a9c4c1b75",
+      "context_run_id": "01a09725-d80b-79b1-9182-d6ba1e252117",
+      "proposal_id": "01a09725-d834-70a2-b67d-03271866e8d1",
+      "trace_id": "1b3b5bb36e36d28823d2502035b60d4d"
+    },
+    {
+      "client": "python",
+      "session_id": "01a09720-83cb-7f02-9bd5-182a9c4c1b75",
+      "context_run_id": "01a09725-d8c8-7fe0-95ad-d66eb930700c",
+      "proposal_id": "01a09725-d8e3-7bd0-a118-590d570721eb",
+      "trace_id": "35a690edbef7b20716d2d82c26aa1668"
+    }
+  ],
+  "automatic_compaction": {
+    "observed_sequence": [
+      "PreCompact:auto",
+      "PostCompact:auto",
+      "SessionStart:compact",
+      "Stop"
+    ],
+    "first_turn_completed": true,
+    "compact_hook_output_bytes": 2300,
+    "allowed_context_and_same_session_in_hook_output": true,
+    "native_skill_command_result_preserved_once": true,
+    "fixture": "adapters/codex/fixtures/auto-compaction.json"
+  },
+  "outage_recovery": {
+    "gateway_fault": "pause only the owned gateway container, with unconditional restoration",
+    "native_completed_while_paused": true,
+    "before_event_count": 9,
+    "pending_at_native_exit": 4,
+    "recovered_event_count": 15,
+    "all_pending_events_delivered_once": true,
+    "pending_after_recovery": 0,
+    "same_native_and_synveda_session": true,
+    "native_exit_kept_task_active": true
+  },
+  "revocation": {
+    "tested_at": "2026-09-12T19:42:26.295403+00:00",
+    "checkout_base": "8e903583e58e85bce49cc2e8146ddbe6fba5b2c7",
+    "session_id": "01a096ab-f2ec-79e1-af15-b8687a59b148",
+    "scope_id": "01a096ab-f2e2-7b61-b5b9-ab2e5591ecd2",
+    "same_bearer_and_python_client": true,
+    "phases": [
+      {
+        "phase": "before_grant",
+        "checks": [
+          {
+            "operation": "get_session",
+            "status": 403,
+            "trace_id": "9626bdc5a0c2174f8200c4688b038dfc"
+          },
+          {
+            "operation": "query_session_knowledge",
+            "status": 403,
+            "trace_id": "17edef09c5fcaaaa5448620d091a2aab"
+          }
+        ]
+      },
+      {
+        "phase": "granted",
+        "checks": [
+          {
+            "operation": "get_session",
+            "status": 200,
+            "trace_id": "6a007598f0239a308ab2fb4fc046cf99"
+          },
+          {
+            "operation": "query_session_knowledge",
+            "status": 200,
+            "trace_id": "ee66ca24c12be85cef451caa6d1568c8"
+          }
+        ]
+      },
+      {
+        "phase": "revoked",
+        "checks": [
+          {
+            "operation": "get_session",
+            "status": 403,
+            "trace_id": "d0ad27f319addc679e0b1b6b413a9848"
+          },
+          {
+            "operation": "query_session_knowledge",
+            "status": 403,
+            "trace_id": "5ad7d86d07273d1a959263ab7ce74405"
+          }
+        ]
+      },
+      {
+        "phase": "reauthorised",
+        "checks": [
+          {
+            "operation": "get_session",
+            "status": 200,
+            "trace_id": "d78fc539ea8dc9d6ff5e3c08a88821bf"
+          },
+          {
+            "operation": "query_session_knowledge",
+            "status": 200,
+            "trace_id": "27734dca710a81b24e5031b6451b14e2"
+          }
+        ]
+      },
+      {
+        "phase": "restored_denial",
+        "checks": [
+          {
+            "operation": "get_session",
+            "status": 403,
+            "trace_id": "ad9bc81d9b8f4125ec023f06fbfa0866"
+          },
+          {
+            "operation": "query_session_knowledge",
+            "status": 403,
+            "trace_id": "4d86e96f92d76be1f4df8766ffa23f36"
+          }
+        ]
+      }
+    ],
+    "grant_mutations": [
+      {
+        "action": "access.granted",
+        "grant_id": "01a09724-7dbd-7192-aa45-9e4edc187db9",
+        "trace_id": "a15d4dd0d4d0eea9f099198729c81028"
+      },
+      {
+        "action": "access.revoked",
+        "grant_id": "01a09724-7dbd-7192-aa45-9e4edc187db9",
+        "trace_id": "4b85cd570f8ac397454a326df47110a3"
+      },
+      {
+        "action": "access.granted",
+        "grant_id": "01a09724-7dd8-73c1-aa73-59097ff4b7a6",
+        "trace_id": "f414f5ec8ac8779550fcc200aae0aaba"
+      },
+      {
+        "action": "access.revoked",
+        "grant_id": "01a09724-7dd8-73c1-aa73-59097ff4b7a6",
+        "trace_id": "1b98296fefd2e5394efe0a280ca2a7e5"
+      }
+    ],
+    "original_grants_unchanged": true,
+    "temporary_grants_removed": true,
+    "audit_valid": true,
+    "audit_head_seq": 735,
+    "audit_head_hash": "eba1ba29d598901380d89ba571dbf38175e7518ded53fad5a3ccd4d42b496826",
+    "audit_events": [
+      {
+        "seq": 718,
+        "action": "authz.decision",
+        "outcome": "allow",
+        "trace_id": "9d396695f22b26cf90e7d2a4392244c4"
+      },
+      {
+        "seq": 719,
+        "action": "authz.decision",
+        "outcome": "allow",
+        "trace_id": "6275a4bb1303494d8447e0a8b8e8e973"
+      },
+      {
+        "seq": 720,
+        "action": "authz.decision",
+        "outcome": "deny",
+        "trace_id": "9626bdc5a0c2174f8200c4688b038dfc"
+      },
+      {
+        "seq": 721,
+        "action": "authz.decision",
+        "outcome": "deny",
+        "trace_id": "17edef09c5fcaaaa5448620d091a2aab"
+      },
+      {
+        "seq": 722,
+        "action": "access.granted",
+        "outcome": "success",
+        "trace_id": "a15d4dd0d4d0eea9f099198729c81028"
+      },
+      {
+        "seq": 723,
+        "action": "authz.decision",
+        "outcome": "allow",
+        "trace_id": "6a007598f0239a308ab2fb4fc046cf99"
+      },
+      {
+        "seq": 724,
+        "action": "authz.decision",
+        "outcome": "allow",
+        "trace_id": "ee66ca24c12be85cef451caa6d1568c8"
+      },
+      {
+        "seq": 725,
+        "action": "access.revoked",
+        "outcome": "success",
+        "trace_id": "4b85cd570f8ac397454a326df47110a3"
+      },
+      {
+        "seq": 726,
+        "action": "authz.decision",
+        "outcome": "deny",
+        "trace_id": "d0ad27f319addc679e0b1b6b413a9848"
+      },
+      {
+        "seq": 727,
+        "action": "authz.decision",
+        "outcome": "deny",
+        "trace_id": "5ad7d86d07273d1a959263ab7ce74405"
+      },
+      {
+        "seq": 728,
+        "action": "access.granted",
+        "outcome": "success",
+        "trace_id": "f414f5ec8ac8779550fcc200aae0aaba"
+      },
+      {
+        "seq": 729,
+        "action": "authz.decision",
+        "outcome": "allow",
+        "trace_id": "d78fc539ea8dc9d6ff5e3c08a88821bf"
+      },
+      {
+        "seq": 730,
+        "action": "authz.decision",
+        "outcome": "allow",
+        "trace_id": "27734dca710a81b24e5031b6451b14e2"
+      },
+      {
+        "seq": 731,
+        "action": "access.revoked",
+        "outcome": "success",
+        "trace_id": "1b98296fefd2e5394efe0a280ca2a7e5"
+      },
+      {
+        "seq": 732,
+        "action": "authz.decision",
+        "outcome": "deny",
+        "trace_id": "ad9bc81d9b8f4125ec023f06fbfa0866"
+      },
+      {
+        "seq": 733,
+        "action": "authz.decision",
+        "outcome": "deny",
+        "trace_id": "4d86e96f92d76be1f4df8766ffa23f36"
+      },
+      {
+        "seq": 734,
+        "action": "authz.decision",
+        "outcome": "allow",
+        "trace_id": "3fa88b920d9bab5c6c11643eaa901081"
+      }
+    ]
+  },
+  "checks": {
+    "native_startup_and_resume_same_session": true,
+    "approved_skill_file_read_by_native_command": true,
+    "authenticated_mcp_recall": true,
+    "typescript_and_python_same_session": true,
+    "proposals_pending_and_idempotent": true,
+    "cross_workspace_read_denied": true,
+    "audit_contains_no_context_or_proposal_markers": true,
+    "session_audit_includes_open_and_end": true
+  },
+  "probe_limits": [
+    "A second turn with the artificial 1000-token threshold repeatedly compacted and was interrupted after 58 seconds; it is not counted as a successful MCP turn. Normal-settings exec resume then completed authenticated recall on the same task.",
+    "The first revocation run restored all grants but its audit assertion used since instead of the documented from filter. The corrected run passed; no product change was needed."
+  ],
+  "not_qualified": [
+    "non-text MCP results",
+    "automatic Skill activation callback",
+    "installation packaging",
+    "other client versions/platforms"
+  ],
+  "source_sha256": {
+    "adapters/codex/src/hook.mts": "083d81fb237a0a3a1f88bddf36cb1c06ef89fa1ec419a13d77fe5b1174d71615",
+    "adapters/codex/src/transcript.mts": "723373022c55f4d40675ba474defe76d65c39ed4ad0d3980eb5f461b13a0e10e",
+    "adapters/claude-code/src/session-start.mts": "8ba6358fc110ba49392cd00cd686ff19cbd3e70fe3bb543ec65a2b478e2af012",
+    "adapters/claude-code/src/turn.mts": "e7e5cb5cc5fb1ea1d47ecf57648d7fc5dd4d9d9e213f453b4c532b38b2e05169",
+    "adapters/claude-code/src/deliver.mts": "e9e496e2015141f1585a973f9621f7dd3a13da84c28d5bff7071ae3d565f2543"
+  }
+}

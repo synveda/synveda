@@ -1,7 +1,8 @@
 # Codex CLI interoperability (CPR-39)
 
-Codex CLI **0.152.0** has authentic Synveda MCP protocol evidence from
-2026-09-12. `adapters/registry.json` classifies it as `captured`, not `verified`.
+Codex CLI **0.152.0** completed live lifecycle qualification on
+2026-09-12 with GPT-5.5/low, macOS arm64 and ordinary Keycloak authentication.
+`adapters/registry.json` classifies that named setup as `verified`.
 `crates/synveda-cli/fixtures/mcp/codex.json` retains its actual initialization,
 tool discovery and recall frames. Existing `rmcp` serves its negotiated
 MCP 2025-06-18 protocol without a new transport adapter.
@@ -42,7 +43,7 @@ Synveda does not currently write Codex TOML configuration. The native
 `codex mcp add synveda -- /absolute/path/to/synveda mcp` command can register an
 unbound shared server; the caller must then supply a Synveda Session ID.
 
-## Captured hook adapter
+## Hook adapter
 
 The workspace now includes `adapters/codex`. Build with
 `pnpm --filter @synveda/codex-adapter... build` after the normal frozen-lockfile
@@ -86,10 +87,9 @@ Codex filters subprocess environments; a working hook login alone does not
 prove that its MCP process sees the same profile. See the
 [native MCP environment contract](https://learn.chatgpt.com/docs/extend/mcp).
 
-The native ID maps to `codex:<native-id>` in the existing local spool. Stop and PreCompact
-records user/assistant text, command calls/results and text-only MCP results;
-runtime exit
-flushes them. A resumed invocation uses the same Synveda Session. The task
+The native ID maps to `codex:<native-id>` in the existing local spool. Stop and
+PreCompact record user/assistant text, command calls/results and text-only MCP
+results; runtime exit flushes them. A resumed invocation uses the same Synveda Session. The task
 owner explicitly requests Capture and ends that Session through the public
 API/SDK when finished. No native hook establishes final task completion.
 After compaction, `SessionStart` with `source: "compact"` composes fresh allowed
@@ -125,13 +125,18 @@ events persisted, Capture produced 23 candidates, explicit end and cross-session
 reuse passed, and the audit chain verified through sequence 655, including
 Session open/end in the Session-filtered history.
 
-An `exec resume` probe using `model_auto_compact_token_limit=1000` completed a
-normal turn but emitted no compaction hooks. It does not qualify automatic
-compaction. The setting is documented in the
-[OpenAI configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference);
-its observed behaviour on this invocation is the limit of the evidence.
-Automatic compaction/reinjection, live revoke/re-authorisation, non-text MCP
-results, installation packaging and other versions/platforms remain unqualified. Reads
+The completed `fixtures/live-qualification.json` run used unchanged product
+code at `8e90358`. An interactive Skill-read turn emitted automatic PreCompact,
+PostCompact, compact SessionStart and Stop. Fresh allowed context and the same
+task ID were returned. The native task then completed authenticated MCP recall,
+outage/recovery and both SDK workflows: 19 unique events, 17 Capture candidates,
+explicit end, cross-session reuse and a valid audit chain through sequence 858.
+An unchanged Python client and bearer saw deny/allow/revoke/re-authorise/deny
+on an existing synthetic foreign-workspace Session. Only new disposable grants
+were removed; grant and denial audit events correlate to response trace IDs.
+
+Non-text MCP results, installation packaging and other versions/platforms
+remain unqualified. Reads
 over 8 MiB/20,000 records are held; unfinished turns can be lost if no hook runs
 before host death. Skill file reading is observed, but automatic activation is
 not claimed. The audit `session_id` filter now matches both delivery identities
@@ -139,7 +144,52 @@ and lifecycle snapshots. For a completed history across pages, hold `until`
 fixed: audit reads append their own evidence. The earlier qualification receipt
 retains the original filter failure; the correction and its validation are
 recorded in the [interoperability plan](../INTEROPERABILITY_PLAN.md).
-CPR-39 remains open until all applicable ADR-0098 criteria pass.
+CPR-39's applicable ADR-0098 lifecycle criteria pass for this exact setup.
+
+## Reproduce the qualification boundaries
+
+Use an isolated synthetic project with the trusted hooks, approved Skill and
+Keycloak profile configured above. Start a new native task with this temporary
+test threshold; do not save the threshold in ordinary project configuration:
+
+```sh
+codex --model gpt-5.5 --sandbox read-only \
+  -c 'model_reasoning_effort="low"' \
+  -c 'model_auto_compact_token_limit=1000' \
+  -c 'model_auto_compact_token_limit_scope="total"'
+```
+
+Request one read-only command to read the installed synthetic `SKILL.md`, then
+one sentence explaining its rule. Capture the actual hook inputs/output and
+native transcript: require the automatic compact sequence above, fresh allowed
+context, the same native/Synveda identities and a completed final answer.
+Exit after that first turn and resume without the temporary overrides. The
+setting is documented in the
+[OpenAI configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+In the recorded run, another turn at the artificial threshold repeatedly
+compacted and was interrupted after 58 seconds; normal-settings resume then
+completed recall. The earlier `exec resume`-only probe emitted no compact hook.
+Neither unsuccessful probe is qualification evidence.
+
+Use the existing [SDK workflow examples](../../sdks/README.md) with this
+hook-created Session, then resume Codex and require the same Session ID.
+For outage acceptance, pause only the owned test gateway with unconditional
+restoration, complete a bounded no-network native turn, and compare the pending
+spool IDs with persisted events after resume. Require each ID once, then request
+Capture, explicitly end the task and query approved Knowledge from a new Session.
+
+For revocation, use a separate existing synthetic Session initially denied to
+the member. An authorised administrator reads its `scope_id`, requires no
+existing direct grant there for that principal, and calls `POST /v1/admin/grants`
+with `principal_id`, `scope_id`, `role: "member"` and a unique Idempotency-Key.
+Keep the member's bearer and Python `Client` unchanged: `get_session` and
+`query_session_knowledge` must change from 403 to 200. Delete only the returned
+grant using `DELETE /v1/admin/grants/{grant_id}` and require 403, then repeat
+grant/allow/revoke/deny. Always remove owned grants on failure and verify the
+original inventory is unchanged. Through the auditor profile, query
+`GET /v1/audit/events` with fixed `from`/`until` and bounded pagination; match
+grant/revoke/denial response trace IDs and verify `GET /v1/audit/verify`.
+Do not revoke a seeded grant and attempt to recreate it under a new identity.
 
 GitHub Copilot CLI and Pi remain separate, unqualified candidates. They have
 no Synveda lifecycle adapter in this checkout. The VS Code registry entry is

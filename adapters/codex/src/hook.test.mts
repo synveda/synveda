@@ -12,6 +12,8 @@ const lifecycle = JSON.parse(readFileSync(new URL("../fixtures/lifecycle.json", 
 const transcript = readFileSync(new URL("../fixtures/transcript.jsonl", import.meta.url), "utf8");
 const compaction = JSON.parse(readFileSync(new URL("../fixtures/compaction.json", import.meta.url), "utf8"));
 const compactedTranscript = readFileSync(new URL("../fixtures/transcript-compaction.jsonl", import.meta.url), "utf8");
+const autoCompaction = JSON.parse(readFileSync(new URL("../fixtures/auto-compaction.json", import.meta.url), "utf8"));
+const autoCompactedTranscript = readFileSync(new URL("../fixtures/transcript-auto-compaction.jsonl", import.meta.url), "utf8");
 const nativeId = lifecycle.invocations[0].frames[0].session_id;
 const workspace = "11111111-1111-1111-1111-111111111111";
 const session = "22222222-2222-2222-2222-222222222222";
@@ -95,10 +97,15 @@ test("native start, durable Stop, outage, runtime exit, resume and duplicate hoo
   } finally { await gateway.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("captured compaction persists locally then refreshes bounded context on the same task", async () => {
+for (const scenario of [
+  { trigger: "manual", frames: compaction.frames, transcript: compactedTranscript,
+    start: 2, before: 0, after: 1, compact: 3, stop: 5, pending: 2, query: "gateway recovery" },
+  { trigger: "auto", frames: autoCompaction.frames, transcript: autoCompactedTranscript,
+    start: 0, before: 4, after: 5, compact: 6, stop: 7, pending: 3, query: "ingestion retry" },
+]) test(`captured ${scenario.trigger} compaction persists locally then refreshes bounded context on the same task`, async () => {
   const root = mkdtempSync(join(tmpdir(), "synveda-codex-compact-"));
   const path = join(root, "transcript.jsonl");
-  const records = compactedTranscript.trim().split("\n");
+  const records = scenario.transcript.trim().split("\n");
   const compactIndex = records.findIndex((line) => JSON.parse(line).type === "compacted");
   const accepted = new Set<string>();
   const gateway = await startGateway((request) => {
@@ -119,30 +126,29 @@ test("captured compaction persists locally then refreshes bounded context on the
     mkdirSync(join(root, ".synveda"));
     writeFileSync(join(root, ".synveda", "config.json"), JSON.stringify({ compact_budget_tokens: 512 }));
     writeFileSync(path, records[0] + "\n");
-    await invoke(compaction.frames[2]); // Native resume before the compact start.
+    await invoke(scenario.frames[scenario.start]);
     writeFileSync(path, records.slice(0, compactIndex).join("\n") + "\n");
     const calls = gateway.requests.length;
-    await invoke(compaction.frames[0]);
-    // Authored alternate trigger coverage, not native automatic-compaction evidence.
-    await invoke({ ...compaction.frames[0], trigger: "auto" });
+    await invoke(scenario.frames[scenario.before]);
+    await invoke(scenario.frames[scenario.before]);
     const directory = join(root, "synveda", "spool");
     const files = readdirSync(directory).filter((name) => name.endsWith(".json"));
     assert.equal(files.length, 1);
     const saved = JSON.parse(readFileSync(join(directory, files[0]), "utf8"));
-    assert.equal(saved.entries.filter((entry: { acknowledged: boolean }) => !entry.acknowledged).length, 2);
+    assert.equal(saved.entries.filter((entry: { acknowledged: boolean }) => !entry.acknowledged).length, scenario.pending);
     assert.equal(gateway.requests.length, calls, "PreCompact records without a network request");
     writeFileSync(path, records.slice(0, compactIndex + 1).join("\n") + "\n");
-    assert.equal(await invoke(compaction.frames[1]), "", "PostCompact has no separate delivery path");
-    assert.ok((await invoke(compaction.frames[3])).includes("fresh permitted context"));
+    assert.equal(await invoke(scenario.frames[scenario.after]), "", "PostCompact has no separate delivery path");
+    assert.ok((await invoke(scenario.frames[scenario.compact])).includes("fresh permitted context"));
     const context = gateway.requests.filter((request) => request.path.endsWith("/context-runs"));
     assert.equal(context.length, 2);
     assert.equal(context[1].body.budget_tokens, 512);
-    assert.ok(String(context[1].body.query).includes("gateway recovery"));
-    writeFileSync(path, compactedTranscript);
-    await invoke(compaction.frames[5]);
-    await invoke(compaction.frames[3]);
-    await invoke(compaction.frames[5]);
-    await invoke(compaction.frames[3]);
+    assert.ok(String(context[1].body.query).includes(scenario.query));
+    writeFileSync(path, scenario.transcript);
+    await invoke(scenario.frames[scenario.stop]);
+    await invoke(scenario.frames[scenario.compact]);
+    await invoke(scenario.frames[scenario.stop]);
+    await invoke(scenario.frames[scenario.compact]);
     assert.equal(accepted.size, 4);
     assert.equal(gateway.requests.filter((request) => request.path === "/v1/sessions").length, 1);
     assert.ok(!gateway.requests.some((request) => request.path.endsWith("/end")));

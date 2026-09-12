@@ -1,4 +1,4 @@
-// CPR-39: authentic protocol evidence; no gateway/lifecycle support claim.
+// CPR-39: deterministic fixture checks are separate from native live evidence.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -45,5 +45,21 @@ test("native manual compaction requests fresh context before the next prompt", (
   assert.equal(resume.source, "resume");
   assert.equal(start.source, "compact");
   assert.equal(prompt.turn_id, stop.turn_id);
+  assert.equal(new Set(compact.frames.map((frame) => frame.session_id)).size, 1);
+});
+
+test("native automatic compaction preserves the tool turn before its final answer", () => {
+  const compact = JSON.parse(readFileSync(new URL("../adapters/codex/fixtures/auto-compaction.json", import.meta.url), "utf8"));
+  assert.equal(compact.client.version, "0.152.0");
+  assert.equal(compact.provenance.kind, "captured-real-client");
+  const [start, prompt, tool, result, before, after, resumed, stop] = compact.frames;
+  assert.deepEqual(compact.frames.map((frame) => frame.hook_event_name),
+    ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PreCompact", "PostCompact", "SessionStart", "Stop"]);
+  assert.equal(start.source, "startup");
+  assert.equal(before.trigger, "auto");
+  assert.equal(after.trigger, "auto");
+  assert.equal(resumed.source, "compact");
+  assert.equal(tool.tool_use_id, result.tool_use_id);
+  assert.equal(new Set([prompt, tool, result, before, after, stop].map((frame) => frame.turn_id)).size, 1);
   assert.equal(new Set(compact.frames.map((frame) => frame.session_id)).size, 1);
 });
