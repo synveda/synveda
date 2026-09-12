@@ -226,7 +226,7 @@ export async function retryBacklog(
       spool.gateway_url !== config.gatewayUrl
     ) continue;
     if (pending(spool).length === 0 && !spool.close_requested) {
-      if (spool.client_name !== "codex") retireIfComplete(spool, path);
+      if (spool.client_name === CLIENT_NAME) retireIfComplete(spool, path);
       continue;
     }
     if (Date.now() >= deadlineAt) {
@@ -239,9 +239,9 @@ export async function retryBacklog(
       await closeRun(spool, config, bearer, spool.end_reason);
     }
     saveSpool(spool, path);
-    // Codex can resume after runtime exit: acknowledged state still binds its
-    // native identity to the active application Session (ADR-0106).
-    if (spool.client_name !== "codex") retireIfComplete(spool, path);
+    // Codex/Copilot task owners end explicitly. Retain acknowledged bindings
+    // across another conversation's start and native runtime exits.
+    if (spool.client_name === CLIENT_NAME) retireIfComplete(spool, path);
   }
   if (delivered > 0) log("backlog.delivered", { events: delivered });
   return delivered;

@@ -23,7 +23,7 @@ const DEFAULT_TIMEOUT_MS = 3000;
 
 export interface AdapterConfig {
   /** Set by the adapter entry point, never by project configuration. */
-  clientName?: "claude-code" | "codex";
+  clientName?: "claude-code" | "codex" | "copilot-cli";
   /** `SYNVEDA_DISABLED=1`, or `disabled` in the project config. */
   disabled: boolean;
   inject: boolean;

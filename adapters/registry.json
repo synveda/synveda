@@ -67,6 +67,31 @@
       }
     },
     {
+      "id": "copilot-cli",
+      "display_name": "GitHub Copilot CLI",
+      "support_level": "experimental",
+      "connection": "mcp",
+      "tested_versions": [],
+      "configuration": null,
+      "lifecycle": {
+        "mechanism": "Documented sessionStart context hook plus native MCP configuration",
+        "contract_version": "Hooks schema version 1 (official contract inspected 2026-09-12); CLI 1.0.83 local configuration only",
+        "status": "context-only-contract-tests",
+        "source": "docs/integrations/copilot-cli.md",
+        "events": ["sessionStart"]
+      },
+      "limitations": [
+        "Source-build context adapter; native context consumption and full lifecycle qualification have not run. Authored contract tests are not captured frames.",
+        "CLI 1.0.83 native local MCP configuration and synthetic Skill discovery passed; no authenticated MCP exchange or approved Skill activation is claimed.",
+        "The first model probe refused a 0.5-credit ceiling; the CLI requires at least 30. Automatic approval review blocked the 30-credit run pending explicit cost authorisation.",
+        "Automatic transcript observation, Capture, compaction reinjection and native Skill activation are unqualified. The application owner explicitly requests Capture and ends the Synveda Session.",
+        "The existing Skill root override and native MCP configuration are used manually; no Synveda configuration writer or packaged Copilot runtime is advertised.",
+        "Copilot CLI is a distinct target from VS Code and the Copilot cloud agent; this entry makes no support claim for either."
+      ],
+      "authentic_fixtures": [],
+      "conformance": { "evidence_level": "not-run", "tested_at": null, "tested_version": null, "checks": {} }
+    },
+    {
       "id": "cursor",
       "display_name": "Cursor",
       "support_level": "experimental",

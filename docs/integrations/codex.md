@@ -218,6 +218,7 @@ original inventory is unchanged. Through the auditor profile, query
 grant/revoke/denial response trace IDs and verify `GET /v1/audit/verify`.
 Do not revoke a seeded grant and attempt to recreate it under a new identity.
 
-GitHub Copilot CLI and Pi remain separate, unqualified candidates. They have
-no Synveda lifecycle adapter in this checkout. The VS Code registry entry is
-not evidence for Copilot CLI, and MCP support alone is not a complete lifecycle.
+GitHub Copilot CLI has a separate [experimental context adapter](copilot-cli.md);
+its native lifecycle qualification remains open. Pi remains unqualified with
+no lifecycle adapter. The VS Code registry entry is not evidence for Copilot
+CLI, and MCP support alone is not a complete lifecycle.

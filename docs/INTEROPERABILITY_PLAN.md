@@ -83,9 +83,9 @@ Packaging, non-text results and other versions/platforms remain unqualified.
 - Acceptance: authenticated context delivery, events, Capture, task end,
   replay/restart, Skill discovery and persisted audited outcomes under
   ADR-0098. Promote the exact client version only after live evidence passes.
-- Copilot CLI and Pi have documented integration surfaces but no Synveda
-  adapter. They remain later qualification candidates. VS Code's hook contract
-  is separate from Copilot CLI's. No support claims follow from configuration.
+- Copilot CLI now has ADPT-9's experimental start/resume context adapter;
+  native lifecycle qualification is open. Pi remains a later candidate with no
+  adapter. VS Code's contract is separate; configuration is not qualification.
 
 ## Evidence and outcomes
 
@@ -403,11 +403,14 @@ changed to obtain the successful rerun.
 The CPR-45 deterministic-gate checkpoint is closed. Wider live reference
 acceptance remains in its open brief.
 
-1. Qualify the installed Copilot CLI 1.0.83 from its actual contract and authentic
-   frames. `copilot --version` confirmed it during the archive batch; no Copilot
-   authentication, protocol or lifecycle test has run yet and no registry entry
-   is inferred. Pi was absent from PATH. Reuse the current public API and MCP
-   implementation; add translation only when authentic evidence requires it.
+1. Complete [ADPT-9's Copilot CLI qualification](backlog/ADPT-9.md). Its bounded
+   source-build start/resume adapter reuses the shared authenticated runtime and
+   is registered as experimental. CLI 1.0.83 local MCP configuration and synthetic
+   Skill discovery work; full lifecycle evidence is blocked by the rejected
+   minimum 30-credit model-run ceiling pending explicit cost authorisation.
+   The 121 adapter tests pass on macOS Node 24 and offline Docker Node 22, zero
+   skips. Request one bounded synthetic native probe;
+   capture actual frames before implementing further seams. Pi was absent from PATH.
 2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
    Local archive build/install/import is verified; packages remain unpublished.

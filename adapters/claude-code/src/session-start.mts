@@ -117,7 +117,7 @@ export async function sessionStart(
     request,
     // A fresh key per start: a resumed conversation composing again is a new
     // composition over a corpus that may have moved, not a retry.
-    `${config.clientName === "codex" ? "codex" : "cc"}-ctx-${randomUUID()}`,
+    `${requestPrefix(config)}-ctx-${randomUUID()}`,
   );
   const elapsedMs = Date.now() - started;
 
@@ -199,7 +199,7 @@ async function resolveRun(
     },
     // Derived from the harness id rather than random: a SessionStart that
     // times out and fires again must land on the same run.
-    `${config.clientName === "codex" ? "codex" : "cc"}-open-${spool.external_session_id}`,
+    `${requestPrefix(config)}-open-${spool.external_session_id}`,
   );
   if (!result.ok) {
     log("session.open_failed", {
@@ -273,6 +273,10 @@ function deriveTask(
 function budgetFor(source: string | undefined, config: AdapterConfig): number | undefined {
   if (source === "compact") return config.compactBudgetTokens ?? config.budgetTokens;
   return config.budgetTokens;
+}
+
+function requestPrefix(config: AdapterConfig): string {
+  return config.clientName === undefined || config.clientName === "claude-code" ? "cc" : config.clientName;
 }
 
 function disclose(cwd: string | undefined, config: AdapterConfig): string | undefined {

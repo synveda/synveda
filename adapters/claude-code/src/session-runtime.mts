@@ -1,4 +1,4 @@
-/** Internal workspace seam for the two captured harnesses (CPR-39, ADR-0106).
+/** Internal workspace seam for explicit harness translations (ADR-0106/0107).
  * Keep credential resolution and durable public-API delivery in one place.
  */
 export { loadConfig, type AdapterConfig } from "./config.mjs";

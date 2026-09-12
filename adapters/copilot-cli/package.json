@@ -1,0 +1,18 @@
+{
+  "name": "@synveda/copilot-cli-adapter",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Experimental Copilot CLI start/resume context over the existing Synveda Session runtime (ADPT-9)",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test --test-timeout=60000 \"dist/*.test.mjs\""
+  },
+  "dependencies": {
+    "@synveda/claude-code-adapter": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -291,11 +291,11 @@ policy does not license Synveda itself.
   Knowledge, Context, Skills, Tools, governance and the distinct packaged
   workflow.
 - [Client support](docs/CLIENT_SUPPORT.md) and the [Claude Code adapter](adapters/claude-code/README.md)
-  cover the only currently verified agent lifecycle and the optional generic
-  MCP integration.
+  cover measured support levels, the Claude lifecycle and generic MCP integration.
 - [Python and TypeScript clients](sdks/README.md) cover the initial authenticated
-  API slice; [Codex CLI setup and evidence](docs/integrations/codex.md) records
-  its captured MCP protocol and remaining lifecycle work.
+  API slice; [experimental Copilot CLI setup](docs/integrations/copilot-cli.md)
+  reuses the same Session boundary; [Codex CLI setup and evidence](docs/integrations/codex.md) records
+  its verified lifecycle and remaining qualification limits.
 - [Contributing](CONTRIBUTING.md), [agent rules](AGENTS.md) and the
   [feature inventory](docs/backlog/STATUS.md) define the development workflow.
 - [Product principles](docs/SYNVEDA_SEED.md), the [technical plan](docs/SYNVEDA_TECH_PLAN.md),

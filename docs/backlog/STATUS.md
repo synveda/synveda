@@ -1,11 +1,11 @@
 # Feature inventory
 
-142 features in this index. This file is authoritative for feature identity,
+143 features in this index. This file is authoritative for feature identity,
 phase and delivered/open state. Delivered names identify historical slices;
 current contracts live in code, generated artefacts and accepted ADRs, while git
 retains their implementation evidence. Open entries link to current briefs.
 
-111 delivered; 31 open. The inventory and open-brief shape are checked in CI.
+111 delivered; 32 open. The inventory and open-brief shape are checked in CI.
 
 The 2026-09-12 [interoperability execution plan](../INTEROPERABILITY_PLAN.md)
 records ADPT-1/2 and CPR-12/23 repairs, the initial ADPT-4 SDK slice and CPR-39
@@ -34,10 +34,16 @@ the extracted archive on Node 22/Linux arm64 and Node 24/macOS arm64. The
 installer preserves client configuration, replaces the hook on upgrade and
 refuses an incomplete runtime before mutation. Native execution from a published
 installation, non-text Codex results and other client versions/platforms remain
-unqualified. Next, qualify the now-installed Copilot CLI 1.0.83 using its actual
-contract and authentic frames;
-it has no registry/support claim yet. Pi is not
-on the current PATH. These are independent of the public-release decisions.
+unqualified. [ADPT-9](ADPT-9.md) adds an experimental source-build Copilot CLI
+start/resume context adapter over the same authenticated Session runtime.
+CLI 1.0.83 local MCP configuration and synthetic Skill discovery work. Native
+lifecycle qualification remains blocked: automatic approval review rejected
+the minimum 30-credit model-run ceiling without explicit cost authorisation.
+All 121 adapter tests (including eight Copilot contracts) pass with zero skips
+on macOS Node 24 and offline Docker Node 22/Linux arm64. Next, request that
+allowance for one bounded synthetic probe before capturing/implementing further
+seams. Pi is not on PATH.
+These are independent of the public-release decisions.
 
 The apparent deployment-gate stall was delayed reporting: the unchanged
 89-test lifecycle suite passed in 360 seconds, and the interrupted build itself
@@ -146,6 +152,7 @@ remain incomplete runs, not passes.
 - [ ] [ADPT-6: LlamaIndex memory adapter](ADPT-6.md) — open
 - [ ] [ADPT-7: Semantic Kernel memory connector](ADPT-7.md) — open
 - [x] ADPT-8: Observation that survives a session that does not wait — delivered 2026-08-24; ADR-0027
+- [ ] [ADPT-9: GitHub Copilot CLI adapter](ADPT-9.md) — open
 - [ ] [PRMT-3: Prompt experiment evidence](PRMT-3.md) — open
 - [ ] [SKIL-5: Authentic Skill usage reporting](SKIL-5.md) — open
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open
