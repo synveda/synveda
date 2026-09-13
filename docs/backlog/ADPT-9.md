@@ -95,16 +95,55 @@ documentation, backlog and ADR gates pass. Rust is unchanged; strict Clippy is
 not applicable. Full CI, database, full Compose acceptance and complete native
 qualification were not rerun. Copilot packaging remains deferred until qualification.
 
-Next action: qualify the real hook and MCP client against the ordinary
-Docker/Keycloak public edge using one shared Python/TypeScript Session. Reuse
-the approved Skill installer and verify exact binding/version attribution;
-exercise proposal submission, foreign-workspace denial, persisted audit
-correlation, retry, explicit Capture/end and later Knowledge reuse. Current
-observation evidence is replay only; compaction, non-text/unknown failure-result
-formats and authentic governed Skill usage remain unqualified. Native
-`skill.invoked` has no Synveda binding identity and is not promoted into a typed
-usage event. The two prior synthetic-prompt allowances are consumed; prepare
-the complete governed scenario before seeking any further paid-run allowance.
+### Authenticated preflight — 2026-09-13
+
+At `24cd02d009f26f87d7a7c6b35fdf01633e1a682e`, the governed scenario passed
+through the existing `acceptance-interop` Docker public edge. Both expired demo
+profiles were renewed through ordinary browser OIDC/PKCE S256. Grants, policy,
+retrieval, the Skill registry, adapters and SDK implementations are unchanged.
+The content-free [result](../../adapters/copilot-cli/fixtures/public-edge-replay.json)
+records source and transcript digests, exact resource IDs and audit traces.
+
+Authored invocations of captured hook schemas replayed six original text/tool
+events. Start returned allowed context; Stop persisted locally before delivery;
+exit and resume retained one active task without duplicate events. The resumed
+captured prompt concerns the earlier synthetic marker, so its empty Knowledge
+selection is not recorded as an allowed-context resume pass.
+
+The existing installer materialised the approved enabled Skill binding into
+the isolated project's native Skill root. Receipt binding/version/bundle and
+file identity match the available API entry; installed bytes match the immutable
+file response. Copilot CLI 1.0.83 listed it as enabled. This proves governed
+installation and native discovery, not native model activation.
+
+Both unchanged SDK examples retrieved allowed context and Skill bytes, submitted
+idempotent pending proposals, denied the existing foreign Session and correlated
+actual response traces with content-free audit. The existing stdio test client
+exercised `rmcp` through two connections: explicit same-task recall, foreign
+denial, missing identity refusal and host-owned write refusal all passed.
+This is an authenticated MCP replay client, not native Copilot MCP evidence.
+
+The shared task contains eight unique events: six captured observations plus two
+SDK `skill.loaded` events. Explicit Capture completed with six candidates;
+task-owner end, later approved Knowledge reuse and audit verification through
+sequence 938 passed. No approved Skill usage is inferred from the old synthetic
+`skill.invoked` record. A local driver initially named a nonexistent Node binary
+and stopped before opening a Session; using the installed executable passed.
+The documented Compose smoke passed again with the same project/profile/pool.
+Full CI, database tests and full Compose acceptance were not rerun. Rust and
+adapter code are unchanged, so strict Clippy and the prior adapter suites were
+not rerun for this evidence/documentation increment.
+
+Next action: run the prepared native Copilot start/resume pair with the real
+hook, approved Skill and authenticated MCP. Between invocations, run both SDK
+examples on the actual native-created Synveda Session with a fresh run key;
+then verify observed tool results, binding/version/hash, persisted audit,
+Capture/end and reuse. The prior two synthetic-prompt allowances are consumed.
+The requested new allowance is at most two user prompts in one native Session,
+sharing the CLI's minimum 30-credit ceiling; neither prompt has run. No automatic
+paid retries are included. Native outage/recovery, compaction, unknown/non-text
+result shapes and packaged installation remain separate unqualified cases.
+Keep the registry experimental until applicable native acceptance is complete.
 
 ## Dependencies
 

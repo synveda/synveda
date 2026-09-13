@@ -78,7 +78,7 @@
       "lifecycle": {
         "mechanism": "Captured sessionStart context, agentStop recording and sessionEnd flush; native MCP configuration",
         "contract_version": "Hooks schema version 1 / captured Copilot CLI 1.0.83 (2026-09-13)",
-        "status": "native context probe and durable observation replay pass; authenticated native lifecycle unverified",
+        "status": "native context probe and authenticated shared-workflow replay pass; native lifecycle unverified",
         "source": "docs/integrations/copilot-cli.md",
         "events": [
           "sessionStart",
@@ -88,9 +88,9 @@
       },
       "limitations": [
         "Source-build context/observation adapter. Native synthetic resume context passes; captured events replay through the shared spool with stable task identity, retries and a two-second exit flush. Authenticated native lifecycle remains unverified.",
-        "CLI 1.0.83 supplied ten authentic hook callbacks across new/resumed invocations and a native skill.invoked event. Approved Synveda Skill binding/version attribution and authenticated MCP were not exercised.",
+        "CLI 1.0.83 supplied ten authentic hook callbacks across new/resumed invocations and a native skill.invoked event. The approved Skill installer and native discovery now pass against Keycloak; native governed activation and native authenticated MCP remain unverified.",
         "The first synthetic probe failed after invoking a conflicting Skill. The separately approved corrected retry passed without tool use under the same saved 30-credit limit; the CLI reported two cumulative premium requests. Both outcomes are preserved.",
-        "Automatic text/tool observations are tested against captured transcripts and mock public APIs. Non-text/unknown failure-result shapes are held; native compaction, approved Skill attribution and live observation delivery remain unqualified. Capture/end remain explicit task-owner operations.",
+        "Captured text/tool observations pass both mock and authenticated Docker/Keycloak replay. Both SDKs and a stdio MCP test client share one task, with workspace denial, audit, Capture/end and Knowledge reuse; see adapters/copilot-cli/fixtures/public-edge-replay.json. This is not native lifecycle conformance. Non-text/unknown failure-result shapes, native outage/compaction and packaged installation remain unqualified.",
         "The existing Skill root override and native MCP configuration are used manually; no Synveda configuration writer or packaged Copilot runtime is advertised.",
         "Copilot CLI is a distinct target from VS Code and the Copilot cloud agent; this entry makes no support claim for either."
       ],

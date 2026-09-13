@@ -11,6 +11,10 @@ The separately approved corrected retry consumed a fresh hook-only marker,
 invoked no tools and resumed the same native Session after process exit.
 Captured text/tool events now replay through the existing durable Session spool.
 Authenticated native Synveda context, MCP and full lifecycle acceptance remain unverified.
+The Docker/Keycloak public-edge preflight now passes real hook replay, both
+SDKs, exact approved Skill installation/native discovery, MCP reconnect,
+workspace denial, Capture/end and audit. Existing implementations needed no
+corrective change for that preflight.
 
 ## Build and connect
 
@@ -208,13 +212,68 @@ same-task resume, denied delivery, gateway isolation, disabled observation,
 malformed/foreign input and one deadline spanning credentials and a stalled
 append. Native hook/transcript captures remain separately digest-pinned.
 
-Next qualify native observations, outage recovery, applicable compaction and
-approved Skill attribution with the same SDK task against the ordinary Docker/Keycloak public edge. Require cross-workspace
-denial and persisted audit correlation, Capture, explicit end and Knowledge
-reuse before registry promotion. Vendor `preCompact` is notification-only; no
-post-compaction reinjection is claimed. Only then extend the existing release
-archive and installation checks. Both approved synthetic prompts are complete;
-additional paid native prompts require their own allowance.
+## Authenticated public-edge preflight
+
+The [2026-09-13 result](../../adapters/copilot-cli/fixtures/public-edge-replay.json)
+at `24cd02d` pins the tested source/transcript hashes and content-free outcomes.
+The existing demo approver and separate author/auditor profiles needed fresh
+browser logins; both completed ordinary Keycloak OIDC/PKCE S256. Configuration
+and grants were unchanged. Captured transcript fixtures were driven through
+the real hook using authored invocations, with private paths/current timestamps.
+This is public-API replay evidence, separate from native model execution.
+
+| Check | Measured result |
+| --- | --- |
+| Start context and task identity | Allowed context delivered; the same task stays active after exit/resume. The unrelated captured resume prompt did not select the ingestion Knowledge, so allowed-context resume is not claimed. |
+| Durable observations | Stop records locally before HTTP delivery; six stable text/tool events delivered without duplicates. |
+| Governed Skill installation | Existing sync dry run, install and unchanged reconciliation pass. Receipt binding/version/bundle/file identity match the enabled available binding; immutable API bytes equal the installed file. Copilot lists the project Skill as enabled. |
+| Python and TypeScript | Both unchanged workflow examples pass on one task: allowed context, exact Skill, idempotent pending proposals, foreign-Session denial and actual response-trace correlation. |
+| MCP reconnect | The existing bounded test client connects twice to `rmcp`. Both connections recall on the same explicit task, deny the foreign Session, refuse missing identity and expose only `recall` in host-write mode. Native Copilot MCP is still pending. |
+| Task-owner lifecycle | Eight unique events, including two SDK Skill loads; Capture completes with six candidates, explicit end succeeds, a later Session reuses approved Knowledge, and the audit chain verifies through sequence 938. |
+
+The six captured events include an old synthetic Skill invocation; it is not
+attributed to the installed approved binding. The two typed `skill.loaded`
+events come only from the SDK examples. Native governed activation must join
+the observed Skill path to the installer receipt and unchanged immutable bytes;
+a matching name or model assertion is insufficient.
+
+The documented Compose smoke passed again with suffix `acceptance-interop`,
+pool `10.231.46.0/24` and profile `demo`. No product or adapter code changed;
+the earlier 136-test adapter results remain dated to their implementation
+increment. Full CI, the database suite and full Compose acceptance were not
+rerun for this preflight; strict Clippy is not applicable to these non-Rust edits.
+
+To repeat the public checks, use the documented Compose/demo fixture and two
+ordinary login profiles, an isolated trusted workspace and fresh task/run keys.
+Use the hook registration and Skill sync commands above, then the existing
+[SDK scenario and workflow commands](../../sdks/README.md#shared-workflow-example)
+with the hook-created Session ID. Keep replay inputs labelled separately from
+authentic invocations. The retained result records the exact fixture hashes;
+private scratch drivers and credentials are not project state.
+
+The prepared native plan is two user prompts on one fresh native Session:
+
+1. Load the installed ingestion-retry-review Skill for review, use the injected
+   Synveda Session ID for MCP recall, and attempt the known foreign test Session.
+   The Skill's ingestion steps are reviewed; no ingestion requests are needed.
+2. After both SDK examples run on that native-created task, resume the same
+   Copilot UUID and recall again with the injected Synveda identity. Verify
+   persisted native observations and tool results, exact Skill attribution,
+   explicit Capture/end, later Knowledge reuse and content-free audit.
+
+Both earlier synthetic prompts are complete. The proposed pair needs a new
+allowance and shares one 30-credit Session ceiling, with no automatic paid
+retry. Restrict tools to the approved Skill and Synveda recall workflow, disable
+built-in MCP servers, remote export and unrelated custom instructions, and keep
+shell/write/URL access denied using the
+[vendor permission patterns](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#tool-permission-patterns).
+Retain native output privately and project only the needed authenticated
+frames; never commit credentials, reasoning or system instructions.
+
+Native outage recovery, applicable compaction and unknown/non-text result shapes
+remain unqualified. Vendor `preCompact` is notification-only; no post-compaction
+reinjection is claimed. Require applicable native acceptance before registry
+promotion and extending the existing release archive/installation checks.
 
 Full CI, the database suite, full Compose acceptance, a packaged Copilot
 installation and complete native lifecycle qualification were not run for this increment.

@@ -408,12 +408,20 @@ acceptance remains in its open brief.
    bounded reader and spool; runtime exit flushes without closing the task.
    The native synthetic resume-context probe passes. All 136 adapter tests
    (23 Copilot), eight extracted Codex package tests on each host/Docker runtime
-   and existing-stack Compose smoke pass; no new paid prompt ran. Prepare the
-   governed Docker/Keycloak scenario, verify approved Skill binding/version
-   attribution, then exercise the native hook/MCP client with both SDKs, denial,
-   audit, retry, explicit Capture/end and reuse. Native authentication and full
-   lifecycle remain unverified; non-text/unknown failure-result shapes and
-   compaction need their own evidence. Pi was absent from PATH.
+   and existing-stack Compose smoke pass. The governed Docker/Keycloak preflight
+   at `24cd02d` now passes real hook replay, exact approved Skill installation
+   and native discovery, both SDK workflows and two authenticated MCP test
+   connections. Eight unique events, six Capture candidates, explicit end,
+   Knowledge reuse and audit verification through sequence 938 are recorded in
+   [the content-free replay result](../adapters/copilot-cli/fixtures/public-edge-replay.json).
+   Existing implementations need no corrective change for these checks.
+   Next run the prepared native start/resume pair with both SDKs on its actual
+   task, then verify denial, audit, approved Skill activation and Capture/end.
+   No new paid prompt ran; the prior synthetic allowances are consumed and the
+   proposed pair shares one 30-credit Session ceiling. Native authentication,
+   outage/recovery and full lifecycle remain unverified; non-text/unknown
+   failure-result shapes and compaction need their own evidence. Pi was absent
+   from PATH.
 2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
    Local archive build/install/import is verified; packages remain unpublished.

@@ -47,11 +47,16 @@ Captured text/tool observations now use the shared bounded reader and spool.
 budget and retains the task. All 136 adapter tests (23 Copilot) and eight
 extracted Codex archive tests pass on macOS Node 24 and offline Docker Node 22,
 zero skips. Original native transcripts replay into six unique observations;
-the existing `acceptance-interop` Compose smoke also passes. Next prepare the
-ordinary Docker/Keycloak shared SDK scenario, verify approved Skill attribution,
-then qualify the native hook/MCP workflow including denial, audit, retry,
-Capture/end and reuse. Native Synveda authentication/full conformance remain
-unverified; no new paid prompt ran. Pi is not on PATH.
+the existing `acceptance-interop` Compose smoke also passes. The governed
+Docker/Keycloak preflight now passes at `24cd02d`: real hook replay, exact
+approved Skill installation/native discovery, both SDK workflows, two MCP
+connections, foreign-workspace denial and audit correlation. Eight unique
+events yield six Capture candidates; explicit end, Knowledge reuse and audit
+verification through sequence 938 pass. No product code changed. Next run the
+prepared native start/resume pair on a fresh task, subject to a new bounded
+paid-run allowance; prior synthetic allowances are consumed. Native Synveda
+authentication/full conformance remain unverified; no new paid prompt ran.
+Pi is not on PATH.
 These are independent of the public-release decisions.
 
 The apparent deployment-gate stall was delayed reporting: the unchanged

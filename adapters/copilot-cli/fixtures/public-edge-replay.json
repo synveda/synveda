@@ -1,0 +1,349 @@
+{
+  "provenance": {
+    "kind": "authenticated-public-api-replay",
+    "feature": "ADPT-9",
+    "checkout_base": "24cd02d009f26f87d7a7c6b35fdf01633e1a682e",
+    "production_changes": false,
+    "native_model_prompts": 0,
+    "client_version": "Copilot CLI 1.0.83 (local configuration/discovery only)",
+    "platform": "Darwin 25.6.0 arm64",
+    "node": "v24.18.0",
+    "python": "3.14.6",
+    "deployment_project": "synveda-development-acceptance-interop",
+    "deployment_profile": "demo",
+    "gateway": "http://app.synveda.test:8080",
+    "authentication": "ordinary Keycloak OIDC/PKCE S256 browser logins; existing approver and separate author/auditor profiles renewed without changes to grants",
+    "hook_driver": "authored command invocations of captured sessionStart/agentStop/sessionEnd schemas; current timestamp and private paths; captured native identity and transcript event IDs retained",
+    "mcp_driver": "bounded stdio test client reused from scripts/interop-mcp.test.mjs; not native Copilot",
+    "source_sha256": {
+      "adapters/copilot-cli/src/hook.mts": "a71bed52609aa787891cfb2b54f5c79f5404650f89df08a7dcc70eaa1d4de936",
+      "adapters/copilot-cli/src/transcript.mts": "68bdf33e5b9f19ff8e4a674f4c719a1418bc5d2f19c648b35f072b3a3b827e22",
+      "adapters/claude-code/src/session-start.mts": "7ae09e26bc2788c6011efd0849f68cd539cbb07c9f7cfa449f55029abf91f096",
+      "adapters/claude-code/src/turn.mts": "11412850e93cc6845069bc714f26e6cd9e386d33e95961d6ce092bfed146236c",
+      "adapters/claude-code/src/transcript.mts": "7b28143ead88eebf2d66b4bf19cd5a1e5769e4c08594363135bccfb886ab2391",
+      "crates/synveda-cli/src/mcp.rs": "3dda272f7ec00c91136e3ceb43f590e7dbd9d6bd23a5ec24840c17468d134d54",
+      "crates/synveda-cli/src/skill.rs": "f958cf5b919534c472f312481edf9c3e781a0925971727e64b6c826c7fbe08aa",
+      "sdks/typescript/src/workflow.mts": "5ce30a0e4589a61cfa0bf3a1bac4d33aebfe0d55537d309b97769edb8b0f0988",
+      "sdks/python/workflow.py": "0747bccd650da76ba843b566d2888e88e4fc96be7f26c8697e5a21ce16f71231",
+      "scripts/interop-mcp.test.mjs": "1a5458fae5fcdf02ad296a015a63a9585543eecd4a7a61fbaa65c786d48bdb2e"
+    },
+    "input_fixture_sha256": {
+      "adapters/copilot-cli/fixtures/transcript.jsonl": "a923453d2ce160f96a9de59551c70210ba5c4a4cd192a1b0904fa1489de800f5",
+      "adapters/copilot-cli/fixtures/resume-transcript.jsonl": "93a3b33aead664f15f0fe5f7e9ca6d85c54211435c8271d71adc5f17ec14ce20"
+    },
+    "scope": "governed scenario preflight; no native lifecycle promotion"
+  },
+  "tested_at": "2026-09-13T08:32:03.929459+00:00",
+  "hook_replay": {
+    "session_id": "01a099e1-b81d-7400-9b0a-26409fc798e9",
+    "external_session_id": "copilot-cli:a634658f-178c-4477-b448-632bc4ab4724",
+    "hooks": [
+      {
+        "event": "sessionStart",
+        "source": "new",
+        "elapsed_ms": 160,
+        "allowed_context": true
+      },
+      {
+        "event": "agentStop",
+        "source": null,
+        "elapsed_ms": 34,
+        "allowed_context": false
+      },
+      {
+        "event": "sessionEnd",
+        "source": null,
+        "elapsed_ms": 73,
+        "allowed_context": false
+      },
+      {
+        "event": "sessionStart",
+        "source": "resume",
+        "elapsed_ms": 121,
+        "allowed_context": false
+      },
+      {
+        "event": "agentStop",
+        "source": null,
+        "elapsed_ms": 37,
+        "allowed_context": false
+      },
+      {
+        "event": "sessionEnd",
+        "source": null,
+        "elapsed_ms": 44,
+        "allowed_context": false
+      }
+    ],
+    "event_counts": {
+      "message.assistant": 2,
+      "message.user": 2,
+      "tool.invoked": 1,
+      "tool.result": 1
+    },
+    "active_after_runtime_exit": true,
+    "duplicate_client_event_ids": 0,
+    "local_stop_before_delivery": true
+  },
+  "approved_skill_installation": {
+    "name": "ingestion-retry-review",
+    "skill_id": "01a096a1-914d-7c22-8fd0-8e72c0775e72",
+    "binding_id": "01a096a1-a6d2-7453-998f-3b47c7ff8d04",
+    "binding_revision": 1,
+    "enabled": true,
+    "version_id": "01a096a1-914d-7c22-8fd0-8e89acc65450",
+    "bundle_digest": "1ac0b2a1296fdf5a25b835ec1a35dec279de974cb04b8ddb715cfe97fe1e3da0",
+    "manifest_object_hash": "a0df167a06d0a8f86cf313a3b34694893ba3a22f47b72401fea69dbd34b68e0b",
+    "skill_file_sha256": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+    "relative_root": ".github/skills",
+    "receipt_matches_available_binding": true,
+    "installed_bytes_match_public_api": true,
+    "native_discovery_enabled": true,
+    "native_model_activation": "not_run",
+    "typed_skill_loaded_source": "existing Python/TypeScript workflow operations only"
+  },
+  "sdk_workflows": [
+    {
+      "client": "typescript",
+      "session_id": "01a099e1-b81d-7400-9b0a-26409fc798e9",
+      "context_run_id": "01a099e2-f83f-7ba2-b7e7-53c8e40353a0",
+      "proposal_id": "01a099e2-f884-7043-809d-79b7b9aea456",
+      "trace_id": "8916fad4f75973faf4d56b85ea1111b5"
+    },
+    {
+      "client": "python",
+      "session_id": "01a099e1-b81d-7400-9b0a-26409fc798e9",
+      "context_run_id": "01a099e2-f924-70a0-9eb6-a69f6d2bdee3",
+      "proposal_id": "01a099e2-f949-76d3-91aa-87e1f94f3b01",
+      "trace_id": "9ed72d823cc9889336199a9ba51dea77"
+    }
+  ],
+  "sdk_assertions": [
+    "same Session",
+    "allowed context and Knowledge",
+    "approved immutable Skill bytes",
+    "pending proposal and identical idempotent replay",
+    "denial for existing foreign-workspace Session",
+    "pending proposal absent from Knowledge",
+    "actual context response trace present in content-free audit"
+  ],
+  "mcp_connections": [
+    {
+      "connection": 1,
+      "protocol_version": "2025-11-25",
+      "tools": [
+        "recall"
+      ],
+      "session_id": "01a099e1-b81d-7400-9b0a-26409fc798e9",
+      "allowed_recall": true,
+      "foreign_session_denied": true,
+      "missing_session_refused": true,
+      "host_owned_write_refused": true
+    },
+    {
+      "connection": 2,
+      "protocol_version": "2025-11-25",
+      "tools": [
+        "recall"
+      ],
+      "session_id": "01a099e1-b81d-7400-9b0a-26409fc798e9",
+      "allowed_recall": true,
+      "foreign_session_denied": true,
+      "missing_session_refused": true,
+      "host_owned_write_refused": true
+    }
+  ],
+  "public_lifecycle": {
+    "tested_at": "2026-09-13T08:32:03.929459+00:00",
+    "session_id": "01a099e1-b81d-7400-9b0a-26409fc798e9",
+    "external_session_id": "copilot-cli:a634658f-178c-4477-b448-632bc4ab4724",
+    "event_counts": {
+      "message.assistant": 2,
+      "message.user": 2,
+      "skill.loaded": 2,
+      "tool.invoked": 1,
+      "tool.result": 1
+    },
+    "event_count": 8,
+    "duplicate_client_event_ids": 0,
+    "skill_loaded_source": "two SDK operations; replayed native synthetic skill is not an approved binding claim",
+    "active_after_mcp_disconnect": true,
+    "capture_batch_id": "01a099e5-18e5-70b2-9dcd-bc39c2072a4c",
+    "capture_state": "completed",
+    "capture_event_count": 6,
+    "capture_candidate_count": 6,
+    "task_owner_end_status": "ended",
+    "reuse_session_id": "01a099e5-1b0d-7f62-9211-2a2f5642a5e9",
+    "knowledge_id": "01a096a1-9cb3-79b0-a5bd-6316a49499c3",
+    "denied_session_id": "01a096ab-f2ec-79e1-af15-b8687a59b148",
+    "audit_valid": true,
+    "audit_head_seq": 938,
+    "audit_head_hash": "d7e1ba4b50fd74d40a73dffc4f68027f059f2aa3038403fc371cd6cff7b11bb6",
+    "session_audit_events": [
+      {
+        "seq": 868,
+        "action": "session.opened",
+        "trace_id": "2342df93d2614843ec09623e596e458b"
+      },
+      {
+        "seq": 869,
+        "action": "context.candidates.retrieved",
+        "trace_id": "d7218cdf4f76445e4087ce6abb7cd1c8"
+      },
+      {
+        "seq": 870,
+        "action": "context.selections.made",
+        "trace_id": "d7218cdf4f76445e4087ce6abb7cd1c8"
+      },
+      {
+        "seq": 871,
+        "action": "session.context.composed",
+        "trace_id": "d7218cdf4f76445e4087ce6abb7cd1c8"
+      },
+      {
+        "seq": 873,
+        "action": "session.events.appended",
+        "trace_id": "c7dfa9325f46989261a0fffa6dd4fa02"
+      },
+      {
+        "seq": 875,
+        "action": "session.events.appended",
+        "trace_id": "8f7be02bf55b66c56bc98ae16913dcd0"
+      },
+      {
+        "seq": 876,
+        "action": "context.candidates.retrieved",
+        "trace_id": "05dbe820e6d19656c0409cfafedf5f7a"
+      },
+      {
+        "seq": 877,
+        "action": "context.selections.made",
+        "trace_id": "05dbe820e6d19656c0409cfafedf5f7a"
+      },
+      {
+        "seq": 878,
+        "action": "session.context.composed",
+        "trace_id": "05dbe820e6d19656c0409cfafedf5f7a"
+      },
+      {
+        "seq": 882,
+        "action": "context.candidates.retrieved",
+        "trace_id": "8916fad4f75973faf4d56b85ea1111b5"
+      },
+      {
+        "seq": 883,
+        "action": "context.selections.made",
+        "trace_id": "8916fad4f75973faf4d56b85ea1111b5"
+      },
+      {
+        "seq": 884,
+        "action": "session.context.composed",
+        "trace_id": "8916fad4f75973faf4d56b85ea1111b5"
+      },
+      {
+        "seq": 888,
+        "action": "session.events.appended",
+        "trace_id": "3b80878d1d88b8ae06fd4828c0c2a6f7"
+      },
+      {
+        "seq": 893,
+        "action": "authz.decision",
+        "trace_id": "c5fc0619ff726c3a72085954a19c6d92"
+      },
+      {
+        "seq": 895,
+        "action": "context.candidates.retrieved",
+        "trace_id": "9ed72d823cc9889336199a9ba51dea77"
+      },
+      {
+        "seq": 896,
+        "action": "context.selections.made",
+        "trace_id": "9ed72d823cc9889336199a9ba51dea77"
+      },
+      {
+        "seq": 897,
+        "action": "session.context.composed",
+        "trace_id": "9ed72d823cc9889336199a9ba51dea77"
+      },
+      {
+        "seq": 901,
+        "action": "session.events.appended",
+        "trace_id": "55cecae88b04b8b84a315270890709d8"
+      },
+      {
+        "seq": 906,
+        "action": "authz.decision",
+        "trace_id": "4ea94720029b8693ac82fcbb5a322fe2"
+      },
+      {
+        "seq": 929,
+        "action": "capture.batch.created",
+        "trace_id": "2bb3df9b78ea7ea3851933761a5cf4e4"
+      },
+      {
+        "seq": 931,
+        "action": "capture.batch.completed",
+        "trace_id": null
+      },
+      {
+        "seq": 933,
+        "action": "session.ended",
+        "trace_id": "6469f6482da8240ff7a8bce82436f546"
+      }
+    ]
+  },
+  "preflight_corrections": [
+    {
+      "stage": "credentials",
+      "result": "stored profiles required login; both renewed through existing PKCE flow"
+    },
+    {
+      "stage": "local replay driver",
+      "result": "incorrect Node path failed before any Session opened; rerun used installed executable and passed"
+    }
+  ],
+  "limits": [
+    "Initial hook returned the allowed context; resumed hook retained the same task but the unrelated captured synthetic prompt did not select that Knowledge. Resume allowed-context delivery is not claimed.",
+    "Captured native synthetic Skill tool events are replay evidence only; they do not attest to activation of the installed governed Skill.",
+    "No additional native model request, native MCP exchange, outage/compaction qualification or packaged Copilot installation was run.",
+    "Full CI, database suite and full Compose acceptance were not rerun; adapter code and SDKs are unchanged."
+  ],
+  "redactions": [
+    "credentials and password inputs",
+    "private filesystem prefixes",
+    "raw hook context and Skill bytes",
+    "observation and proposal bodies",
+    "hidden reasoning, encrypted fields and system instructions"
+  ],
+  "compose_smoke": {
+    "status": "passed",
+    "target": "make compose-smoke",
+    "project_suffix": "acceptance-interop",
+    "ipv4_pool": "10.231.46.0/24",
+    "profiles": "demo",
+    "scope": "existing retained deployment; full Compose acceptance not rerun"
+  },
+  "repository_validation": {
+    "passed": [
+      "make fmt",
+      "make check-deps",
+      "make check-adapters",
+      "make check-docs",
+      "make check-backlog",
+      "make check-adr-status",
+      "git diff --check",
+      "source/input digest and content-free evidence projection checks"
+    ],
+    "checker_tests_passed": 21,
+    "checker_tests_skipped": 0,
+    "not_run": [
+      "full CI",
+      "fresh database suite",
+      "full Compose acceptance",
+      "new native Copilot model prompts",
+      "native outage/compaction qualification",
+      "packaged Copilot installation"
+    ],
+    "unchanged_code_checks": "Rust Clippy and 136 adapter tests not rerun for documentation/evidence-only changes; prior measured results remain dated to 24cd02d"
+  }
+}
