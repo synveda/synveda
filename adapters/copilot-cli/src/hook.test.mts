@@ -184,19 +184,25 @@ test("missing login never opens a task and empty allowed context still identifie
     `Synveda Session ID: ${session}. Pass this as session_id to Synveda MCP tools for this task.`);
 });
 
-test("captured 1.0.83 frames reuse the start adapter without inventing observation or task completion", async (t) => {
-  const capture = JSON.parse(readFileSync(new URL("../fixtures/lifecycle.json", import.meta.url), "utf8"));
+test("captured 1.0.83 new/resume frames reuse one task across runtime end without inventing observations", async (t) => {
   const { root, gateway } = await fixture(t, allowed);
-  for (const frame of capture.invocations[0].frames) {
-    const output = await hook(root, gateway.url, { ...frame.input, cwd: root }, {}, frame.event);
-    if (frame.event === "sessionStart") {
-      assert.ok(JSON.parse(output.stdout).additionalContext.includes(session));
-    } else {
-      assert.equal(output.stdout, "");
+  for (const name of ["lifecycle.json", "resume-lifecycle.json"]) {
+    const capture = JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"));
+    for (const frame of capture.invocations[0].frames) {
+      const output = await hook(root, gateway.url, { ...frame.input, cwd: root }, {}, frame.event);
+      if (frame.event === "sessionStart") {
+        assert.ok(JSON.parse(output.stdout).additionalContext.includes(session));
+      } else {
+        assert.equal(output.stdout, "");
+      }
     }
+    const spools = saved(root);
+    assert.equal(spools.length, 1);
+    assert.equal(spools[0].session_id, session);
+    assert.equal(spools[0].close_requested, false);
+    assert.deepEqual(spools[0].entries, []);
   }
   assert.deepEqual(gateway.requests.map((request) => request.path),
-    ["/v1/sessions", `/v1/sessions/${session}/context-runs`]);
-  assert.equal(saved(root)[0].close_requested, false);
-  assert.deepEqual(saved(root)[0].entries, []);
+    ["/v1/sessions", `/v1/sessions/${session}/context-runs`, `/v1/sessions/${session}/context-runs`]);
+  assert.equal(new Set(gateway.requests.slice(1).map((request) => request.idempotencyKey)).size, 2);
 });

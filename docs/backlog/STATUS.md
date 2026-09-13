@@ -39,13 +39,17 @@ start/resume context adapter over the same authenticated Session runtime.
 CLI 1.0.83 local MCP configuration and synthetic Skill discovery work. The
 approved 2026-09-13 native probe captured six hook events and Skill activation,
 but failed its marker assertion after invoking a conflicting synthetic Skill.
-The captured start frame needs no production-code change. All twelve Copilot
-contract/replay tests pass on macOS Node 24 and offline Docker Node 22, zero
-skips; the prior full 121-test adapter run remains dated 2026-09-12. The owned
-Skill conflict is removed and a fresh-marker resume is prepared. Automatic
-approval review rejected this additional paid retry beyond the one-probe
-approval; next obtain that allowance, then verify the fresh marker and same
-Session before further native qualification. Pi is not on PATH.
+The separately approved corrected retry consumed the fresh hook-only marker
+without tools and resumed the same native Session after runtime end under its
+saved 30-credit limit. Both captured runs need no production-code change.
+All fourteen Copilot contract/replay tests pass on macOS Node 24 and offline
+Docker Node 22, zero skips; the prior full 121-test adapter run remains dated
+2026-09-12. Native
+Synveda authentication, automatic observations and full conformance remain
+unverified. Next translate only captured observation seams through the shared
+spool, then qualify approved Skills and the shared SDK task through ordinary
+Docker/Keycloak APIs, including denial, audit, Capture/end and reuse. Both
+approved synthetic prompts are complete. Pi is not on PATH.
 These are independent of the public-release decisions.
 
 The apparent deployment-gate stall was delayed reporting: the unchanged

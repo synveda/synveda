@@ -7,7 +7,7 @@ A connection recipe is not a support claim. `captured` means authentic frames re
 | Client | Level | Tested versions | Lifecycle | Principal limit |
 | --- | --- | --- | --- | --- |
 | Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. |
-| GitHub Copilot CLI | `experimental` | 1.0.83 | Documented sessionStart context hook plus native MCP configuration | Source-build context adapter; native hook output was accepted, but the synthetic marker assertion failed. Full Synveda context/lifecycle qualification remains unverified. |
+| GitHub Copilot CLI | `experimental` | 1.0.83 | Documented sessionStart context hook plus native MCP configuration | Source-build context adapter; a fresh hook-only marker was consumed on native resume with the same Session ID. Authenticated Synveda context and full lifecycle qualification remain unverified. |
 | Cursor | `experimental` | none | Cursor Hooks v1 plus MCP | No Cursor executable or authenticated client was available on 2026-08-25. |
 | Visual Studio Code | `configured` | none | VS Code agent hooks Preview plus MCP | The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive. |
 | Codex CLI | `verified` | 0.152.0 | Native hooks and MCP over the existing Session runtime; manual/automatic compaction and outage/recovery verified | Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, native execution from a published installation and other client versions/platforms remain unqualified. |
@@ -55,6 +55,8 @@ Authentic fixtures:
 
 - `adapters/copilot-cli/fixtures/lifecycle.json` — captured-real-client-lifecycle, SHA-256 `5da9955570a6a742db9a05d3dead220d716b7679496890e77e01ac4336207525`
 - `adapters/copilot-cli/fixtures/transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `a923453d2ce160f96a9de59551c70210ba5c4a4cd192a1b0904fa1489de800f5`
+- `adapters/copilot-cli/fixtures/resume-lifecycle.json` — captured-real-client-lifecycle, SHA-256 `6e561e4620ade24b37f9314b5614c9a7ff2d6295157d7d229b7b8bfc918338cb`
+- `adapters/copilot-cli/fixtures/resume-transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `93a3b33aead664f15f0fe5f7e9ca6d85c54211435c8271d71adc5f17ec14ce20`
 
 Conformance:
 
@@ -71,9 +73,9 @@ Conformance:
 
 Known limits:
 
-- Source-build context adapter; native hook output was accepted, but the synthetic marker assertion failed. Full Synveda context/lifecycle qualification remains unverified.
-- CLI 1.0.83 supplied six authentic hook frames and a native skill.invoked event. The synthetic Skill was activated; approved Synveda binding/version attribution and authenticated MCP were not exercised.
-- The user-approved 30-credit probe completed with one reported premium request. A conflicting synthetic Skill supplied the returned marker; automatic approval review rejected an additional paid retry outside that one-probe approval.
+- Source-build context adapter; a fresh hook-only marker was consumed on native resume with the same Session ID. Authenticated Synveda context and full lifecycle qualification remain unverified.
+- CLI 1.0.83 supplied ten authentic hook callbacks across new/resumed invocations and a native skill.invoked event. Approved Synveda Skill binding/version attribution and authenticated MCP were not exercised.
+- The first synthetic probe failed after invoking a conflicting Skill. The separately approved corrected retry passed without tool use under the same saved 30-credit limit; the CLI reported two cumulative premium requests. Both outcomes are preserved.
 - Automatic transcript observation, Capture and compaction reinjection remain unqualified. The application owner explicitly requests Capture and ends the Synveda Session.
 - The existing Skill root override and native MCP configuration are used manually; no Synveda configuration writer or packaged Copilot runtime is advertised.
 - Copilot CLI is a distinct target from VS Code and the Copilot cloud agent; this entry makes no support claim for either.

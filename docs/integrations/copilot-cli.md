@@ -7,8 +7,9 @@ The installed CLI is 1.0.83 on macOS arm64. Native local MCP configuration and
 Skill discovery work. The approved 2026-09-13 native probe captured six hook
 events and synthetic Skill activation. Copilot accepted the hook output but
 returned the conflicting Skill's marker, so the context-marker assertion failed.
-Synveda context consumption, authenticated MCP and full lifecycle acceptance
-remain unverified. An additional paid retry needs explicit approval.
+The separately approved corrected retry consumed a fresh hook-only marker,
+invoked no tools and resumed the same native Session after process exit.
+Authenticated Synveda context, MCP and full lifecycle acceptance remain unverified.
 
 ## Build and connect
 
@@ -116,11 +117,13 @@ an ordinary UID, a read-only checkout and an executable temporary filesystem
 for synthetic CLI test stubs. Formatting, generated support, documentation,
 backlog, ADR and dependency gates pass. The existing plugin archive also passes
 its eight extracted Codex regression tests with the changed shared runtime;
-the archive contains no Copilot runtime yet. On 2026-09-13, all twelve Copilot
+the archive contains no Copilot runtime yet. On 2026-09-13, all fourteen Copilot
 tests passed on those same host/Docker runtimes, with zero skips. These include
-the authentic start payload, native event correlations, fixture hashes and the
-negative marker outcome. The existing entry point accepted the captured
-`source: "new"` frame without production-code changes. No Rust code changed.
+the authentic new/resume payloads, native event correlations, fixture hashes,
+the first failed marker and the successful fresh-marker resume. Process replay
+opens one Synveda task, requests context twice and retains the binding after
+both runtime ends. The existing entry point accepted both captured payloads
+without production-code changes. No Rust code changed.
 
 Native local checks used only an owned scratch checkout and isolated
 `COPILOT_HOME`. `copilot mcp add ... --json` produced the expected local command
@@ -153,18 +156,34 @@ is useful evidence that native Skill activation is observable, but it does not
 attribute that Skill to an approved Synveda binding/version or verify hook
 context consumption. A successful process exit does not override the failure.
 
-The two owned synthetic Skills have been removed from the scratch project.
-A prepared retry uses a fresh unpredictable hook marker, excludes the Skill
-tool, denies tool execution and resumes the same native Session under its saved
-30-credit limit. Automatic approval review rejected that retry as another
-billable request outside the one-probe approval; **the retry did not run**.
-After additional approval, require the exact fresh marker and the same Session
-ID before translating further lifecycle seams. Next qualify observations, outage recovery, compaction and
-approved Skill usage with the same SDK task against the ordinary Docker/Keycloak
-public edge. Require cross-workspace denial and persisted audit correlation,
-Capture, explicit end and Knowledge reuse before registry promotion. Vendor
-`preCompact` is notification-only; no post-compaction reinjection is claimed.
-Only then extend the existing release archive and installation checks.
+After separate approval, the corrected retry ran at 2026-09-13T07:28:35Z using
+the same saved Session and 30-credit ceiling. Both owned conflicting Skills
+were removed. The final command used `--available-tools=`,
+`--excluded-tools=skill`, `--deny-tool=shell`, `--deny-tool=write` and
+`--deny-tool=url`; no tool invocation occurred. An initial `--deny-tool=*`
+attempt failed argument validation before any new hook/transcript event or
+model execution. It is not counted as a passing native invocation.
+
+The [resume lifecycle](../../adapters/copilot-cli/fixtures/resume-lifecycle.json)
+and [resume transcript](../../adapters/copilot-cli/fixtures/resume-transcript.jsonl)
+preserve four hooks, `source: "resume"`, the same native UUID and a native
+`session.resume` event linked to the previous shutdown. The response exactly
+matches an unpredictable marker present only in the latest hook output, absent
+from the user prompt and prior transcript. It exited zero in 5.03 seconds.
+The native premium-request counter increased from one to two cumulatively;
+neither that counter nor the retained native usage units are a monetary estimate.
+This verifies synthetic hook consumption on resume. It does not exercise the
+real Synveda hook's Keycloak credentials or governed context retrieval.
+
+Next translate only captured observation seams through the existing spool with
+bounded work and explicit task-owner Capture/end. Qualify observations, outage
+recovery, applicable compaction and approved Skill attribution with the same SDK
+task against the ordinary Docker/Keycloak public edge. Require cross-workspace
+denial and persisted audit correlation, Capture, explicit end and Knowledge
+reuse before registry promotion. Vendor `preCompact` is notification-only; no
+post-compaction reinjection is claimed. Only then extend the existing release
+archive and installation checks. Both approved synthetic prompts are complete;
+additional paid native prompts require their own allowance.
 
 Full CI, the database suite, live Compose acceptance, packaged installation and
 complete native lifecycle qualification were not run for this evidence increment.
