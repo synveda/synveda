@@ -403,18 +403,17 @@ changed to obtain the successful rerun.
 The CPR-45 deterministic-gate checkpoint is closed. Wider live reference
 acceptance remains in its open brief.
 
-1. Complete [ADPT-9's Copilot CLI qualification](backlog/ADPT-9.md). Its bounded
-   source-build start/resume adapter reuses the shared authenticated runtime and
-   is registered as experimental. The approved CLI 1.0.83 probe captured six
-   native hooks and synthetic Skill activation, but returned the conflicting
-   Skill's marker and failed the hook-marker assertion. The separately approved
-   retry consumed the fresh hook-only marker without tools and resumed the same
-   native Session under its saved 30-credit limit. Fourteen Copilot tests pass
-   on macOS Node 24 and offline Docker Node 22, zero skips; captured new/resume
-   frames need no production change. Next translate only captured observations
-   through the existing spool and qualify the governed Docker/Keycloak workflow
-   with approved Skills, both SDKs, denial, audit and explicit Capture/end.
-   Native authentication/full lifecycle remain unverified. Pi was absent from PATH.
+1. Complete [ADPT-9's Copilot CLI qualification](backlog/ADPT-9.md). Its
+   experimental adapter now maps captured text/tool events through the shared
+   bounded reader and spool; runtime exit flushes without closing the task.
+   The native synthetic resume-context probe passes. All 136 adapter tests
+   (23 Copilot), eight extracted Codex package tests on each host/Docker runtime
+   and existing-stack Compose smoke pass; no new paid prompt ran. Prepare the
+   governed Docker/Keycloak scenario, verify approved Skill binding/version
+   attribution, then exercise the native hook/MCP client with both SDKs, denial,
+   audit, retry, explicit Capture/end and reuse. Native authentication and full
+   lifecycle remain unverified; non-text/unknown failure-result shapes and
+   compaction need their own evidence. Pi was absent from PATH.
 2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
    Local archive build/install/import is verified; packages remain unpublished.

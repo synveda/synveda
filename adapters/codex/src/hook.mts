@@ -4,7 +4,7 @@
  */
 import { isAbsolute } from "node:path";
 import {
-  diagnostic, loadConfig, log, sessionStart, turn, type HookInput,
+  diagnostic, loadConfig, log, sessionStart, turn, TranscriptReadError, type HookInput,
 } from "@synveda/claude-code-adapter/session-runtime";
 import { CodexInputError, readCodexTranscript } from "./transcript.mjs";
 
@@ -13,7 +13,8 @@ const watchdog = setTimeout(() => process.exit(0), 10_000);
 watchdog.unref();
 try { await main(); }
 catch (error) {
-  log("codex.hook_failed", { error: error instanceof CodexInputError ? error.reason : diagnostic(error) });
+  log("codex.hook_failed", { error: error instanceof CodexInputError || error instanceof TranscriptReadError
+    ? error.reason : diagnostic(error) });
 }
 finally { clearTimeout(watchdog); }
 

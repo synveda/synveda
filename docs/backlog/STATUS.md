@@ -42,14 +42,16 @@ but failed its marker assertion after invoking a conflicting synthetic Skill.
 The separately approved corrected retry consumed the fresh hook-only marker
 without tools and resumed the same native Session after runtime end under its
 saved 30-credit limit. Both captured runs need no production-code change.
-All fourteen Copilot contract/replay tests pass on macOS Node 24 and offline
-Docker Node 22, zero skips; the prior full 121-test adapter run remains dated
-2026-09-12. Native
-Synveda authentication, automatic observations and full conformance remain
-unverified. Next translate only captured observation seams through the shared
-spool, then qualify approved Skills and the shared SDK task through ordinary
-Docker/Keycloak APIs, including denial, audit, Capture/end and reuse. Both
-approved synthetic prompts are complete. Pi is not on PATH.
+Captured text/tool observations now use the shared bounded reader and spool.
+`agentStop` records locally; runtime exit uses a two-second credential/delivery
+budget and retains the task. All 136 adapter tests (23 Copilot) and eight
+extracted Codex archive tests pass on macOS Node 24 and offline Docker Node 22,
+zero skips. Original native transcripts replay into six unique observations;
+the existing `acceptance-interop` Compose smoke also passes. Next prepare the
+ordinary Docker/Keycloak shared SDK scenario, verify approved Skill attribution,
+then qualify the native hook/MCP workflow including denial, audit, retry,
+Capture/end and reuse. Native Synveda authentication/full conformance remain
+unverified; no new paid prompt ran. Pi is not on PATH.
 These are independent of the public-release decisions.
 
 The apparent deployment-gate stall was delayed reporting: the unchanged

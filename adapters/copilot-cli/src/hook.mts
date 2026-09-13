@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-/** ADPT-9: the documented camelCase start/resume seam (ADR-0107).
- * Only public-API context and task binding; transcript capture is unqualified.
+/** ADPT-9: captured start/resume, local Stop and bounded runtime-exit seams.
+ * Public-API context and durable observations share one application task.
  */
 import { isAbsolute } from "node:path";
 import {
-  diagnostic, loadConfig, log, sessionStart, type HookInput,
+  diagnostic, loadConfig, log, sessionStart, turn, TranscriptReadError, type HookInput,
 } from "@synveda/claude-code-adapter/session-runtime";
+import { CopilotInputError, readCopilotTranscript } from "./transcript.mjs";
 
 const MAX_INPUT_BYTES = 64 * 1024;
 const watchdog = setTimeout(() => {
@@ -14,25 +15,33 @@ const watchdog = setTimeout(() => {
 }, 10_000);
 watchdog.unref();
 try { await main(); }
-catch (error) { log("copilot.hook_failed", { error: diagnostic(error) }); }
+catch (error) { log("copilot.hook_failed", {
+  error: error instanceof CopilotInputError || error instanceof TranscriptReadError ? error.reason : diagnostic(error),
+}); }
 finally { clearTimeout(watchdog); }
 
 async function main(): Promise<void> {
   // Native camelCase input has no event name. The registration supplies it;
-  // other hooks must never be mistaken for an application start or end.
-  if (process.argv[2] !== "sessionStart") return;
-  const input = await readInput();
+  // Other hooks must never be mistaken for a captured lifecycle boundary.
+  const event = process.argv[2];
+  if (event !== "sessionStart" && event !== "agentStop" && event !== "sessionEnd") return;
+  const input = await readInput(event);
   if (input === undefined) return;
   const configured = loadConfig(input.cwd);
   if (configured.disabled) return;
-  const config = { ...configured, clientName: "copilot-cli" as const, observe: false };
-  const output = await sessionStart(input, config, () => []);
+  const config = { ...configured, clientName: "copilot-cli" as const };
+  const nativeId = input.session_id as string;
+  const bound = { ...input, session_id: `copilot-cli:${nativeId}` };
+  const reader = (path: string) => config.observe ? readCopilotTranscript(path, nativeId) : [];
+  const output = event === "sessionStart"
+    ? await sessionStart(bound, config, reader) : await turn(bound, config, reader);
+  if (event !== "sessionStart") return;
   const context = [output.hookSpecificOutput?.additionalContext, output.systemMessage]
     .filter((value): value is string => typeof value === "string" && value.length > 0);
   if (context.length > 0) process.stdout.write(JSON.stringify({ additionalContext: context.join("\n\n") }));
 }
 
-async function readInput(): Promise<HookInput | undefined> {
+async function readInput(event: "sessionStart" | "agentStop" | "sessionEnd"): Promise<HookInput | undefined> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const piece of process.stdin) {
@@ -48,18 +57,28 @@ async function readInput(): Promise<HookInput | undefined> {
   const input = value as Record<string, unknown>;
   if (typeof input.sessionId !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.sessionId)) return invalid("identity");
-  if (typeof input.cwd !== "string" || input.cwd.length > 4096 ||
-      input.cwd.includes("\0") || !isAbsolute(input.cwd)) return invalid("cwd");
-  if (input.source !== "startup" && input.source !== "resume" && input.source !== "new") return invalid("source");
+  if (!absolutePath(input.cwd)) return invalid("cwd");
   if (typeof input.timestamp !== "number" || !Number.isSafeInteger(input.timestamp) ||
       input.timestamp < 0) return invalid("timestamp");
-  // Construct, do not spread: unqualified transcript/model fields cannot enter
-  // the shared reader, and the native ID is never a Synveda Session UUID.
-  return { hook_event_name: "SessionStart", session_id: `copilot-cli:${input.sessionId}`,
-    cwd: input.cwd, source: input.source };
+  // Construct, do not spread. Only agentStop supplies the captured transcript
+  // path; start/end reuse its saved path, always checked against native identity.
+  const base = { session_id: input.sessionId, cwd: input.cwd };
+  if (event === "sessionStart") {
+    if (input.source !== "startup" && input.source !== "resume" && input.source !== "new") return invalid("source");
+    return { ...base, hook_event_name: "SessionStart", source: input.source };
+  }
+  if (event === "agentStop") {
+    if (!absolutePath(input.transcriptPath)) return invalid("transcript_path");
+    return { ...base, hook_event_name: "Stop", transcript_path: input.transcriptPath };
+  }
+  return { ...base, hook_event_name: "SessionEnd" };
 }
 
-function invalid(reason: "payload_size" | "json" | "shape" | "identity" | "cwd" | "source" | "timestamp"): undefined {
+function absolutePath(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 4096 && !value.includes("\0") && isAbsolute(value);
+}
+
+function invalid(reason: "payload_size" | "json" | "shape" | "identity" | "cwd" | "source" | "timestamp" | "transcript_path"): undefined {
   log("copilot.input_held", { reason });
   return undefined;
 }

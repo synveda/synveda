@@ -68,29 +68,43 @@ the native counter increased from one to two cumulative premium requests.
 An invalid wildcard denial flag was rejected before the retry ran, with no new
 hook or transcript events; documented shell/write/URL denial rules replaced it.
 The earlier failure and successful resume are separately digest-pinned.
-Native Synveda authentication, durable observations and the shared SDK
-lifecycle remain unverified; synthetic hook consumption is not that workflow.
+Authenticated native context/observation delivery and the shared SDK lifecycle
+remain unverified; synthetic hook consumption is not that workflow.
 
-On 2026-09-12, all 121 adapter tests, including eight Copilot contract cases, passed on
-macOS arm64 Node 24.18.0 and offline Docker Linux arm64 Node 22.23.2, zero skips.
-On 2026-09-13 all fourteen Copilot tests pass on the same two runtimes, zero skips.
-They preserve authentic frames, correlations, the first failed marker and the
-successful fresh-marker resume. Process replay opens one Synveda task, requests
-fresh context on resume and leaves its binding active after both runtime ends.
-No production code changed for these captured payloads.
-Formatting, registry/evidence, documentation, backlog, ADR and dependency gates
-pass. The existing archive passes its eight extracted Codex regression tests.
-Rust is unchanged; strict Clippy is not applicable to this increment.
-Full CI, database, live Compose and complete native qualification have not been rerun.
-The initial sandbox loopback denial, one corrected log-assertion failure and
-the first Docker run's non-executable temporary directory are not passes.
-Next action: translate only the captured observation seams through the existing
-bounded spool, preserving explicit task-owner Capture/end, and add replay tests.
-Then qualify approved Skill attribution, the shared Python/TypeScript task,
-foreign-workspace denial and persisted audit correlation through the ordinary
-Docker/Keycloak public edge. That full native workflow, outage recovery and
-applicable compaction evidence remain the qualification gap. The two approved
-synthetic prompts are complete; neither authorises additional paid prompts.
+The observation increment starts at `d22f8fd305a989544d237a3c87d68ddacdfa2af3`.
+The amended ADR-0107 records the decision before implementation. Captured
+user/assistant text and actual tool execution pairs now use the existing event
+mapper and spool. `agentStop` records locally; `sessionEnd` shares a two-second
+budget across credentials and delivery and retains the application task.
+Start/resume reads the saved transcript and retries stable event IDs. The
+Codex bounded file reader is shared through the existing runtime export, with
+no new runtime dependency or protocol framework.
+
+All 136 adapter tests pass on macOS arm64 Node 24.18.0 and pinned offline Docker
+Linux arm64 Node 22.23.2, zero skips: 105 Claude, eight Codex and 23 Copilot.
+The existing Codex archive passes eight extracted regression tests on both
+runtimes. Original private native transcripts also replay offline into the
+same four initial and six total observations. The documented
+`acceptance-interop` Compose smoke passes against the running Keycloak stack.
+This establishes stack health and deterministic adapter behaviour, not native
+Synveda authentication or full lifecycle conformance. No new paid model prompt
+was run. Earlier native evidence and its failed first marker remain preserved.
+
+Formatting, strict TypeScript compilation, dependency direction, registry,
+documentation, backlog and ADR gates pass. Rust is unchanged; strict Clippy is
+not applicable. Full CI, database, full Compose acceptance and complete native
+qualification were not rerun. Copilot packaging remains deferred until qualification.
+
+Next action: qualify the real hook and MCP client against the ordinary
+Docker/Keycloak public edge using one shared Python/TypeScript Session. Reuse
+the approved Skill installer and verify exact binding/version attribution;
+exercise proposal submission, foreign-workspace denial, persisted audit
+correlation, retry, explicit Capture/end and later Knowledge reuse. Current
+observation evidence is replay only; compaction, non-text/unknown failure-result
+formats and authentic governed Skill usage remain unqualified. Native
+`skill.invoked` has no Synveda binding identity and is not promoted into a typed
+usage event. The two prior synthetic-prompt allowances are consumed; prepare
+the complete governed scenario before seeking any further paid-run allowance.
 
 ## Dependencies
 

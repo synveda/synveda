@@ -2,7 +2,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -14,6 +16,10 @@ const anotherId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const workspace = "11111111-1111-4111-8111-111111111111";
 const session = "22222222-2222-4222-8222-222222222222";
 const bearer = "synthetic-copilot-bearer";
+const capture = JSON.parse(readFileSync(new URL("../fixtures/lifecycle.json", import.meta.url), "utf8"));
+const resume = JSON.parse(readFileSync(new URL("../fixtures/resume-lifecycle.json", import.meta.url), "utf8"));
+const transcript = readFileSync(new URL("../fixtures/transcript.jsonl", import.meta.url), "utf8");
+const resumeTranscript = readFileSync(new URL("../fixtures/resume-transcript.jsonl", import.meta.url), "utf8");
 const frame = (cwd: string, extra: Record<string, unknown> = {}) => ({
   sessionId: nativeId, timestamp: 1_789_200_000_000, cwd, source: "startup", ...extra,
 });
@@ -73,8 +79,13 @@ test("start/resume reuse one authenticated task and Copilot's native context out
   for (const source of ["startup", "resume", "new"]) {
     const result = await hook(root, gateway.url, frame(root, { source,
       initialPrompt: "private-prompt-marker", transcript_path: "/unqualified/transcript" }));
-    assert.deepEqual(JSON.parse(result.stdout), { additionalContext:
-      `Synveda Session ID: ${session}. Pass this as session_id to Synveda MCP tools for this task.\n\npermitted context` });
+    const output = JSON.parse(result.stdout);
+    assert.deepEqual(Object.keys(output), ["additionalContext"]);
+    const context = `Synveda Session ID: ${session}. Pass this as session_id to Synveda MCP tools for this task.\n\npermitted context`;
+    if (source === "startup") {
+      assert.ok(output.additionalContext.startsWith(context));
+      assert.ok(output.additionalContext.includes("Synveda is active in this project"));
+    } else assert.equal(output.additionalContext, context);
   }
   const opens = gateway.requests.filter((request) => request.path === "/v1/sessions");
   assert.equal(opens.length, 1);
@@ -180,29 +191,177 @@ test("missing login never opens a task and empty allowed context still identifie
   assert.match((await hook(root, gateway.url, frame(root), { SYNVEDA_TOKEN: "" })).stdout, /synveda login/);
   assert.equal(gateway.requests.length, 0);
   const output = JSON.parse((await hook(root, gateway.url, frame(root))).stdout);
-  assert.equal(output.additionalContext,
-    `Synveda Session ID: ${session}. Pass this as session_id to Synveda MCP tools for this task.`);
+  assert.ok(output.additionalContext.startsWith(
+    `Synveda Session ID: ${session}. Pass this as session_id to Synveda MCP tools for this task.`));
 });
 
-test("captured 1.0.83 new/resume frames reuse one task across runtime end without inventing observations", async (t) => {
-  const { root, gateway } = await fixture(t, allowed);
-  for (const name of ["lifecycle.json", "resume-lifecycle.json"]) {
-    const capture = JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"));
-    for (const frame of capture.invocations[0].frames) {
-      const output = await hook(root, gateway.url, { ...frame.input, cwd: root }, {}, frame.event);
-      if (frame.event === "sessionStart") {
-        assert.ok(JSON.parse(output.stdout).additionalContext.includes(session));
-      } else {
-        assert.equal(output.stdout, "");
-      }
+function native(root: string, event: string, resumed = false): Record<string, unknown> {
+  const value = (resumed ? resume : capture).invocations[0].frames
+    .find((frame: { event: string }) => frame.event === event).input;
+  return { ...value, cwd: root, ...(value.transcriptPath === undefined ? {} : { transcriptPath: join(root, "native.jsonl") }) };
+}
+
+function appended(request: Parameters<Responder>[0]) {
+  return { status: 200, body: {
+    events: (request.body.events as { client_event_id: string }[]).map((event) => ({ ...event, outcome: "appended" })),
+    denied: 0, quarantined: 0,
+  } };
+}
+
+test("captured Stop persists locally; outage, exit, resume and duplicate hooks deliver six events on one task", async (t) => {
+  let outage = true;
+  const accepted = new Set<string>();
+  const { root, gateway } = await fixture(t, (request) => {
+    if (!request.path.endsWith("/events")) return allowed(request);
+    assert.equal(request.authorization, `Bearer ${bearer}`);
+    if (outage) return { status: 503 };
+    for (const event of request.body.events as { client_event_id: string }[]) {
+      assert.ok(!accepted.has(event.client_event_id), "acknowledged events must not be replayed");
+      accepted.add(event.client_event_id);
     }
-    const spools = saved(root);
-    assert.equal(spools.length, 1);
-    assert.equal(spools[0].session_id, session);
-    assert.equal(spools[0].close_requested, false);
-    assert.deepEqual(spools[0].entries, []);
+    return appended(request);
+  });
+  const invoke = (event: string, resumed = false) => hook(root, gateway.url, native(root, event, resumed), {}, event);
+  writeFileSync(join(root, "native.jsonl"), transcript);
+  await invoke("sessionStart");
+  const calls = gateway.requests.length;
+  for (const event of ["userPromptSubmitted", "preToolUse", "postToolUse", "agentStop"]) await invoke(event);
+  assert.equal(gateway.requests.length, calls, "Stop crosses local durability without credentials or network");
+  assert.equal(saved(root)[0].entries.length, 4);
+  assert.ok(saved(root)[0].entries.every((entry) => !entry.acknowledged));
+  await invoke("sessionEnd");
+  assert.equal(saved(root)[0].close_requested, false);
+  assert.ok(saved(root)[0].entries.every((entry) => !entry.acknowledged));
+  outage = false;
+  // The authentic resumed user message precedes SessionStart; the assistant
+  // response is only present before the later agentStop.
+  const records = resumeTranscript.trim().split("\n");
+  appendFileSync(join(root, "native.jsonl"), records.slice(0, 2).join("\n") + "\n");
+  await invoke("sessionStart", true);
+  assert.equal(accepted.size, 5);
+  appendFileSync(join(root, "native.jsonl"), records.slice(2).join("\n") + "\n");
+  for (let repeat = 0; repeat < 2; repeat += 1) {
+    await invoke("agentStop", true);
+    await invoke("sessionEnd", true);
   }
-  assert.deepEqual(gateway.requests.map((request) => request.path),
-    ["/v1/sessions", `/v1/sessions/${session}/context-runs`, `/v1/sessions/${session}/context-runs`]);
-  assert.equal(new Set(gateway.requests.slice(1).map((request) => request.idempotencyKey)).size, 2);
+  assert.equal(accepted.size, 6);
+  const [spool] = saved(root);
+  assert.equal(saved(root).length, 1);
+  assert.equal(spool.session_id, session);
+  assert.equal(spool.external_session_id, `copilot-cli:${capture.invocations[0].result.session_id}`);
+  assert.equal(spool.close_requested, false);
+  assert.ok(spool.entries.every((entry) => entry.acknowledged));
+  assert.equal(gateway.requests.filter((request) => request.path === "/v1/sessions").length, 1);
+  const context = gateway.requests.filter((request) => request.path.endsWith("/context-runs"));
+  assert.equal(context.length, 2);
+  assert.equal(new Set(context.map((request) => request.idempotencyKey)).size, 2);
+  assert.equal(context[1].body.query, resume.invocations[0].frames[0].input.prompt);
+});
+
+test("observation opt-out and invalid or foreign Stop payloads preserve the saved cursor", async (t) => {
+  const { root, gateway } = await fixture(t, allowed);
+  const path = join(root, "native.jsonl");
+  writeFileSync(path, transcript);
+  await hook(root, gateway.url, native(root, "sessionStart"));
+  await hook(root, gateway.url, native(root, "agentStop"), {}, "agentStop");
+  const before = JSON.stringify(saved(root));
+  const calls = gateway.requests.length;
+  for (const value of [undefined, "relative", "/nul\0", "/" + "a".repeat(4096)]) {
+    await hook(root, gateway.url, { ...native(root, "agentStop"), transcriptPath: value }, {}, "agentStop");
+    assert.equal(JSON.stringify(saved(root)), before);
+  }
+  for (const raw of [transcript + "{private-prompt-marker",
+    transcript.replace(capture.invocations[0].result.session_id, anotherId)]) {
+    writeFileSync(path, raw);
+    await hook(root, gateway.url, native(root, "agentStop"), {}, "agentStop");
+    assert.equal(JSON.stringify(saved(root)), before);
+  }
+  writeFileSync(path, transcript + resumeTranscript);
+  mkdirSync(join(root, ".synveda"));
+  writeFileSync(join(root, ".synveda", "config.json"), '{"observe":false}');
+  await hook(root, gateway.url, native(root, "agentStop"), {}, "agentStop");
+  await hook(root, gateway.url, native(root, "sessionEnd"), {}, "sessionEnd");
+  assert.equal(JSON.stringify(saved(root)), before);
+  assert.equal(gateway.requests.length, calls);
+});
+
+test("observation delivery holds denied credentials and a changed gateway, then retries the same task", async (t) => {
+  let status = 401;
+  const { root, gateway } = await fixture(t, (request) => request.path.endsWith("/events")
+    ? status === 200 ? appended(request) : { status, body: { message: "private-prompt-marker" } } : allowed(request));
+  const other = await startGateway(() => assert.fail("foreign gateway received saved observations"));
+  t.after(other.close);
+  writeFileSync(join(root, "native.jsonl"), transcript);
+  await hook(root, gateway.url, native(root, "sessionStart"));
+  await hook(root, gateway.url, native(root, "agentStop"), {}, "agentStop");
+  for (status of [401, 403]) {
+    await hook(root, gateway.url, native(root, "sessionEnd"), {}, "sessionEnd");
+    assert.ok(saved(root)[0].entries.every((entry) => !entry.acknowledged));
+    assert.equal(saved(root)[0].close_requested, false);
+  }
+  const before = JSON.stringify(saved(root));
+  await hook(root, other.url, native(root, "sessionEnd"), {}, "sessionEnd");
+  assert.equal(saved(root)[0].gateway_url, gateway.url);
+  assert.deepEqual(saved(root)[0].entries, JSON.parse(before)[0].entries);
+  status = 200;
+  await hook(root, gateway.url, native(root, "sessionEnd"), {}, "sessionEnd");
+  assert.ok(saved(root)[0].entries.every((entry) => entry.acknowledged));
+  assert.equal(saved(root)[0].session_id, session);
+});
+
+test("exit bounds credential resolution and stalled append together, retaining pending observations", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "synveda-copilot-deadline-"));
+  let stalled = true;
+  let appends = 0;
+  const server = createServer((request, response) => {
+    let body = "";
+    request.on("data", (piece) => { body += String(piece); });
+    request.on("end", () => {
+      let result: unknown;
+      if (request.url === "/v1/sessions") result = { id: session, workspace_id: workspace };
+      else if (request.url?.endsWith("/context-runs")) result = { rendered: "allowed", tokens: 1, entry_count: 1 };
+      else if (request.url?.endsWith("/events")) {
+        appends += 1;
+        if (stalled) return;
+        result = { events: JSON.parse(body).events.map((entry: { client_event_id: string }) => ({
+          client_event_id: entry.client_event_id, outcome: "appended",
+        })), denied: 0, quarantined: 0 };
+      } else assert.fail(`unexpected request ${request.url}`);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(result));
+    });
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    server.close();
+    await once(server, "close");
+    rmSync(root, { recursive: true, force: true });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address !== null && typeof address === "object");
+  const gateway = `http://127.0.0.1:${address.port}`;
+  writeFileSync(join(root, "native.jsonl"), transcript);
+  await hook(root, gateway, native(root, "sessionStart"));
+  await hook(root, gateway, native(root, "agentStop"), {}, "agentStop");
+  const cli = join(root, "credential.mjs");
+  for (const body of [
+    "setTimeout(() => {}, 60_000)",
+    `setTimeout(() => console.log(JSON.stringify({ access_token: "${bearer}", gateway_url: ${JSON.stringify(gateway)} })), 700)`,
+  ]) {
+    writeFileSync(cli, `#!${process.execPath}\n${body}\n`);
+    chmodSync(cli, 0o700);
+    const started = Date.now();
+    await hook(root, gateway, native(root, "sessionEnd"), {
+      SYNVEDA_TOKEN: "", SYNVEDA_CLI: cli, SYNVEDA_TIMEOUT_MS: "10000",
+    }, "sessionEnd");
+    assert.ok(Date.now() - started < 3000, "exit must honour the two-second delivery budget with teardown headroom");
+    assert.equal(saved(root)[0].entries.filter((entry) => !entry.acknowledged).length, 4);
+    assert.equal(saved(root)[0].close_requested, false);
+  }
+  assert.equal(appends, 1, "credentials consume the same deadline as the append");
+  stalled = false;
+  await hook(root, gateway, native(root, "sessionEnd"), {}, "sessionEnd");
+  assert.ok(saved(root)[0].entries.every((entry) => entry.acknowledged));
 });

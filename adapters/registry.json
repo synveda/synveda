@@ -76,19 +76,21 @@
       ],
       "configuration": null,
       "lifecycle": {
-        "mechanism": "Documented sessionStart context hook plus native MCP configuration",
+        "mechanism": "Captured sessionStart context, agentStop recording and sessionEnd flush; native MCP configuration",
         "contract_version": "Hooks schema version 1 / captured Copilot CLI 1.0.83 (2026-09-13)",
-        "status": "native start/resume captured; synthetic resume context consumed; public-API lifecycle unverified",
+        "status": "native context probe and durable observation replay pass; authenticated native lifecycle unverified",
         "source": "docs/integrations/copilot-cli.md",
         "events": [
-          "sessionStart"
+          "sessionStart",
+          "agentStop",
+          "sessionEnd"
         ]
       },
       "limitations": [
-        "Source-build context adapter; a fresh hook-only marker was consumed on native resume with the same Session ID. Authenticated Synveda context and full lifecycle qualification remain unverified.",
+        "Source-build context/observation adapter. Native synthetic resume context passes; captured events replay through the shared spool with stable task identity, retries and a two-second exit flush. Authenticated native lifecycle remains unverified.",
         "CLI 1.0.83 supplied ten authentic hook callbacks across new/resumed invocations and a native skill.invoked event. Approved Synveda Skill binding/version attribution and authenticated MCP were not exercised.",
         "The first synthetic probe failed after invoking a conflicting Skill. The separately approved corrected retry passed without tool use under the same saved 30-credit limit; the CLI reported two cumulative premium requests. Both outcomes are preserved.",
-        "Automatic transcript observation, Capture and compaction reinjection remain unqualified. The application owner explicitly requests Capture and ends the Synveda Session.",
+        "Automatic text/tool observations are tested against captured transcripts and mock public APIs. Non-text/unknown failure-result shapes are held; native compaction, approved Skill attribution and live observation delivery remain unqualified. Capture/end remain explicit task-owner operations.",
         "The existing Skill root override and native MCP configuration are used manually; no Synveda configuration writer or packaged Copilot runtime is advertised.",
         "Copilot CLI is a distinct target from VS Code and the Copilot cloud agent; this entry makes no support claim for either."
       ],

@@ -1,7 +1,7 @@
 # GitHub Copilot CLI interoperability (ADPT-9)
 
-Copilot CLI has an **experimental context adapter**. This is a source-build
-start/resume increment; it is not the verified Codex lifecycle or a Copilot
+Copilot CLI has an **experimental context and observation adapter**. This is a source-build
+integration; it is not the verified Codex lifecycle or a Copilot
 cloud-agent/VS Code adapter. `adapters/registry.json` owns the support level.
 The installed CLI is 1.0.83 on macOS arm64. Native local MCP configuration and
 Skill discovery work. The approved 2026-09-13 native probe captured six hook
@@ -9,7 +9,8 @@ events and synthetic Skill activation. Copilot accepted the hook output but
 returned the conflicting Skill's marker, so the context-marker assertion failed.
 The separately approved corrected retry consumed a fresh hook-only marker,
 invoked no tools and resumed the same native Session after process exit.
-Authenticated Synveda context, MCP and full lifecycle acceptance remain unverified.
+Captured text/tool events now replay through the existing durable Session spool.
+Authenticated native Synveda context, MCP and full lifecycle acceptance remain unverified.
 
 ## Build and connect
 
@@ -39,6 +40,18 @@ the two absolute executable paths. Leave other hook files intact:
       "exec": "/absolute/path/to/node",
       "args": ["/absolute/path/to/synveda/adapters/copilot-cli/dist/hook.mjs", "sessionStart"],
       "timeoutSec": 12
+    }],
+    "agentStop": [{
+      "type": "command",
+      "exec": "/absolute/path/to/node",
+      "args": ["/absolute/path/to/synveda/adapters/copilot-cli/dist/hook.mjs", "agentStop"],
+      "timeoutSec": 12
+    }],
+    "sessionEnd": [{
+      "type": "command",
+      "exec": "/absolute/path/to/node",
+      "args": ["/absolute/path/to/synveda/adapters/copilot-cli/dist/hook.mjs", "sessionEnd"],
+      "timeoutSec": 5
     }]
   }
 }
@@ -57,7 +70,7 @@ to 64 KiB and execution to ten seconds. `SYNVEDA_DISABLED=1` or the project's
 Register Synveda using the native configuration command:
 
 ```sh
-copilot mcp add synveda -- /absolute/path/to/synveda mcp --writes tool
+copilot mcp add synveda -- /absolute/path/to/synveda mcp --writes host
 ```
 
 This configures Synveda **as an MCP server**. No external MCP server management
@@ -69,11 +82,27 @@ currently write that format; the native command owns it.
 
 Leave this shared MCP server unbound. Pass the hook's Synveda `session_id` to
 each recall/observe call; the native Copilot UUID is not a Synveda Session UUID.
-Do not also configure `--task` with a different task key. This context-only hook
-does not observe transcripts, so `--writes tool` enables explicit model-requested
-observations. If an application/SDK owns observation delivery for the task,
-use `--writes host` instead to prevent a second writer. Explicit observations
-are not an automatic transcript or an approved Knowledge publication.
+Do not also configure `--task` with a different task key. The hook owns automatic
+transcript observations, so `--writes host` prevents a second model-controlled
+writer. SDK applications may append their own distinct observations with stable
+event IDs. For context-only use, set `"observe": false` in the project config;
+then `--writes tool` can enable explicit model-requested observations instead.
+Observations remain Session evidence; only governed publication creates Knowledge.
+
+`agentStop` validates the native transcript's Session header and records text,
+actual tool calls and known text results locally before returning. It performs
+no credential or network work. `sessionEnd` retries the saved transcript and
+flushes pending events with one two-second budget for credentials and delivery.
+Start/resume retries the same spool, with no new task or implicit Capture/end.
+The existing one-time disclosure announces observation when active.
+
+The shared reader admits only regular files, refuses the final path component
+when it is a symlink, and limits each read to 8 MiB and 20,000 JSONL lines.
+Malformed/partial content, foreign Session headers and unsupported message/tool
+result shapes are held with content-free diagnostics without advancing the
+cursor. System instructions, reasoning, encrypted fields and separate
+`skill.invoked` bodies are excluded. Host death before `agentStop` remains a loss boundary;
+native compaction and non-text/other failure-result formats remain unqualified.
 
 ## Approved Skills and SDK handoff
 
@@ -109,21 +138,15 @@ start, fresh context requests, denied/empty context, outages, gateway/client
 isolation, missing login and malformed/oversized input. These verify adapter
 behaviour, not actual Cedar/RLS enforcement or native model consumption.
 
-On 2026-09-12, all 121 tests across Claude Code, Codex and Copilot passed with zero skips on
-macOS arm64 Node 24.18.0 and offline Linux arm64 Docker Node 22.23.2. Eight are
-the new Copilot contract cases. The Docker run uses the pinned image
+The observation increment at `d22f8fd` plus its working tree passes **136 adapter
+tests** (105 Claude, eight Codex, 23 Copilot), zero skips, on macOS arm64 Node
+24.18.0 and offline Linux arm64 Docker Node 22.23.2. Docker uses the pinned image
 `node@sha256:7725a5c2c83eed1d36258c66efae14b1ceccd021db9ed1d9559d3335ed3d68ed`,
-an ordinary UID, a read-only checkout and an executable temporary filesystem
-for synthetic CLI test stubs. Formatting, generated support, documentation,
-backlog, ADR and dependency gates pass. The existing plugin archive also passes
-its eight extracted Codex regression tests with the changed shared runtime;
-the archive contains no Copilot runtime yet. On 2026-09-13, all fourteen Copilot
-tests passed on those same host/Docker runtimes, with zero skips. These include
-the authentic new/resume payloads, native event correlations, fixture hashes,
-the first failed marker and the successful fresh-marker resume. Process replay
-opens one Synveda task, requests context twice and retains the binding after
-both runtime ends. The existing entry point accepted both captured payloads
-without production-code changes. No Rust code changed.
+an ordinary UID, a read-only checkout and executable temporary storage for
+synthetic CLI stubs. The existing Codex package passes all eight extracted tests
+on both runtimes; it contains no Copilot runtime yet. Formatting, strict
+TypeScript compilation, dependency, registry, documentation, backlog and ADR
+gates pass. No Rust, SQL, public contract or dependency changes are made.
 
 Native local checks used only an owned scratch checkout and isolated
 `COPILOT_HOME`. `copilot mcp add ... --json` produced the expected local command
@@ -175,15 +198,23 @@ neither that counter nor the retained native usage units are a monetary estimate
 This verifies synthetic hook consumption on resume. It does not exercise the
 real Synveda hook's Keycloak credentials or governed context retrieval.
 
-Next translate only captured observation seams through the existing spool with
-bounded work and explicit task-owner Capture/end. Qualify observations, outage
-recovery, applicable compaction and approved Skill attribution with the same SDK
-task against the ordinary Docker/Keycloak public edge. Require cross-workspace
+Original private native transcripts replay offline into the same four initial
+and six total events; no additional model request was made. The documented
+`acceptance-interop` Compose smoke passes for the running stack. Smoke verifies
+service/public-edge health; native authentication remains unqualified.
+
+The replay tests cover durable local Stop, outage/retry, duplicate hooks,
+same-task resume, denied delivery, gateway isolation, disabled observation,
+malformed/foreign input and one deadline spanning credentials and a stalled
+append. Native hook/transcript captures remain separately digest-pinned.
+
+Next qualify native observations, outage recovery, applicable compaction and
+approved Skill attribution with the same SDK task against the ordinary Docker/Keycloak public edge. Require cross-workspace
 denial and persisted audit correlation, Capture, explicit end and Knowledge
 reuse before registry promotion. Vendor `preCompact` is notification-only; no
 post-compaction reinjection is claimed. Only then extend the existing release
 archive and installation checks. Both approved synthetic prompts are complete;
 additional paid native prompts require their own allowance.
 
-Full CI, the database suite, live Compose acceptance, packaged installation and
-complete native lifecycle qualification were not run for this evidence increment.
+Full CI, the database suite, full Compose acceptance, a packaged Copilot
+installation and complete native lifecycle qualification were not run for this increment.

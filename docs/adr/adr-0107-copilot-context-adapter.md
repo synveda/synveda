@@ -1,6 +1,6 @@
 # ADR-0107: Copilot context uses the existing authenticated Session runtime
 
-- **Status**: Accepted
+- **Status**: Accepted; amended 2026-09-13
 - **Date**: 2026-09-12
 - **Feature(s)**: ADPT-9
 - **Deciders**: User-directed Copilot adapter continuation
@@ -21,7 +21,7 @@ public-API runtime, origin-bound credentials and stable task identity we need.
 
 ## Decision
 
-Implement only the documented camelCase `sessionStart` boundary in this batch,
+Implement the documented camelCase `sessionStart` boundary
 using the existing Session runtime and Copilot's top-level `additionalContext`
 output. Extend its closed client identity with `copilot-cli`; namespace native
 IDs as `copilot-cli:<native-id>`. Preserve the binding across other task starts,
@@ -29,11 +29,28 @@ resume and transport/process exit. The application owner explicitly requests
 Capture and ends its Synveda Session.
 
 Bound stdin and execution, validate the fields used at the entry point, and
-honour project opt-out. Disable observation in this entry point and supply no
-transcript reader: a vendor SDK event type is not evidence of the on-disk
-transcript format. Do not infer post-compaction reinjection from `preCompact`,
-whose documented output is ignored. Translate other seams only after capturing
-authentic frames. Authored tests must remain labelled contract tests.
+honour project opt-out. Translate additional seams only from authentic frames;
+a vendor SDK event type alone is not evidence of the on-disk transcript format.
+Do not infer post-compaction reinjection from `preCompact`, whose documented
+output is ignored. Authored tests must remain labelled contract tests.
+
+The 2026-09-13 captured CLI 1.0.83 frames establish `agentStop.transcriptPath`,
+native event UUIDs, user/assistant text, a tool execution pair and same-UUID
+resume after `sessionEnd`. Translate those transcript shapes into the existing
+event mapper and spool. `agentStop` records locally before any network work;
+`sessionEnd` flushes within a two-second credential/delivery budget and retains
+the binding. Only Claude's existing runtime owns automatic task closure.
+Start/resume reuses the saved transcript path and retries pending events.
+
+Share the existing Codex bounded file reader through the narrow runtime export:
+regular files only, no final symlink, at most 8 MiB and 20,000 JSONL records.
+Require the native transcript header to match the hook's Session UUID. Reject
+malformed/partial records, invalid identities and unknown content/result shapes
+without advancing the cursor. Use native execution events for tool calls, not
+assistant tool intentions or uncorrelated hook callbacks. Whitelist content
+fields; omit system instructions, reasoning, encrypted data and diagnostics.
+The native `skill.invoked` record proves host activation but does not establish
+a governed Synveda binding/version, so it emits no typed Skill-usage claim.
 
 Reuse native `copilot mcp add` and Synveda's existing Skill `--root` override.
 Keep the server unbound for multiple tasks and pass the injected Synveda
@@ -56,9 +73,10 @@ release archive before its native qualification.
 
 - Positive: one explicit application identity, credential boundary and context
   path across harness and SDK calls, with no new runtime dependency.
-- Accepted trade-off: experimental, source-build support. Automatic observation,
-  native context consumption, compaction, Skill activation and the full audit
-  workflow remain unqualified until an authorised native run completes.
+- Accepted trade-off: experimental, source-build support. Synthetic resume
+  context is observed; transcript delivery remains replay evidence until the
+  authenticated native workflow passes. Compaction, governed Skill attribution
+  and full audit qualification remain open.
 - Reversal trigger: authentic frames demonstrate another necessary seam; add
   only that translation and its replay, then run ADR-0098 qualification.
 

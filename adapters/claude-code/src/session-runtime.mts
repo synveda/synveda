@@ -5,5 +5,5 @@ export { loadConfig, type AdapterConfig } from "./config.mjs";
 export { diagnostic, log } from "./log.mjs";
 export { sessionStart } from "./session-start.mjs";
 export { turn } from "./turn.mjs";
-export type { TranscriptEntry } from "./transcript.mjs";
+export { readBoundedTranscript, TranscriptReadError, MAX_TRANSCRIPT_BYTES, type TranscriptEntry } from "./transcript.mjs";
 export type { HookInput, HookOutput } from "./types.mjs";

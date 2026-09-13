@@ -7,7 +7,7 @@ A connection recipe is not a support claim. `captured` means authentic frames re
 | Client | Level | Tested versions | Lifecycle | Principal limit |
 | --- | --- | --- | --- | --- |
 | Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. |
-| GitHub Copilot CLI | `experimental` | 1.0.83 | Documented sessionStart context hook plus native MCP configuration | Source-build context adapter; a fresh hook-only marker was consumed on native resume with the same Session ID. Authenticated Synveda context and full lifecycle qualification remain unverified. |
+| GitHub Copilot CLI | `experimental` | 1.0.83 | Captured sessionStart context, agentStop recording and sessionEnd flush; native MCP configuration | Source-build context/observation adapter. Native synthetic resume context passes; captured events replay through the shared spool with stable task identity, retries and a two-second exit flush. Authenticated native lifecycle remains unverified. |
 | Cursor | `experimental` | none | Cursor Hooks v1 plus MCP | No Cursor executable or authenticated client was available on 2026-08-25. |
 | Visual Studio Code | `configured` | none | VS Code agent hooks Preview plus MCP | The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive. |
 | Codex CLI | `verified` | 0.152.0 | Native hooks and MCP over the existing Session runtime; manual/automatic compaction and outage/recovery verified | Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, native execution from a published installation and other client versions/platforms remain unqualified. |
@@ -73,10 +73,10 @@ Conformance:
 
 Known limits:
 
-- Source-build context adapter; a fresh hook-only marker was consumed on native resume with the same Session ID. Authenticated Synveda context and full lifecycle qualification remain unverified.
+- Source-build context/observation adapter. Native synthetic resume context passes; captured events replay through the shared spool with stable task identity, retries and a two-second exit flush. Authenticated native lifecycle remains unverified.
 - CLI 1.0.83 supplied ten authentic hook callbacks across new/resumed invocations and a native skill.invoked event. Approved Synveda Skill binding/version attribution and authenticated MCP were not exercised.
 - The first synthetic probe failed after invoking a conflicting Skill. The separately approved corrected retry passed without tool use under the same saved 30-credit limit; the CLI reported two cumulative premium requests. Both outcomes are preserved.
-- Automatic transcript observation, Capture and compaction reinjection remain unqualified. The application owner explicitly requests Capture and ends the Synveda Session.
+- Automatic text/tool observations are tested against captured transcripts and mock public APIs. Non-text/unknown failure-result shapes are held; native compaction, approved Skill attribution and live observation delivery remain unqualified. Capture/end remain explicit task-owner operations.
 - The existing Skill root override and native MCP configuration are used manually; no Synveda configuration writer or packaged Copilot runtime is advertised.
 - Copilot CLI is a distinct target from VS Code and the Copilot cloud agent; this entry makes no support claim for either.
 

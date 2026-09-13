@@ -1,16 +1,15 @@
 /** Codex 0.152.0's captured JSONL → the existing Session event mapper.
  * This is an internal vendor format; unsupported shapes grant no capabilities.
  */
-import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
-import type { TranscriptEntry } from "@synveda/claude-code-adapter/session-runtime";
+import { readBoundedTranscript, type TranscriptEntry } from "@synveda/claude-code-adapter/session-runtime";
 
-export const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
+export { MAX_TRANSCRIPT_BYTES } from "@synveda/claude-code-adapter/session-runtime";
 const MAX_RECORDS = 20_000;
 type ObjectValue = Record<string, unknown>;
 type ToolResult = { kind: "command" | "mcp"; failed: boolean };
 
 type InputReason = "input_limit" | "record_limit" | "invalid_json" | "session_mismatch" |
-  "missing_identity" | "unreadable" | "size_or_type" | "changed_during_read" |
+  "missing_identity" |
   "invalid_tool_arguments" | "tool_result_status_unknown" | "tool_result_shape_unknown";
 
 /** A closed diagnostic vocabulary; never retain rejected content in logs. */
@@ -19,7 +18,7 @@ export class CodexInputError extends Error {
 }
 
 export function readCodexTranscript(path: string, sessionId: string): TranscriptEntry[] {
-  const raw = boundedRead(path);
+  const raw = readBoundedTranscript(path);
   if (raw === undefined || raw.length === 0) return [];
   const lines = raw.split("\n");
   if (lines.length > MAX_RECORDS) throw new CodexInputError("record_limit");
@@ -54,31 +53,6 @@ export function readCodexTranscript(path: string, sessionId: string): Transcript
     }
   }
   return entries;
-}
-
-function boundedRead(path: string): string | undefined {
-  let fd: number;
-  try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
-  catch (error) {
-    if (object(error).code === "ENOENT") return undefined;
-    throw new CodexInputError("unreadable");
-  }
-  try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.size > MAX_TRANSCRIPT_BYTES) {
-      throw new CodexInputError("size_or_type");
-    }
-    // Read at most the validated size plus one byte to detect concurrent growth.
-    const bytes = Buffer.alloc(stat.size + 1);
-    let size = 0;
-    while (size < bytes.length) {
-      const count = readSync(fd, bytes, size, bytes.length - size, null);
-      if (count === 0) break;
-      size += count;
-    }
-    if (size > stat.size) throw new CodexInputError("changed_during_read");
-    return bytes.subarray(0, size).toString("utf8");
-  } finally { closeSync(fd); }
 }
 
 function translate(
