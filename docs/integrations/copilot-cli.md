@@ -4,9 +4,11 @@ Copilot CLI has an **experimental context adapter**. This is a source-build
 start/resume increment; it is not the verified Codex lifecycle or a Copilot
 cloud-agent/VS Code adapter. `adapters/registry.json` owns the support level.
 The installed CLI is 1.0.83 on macOS arm64. Native local MCP configuration and
-synthetic Skill discovery ran successfully without a model prompt. Native
-context consumption, authenticated MCP exchange and full lifecycle acceptance
-remain blocked on model-run cost approval.
+Skill discovery work. The approved 2026-09-13 native probe captured six hook
+events and synthetic Skill activation. Copilot accepted the hook output but
+returned the conflicting Skill's marker, so the context-marker assertion failed.
+Synveda context consumption, authenticated MCP and full lifecycle acceptance
+remain unverified. An additional paid retry needs explicit approval.
 
 ## Build and connect
 
@@ -106,7 +108,7 @@ start, fresh context requests, denied/empty context, outages, gateway/client
 isolation, missing login and malformed/oversized input. These verify adapter
 behaviour, not actual Cedar/RLS enforcement or native model consumption.
 
-All 121 tests across Claude Code, Codex and Copilot pass with zero skips on
+On 2026-09-12, all 121 tests across Claude Code, Codex and Copilot passed with zero skips on
 macOS arm64 Node 24.18.0 and offline Linux arm64 Docker Node 22.23.2. Eight are
 the new Copilot contract cases. The Docker run uses the pinned image
 `node@sha256:7725a5c2c83eed1d36258c66efae14b1ceccd021db9ed1d9559d3335ed3d68ed`,
@@ -114,22 +116,50 @@ an ordinary UID, a read-only checkout and an executable temporary filesystem
 for synthetic CLI test stubs. Formatting, generated support, documentation,
 backlog, ADR and dependency gates pass. The existing plugin archive also passes
 its eight extracted Codex regression tests with the changed shared runtime;
-the archive contains no Copilot runtime yet. No Rust code changed.
+the archive contains no Copilot runtime yet. On 2026-09-13, all twelve Copilot
+tests passed on those same host/Docker runtimes, with zero skips. These include
+the authentic start payload, native event correlations, fixture hashes and the
+negative marker outcome. The existing entry point accepted the captured
+`source: "new"` frame without production-code changes. No Rust code changed.
 
 Native local checks used only an owned scratch checkout and isolated
 `COPILOT_HOME`. `copilot mcp add ... --json` produced the expected local command
 entry, and `copilot skill list --json` listed the synthetic project Skill as
 enabled. No account credential or user Skill contents are captured here.
 
-The first native prompt exited before model execution because a 0.5-credit
-ceiling is below CLI 1.0.83's minimum of 30. Automatic approval review rejected
-the subsequent 30-credit run because its service-cost allowance was not
-explicit. No native lifecycle or authenticated MCP frame was captured.
+The user-approved native probe ran at 2026-09-13T07:00:16Z on CLI 1.0.83,
+auto-routed to `gpt-5.6-luna`, with a saved 30-credit Session limit. It exited
+zero in 9.17 seconds and reported one premium request. That counter is retained
+as reported, not converted into a monetary price. Remote export and the Synveda
+MCP server were disabled for this synthetic boundary check; no Synveda login or
+public-API lifecycle was exercised by the native client.
 
-After approval, first run one bounded synthetic context-marker prompt in a
-trusted scratch checkout, with remote export/update disabled and a 30-credit
-ceiling. Capture the actual hook payloads and output before implementing other
-seams. Next qualify start/resume, observations, outage recovery, compaction and
+The [captured lifecycle](../../adapters/copilot-cli/fixtures/lifecycle.json)
+records `userPromptSubmitted`, `sessionStart` (`source: "new"`), `preToolUse`,
+`postToolUse`, `agentStop` and `sessionEnd` (`reason: "complete"`). Its native
+`hook.end` confirms successful acceptance of top-level `additionalContext`.
+The [transcript projection](../../adapters/copilot-cli/fixtures/transcript.jsonl)
+retains stable native event IDs, user/assistant text, the correlated tool pair
+and `skill.invoked` with `trigger: "agent-invoked"`. Private path prefixes are
+replaced, and hidden reasoning, encrypted content, system instructions and
+unrelated diagnostics are omitted with the exact projection declared in the
+lifecycle file. Registry digests and replay tests check both files.
+
+The marker assertion **failed**. A leftover synthetic project Skill instructed
+the model to return `SYNVEDA_COPILOT_SKILL_OK`, which it did after invoking the
+native `skill` tool. That differs from the context hook's expected marker.
+The empty `--available-tools=` flag did not prevent this tool invocation. This
+is useful evidence that native Skill activation is observable, but it does not
+attribute that Skill to an approved Synveda binding/version or verify hook
+context consumption. A successful process exit does not override the failure.
+
+The two owned synthetic Skills have been removed from the scratch project.
+A prepared retry uses a fresh unpredictable hook marker, excludes the Skill
+tool, denies tool execution and resumes the same native Session under its saved
+30-credit limit. Automatic approval review rejected that retry as another
+billable request outside the one-probe approval; **the retry did not run**.
+After additional approval, require the exact fresh marker and the same Session
+ID before translating further lifecycle seams. Next qualify observations, outage recovery, compaction and
 approved Skill usage with the same SDK task against the ordinary Docker/Keycloak
 public edge. Require cross-workspace denial and persisted audit correlation,
 Capture, explicit end and Knowledge reuse before registry promotion. Vendor
@@ -137,4 +167,4 @@ Capture, explicit end and Knowledge reuse before registry promotion. Vendor
 Only then extend the existing release archive and installation checks.
 
 Full CI, the database suite, live Compose acceptance, packaged installation and
-native lifecycle qualification have not been rerun for this source increment.
+complete native lifecycle qualification were not run for this evidence increment.

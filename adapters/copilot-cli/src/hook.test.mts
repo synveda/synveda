@@ -183,3 +183,20 @@ test("missing login never opens a task and empty allowed context still identifie
   assert.equal(output.additionalContext,
     `Synveda Session ID: ${session}. Pass this as session_id to Synveda MCP tools for this task.`);
 });
+
+test("captured 1.0.83 frames reuse the start adapter without inventing observation or task completion", async (t) => {
+  const capture = JSON.parse(readFileSync(new URL("../fixtures/lifecycle.json", import.meta.url), "utf8"));
+  const { root, gateway } = await fixture(t, allowed);
+  for (const frame of capture.invocations[0].frames) {
+    const output = await hook(root, gateway.url, { ...frame.input, cwd: root }, {}, frame.event);
+    if (frame.event === "sessionStart") {
+      assert.ok(JSON.parse(output.stdout).additionalContext.includes(session));
+    } else {
+      assert.equal(output.stdout, "");
+    }
+  }
+  assert.deepEqual(gateway.requests.map((request) => request.path),
+    ["/v1/sessions", `/v1/sessions/${session}/context-runs`]);
+  assert.equal(saved(root)[0].close_requested, false);
+  assert.deepEqual(saved(root)[0].entries, []);
+});

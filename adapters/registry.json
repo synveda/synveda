@@ -71,25 +71,45 @@
       "display_name": "GitHub Copilot CLI",
       "support_level": "experimental",
       "connection": "mcp",
-      "tested_versions": [],
+      "tested_versions": [
+        "1.0.83"
+      ],
       "configuration": null,
       "lifecycle": {
         "mechanism": "Documented sessionStart context hook plus native MCP configuration",
-        "contract_version": "Hooks schema version 1 (official contract inspected 2026-09-12); CLI 1.0.83 local configuration only",
-        "status": "context-only-contract-tests",
+        "contract_version": "Hooks schema version 1 / captured Copilot CLI 1.0.83 (2026-09-13)",
+        "status": "native-start-captured; context consumption unverified",
         "source": "docs/integrations/copilot-cli.md",
-        "events": ["sessionStart"]
+        "events": [
+          "sessionStart"
+        ]
       },
       "limitations": [
-        "Source-build context adapter; native context consumption and full lifecycle qualification have not run. Authored contract tests are not captured frames.",
-        "CLI 1.0.83 native local MCP configuration and synthetic Skill discovery passed; no authenticated MCP exchange or approved Skill activation is claimed.",
-        "The first model probe refused a 0.5-credit ceiling; the CLI requires at least 30. Automatic approval review blocked the 30-credit run pending explicit cost authorisation.",
-        "Automatic transcript observation, Capture, compaction reinjection and native Skill activation are unqualified. The application owner explicitly requests Capture and ends the Synveda Session.",
+        "Source-build context adapter; native hook output was accepted, but the synthetic marker assertion failed. Full Synveda context/lifecycle qualification remains unverified.",
+        "CLI 1.0.83 supplied six authentic hook frames and a native skill.invoked event. The synthetic Skill was activated; approved Synveda binding/version attribution and authenticated MCP were not exercised.",
+        "The user-approved 30-credit probe completed with one reported premium request. A conflicting synthetic Skill supplied the returned marker; automatic approval review rejected an additional paid retry outside that one-probe approval.",
+        "Automatic transcript observation, Capture and compaction reinjection remain unqualified. The application owner explicitly requests Capture and ends the Synveda Session.",
         "The existing Skill root override and native MCP configuration are used manually; no Synveda configuration writer or packaged Copilot runtime is advertised.",
         "Copilot CLI is a distinct target from VS Code and the Copilot cloud agent; this entry makes no support claim for either."
       ],
-      "authentic_fixtures": [],
-      "conformance": { "evidence_level": "not-run", "tested_at": null, "tested_version": null, "checks": {} }
+      "authentic_fixtures": [
+        {
+          "path": "adapters/copilot-cli/fixtures/lifecycle.json",
+          "sha256": "5da9955570a6a742db9a05d3dead220d716b7679496890e77e01ac4336207525",
+          "kind": "captured-real-client-lifecycle"
+        },
+        {
+          "path": "adapters/copilot-cli/fixtures/transcript.jsonl",
+          "sha256": "a923453d2ce160f96a9de59551c70210ba5c4a4cd192a1b0904fa1489de800f5",
+          "kind": "captured-real-client-transcript-projection"
+        }
+      ],
+      "conformance": {
+        "evidence_level": "native-probe",
+        "tested_at": "2026-09-13T07:00:16Z",
+        "tested_version": "1.0.83",
+        "checks": {}
+      }
     },
     {
       "id": "cursor",

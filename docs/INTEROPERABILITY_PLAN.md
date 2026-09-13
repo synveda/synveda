@@ -405,12 +405,15 @@ acceptance remains in its open brief.
 
 1. Complete [ADPT-9's Copilot CLI qualification](backlog/ADPT-9.md). Its bounded
    source-build start/resume adapter reuses the shared authenticated runtime and
-   is registered as experimental. CLI 1.0.83 local MCP configuration and synthetic
-   Skill discovery work; full lifecycle evidence is blocked by the rejected
-   minimum 30-credit model-run ceiling pending explicit cost authorisation.
-   The 121 adapter tests pass on macOS Node 24 and offline Docker Node 22, zero
-   skips. Request one bounded synthetic native probe;
-   capture actual frames before implementing further seams. Pi was absent from PATH.
+   is registered as experimental. The approved CLI 1.0.83 probe captured six
+   native hooks and synthetic Skill activation, but returned the conflicting
+   Skill's marker and failed the hook-marker assertion. Twelve Copilot replay
+   tests pass on macOS Node 24 and offline Docker Node 22, zero skips. The
+   owned Skill conflict is removed and fresh-marker resume is prepared under
+   the same saved 30-credit limit. Automatic approval review rejected this
+   additional paid retry beyond the one-probe approval. Obtain that allowance,
+   verify the new marker and same native Session, then qualify the governed
+   Docker/Keycloak workflow. Pi was absent from PATH.
 2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
    Local archive build/install/import is verified; packages remain unpublished.

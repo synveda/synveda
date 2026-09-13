@@ -36,13 +36,16 @@ refuses an incomplete runtime before mutation. Native execution from a published
 installation, non-text Codex results and other client versions/platforms remain
 unqualified. [ADPT-9](ADPT-9.md) adds an experimental source-build Copilot CLI
 start/resume context adapter over the same authenticated Session runtime.
-CLI 1.0.83 local MCP configuration and synthetic Skill discovery work. Native
-lifecycle qualification remains blocked: automatic approval review rejected
-the minimum 30-credit model-run ceiling without explicit cost authorisation.
-All 121 adapter tests (including eight Copilot contracts) pass with zero skips
-on macOS Node 24 and offline Docker Node 22/Linux arm64. Next, request that
-allowance for one bounded synthetic probe before capturing/implementing further
-seams. Pi is not on PATH.
+CLI 1.0.83 local MCP configuration and synthetic Skill discovery work. The
+approved 2026-09-13 native probe captured six hook events and Skill activation,
+but failed its marker assertion after invoking a conflicting synthetic Skill.
+The captured start frame needs no production-code change. All twelve Copilot
+contract/replay tests pass on macOS Node 24 and offline Docker Node 22, zero
+skips; the prior full 121-test adapter run remains dated 2026-09-12. The owned
+Skill conflict is removed and a fresh-marker resume is prepared. Automatic
+approval review rejected this additional paid retry beyond the one-probe
+approval; next obtain that allowance, then verify the fresh marker and same
+Session before further native qualification. Pi is not on PATH.
 These are independent of the public-release decisions.
 
 The apparent deployment-gate stall was delayed reporting: the unchanged
