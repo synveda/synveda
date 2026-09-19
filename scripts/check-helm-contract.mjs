@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const chart = "deploy/helm/synveda";
-const values = `${chart}/ci/lint-values.yaml`;
+const values = `${chart}/ci/cnpg-values.yaml`;
 const appVersion = readFileSync(`${chart}/Chart.yaml`, "utf8").match(
   /^appVersion:\s*"?([^"\s]+)"?/m,
 )?.[1];
@@ -15,7 +15,7 @@ if (!appVersion) throw new Error("chart appVersion is missing");
 function render(extraArgs = []) {
   return spawnSync(
     "helm",
-    ["template", "synveda", chart, "-f", values, ...extraArgs],
+    ["template", "synveda", chart, "--api-versions", "postgresql.cnpg.io/v1", "-f", values, ...extraArgs],
     { encoding: "utf8" },
   );
 }
@@ -32,7 +32,7 @@ function requireRefusal(name, expected, extraArgs) {
     throw new Error(`${name} rendered but should have been refused`);
   }
   const output = `${result.stdout}\n${result.stderr}`;
-  if (!output.includes(expected)) {
+  if (!output.includes(expected) && !output.replaceAll("/", ".").includes(expected)) {
     throw new Error(`${name} failed for the wrong reason:\n${output}`);
   }
 }
@@ -231,7 +231,7 @@ forbidMarkers("database bootstrap", bootstrap, [
 ]);
 
 requireMarkers("database preflight", preflight, [
-  'args: ["database-preflight"]',
+  "while ! /usr/local/bin/synveda-container database-preflight; do",
   "- name: SYNVEDA_MIGRATOR_DATABASE_URL_FILE",
   "value: /run/secrets/synveda-preflight/migrator_database_url",
   "- name: SYNVEDA_GATEWAY_DATABASE_URL_FILE",
@@ -247,7 +247,7 @@ requireMarkers("database preflight", preflight, [
 forbidMarkers("database preflight", preflight, ["synveda-pg-superuser", "bootstrap-secrets"]);
 
 requireMarkers("migration", migrate, [
-  'args: ["migrate"]',
+  'args: ["/usr/local/bin/synveda-container", "migrate"]',
   "- name: DATABASE_URL_FILE",
   "value: /run/secrets/synveda-migrator/database_url",
   "- name: SYNVEDA_DATABASE_ROLES_FILE",
@@ -320,13 +320,15 @@ const withTenant = render([
   "--set-string",
   "install.tenant.slug=acme",
   "--set-string",
+  "install.tenant.id=019b53c0-7c00-7000-8000-000000000011",
+  "--set-string",
   "install.tenant.name=Acme",
 ]);
 requireSuccess("tenant admission chart", withTenant);
 const tenantInstall = resource(withTenant.stdout, "Job", "install");
 const tenantStage = namedItem(tenantInstall, "tenant");
 requireMarkers("tenant admission", tenantStage, [
-  "/usr/local/bin/synveda tenant create",
+  'args: ["tenant-converge"]',
   "- name: DATABASE_URL_FILE",
   "value: /run/secrets/synveda-migrator/database_url",
   "- name: SYNVEDA_DATABASE_ROLES_FILE",
@@ -347,7 +349,7 @@ if (
 ) {
   throw new Error("default worker pod grace must remain ten seconds beyond its join bound");
 }
-const customShutdown = render(["--set-string", "worker.shutdownSeconds=29"]);
+const customShutdown = render(["--set", "worker.shutdownSeconds=29"]);
 requireSuccess("custom worker shutdown", customShutdown);
 const customWorker = resource(customShutdown.stdout, "Deployment", "worker");
 if (
@@ -373,17 +375,13 @@ for (const [component, document] of [
   ["gateway", gateway],
   ["worker", worker],
 ]) {
-  for (const [envName, secretKey] of [
-    ["SYNVEDA_KMS_KEY", "SYNVEDA_KMS_KEY"],
-    ["SYNVEDA_KMS_KEY_REF", "SYNVEDA_KMS_KEY_REF"],
-  ]) {
-    const pattern = new RegExp(
-      `- name: ${envName}\\n\\s+valueFrom:\\n\\s+secretKeyRef:\\n\\s+name: synveda-kms\\n\\s+key: ${secretKey}`,
-    );
-    if (!pattern.test(document)) {
-      throw new Error(`${component} does not source ${envName} from synveda-kms/${secretKey}`);
-    }
-  }
+  requireMarkers(component, document, [
+    "- name: SYNVEDA_OIDC_ISSUERS_FILE", "- name: SYNVEDA_KMS_KEY_FILE",
+    "- name: SYNVEDA_KMS_KEY_REF_FILE", "name: synveda-kms",
+    "key: SYNVEDA_KMS_KEY", "key: SYNVEDA_KMS_KEY_REF",
+    "mountPath: /run/secrets/synveda-runtime", "startupProbe:",
+  ]);
+  forbidMarkers(component, document, ["secretKeyRef:", "- name: SYNVEDA_KMS_KEY\n"]);
 }
 
 for (const [name, expected, args] of [
@@ -394,7 +392,7 @@ for (const [name, expected, args] of [
   ],
   [
     "string development HTTP relaxation",
-    "gateway.insecureDevelopmentHttp must be a boolean",
+    "gateway.insecureDevelopmentHttp",
     ["--set-string", "gateway.insecureDevelopmentHttp=true"],
   ],
   [
@@ -402,15 +400,15 @@ for (const [name, expected, args] of [
     "gateway.insecureDevelopmentHttp must remain false",
     ["--set", "gateway.insecureDevelopmentHttp=true"],
   ],
-  ["missing KMS Secret", "kms.existingSecret is required", ["--set-string", "kms.existingSecret="]],
+  ["missing KMS Secret", "kms.existingSecret", ["--set-string", "kms.existingSecret="]],
   [
     "missing gateway database Secret",
-    "gateway.databaseExistingSecret is required",
+    "gateway.databaseExistingSecret",
     ["--set-string", "gateway.databaseExistingSecret="],
   ],
   [
     "missing worker database Secret",
-    "worker.databaseExistingSecret is required",
+    "worker.databaseExistingSecret",
     ["--set-string", "worker.databaseExistingSecret="],
   ],
   [
@@ -420,12 +418,12 @@ for (const [name, expected, args] of [
   ],
   [
     "gateway migrator Secret",
-    "gateway.databaseExistingSecret must not be the CloudNativePG migrator Secret",
+    "gateway.databaseExistingSecret must not be the migrator Secret",
     ["--set-string", "gateway.databaseExistingSecret=synveda-pg-app"],
   ],
   [
     "worker migrator Secret",
-    "worker.databaseExistingSecret must not be the CloudNativePG migrator Secret",
+    "worker.databaseExistingSecret must not be the migrator Secret",
     ["--set-string", "worker.databaseExistingSecret=synveda-pg-app"],
   ],
   [
@@ -450,47 +448,47 @@ for (const [name, expected, args] of [
   ],
   [
     "optional install bypass",
-    "install.enabled was removed",
+    "enabled",
     ["--set-string", "install.enabled=false"],
   ],
   [
     "oversized worker pool",
-    "worker.dbMaxConnections must be between 1 and 64",
-    ["--set-string", "worker.dbMaxConnections=65"],
+    "worker.dbMaxConnections",
+    ["--set", "worker.dbMaxConnections=65"],
   ],
   [
     "unbounded worker shutdown",
-    "worker.shutdownSeconds must be between 3 and 300",
-    ["--set-string", "worker.shutdownSeconds=2"],
+    "worker.shutdownSeconds",
+    ["--set", "worker.shutdownSeconds=2"],
   ],
   [
     "short install deadline",
-    "install.activeDeadlineSeconds must be between 300 and 3600",
-    ["--set-string", "install.activeDeadlineSeconds=299"],
+    "install.activeDeadlineSeconds",
+    ["--set", "install.activeDeadlineSeconds=299"],
   ],
   [
     "unbounded install deadline",
-    "install.activeDeadlineSeconds must be between 300 and 3600",
-    ["--set-string", "install.activeDeadlineSeconds=3601"],
+    "install.activeDeadlineSeconds",
+    ["--set", "install.activeDeadlineSeconds=3601"],
   ],
   [
     "unbounded install retries",
-    "install.backoffLimit must be between 0 and 6",
-    ["--set-string", "install.backoffLimit=7"],
+    "install.backoffLimit",
+    ["--set", "install.backoffLimit=7"],
   ],
   [
     "short install result retention",
-    "install.ttlSecondsAfterFinished must be between 300 and 604800",
-    ["--set-string", "install.ttlSecondsAfterFinished=299"],
+    "install.ttlSecondsAfterFinished",
+    ["--set", "install.ttlSecondsAfterFinished=299"],
   ],
   [
     "worker replicas",
-    "worker replicas are not configurable",
+    "replicas",
     ["--set-string", "worker.replicas=2"],
   ],
   [
     "disabled extractor",
-    "extractor.kind must be one of deterministic|claude|vllm",
+    "extractor.kind",
     ["--set-string", "extractor.kind=off"],
   ],
   [
@@ -506,6 +504,86 @@ for (const [name, expected, args] of [
 ]) {
   requireRefusal(name, expected, args);
 }
+
+// OPS-11: the application-only path must work with no operator API advertised.
+function externalRender(extraArgs = []) {
+  return spawnSync("helm", ["template", "synveda", chart, "-f", `${chart}/ci/external-values.yaml`, ...extraArgs], { encoding: "utf8" });
+}
+const external = externalRender();
+requireSuccess("external services", external);
+forbidMarkers("external services", external.stdout, [
+  "kind: Cluster\n", "kind: Secret\n", "kind: ClusterRole", "kind: PersistentVolumeClaim",
+  "database-bootstrap", "synveda-pg-superuser", "helm.sh/hook", "kind: StatefulSet",
+]);
+for (const component of ["gateway", "worker"]) {
+  const deployment = resource(external.stdout, "Deployment", component);
+  requireMarkers(component, deployment, [
+    "replicas: 1", "type: Recreate", "startupProbe:", "automountServiceAccountToken: false",
+    "SYNVEDA_DATABASE_EXPECTED_HOST", "SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE",
+    "mountPath: /run/secrets/synveda-postgres", "runAsNonRoot: true",
+  ]);
+  forbidMarkers(component, deployment, ["synveda-migrator-db", "runAsUser:"]);
+}
+const externalJob = resource(external.stdout, "Job", "install");
+requireMarkers("external Job", externalJob, ["synveda-install-1", "activeDeadlineSeconds: 900", "synveda-migrator-db", "retry $attempt/12", '"300s"']);
+for (const stage of ["database-preflight", "migrate"]) {
+  requireMarkers(stage, namedItem(externalJob, stage), ["SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE", "mountPath: /run/secrets/synveda-postgres"]);
+  forbidMarkers(stage, namedItem(externalJob, stage), ["tenant-kms", "SYNVEDA_KMS_KEY_FILE"]);
+}
+const admitted = externalRender(["--set-string", "install.tenant.id=019b53c0-7c00-7000-8000-000000000011", "--set-string", "install.tenant.slug=acme"]);
+requireSuccess("tenant convergence", admitted);
+const admittedJob = resource(admitted.stdout, "Job", "install");
+requireMarkers("tenant encryption-key admission", namedItem(admittedJob, "tenant"), ["SYNVEDA_KMS_KEY_FILE", "SYNVEDA_KMS_KEY_REF_FILE", "mountPath: /run/secrets/synveda-kms"]);
+for (const stage of ["database-preflight", "migrate"]) {
+  forbidMarkers(stage, namedItem(admittedJob, stage), ["tenant-kms", "SYNVEDA_KMS_KEY_FILE"]);
+}
+const digest = `sha256:${"a".repeat(64)}`;
+const pinned = externalRender(["--set-string", `image.digest=${digest}`]);
+requireSuccess("digest image", pinned);
+if ((pinned.stdout.match(new RegExp(`image: ghcr.io/synveda/product@${digest}`, "g")) ?? []).length !== 5) {
+  throw new Error("digest must select the same product image for both processes and all three Job stages");
+}
+const mutualTls = externalRender(["--set-string", "postgres.external.clientExistingSecret=client-cert", "--set-string", "postgres.external.clientCertSecretKey=tls.crt", "--set-string", "postgres.external.clientKeySecretKey=tls.key"]);
+requireSuccess("client certificate", mutualTls);
+requireMarkers("client certificate", mutualTls.stdout, ["SYNVEDA_DATABASE_EXPECTED_CLIENT_CERT_FILE", "SYNVEDA_DATABASE_EXPECTED_CLIENT_KEY_FILE", "secretName: client-cert"]);
+const tei = externalRender(["--set", "embedder=tei,tei.enabled=true", "--set-string", "tei.nodeSelector.pool=models", "--set-string", "tei.podAnnotations.owner=operators"]);
+requireSuccess("optional non-root TEI", tei);
+requireMarkers("optional TEI", resource(tei.stdout, "Deployment", "tei"), [
+  "automountServiceAccountToken: false", "runAsNonRoot: true", "runAsUser: 1000",
+  "readOnlyRootFilesystem: true", "containerPort: 8080", "startupProbe:", "livenessProbe:",
+  "pool: models", "owner: operators", "mountPath: /tmp",
+]);
+const schemaRefusals = [
+  ["missing endpoint", ["--set-string", "postgres.external.host="], "host"],
+  ["missing migrator Secret", ["--set-string", "postgres.external.migratorExistingSecret="], "migratorExistingSecret"],
+  ["missing CA Secret", ["--set-string", "postgres.external.caExistingSecret="], "caExistingSecret"],
+  ["ambiguous modes", ["--set", "postgres.mode=cnpg"], "external"],
+  ["unknown setting", ["--set", "gateway.replicaCount=2"], "replicaCount"],
+  ["unknown dependency", ["--set", "redis.enabled=true"], "redis"],
+  ["unknown database setting", ["--set", "postgres.external.sslmode=disable"], "sslmode"],
+  ["unpaired certificate", ["--set-string", "postgres.external.clientExistingSecret=client"], "client"],
+  ["CNPG settings with external database", ["--set", "postgres.instances=2"], "postgres.mode=cnpg"],
+  ["CNPG resources with external database", ["--set-string", "postgres.resources.requests.memory=4Gi"], "postgres.mode=cnpg"],
+  ["image tag and digest", ["--set-string", "image.tag=test", "--set-string", `image.digest=${digest}`], "mutually exclusive"],
+  ["ignored TEI URL", ["--set-string", "tei.url=http://tei:80"], "embedder=tei"],
+  ["ignored deterministic model", ["--set-string", "embedderModel=other"], "embedder=tei"],
+  ["ignored TEI workload", ["--set-string", "tei.nodeSelector.pool=models"], "tei.enabled=true"],
+  ["ignored database password key", ["--set-string", "worker.databasePasswordSecretKey=unused"], "postgres.mode=cnpg"],
+  ["ignored OIDC CA key", ["--set-string", "oidc.caSecretKey=unused"], "oidc.caExistingSecret"],
+  ["ignored extractor key", ["--set-string", "extractor.secretKey=unused"], "extractor.kind=claude"],
+  ["unacknowledged ingress TLS", ["--set", "ingress.enabled=true", "--set-string", "ingress.host=synveda.example.com"], "TLS Secret"],
+  ["non-ClusterIP exposure", ["--set", "service.type=LoadBalancer"], "ClusterIP"],
+  ["privileged process", ["--set", "podSecurityContext.runAsUser=0"], "runAsUser"],
+];
+for (const [name, args, expected] of schemaRefusals) {
+  const result = externalRender(args);
+  if (result.status === 0 || !`${result.stderr}${result.stdout}`.includes(expected)) {
+    throw new Error(`${name} did not produce its expected refusal: ${result.stderr}`);
+  }
+}
+const absentApi = spawnSync("helm", ["template", "synveda", chart, "-f", values], { encoding: "utf8" });
+if (absentApi.status === 0 || !absentApi.stderr.includes("preinstalled CloudNativePG")) throw new Error("missing CNPG API was not refused explicitly");
+console.log("ok: external mode, strict values schema, TLS/mTLS file references, digest selection, bounded Job and unsupported-mode refusals.");
 
 const scratch = mkdtempSync(join(tmpdir(), "synveda-helm-secret-read-"));
 try {

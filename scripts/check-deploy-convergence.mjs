@@ -1991,7 +1991,7 @@ export function helmContractFindings(rendered) {
       if (!bootstrap.includes(marker)) findings.push(`database bootstrap is missing ${marker}`);
     }
     for (const marker of [
-      'args: ["database-preflight"]',
+      "/usr/local/bin/synveda-container database-preflight",
       "SYNVEDA_MIGRATOR_DATABASE_URL_FILE",
       "SYNVEDA_GATEWAY_DATABASE_URL_FILE",
       "SYNVEDA_WORKER_DATABASE_URL_FILE",
@@ -2090,7 +2090,10 @@ function checkHelm() {
     "synveda",
     "deploy/helm/synveda",
     "-f",
-    "deploy/helm/synveda/ci/full-values.yaml",
+    "deploy/helm/synveda/ci/cnpg-values.yaml",
+    "--api-versions", "postgresql.cnpg.io/v1",
+    "--set", "install.tenant.slug=acme",
+    "--set", "install.tenant.id=019b53c0-7c00-7000-8000-000000000002",
   ]);
   const temporal = temporalRuntimeResidueFindings([["rendered Helm", rendered]], false);
   if (temporal.length > 0) fail(`unused Temporal runtime residue: ${temporal.join(", ")}`);

@@ -1,92 +1,35 @@
-Synveda {{ .Chart.AppVersion }} — one context-platform runtime (CPR-45, ADR-0102)
+Synveda {{ .Chart.AppVersion }} — one gateway/console host and one private worker
 
-  gateway    {{ include "synveda.fullname" . }} (1 replica; see limits below)
-  worker     {{ include "synveda.fullname" . }}-worker (1 replica; private health)
-  database   {{ include "synveda.clusterName" . }} — {{ .Values.postgres.instances }} CloudNativePG instances
-  embedder   {{ .Values.embedder }}{{ if eq .Values.embedder "tei" }} ({{ if .Values.tei.enabled }}in-cluster{{ else }}{{ .Values.tei.url }}{{ end }}){{ end }}
-  extractor  {{ .Values.extractor.kind }}
-  public URL {{ .Values.gateway.publicUrl }}
+  public URL: {{ .Values.gateway.publicUrl }}/console/
+  PostgreSQL mode: {{ .Values.postgres.mode }}
+{{- if eq .Values.postgres.mode "external" }}
+  External database: {{ .Values.postgres.external.host }}:{{ .Values.postgres.external.port }}/{{ .Values.postgres.external.database }}
+  Provider provisioning is operator-owned; the release creates no database.
+{{- else }}
+  CNPG: {{ include "synveda.clusterName" . }}, {{ .Values.postgres.instances }} instance(s); preinstalled operator required.
+{{- end }}
 
-1. Watch the install job. Its ordered stages use the superuser only to
-   converge extensions, fixed roles, ownership and ACLs; prove the migrator,
-   gateway and worker credentials select one writable target with their exact
-   authority; migrate as the ordinary `synveda_migrator` owner; and optionally
-   admit one tenant. Gateway and worker receive only their distinct non-owner
-   credentials from `{{ .Values.gateway.databaseExistingSecret }}` and
-   `{{ .Values.worker.databaseExistingSecret }}`. Neither runtime process
-   receives the bootstrap or migrator DSN.
+The normal Job {{ include "synveda.fullname" . }}-install-{{ .Release.Revision }}
+performs bounded preflight, advisory-locked migration and optional idempotent
+admission. Gateway and worker receive only their own non-owner database Secrets.
 
-     kubectl logs -l app.kubernetes.io/component=install -f
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "synveda.fullname" . }}-install-{{ .Release.Revision }} -c database-preflight
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "synveda.fullname" . }}-install-{{ .Release.Revision }} -c migrate
 
-2. Register this redirect URI with the IdP named by
-   `{{ .Values.oidc.existingSecret }}`:
+Register exactly {{ .Values.gateway.publicUrl }}/auth/callback with the issuer
+in {{ .Values.oidc.existingSecret }}. Its static tenant ID must match
+install.tenant.id, or an already-admitted operator-managed tenant.
+External login alone grants no workspace membership. Use the existing first
+administrator group, then public API invitations and governed grants.
 
-     {{ .Values.gateway.publicUrl }}/auth/callback
+Secrets are mounted files and are never generated or printed by this chart.
+After externally rotating credentials or CA files, roll the affected process:
 
-   A trust entry binds the issuer to a tenant id. The tenant root scope, first
-   principal scope and first `administrator` grant are not chart resources;
-   they are created and audited under the first `synveda-admins` member who
-   logs in.
+  kubectl -n {{ .Release.Namespace }} rollout restart deployment/{{ include "synveda.fullname" . }} deployment/{{ include "synveda.fullname" . }}-worker
 
-   Gateway and worker read the local KMS key from
-   `{{ .Values.kms.existingSecret }}`. This chart does not create or own that
-   Secret. Back it up outside Postgres and test restoring it: losing the key
-   makes wrapped tenant keys and console sessions unrecoverable. The stable
-   key reference is evidence metadata, not a cloud KMS/HSM custody integration.
+Back up {{ .Values.kms.existingSecret }} separately from the database. Replacing
+a KMS Secret is not a key-rotation ceremony. See deploy/helm/synveda/README.md.
 
-{{ if not .Values.install.tenant.slug }}3. No tenant was requested. Tenant admission is the retained deployment
-   boundary and is intentionally unavailable to the gateway and worker roles.
-   Admit the first tenant with a bounded operator Job that mounts the
-   `{{ include "synveda.migratorSecret" . }}` `uri` as `DATABASE_URL_FILE`, or
-   set `install.tenant.slug` and `install.tenant.name` on the initial install.
-   Never supply the superuser or a runtime credential to a product command.
-
-{{ else }}3. Tenant `{{ .Values.install.tenant.slug }}` was admitted by the install job.
-
-{{ end }}4. After login, select product behaviour through the generated public
-   Configuration API or Advanced > Configuration. `personal`, `team` and
-   `enterprise` are complete immutable documents copied into ordinary
-   VedaFlow-governed versions and bound to scopes. No Helm value or environment
-   variable selects a product edition. With no binding, the enterprise
-   document is the conservative fail-safe.
-
-5. Create workspaces/projects and append sessions through `/v1`. Capture
-   produces reviewable candidates; accepting one invokes the Knowledge command
-   layer and VedaFlow. The chart seeds none of those domain rows.
-
-OPERATIONAL LIMITS
-
-  CloudNativePG provides a replicated data plane and the OPS-2 acceptance test
-  deletes its primary before repeating a public context request. That is not a
-  claim of gateway HA.
-
-  Gateway and core worker remain one replica each and upgrades use `Recreate`.
-  Pending login state and cross-process cache invalidation have not passed
-  OPS-7's multi-gateway criterion. Only Capture has passed concurrent lease
-  fencing; the other core loops have not passed multi-worker acceptance. The
-  chart refuses replica keys instead of accepting unsupported availability.
-
-  Worker SIGTERM withdraws readiness, requests cancellation and applies
-  `worker.shutdownSeconds` as the hard supervised-task join deadline. Bounded
-  idle shutdown is proved. Real process interruption during claimed Capture or
-  provider work and subsequent claim recovery remain unproved; a deadline may
-  abort unfinished work and provider calls are not exactly once.
-
-  Rotating `{{ .Values.gateway.databaseExistingSecret }}` or
-  `{{ .Values.worker.databaseExistingSecret }}` does not restart a Pod
-  automatically. Converge the login password and roll the matching process as
-  one operator action; do not replace a Secret and leave the old process
-  alive.
-
-  Provider credentials and the local KMS key remain Kubernetes Secret
-  references. Rendered diagnostics, ordinary APIs and audit rows do not
-  contain their values. Key rotation and restore are operator procedures that
-  this chart does not automate or prove.
-
-  `deterministic` embeddings are lexical-only. Select `tei` for meaningful
-  semantic retrieval. Knowledge index rows retain model and dimension, and a
-  model change converges a separately labelled sidecar.
-
-  This chart does not promise zero-downtime gateway upgrades, signed binaries,
-  Windows support, an external HSM/customer-managed key integration, SIEM/WORM
-  export, or an old-schema translator.
+Both processes use Recreate: upgrades interrupt service. No gateway HA,
+claimed-work shutdown qualification, published image availability, cloud or
+OpenShift certification, backup/PITR or old-schema compatibility is claimed.

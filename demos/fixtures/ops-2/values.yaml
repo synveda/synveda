@@ -52,6 +52,7 @@ extractor:
   kind: deterministic
 
 postgres:
+  mode: cnpg
   # Two, not the chart's three. A failover needs exactly one replica to
   # promote, and the third instance is what a production cluster wants for
   # quorum during maintenance — not what this assertion needs.
@@ -73,5 +74,6 @@ postgres:
 
 install:
   tenant:
+    id: 019b53c0-7c00-7000-8000-000000000002
     slug: acme
     name: ACME Corporation

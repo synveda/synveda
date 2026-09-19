@@ -1,11 +1,29 @@
 # Feature inventory
 
-143 features in this index. This file is authoritative for feature identity,
+144 features in this index. This file is authoritative for feature identity,
 phase and delivered/open state. Delivered names identify historical slices;
 current contracts live in code, generated artefacts and accepted ADRs, while git
 retains their implementation evidence. Open entries link to current briefs.
 
-112 delivered; 31 open. The inventory and open-brief shape are checked in CI.
+112 delivered; 32 open. The inventory and open-brief shape are checked in CI.
+
+[OPS-11](OPS-11.md) records the next small-team Kubernetes milestone under
+ADR-0109. The [deployment audit](../../deploy/README.md#small-team-kubernetes-release-contract)
+reuses the existing Helm chart and owner-validated Docker MVP, keeps application
+replicas at one, and orders external services, starter/onboarding, OpenShift,
+then operational and published-release evidence. The portable chart slice now
+implements external PostgreSQL/OIDC, verified TLS/private CAs, file-mounted
+Secrets and a bounded normal migration/tenant Job. The starter/onboarding,
+OpenShift and operational/release scopes remain open; measured acceptance and
+the exact next action are in the brief.
+
+The 2026-09-19 external Kind run passed clean installation, real Keycloak PKCE,
+Session/context/audit, verified database TLS with a client certificate, bad
+credential/CA/hostname/issuer/audience refusals, runtime restarts and the normal
+Helm upgrade/migration rerun. Strict chart/Rust/deployment checks, the exact-role
+database suite and existing Compose smoke passed. This one private development
+topology does not qualify public HTTPS ingress, cloud, OpenShift, HA or release
+publication; OPS-11 remains open for its later slices.
 
 The 2026-09-12 [interoperability execution plan](../INTEROPERABILITY_PLAN.md)
 records ADPT-1/2 and CPR-12/23 repairs, the initial ADPT-4 SDK slice and CPR-39
@@ -210,6 +228,7 @@ the next PR/main runs must compare cold and warm Kind timings with the
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 - [ ] [OPS-6: Upgrade and rollback discipline](OPS-6.md) — open
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
+- [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered 2026-08-24; ADR-0082
 - [ ] [AUD-5: Compliance mapping doc](AUD-5.md) — open

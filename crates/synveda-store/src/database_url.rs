@@ -85,7 +85,63 @@ pub fn parse(setting: &str, value: &str) -> Result<PgConnectOptions> {
     if options.get_options().is_some() {
         return Err(invalid(setting));
     }
+    // Helm starts runtime pods beside the migration Job. The external TLS
+    // contract must therefore protect every process, including later restarts.
+    let expected = [
+        "SYNVEDA_DATABASE_EXPECTED_HOST",
+        "SYNVEDA_DATABASE_EXPECTED_PORT",
+        "SYNVEDA_DATABASE_EXPECTED_NAME",
+        "SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE",
+        "SYNVEDA_DATABASE_EXPECTED_CLIENT_CERT_FILE",
+        "SYNVEDA_DATABASE_EXPECTED_CLIENT_KEY_FILE",
+    ]
+    .map(std::env::var_os);
+    validate_deployment_transport(setting, value, &options, &expected)?;
     Ok(options)
+}
+
+fn validate_deployment_transport(
+    setting: &str,
+    value: &str,
+    options: &PgConnectOptions,
+    expected: &[Option<std::ffi::OsString>; 6],
+) -> Result<()> {
+    let text = expected
+        .each_ref()
+        .map(|value| value.as_deref().and_then(|v| v.to_str()));
+    if expected
+        .iter()
+        .zip(text)
+        .any(|(raw, text)| raw.is_some() && text.is_none())
+    {
+        return Err(invalid(setting));
+    }
+    match (text[0], text[1], text[2]) {
+        (None, None, None) => {}
+        (Some(host), Some(port), Some(database))
+            if options.get_host() == host
+                && port.parse::<u16>().ok() == Some(options.get_port())
+                && options.get_database() == Some(database)
+                && options.get_socket().is_none() => {}
+        _ => return Err(invalid(setting)),
+    }
+    if let Some(root) = text[3] {
+        verify_full_parameters(setting, value, Path::new(root))?;
+    }
+    match (text[4], text[5]) {
+        (None, None) => {}
+        (Some(cert), Some(key)) if text[3].is_some() => {
+            let parsed = url::Url::parse(value).map_err(|_| invalid(setting))?;
+            let pairs = parsed.query_pairs().collect::<Vec<_>>();
+            if !pairs.iter().any(|(k, v)| k == "sslcert" && v == cert)
+                || !pairs.iter().any(|(k, v)| k == "sslkey" && v == key)
+            {
+                return Err(invalid(setting));
+            }
+        }
+        _ => return Err(invalid(setting)),
+    }
+    Ok(())
 }
 
 /// Parses an external PostgreSQL URL with hostname and CA verification.
@@ -97,12 +153,23 @@ pub fn parse_verify_full(
     value: &str,
     expected_root_cert: &Path,
 ) -> Result<PgConnectOptions> {
+    verify_full_parameters(setting, value, expected_root_cert)?;
+    let options = parse(setting, value)?;
+    if !matches!(options.get_ssl_mode(), PgSslMode::VerifyFull) || options.get_socket().is_some() {
+        return Err(invalid(setting));
+    }
+    Ok(options)
+}
+
+fn verify_full_parameters(setting: &str, value: &str, expected_root_cert: &Path) -> Result<()> {
     if !expected_root_cert.is_absolute() {
         return Err(invalid(setting));
     }
     let parsed = url::Url::parse(value).map_err(|_| invalid(setting))?;
     let mut ssl_mode = None;
     let mut ssl_root_cert = None;
+    let mut ssl_cert = None;
+    let mut ssl_key = None;
     let mut password_is_nonempty = parsed
         .password()
         .is_some_and(|password| !password.is_empty());
@@ -113,6 +180,8 @@ pub fn parse_verify_full(
                 ssl_root_cert = Some(query_value.into_owned());
             }
             "password" => password_is_nonempty = !query_value.is_empty(),
+            "sslcert" if ssl_cert.is_none() => ssl_cert = Some(query_value.into_owned()),
+            "sslkey" if ssl_key.is_none() => ssl_key = Some(query_value.into_owned()),
             "sslmode" | "sslrootcert" | "ssl-mode" | "ssl-root-cert" | "ssl-ca" | "sslcert"
             | "ssl-cert" | "sslkey" | "ssl-key" | "hostaddr" => {
                 return Err(invalid(setting));
@@ -126,12 +195,13 @@ pub fn parse_verify_full(
     {
         return Err(invalid(setting));
     }
-
-    let options = parse(setting, value)?;
-    if !matches!(options.get_ssl_mode(), PgSslMode::VerifyFull) || options.get_socket().is_some() {
-        return Err(invalid(setting));
+    match (ssl_cert.as_deref(), ssl_key.as_deref()) {
+        (None, None) => {}
+        (Some(cert), Some(key))
+            if Path::new(cert).is_absolute() && Path::new(key).is_absolute() => {}
+        _ => return Err(invalid(setting)),
     }
-    Ok(options)
+    Ok(())
 }
 
 fn ambient_environment(setting: &str) -> Error {
@@ -258,6 +328,62 @@ mod tests {
             );
             assert!(!error.to_string().contains("secret"));
             assert!(!error.to_string().contains("postgres_root_ca"));
+        }
+    }
+
+    #[test]
+    fn external_transport_is_enforced_on_every_process_and_optional_client_files_are_paired() {
+        let base = "postgresql://app:secret@database.example.test:5432/synveda?sslmode=verify-full&sslrootcert=/run/ca.pem";
+        let expected = [
+            Some("database.example.test"),
+            Some("5432"),
+            Some("synveda"),
+            Some("/run/ca.pem"),
+            None,
+            None,
+        ]
+        .map(|value| value.map(std::ffi::OsString::from));
+        let options = parse("DATABASE_URL", base).expect("URL");
+        validate_deployment_transport("DATABASE_URL", base, &options, &expected)
+            .expect("TLS contract");
+        for refused in [
+            base.replace("verify-full", "prefer"),
+            base.replace("/run/ca.pem", "/wrong/ca.pem"),
+            base.replace("database.example.test", "wrong.example.test"),
+            base.replace(":5432", ":5433"),
+            base.replace("/synveda?", "/other?"),
+        ] {
+            let options = parse("DATABASE_URL", &refused).expect("valid unbound URL");
+            let error =
+                validate_deployment_transport("DATABASE_URL", &refused, &options, &expected)
+                    .expect_err("weakened or redirected transport");
+            assert!(!error.to_string().contains("secret"));
+        }
+        let mtls = format!("{base}&sslcert=/run/client.crt&sslkey=/run/client.key");
+        parse_verify_full("DATABASE_URL", &mtls, Path::new("/run/ca.pem")).expect("mTLS pair");
+        let mut client_expected = expected;
+        client_expected[4] = Some("/run/client.crt".into());
+        client_expected[5] = Some("/run/client.key".into());
+        validate_deployment_transport("DATABASE_URL", &mtls, &options, &client_expected)
+            .expect("client contract");
+        assert!(
+            validate_deployment_transport("DATABASE_URL", base, &options, &client_expected)
+                .is_err()
+        );
+        for suffix in [
+            "&sslcert=/run/client.crt",
+            "&sslkey=/run/client.key",
+            "&sslcert=relative.crt&sslkey=/run/client.key",
+            "&sslcert=/run/client.crt&sslkey=/run/client.key&sslcert=/other.crt",
+        ] {
+            assert!(
+                parse_verify_full(
+                    "DATABASE_URL",
+                    &format!("{base}{suffix}"),
+                    Path::new("/run/ca.pem")
+                )
+                .is_err()
+            );
         }
     }
 

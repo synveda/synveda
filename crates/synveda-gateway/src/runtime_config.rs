@@ -158,6 +158,19 @@ pub fn required_setting(name: &str) -> Result<String, String> {
     setting(name)?.ok_or_else(|| format!("{name} or {name}_FILE must be set"))
 }
 
+/// Shared OIDC trust transport for the gateway and its deployment diagnostic.
+pub fn oidc_verifier(
+    issuers: Vec<synveda_identity::IssuerConfig>,
+) -> Result<synveda_identity::OidcVerifier, String> {
+    let ca = setting("SYNVEDA_OIDC_CA_CERT")?;
+    synveda_identity::OidcVerifier::new_with_transport(
+        issuers,
+        insecure_development_http_enabled()?,
+        ca.as_deref(),
+    )
+    .map_err(|error| error.to_string())
+}
+
 /// Reads the provider-neutral database role contract shared by gateway,
 /// worker, migrator and deployment preflight.
 pub fn database_roles() -> Result<synveda_store::runtime_role::DatabaseRoles, String> {

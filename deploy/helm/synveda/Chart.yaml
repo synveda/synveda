@@ -2,7 +2,7 @@ apiVersion: v2
 name: synveda
 description: |
   Synveda's context-platform runtime — separate gateway and core worker
-  processes from one image, a CloudNativePG data plane, and the wiring for a
+  processes from one image, external PostgreSQL or optional CloudNativePG, and a
   customer's IdP. Product profiles are governed Configuration data, not chart
   variants. CPR-45; ADR-0102.
 type: application
@@ -20,10 +20,10 @@ home: https://github.com/synveda/synveda
 sources:
   - https://github.com/synveda/synveda
 
-# No dependencies, deliberately. CloudNativePG is required and is *not* a
+# No subchart dependencies. Optional CloudNativePG is *not* a
 # subchart: its operator is cluster-scoped, and a product chart that
 # installs cluster-scoped CRDs fights the next chart that wants them
 # (ADR-0062 decision 1). Install the operator first; this chart renders a
 # `Cluster` for it and fails with that instruction if the CRD is absent.
 annotations:
-  synveda.io/requires-operator: "cloudnative-pg"
+  synveda.io/optional-operator: "cloudnative-pg (postgres.mode=cnpg only)"

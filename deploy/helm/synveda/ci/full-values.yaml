@@ -26,7 +26,26 @@ extractor:
   existingSecret: synveda-anthropic
 install:
   tenant:
+    id: 019b53c0-7c00-7000-8000-000000000011
     slug: acme
     name: ACME Corporation
 otel:
   endpoint: http://otel-collector:4317
+postgres:
+  mode: external
+  external:
+    host: postgres.database.example.test
+    port: 5432
+    database: synveda
+    migratorExistingSecret: synveda-migrator-db
+    migratorUrlSecretKey: DATABASE_URL
+    caExistingSecret: synveda-postgres-ca
+    caSecretKey: ca.crt
+    roles:
+      migrator: synveda_migrator
+      gateway: synveda_gateway
+      worker: synveda_worker
+      administrators: [postgres]
+      administrative_memberships: []
+      forbidden_databases: [postgres, template1]
+      isolated_peer_roles: []

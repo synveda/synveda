@@ -4,20 +4,20 @@
 # selects personal, team or enterprise product behaviour: those are immutable
 # governed Configuration versions and scope bindings in the one runtime.
 #
-# Seven values have no default and the chart refuses to render without them:
-# `gateway.publicUrl`, `gateway.databaseExistingSecret`,
-# `worker.databaseExistingSecret`, `embedder`,
-# `oidc.existingSecret`, `kms.existingSecret`, and — if the embedder is `tei`
-# — one of `tei.enabled` or `tei.url`. Each is a decision somebody has to
-# make on purpose; a default would make it silently.
+# See README.md for external installation, Secret file formats and acceptance.
+# External dependencies are the default; all endpoints and Secrets are explicit.
 
 # ── The product image ────────────────────────────────────────────────────
 # Carries the gateway, core worker and `synveda` CLI. The install job and an
 # operator's `kubectl exec` use that same immutable artefact (ADR-0102).
 image:
+  # Release coordinate only; published availability is not established.
+  # Supply an image built from this checkout or a pull-verified registry image.
   repository: ghcr.io/synveda/product
   # Empty means Chart.appVersion — the chart deploys the release it names.
   tag: ""
+  # Set a sha256 digest instead of a tag to pin the exact product image.
+  digest: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -47,7 +47,8 @@ gateway:
   # opt-in when publicUrl is HTTPS.
   insecureDevelopmentHttp: false
 
-  # Operator-owned Secret with two distinct keys:
+  # Operator-owned Secret. External mode uses only DATABASE_URL with its full
+  # verified TLS parameters (README.md). CNPG mode needs two distinct keys:
   #
   #   DATABASE_URL  postgres://synveda_gateway:<password>@<rw-service>:5432/synveda
   #   password      the exact password embedded in DATABASE_URL
@@ -63,6 +64,7 @@ gateway:
   # against postgres.maxConnections; migration/operator connections still
   # need headroom.
   dbMaxConnections: 20
+  shutdownSeconds: 30
 
   logLevel: info
   resources:
@@ -78,7 +80,8 @@ gateway:
 
 # ── The core worker ─────────────────────────────────────────────────────
 worker:
-  # Existing Secret owned by the operator, with two keys:
+  # Operator-owned Secret. External mode uses only the complete verified-TLS
+  # DATABASE_URL; CNPG mode also requires the password-only key:
   #
   #   DATABASE_URL  postgres://synveda_worker:<password>@<rw-service>:5432/synveda
   #   password      the exact password embedded in DATABASE_URL
@@ -107,8 +110,10 @@ worker:
   podAnnotations: {}
 
 service:
+  # ClusterIP is the only base exposure; use ingress or private access.
   type: ClusterIP
   port: 8120
+  annotations: {}
 
 ingress:
   enabled: false
@@ -119,11 +124,21 @@ ingress:
   # settings that will not.
   host: ""
   tls: []
+  # Explicitly acknowledge an existing HTTPS terminator in front of Ingress.
+  # Otherwise HTTPS ingress requires a TLS Secret for the public host.
+  externalTlsTermination: false
 
-# ── Postgres (CloudNativePG) ─────────────────────────────────────────────
-# The operator is not installed by this chart (ADR-0062 decision 1); this
-# renders a Cluster for an operator that is already there.
+# ── PostgreSQL: external or optional CloudNativePG ───────────────────────
+# CNPG mode renders a Cluster for an operator that is already installed.
 postgres:
+  # external | cnpg. CNPG requires its API/operator already installed.
+  mode: external
+  # Required in external mode; use the example in ci/external-values.yaml.
+  # host, port, database, migratorExistingSecret, migratorUrlSecretKey,
+  # caExistingSecret, caSecretKey and roles select the existing SQLx contract.
+  # Optional clientExistingSecret/clientCertSecretKey/clientKeySecretKey mount
+  # an additional PEM client certificate and PKCS#8 key for mutual TLS.
+  external: {}
   # Built from deploy/helm/postgres/Dockerfile: the CNPG base plus pgvector.
   # Empty means
   # ghcr.io/synveda/cnpg-postgres:17.11-synveda-<Chart.appVersion>.
@@ -133,7 +148,7 @@ postgres:
   # tag plus a digest) explicitly.
   # Epoch 3 has no queue or graph-extension dependency.
   image: ""
-  instances: 3
+  instances: 1
   storage:
     size: 100Gi
     storageClass: ""
@@ -149,8 +164,9 @@ postgres:
 
 # ── Identity ─────────────────────────────────────────────────────────────
 oidc:
-  # Name of an existing Secret holding the trust-entry JSON. The chart never
-  # generates it: an issuer configuration names a customer's directory, and
+  # Name of an existing Secret holding the trust-entry JSON, mounted as
+  # SYNVEDA_OIDC_ISSUERS_FILE. OIDC is external; Keycloak is the tested provider.
+  # The chart never generates it: issuer configuration names a directory, and
   # a chart that writes one has invented a trust relationship.
   #
   #   kubectl create secret generic synveda-oidc \
@@ -161,18 +177,22 @@ oidc:
   # cannot express it.
   existingSecret: ""
   secretKey: SYNVEDA_OIDC_ISSUERS
+  # Optional private root CA, added to platform trust for the OIDC client.
+  caExistingSecret: ""
+  caSecretKey: ca.crt
 
 # ── Local key custody ────────────────────────────────────────────────────
 kms:
   # Name of an existing Secret holding the local KMS key and its stable
-  # reference. The chart wires custody into gateway and worker but never
+  # reference. Gateway, worker and optional tenant admission use it; the chart never
   # creates, prints or owns the key. Losing it makes every wrapped tenant key
   # unrecoverable; back up and restore this Secret outside the database.
   #
   #   kubectl create secret generic synveda-kms \
-  #     --from-literal=SYNVEDA_KMS_KEY="$(synveda kms keygen)" \
-  #     --from-literal=SYNVEDA_KMS_KEY_REF=local:production
+  #     --from-file=SYNVEDA_KMS_KEY=./private/kms-key \
+  #     --from-file=SYNVEDA_KMS_KEY_REF=./private/kms-key-ref
   #
+  # Mounted as SYNVEDA_KMS_KEY_FILE and SYNVEDA_KMS_KEY_REF_FILE.
   # Required. This proves only that startup names a custody source; it does
   # not provide cloud KMS/HSM integration or a rotation/restore procedure.
   existingSecret: ""
@@ -207,6 +227,16 @@ tei:
     requests:
       cpu: "2"
       memory: 4Gi
+  # The upstream image defaults to root. These overridable values give its
+  # cache a non-root owner; remove UID/fsGroup on platforms assigning them.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
 
 # ── The extractor: a runtime choice, unlike the embedder ─────────────────
 # Changing it changes what future extraction produces and invalidates
@@ -218,18 +248,21 @@ extractor:
   # For `claude`: a Secret with key ANTHROPIC_API_KEY. For `vllm`: both
   # baseUrl and model are required.
   existingSecret: ""
+  secretKey: ANTHROPIC_API_KEY
   baseUrl: ""
 
 # ── The install job ──────────────────────────────────────────────────────
 install:
-  # The required Job converges roles/extensions under the CNPG superuser,
+  # In CNPG mode the Job first converges roles/extensions under its administrator;
+  # external mode performs no administrative provisioning. It then
   # proves the migrator/gateway/worker targets through the product preflight,
-  # then migrates and optionally admits one tenant under `synveda_migrator`.
+  # migrates and optionally converges one tenant under the configured migrator.
   # No product or runtime container receives the superuser credential.
-  # Optionally admit the first tenant in the same job. Leave the slug empty
-  # and NOTES.txt prints the command instead; a chart that hardcodes one
-  # tenant into a multi-tenant product is guessing.
+  # Optionally converge one tenant by a preselected UUIDv7 on each install/upgrade.
+  # Leave empty for operator-managed admission; see README.md.
   tenant:
+    # Preselect one UUIDv7, also used in the issuer Secret static tenant binding.
+    id: ""
     slug: ""
     name: ""
   # Bounds bootstrap, authority preflight, schema migration and optional
@@ -237,6 +270,16 @@ install:
   activeDeadlineSeconds: 900
   backoffLimit: 3
   ttlSecondsAfterFinished: 3600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 1Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
 
 # ── Telemetry ────────────────────────────────────────────────────────────
 otel:
@@ -251,8 +294,9 @@ serviceAccount:
 
 podSecurityContext:
   runAsNonRoot: true
-  runAsUser: 65532
-  fsGroup: 65532
+  # No fixed UID/GID: ordinary Kubernetes uses the image UID; platforms may
+  # assign an allowed identity. Projected Secrets are readable only in the
+  # containers that mount them (0444); no application container shares them.
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true

@@ -20,7 +20,18 @@
 # Usage:  demos/ops-2-helm-install.sh            create, assert, tear down
 #         KEEP=1 demos/ops-2-helm-install.sh     leave the cluster up
 #         REUSE=1 demos/ops-2-helm-install.sh    reuse an existing cluster
+#         POSTGRES_MODE=external demos/ops-2-helm-install.sh  external TLS fixture
 set -euo pipefail
+
+# OPS-11 exercises independently provisioned providers with no CNPG API.
+case "${POSTGRES_MODE:-cnpg}" in
+  external)
+    cd "$(dirname "$0")/.."
+    exec node demos/fixtures/ops-2/external.mjs
+    ;;
+  cnpg) ;;
+  *) echo "POSTGRES_MODE must be cnpg or external" >&2; exit 64 ;;
+esac
 
 CLUSTER=${CLUSTER:-synveda-ops2}
 NS=synveda-test
@@ -247,9 +258,16 @@ else
   unset WORKER_DATABASE_PASSWORD
 fi
 
+TENANT_ID=019b53c0-7c00-7000-8000-000000000002
+printf '[{"issuer":"%s","client_id":"synveda","audience":"synveda-api","tenant":{"static":{"tenant_id":"%s"}}}]' \
+  "$ISSUER" "$TENANT_ID" > "$SECRET_SCRATCH/issuers.json"
+kubectl create secret generic synveda-oidc -n "$NS" \
+  --from-file=SYNVEDA_OIDC_ISSUERS="$SECRET_SCRATCH/issuers.json" \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
 echo "==> helm install"
 helm upgrade --install "$RELEASE" deploy/helm/synveda \
-  --namespace "$NS" -f "$FIXTURES/values.yaml" --wait=false ||
+  --namespace "$NS" -f "$FIXTURES/values.yaml" --wait --wait-for-jobs --timeout 20m ||
   fail "helm install failed"
 
 echo "==> the install job: bootstrap, preflight, migrate, admit a tenant"
@@ -262,27 +280,19 @@ done
 [ "${phase:-0}" = "1" ] || fail "the install job did not succeed" \
   "$(kubectl logs -n "$NS" -l app.kubernetes.io/component=install --all-containers --tail=50 2>&1 || true)"
 
-# The trust entry needs the tenant's id, and this is the ordering an
-# operator meets too: an issuer binds to a tenant, and the tenant is
-# admitted by the install (NOTES.txt says so).
-#
-# Asked of the database rather than scraped from the install job's log.
-# The first draft read the log, which worked once and then failed on the
-# second run of this demo for a good reason: tenant admission is an
-# install-only step, so an upgrade's job correctly prints that it skipped
-# it and there is no JSON to parse. A fact about the deployment should be
-# read from the deployment.
+# Verify the preselected issuer binding against stored admission, on both
+# the clean install and an idempotent rerun.
 PG_POD=$(kubectl get pods -n "$NS" -l cnpg.io/cluster=synveda-pg,role=primary \
   -o jsonpath='{.items[0].metadata.name}') || fail "no Postgres primary to ask"
-TENANT_ID=""
+OBSERVED_TENANT_ID=""
 for _ in $(seq 1 30); do
-  TENANT_ID=$(kubectl exec -n "$NS" "$PG_POD" -c postgres -- \
+  OBSERVED_TENANT_ID=$(kubectl exec -n "$NS" "$PG_POD" -c postgres -- \
     psql -U postgres -d synveda -tAc \
     "select id from tenants where slug = 'acme'" 2>/dev/null | tr -d '\r ' || true)
-  [ -n "$TENANT_ID" ] && break
+  [ -n "$OBSERVED_TENANT_ID" ] && break
   sleep 2
 done
-[ -n "$TENANT_ID" ] || fail "the install job admitted no tenant with slug acme" \
+[ "$OBSERVED_TENANT_ID" = "$TENANT_ID" ] || fail "the admitted tenant does not match the issuer binding" \
   "$(kubectl logs -n "$NS" -l app.kubernetes.io/component=install -c tenant --tail=20 2>&1 || true)"
 echo "    tenant $TENANT_ID"
 
@@ -294,11 +304,6 @@ SYNVEDA_KEYCLOAK_RESIDUE=$(kubectl exec -n "$NS" "$PG_POD" -c postgres -- \
   fail "could not verify the Synveda database catalogue"
 [ "$SYNVEDA_KEYCLOAK_RESIDUE" = "0|0" ] ||
   fail "the external-OIDC Helm data plane contains Keycloak authority: $SYNVEDA_KEYCLOAK_RESIDUE"
-
-echo "==> the trust entry, now that there is a tenant to bind it to"
-kubectl create secret generic synveda-oidc -n "$NS" \
-  --from-literal=SYNVEDA_OIDC_ISSUERS="[{\"issuer\":\"$ISSUER\",\"client_id\":\"synveda\",\"audience\":\"synveda-api\",\"tenant\":{\"static\":{\"tenant_id\":\"$TENANT_ID\"}}}]" \
-  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 echo "==> the gateway and core worker"
 kubectl rollout status -n "$NS" deployment/synveda --timeout=600s ||

@@ -420,6 +420,17 @@ impl OidcVerifier {
         configs: Vec<IssuerConfig>,
         insecure_development_http: bool,
     ) -> Result<Self> {
+        Self::new_with_transport(configs, insecure_development_http, None)
+    }
+
+    /// Adds one deployment-owned PEM root to platform trust without changing
+    /// certificate, hostname, issuer or token verification. The same client
+    /// performs discovery, JWKS reads and the browser flow's token exchange.
+    pub fn new_with_transport(
+        configs: Vec<IssuerConfig>,
+        insecure_development_http: bool,
+        root_certificate: Option<&str>,
+    ) -> Result<Self> {
         if configs.is_empty() {
             return Err(Error::Invalid {
                 message: "at least one OIDC issuer must be configured".to_owned(),
@@ -498,7 +509,7 @@ impl OidcVerifier {
                 });
             }
         }
-        let http = reqwest::Client::builder()
+        let mut http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
             // Ambient proxy variables are not part of the OIDC trust
@@ -507,11 +518,27 @@ impl OidcVerifier {
             .no_proxy()
             // IdP metadata, keys, and tokens must come from the configured
             // host, not wherever it redirects.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|err| Error::Internal {
-                message: format!("building the OIDC HTTP client: {err}"),
-            })?;
+            .redirect(reqwest::redirect::Policy::none());
+        if let Some(pem) = root_certificate {
+            let invalid_ca = || Error::Invalid {
+                message: "OIDC root CA must contain one PEM certificate of at most 65536 bytes"
+                    .to_owned(),
+            };
+            if pem.len() > 65_536
+                || !pem.trim().starts_with("-----BEGIN CERTIFICATE-----")
+                || !pem.trim().ends_with("-----END CERTIFICATE-----")
+                || pem.matches("-----BEGIN CERTIFICATE-----").count() != 1
+                || pem.matches("-----END CERTIFICATE-----").count() != 1
+            {
+                return Err(invalid_ca());
+            }
+            let certificate =
+                reqwest::Certificate::from_pem(pem.as_bytes()).map_err(|_| invalid_ca())?;
+            http = http.add_root_certificate(certificate);
+        }
+        let http = http.build().map_err(|err| Error::Internal {
+            message: format!("building the OIDC HTTP client: {err}"),
+        })?;
         Ok(Self {
             http,
             issuers,
@@ -1857,6 +1884,28 @@ mod tests {
             .err()
             .expect("empty config must be refused");
         assert!(matches!(err, Error::Invalid { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn malformed_or_ambiguous_private_ca_is_refused_without_disclosing_input() {
+        for pem in [
+            String::new(),
+            "PRIVATE_CA_SENTINEL".to_owned(),
+            "-----BEGIN CERTIFICATE-----\nPRIVATE_CA_SENTINEL\n-----END CERTIFICATE-----"
+                .to_owned(),
+            "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n".repeat(2),
+            "PRIVATE_CA_SENTINEL".repeat(4096),
+        ] {
+            let configs = parse_issuers(
+                r#"[{"issuer":"https://idp.example.test","client_id":"browser","audience":"api"}]"#,
+            )
+            .expect("issuer");
+            let error = OidcVerifier::new_with_transport(configs, false, Some(&pem))
+                .err()
+                .expect("malformed CA must be refused");
+            assert!(matches!(error, Error::Invalid { .. }));
+            assert!(!error.to_string().contains("PRIVATE_CA_SENTINEL"));
+        }
     }
 
     #[test]

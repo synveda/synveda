@@ -96,11 +96,7 @@ fn load_contract() -> Result<synveda_identity::OidcVerifier, ()> {
     let expected =
         synveda_gateway::runtime_config::required_setting("SYNVEDA_OIDC_EXPECTED_ISSUER")
             .map_err(|_| ())?;
-    let contract = synveda_identity::OidcVerifier::new_with_insecure_development_http(
-        issuers.clone(),
-        synveda_gateway::runtime_config::insecure_development_http_enabled().map_err(|_| ())?,
-    )
-    .map_err(|_| ())?;
+    let contract = synveda_gateway::runtime_config::oidc_verifier(issuers).map_err(|_| ())?;
     if contract.sole_issuer() != Some(expected.as_str()) {
         return Err(());
     }

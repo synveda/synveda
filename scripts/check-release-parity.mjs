@@ -476,11 +476,11 @@ function packageAndRenderChart(version) {
       ],
       { cwd: ROOT, encoding: "utf8" },
     );
-    for (const image of [
-      `ghcr.io/synveda/product:${version}`,
-      `ghcr.io/synveda/cnpg-postgres:17.11-synveda-${version}`,
-    ]) {
-      if (!rendered.includes(image)) throw new Error(`packaged chart does not render ${image}`);
+    if (!rendered.includes(`ghcr.io/synveda/product:${version}`)) {
+      throw new Error("packaged external chart does not render the versioned product image");
+    }
+    if (rendered.includes("kind: Cluster\n") || rendered.includes("synveda-pg-superuser")) {
+      throw new Error("packaged external chart unexpectedly owns a database provider");
     }
     const acceptance = execFileSync(
       "helm",
@@ -490,6 +490,8 @@ function packageAndRenderChart(version) {
         join(first, name),
         "-f",
         "demos/fixtures/ops-2/values.yaml",
+        "--api-versions",
+        "postgresql.cnpg.io/v1",
       ],
       { cwd: ROOT, encoding: "utf8" },
     );
