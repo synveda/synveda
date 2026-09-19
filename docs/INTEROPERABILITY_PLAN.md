@@ -477,7 +477,10 @@ The [ADPT-4 release proposal](backlog/ADPT-4.md#release-decision-proposal)
 provides concrete licence/ownership inputs, one OIDC publishing path, a narrow
 candidate support policy and three small batches. It changes no runtime,
 manifest, workflow permission, registry state or licence. Owner decisions are
-pending. Remote CI, full CI, database, live Keycloak/Compose acceptance,
+partially resolved: both SDKs follow the repository's licence and Synveda
+ownership. Repository licence text and registry publishing access remain
+unresolved; GitHub identifies the `synveda` organization as repository owner
+and reports no licence. Remote CI, full CI, database, live Keycloak/Compose acceptance,
 registry publication and provenance verification were not run in this
 documentation/checking increment; no Rust changed, so Clippy is inapplicable.
 
@@ -486,10 +489,11 @@ documentation/checking increment; no Rust changed, so Clippy is inapplicable.
 The CPR-45 deterministic-gate checkpoint is closed. Wider live reference
 acceptance remains in its open brief.
 
-1. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
-   public support window and release ownership before public distribution.
-   Use the concrete proposal in the ADPT-4 brief; licence terms and named
-   npm/PyPI/release owners are the next required inputs.
+1. Resolve ADPT-4's missing repository licence terms, verify Synveda's npm/PyPI
+   publishing access, and settle provenance custody and the public support
+   window before public distribution. Both SDKs inherit the repository terms
+   and remain Synveda-managed; these choices no longer need to be made again.
+   Use the concrete proposal in the ADPT-4 brief for the remaining release work.
    The measured runtime/contract matrix and local archive build/install/import
    are verified; packages remain unpublished.
 2. Native Codex/Copilot execution from a published installation, non-text

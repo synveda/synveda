@@ -33,8 +33,11 @@ package/API version changes fail the existing generator drift gate. CI now
 declares both pairs, with gateway acceptance only on the minimum pair; those
 remote jobs remain unverified. The [SDK guide](../../sdks/README.md#compatibility-and-release-boundary)
 separates the measured matrix from public support commitments.
-Public distribution awaits owner decisions on
-licence, namespaces, provenance custody and the supported server/runtime window.
+The owner has directed both SDKs to follow the repository's licence and Synveda
+ownership. GitHub confirms the `synveda` organization owns the repository but
+reports no licence; the checkout has no first-party licence file. Public
+distribution still needs the repository terms, verified npm/PyPI publishing
+access, provenance custody and the supported server/runtime window.
 The [release decision proposal](ADPT-4.md#release-decision-proposal)
 now gives concrete choices and three small follow-on batches. At `09ff50a`,
 the existing archive suites also pass all 18 tests under pinned offline

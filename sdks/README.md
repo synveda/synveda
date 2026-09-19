@@ -110,14 +110,16 @@ does not extend it to another server.
 
 | Publishing prerequisite | Current state / required decision |
 | --- | --- |
-| First-party licence | Repository terms remain unresolved; owner-approved SDK terms and required notices must be chosen before distribution. Dependency licence approval does not choose Synveda's licence. |
-| Package namespaces | `@synveda/sdk` is private; `synveda-sdk` is a local build name. Confirm registry ownership and intended public names. |
+| First-party licence | Both SDKs inherit the repository's licence by owner direction. The repository currently has no first-party licence file; establish those terms and include the same licence/notices in both packages before distribution. Dependency licence approval does not choose Synveda's licence. |
+| Package namespaces | Both packages remain Synveda-managed: `@synveda/sdk` on npm and `synveda-sdk` on PyPI. GitHub confirms repository ownership by the `synveda` organization; registry publishing rights are separate and remain unverified. The npm package remains private and the Python name remains a local build name. |
 | Publisher and provenance | Confirm release owner, trusted publisher identities and signing/provenance custody before adding publication automation. |
 | Support policy | Adopt or revise the measured runtime/server window and define compatibility/deprecation policy; no broader range is inferred here. |
 
 The [release decision proposal](../docs/backlog/ADPT-4.md#release-decision-proposal)
 names a first candidate, an SDK-only OIDC publishing path, a narrow compatibility
-policy and three implementation batches. These remain proposed choices. The
+policy and three implementation batches. The owner has confirmed repository
+licence inheritance and Synveda stewardship; the release mechanics and support
+policy remain proposed choices. The
 published product `v0.2.0` predates this checked contract, so a release must name
 the exact tested server source/image and digest, not just API version `0.2.0`.
 

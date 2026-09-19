@@ -50,7 +50,13 @@ Publish pre-1.0 prereleases against a pinned server version, run the shared conf
 
 ## Dependencies
 
-The owner must approve Synveda's repository/package licence, PyPI/npm namespaces, signing/provenance custody, supported runtime matrix, release ownership, and compatibility window before public distribution. The clients depend on stable generated OpenAPI and test OIDC credentials. gRPC support, if accepted under ADPT-3, is separate.
+The SDKs follow the repository's licence and Synveda ownership, as directed by
+the owner on 2026-09-19. There is no separate SDK licence choice. The repository
+still needs approved first-party terms; npm/PyPI publishing access, signing/
+provenance custody, the supported runtime matrix and compatibility window
+must be established before public distribution. The clients depend on stable
+generated OpenAPI and test OIDC credentials. gRPC support, if accepted under
+ADPT-3, is separate.
 
 ### Release decision proposal
 
@@ -67,10 +73,20 @@ published product release is `v0.2.0`, whose tag resolves to
 The checkout also calls its API `0.2.0`; that number alone cannot identify a
 compatible server. No test against the published product was run.
 
+The owner's direction settles the licence relationship and intended ownership:
+both SDKs inherit the repository terms and remain Synveda-managed. A subsequent
+read of GitHub's repository API identifies the `synveda` organization as owner,
+returns `license: null`, and returns HTTP 404 for the repository licence
+endpoint. The checkout likewise has no first-party licence file. Registry
+administration is separate from GitHub ownership: the TypeScript package goes
+to npm and the Python package to PyPI, each with its own publishing permissions.
+Keep the current package names while verifying that Synveda controls them;
+do not invent a licence or infer registry access from the GitHub organization.
+
 | Decision | Proposed smallest choice | Evidence / remaining owner input | Acceptance before public distribution |
 | --- | --- | --- | --- |
-| First-party terms | Apply the owner's exact SDK licence and notices, explicitly identifying whether they cover only `sdks/` or the repository. No licence is selected by this proposal. | No root `LICENSE`; `README.md` records the unresolved terms; `crates/synveda-gateway/src/openapi.rs` says `Proprietary`; neither SDK manifest specifies a licence. | Owner supplies approved terms and copyright holder. Both installed archives contain the required text and matching metadata; regenerate OpenAPI only if the approved repository terms change its source annotation. |
-| Names and ownership | Retain `@synveda/sdk` and `synveda-sdk` if the owner controls their registry namespaces. | Both anonymous package metadata requests returned HTTP 404 on 2026-09-19. That establishes neither availability nor ownership. GitHub repository administration does not establish npm/PyPI rights. | Named npm scope administrator, PyPI project owner and release maintainer confirm access and the first-publication setup; verify access through the registries without recording credentials. |
+| First-party terms | Confirmed direction: inherit the repository's licence and required notices for both SDKs. | No root `LICENSE`; GitHub reports no licence; `README.md` records the unresolved terms; `crates/synveda-gateway/src/openapi.rs` says `Proprietary`; neither SDK manifest specifies a licence. | Establish approved repository terms and copyright holder, then include that same text and matching metadata in both installed archives; regenerate OpenAPI if the approved terms change its source annotation. |
+| Names and ownership | Confirmed direction: Synveda manages both packages. Retain `@synveda/sdk` on npm and `synveda-sdk` on PyPI, subject to verified registry control. | GitHub confirms the `synveda` organization owns the repository. Both anonymous package metadata requests returned HTTP 404 on 2026-09-19; that establishes neither name availability nor registry ownership. | Verify Synveda's npm scope administrator, PyPI project owner and release maintainer access and first-publication setup through the registries without recording credentials. |
 | First candidate and server boundary | Use npm `0.1.0-rc.1` and Python `0.1.0rc1` as the same candidate, tied to one exact server source/image and checked OpenAPI digest. SDK versions remain independent of the product version. | Existing SDK version is `0.1.0`; generated API version is `0.2.0`. Current digest and tested environments are in the [SDK guide](../../sdks/README.md#compatibility-and-release-boundary). A releasable server candidate has not been selected. | Version/digest drift checks, installed-package tests and the shared authenticated workflow pass against the named candidate. Do not advertise compatibility with the old `v0.2.0` release from its version label. |
 | Publisher identity | One SDK-only GitHub Actions workflow in this repository, named `sdk-release.yml`, with an `sdk-release` environment and registry OIDC trusted publishers. Keep its candidate tags outside the product workflow's `v*` trigger, for example `sdk-v0.1.0-rc.1`. | Existing `release.yml` publishes product artifacts and checks their version against Cargo; it has no SDK publisher. Owner must name the registry/account recovery custodian and environment reviewer. These proposed workflow/environment names are not configured. | A credential-free dry run produces the same tested archives. Only the publish jobs receive OIDC permission. Registry attestations identify the expected repository, workflow, commit and archive digest; a fresh consumer verifies and installs the downloaded bytes. |
 | Runtime and change policy | Initially qualify the existing Node 22/Python 3.11 and Node 24/Python 3.14 CI pairs on native Linux amd64; keep the measured macOS/Linux arm64 results labelled as supplemental evidence. Claim only exact candidate/server combinations until more are tested. | CI declares both pairs; their remote runs remain unverified. Package minimum versions do not prove every newer runtime. Owner may adopt this deliberately small evaluation window. | Both native CI rows pass without skipped SDK checks; one ordinary Keycloak workflow passes per server candidate. Before 1.0, document breaking changes in a new minor candidate, keep patch releases compatible with the advertised contract, and deprecate/yank defective versions rather than silently replacing bytes. A stable release needs a separately approved support/deprecation window. |
@@ -204,10 +220,11 @@ package evidence, not a native CI, live OIDC or published-install qualification.
 The public repository, latest product tag and anonymous registry-name reads
 were inspected for the proposal; no registry or workflow settings were changed.
 Exact images and reproduction are in the SDK guide; the interoperability plan
-records the check limits. The owner question for licence terms and named
-registry/release ownership remains pending.
+records the check limits. The owner has directed both packages to follow the
+repository's licence and ownership. Approved repository licence text and
+verified Synveda publishing access remain outstanding.
 
 Next: resolve the concrete choices in the release decision proposal above,
-starting with licence terms and registry/release ownership, then execute only
+starting with the missing repository terms and verified registry access, then execute only
 the selected release path and support policy. No public package was published.
 ADPT-4 remains open for those decisions and its wider scope.
