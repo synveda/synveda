@@ -82,7 +82,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if eq .Values.postgres.mode "external" -}}
 {{- toJson .Values.postgres.external.roles -}}
 {{- else -}}
-{"migrator":"{{ include "synveda.migratorRole" . }}","gateway":"{{ include "synveda.gatewayRole" . }}","worker":"{{ include "synveda.workerRole" . }}","administrators":["postgres"],"administrative_memberships":[],"forbidden_databases":["postgres","template1"],"isolated_peer_roles":[]}
+{"migrator":"{{ include "synveda.migratorRole" . }}","gateway":"{{ include "synveda.gatewayRole" . }}","worker":"{{ include "synveda.workerRole" . }}","administrators":["postgres"],"administrative_memberships":[],"forbidden_databases":[{{ if .Values.keycloak.enabled }}"keycloak",{{ end }}"postgres","template1"],"isolated_peer_roles":[{{ if .Values.keycloak.enabled }}"keycloak"{{ end }}]}
 {{- end -}}
 {{- end -}}
 
@@ -262,7 +262,7 @@ silent if the chart rendered it anyway.
 {{- if eq .Values.postgres.mode "cnpg" -}}
 {{- if .Values.postgres.external -}}{{ fail "postgres.external must be empty in cnpg mode" }}{{- end -}}
 {{- else -}}
-{{- if or .Values.postgres.image (ne (int .Values.postgres.instances) 1) .Values.postgres.parameters .Values.postgres.storage.storageClass (ne .Values.postgres.storage.size "100Gi") (ne (int .Values.postgres.maxConnections) 200) -}}
+{{- if or .Values.postgres.image (ne (int .Values.postgres.instances) 1) .Values.postgres.parameters .Values.postgres.storage.storageClass (ne .Values.postgres.storage.size "100Gi") (ne (int .Values.postgres.maxConnections) 200) .Values.postgres.retain (ne .Values.postgres.primaryUpdateStrategy "unsupervised") -}}
 {{- fail "CNPG image, instances, parameters, storage and maxConnections overrides require postgres.mode=cnpg" -}}
 {{- end -}}
 {{- if ne (toJson .Values.postgres.resources) (toJson (dict "requests" (dict "cpu" "1" "memory" "2Gi"))) -}}{{ fail "postgres.resources overrides require postgres.mode=cnpg" }}{{- end -}}

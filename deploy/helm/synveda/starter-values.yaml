@@ -1,0 +1,49 @@
+# OPS-11: copy and replace the public endpoints, TLS/Secret names and images.
+# Use the saved file on every upgrade. Secret values are never Helm values.
+fullnameOverride: synveda
+gateway:
+  publicUrl: https://synveda.example.com
+  databaseExistingSecret: synveda-gateway-db
+worker:
+  databaseExistingSecret: synveda-worker-db
+oidc:
+  existingSecret: synveda-oidc
+kms:
+  existingSecret: synveda-kms
+embedder: deterministic
+postgres:
+  mode: cnpg
+  image: ghcr.io/synveda/cnpg-postgres:17.11-synveda-0.2.0
+  instances: 1
+  retain: true
+  # CNPG requires unsupervised updates with one instance. The fixed image
+  # above changes only in an operator-planned maintenance release.
+  primaryUpdateStrategy: unsupervised
+  storage:
+    size: 20Gi
+    storageClass: ""
+keycloak:
+  enabled: true
+  image:
+    repository: ghcr.io/synveda/keycloak
+    tag: "0.2.0"
+  publicUrl: https://auth.example.com
+  # Replace with the actual ingress/proxy source range, never a public /0.
+  proxyTrustedAddresses: 192.0.2.0/24
+  adminExistingSecret: synveda-keycloak-admin
+  databaseCaExistingSecret: synveda-pg-ca
+  databaseCaSecretKey: ca.crt
+  database:
+    hostname: synveda-pg-rw
+    existingSecret: synveda-keycloak-db
+  ingress:
+    enabled: true
+    tls:
+      - hosts: [auth.example.com]
+        secretName: synveda-identity-tls
+ingress:
+  enabled: true
+  host: synveda.example.com
+  tls:
+    - hosts: [synveda.example.com]
+      secretName: synveda-application-tls

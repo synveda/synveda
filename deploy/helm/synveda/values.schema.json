@@ -645,6 +645,15 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "retain": {
+          "type": "boolean"
+        },
+        "primaryUpdateStrategy": {
+          "enum": [
+            "supervised",
+            "unsupervised"
+          ]
         }
       },
       "required": [
@@ -1193,6 +1202,29 @@
         "readOnlyRootFilesystem",
         "capabilities"
       ]
+    },
+    "keycloak": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "publicUrl": {
+          "type": "string"
+        },
+        "proxyTrustedAddresses": {
+          "type": "string"
+        },
+        "adminExistingSecret": {
+          "type": "string"
+        },
+        "databaseCaExistingSecret": {
+          "type": "string"
+        },
+        "databaseCaSecretKey": {
+          "type": "string"
+        }
+      }
     }
   },
   "required": [

@@ -20,10 +20,13 @@ home: https://github.com/synveda/synveda
 sources:
   - https://github.com/synveda/synveda
 
-# No subchart dependencies. Optional CloudNativePG is *not* a
-# subchart: its operator is cluster-scoped, and a product chart that
-# installs cluster-scoped CRDs fights the next chart that wants them
-# (ADR-0062 decision 1). Install the operator first; this chart renders a
-# `Cluster` for it and fails with that instruction if the CRD is absent.
+# CloudNativePG remains a separately installed operator (ADR-0062).
+# The optional identity workload is an unchanged, locked upstream chart.
+dependencies:
+  - name: keycloakx
+    alias: keycloak
+    version: 7.3.2
+    repository: https://codecentric.github.io/helm-charts
+    condition: keycloak.enabled
 annotations:
   synveda.io/optional-operator: "cloudnative-pg (postgres.mode=cnpg only)"

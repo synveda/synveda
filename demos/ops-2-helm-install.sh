@@ -23,6 +23,11 @@
 #         POSTGRES_MODE=external demos/ops-2-helm-install.sh  external TLS fixture
 set -euo pipefail
 
+if [ "${STARTER_MATRIX:-0}" = 1 ]; then
+  cd "$(dirname "$0")/.."
+  exec node demos/fixtures/ops-2/starter.mjs
+fi
+
 # OPS-11 exercises independently provisioned providers with no CNPG API.
 case "${POSTGRES_MODE:-cnpg}" in
   external)

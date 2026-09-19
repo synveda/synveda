@@ -10,8 +10,11 @@ The default is **external PostgreSQL and external OIDC**, one organisation
 (tenant) and namespace per installation, with one gateway and worker using
 `Recreate`. Keycloak is the tested OIDC provider. `postgres.mode: cnpg` retains
 the existing integration with a separately installed CloudNativePG operator;
-it defaults to one database instance. A bundled Keycloak starter and OpenShift
-qualification remain later OPS-11 work.
+it defaults to one database instance. The optional
+[persistent starter](STARTER.md) adds upstream-packaged Keycloak with a separate
+database/user, retained storage and explicit owner/team onboarding. All four
+provider combinations use this chart. OpenShift qualification remains OPS-11
+work.
 
 ## Image and values
 

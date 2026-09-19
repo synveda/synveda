@@ -13,6 +13,17 @@ export interface ConfigurationTarget {
   label: string;
 }
 
+/** The PDP forecast offers this choice; the public API reauthorizes every write. */
+export function organisationConfigurationTarget(me: MeView): ConfigurationTarget | null {
+  const root = me.anchors.find(
+    (anchor) =>
+      anchor.kind === "tenant" &&
+      anchor.scope_id === me.onboarding.tenant_scope_id &&
+      anchor.actions["configuration.write"] === true,
+  );
+  return root ? { id: root.scope_id, label: "organisation" } : null;
+}
+
 export const TRACE_RETENTION_OPTIONS = ["full", "redacted", "hashes_only", "disabled"] as const;
 export type TraceRetention = (typeof TRACE_RETENTION_OPTIONS)[number];
 

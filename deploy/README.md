@@ -148,7 +148,8 @@ profile remains pending.
 ## Small-team Kubernetes release contract
 
 The audit below records the pre-implementation checkout. OPS-11 now implements
-the [portable external-services chart](helm/synveda/README.md); its current
+the [portable external-services chart](helm/synveda/README.md) and
+[persistent starter](helm/synveda/STARTER.md); its current
 validation and remaining work live in [the feature brief](../docs/backlog/OPS-11.md).
 
 Audit: 2026-09-19, source `1194c0a348733ab58aaa5e1984eedccfd3eff25e`.
@@ -199,8 +200,7 @@ required alongside the unit and live health/console evidence above.
 
 ### Presets, topology and operator inputs
 
-Implement two values presets in the **existing** chart; names below describe
-targets, not currently accepted values. Use one organisation (one admitted
+Use the two documented presets in the **existing** chart. Use one organisation (one admitted
 tenant) per release and namespace/project, with one exact static issuer binding.
 Workspace, project and personal-scope isolation remain unchanged. Multiple
 issuers per tenant stay outside this release because identity lookup currently
@@ -209,9 +209,9 @@ keys by tenant and subject, not issuer (MEM-7).
 | Preset / combination | PostgreSQL | Identity | Persistent application footprint |
 | --- | --- | --- | --- |
 | External-services | Operator-owned conforming PostgreSQL 17 | Existing Keycloak through generic OIDC | No chart database, CNPG CRD requirement or application PVC; retain external DB/IdP backups and KMS Secret. |
-| Persistent starter | Existing CNPG integration, one instance with PVC | One optimized Keycloak plus its existing realm-convergence process | Separate `synveda` and `keycloak` databases/roles on that instance; shared failure domain and joint recovery. Requires an already-installed CNPG operator. |
+| Persistent starter | Existing CNPG integration, one instance with PVC | One optimized Keycloak in a locked upstream chart, native initial realm import (ADR-0110) | Separate `synveda` and `keycloak` databases/roles on that instance; shared failure domain and joint recovery. Requires an already-installed CNPG operator. See the [starter guide](helm/synveda/STARTER.md). |
 | Mixed: in-cluster DB, external identity | Same CNPG/PVC | External OIDC | Only Synveda database required locally. |
-| Mixed: external DB, bundled identity | External PostgreSQL; operator also supplies a separate Keycloak database/login | Bundled Keycloak/convergence | Identity persistence is external too; Synveda roles cannot enter its database. Compose must gain this presently refused combination. |
+| Mixed: external DB, bundled identity | External PostgreSQL; operator also supplies a separate Keycloak database/login | Packaged Keycloak, native initial realm import | Identity persistence is external too; Synveda roles cannot enter its database. This Helm selection does not change Compose's existing supported combinations. |
 
 The supported application topology remains **one gateway and one core worker**,
 both `Recreate`, from the same immutable product image. No HPA or rolling surge.
@@ -227,7 +227,7 @@ No operator, CRD installer or generic infrastructure provisioner is added.
 | Public DNS and TLS | `gateway.publicUrl` → `SYNVEDA_PUBLIC_URL`; `ingress.host`, `ingress.className`, `ingress.tls` or an operator TLS router. Bundled Keycloak also needs an exact public issuer hostname. HTTPS is required; `gateway.insecureDevelopmentHttp` remains disposable-development only. |
 | Database endpoints and existing Secrets | Distinct migrator, gateway and worker URLs; existing `gateway.databaseExistingSecret` and `worker.databaseExistingSecret` with configurable URL/password keys. Add external migrator/CA/role-contract references and endpoint assertions, reusing `DATABASE_URL_FILE`, `SYNVEDA_DATABASE_ROLES_FILE`, `SYNVEDA_DATABASE_EXPECTED_{HOST,PORT,NAME}`. External operators pre-provision roles/extensions; no superuser credential enters the product. Managed-service compatibility must be proved against the exact authority contract. |
 | Identity trust and first owner | `oidc.existingSecret`/`secretKey` → `SYNVEDA_OIDC_ISSUERS_FILE`. JSON names `issuer`, `client_id`, distinct API `audience`, `algorithms` (RS256 default), `tenant.static.tenant_id`, `groups_claim`, `login_scopes` and optional `service_audiences`. Register precisely `<publicUrl>/auth/callback`; browser, gateway and CLI must resolve the same issuer. Map only the intended first administrator to `synveda-admins` before login. This creates a tenant `administrator`, not a new role vocabulary; workspace creation grants `owner`. |
-| Bundled identity credentials | Existing Secret references for Keycloak's separate DB login, bootstrap administrator and realm-convergence account; reuse `KC_DB_PASSWORD_FILE`, `KC_BOOTSTRAP_ADMIN_USERNAME_FILE`, `KC_BOOTSTRAP_ADMIN_PASSWORD_FILE` and `SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE`. Do not generate credentials into rendered values or reports. |
+| Bundled identity credentials | Helm's upstream Keycloak boundary uses existing Secret references for its separate database login and bootstrap administrator. Native initial import needs no convergence account (ADR-0110). Compose retains its existing file adapter and realm convergence. Do not generate credentials into rendered values or reports. |
 | Tenant and key custody | Current `install.tenant.slug/name` admits a generated ID; reuse `tenant-converge` with an explicit UUIDv7 to remove the current admit/read-ID/create-issuer-Secret ordering. `kms.existingSecret`, `secretKey`, `keyRefSecretKey` must mount `SYNVEDA_KMS_KEY_FILE` and `SYNVEDA_KMS_KEY_REF_FILE`. Preserve the key and stable reference independently of DB backups. |
 | Storage and resource sizing | `postgres.storage.{size,storageClass}` only for CNPG; `tei.cache.{size,storageClass}` only if local TEI is selected. Gateway/worker need no durable volume. Keep pool limits (`gateway.dbMaxConnections`, `worker.dbMaxConnections`) within database capacity with migration/identity headroom. |
 | Optional providers and telemetry | `embedder`, `embedderModel`, `tei.{enabled,url,image,model}` map to `SYNVEDA_EMBEDDER`, `SYNVEDA_EMBEDDER_MODEL`, `SYNVEDA_TEI_URL`. `extractor.{kind,model,existingSecret,baseUrl}` maps to `SYNVEDA_EXTRACTOR`, `SYNVEDA_EXTRACTOR_MODEL`, `ANTHROPIC_API_KEY_FILE` or `SYNVEDA_VLLM_BASE_URL`. No provider credential is needed for the lexical/rule-based preset. `otel.endpoint` maps to `OTEL_EXPORTER_OTLP_ENDPOINT`; optional service identities require IdP client credentials plus provisioned Synveda grants and bounded token TTL. |
@@ -248,7 +248,7 @@ Keep those limits explicit until a common tested configuration path exists.
 | Keycloak users, client/realm configuration and signing state; KMS and operator credentials | Durable identity DB plus separately retained Secrets. Realm export or regenerated passwords are not a substitute for this recovery set. |
 | FTS/index structures and Knowledge embedding sidecars | Rebuildable from retained database revisions with the same model; `knowledge_index.rs` retries missing rows. Production rebuild/cutover timing is unverified. TEI `/data` is a model-download cache, not product truth. |
 | Pending PKCE logins (10 minutes), CLI handoffs (60 seconds), JWKS/PDP/entity caches, worker timers/in-flight calls and telemetry buffers | Process-local (`flow.rs`, `oidc.rs`, `pdp.rs`, `worker.rs`). Restart loses unfinished logins and reschedules loops from durable state. Capture is fenced, but no complete two-worker or cross-pod authority proof exists. |
-| Keycloak authority/generation files, Apalis queue and local metrics history | Rebuildable operational state. The Keycloak converger remains a required runtime when bundled; its shared public gate must be translated, not discarded. Apalis queue loss uses native execution/outbox recovery. |
+| Keycloak authority/generation files, Apalis queue and local metrics history | Rebuildable operational state. Compose retains its Keycloak converger and public gate. Helm's locked upstream chart uses native initial import and database readiness (ADR-0110); it does not run that Compose sidecar. Apalis queue loss uses native execution/outbox recovery. |
 
 Gateway port **8120** serves API, UI and probes; its writable path is `/tmp`
 (`HOME` and XDG cache point there). Worker health is loopback **8121** with exec
@@ -313,15 +313,15 @@ and executable extension contract before publication.
    superuser bootstrap or PVC. Reuse database-preflight, migrations, authority
    sentinel and issuer diagnostic. Retain the existing CNPG branch and its
    failover test; test invalid combinations without weakening role checks.
-2. **Persistent starter / onboarding (OPS-11).** Map the existing optimized
-   Keycloak image, database isolation, realm converger and public gate to the
-   chart. Use stable tenant admission and explicit first-admin mapping; keep
-   subsequent workspaces/membership on the existing public API. Add both mixed
-   combinations, including the missing Compose combination. Acceptance must
-   exercise all four combinations, no-model workflows and restart persistence.
+2. **Persistent starter / onboarding (OPS-11).** ADR-0110 maps the existing
+   optimized Keycloak image and database isolation to a locked upstream chart,
+   with native initial realm import and private administration. Keep stable
+   tenant admission, explicit first-admin mapping and public membership APIs.
+   Qualify all four Helm combinations, no-model workflows, unchanged-token
+   revocation and retained reinstall; preserve Compose's existing contract.
 3. **OpenShift / portability (OPS-11).** Supply an assigned-UID preset, bounded
    writable mounts and projected-secret permissions; cover install jobs,
-   Keycloak/converger and optional TEI, not only the gateway. Use restricted
+   packaged Keycloak and optional TEI, not only the gateway. Use restricted
    admission without `anyuid`, privileged pods or new SCCs. Add the public TLS
    ingress/Route contract, metrics/admin refusal and explicit dependency/DNS
    NetworkPolicies. Validate private CA/proxy requirements consistently or

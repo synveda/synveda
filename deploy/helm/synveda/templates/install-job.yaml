@@ -57,7 +57,7 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           # Kubernetes' atomic Secret writer exposes projected keys as
           # symlinks. The shared bootstrap command deliberately refuses every
-          # symlink, so this container copies four fixed, read-only projection
+          # symlink, so this container copies only fixed, read-only projection
           # paths into a private memory-backed volume before invoking it. No
           # value is placed in an argument, environment variable or log.
           command: ["/bin/sh", "-ec"]
@@ -68,7 +68,8 @@ spec:
                 postgres_bootstrap_password \
                 synveda_migrator_password \
                 synveda_gateway_password \
-                synveda_worker_password
+                synveda_worker_password{{ if .Values.keycloak.enabled }} \
+                keycloak_database_password{{ end }}
               do
                 source=/run/bootstrap-projection/$secret
                 destination=/run/secrets/$secret
@@ -85,7 +86,19 @@ spec:
               fi
               cp -- /run/database-roles/roles.json /run/secrets/database_roles.json
               chmod 0600 /run/secrets/database_roles.json
+              {{- if .Values.keycloak.enabled }}
+              mkdir -p /run/database-authority/private
+              chmod 0700 /run/database-authority/private
+              /usr/local/bin/synveda-database-bootstrap synveda
+              /usr/local/bin/synveda-database-bootstrap keycloak
+              # This content-free witness crosses images with different UIDs.
+              # Init-container ordering leaves no concurrent writer; preflight
+              # copies the read-only handoff into its own private directory.
+              cp /run/database-authority/private/keycloak-cluster.json /run/database-authority/keycloak-cluster.json
+              chmod 0444 /run/database-authority/keycloak-cluster.json
+              {{- else }}
               exec /usr/local/bin/synveda-database-bootstrap synveda
+              {{- end }}
           env:
             - name: SYNVEDA_POSTGRES_BOOTSTRAP_USER
               valueFrom:
@@ -100,6 +113,12 @@ spec:
               value: /run/secrets
             - name: SYNVEDA_DATABASE_ROLES_FILE
               value: /run/secrets/database_roles.json
+            {{- if .Values.keycloak.enabled }}
+            - name: SYNVEDA_DATABASE_REQUIRE_KEYCLOAK_PASSWORD
+              value: "true"
+            - name: SYNVEDA_DATABASE_AUTHORITY_DIR
+              value: /run/database-authority/private
+            {{- end }}
           volumeMounts:
             - name: bootstrap-projection
               mountPath: /run/bootstrap-projection
@@ -111,6 +130,10 @@ spec:
             - name: database-roles
               mountPath: /run/database-roles
               readOnly: true
+            {{- if .Values.keycloak.enabled }}
+            - name: database-authority
+              mountPath: /run/database-authority
+            {{- end }}
 
         {{- end }}
         - name: database-preflight
@@ -123,6 +146,13 @@ spec:
           command: ["/bin/sh", "-ec"]
           args:
             - |
+              {{- if and .Values.keycloak.enabled (eq .Values.postgres.mode "cnpg") }}
+              umask 077
+              mkdir -p /run/preflight-authority/private
+              chmod 0700 /run/preflight-authority/private
+              cp /run/database-authority/keycloak-cluster.json /run/preflight-authority/private/keycloak-cluster.json
+              chmod 0600 /run/preflight-authority/private/keycloak-cluster.json
+              {{- end }}
               attempt=1
               while ! /usr/local/bin/synveda-container database-preflight; do
                 if [ "$attempt" -ge 12 ]; then
@@ -143,6 +173,12 @@ spec:
               value: /run/secrets/synveda-preflight/worker_database_url
             - name: SYNVEDA_DATABASE_ROLES_FILE
               value: /etc/synveda/database/roles.json
+            {{- if and .Values.keycloak.enabled (eq .Values.postgres.mode "cnpg") }}
+            - name: SYNVEDA_DATABASE_REQUIRED_PEER
+              value: keycloak
+            - name: SYNVEDA_DATABASE_PEER_WITNESS_FILE
+              value: /run/preflight-authority/private/keycloak-cluster.json
+            {{- end }}
           volumeMounts:
             {{- include "synveda.databaseTransportMounts" . | nindent 12 }}
             - name: preflight-databases
@@ -151,6 +187,13 @@ spec:
             - name: database-roles
               mountPath: /etc/synveda/database
               readOnly: true
+            {{- if and .Values.keycloak.enabled (eq .Values.postgres.mode "cnpg") }}
+            - name: database-authority
+              mountPath: /run/database-authority
+              readOnly: true
+            - name: preflight-authority
+              mountPath: /run/preflight-authority
+            {{- end }}
 
         - name: migrate
           image: {{ include "synveda.image" . }}
@@ -268,6 +311,23 @@ spec:
                   items:
                     - key: {{ .Values.worker.databasePasswordSecretKey }}
                       path: synveda_worker_password
+              {{- if .Values.keycloak.enabled }}
+              - secret:
+                  name: {{ .Values.keycloak.database.existingSecret }}
+                  items:
+                    - key: {{ .Values.keycloak.database.existingSecretKey }}
+                      path: keycloak_database_password
+              {{- end }}
+        {{- if .Values.keycloak.enabled }}
+        - name: database-authority
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Ki
+        - name: preflight-authority
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Ki
+        {{- end }}
         - name: bootstrap-private
           emptyDir:
             medium: Memory

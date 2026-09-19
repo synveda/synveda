@@ -509,6 +509,24 @@ impl OidcVerifier {
                 });
             }
         }
+        // Persistent principals are tenant/subject keyed. Until issuer-qualified
+        // bindings land, distinct issuers must never admit the same tenant.
+        // A claim-bound issuer can name any tenant, so it must stand alone.
+        if issuers.len() > 1 {
+            let mut tenants = std::collections::HashSet::new();
+            for entry in issuers.values() {
+                let TenantBinding::Static { tenant_id } = entry.config.tenant else {
+                    return Err(Error::Invalid {
+                        message: "multiple OIDC issuers require disjoint static tenant bindings; a claim-bound issuer must be configured alone (MEM-7)".to_owned(),
+                    });
+                };
+                if !tenants.insert(tenant_id) {
+                    return Err(Error::Invalid {
+                        message: "each tenant must trust exactly one OIDC issuer; use distinct tenants until issuer-qualified identity bindings are supported (MEM-7)".to_owned(),
+                    });
+                }
+            }
+        }
         let mut http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
@@ -1929,13 +1947,40 @@ mod tests {
         assert_eq!(one.sole_issuer(), Some("https://a"));
         let two = OidcVerifier::new(
             parse_issuers(
-                r#"[{"issuer":"https://a","client_id":"c","audience":"api-a"},
-                    {"issuer":"https://b","client_id":"c","audience":"api-b"}]"#,
+                r#"[{"issuer":"https://a","client_id":"c","audience":"api-a",
+                     "tenant":{"static":{"tenant_id":"019b53c0-7c00-7000-8000-000000000001"}}},
+                    {"issuer":"https://b","client_id":"c","audience":"api-b",
+                     "tenant":{"static":{"tenant_id":"019b53c0-7c00-7000-8000-000000000002"}}}]"#,
             )
             .unwrap(),
         )
         .unwrap();
         assert_eq!(two.sole_issuer(), None);
+    }
+
+    #[test]
+    fn overlapping_issuer_tenants_are_refused_before_token_or_network_use() {
+        let tenant = serde_json::json!({"static": {
+            "tenant_id": "019b53c0-7c00-7000-8000-000000000001"
+        }});
+        let claim = serde_json::json!({"claim": {"name": "tid"}});
+        for (first, second) in [
+            (tenant.clone(), tenant.clone()),
+            (claim.clone(), tenant.clone()),
+            (tenant, claim.clone()),
+            (claim.clone(), claim),
+        ] {
+            let document = serde_json::json!([
+                {"issuer":"https://first.example.test", "client_id":"browser",
+                 "audience":"api", "tenant":first},
+                {"issuer":"https://second.example.test", "client_id":"browser",
+                 "audience":"api", "tenant":second}
+            ]);
+            let configs = parse_issuers(&document.to_string()).expect("valid issuer syntax");
+            let error = OidcVerifier::new(configs).err().expect("overlap refused");
+            assert!(matches!(error, Error::Invalid { .. }));
+            assert!(error.to_string().contains("MEM-7"));
+        }
     }
 
     #[tokio::test]

@@ -1,0 +1,10 @@
+# Combine with either ci/cnpg-values.yaml or ci/external-values.yaml.
+keycloak:
+  enabled: true
+  publicUrl: https://auth.example.com
+  proxyTrustedAddresses: 192.0.2.0/24
+  adminExistingSecret: synveda-keycloak-admin
+  databaseCaExistingSecret: synveda-pg-ca
+  database:
+    hostname: synveda-pg-rw
+    existingSecret: synveda-keycloak-db

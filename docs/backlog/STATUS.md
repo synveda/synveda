@@ -11,11 +11,14 @@ retains their implementation evidence. Open entries link to current briefs.
 ADR-0109. The [deployment audit](../../deploy/README.md#small-team-kubernetes-release-contract)
 reuses the existing Helm chart and owner-validated Docker MVP, keeps application
 replicas at one, and orders external services, starter/onboarding, OpenShift,
-then operational and published-release evidence. The portable chart slice now
-implements external PostgreSQL/OIDC, verified TLS/private CAs, file-mounted
-Secrets and a bounded normal migration/tenant Job. The starter/onboarding,
-OpenShift and operational/release scopes remain open; measured acceptance and
-the exact next action are in the brief.
+then operational and published-release evidence. The chart implements external
+PostgreSQL/OIDC, verified TLS/private CAs, file-mounted Secrets and a bounded
+normal migration/tenant Job. ADR-0110 adds independently optional persistent
+Keycloak/CNPG, explicit team admission, scoped agent credentials and an
+organisation Configuration target. MEM-7 now refuses overlapping issuer/tenant
+bindings; durable federation and issuer replacement remain open. OpenShift and
+operational/release qualification keep OPS-11 open; measured acceptance and the
+exact next action are in the brief.
 
 The 2026-09-19 external Kind run passed clean installation, real Keycloak PKCE,
 Session/context/audit, verified database TLS with a client certificate, bad
@@ -24,6 +27,15 @@ Helm upgrade/migration rerun. Strict chart/Rust/deployment checks, the exact-rol
 database suite and existing Compose smoke passed. This one private development
 topology does not qualify public HTTPS ingress, cloud, OpenShift, HA or release
 publication; OPS-11 remains open for its later slices.
+
+The subsequent starter matrix passed all four PostgreSQL/Keycloak ownership
+combinations over HTTPS/private CA: explicit owner, member/viewer/stranger,
+cross-workspace refusal, service/MCP access, 400 captured events and 80 context
+runs per case, pod recreation, stable upgrade, retained reinstall and unchanged-
+token revocation. The [resource report](../../demos/evidence/ops11-starter.json)
+records short-run CPU/memory observations, not capacity guarantees. Restricted
+OpenShift, real ingress, published pulls and joint restore remain the next
+qualification work; issuer migration/linking remains MEM-7.
 
 The 2026-09-12 [interoperability execution plan](../INTEROPERABILITY_PLAN.md)
 records ADPT-1/2 and CPR-12/23 repairs, the initial ADPT-4 SDK slice and CPR-39

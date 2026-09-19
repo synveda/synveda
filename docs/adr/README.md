@@ -86,7 +86,7 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0066](adr-0066-beta-demo-profile.md) | Operator-seeded beta demo | Proposed; amended once | Current (partially superseded by ADR-0100) | OPS-9 | ADR-0100 provides the resumable public-API PulseBoard demo; externally dependent beta evidence remains open. |
 | [ADR-0067](adr-0067-uninstall-and-cleanup.md) | Uninstall and cleanup | Proposed | Current (partially superseded by ADR-0102) | OPS-10 | Canonical Compose owns lifecycle and reset. Automatic artifact removal remains fail-closed until the installer persists a strict ownership receipt. |
 
-## ADR-0068 through ADR-0109
+## ADR-0068 through ADR-0110
 
 | ADR | Concise title | Header status | Current classification | Features | Replacement/removal |
 | --- | --- | --- | --- | --- | --- |
@@ -132,3 +132,4 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0107](adr-0107-copilot-context-adapter.md) | Copilot context and observations | Accepted; amended | Current | ADPT-9 | Native CLI 1.0.83 start/resume and the shared SDK task are verified for the named source-build setup. Text/tool events reuse the bounded reader and spool; runtime exit retains task identity. ADR-0065 packages the existing runtime. |
 | [ADR-0108](adr-0108-ci-gate-ownership-and-build-caching.md) | CI gate ownership and Kind build caching | Accepted | Current | FND-1 | Deployment contracts run once per CI revision; Kind caches source-build layers while retaining live acceptance. |
 | [ADR-0109](adr-0109-small-team-kubernetes-release.md) | Small-team Kubernetes release boundary | Accepted | Current (portable increment implemented) | OPS-11 | External PostgreSQL/OIDC, verified TLS and file-mounted Secrets extend the existing chart; single application replicas and optional preinstalled CNPG remain. Starter/platform/release qualification is still open. |
+| [ADR-0110](adr-0110-persistent-starter-and-team-admission.md) | Persistent starter and explicit team admission | Accepted | Current (implemented) | OPS-11, MEM-7 | Locked optional Keycloak, retained existing CNPG and disjoint issuer admission; four ownership combinations passed on Kind. No new operator or role model. |

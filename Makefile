@@ -398,6 +398,7 @@ chart-lint:
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/lint-values.yaml
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
 	node scripts/check-helm-contract.mjs
+	node scripts/check-starter-contract.mjs
 
 # CPR-36/CPR-45: canonical Compose, Helm, generated API and the packaged
 # reference are one runtime. Unsafe legacy uninstall automation stays refused

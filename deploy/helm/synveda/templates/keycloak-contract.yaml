@@ -1,0 +1,57 @@
+{{- if .Values.keycloak.enabled -}}
+{{- $kc := .Values.keycloak -}}
+{{- if or (and (not $kc.image.digest) (or (not $kc.image.tag) (eq $kc.image.tag "latest"))) (and $kc.image.digest (not (regexMatch "^sha256:[a-f0-9]{64}$" $kc.image.digest))) -}}
+{{- fail "packaged Keycloak requires an explicit fixed image tag or SHA-256 digest; upstream appVersion fallback is forbidden" -}}
+{{- end -}}
+{{- if or (ne (int $kc.replicas) 1) $kc.autoscaling.enabled (ne $kc.updateStrategy "OnDelete") -}}
+{{- fail "packaged Keycloak requires one replica and OnDelete updates; provider upgrades are explicit maintenance" -}}
+{{- end -}}
+{{- if or (not (hasPrefix "https://" $kc.publicUrl)) (hasSuffix "/" $kc.publicUrl) (not $kc.proxyTrustedAddresses) -}}
+{{- fail "packaged Keycloak requires an HTTPS publicUrl without a trailing slash and explicit proxyTrustedAddresses" -}}
+{{- end -}}
+{{- range splitList "," $kc.proxyTrustedAddresses -}}
+{{- if or (eq (trim .) "0.0.0.0/0") (eq (trim .) "::/0") -}}
+{{- fail "Keycloak proxyTrustedAddresses must restrict the trusted proxy network" -}}
+{{- end -}}
+{{- end -}}
+{{- if or (not $kc.adminExistingSecret) (not $kc.database.existingSecret) (not $kc.databaseCaExistingSecret) -}}
+{{- fail "packaged Keycloak requires separate adminExistingSecret, database.existingSecret and databaseCaExistingSecret" -}}
+{{- end -}}
+{{- if or (ne $kc.database.vendor "postgres") (ne $kc.database.database "keycloak") (ne $kc.database.username "keycloak") $kc.database.password (not $kc.database.hostname) -}}
+{{- fail "packaged Keycloak requires its explicit PostgreSQL hostname, keycloak database/user and an existing Secret; inline database passwords are forbidden" -}}
+{{- end -}}
+{{- $secrets := list $kc.adminExistingSecret $kc.database.existingSecret .Values.gateway.databaseExistingSecret .Values.worker.databaseExistingSecret (include "synveda.migratorSecret" .) .Values.kms.existingSecret .Values.oidc.existingSecret -}}
+{{- if ne (len $secrets) (len (uniq $secrets)) -}}
+{{- fail "Keycloak, Synveda and administrator credential Secrets must be distinct" -}}
+{{- end -}}
+{{- if and (eq .Values.postgres.mode "cnpg") (or (ne $kc.database.hostname (printf "%s-rw" (include "synveda.clusterName" .))) (ne (int $kc.database.port) 5432)) -}}
+{{- fail "packaged PostgreSQL and Keycloak share the existing CNPG server: set keycloak.database.hostname to <cluster>-rw and port to 5432" -}}
+{{- end -}}
+{{- if or (ne $kc.service.type "ClusterIP") $kc.ingress.console.enabled $kc.httpRoute.enabled $kc.route.enabled $kc.serviceAccount.automountServiceAccountToken $kc.serviceAccount.allowReadPods -}}
+{{- fail "packaged Keycloak requires private ClusterIP/admin/management access and no Kubernetes API credentials" -}}
+{{- end -}}
+{{- if or (ne $kc.http.relativePath "/") $kc.http.managementRelativePath (ne (toJson $kc.command) (toJson (list "/usr/bin/env" "-u" "KC_HTTP_RELATIVE_PATH" "/opt/keycloak/bin/kc.sh"))) (ne (toJson $kc.args) (toJson (list "start" "--optimized" "--cache=local" "--import-realm"))) -}}
+{{- fail "packaged Keycloak requires the existing optimized image and production start --optimized --cache=local" -}}
+{{- end -}}
+{{- if or (not $kc.securityContext.runAsNonRoot) $kc.securityContext.allowPrivilegeEscalation (not $kc.securityContext.readOnlyRootFilesystem) $kc.dbchecker.enabled -}}
+{{- fail "packaged Keycloak requires the restricted security context and no dbchecker side image" -}}
+{{- end -}}
+{{- if $kc.ingress.enabled -}}
+{{- $host := (urlParse $kc.publicUrl).host -}}
+{{- $covered := false -}}
+{{- range $kc.ingress.tls -}}
+{{- if and .secretName (has $host .hosts) -}}{{- $covered = true -}}{{- end -}}
+{{- end -}}
+{{- if not $covered -}}{{- fail "Keycloak ingress requires a TLS Secret covering keycloak.publicUrl" -}}{{- end -}}
+{{- range $kc.ingress.rules -}}
+{{- if ne (tpl .host (dict "Values" $kc "Template" $.Template)) $host -}}
+{{- fail "Keycloak ingress host must match keycloak.publicUrl" -}}
+{{- end -}}
+{{- range .paths -}}
+{{- if or (not (has .path (list "/realms/synveda" "/resources"))) (ne .pathType "Prefix") -}}
+{{- fail "Keycloak public ingress permits only /realms/synveda and /resources; administration stays private" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
