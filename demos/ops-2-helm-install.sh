@@ -103,16 +103,21 @@ kubectl config use-context "kind-$CLUSTER" >/dev/null
 # around a CI-compiled binary: the point of this test is that *this*
 # artefact serves (ADR-0062 decision 9).
 echo "==> building the product image (this is the slow part; layers cache)"
-docker build -t "$PRODUCT_IMAGE" -f deploy/compose/product/Dockerfile .
+bash scripts/build-kind-image.sh "$PRODUCT_IMAGE" deploy/compose/product/Dockerfile product
 echo "==> building the CloudNativePG Postgres image (CNPG base + pgvector)"
-docker build -t "$CNPG_IMAGE" -f deploy/helm/postgres/Dockerfile .
+bash scripts/build-kind-image.sh "$CNPG_IMAGE" deploy/helm/postgres/Dockerfile cnpg-postgres
 echo "==> building the optimized Keycloak image"
-docker build -t "$KEYCLOAK_IMAGE" -f deploy/compose/keycloak/Dockerfile .
+bash scripts/build-kind-image.sh "$KEYCLOAK_IMAGE" deploy/compose/keycloak/Dockerfile keycloak
 echo "==> loading the exact release-coordinate images into the cluster"
 kind load docker-image --name "$CLUSTER" "$PRODUCT_IMAGE" "$CNPG_IMAGE" "$KEYCLOAK_IMAGE"
 # Multi-stage image builds leave a large cache on a runner that must still
 # hold two database planes. The images themselves are already loaded in kind.
-docker builder prune --force >/dev/null 2>&1 || true
+# CI has already exported its cache. Prune the builder used for these builds.
+if [ "${SYNVEDA_KIND_GHA_CACHE:-0}" = 1 ]; then
+  docker buildx prune --all --force >/dev/null 2>&1 || true
+else
+  docker builder prune --force >/dev/null 2>&1 || true
+fi
 
 # ── the operator ─────────────────────────────────────────────────────────
 # Cluster-scoped, and installed separately for the reason ADR-0062

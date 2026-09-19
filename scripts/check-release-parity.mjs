@@ -366,15 +366,15 @@ export function helmAcceptanceFindings(demo, clientPod, keycloakFixture) {
     ],
     [
       "product build",
-      'docker build -t "$PRODUCT_IMAGE" -f deploy/compose/product/Dockerfile .',
+      'bash scripts/build-kind-image.sh "$PRODUCT_IMAGE" deploy/compose/product/Dockerfile product',
     ],
     [
       "CloudNativePG build",
-      'docker build -t "$CNPG_IMAGE" -f deploy/helm/postgres/Dockerfile .',
+      'bash scripts/build-kind-image.sh "$CNPG_IMAGE" deploy/helm/postgres/Dockerfile cnpg-postgres',
     ],
     [
       "Keycloak build",
-      'docker build -t "$KEYCLOAK_IMAGE" -f deploy/compose/keycloak/Dockerfile .',
+      'bash scripts/build-kind-image.sh "$KEYCLOAK_IMAGE" deploy/compose/keycloak/Dockerfile keycloak',
     ],
     [
       "kind image load",

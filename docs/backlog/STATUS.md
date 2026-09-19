@@ -95,9 +95,20 @@ Four focused checks also pass on Node 22/Linux arm64 Docker as an ordinary user.
 checkpoint and the remaining live acceptance. The two earlier terminated gates
 remain incomplete runs, not passes.
 
+FND-1's [CI maintenance decision](../adr/adr-0108-ci-gate-ownership-and-build-caching.md)
+assigns deployment checks to one job, removes unused beta/duplicate TypeScript
+builds, reuses package downloads and adds scoped Kind image caches. Job names
+and distinct acceptance gates remain. Local validation passes the full
+351-test deployment gate with zero skips, the final five cache-helper cases,
+395 adapter/console tests, 31 installed-hook replay tests and the production
+console build. Workflow lint, formatting, demo/dependency and documentation
+checks pass. Hosted cache reuse and wall-clock savings remain unmeasured;
+the next PR/main runs must compare cold and warm Kind timings with the
+29m35s baseline linked in ADR-0108. This does not change readiness claims.
+
 ## Phase 0 — Foundation (wk 1)
 
-- [x] FND-1: Workspace scaffold — delivered 2026-07-16
+- [x] FND-1: Workspace scaffold — delivered 2026-07-16; CI gate ownership and build caching: ADR-0108
 - [x] FND-2: Dev environment — delivered 2026-07-17
 - [x] FND-3: synveda-types + error model — delivered 2026-07-18
 - [x] FND-4: Migrations & bitemporal base tables — delivered 2026-07-18
