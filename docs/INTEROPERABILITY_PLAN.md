@@ -451,6 +451,36 @@ workflow evidence remains dated above. Rust is unchanged. The
 exact tested contract and remaining licence, namespace, provenance and public
 support decisions. No publication or wider compatibility claim follows.
 
+## SDK release preparation checkpoint — 2026-09-19
+
+At `09ff50a05a526e0405460e46cb126fe1bbe9ee2e`, both existing installed-package
+suites additionally passed under emulated Linux amd64 Docker on the arm64
+host. Node 22.23.2 and Python 3.11.16 each passed all nine tests, zero skips;
+installed metadata, exports/types/resources and identical clean builds passed.
+The npm, sdist and wheel hashes equal the compatibility checkpoint above.
+Networking was disabled during the checks, which ran as UID/GID 1000 with
+read-only source/wheels/root, dropped capabilities and executable temporary
+storage. Dependency preparation used the existing Python hash lock online.
+The [SDK guide](../sdks/README.md#check-local-package-archives) records the exact
+child image digests and reproduction. Emulation does not establish native
+amd64 runner support or complete the configured remote CI matrix.
+
+Read-only GitHub inspection confirmed the public repository and latest product
+release `v0.2.0` at `92ffa890ee330eb31bce71d5fba08624dcd88a22`. That tag lacks
+the checked OpenAPI and current Session/Context API modules; no compatible
+published server follows from the shared `0.2.0` label. Both anonymous package
+metadata endpoints returned HTTP 404, which does not verify name ownership or
+availability. The initial host-Python registry lookup failed certificate
+verification; system curl then completed with TLS verification retained.
+
+The [ADPT-4 release proposal](backlog/ADPT-4.md#release-decision-proposal)
+provides concrete licence/ownership inputs, one OIDC publishing path, a narrow
+candidate support policy and three small batches. It changes no runtime,
+manifest, workflow permission, registry state or licence. Owner decisions are
+pending. Remote CI, full CI, database, live Keycloak/Compose acceptance,
+registry publication and provenance verification were not run in this
+documentation/checking increment; no Rust changed, so Clippy is inapplicable.
+
 ## Remaining actions
 
 The CPR-45 deterministic-gate checkpoint is closed. Wider live reference
@@ -458,6 +488,8 @@ acceptance remains in its open brief.
 
 1. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    public support window and release ownership before public distribution.
+   Use the concrete proposal in the ADPT-4 brief; licence terms and named
+   npm/PyPI/release owners are the next required inputs.
    The measured runtime/contract matrix and local archive build/install/import
    are verified; packages remain unpublished.
 2. Native Codex/Copilot execution from a published installation, non-text

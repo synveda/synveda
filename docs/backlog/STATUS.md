@@ -35,6 +35,15 @@ remote jobs remain unverified. The [SDK guide](../../sdks/README.md#compatibilit
 separates the measured matrix from public support commitments.
 Public distribution awaits owner decisions on
 licence, namespaces, provenance custody and the supported server/runtime window.
+The [release decision proposal](ADPT-4.md#release-decision-proposal)
+now gives concrete choices and three small follow-on batches. At `09ff50a`,
+the existing archive suites also pass all 18 tests under pinned offline
+emulated Linux amd64, zero skips, with hashes identical to the earlier native
+arm64 results. Native amd64 CI remains unverified. Both proposed public package
+names returned anonymous HTTP 404; namespace ownership is still unverified.
+The published product `v0.2.0` predates the checked contract, so matching version
+labels do not establish SDK/server compatibility. No release configuration,
+licence or public package was changed.
 
 OPS-8/CPR-39 now includes the compiled Codex hook and its existing shared
 Session runtime in the current plugin archive. Eight captured tests pass from

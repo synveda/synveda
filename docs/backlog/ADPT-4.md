@@ -52,6 +52,67 @@ Publish pre-1.0 prereleases against a pinned server version, run the shared conf
 
 The owner must approve Synveda's repository/package licence, PyPI/npm namespaces, signing/provenance custody, supported runtime matrix, release ownership, and compatibility window before public distribution. The clients depend on stable generated OpenAPI and test OIDC credentials. gRPC support, if accepted under ADPT-3, is separate.
 
+### Release decision proposal
+
+Prepared on 2026-09-19 against `09ff50a05a526e0405460e46cb126fe1bbe9ee2e`. This is a proposal
+for the first SDK prerelease, not an accepted support policy or permission to
+publish. Local packaging and the authenticated workflow already work; reuse
+them unchanged. No additional adapter or public API expansion is required for
+this release slice.
+
+Read-only inspection confirms that `synveda/synveda` is public. Its latest
+published product release is `v0.2.0`, whose tag resolves to
+`92ffa890ee330eb31bce71d5fba08624dcd88a22`. That tree has neither
+`docs/api/openapi.json` nor the current `session_api.rs`/`context_api.rs` modules.
+The checkout also calls its API `0.2.0`; that number alone cannot identify a
+compatible server. No test against the published product was run.
+
+| Decision | Proposed smallest choice | Evidence / remaining owner input | Acceptance before public distribution |
+| --- | --- | --- | --- |
+| First-party terms | Apply the owner's exact SDK licence and notices, explicitly identifying whether they cover only `sdks/` or the repository. No licence is selected by this proposal. | No root `LICENSE`; `README.md` records the unresolved terms; `crates/synveda-gateway/src/openapi.rs` says `Proprietary`; neither SDK manifest specifies a licence. | Owner supplies approved terms and copyright holder. Both installed archives contain the required text and matching metadata; regenerate OpenAPI only if the approved repository terms change its source annotation. |
+| Names and ownership | Retain `@synveda/sdk` and `synveda-sdk` if the owner controls their registry namespaces. | Both anonymous package metadata requests returned HTTP 404 on 2026-09-19. That establishes neither availability nor ownership. GitHub repository administration does not establish npm/PyPI rights. | Named npm scope administrator, PyPI project owner and release maintainer confirm access and the first-publication setup; verify access through the registries without recording credentials. |
+| First candidate and server boundary | Use npm `0.1.0-rc.1` and Python `0.1.0rc1` as the same candidate, tied to one exact server source/image and checked OpenAPI digest. SDK versions remain independent of the product version. | Existing SDK version is `0.1.0`; generated API version is `0.2.0`. Current digest and tested environments are in the [SDK guide](../../sdks/README.md#compatibility-and-release-boundary). A releasable server candidate has not been selected. | Version/digest drift checks, installed-package tests and the shared authenticated workflow pass against the named candidate. Do not advertise compatibility with the old `v0.2.0` release from its version label. |
+| Publisher identity | One SDK-only GitHub Actions workflow in this repository, named `sdk-release.yml`, with an `sdk-release` environment and registry OIDC trusted publishers. Keep its candidate tags outside the product workflow's `v*` trigger, for example `sdk-v0.1.0-rc.1`. | Existing `release.yml` publishes product artifacts and checks their version against Cargo; it has no SDK publisher. Owner must name the registry/account recovery custodian and environment reviewer. These proposed workflow/environment names are not configured. | A credential-free dry run produces the same tested archives. Only the publish jobs receive OIDC permission. Registry attestations identify the expected repository, workflow, commit and archive digest; a fresh consumer verifies and installs the downloaded bytes. |
+| Runtime and change policy | Initially qualify the existing Node 22/Python 3.11 and Node 24/Python 3.14 CI pairs on native Linux amd64; keep the measured macOS/Linux arm64 results labelled as supplemental evidence. Claim only exact candidate/server combinations until more are tested. | CI declares both pairs; their remote runs remain unverified. Package minimum versions do not prove every newer runtime. Owner may adopt this deliberately small evaluation window. | Both native CI rows pass without skipped SDK checks; one ordinary Keycloak workflow passes per server candidate. Before 1.0, document breaking changes in a new minor candidate, keep patch releases compatible with the advertised contract, and deprecate/yank defective versions rather than silently replacing bytes. A stable release needs a separately approved support/deprecation window. |
+
+Use maintained registry tooling. npm trusted publishing requires a supported
+GitHub-hosted runner, npm CLI at least 11.5.1 and Node at least 22.14.0; these
+are publisher requirements, not new SDK consumer minimums. Configure the exact
+repository/workflow/environment and explicitly allow the selected publishing
+action. OIDC publication of a public package from this public repository can
+generate provenance automatically. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+The npm manifest must also name the exact public repository; see
+[npm provenance prerequisites](https://docs.npmjs.com/generating-provenance-statements/).
+
+For Python, reuse PyPA's maintained publishing action with job-scoped OIDC
+permission and its attestation support; do not implement token exchange or
+signing. See [PyPI publishing](https://docs.pypi.org/trusted-publishers/using-a-publisher/)
+and [attestation production](https://docs.pypi.org/attestations/producing-attestations/).
+A PyPI pending publisher can create the first project but does not reserve its
+name. See [PyPI first publication](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/).
+The npm first-publication bootstrap must be confirmed with the scope owner;
+do not assume it has PyPI's pending-publisher mechanism. No registry account,
+publisher or environment was changed during this inspection.
+
+After those decisions, use at most three implementation batches:
+
+1. **Package metadata and terms.** Amend ADR-0106 with the accepted choices;
+   add approved licence/notices, repository/readme metadata and candidate
+   versions through the existing manifests/generator. Extend the existing
+   archive checks to prove those files and metadata survive installation.
+2. **Build and publish one candidate.** Reuse `sdk-check`, `sdk-package-check`,
+   their locks and the existing shared gateway acceptance. Keep build/test
+   jobs separate from the minimal OIDC publish jobs, use immutable action
+   references, publish the validated bytes, and retain their digests and
+   attestations. First complete the non-publishing workflow run; registry
+   configuration and actual publication follow the approved owner decisions.
+3. **Verify distribution and document support.** Download the exact registry
+   versions into empty consumers, verify provenance/digests, run the existing
+   package suites and the shared allowed-context/approved-Skill/proposal/
+   workspace-denial/audit workflow against the selected server. Publish only
+   the resulting compatibility table and rollback instructions. Package
+   provenance does not close product-image signing or production readiness.
+
 **Current checkpoint (2026-09-12)**
 
 `make sdk-check`, full CI and the fresh exact-role database suite pass at
@@ -133,6 +194,20 @@ dated to its original source. No Rust changed, so strict Clippy is inapplicable.
 The [SDK guide](../../sdks/README.md#compatibility-and-release-boundary) records
 the exact contract and measured matrix, separate from public support policy.
 
-Next: obtain the owner decisions under Dependencies, then add only the selected
-release path and support policy. No public package was published. ADPT-4
-remains open for those decisions and its wider scope.
+**Release preparation checkpoint (2026-09-19; starting at `09ff50a`)**
+
+Both existing archive checks now also pass in pinned offline emulated Linux
+amd64 containers: Node 22.23.2 and Python 3.11.16, nine tests each, zero skips.
+Installed metadata, types/resources, headers and two clean builds pass; all
+three archive hashes match the native arm64 results above. This is supplemental
+package evidence, not a native CI, live OIDC or published-install qualification.
+The public repository, latest product tag and anonymous registry-name reads
+were inspected for the proposal; no registry or workflow settings were changed.
+Exact images and reproduction are in the SDK guide; the interoperability plan
+records the check limits. The owner question for licence terms and named
+registry/release ownership remains pending.
+
+Next: resolve the concrete choices in the release decision proposal above,
+starting with licence terms and registry/release ownership, then execute only
+the selected release path and support policy. No public package was published.
+ADPT-4 remains open for those decisions and its wider scope.

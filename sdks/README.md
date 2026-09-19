@@ -99,6 +99,7 @@ The 2026-09-19 compatibility increment starting at `06bcc09` measured:
 | --- | --- | --- |
 | Pinned offline Docker, Linux arm64 | 22.23.2 / 3.11.16 | Nine tests per installed SDK pass; metadata, exports/types/resources and two identical clean builds pass; zero skips. |
 | Local macOS arm64 | 24.18.0 / 3.14.6 | The same package checks pass; all archive hashes equal the Docker builds; zero skips. |
+| Pinned offline Docker, emulated Linux amd64, at `09ff50a` | 22.23.2 / 3.11.16 | Nine tests per installed SDK pass with zero skips and matching archive hashes; emulation on the arm64 Docker host is not native CI evidence. |
 | Declared CI, Linux amd64 | 22 / 3.11 and 24 / 3.14 | Both rows run SDK drift and archive checks; only the minimum pair runs gateway acceptance. Remote execution remains unverified. |
 
 The package manifests' Node 22+/Python 3.11+ requirements are minimums, not
@@ -114,6 +115,11 @@ does not extend it to another server.
 | Publisher and provenance | Confirm release owner, trusted publisher identities and signing/provenance custody before adding publication automation. |
 | Support policy | Adopt or revise the measured runtime/server window and define compatibility/deprecation policy; no broader range is inferred here. |
 
+The [release decision proposal](../docs/backlog/ADPT-4.md#release-decision-proposal)
+names a first candidate, an SDK-only OIDC publishing path, a narrow compatibility
+policy and three implementation batches. These remain proposed choices. The
+published product `v0.2.0` predates this checked contract, so a release must name
+the exact tested server source/image and digest, not just API version `0.2.0`.
 
 ## Check local package archives
 
@@ -158,6 +164,15 @@ docker run --rm --network none -v "$PWD:/source:ro" \
       -r sdks/python/requirements-dev.lock
     /tmp/builder/bin/python scripts/check-sdk-package.py'
 ```
+
+To repeat the emulated Linux amd64 minimum-runtime check on an arm64 Docker
+host, pass `--platform linux/amd64` to all three containers and prepare a
+separate wheelhouse for that architecture. The measured child images were
+`node@sha256:b6ca9eabea5fc816699178b5dd4842270e1c42f90739afc93bbcfdf91a13512e`
+and `python@sha256:d1053354624536b044162aaab1e418bd000ea35184fb1ae098ab3166b1072e72`.
+The actual checks ran as UID/GID 1000 with a read-only root, dropped capabilities,
+`no-new-privileges` and an executable `/tmp` tmpfs (256 MiB for Node, 512 MiB
+for Python). The tmpfs must permit execution of the isolated Python venv.
 
 The scripts print archive SHA-256 values and runtime versions. Python builds
 use a fixed `SOURCE_DATE_EPOCH`; matching clean builds are reproducibility
