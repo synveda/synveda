@@ -77,8 +77,8 @@
       "configuration": null,
       "lifecycle": {
         "mechanism": "Captured sessionStart context, agentStop recording and sessionEnd flush; native MCP configuration",
-        "contract_version": "Hooks schema version 1 / captured Copilot CLI 1.0.83 (2026-09-13)",
-        "status": "native governed context, Skill activation and MCP recall/denial observed; error-shape delivery fix passes replay; full lifecycle unverified",
+        "contract_version": "Hooks schema version 1 / captured Copilot CLI 1.0.83 (2026-09-19)",
+        "status": "authenticated native resume and shared SDK workflow passed; clean first-start/resume qualification pending",
         "source": "docs/integrations/copilot-cli.md",
         "events": [
           "sessionStart",
@@ -87,13 +87,11 @@
         ]
       },
       "limitations": [
-        "Source-build context/observation adapter. Native synthetic resume context passes; captured events replay through the shared spool with stable task identity, retries and a two-second exit flush. Authenticated native lifecycle remains unverified.",
-        "CLI 1.0.83 natively loaded the exact approved Skill and recalled allowed Knowledge using the hook-injected Synveda Session. Foreign-workspace MCP denial returned a captured error object. Full governed native resume and audit qualification remain unverified.",
-        "The first synthetic probe failed after invoking a conflicting Skill. The separately approved corrected retry passed without tool use under the same saved 30-credit limit; the CLI reported two cumulative premium requests. Both outcomes are preserved.",
-        "The native governed probe held its transcript because a denied MCP completion used error.code/message instead of result.content. The narrow parser fix replays all eight observations and preserves failed-tool correlation. Both SDKs, Capture/end and audit passed the earlier public-edge replay on a different task, not this native task.",
-        "The existing Skill root override and native MCP configuration are used manually; no Synveda configuration writer or packaged Copilot runtime is advertised.",
-        "Copilot CLI is a distinct target from VS Code and the Copilot cloud agent; this entry makes no support claim for either.",
-        "The 2026-09-19 retry found the temporary native Session, raw captures, credentials and spool absent. Compose startup refused a changed hosts-backup filesystem device witness despite matching hosts content. No additional paid prompt ran; native resume and live delivery recovery are blocked. See adapters/copilot-cli/fixtures/governed-probe.json."
+        "Source-build experiment: the corrected native resume and shared authenticated SDK workflow pass. The first prompt had no hooks because its scratch directory inherited the parent Git root; a clean correctly rooted first-start/resume pair remains required.",
+        "Native context, exact approved Skill activation, MCP recall and foreign-workspace denial pass on CLI 1.0.83. Both SDK examples share its Synveda Session and correlate actual response traces with audit.",
+        "Sixteen native observations plus two SDK Skill events persist without duplicates. The last assistant message arrived on a subsequent native reopen/exit; runtime exit retains the application task. Explicit Capture produced 16 candidates, explicit end and Knowledge reuse passed, and audit verified through sequence 1059.",
+        "The prior denial-result parser failure and the first missing-hook run remain recorded. The current workflow used two approved prompts; no-prompt reopens left its two cumulative premium requests and 847087000 nano-AIU unchanged.",
+        "The approved Skill root override and native MCP configuration need no new adapter dependencies. Packaging, native outage/compaction, other result formats and other versions/platforms remain unqualified. Copilot CLI support makes no VS Code or cloud-agent claim."
       ],
       "authentic_fixtures": [
         {
@@ -125,13 +123,86 @@
           "path": "adapters/copilot-cli/fixtures/governed-probe.json",
           "sha256": "440a92f52a55e8cfe5f277578049520114b699896f56d553225ec2d1e8b7c68d",
           "kind": "captured-real-client-partial-result"
+        },
+        {
+          "path": "adapters/copilot-cli/fixtures/shared-workflow-transcript.jsonl",
+          "sha256": "bb636f9e4f460f28844690718b475fe9fad6aa8151d024089f8ecf822ea33f9c",
+          "kind": "captured-real-client-transcript-projection"
+        },
+        {
+          "path": "adapters/copilot-cli/fixtures/shared-workflow.json",
+          "sha256": "9a5d0ab47c9f02405dbaf60f0d030026a3a00f3d63fb84a51d90668cfdb18a47",
+          "kind": "captured-live-client-partial-result"
         }
       ],
       "conformance": {
-        "evidence_level": "native-probe",
-        "tested_at": "2026-09-13T08:53:12Z",
+        "evidence_level": "live-client",
+        "tested_at": "2026-09-19T09:43:31.138Z",
         "tested_version": "1.0.83",
-        "checks": {}
+        "checks": {
+          "session_creation": {
+            "status": "passed",
+            "evidence": [
+              "adapters/copilot-cli/fixtures/shared-workflow.json"
+            ]
+          },
+          "event_delivery": {
+            "status": "passed",
+            "evidence": [
+              "adapters/copilot-cli/fixtures/shared-workflow.json"
+            ]
+          },
+          "context_request_delivery": {
+            "status": "failed",
+            "evidence": [
+              "adapters/copilot-cli/fixtures/shared-workflow.json"
+            ],
+            "reason": "Corrected native resume consumed allowed context; the initial wrongly rooted prompt had no hooks, so a clean first-start/resume pair is still required."
+          },
+          "capture": {
+            "status": "passed",
+            "evidence": [
+              "adapters/copilot-cli/fixtures/shared-workflow.json"
+            ]
+          },
+          "session_end": {
+            "status": "passed",
+            "evidence": [
+              "adapters/copilot-cli/fixtures/shared-workflow.json"
+            ]
+          },
+          "retry_idempotency": {
+            "status": "passed",
+            "evidence": [
+              "adapters/copilot-cli/fixtures/shared-workflow.json"
+            ],
+            "reason": "Sixteen exact native event ids/payloads replayed through the public API appended zero duplicates; native outage recovery was not exercised."
+          },
+          "skill_advertisement_activation": {
+            "status": "passed",
+            "evidence": [
+              "adapters/copilot-cli/fixtures/shared-workflow.json"
+            ]
+          },
+          "tool_configuration": {
+            "status": "passed",
+            "evidence": [
+              "adapters/copilot-cli/fixtures/shared-workflow.json"
+            ]
+          },
+          "cross_session_knowledge_reuse": {
+            "status": "passed",
+            "evidence": [
+              "adapters/copilot-cli/fixtures/shared-workflow.json"
+            ]
+          },
+          "persisted_audited_outcomes": {
+            "status": "passed",
+            "evidence": [
+              "adapters/copilot-cli/fixtures/shared-workflow.json"
+            ]
+          }
+        }
       }
     },
     {

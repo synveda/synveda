@@ -175,16 +175,12 @@ hosts content but a changed `dev` field in the root-owned backup witness.
 `make compose-hosts-status` also refused; the plan still names the existing
 `acceptance-interop` mapping. No witness or preflight gate was changed.
 
-Next action: resolve the hosts-backup device-witness drift under CPR-45, then
-prepare a replacement governed start/resume qualification with durable private
-state. The original temporary Session cannot be resumed from the retained
-projection. Only one prompt of the newly approved pair ran; no paid prompt ran
-on retry. Keep new-Session cost allowance explicit and do not silently reuse a
-lost Session's budget. Both SDKs, live delivery/audit after this fix, Capture/end
-and reuse on the native task remain unverified. Native outage/compaction,
-other error/result shapes and packaging remain open. Keep support experimental.
+Only one prompt of that approved pair ran; no paid prompt ran on retry. The
+original temporary Session cannot be resumed from the retained projection.
+The replacement checkpoint below resolves the deployment prerequisite and
+records the new native task separately.
 
-### Replacement qualification prepared — 2026-09-19
+### Shared native and SDK workflow — 2026-09-19
 
 CPR-45's confirmed device-only witness renewal restored the existing Docker
 project without resetting its volumes or secrets. Canonical up/smoke, hostname
@@ -194,13 +190,53 @@ its file hash matches the original immutable version and native discovery
 passes. The existing foreign Session returns HTTP 403. All 345 deployment
 tests pass without skips.
 
-The replacement native start/resume pair uses an owner-only ignored directory
-excluded from Docker build contexts, with credentials outside the harness
-project and saved native state retained between invocations. The old temporary
-Session is not reconstructed. Next run the prepared pair after explicit
-new-Session service-cost allowance, then verify both unchanged SDK examples,
-durable delivery, Capture, explicit end, Knowledge reuse and content-free audit
-on that same native-created Synveda task. No replacement paid prompt has run.
+At `8336c22cc5cf2b84970426f78f2e4cd16c50d40b`, the separately approved replacement
+pair used durable owner-only state excluded from Git and Docker build contexts,
+with credentials outside the harness project. CLI 1.0.83 / gpt-5.6-luna ran two
+prompts in one native Session under a shared 30-credit soft limit. It reported
+two cumulative premium requests and 847087000 nano-AIU; these are not monetary
+estimates. No-prompt reopen/exit checks left those counters unchanged.
+
+The [native result](../../adapters/copilot-cli/fixtures/shared-workflow.json)
+and [transcript projection](../../adapters/copilot-cli/fixtures/shared-workflow-transcript.jsonl)
+preserve the failed first start: the nested scratch directory inherited the
+parent Git root, so its hook file was not discovered and no Synveda Session ID
+was injected. Initializing the owned scratch project as its own Git repository
+fixed discovery without an adapter change. The second prompt's real resume
+hook created the Synveda task and delivered allowed context; the model used
+that injected ID, activated the exact approved Skill, recalled allowed Knowledge
+and received the expected foreign-workspace denial.
+
+Fifteen native observations arrived at that exit. The final assistant message
+became visible later and a no-prompt native reopen/exit delivered it, giving
+16 native observations. Runtime exit retained the active Synveda task. Both
+unchanged SDK examples used it for allowed context, exact approved Skill bytes,
+pending proposals, foreign denial and actual response-trace audit correlation.
+All 18 persisted events have unique client IDs and the native payloads match
+the spool. Exact public-API replay appended zero duplicates. Explicit Capture
+completed with 16 reviewable candidates; explicit task-owner end, later approved
+Knowledge reuse and audit-chain verification through sequence 1059 passed.
+Native Skill activation does not infer a typed Skill-usage event; the two
+`skill.loaded` events came from the SDKs.
+
+All 142 adapter tests pass on macOS arm64 Node 24.18.0 and pinned offline Docker
+Linux arm64 Node 22.23.2, with zero skips: 105 Claude, eight Codex and 29 Copilot.
+No product implementation changed for this run. Strict TypeScript, formatting,
+dependency direction, registry/digests, docs, backlog and ADR gates pass; the
+documented Compose smoke passes again. Strict Rust Clippy is not applicable. Full CI,
+fresh database tests, full Compose acceptance and unchanged package checks were
+not rerun.
+
+Next action: run a fresh, correctly rooted native start/resume pair and require
+both hooks to deliver context on the same Synveda task. The corrected resume
+above does not prove that clean pair, so `context_request_delivery` remains
+failed and support remains experimental. Both approved prompts were used; a
+new Session needs a new explicit two-prompt, 30-credit soft allowance. Its
+isolated Git root and hook paths are now verified; approved Skill installation,
+exact immutable bytes, native discovery and foreign HTTP 403 preflight pass.
+Its runner refuses execution without new allowance and refuses the second
+prompt unless the first start's context check passes. No fresh prompt has run.
+Native outage/compaction, other result shapes and packaging remain unqualified.
 
 ## Dependencies
 

@@ -65,12 +65,20 @@ native Session/credentials/spool absent and Compose startup blocked by a changed
 hosts-backup device witness. CPR-45 now repairs that exact device-only drift
 through confirmed installation after rechecking the protected recovery copy.
 Canonical up/smoke, resolver checks and ordinary browser PKCE login pass;
-all 345 deployment tests pass without skips. The replacement Copilot pair is
-prepared with durable private state, an exact approved Skill and a verified
-foreign-workspace denial. Native resume, live delivery after the parser fix and
-full conformance remain unverified pending the new Session's explicit cost
-allowance; no replacement paid prompt has run yet. Pi was not on PATH during
-the earlier inventory.
+all 345 deployment tests pass without skips. At `8336c22`, the separately
+approved replacement pair used durable private state. Its first prompt missed
+hooks because the scratch project inherited the parent Git root. After that
+setup correction, native resume consumed allowed context, activated the exact
+approved Skill and passed MCP recall/foreign denial. Both SDKs shared the
+native-created task: 18 unique events, zero duplicates on replay, 16 Capture
+candidates, explicit end, Knowledge reuse and valid audit through sequence 1059.
+The last native assistant event arrived on a later no-prompt reopen/exit.
+All 142 adapter tests (29 Copilot) pass on host/Docker, zero skips. ADPT-9 stays
+experimental until a clean correctly rooted start/resume pair passes; the two
+approved prompts were used. A fresh project has passed Git-root, approved Skill
+and foreign-denial preflight and awaits its own explicit two-prompt, 30-credit
+soft allowance. Native outage/compaction and packaging remain unqualified. Pi was
+not on PATH during the earlier inventory.
 These are independent of the public-release decisions.
 
 The apparent deployment-gate stall was delayed reporting: the unchanged

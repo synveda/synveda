@@ -21,16 +21,44 @@ test("native fixture bytes are pinned and omit private paths and hidden model co
   const client = registry.clients.find((entry: { id: string }) => entry.id === "copilot-cli");
   assert.equal(client.support_level, "experimental");
   assert.deepEqual(client.tested_versions, ["1.0.83"]);
-  assert.equal(client.conformance.evidence_level, "native-probe");
-  assert.deepEqual(client.conformance.checks, {}, "partial probes do not establish a complete native lifecycle");
+  assert.equal(client.conformance.evidence_level, "live-client");
+  assert.equal(client.conformance.checks.context_request_delivery.status, "failed",
+    "the corrected resume does not turn the initial missing-hook prompt into a clean pair");
   for (const name of ["lifecycle.json", "transcript.jsonl", "resume-lifecycle.json", "resume-transcript.jsonl",
-    "governed-probe.json", "governed-transcript.jsonl"]) {
+    "governed-probe.json", "governed-transcript.jsonl", "shared-workflow.json", "shared-workflow-transcript.jsonl"]) {
     const file = readFileSync(new URL(`../fixtures/${name}`, import.meta.url));
     const digest = createHash("sha256").update(file).digest("hex");
     assert.equal(client.authentic_fixtures.find((entry: { path: string }) =>
       entry.path === `adapters/copilot-cli/fixtures/${name}`).sha256, digest);
     assert.doesNotMatch(file.toString("utf8"), /\/Users\/|\/private\/|"(?:access_token|refresh_token|reasoningText|reasoningOpaque|reasoningBlocks|encryptedContent)"/);
   }
+});
+
+test("shared native workflow preserves the failed first start and actual governed resume evidence", () => {
+  const result = JSON.parse(readFileSync(new URL("../fixtures/shared-workflow.json", import.meta.url), "utf8"));
+  const records = readFileSync(new URL("../fixtures/shared-workflow-transcript.jsonl", import.meta.url), "utf8")
+    .trim().split("\n").map((line) => JSON.parse(line));
+  const answers = records.filter((record) => record.type === "assistant.message" && record.data.content)
+    .map((record) => JSON.parse(record.data.content));
+  assert.equal(result.initial_start.hook_discovery, "failed");
+  assert.equal(answers[0].synveda_session_id, null);
+  assert.equal(answers[1].synveda_session_id, result.synveda_session_id);
+  assert.equal(result.corrected_resume.source, "resume");
+  assert.equal(result.hooks.filter((frame: { event: string }) => frame.event === "sessionStart").length, 1);
+  assert.equal(result.approved_skill.file_sha256_before, result.approved_skill.file_sha256_after);
+  assert.ok(records.some((record) => record.type === "skill.invoked" &&
+    record.data.path === result.approved_skill.native_path));
+  assert.ok(records.some((record) => record.type === "tool.execution_start" &&
+    record.data.arguments.session_id === result.synveda_session_id));
+  assert.equal(result.observation_delivery.after_corrected_prompt, 15);
+  assert.equal(result.observation_delivery.after_no_prompt_reopen_exit, 16);
+  assert.equal(result.workflow.unique_client_event_ids, 18);
+  assert.equal(result.workflow.duplicate_replay_appended, 0);
+  assert.equal(result.workflow.capture_state, "completed");
+  assert.equal(result.workflow.session_state, "ended");
+  assert.equal(result.audit.valid, true);
+  assert.equal(result.usage.executed_prompts, 2);
+  assert.equal(result.usage.no_prompt_reopens_increased_usage, false);
 });
 
 test("governed native calls use the injected task and preserve the original delivery failure", () => {

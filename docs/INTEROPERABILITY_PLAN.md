@@ -403,29 +403,25 @@ changed to obtain the successful rerun.
 The CPR-45 deterministic-gate checkpoint is closed. Wider live reference
 acceptance remains in its open brief.
 
-1. Complete [ADPT-9's Copilot CLI qualification](backlog/ADPT-9.md). Its
-   experimental adapter now maps captured text/tool events through the shared
-   bounded reader and spool; runtime exit flushes without closing the task.
-   The native synthetic resume-context probe passes. All 136 adapter tests
-   (23 Copilot), eight extracted Codex package tests on each host/Docker runtime
-   and existing-stack Compose smoke pass. The governed Docker/Keycloak preflight
-   at `24cd02d` now passes real hook replay, exact approved Skill installation
-   and native discovery, both SDK workflows and two authenticated MCP test
-   connections. Eight unique events, six Capture candidates, explicit end,
-   Knowledge reuse and audit verification through sequence 938 are recorded in
-   [the content-free replay result](../adapters/copilot-cli/fixtures/public-edge-replay.json).
-   The first approved native invocation then consumed authenticated context,
-   activated the exact approved Skill and performed MCP recall/foreign denial.
-   Its denied completion held the transcript because it used an error object.
-   ADPT-9's narrow parser correction and captured regressions now preserve all
-   eight observations, failed-tool correlation and one delivery per event.
-   [The partial native result](../adapters/copilot-cli/fixtures/governed-probe.json)
-   preserves that original failure. On 2026-09-19 the temporary native Session,
-   credentials and spool were absent, and Compose startup refused a changed
-   hosts-backup device witness. Resolve that CPR-45 prerequisite, then use
-   durable private state for a replacement native/SDK qualification with an
-   explicit cost allowance. No paid prompt ran on retry. Native resume,
-   post-fix live delivery/audit, outage/compaction and packaging remain open.
+1. Complete [ADPT-9's Copilot CLI qualification](backlog/ADPT-9.md). CPR-45's
+   confirmed hosts-witness renewal restored the Docker/Keycloak reference;
+   all 345 deployment tests pass without skips. At `8336c22`, the separately
+   approved native pair used durable private state. Its first prompt missed
+   hooks because the nested project inherited the parent Git root. After
+   initializing the owned scratch project, native resume delivered allowed
+   context, activated the exact approved Skill and passed MCP recall/foreign
+   denial. Both SDKs shared that task: 18 unique events, zero duplicates on
+   replay, 16 Capture candidates, explicit end, Knowledge reuse and audit
+   verification through sequence 1059. The final assistant observation arrived
+   on a later no-prompt reopen/exit. The [native workflow result](../adapters/copilot-cli/fixtures/shared-workflow.json)
+   retains the initial failure; the [earlier denial result](../adapters/copilot-cli/fixtures/governed-probe.json)
+   retains the parser failure. All 142 adapter tests (29 Copilot) pass on
+   macOS Node 24 and pinned offline Docker Node 22, zero skips. Next run a
+   clean correctly rooted start/resume pair on one governed task. Both approved
+   prompts were used. A fresh project has passed Git-root, approved Skill and
+   foreign-denial preflight and awaits a new two-prompt, 30-credit soft
+   allowance. Support remains experimental; native
+   outage/compaction, other result shapes and packaging remain unqualified.
 2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
    Local archive build/install/import is verified; packages remain unpublished.

@@ -82,10 +82,15 @@ release archive before its native qualification.
 
 - Positive: one explicit application identity, credential boundary and context
   path across harness and SDK calls, with no new runtime dependency.
-- Accepted trade-off: experimental, source-build support. Synthetic resume
-  context is observed; transcript delivery remains replay evidence until the
-  authenticated native workflow passes. Compaction, governed Skill attribution
-  and full audit qualification remain open.
+- Accepted trade-off: experimental, source-build support. The 2026-09-19 native
+  resume and shared SDK workflow passed with 18 unique events, 16 Capture
+  candidates and audit verification through sequence 1059. The last assistant
+  event required a subsequent native reopen/exit to become deliverable. The
+  initial prompt had no hooks because the scratch project inherited its parent
+  Git root; a clean correctly rooted start/resume pair is still required.
+  Native outage/compaction and packaging remain unqualified. The approved
+  Skill's exact binding/file and activation path are evidenced separately;
+  native activation alone still emits no typed Skill-usage event.
 - Reversal trigger: authentic frames demonstrate another necessary seam; add
   only that translation and its replay, then run ADR-0098 qualification.
 

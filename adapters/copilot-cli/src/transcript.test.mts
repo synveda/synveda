@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 import { MAX_TRANSCRIPT_BYTES } from "@synveda/claude-code-adapter/session-runtime";
 import { toSessionEvents } from "../../claude-code/dist/events.mjs";
 import { readCopilotTranscript } from "./transcript.mjs";
@@ -15,6 +16,18 @@ const records = captured.trim().split("\n").map((line) => JSON.parse(line));
 const governed = readFileSync(new URL("../fixtures/governed-transcript.jsonl", import.meta.url), "utf8");
 const governedRecords = governed.trim().split("\n").map((line) => JSON.parse(line));
 const governedId = governedRecords[0].data.sessionId;
+
+test("shared native transcript replays all sixteen persisted observations with stable ids", () => {
+  const path = new URL("../fixtures/shared-workflow-transcript.jsonl", import.meta.url);
+  const records = readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const events = toSessionEvents(readCopilotTranscript(fileURLToPath(path), records[0].data.sessionId), undefined);
+  assert.equal(events.length, 16);
+  assert.equal(new Set(events.map((event) => event.client_event_id)).size, 16);
+  assert.deepEqual(events, toSessionEvents(readCopilotTranscript(fileURLToPath(path), records[0].data.sessionId), undefined));
+  assert.equal(events.at(-1)?.event_type, "message.assistant");
+  assert.equal(events.filter((event) => event.event_type === "tool.result").length, 6);
+  assert.ok(!events.some((event) => event.event_type.startsWith("skill.")));
+});
 
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "synveda-copilot-reader-"));

@@ -1,24 +1,20 @@
 # GitHub Copilot CLI interoperability (ADPT-9)
 
-Copilot CLI has an **experimental context and observation adapter**. This is a source-build
-integration; it is not the verified Codex lifecycle or a Copilot
-cloud-agent/VS Code adapter. `adapters/registry.json` owns the support level.
-The installed CLI is 1.0.83 on macOS arm64. Native local MCP configuration and
-Skill discovery work. The approved 2026-09-13 native probe captured six hook
-events and synthetic Skill activation. Copilot accepted the hook output but
-returned the conflicting Skill's marker, so the context-marker assertion failed.
-The separately approved corrected retry consumed a fresh hook-only marker,
-invoked no tools and resumed the same native Session after process exit.
-Captured text/tool events now replay through the existing durable Session spool.
-The later governed native probe consumed authenticated context, activated the
-exact approved Skill and performed MCP recall with foreign-workspace denial.
-That denial exposed a failed-tool error shape which held observation delivery;
-the narrow parser correction now passes captured replay. Full native lifecycle
-acceptance remains unverified.
-The Docker/Keycloak public-edge preflight now passes real hook replay, both
-SDKs, exact approved Skill installation/native discovery, MCP reconnect,
-workspace denial, Capture/end and audit. Existing implementations needed no
-corrective change for that preflight.
+Copilot CLI has an **experimental context and observation adapter** built from
+source. `adapters/registry.json` owns the support level. CLI 1.0.83 on macOS
+arm64 has passed authenticated native resume, approved Skill activation, MCP
+recall and foreign-workspace denial against the Docker/Keycloak public edge.
+Both unchanged SDK examples shared its task for context, Skill loading,
+proposals and audit correlation. Eighteen unique events, Capture, explicit end
+and later Knowledge reuse passed without product implementation changes.
+
+A clean initial-start/resume pair remains unqualified: the first replacement
+prompt did not discover hooks because its scratch directory inherited the
+parent Git root. The corrected resume passed, and both outcomes are retained
+in the [shared workflow result](../../adapters/copilot-cli/fixtures/shared-workflow.json).
+The last assistant observation required a subsequent native reopen/exit.
+Native outage/compaction and packaging also remain unqualified. This entry
+makes no Copilot cloud-agent or VS Code support claim.
 
 ## Build and connect
 
@@ -36,8 +32,12 @@ pnpm --filter @synveda/copilot-cli-adapter... build
 pnpm --filter @synveda/copilot-cli-adapter test
 ```
 
-In a trusted qualification checkout, add **.github/hooks/synveda.json**, replacing
-the two absolute executable paths. Leave other hook files intact:
+At the **Git repository root** of a trusted qualification checkout, add
+**.github/hooks/synveda.json**, replacing the two absolute executable paths.
+Check `git rev-parse --show-toplevel` first: Copilot loads repository hooks from
+that root, so a hook file under a nested working directory is ignored. An
+isolated scratch project inside another checkout needs its own `git init`
+before qualification. Leave other hook files intact:
 
 ```json
 {
@@ -269,7 +269,8 @@ The approved native plan was two user prompts on one fresh native Session:
    explicit Capture/end, later Knowledge reuse and content-free audit.
 
 Both earlier synthetic prompts are complete. The new pair was approved with
-one shared 30-credit Session ceiling and no automatic paid retry. Restrict tools
+one shared 30-credit Session soft limit and no automatic paid retry. The CLI's
+soft limit can overrun within a response. Restrict tools
 to the approved Skill and Synveda recall workflow, disable
 built-in MCP servers, remote export and unrelated custom instructions, and keep
 shell/write/URL access denied using the
@@ -316,10 +317,10 @@ native resume, both SDKs on this native task, post-fix live delivery/audit and
 Capture/end could not be completed; the earlier public-edge replay results
 belong to their separately identified task. No paid prompt ran on retry.
 
-Resolve the hosts-backup witness prerequisite before another live qualification.
-Use durable, private qualification state and treat a replacement Session as a
-new run with an explicit cost allowance; it cannot inherit the lost Session's
-remaining ceiling. The second prompt of the original pair was not executed.
+CPR-45's confirmed ownership renewal subsequently restored the same Docker
+project and ordinary Keycloak login. The replacement below used durable private
+state and its own explicit cost allowance. The second prompt of the original
+lost pair was not executed.
 
 Native outage recovery, applicable compaction and unknown/non-text result shapes
 remain unqualified. Vendor `preCompact` is notification-only; no post-compaction
@@ -328,3 +329,38 @@ promotion and extending the existing release archive/installation checks.
 
 Full CI, the database suite, full Compose acceptance, a packaged Copilot
 installation and complete native lifecycle qualification were not run for this increment.
+
+### Shared native and SDK workflow — 2026-09-19
+
+At `8336c22`, a separately approved pair ran on CLI 1.0.83 / gpt-5.6-luna. Its
+first prompt did not discover the nested project's hooks. Checking the native
+Git root exposed the setup error; `git init` in the owned scratch project fixed
+discovery. The second prompt's real `sessionStart` with `source: "resume"`
+created the Synveda task, injected allowed context and led to exact approved
+Skill activation, allowed MCP recall and foreign-Session denial. A clean pair
+must still prove that initial start and resume both use the same governed task.
+
+The [result](../../adapters/copilot-cli/fixtures/shared-workflow.json) pins the
+[native projection](../../adapters/copilot-cli/fixtures/shared-workflow-transcript.jsonl),
+actual hook receipts, approved binding/file identity, SDK proposal IDs and audit
+traces. It records these measured boundaries:
+
+| Check | Result |
+| --- | --- |
+| Native delivery | 15 observations at prompt exit; a later no-prompt reopen/exit delivered the final assistant message, giving 16. The task remained active. |
+| Shared SDK workflow | Both existing examples retrieved allowed context and approved Skill bytes, submitted pending proposals, denied the foreign Session and matched actual response traces to audit. |
+| Durable outcomes | 18 unique events including two SDK `skill.loaded` events; native payloads match the spool; exact public-API replay appended zero duplicates. No native outage test was run. |
+| Explicit lifecycle | Capture completed with 16 reviewable candidates. The task owner ended the Session; a later Session reused approved Knowledge. |
+| Audit | Content-free correlation and chain verification passed through sequence 1059. |
+| Usage | Two prompts in one native Session, shared 30-credit soft limit, two cumulative premium requests and 847087000 nano-AIU. No-prompt reopens did not increase usage. These counters are not price estimates. |
+| Regression | 142 adapter tests passed on macOS arm64 Node 24.18.0 and pinned offline Docker Linux arm64 Node 22.23.2, zero skips; 29 are Copilot tests. |
+
+Native activation names the exact installed approved Skill but does not infer
+a typed Skill-usage event. Candidate Capture and SDK proposals do not publish
+Knowledge. The first missing-hook prompt remains a failed context check in the
+registry. Both approved prompts were used; another clean pair needs a fresh
+two-prompt allowance under the CLI's 30-credit soft minimum. No additional paid
+prompt was run. Full CI, fresh database tests, full Compose acceptance, native
+outage/compaction and packaging were not run for this evidence increment.
+Strict TypeScript and repository metadata gates passed; the documented Compose
+smoke passed again. Rust is unchanged, so strict Clippy is not applicable.
