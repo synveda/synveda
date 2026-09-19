@@ -421,14 +421,45 @@ and then a sandbox socket denial, with unchanged affected checks passing on
 retry. No passing suite skipped a test and no paid native prompt was run.
 See [setup and reproducible package checks](integrations/copilot-cli.md#release-archive-validation).
 
+## SDK compatibility checkpoint — 2026-09-19
+
+Starting at `06bcc096f7d56d5728e2522c21265c94fa07836e`, ADPT-4 derives SDK version
+from each package manifest and target API version/digest from checked OpenAPI.
+Both public imports expose `SDK_VERSION`, `API_VERSION` and `OPENAPI_SHA256`;
+the existing client-identification header uses the generated SDK version.
+Installed-package checks verify those values and actual headers, and identify
+OS/architecture in their content-free result. No new dependency or API operation
+was added. The SDKs remain version 0.1.0 against the exact 0.2.0 contract.
+
+All nine tests per installed SDK pass on pinned offline Docker Linux arm64
+Node 22.23.2/Python 3.11.16 and host macOS arm64 Node 24.18.0/Python 3.14.6,
+zero skips. Clean builds agree within each environment and across them:
+
+| Archive | SHA-256 |
+| --- | --- |
+| npm | `f56d2b89ebcb2073755c5e673b5c1ca430ff4b6e528d81117ea7d9dba5b3530b` |
+| Python sdist | `5a677899b90920cfae0716192f9a8ffcf193913b5039dc4baf2c8337200b9894` |
+| Python wheel | `85663640731598b1e47349b6d8060a2e7f1cde3fe18c00fed451e08c16b205e8` |
+
+Synthetic version changes in each package manifest and OpenAPI independently
+fail the existing generated-contract drift gate; unchanged inputs pass. CI now
+declares both runtime pairs, keeping gateway acceptance on the minimum pair.
+Remote CI remains unverified. Full CI, fresh DB, live Keycloak and Compose
+acceptance were not rerun for this metadata/header increment; prior live
+workflow evidence remains dated above. Rust is unchanged. The
+[SDK guide](../sdks/README.md#compatibility-and-release-boundary) records the
+exact tested contract and remaining licence, namespace, provenance and public
+support decisions. No publication or wider compatibility claim follows.
+
 ## Remaining actions
 
 The CPR-45 deterministic-gate checkpoint is closed. Wider live reference
 acceptance remains in its open brief.
 
 1. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
-   runtime/server matrix and release ownership before public distribution.
-   Local archive build/install/import is verified; packages remain unpublished.
+   public support window and release ownership before public distribution.
+   The measured runtime/contract matrix and local archive build/install/import
+   are verified; packages remain unpublished.
 2. Native Codex/Copilot execution from a published installation, non-text
    results and other client versions/platforms require their own evidence.
    Copilot native outage/compaction also remains unqualified. Generic

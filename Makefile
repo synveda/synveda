@@ -227,7 +227,7 @@ db-test:
 SYNVEDA_PYTHON ?= python3
 .PHONY: sdk-check sdk-package-check interop-acceptance
 sdk-check:
-	SYNVEDA_DATAMODEL_CODEGEN="$(SYNVEDA_DATAMODEL_CODEGEN)" node scripts/generate-sdk-contract.mjs --check
+	SYNVEDA_PYTHON="$(SYNVEDA_PYTHON)" SYNVEDA_DATAMODEL_CODEGEN="$(SYNVEDA_DATAMODEL_CODEGEN)" node scripts/generate-sdk-contract.mjs --check
 	pnpm --filter @synveda/sdk test
 	PYTHONPATH=sdks/python $(SYNVEDA_PYTHON) -m unittest discover -s sdks/python/tests -v
 

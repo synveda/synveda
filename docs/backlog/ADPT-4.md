@@ -2,7 +2,7 @@
 
 ## Problem and evidence
 
-The initial slice in `sdks/` now generates 15 operations and 52 schemas from the checked OpenAPI, with bounded HTTPX/Fetch clients, nine tests per language and a shared real-gateway acceptance workflow. Claude hook replay and both SDKs share authenticated Session identity, approved Skill bytes, pending proposals, workspace denial and correlated content-free audit. Public publication, wider operation coverage and a verified runtime/server matrix remain open. The shared Keycloak workflow passes. Framework-specific shims are not a substitute for supported base clients.
+The initial slice in `sdks/` now generates 15 operations and 52 schemas from the checked OpenAPI, with bounded HTTPX/Fetch clients, nine tests per language and a shared real-gateway acceptance workflow. Claude hook replay and both SDKs share authenticated Session identity, approved Skill bytes, pending proposals, workspace denial and correlated content-free audit. Installed packages expose verified build metadata, with two measured runtime pairs. Public publication, wider operation coverage and the public runtime/server support policy remain open. The shared Keycloak workflow passes. Framework-specific shims are not a substitute for supported base clients.
 
 ## Scope
 
@@ -101,7 +101,38 @@ suites were not rerun for this packaging-only batch. Exact hashes, corrected
 environment failures and reproduction are in `docs/INTEROPERABILITY_PLAN.md`
 and `sdks/README.md`.
 
-Next: resolve the owner decisions listed under Dependencies before public
-distribution, then implement only the approved release path and compatibility
-matrix. Local packaging is verified; no API expansion or framework adapter is
-needed for it. ADPT-4 remains open for its wider scope.
+**Compatibility increment (2026-09-19; starting at `06bcc096f7d56d5728e2522c21265c94fa07836e`)**
+
+The generated contracts already carry the OpenAPI digest, but both HTTP clients
+hard-code SDK version `0.1.0` in their identification header. Public imports do
+not expose a package/API/contract tuple, and CI tests only Node 22/Python 3.11.
+A package version bump could therefore misidentify the installed client.
+
+Under the amended ADR-0106, derive the two package versions and OpenAPI version
+through the existing generator, expose the three metadata constants and verify
+the header through the installed-package wire suites. Add Node 24/Python 3.14
+to the existing CI job while keeping real gateway acceptance on the minimum
+pair. Record exact measured runtimes/platforms; no compatibility range or public
+support promise is inferred. Reuse the package checks, their hash-locked inputs
+and the documented offline Docker path.
+
+Acceptance passed: isolated TypeScript/Python package-version and API-version
+mutations each fail the existing generator drift check; unchanged inputs pass.
+Installed public metadata equals each manifest and current OpenAPI, and actual
+HTTP headers use the SDK version. Nine tests per SDK pass on pinned offline
+Docker Linux arm64 Node 22.23.2/Python 3.11.16 and host macOS arm64 Node
+24.18.0/Python 3.14.6, with zero skips and identical archive hashes. No API
+expansion, protocol negotiation or framework adapter was needed.
+
+CI declares both runtime pairs on Linux amd64, but its remote execution remains
+unverified. SDK drift, formatting, dependency direction, adapter conformance,
+generated console types, docs, backlog, ADR and CI YAML checks pass. Full CI,
+fresh database, live Keycloak and Compose acceptance were
+not rerun for this metadata/header change; prior authenticated evidence remains
+dated to its original source. No Rust changed, so strict Clippy is inapplicable.
+The [SDK guide](../../sdks/README.md#compatibility-and-release-boundary) records
+the exact contract and measured matrix, separate from public support policy.
+
+Next: obtain the owner decisions under Dependencies, then add only the selected
+release path and support policy. No public package was published. ADPT-4
+remains open for those decisions and its wider scope.

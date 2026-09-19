@@ -16,6 +16,10 @@ import httpx
 T = TypeVar("T")
 TokenProvider = Callable[[bool], Awaitable[str]]
 CONTRACT = json.loads(files("synveda").joinpath("contract.json").read_text())
+# Build identity only; this does not negotiate compatibility with a live server.
+SDK_VERSION: str = CONTRACT["sdk_version"]
+API_VERSION: str = CONTRACT["api_version"]
+OPENAPI_SHA256: str = CONTRACT["openapi_sha256"]
 
 
 @dataclass(frozen=True)
@@ -105,7 +109,7 @@ class Client:
             if not _header(token, 16_384):
                 raise ValueError("Bearer provider returned an invalid token")
             headers = {"authorization": f"Bearer {token}", "traceparent": parent,
-                       "x-synveda-client": "synveda-python/0.1.0", "accept": "application/json"}
+                       "x-synveda-client": f"synveda-python/{SDK_VERSION}", "accept": "application/json"}
             if body is not None:
                 headers["content-type"] = "application/json"
             if route["idempotent"]:

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 import httpx
-from synveda import ApiError, Client, TransportError
+from synveda import SDK_VERSION, ApiError, Client, TransportError
 
 PARENT = "00-11111111111111111111111111111111-2222222222222222-01"
 
@@ -55,6 +55,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.url.raw_path.decode(), fixture["url"])
             self.assertEqual(json.loads(request.content) if request.content else None, fixture["body"])
             self.assertEqual(request.headers["authorization"], "Bearer synthetic-token")
+            self.assertEqual(request.headers["x-synveda-client"], f"synveda-python/{SDK_VERSION}")
             self.assertEqual(request.headers.get("idempotency-key"), options.get("idempotency_key"))
             self.assertEqual(request.headers["traceparent"], PARENT)
 

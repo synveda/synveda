@@ -10,6 +10,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const source = join(root, "sdks/typescript");
+const metadata = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
+const api = JSON.parse(readFileSync(join(root, "docs/api/openapi.json"), "utf8"));
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-sdk-npm-")));
 const env = { ...process.env, npm_config_cache: join(scratch, "npm-cache"),
   npm_config_offline: "true", npm_config_loglevel: "silent", npm_config_ignore_scripts: "false" };
@@ -48,9 +50,18 @@ try {
   assert.equal(realpathSync(installed), installed, "install must extract the archive, not link the source checkout");
   const resolved = run(process.execPath, ["--input-type=module", "-e", "console.log(import.meta.resolve('@synveda/sdk'))"], consumer).trim();
   assert.equal(resolved, pathToFileURL(join(installed, "dist/client.mjs")).href);
+  const info = JSON.parse(run(process.execPath, ["--input-type=module", "-e", `
+import { SDK_VERSION, API_VERSION, OPENAPI_SHA256 } from "@synveda/sdk";
+console.log(JSON.stringify({ sdk_version: SDK_VERSION, api_version: API_VERSION, openapi_sha256: OPENAPI_SHA256 }));
+`], consumer));
+  const installedMetadata = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
+  assert.equal(installedMetadata.version, metadata.version);
+  assert.deepEqual(info, { sdk_version: metadata.version, api_version: api.info.version,
+    openapi_sha256: sha256(join(root, "docs/api/openapi.json")) }, "installed SDK build identity must match its manifest and OpenAPI");
 
   writeFileSync(join(consumer, "consumer.mts"), `
-import { Client, type OpenSessionBody } from "@synveda/sdk";
+import { Client, SDK_VERSION, API_VERSION, OPENAPI_SHA256, type OpenSessionBody } from "@synveda/sdk";
+const buildIdentity: readonly string[] = [SDK_VERSION, API_VERSION, OPENAPI_SHA256];
 const body: OpenSessionBody = { workspace_id: "synthetic", client_name: "package-check" };
 async function read(client: Client): Promise<string> {
   const response = await client.request("get_session", { path: { session_id: "synthetic" } });
@@ -60,7 +71,7 @@ async function read(client: Client): Promise<string> {
   await client.request("unknown_operation", {});
   return response.data.id;
 }
-void body; void read;
+void buildIdentity; void body; void read;
 `);
   run(process.execPath, [join(source, "node_modules/typescript/bin/tsc"), "--module", "NodeNext", "--target", "ES2022", "--strict", "--noEmit", "consumer.mts"], consumer);
 
@@ -69,7 +80,8 @@ void body; void read;
   cpSync(join(root, "sdks/fixtures/wire.json"), join(scratch, "fixtures/wire.json"));
   cpSync(join(builds[0].stage, "dist/client.test.mjs"), join(consumer, "dist/client.test.mjs"));
   process.stdout.write(run(process.execPath, ["--test", "--test-timeout=30000", "dist/client.test.mjs"], consumer));
-  console.log(JSON.stringify({ package: "@synveda/sdk", node: process.version, archive_sha256: sha256(builds[0].archive),
+  console.log(JSON.stringify({ package: metadata.name, ...info, node: process.version,
+    platform: process.platform, architecture: process.arch, archive_sha256: sha256(builds[0].archive),
     files: builds[0].fileCount, clean_builds_identical: true, installed_exports_and_types: true }));
 } finally {
   rmSync(scratch, { recursive: true, force: true });

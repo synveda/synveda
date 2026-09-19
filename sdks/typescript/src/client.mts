@@ -3,6 +3,11 @@ import { contract } from "./generated/contract.js";
 import type { ApiErrorBody, OperationId, Operations } from "./generated/api.js";
 export type * from "./generated/api.js";
 
+// Build identity only; this does not negotiate compatibility with a live server.
+export const SDK_VERSION = contract.sdk_version;
+export const API_VERSION = contract.api_version;
+export const OPENAPI_SHA256 = contract.openapi_sha256;
+
 export type TokenProvider = (refresh: boolean, signal: AbortSignal) => Promise<string>;
 export interface ApiResponse<T> { data: T; status: number; traceId: string; retryAfter?: string }
 export class ApiError extends Error {
@@ -70,7 +75,7 @@ export class Client {
         const response = await fetch(url, {
           method: route.method, body, signal, redirect: "error", credentials: "omit",
           headers: { authorization: `Bearer ${bearer}`, traceparent: parent,
-            "x-synveda-client": "synveda-typescript/0.1.0", accept: "application/json",
+            "x-synveda-client": `synveda-typescript/${SDK_VERSION}`, accept: "application/json",
             ...(body === undefined ? {} : { "content-type": "application/json" }),
             ...(route.idempotent ? { "idempotency-key": options.idempotencyKey! } : {}) },
         });

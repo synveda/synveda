@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
 import { test, type TestContext } from "node:test";
-import { ApiError, Client, TransportError, type OperationId } from "@synveda/sdk";
+import { ApiError, Client, SDK_VERSION, TransportError, type OperationId } from "@synveda/sdk";
 
 const parent = "00-11111111111111111111111111111111-2222222222222222-01";
 async function server(t: TestContext, handle: (req: IncomingMessage, res: ServerResponse) => void) {
@@ -26,7 +26,8 @@ test("shared Python/TypeScript wire fixtures: encoding, auth, idempotency and co
     req.on("end", () => {
       const fixture = fixtures[observed.length];
       observed.push({ method: req.method, url: req.url, body: body ? JSON.parse(body) : null,
-        token: req.headers.authorization, key: req.headers["idempotency-key"], trace: req.headers.traceparent });
+        token: req.headers.authorization, key: req.headers["idempotency-key"], trace: req.headers.traceparent,
+        client: req.headers["x-synveda-client"] });
       reply(res, 200, fixture.response);
     });
   });
@@ -36,7 +37,8 @@ test("shared Python/TypeScript wire fixtures: encoding, auth, idempotency and co
     assert.deepEqual(result.data, fixture.response);
     assert.equal(result.traceId, parent.slice(3, 35));
     assert.deepEqual(observed.at(-1), { method: fixture.method, url: fixture.url, body: fixture.body,
-      token: "Bearer synthetic-token", key: fixture.options.idempotencyKey, trace: parent });
+      token: "Bearer synthetic-token", key: fixture.options.idempotencyKey, trace: parent,
+      client: `synveda-typescript/${SDK_VERSION}` });
   }
 });
 

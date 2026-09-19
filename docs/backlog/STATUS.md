@@ -25,6 +25,14 @@ tests per SDK on Docker Linux arm64 Node 22.23.2/Python 3.11.16 and macOS arm64
 Node 24.18.0/Python 3.14.6, with matching clean-build hashes and no skips.
 `make sdk-package-check` also checks exported types and packaged contract
 resources; CI invokes it, but the remote job was not run locally.
+The 2026-09-19 compatibility increment derives SDK/API versions and the OpenAPI
+digest from their existing manifests, exposes them through both public imports
+and removes the hard-coded client-header version. Both measured runtime pairs
+pass installed metadata/header checks and produce identical archives. Synthetic
+package/API version changes fail the existing generator drift gate. CI now
+declares both pairs, with gateway acceptance only on the minimum pair; those
+remote jobs remain unverified. The [SDK guide](../../sdks/README.md#compatibility-and-release-boundary)
+separates the measured matrix from public support commitments.
 Public distribution awaits owner decisions on
 licence, namespaces, provenance custody and the supported server/runtime window.
 

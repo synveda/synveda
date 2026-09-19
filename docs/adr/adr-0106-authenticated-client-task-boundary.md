@@ -1,6 +1,6 @@
 # ADR-0106: Explicit task identity and public client interoperability
 
-- **Status**: Accepted
+- **Status**: Accepted; amended 2026-09-19
 - **Date**: 2026-09-12
 - **Feature(s)**: ADPT-1, ADPT-2, ADPT-4, CPR-12, CPR-23, CPR-39
 - **Deciders**: sujitn (implementation plan authorised 2026-09-12)
@@ -52,6 +52,23 @@ check exported types and packaged contract resources, and compare two clean
 builds. Installation uses a prepared hash-locked wheelhouse and no network.
 This is local artifact evidence; public names, licences, signing custody and
 release support policy remain owner decisions under ADPT-4.
+
+The SDK compatibility increment derives each package's version from its existing
+manifest and the target API version/digest from checked OpenAPI. Generate those
+values alongside the existing operation metadata, expose `SDK_VERSION`,
+`API_VERSION` and `OPENAPI_SHA256` through both public imports, and use the
+generated SDK version in the existing client-identification header. These are
+build facts, not a negotiated server range, a new API request or an authority
+claim. Installed-package checks must compare them with the source manifests and
+OpenAPI, then reuse the wire suites to verify the header actually sent.
+
+CI tests the existing minimum-runtime pair (Node 22/Python 3.11) and the already
+locally exercised pair (Node 24/Python 3.14). Run expensive gateway acceptance
+only on the minimum pair; both pairs build and test the real archives. Record
+OS, architecture, runtime, package/API versions and contract digest in the
+existing content-free package result. Test evidence remains distinct from a
+public support commitment. Do not add runtime negotiation, compatibility
+fallbacks, new dependencies or publication automation in this increment.
 
 The public Compose edge deliberately removes caller trace context. The gateway
 therefore returns its actual OpenTelemetry trace ID in `X-Synveda-Trace-Id` on

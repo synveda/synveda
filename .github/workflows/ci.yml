@@ -9,25 +9,39 @@ jobs:
   sdk-interop:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node: 22
+            python: '3.11'
+            interop: true
+          - node: 24
+            python: '3.14'
+            interop: false
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install
+        if: matrix.interop
       - uses: Swatinem/rust-cache@v2
+        if: matrix.interop
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python }}
       - run: python -m pip install --require-hashes -r sdks/python/requirements-dev.lock
       - run: pnpm install --frozen-lockfile
       - run: |
           python -m pip download --require-hashes --only-binary=:all: \
             -r sdks/python/requirements-dev.lock --dest "$RUNNER_TEMP/sdk-wheelhouse"
-      - run: make sdk-check sdk-package-check interop-acceptance
+      - run: make sdk-check sdk-package-check
         env:
           SYNVEDA_SDK_WHEELHOUSE: ${{ runner.temp }}/sdk-wheelhouse
+      - run: make interop-acceptance
+        if: matrix.interop
 
   # CPR-14 tier 2: captured real-client frames, but no Claude credential,
   # through the public session API and a real current-epoch database. This is

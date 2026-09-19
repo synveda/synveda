@@ -4,7 +4,7 @@ This initial, unpublished slice covers 15 operations from Synveda's checked
 OpenAPI: Sessions, observations, Context, approved immutable Skills, Knowledge
 proposals and audit pages. The generated contracts include the source SHA-256;
 they target the 0.2.0 API in this checkout. Broader API coverage, published
-packages and a supported server/runtime matrix remain in `docs/backlog/ADPT-4.md`.
+packages and a public support policy remain in `docs/backlog/ADPT-4.md`.
 
 TypeScript uses Node's maintained Fetch implementation; Python uses HTTPX.
 Neither client implements retrieval, policy, OAuth, orchestration or automatic
@@ -17,9 +17,10 @@ nine tests per SDK in pinned Linux arm64 containers on Node 22.23.2/Python
 3.11.16 and locally on macOS arm64 Node 24.18.0/Python 3.14.6. Each run built
 twice from clean staging directories, installed offline into separate consumers
 and checked exported types/resources. Both runs produced identical archives.
-CI declares Node 22/Python 3.11 on Linux amd64; that remote job was not executed
-locally. The full local CI and fresh database suite passed at `8f40237`;
-neither was rerun for the packaging change. These checks do not qualify live OIDC.
+CI declares Node 22/Python 3.11 and Node 24/Python 3.14 on Linux amd64; those
+remote matrix jobs were not executed locally. The full local CI and fresh
+database suite passed at `8f40237`; neither was rerun for the compatibility
+change. These package checks do not qualify live OIDC.
 No public npm/PyPI package is published by this work.
 
 The later live Keycloak run passed both examples through the canonical Docker
@@ -66,6 +67,53 @@ make sdk-check
 executables. Python runtime and generator dependencies are hash-locked; the
 TypeScript package uses the repository pnpm lock. The Python wheel includes
 generated types, operation bindings, contract metadata and `py.typed`.
+
+## Compatibility and release boundary
+
+SDK version **0.1.0** targets API version **0.2.0** and checked OpenAPI SHA-256
+`4030fc5c05beccd091cf7746a7985b0f59b84e9000b54b2cd4e908e82372b749`.
+That digest covers the whole API document; the SDK exposes only the 15 selected
+operations. Another server version or contract has no compatibility claim from
+these checks. Regenerate after reviewed contract or package-version changes,
+then rerun the drift, installed-package and applicable gateway acceptance gates.
+
+Both public imports expose build facts without a network request:
+
+```typescript
+import { SDK_VERSION, API_VERSION, OPENAPI_SHA256 } from "@synveda/sdk";
+```
+
+```python
+from synveda import SDK_VERSION, API_VERSION, OPENAPI_SHA256
+```
+
+`API_VERSION` is the build's target, not an observation of the connected server.
+The generator reads each package manifest and checked OpenAPI; request headers
+use that generated SDK version. Installed-package checks compare all three
+values with their sources and verify the actual client-identification header.
+They print the OS, architecture and runtime with content-free archive evidence.
+
+The 2026-09-19 compatibility increment starting at `06bcc09` measured:
+
+| Environment | Node / Python | Evidence |
+| --- | --- | --- |
+| Pinned offline Docker, Linux arm64 | 22.23.2 / 3.11.16 | Nine tests per installed SDK pass; metadata, exports/types/resources and two identical clean builds pass; zero skips. |
+| Local macOS arm64 | 24.18.0 / 3.14.6 | The same package checks pass; all archive hashes equal the Docker builds; zero skips. |
+| Declared CI, Linux amd64 | 22 / 3.11 and 24 / 3.14 | Both rows run SDK drift and archive checks; only the minimum pair runs gateway acceptance. Remote execution remains unverified. |
+
+The package manifests' Node 22+/Python 3.11+ requirements are minimums, not
+proof for every higher runtime or platform. Public support windows and
+deprecation commitments remain owner decisions. The existing authenticated
+workflow evidence below belongs to its named source/deployment; archive replay
+does not extend it to another server.
+
+| Publishing prerequisite | Current state / required decision |
+| --- | --- |
+| First-party licence | Repository terms remain unresolved; owner-approved SDK terms and required notices must be chosen before distribution. Dependency licence approval does not choose Synveda's licence. |
+| Package namespaces | `@synveda/sdk` is private; `synveda-sdk` is a local build name. Confirm registry ownership and intended public names. |
+| Publisher and provenance | Confirm release owner, trusted publisher identities and signing/provenance custody before adding publication automation. |
+| Support policy | Adopt or revise the measured runtime/server window and define compatibility/deprecation policy; no broader range is inferred here. |
+
 
 ## Check local package archives
 
@@ -114,6 +162,7 @@ docker run --rm --network none -v "$PWD:/source:ro" \
 The scripts print archive SHA-256 values and runtime versions. Python builds
 use a fixed `SOURCE_DATE_EPOCH`; matching clean builds are reproducibility
 evidence for those inputs, not signatures or a release support commitment.
+The results also identify the SDK/API versions and source OpenAPI digest.
 Public namespace, licence and signing/provenance ownership remain open in
 [ADPT-4](../docs/backlog/ADPT-4.md).
 

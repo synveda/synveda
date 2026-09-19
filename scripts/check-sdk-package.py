@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -95,6 +96,7 @@ def main():
         digest(wheel) in allowed for wheel in supplied
     ), "wheelhouse contains unlocked bytes"
     metadata = tomllib.loads((SOURCE / "pyproject.toml").read_text())
+    api = json.loads((ROOT / "docs/api/openapi.json").read_text())
     assert metadata["build-system"]["requires"] == [
         "hatchling==" + version("hatchling")
     ]
@@ -151,20 +153,26 @@ def main():
                 "-c",
                 """
 import importlib.util, json, sys
+from importlib.metadata import version
 from importlib.resources import files
 from pathlib import Path
 import synveda
-from synveda import models, operations
+from synveda import API_VERSION, OPENAPI_SHA256, SDK_VERSION, models, operations
 assert Path(synveda.__file__).is_relative_to(Path(sys.prefix))
 assert importlib.util.find_spec('hatchling') is None
 assert importlib.util.find_spec('datamodel_code_generator') is None
 contract = json.loads(files('synveda').joinpath('contract.json').read_text())
 assert contract['openapi_sha256'] == sys.argv[1]
+assert OPENAPI_SHA256 == sys.argv[1]
+assert SDK_VERSION == version('synveda-sdk') == sys.argv[2]
+assert API_VERSION == sys.argv[3]
 assert len(contract['operations']) == 15
 assert files('synveda').joinpath('py.typed').is_file()
 assert callable(operations.open_session) and models.OpenSessionBody
 """,
                 digest(ROOT / "docs/api/openapi.json"),
+                metadata["project"]["version"],
+                api["info"]["version"],
             ],
             scratch,
         )
@@ -186,7 +194,12 @@ assert callable(operations.open_session) and models.OpenSessionBody
             json.dumps(
                 {
                     "package": metadata["project"]["name"],
+                    "sdk_version": metadata["project"]["version"],
+                    "api_version": api["info"]["version"],
+                    "openapi_sha256": digest(ROOT / "docs/api/openapi.json"),
                     "python": sys.version.split()[0],
+                    "platform": sys.platform,
+                    "architecture": platform.machine(),
                     "sdist_sha256": digest(first[0]),
                     "wheel_sha256": digest(wheel),
                     "clean_builds_identical": True,
