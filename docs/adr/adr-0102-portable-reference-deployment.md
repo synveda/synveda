@@ -1,6 +1,6 @@
 # ADR-0102: Portable reference deployment contract
 
-- **Status**: Accepted; amended by ADR-0105
+- **Status**: Accepted; amended by ADR-0105 and 2026-09-19
 - **Date**: 2026-08-27
 - **Feature(s)**: CPR-45
 - **Deciders**: Synveda maintainers
@@ -19,6 +19,18 @@ separately supplied KMS key/reference and surviving Keycloak convergence
 credential. That is the Docker-reference recovery contract. S3-compatible
 encrypted retention, WAL/PITR, owned RPO/RTO, off-host retention policy and
 recurring production drills remain OPS-5 work.
+
+The 2026-09-19 development retry found an unchanged hosts mapping and backup
+whose persisted filesystem device number alone had changed. Read-only status
+and normal lifecycle checks continue to require the complete saved witness.
+An explicitly confirmed, privileged hosts installation may renew that witness
+only after reading the protected backup and verifying its nonce, selection,
+source-to-installed digest, exact installed hosts bytes and metadata, and every
+other saved backup witness field. It preserves the hosts inode and backup.
+Under the existing mutation lock, it removes only the verified public receipt
+and reuses interrupted-install recovery to publish a fresh one. A failure in
+between leaves startup refused and the same confirmed installation retryable.
+Removal, unknown drift and unowned mappings retain their existing refusals.
 
 ## Context
 

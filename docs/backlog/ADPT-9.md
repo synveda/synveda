@@ -184,6 +184,24 @@ lost Session's budget. Both SDKs, live delivery/audit after this fix, Capture/en
 and reuse on the native task remain unverified. Native outage/compaction,
 other error/result shapes and packaging remain open. Keep support experimental.
 
+### Replacement qualification prepared — 2026-09-19
+
+CPR-45's confirmed device-only witness renewal restored the existing Docker
+project without resetting its volumes or secrets. Canonical up/smoke, hostname
+resolution and both ordinary Keycloak browser PKCE logins pass. The approved
+Skill again installs through the public API into the isolated native root;
+its file hash matches the original immutable version and native discovery
+passes. The existing foreign Session returns HTTP 403. All 345 deployment
+tests pass without skips.
+
+The replacement native start/resume pair uses an owner-only ignored directory
+excluded from Docker build contexts, with credentials outside the harness
+project and saved native state retained between invocations. The old temporary
+Session is not reconstructed. Next run the prepared pair after explicit
+new-Session service-cost allowance, then verify both unchanged SDK examples,
+durable delivery, Capture, explicit end, Knowledge reuse and content-free audit
+on that same native-created Synveda task. No replacement paid prompt has run.
+
 ## Dependencies
 
 Existing ADPT-1/2/4, CPR-12/23/39, ADR-0098/0106 and the Docker reference

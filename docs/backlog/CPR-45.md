@@ -38,6 +38,35 @@ private OpenTelemetry Collector. Synveda and Keycloak use separate databases
 and roles. Keycloak stays behind the generic OIDC/OAuth2 + PKCE boundary and is
 the only bundled identity provider. Temporal is absent.
 
+### Hosts witness recovery — 2026-09-19
+
+At `fbb340973ae482be5ee62f128957660bced9442c`, the existing
+`acceptance-interop` deployment refused startup because the protected hosts
+backup's saved `dev` alone had changed. Installed hosts bytes still matched
+their recorded digest. The ADR-0102 amendment adds a confirmed privileged
+installation repair: verify the complete protected backup and exact installed
+target, preserve every other witness field, and republish only the public
+receipt through existing interrupted-install recovery. Status and removal
+remain strict. Unknown drift is never adopted.
+
+The operator ran the exact same-project install confirmation. Ownership and
+resolver checks, canonical `compose-up` and `compose-smoke` now pass with the
+existing volumes and secrets. The hosts content digest remained
+`5e318b3359804b40b3929f3a2ea7803a67892e896d34af6164b784f1b9a76876`.
+Ordinary approver and author browser PKCE logins also passed for ADPT-9.
+
+All 345 `make check-deploy` tests pass with no skips, followed by the Compose
+render and deployment-convergence checks. The hosts suite passes 39/39 on
+macOS Node 24.18.0 and 37/39 on pinned Linux arm64 Node 22.23.2: the Linux run
+explicitly skips the unavailable xattr tool fixture and Darwin ACL fixture.
+The bare Node image first failed five checks because its required Linux `acl`
+package was absent; installing that documented system dependency in a
+disposable container resolved those failures. Formatting, dependency direction,
+docs, backlog and ADR gates pass. No Rust changed; Clippy is not applicable.
+Full CI, fresh database tests and the full live Compose restart acceptance were
+not rerun. This repair does not close the reference deployment's remaining
+platform, recovery, upgrade or published-installation qualification.
+
 ## Scope
 
 - Keep one provider-neutral configuration, image, command, schema, health,

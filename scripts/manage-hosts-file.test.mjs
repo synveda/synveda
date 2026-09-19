@@ -857,6 +857,81 @@ test("stale nlink-two stages must link to the exact published sidecar", () => {
   }
 });
 
+function changeSavedDevice(state, extraField) {
+  const path = join(state.scratch, STATE);
+  const record = JSON.parse(readFileSync(path, "utf8"));
+  for (const field of ["dev", ...(extraField === undefined ? [] : [extraField])]) {
+    record.backupWitness[field] = (BigInt(record.backupWitness[field]) + 1n).toString();
+  }
+  writeFileSync(path, `${JSON.stringify(record)}\n`);
+}
+
+test("only confirmed installation renews a device-only witness without changing hosts or backup", () => {
+  const state = fixture();
+  try {
+    manage(state, "install");
+    const installed = readFileSync(state.hosts);
+    const before = lstatSync(state.hosts, { bigint: true });
+    const backup = readFileSync(join(state.scratch, BACKUP));
+    const backupStat = lstatSync(join(state.scratch, BACKUP), { bigint: true });
+    changeSavedDevice(state);
+    assertRefused(() => manage(state, "status"), /ownership/);
+    assertRefused(() => manage(state, "remove"), /ownership/);
+    assertRefused(() => manage(state, "install", BUNDLED, "wrong"), /confirmation/, 64);
+    assert.equal(manage(state, "install"), "installed");
+    assert.equal(manage(state, "status"), "installed");
+    assert.deepEqual(readFileSync(state.hosts), installed);
+    for (const field of ["dev", "ino", "uid", "gid", "mode", "size", "mtimeNs", "ctimeNs"]) {
+      assert.equal(lstatSync(state.hosts, { bigint: true })[field], before[field]);
+      assert.equal(lstatSync(join(state.scratch, BACKUP), { bigint: true })[field], backupStat[field]);
+    }
+    assert.deepEqual(readFileSync(join(state.scratch, BACKUP)), backup);
+    assert.equal(manage(state, "remove"), "absent");
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("device renewal refuses every other witness change and mismatched installed content", () => {
+  for (const drift of ["ino", "nlink", "uid", "gid", "mode", "size", "mtimeNs", "ctimeNs", "hosts", "backup"]) {
+    const state = fixture();
+    try {
+      manage(state, "install");
+      changeSavedDevice(state, ["hosts", "backup"].includes(drift) ? undefined : drift);
+      if (drift === "hosts") writeFileSync(state.hosts, state.source);
+      if (drift === "backup") {
+        const path = join(state.scratch, BACKUP);
+        const record = JSON.parse(readFileSync(path, "utf8"));
+        record.nonce = "00000000-0000-4000-8000-000000000000";
+        writeFileSync(path, `${JSON.stringify(record)}\n`);
+      }
+      const before = [state.hosts, join(state.scratch, STATE), join(state.scratch, BACKUP)].map(path => readFileSync(path));
+      assertRefused(() => manage(state, "install"), /ownership|drift/);
+      assert.deepEqual([state.hosts, join(state.scratch, STATE), join(state.scratch, BACKUP)].map(path => readFileSync(path)), before);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("interrupted device renewal remains refused until the confirmed installation retries", () => {
+  const state = fixture();
+  try {
+    manage(state, "install");
+    const installed = readFileSync(state.hosts);
+    changeSavedDevice(state);
+    assert.throws(() => manage(state, "install", BUNDLED, confirmation("install"), {
+      hooks: { afterStateRemoved: () => refuseFixture("interrupted-renewal") },
+    }), /interrupted-renewal/);
+    assertRefused(() => manage(state, "status"), /incomplete/, 75);
+    assert.deepEqual(readFileSync(state.hosts), installed);
+    assert.equal(manage(state, "install"), "installed");
+    assert.equal(manage(state, "status"), "installed");
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
 test("target drift and recovery-record drift fail closed", () => {
   const targetDrift = fixture();
   try {

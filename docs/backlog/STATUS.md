@@ -62,10 +62,15 @@ native delivery remains recorded. All 140 adapter tests (27 Copilot) pass on
 host Node 24 and offline Docker Node 22, with zero skips; strict TypeScript and
 the repository metadata gates pass. The 2026-09-19 retry found the temporary
 native Session/credentials/spool absent and Compose startup blocked by a changed
-hosts-backup device witness. Next resolve that CPR-45 prerequisite and prepare
-a replacement qualification with durable private state. Native resume, live
-delivery after the fix and full conformance remain unverified; no paid prompt
-ran on retry. Pi was not on PATH during the earlier inventory.
+hosts-backup device witness. CPR-45 now repairs that exact device-only drift
+through confirmed installation after rechecking the protected recovery copy.
+Canonical up/smoke, resolver checks and ordinary browser PKCE login pass;
+all 345 deployment tests pass without skips. The replacement Copilot pair is
+prepared with durable private state, an exact approved Skill and a verified
+foreign-workspace denial. Native resume, live delivery after the parser fix and
+full conformance remain unverified pending the new Session's explicit cost
+allowance; no replacement paid prompt has run yet. Pi was not on PATH during
+the earlier inventory.
 These are independent of the public-release decisions.
 
 The apparent deployment-gate stall was delayed reporting: the unchanged

@@ -749,7 +749,7 @@ function validateBackupRecord(value, selection) {
   return { nonce: value.nonce, selection: storedSelection, target: value.target, source };
 }
 
-function inspectSidecars(paths, selection, expectedUid, openBackup) {
+function inspectSidecars(paths, selection, expectedUid, openBackup, renewDevice = false) {
   const stateStat = lstatIfPresent(paths.state);
   const backupStat = lstatIfPresent(paths.backup);
   if (stateStat === undefined && backupStat === undefined) return undefined;
@@ -775,13 +775,16 @@ function inspectSidecars(paths, selection, expectedUid, openBackup) {
     refuse("hosts ownership state audience was refused");
   }
   if (backup !== undefined) {
+    const witness = renewDevice
+      ? { ...publicState.backupWitness, dev: backupSnapshot.stat.dev.toString() }
+      : publicState.backupWitness;
     if (
       backup.nonce !== publicState.nonce ||
       backup.target.uid !== publicState.target.uid ||
       backup.target.gid !== publicState.target.gid ||
       backup.target.mode !== publicState.target.mode ||
       digest(installedBytes(backup.source, selection)) !== publicState.installedDigest ||
-      !witnessMatches(backupSnapshot.stat, publicState.backupWitness)
+      !witnessMatches(backupSnapshot.stat, witness)
     ) {
       refuse("hosts ownership state was refused");
     }
@@ -1197,14 +1200,24 @@ function installMapping(paths, selection, expectedUid, expectedGid, lock, hooks)
     "hosts file",
     hooks,
   );
-  const existing = inspectSidecars(paths, selection, expectedUid, true);
+  const existing = inspectSidecars(paths, selection, expectedUid, true, true);
   if (existing === undefined) {
     if (classifyHostsBytes(target.bytes, selection).state !== "absent") {
       refuse("unowned hosts mapping was refused");
     }
   } else {
     const existingMatch = targetMatchesRecord(target, existing, selection, true);
-    if (existingMatch.state === "installed" && existing.public !== undefined) {
+    if (existing.public !== undefined && !witnessMatches(existing.backupSnapshot.stat, existing.public.backupWitness)) {
+      // Only a confirmed install reads and revalidates the protected backup.
+      // Renew a device-only witness through the existing receipt-loss recovery;
+      // status/removal and all other persistent witness fields remain strict.
+      if (existingMatch.state !== "installed") refuse("hosts file drift was refused");
+      syncTarget(paths, target, expectedUid, hooks);
+      inspectSidecars(paths, selection, expectedUid, true, true);
+      assertLock(paths, lock, expectedUid);
+      removeExact(paths.state, existing.stateSnapshot, paths, "hosts ownership state");
+      hooks.afterStateRemoved?.();
+    } else if (existingMatch.state === "installed" && existing.public !== undefined) {
       syncTarget(paths, target, expectedUid, hooks);
       return "installed";
     }
