@@ -14,10 +14,11 @@ proves both native starts use the same Synveda task, with both SDKs running
 between the prompts. Earlier failures remain in their original fixtures.
 The last assistant observation requires a subsequent native reopen/exit.
 Native outage/compaction, unknown/non-text result formats, other client
-versions/platforms and packaging remain unqualified. This entry makes no
+versions/platforms and native execution from a published installation remain
+unqualified. This entry makes no
 Copilot cloud-agent or VS Code support claim.
 
-## Build and connect
+## Install or build, then connect
 
 Follow [the Docker reference guide](../../deploy/compose/README.md) for gateway,
 issuer, hosts and secret setup. Sign in with `synveda login` and select the
@@ -26,6 +27,16 @@ workspace/project in `.synveda/config.json` or `SYNVEDA_WORKSPACE` and
 isolated `XDG_CONFIG_HOME`; keep bearer credentials out of project files.
 CLI-resolved credentials pin the gateway origin. Configuration does not grant
 access to a selected workspace.
+
+The [release installer](../INSTALL.md) carries the complete runtime under
+`$SYNVEDA_HOME/plugin/copilot-cli/` (default `~/.synveda/plugin/copilot-cli/`).
+Use Node 22+ and the absolute `dist/hook.mjs` path printed by the installer
+in each hook below. Keep the complete runtime tree: its private shared
+dependency is included. Client configuration and hook trust are separate
+setup steps. Local archive replay is covered by `make plugin-package-check`;
+native qualification still refers to the source-build setup above.
+
+For a source checkout, build with the locked workspace dependencies:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -401,11 +412,66 @@ replay establishes idempotency; it is not native outage-recovery evidence.
 
 No product implementation changed. Native outage/compaction, other result
 formats and client platforms, published installation, full CI, fresh database
-tests and full Compose restart acceptance were not exercised. Packaging through
-the existing archive and installer is the next ADPT-9 increment.
+tests and full Compose restart acceptance were not exercised in that run.
+Archive and installer validation is recorded separately below.
 
 All 144 adapter tests passed on macOS arm64 Node 24.18.0 and pinned offline
 Docker Linux arm64 Node 22.23.2, zero skips: 105 Claude, eight Codex and 31
 Copilot. Strict TypeScript, formatting, dependency direction, registry/digests,
 docs, backlog and ADR gates passed. Rust is unchanged, so strict Clippy is not
 applicable.
+
+## Release archive validation
+
+On 2026-09-19, starting at `571a6c6a185fe73efd4d04fccc4d38a3df3d7a91`, ADPT-9
+extends the existing archive and installer under ADR-0065 amendment 10. Each Codex/Copilot
+tree contains 17 regular runtime/manifest files, with release-pinned private
+dependencies and no source, test, fixture or workspace symlink. Production
+bytes match the build and resolve dependencies inside the extracted archive
+before any test helpers are added. No adapter or server behaviour changed.
+
+| Environment | Extracted lifecycle replay | Installer fixtures |
+| --- | --- | --- |
+| macOS arm64, Node 24.18.0 | 8 Codex + 23 Copilot pass | 12 pass |
+| Offline Docker Linux arm64, Node 22.23.2 | 8 Codex + 23 Copilot pass | 2 pass, 10 fail at the existing unsupported-platform refusal; not a passing installer run |
+| Offline Docker Linux x86_64 under emulation, Node 22.23.2 | 8 Codex + 23 Copilot pass | 12 pass |
+
+All passing suites report zero skips. Installer fixtures exercise initial
+installation, reinstall, upgrade, preserved Codex/Copilot configuration and
+project hooks, and missing hook/shared-runtime refusal before mutation. They
+use synthetic release binaries; they do not qualify native binaries or a
+published release. Linux arm64 remains outside the installer's release matrix.
+
+After building all three adapters with the frozen workspace dependencies, run
+`make plugin-package-check` and `node --test scripts/install.test.mjs`. The
+supported Linux installer check uses the immutable x86_64 child of the Node
+image index above:
+
+```sh
+docker run --rm --platform linux/amd64 --network none --user 1000:1000 \
+  --cap-drop ALL --security-opt no-new-privileges --read-only \
+  --tmpfs /tmp:rw,exec,nosuid,nodev,size=256m \
+  --mount "type=bind,src=$PWD,dst=/workspace,readonly" --workdir /workspace \
+  node@sha256:b6ca9eabea5fc816699178b5dd4842270e1c42f90739afc93bbcfdf91a13512e \
+  sh -c 'node scripts/check-plugin-package.mjs && node --test scripts/install.test.mjs'
+```
+
+The full 144-test adapter regression passes again on the host. Strict
+TypeScript, shell syntax, formatting, dependency direction, registry, docs,
+backlog and ADR checks pass. All 347 deployment tests pass across completed
+component runs, with zero skips; the Compose render matrix and deployment
+convergence check also pass.
+
+Neither complete `make check-deploy` invocation passed uninterrupted. The first
+failed the unchanged TERM-responsive-leader fixture: timeout 124 instead of
+forced-cleanup 125. All eight deadline tests passed unchanged in isolation.
+The second passed all 298 tests before deployment convergence, including all
+169 lifecycle cases, then failed when the sandbox denied an ordinary loopback
+socket. The remaining 49 convergence/uninstall tests and static convergence
+check passed with that required socket permission. No runtime or gate was
+changed to obtain those results.
+
+No additional paid native prompt was run. Full CI, fresh database tests,
+live Compose restart acceptance and native
+execution from a published installation were not run; Rust Clippy is not
+applicable because no Rust changed.

@@ -67,14 +67,17 @@ function buildAssets(scratch, releaseVersion = version, releaseSourceSha = sourc
   archive(consoleStage, join(assets, `synveda-console-${releaseVersion}.tar.gz`), ["console"]);
   mkdirSync(join(pluginStage, "plugin"), { recursive: true });
   writeFileSync(join(pluginStage, "plugin/manifest.json"), "{}\n");
-  mkdirSync(join(pluginStage, "plugin/codex/dist"), { recursive: true });
-  writeFileSync(join(pluginStage, "plugin/codex/dist/hook.mjs"), `// fixture ${releaseVersion}\n`);
-  writeFileSync(join(pluginStage, "plugin/codex/dist/transcript.mjs"), "// fixture\n");
-  writeFileSync(join(pluginStage, "plugin/codex/package.json"), "{}\n");
-  const shared = join(pluginStage, "plugin/codex/node_modules/@synveda/claude-code-adapter");
-  mkdirSync(join(shared, "dist"), { recursive: true });
-  writeFileSync(join(shared, "package.json"), "{}\n");
-  writeFileSync(join(shared, "dist/session-runtime.mjs"), "// fixture\n");
+  for (const client of ["codex", "copilot-cli"]) {
+    const runtime = join(pluginStage, "plugin", client);
+    mkdirSync(join(runtime, "dist"), { recursive: true });
+    writeFileSync(join(runtime, "dist/hook.mjs"), `// fixture ${releaseVersion}\n`);
+    writeFileSync(join(runtime, "dist/transcript.mjs"), "// fixture\n");
+    writeFileSync(join(runtime, "package.json"), "{}\n");
+    const shared = join(runtime, "node_modules/@synveda/claude-code-adapter");
+    mkdirSync(join(shared, "dist"), { recursive: true });
+    writeFileSync(join(shared, "package.json"), "{}\n");
+    writeFileSync(join(shared, "dist/session-runtime.mjs"), "// fixture\n");
+  }
   archive(pluginStage, join(assets, `synveda-plugin-${releaseVersion}.tar.gz`), ["plugin"]);
   execFileSync(
     "bash",
@@ -118,9 +121,11 @@ test("installer converges the canonical reference and preserves mutable state", 
   t.after(() => rmSync(scratch, { recursive: true, force: true }));
   const assets = buildAssets(scratch);
   const fixture = installEnv(scratch, assets);
+  const project = join(scratch, "project");
+  mkdirSync(project);
 
   const first = spawnSync("/bin/sh", [installer], {
-    cwd: root,
+    cwd: project,
     encoding: "utf8",
     env: fixture.env,
   });
@@ -150,17 +155,34 @@ test("installer converges the canonical reference and preserves mutable state", 
   assert.equal(existsSync(clientConfig), false, "install must not configure Codex");
   mkdirSync(join(fixture.env.HOME, ".codex"), { recursive: true });
   writeFileSync(clientConfig, "# user-owned configuration\n");
+  const copilotHook = join(fixture.home, "plugin/copilot-cli/dist/hook.mjs");
+  assert.ok(first.stdout.includes(copilotHook));
+  assert.match(first.stdout, new RegExp(`/blob/${sourceSha}/docs/integrations/copilot-cli\\.md`));
+  assert.equal(readFileSync(copilotHook, "utf8"), `// fixture ${version}\n`);
+  const copilotConfig = join(fixture.env.HOME, ".copilot/mcp-config.json");
+  const projectHooks = join(project, ".github/hooks/synveda.json");
+  assert.equal(existsSync(copilotConfig), false, "install must not configure Copilot MCP");
+  assert.equal(existsSync(projectHooks), false, "install must not configure project hooks");
+  mkdirSync(join(fixture.env.HOME, ".copilot"), { recursive: true });
+  mkdirSync(join(project, ".github/hooks"), { recursive: true });
+  const copilotConfigBytes = '{"mcpServers":{"user-owned":{"command":"custom-server"}}}\n';
+  const projectHookBytes = '{"version":1,"hooks":{"sessionStart":[]}}\n';
+  writeFileSync(copilotConfig, copilotConfigBytes);
+  writeFileSync(projectHooks, projectHookBytes);
 
   const sentinel = join(fixture.home, "state/synveda-reference/operator-sentinel");
   writeFileSync(sentinel, "preserve\n");
   const second = spawnSync("/bin/sh", [installer], {
-    cwd: root,
+    cwd: project,
     encoding: "utf8",
     env: fixture.env,
   });
   assert.equal(second.status, 0, second.stderr);
   assert.equal(readFileSync(codexHook, "utf8"), `// fixture ${version}\n`);
   assert.equal(readFileSync(clientConfig, "utf8"), "# user-owned configuration\n");
+  assert.equal(readFileSync(copilotHook, "utf8"), `// fixture ${version}\n`);
+  assert.equal(readFileSync(copilotConfig, "utf8"), copilotConfigBytes);
+  assert.equal(readFileSync(projectHooks, "utf8"), projectHookBytes);
   assert.equal(readFileSync(sentinel, "utf8"), "preserve\n");
   assert.equal(readFileSync(join(fixture.bin, "synveda"), "utf8").startsWith("#!/bin/sh"), true);
 
@@ -170,7 +192,7 @@ test("installer converges the canonical reference and preserves mutable state", 
   mkdirSync(upgradeScratch);
   const upgradeAssets = buildAssets(upgradeScratch, nextVersion, nextSourceSha);
   const upgrade = spawnSync("/bin/sh", [installer], {
-    cwd: root,
+    cwd: project,
     encoding: "utf8",
     env: {
       ...fixture.env,
@@ -181,6 +203,9 @@ test("installer converges the canonical reference and preserves mutable state", 
   assert.equal(upgrade.status, 0, upgrade.stderr);
   assert.equal(readFileSync(codexHook, "utf8"), `// fixture ${nextVersion}\n`);
   assert.equal(readFileSync(clientConfig, "utf8"), "# user-owned configuration\n");
+  assert.equal(readFileSync(copilotHook, "utf8"), `// fixture ${nextVersion}\n`);
+  assert.equal(readFileSync(copilotConfig, "utf8"), copilotConfigBytes);
+  assert.equal(readFileSync(projectHooks, "utf8"), projectHookBytes);
   assert.equal(
     readlinkSync(join(fixture.home, "reference/current")),
     `releases/${nextVersion}-${nextSourceSha}`,
@@ -283,24 +308,33 @@ test("installer refuses symlinks in checksum-valid release archives before mutat
   assert.equal(existsSync(fixture.bin), false);
 });
 
-test("installer refuses an incomplete Codex runtime before mutation", (t) => {
-  const scratch = mkdtempSync(join(tmpdir(), "synveda-install-codex-missing-"));
-  t.after(() => rmSync(scratch, { recursive: true, force: true }));
-  const assets = buildAssets(scratch);
-  const fixture = installEnv(scratch, assets);
-  const stage = join(scratch, "plugin-stage");
-  rmSync(join(stage, "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/session-runtime.mjs"));
-  archive(stage, join(assets, `synveda-plugin-${version}.tar.gz`), ["plugin"]);
-  writeChecksums(assets, version);
+for (const { client, asset, label, error } of [
+  { client: "codex", asset: "node_modules/@synveda/claude-code-adapter/dist/session-runtime.mjs",
+    label: "Codex shared runtime", error: /Codex .*session-runtime\.mjs was missing/ },
+  { client: "copilot-cli", asset: "dist/hook.mjs",
+    label: "Copilot hook", error: /Copilot dist\/hook\.mjs was missing/ },
+  { client: "copilot-cli", asset: "node_modules/@synveda/claude-code-adapter/dist/session-runtime.mjs",
+    label: "Copilot shared runtime", error: /Copilot .*session-runtime\.mjs was missing/ },
+]) {
+  test(`installer refuses a missing ${label} before mutation`, (t) => {
+    const scratch = mkdtempSync(join(tmpdir(), "synveda-install-runtime-missing-"));
+    t.after(() => rmSync(scratch, { recursive: true, force: true }));
+    const assets = buildAssets(scratch);
+    const fixture = installEnv(scratch, assets);
+    const stage = join(scratch, "plugin-stage");
+    rmSync(join(stage, "plugin", client, asset));
+    archive(stage, join(assets, `synveda-plugin-${version}.tar.gz`), ["plugin"]);
+    writeChecksums(assets, version);
 
-  const result = spawnSync("/bin/sh", [installer], {
-    cwd: root, encoding: "utf8", env: fixture.env,
+    const result = spawnSync("/bin/sh", [installer], {
+      cwd: root, encoding: "utf8", env: fixture.env,
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, error);
+    assert.equal(existsSync(fixture.home), false);
+    assert.equal(existsSync(fixture.bin), false);
   });
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /Codex .*session-runtime\.mjs was missing/);
-  assert.equal(existsSync(fixture.home), false);
-  assert.equal(existsSync(fixture.bin), false);
-});
+}
 
 test("installer refuses a directory at a binary destination before mutation", (t) => {
   const scratch = mkdtempSync(join(tmpdir(), "synveda-install-binary-dir-"));

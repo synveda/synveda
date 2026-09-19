@@ -65,8 +65,9 @@ Reuse native `copilot mcp add` and Synveda's existing Skill `--root` override.
 Keep the server unbound for multiple tasks and pass the injected Synveda
 `session_id` explicitly. MCP uses the maintained `rmcp` server and public API;
 Python and TypeScript applications reuse that same Session. No external MCP
-server manager is required. This source-build experiment is not added to the
-release archive before its native qualification.
+server manager is required. Following the clean native qualification, package
+the existing compiled runtime through ADR-0065 amendment 10's archive and
+installer contract. Client configuration remains an explicit setup step.
 
 ## Options considered
 
@@ -88,7 +89,8 @@ release archive before its native qualification.
   events, 16 Capture candidates and audit verification through sequence 1179.
   The last assistant event required a subsequent native reopen/exit to become
   deliverable. Earlier missing-hook and parser failures remain pinned.
-  Native outage/compaction and packaging remain unqualified. The approved
+  Native outage/compaction and execution from a published installation remain
+  unqualified. Local archive replay has its own acceptance gate. The approved
   Skill's exact binding/file and activation path are evidenced separately;
   native activation alone still emits no typed Skill-usage event.
 - Reversal trigger: authentic frames demonstrate another necessary seam; add

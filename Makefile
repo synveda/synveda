@@ -383,7 +383,7 @@ check-release-parity:
 	node --test scripts/check-release-parity.test.mjs scripts/install.test.mjs
 	node scripts/check-release-parity.mjs
 
-# OPS-8/CPR-39: both adapters must already be built from the frozen lockfile.
+# OPS-8/CPR-39/ADPT-9: all three adapters must be built from the frozen lockfile.
 # Replay the captured lifecycle through the actual, extracted release archive.
 .PHONY: plugin-package-check
 plugin-package-check:

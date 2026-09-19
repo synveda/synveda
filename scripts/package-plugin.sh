@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Assembles the Claude marketplace and Codex hook runtime (OPS-8,
-# ADR-0065 amendments 2 and 9). Client configuration is a separate step.
+# Assembles the Claude marketplace and Codex/Copilot hook runtimes (OPS-8,
+# ADPT-9, ADR-0065 amendments 2, 9 and 10). Client configuration is separate.
 #
 # Usage: scripts/package-plugin.sh <version> <output-dir>
 #
@@ -12,6 +12,7 @@
 #   plugin/synveda/hooks/hooks.json           the four seams, auto-discovered
 #   plugin/synveda/dist/                      the prebuilt, dependency-free JS
 #   plugin/codex/                            the private, self-contained hook runtime
+#   plugin/copilot-cli/                      the private, self-contained hook runtime
 #
 # A **marketplace** rather than a bare plugin directory because that is the
 # unit Claude Code installs: `claude plugin marketplace add <path>` then
@@ -21,7 +22,7 @@
 # not a location Claude Code reads.
 #
 # `dist/` is gitignored, so the caller builds it first:
-#   pnpm --filter @synveda/codex-adapter... build
+#   pnpm --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter... build
 #
 # It writes nothing outside <output-dir>.
 set -euo pipefail
@@ -56,11 +57,13 @@ for module in $shared_modules; do
     exit 1
   }
 done
-for module in hook transcript; do
-  [ -f "adapters/codex/dist/$module.mjs" ] && [ ! -L "adapters/codex/dist/$module.mjs" ] || {
-    echo "package-plugin: build both adapters with pnpm --filter @synveda/codex-adapter... build" >&2
-    exit 1
-  }
+for client in codex copilot-cli; do
+  for module in hook transcript; do
+    [ -f "adapters/$client/dist/$module.mjs" ] && [ ! -L "adapters/$client/dist/$module.mjs" ] || {
+      echo "package-plugin: build the adapters with pnpm --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter... build" >&2
+      exit 1
+    }
+  done
 done
 
 stage="$outdir/plugin"
@@ -73,26 +76,28 @@ cp "$adapter/.mcp.json" "$stage/synveda/.mcp.json"
 cp -R "$adapter/hooks" "$stage/synveda/hooks"
 cp -R "$adapter/dist" "$stage/synveda/dist"
 
-codex="$stage/codex"
-shared="$codex/node_modules/@synveda/claude-code-adapter"
-mkdir -p "$codex/dist" "$shared/dist"
-for module in hook transcript; do
-  cp "adapters/codex/dist/$module.mjs" "$codex/dist/$module.mjs"
+for client in codex copilot-cli; do
+  runtime="$stage/$client"
+  shared="$runtime/node_modules/@synveda/claude-code-adapter"
+  mkdir -p "$runtime/dist" "$shared/dist"
+  for module in hook transcript; do
+    cp "adapters/$client/dist/$module.mjs" "$runtime/dist/$module.mjs"
+  done
+  for module in $shared_modules; do
+    cp "$adapter/dist/$module.mjs" "$shared/dist/$module.mjs"
+  done
+  node -e '
+    const fs = require("node:fs");
+    const [version, client, runtime, shared] = process.argv.slice(1);
+    for (const [source, destination] of [[`adapters/${client}`, runtime], ["adapters/claude-code", shared]]) {
+      const sourceManifest = JSON.parse(fs.readFileSync(`${source}/package.json`, "utf8"));
+      const manifest = { name: sourceManifest.name, version, private: true, type: sourceManifest.type };
+      if (sourceManifest.exports) manifest.exports = sourceManifest.exports;
+      if (sourceManifest.dependencies) manifest.dependencies = { "@synveda/claude-code-adapter": version };
+      fs.writeFileSync(`${destination}/package.json`, JSON.stringify(manifest, null, 2) + "\n");
+    }
+  ' "$version" "$client" "$runtime" "$shared"
 done
-for module in $shared_modules; do
-  cp "$adapter/dist/$module.mjs" "$shared/dist/$module.mjs"
-done
-node -e '
-  const fs = require("node:fs");
-  const [version, codex, shared] = process.argv.slice(1);
-  for (const [source, destination] of [["adapters/codex", codex], ["adapters/claude-code", shared]]) {
-    const sourceManifest = JSON.parse(fs.readFileSync(`${source}/package.json`, "utf8"));
-    const manifest = { name: sourceManifest.name, version, private: true, type: sourceManifest.type };
-    if (sourceManifest.exports) manifest.exports = sourceManifest.exports;
-    if (sourceManifest.dependencies) manifest.dependencies = { "@synveda/claude-code-adapter": version };
-    fs.writeFileSync(`${destination}/package.json`, JSON.stringify(manifest, null, 2) + "\n");
-  }
-' "$version" "$codex" "$shared"
 
 # The plugin's version is the release's. `synveda plugin install` reports
 # what it installed and `claude plugin list` shows it, so a plugin claiming

@@ -5,7 +5,7 @@ phase and delivered/open state. Delivered names identify historical slices;
 current contracts live in code, generated artefacts and accepted ADRs, while git
 retains their implementation evidence. Open entries link to current briefs.
 
-111 delivered; 32 open. The inventory and open-brief shape are checked in CI.
+112 delivered; 31 open. The inventory and open-brief shape are checked in CI.
 
 The 2026-09-12 [interoperability execution plan](../INTEROPERABILITY_PLAN.md)
 records ADPT-1/2 and CPR-12/23 repairs, the initial ADPT-4 SDK slice and CPR-39
@@ -34,7 +34,7 @@ the extracted archive on Node 22/Linux arm64 and Node 24/macOS arm64. The
 installer preserves client configuration, replaces the hook on upgrade and
 refuses an incomplete runtime before mutation. Native execution from a published
 installation, non-text Codex results and other client versions/platforms remain
-unqualified. [ADPT-9](ADPT-9.md) now records a verified Copilot CLI 1.0.83 /
+unqualified. ADPT-9 delivers a verified Copilot CLI 1.0.83 /
 gpt-5.6-luna source-build lifecycle on macOS arm64 with the Docker/Keycloak
 reference. The clean pair at `c86d5c6` delivered authenticated context at both
 native start and resume, retained one task across both SDK workflows, activated
@@ -47,9 +47,18 @@ pass on macOS Node 24 and pinned offline Docker Node 22, zero skips. Earlier
 marker, parser and hook-location failures remain preserved in their fixtures.
 CPR-45's confirmed hosts-witness renewal restored Compose/PKCE; current smoke
 passes and the earlier deployment checkpoint passed 345 tests without skips.
-The next ADPT-9 increment is the existing archive/installer path. Native
-outage/compaction, other result formats/platforms and execution from a published
-installation remain unqualified. Pi had no executable in the earlier inventory.
+ADPT-9 also packages the existing runtime through the archive/installer path.
+Eight Codex and 23 Copilot tests pass from the extracted archive on host Node
+24/macOS arm64 and pinned offline Docker Node 22/Linux arm64 and emulated
+x86_64. All 12 installer fixtures pass on host and Docker x86_64, preserving
+client configuration and refusing incomplete runtimes before mutation. The
+initial Linux arm64 installer run failed ten tests at the deliberately
+unsupported-platform boundary; it is not counted as passing. All 347 deployment
+tests and static gates pass across completed component runs; the full command's
+deadline failure and sandbox socket denial remain explicit in
+[the package evidence](../integrations/copilot-cli.md#release-archive-validation).
+Native outage/compaction, other result formats/platforms and execution from a
+published installation remain unqualified. Pi had no executable in the earlier inventory.
 These are independent of the public-release decisions.
 
 The apparent deployment-gate stall was delayed reporting: the unchanged
@@ -159,7 +168,7 @@ remain incomplete runs, not passes.
 - [ ] [ADPT-6: LlamaIndex memory adapter](ADPT-6.md) — open
 - [ ] [ADPT-7: Semantic Kernel memory connector](ADPT-7.md) — open
 - [x] ADPT-8: Observation that survives a session that does not wait — delivered 2026-08-24; ADR-0027
-- [ ] [ADPT-9: GitHub Copilot CLI adapter](ADPT-9.md) — open
+- [x] ADPT-9: GitHub Copilot CLI adapter — delivered 2026-09-19; ADR-0107
 - [ ] [PRMT-3: Prompt experiment evidence](PRMT-3.md) — open
 - [ ] [SKIL-5: Authentic Skill usage reporting](SKIL-5.md) — open
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open

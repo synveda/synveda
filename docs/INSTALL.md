@@ -993,17 +993,18 @@ certificates and supported external-dependency inputs.
 | `synveda` | the CLI, on your `PATH` |
 | `~/.synveda/bin/{synveda-gateway,synveda-worker}` | direct-binary artifacts; the reference runs their image-contained commands |
 | `~/.synveda/console/` | the admin console bundle |
-| `~/.synveda/plugin/` | the Claude Code marketplace and Codex hook runtime, configured in no client |
+| `~/.synveda/plugin/` | the Claude Code marketplace and Codex/Copilot hook runtimes, configured in no client |
 | `~/.synveda/reference/releases/<version>-<source-sha>/` | immutable digest-bound Docker reference |
 | `~/.synveda/reference/current` | validated symlink to the selected immutable release |
 | `~/.synveda/state/synveda-reference/` | mode-0700 deployment inputs, including keys and issuer state; preserved across upgrades |
 | `~/.synveda/backups/{database,secrets}/synveda-reference/` | separate recovery roots; preserved across upgrades |
 
-For Codex, use Node 22+ with the complete
-`~/.synveda/plugin/codex/` tree and point normal trusted hooks at its
-`dist/hook.mjs`. The installer prints the exact path and source-bound setup
-guide. See [Codex setup and evidence](integrations/codex.md). Local archive
-replay is tested; a published installation/native-client run remains open.
+For Codex or Copilot CLI, use Node 22+ with the complete
+`~/.synveda/plugin/codex/` or `~/.synveda/plugin/copilot-cli/` tree and point
+normal trusted hooks at its `dist/hook.mjs`. The installer prints the exact
+paths and source-bound setup guides. See [Codex setup](integrations/codex.md)
+and [Copilot setup](integrations/copilot-cli.md). Local archive replay is tested;
+native execution from a published installation remains unqualified.
 
 `SYNVEDA_HOME` moves all of it; `SYNVEDA_BIN` moves the CLI.
 

@@ -1,10 +1,32 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted; amended nine times. The current Docker deployment
+- **Status**: Accepted; amended ten times. The current Docker deployment
   contract is ADR-0102; the native/client artifact decisions below remain.
 - **Date**: 2026-08-11
-- **Feature(s)**: OPS-8, CPR-39
+- **Feature(s)**: OPS-8, CPR-39, ADPT-9
 - **Deciders**: sujitn
+
+## Amendment 10 (2026-09-19): carry the qualified Copilot hook runtime
+
+At `571a6c6`, Copilot CLI 1.0.83 passes native qualification from the checkout,
+but the release archive still contains only the Claude and Codex runtimes.
+Extend amendment 9's explicit client list with `plugin/copilot-cli`: its two
+compiled hook/reader modules and the same closed shared Session runtime as a
+private, release-versioned Node dependency. Preserve the Claude marketplace.
+No new dependency, bundler, import rewriting or plugin manager is needed.
+
+Build all three adapters in the existing release step. Before changing an
+installation, require the Copilot manifests, hook, reader and shared runtime
+entry point, as for Codex. Print the installed hook path and source-bound guide;
+client configuration and hook trust remain user-owned. Reinstall and upgrade
+replace the owned runtime bytes while preserving client configuration.
+
+Acceptance reuses both clients' captured hook/reader tests against the extracted
+archive outside the checkout, checks local dependency resolution and unchanged
+compiled bytes, and exercises installer convergence and incomplete-archive
+refusal. Run these checks on the host and pinned offline Docker Node 22. This
+proves local archive execution, not native execution from a published release;
+ADR-0107's version, platform and lifecycle qualification limits remain.
 
 ## Amendment 9 (2026-09-12): carry the verified Codex hook runtime
 

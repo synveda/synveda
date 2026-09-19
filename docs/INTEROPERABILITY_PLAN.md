@@ -398,31 +398,40 @@ first root-user invocation failed all four checks at or after Compose's existing
 non-zero UID/GID refusal; it is not counted as a pass. No runtime-user rule was
 changed to obtain the successful rerun.
 
+## Copilot delivery checkpoint — 2026-09-19
+
+ADPT-9 is delivered for the named CLI 1.0.83 / gpt-5.6-luna, macOS arm64 and
+Docker/Keycloak setup. The clean native pair at `c86d5c6` and both SDK workflows
+share one authenticated task, exact approved Skill, MCP recall, foreign denial,
+proposals and audit correlation. The
+[clean lifecycle result](../adapters/copilot-cli/fixtures/clean-lifecycle.json)
+records 18 unique events, zero duplicates on replay, 16 Capture candidates,
+explicit end, Knowledge reuse and valid audit through sequence 1179.
+
+The existing archive now includes the compiled Copilot runtime and its private
+shared dependency. Eight Codex and 23 Copilot tests pass from the extracted
+archive on host Node 24/macOS arm64 and pinned offline Docker Node 22/Linux
+arm64 and emulated x86_64. All 12 installer fixtures pass on host and Docker
+x86_64, including preserved client configuration and missing-runtime refusal
+before mutation. The initial arm64 installer invocation had ten platform
+refusals and is not counted as passing. All 144 adapter regressions pass again
+on the host. All 347 deployment tests and static gates pass across completed
+component runs; the complete command encountered a transient deadline failure
+and then a sandbox socket denial, with unchanged affected checks passing on
+retry. No passing suite skipped a test and no paid native prompt was run.
+See [setup and reproducible package checks](integrations/copilot-cli.md#release-archive-validation).
+
 ## Remaining actions
 
 The CPR-45 deterministic-gate checkpoint is closed. Wider live reference
 acceptance remains in its open brief.
 
-1. Package [ADPT-9's verified Copilot CLI runtime](backlog/ADPT-9.md) through
-   the existing archive and installer. The clean native start/resume pair at
-   `c86d5c6` passed on CLI 1.0.83 / gpt-5.6-luna, macOS arm64 and the restored
-   Docker/Keycloak reference. Both SDKs used the same task between prompts;
-   approved Skill activation, MCP recall, foreign denial, proposals and audit
-   correlation passed. The [clean lifecycle result](../adapters/copilot-cli/fixtures/clean-lifecycle.json)
-   records 18 unique events, zero duplicates on replay, 16 Capture candidates,
-   explicit end, Knowledge reuse and valid audit through sequence 1179. All 144
-   adapter tests (31 Copilot) pass on host and pinned offline Docker, zero skips.
-   Earlier failures remain pinned separately. Reuse the package fixture and
-   installer tests to prove extracted runtime resolution, captured lifecycle
-   replay, preserved client configuration and refusal before mutation when
-   runtime files are missing. Native outage/compaction, other result formats
-   and versions/platforms, and native execution from a published installation
-   remain unqualified.
-2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
+1. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
    Local archive build/install/import is verified; packages remain unpublished.
-3. Native Codex execution from a published installation, non-text results and
-   other client versions/platforms require their own evidence. Generic
+2. Native Codex/Copilot execution from a published installation, non-text
+   results and other client versions/platforms require their own evidence.
+   Copilot native outage/compaction also remains unqualified. Generic
    MCP/Skills compatibility and archive replay do not qualify those workflows.
 
 These continue the original client batches; no new orchestration, plugin
