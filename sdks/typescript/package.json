@@ -2,9 +2,10 @@
   "name": "@synveda/sdk",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "exports": { ".": { "types": "./dist/client.d.mts", "import": "./dist/client.mjs" } },
-  "files": ["dist/client.mjs", "dist/client.d.mts", "dist/generated"],
+  "files": ["dist/client.mjs", "dist/client.d.mts", "dist/generated", "LICENSE", "NOTICE"],
   "engines": { "node": ">=22" },
   "scripts": {
     "build": "tsc -p tsconfig.json",

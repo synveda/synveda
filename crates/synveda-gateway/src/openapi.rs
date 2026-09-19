@@ -88,7 +88,6 @@ projects, repositories — takes a required `expected_revision`; a mismatch is \
 `409` and writes nothing. The scope admin plane does not: a scope carries no \
 revision, and its mutations are last-writer-wins under the PDP.",
         version = env!("CARGO_PKG_VERSION"),
-        license(name = "Proprietary"),
     ),
     servers((url = "/", description = "This gateway")),
     paths(

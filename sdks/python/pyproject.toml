@@ -6,6 +6,8 @@ build-backend = "hatchling.build"
 name = "synveda-sdk"
 version = "0.1.0"
 description = "Initial authenticated Synveda public API client slice"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 dependencies = ["httpx==0.28.1", "typing-extensions==4.16.0"]
 

@@ -280,10 +280,12 @@ register. In particular, a successful local demo does not establish published
 artifact parity, signing, production recovery or key custody, HA, SaaS or Helm
 production readiness.
 
-The repository currently has no `LICENSE` grant while generated OpenAPI
-metadata says `Proprietary`. That metadata is not complete distribution or use
-terms. An owner/legal decision is still required; the permissive dependency
-policy does not license Synveda itself.
+## Licence
+
+Synveda's first-party code and documentation, including the Python and
+TypeScript SDKs, are licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE)
+for attribution. Third-party components and materials retain their own
+licences and notices. The dependency licence policy remains a separate gate.
 
 ## Documentation
 

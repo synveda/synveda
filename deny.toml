@@ -42,8 +42,8 @@ exceptions = [
     # Added with AUD-1.
     { name = "arrayref", allow = ["BSD-2-Clause"] },
 ]
-# Our own crates are publish = false and carry no licence field; the allowlist
-# governs dependencies, not first-party code.
+# Our own crates are publish = false and inherit the Apache-2.0 workspace
+# licence. This allowlist governs dependencies, not first-party licence choice.
 private = { ignore = true }
 
 [advisories]

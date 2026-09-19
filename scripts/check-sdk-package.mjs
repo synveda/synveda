@@ -25,7 +25,7 @@ try {
   for (const name of ["first", "second"]) {
     const stage = join(scratch, name);
     mkdirSync(stage);
-    for (const file of ["package.json", "tsconfig.json", "src"]) cpSync(join(source, file), join(stage, file), { recursive: true });
+    for (const file of ["package.json", "tsconfig.json", "src", "LICENSE", "NOTICE"]) cpSync(join(source, file), join(stage, file), { recursive: true });
     // Reuse locked compiler dependencies, not pnpm's location-dependent bin shim.
     mkdirSync(join(stage, "node_modules/.bin"), { recursive: true });
     for (const dependency of ["typescript", "@types"]) {
@@ -34,7 +34,7 @@ try {
     symlinkSync(join(source, "node_modules/typescript/bin/tsc"), join(stage, "node_modules/.bin/tsc"));
     const [packed] = JSON.parse(run("npm", ["pack", "--json", "--pack-destination", stage], stage));
     const files = new Set(packed.files.map((file) => file.path));
-    for (const file of ["dist/client.mjs", "dist/client.d.mts", "dist/generated/api.d.ts", "dist/generated/contract.js"]) {
+    for (const file of ["dist/client.mjs", "dist/client.d.mts", "dist/generated/api.d.ts", "dist/generated/contract.js", "LICENSE", "NOTICE"]) {
       assert.ok(files.has(file), `archive is missing ${file}`);
     }
     assert.ok(![...files].some((file) => file.includes(".test.") || file.includes("workflow") || file.includes("node_modules")));
@@ -56,6 +56,11 @@ console.log(JSON.stringify({ sdk_version: SDK_VERSION, api_version: API_VERSION,
 `], consumer));
   const installedMetadata = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
   assert.equal(installedMetadata.version, metadata.version);
+  assert.equal(installedMetadata.license, api.info.license.name);
+  for (const file of ["LICENSE", "NOTICE"]) {
+    assert.deepEqual(readFileSync(join(installed, file)), readFileSync(join(root, file)),
+      `installed ${file} must match the repository`);
+  }
   assert.deepEqual(info, { sdk_version: metadata.version, api_version: api.info.version,
     openapi_sha256: sha256(join(root, "docs/api/openapi.json")) }, "installed SDK build identity must match its manifest and OpenAPI");
 
@@ -82,7 +87,8 @@ void buildIdentity; void body; void read;
   process.stdout.write(run(process.execPath, ["--test", "--test-timeout=30000", "dist/client.test.mjs"], consumer));
   console.log(JSON.stringify({ package: metadata.name, ...info, node: process.version,
     platform: process.platform, architecture: process.arch, archive_sha256: sha256(builds[0].archive),
-    files: builds[0].fileCount, clean_builds_identical: true, installed_exports_and_types: true }));
+    files: builds[0].fileCount, clean_builds_identical: true, installed_exports_and_types: true,
+    license: installedMetadata.license, installed_license_and_notice: true }));
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

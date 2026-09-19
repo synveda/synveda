@@ -71,7 +71,7 @@ generated types, operation bindings, contract metadata and `py.typed`.
 ## Compatibility and release boundary
 
 SDK version **0.1.0** targets API version **0.2.0** and checked OpenAPI SHA-256
-`4030fc5c05beccd091cf7746a7985b0f59b84e9000b54b2cd4e908e82372b749`.
+`1f7c34523fc9f84cffdfd403a99ae24bc7fbfb77f0a28e77c7cc8945f3a8b952`.
 That digest covers the whole API document; the SDK exposes only the 15 selected
 operations. Another server version or contract has no compatibility claim from
 these checks. Regenerate after reviewed contract or package-version changes,
@@ -93,7 +93,11 @@ use that generated SDK version. Installed-package checks compare all three
 values with their sources and verify the actual client-identification header.
 They print the OS, architecture and runtime with content-free archive evidence.
 
-The 2026-09-19 compatibility increment starting at `06bcc09` measured:
+The 2026-09-19 Apache-2.0 increment starting at `9365c92` repeats the two
+native arm64 rows below, including exact installed licence/notice checks.
+It changes only OpenAPI licence metadata and therefore the document digest;
+operation/schema types and the generated console client are unchanged. The
+earlier emulated amd64 result remains tied to its original commit.
 
 | Environment | Node / Python | Evidence |
 | --- | --- | --- |
@@ -110,7 +114,7 @@ does not extend it to another server.
 
 | Publishing prerequisite | Current state / required decision |
 | --- | --- |
-| First-party licence | Both SDKs inherit the repository's licence by owner direction. The repository currently has no first-party licence file; establish those terms and include the same licence/notices in both packages before distribution. Dependency licence approval does not choose Synveda's licence. |
+| First-party licence | Apache-2.0, matching the repository. Root `LICENSE` and `NOTICE` are canonical; the existing generator copies them into both packages. Archive checks verify installed licence metadata and byte-identical text. Third-party terms and the dependency allowlist remain unchanged. |
 | Package namespaces | Both packages remain Synveda-managed: `@synveda/sdk` on npm and `synveda-sdk` on PyPI. GitHub confirms repository ownership by the `synveda` organization; registry publishing rights are separate and remain unverified. The npm package remains private and the Python name remains a local build name. |
 | Publisher and provenance | Confirm release owner, trusted publisher identities and signing/provenance custody before adding publication automation. |
 | Support policy | Adopt or revise the measured runtime/server window and define compatibility/deprecation policy; no broader range is inferred here. |
@@ -119,8 +123,8 @@ The [release decision proposal](../docs/backlog/ADPT-4.md#release-decision-propo
 names a first candidate, an SDK-only OIDC publishing path, a narrow compatibility
 policy and three implementation batches. The owner has confirmed repository
 licence inheritance and Synveda stewardship; the release mechanics and support
-policy remain proposed choices. The
-published product `v0.2.0` predates this checked contract, so a release must name
+policy remain proposed choices. The published product `v0.2.0` predates this
+checked contract, so a release must name
 the exact tested server source/image and digest, not just API version `0.2.0`.
 
 ## Check local package archives
@@ -176,11 +180,17 @@ The actual checks ran as UID/GID 1000 with a read-only root, dropped capabilitie
 `no-new-privileges` and an executable `/tmp` tmpfs (256 MiB for Node, 512 MiB
 for Python). The tmpfs must permit execution of the isolated Python venv.
 
+The root [licence](../LICENSE) and [notice](../NOTICE) are copied by
+`scripts/generate-sdk-contract.mjs`; do not edit the SDK copies independently.
+`sdk-check` rejects copy or SPDX metadata drift. `sdk-package-check` verifies
+the licence/notice and standard metadata in the extracted npm archive and
+Python sdist/wheel, including their installed distributions.
+
 The scripts print archive SHA-256 values and runtime versions. Python builds
 use a fixed `SOURCE_DATE_EPOCH`; matching clean builds are reproducibility
 evidence for those inputs, not signatures or a release support commitment.
 The results also identify the SDK/API versions and source OpenAPI digest.
-Public namespace, licence and signing/provenance ownership remain open in
+Public namespace control and signing/provenance ownership remain open in
 [ADPT-4](../docs/backlog/ADPT-4.md).
 
 ## Application boundary

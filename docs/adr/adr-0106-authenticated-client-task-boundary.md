@@ -50,8 +50,26 @@ Python uses its existing pinned Hatchling backend, also in the development lock
 for offline checks. Reuse the SDK wire suites against the installed packages,
 check exported types and packaged contract resources, and compare two clean
 builds. Installation uses a prepared hash-locked wheelhouse and no network.
-This is local artifact evidence; public names, licences, signing custody and
-release support policy remain owner decisions under ADPT-4.
+This is local artifact evidence; registry control, signing custody and release
+support policy remain owner decisions under ADPT-4.
+
+The owner authorised a repository-wide MIT or Apache licence on 2026-09-19.
+Select Apache-2.0 for first-party Synveda code and documentation, including both
+SDKs: it is permissive and includes an explicit contributor patent grant.
+The root `LICENSE` contains the unmodified Apache text and `NOTICE` attributes
+Synveda contributors. Existing third-party licences and notices retain their
+scope. This decision changes no dependency allowlist or publication setting.
+See the [Apache licence](https://www.apache.org/licenses/LICENSE-2.0).
+
+Cargo packages inherit the workspace licence; first-party npm/Python metadata
+uses the same SPDX identifier. Utoipa derives OpenAPI's licence name and SPDX
+identifier from the gateway's Cargo metadata. Regenerate contracts through
+the existing tools; a metadata-only digest change is not a new wire contract.
+The SDK generator copies the root licence/notice into each package and checks
+their byte equality in drift mode. Existing installed-archive tests verify the
+actual licence metadata and files using npm/Hatchling's standard packaging.
+Do not add a licence service, rewrite third-party notices, enable publication or
+claim registry/release-artifact qualification from these source/package checks.
 
 The SDK compatibility increment derives each package's version from its existing
 manifest and the target API version/digest from checked OpenAPI. Generate those

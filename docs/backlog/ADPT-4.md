@@ -50,10 +50,10 @@ Publish pre-1.0 prereleases against a pinned server version, run the shared conf
 
 ## Dependencies
 
-The SDKs follow the repository's licence and Synveda ownership, as directed by
-the owner on 2026-09-19. There is no separate SDK licence choice. The repository
-still needs approved first-party terms; npm/PyPI publishing access, signing/
-provenance custody, the supported runtime matrix and compatibility window
+The SDKs follow the repository's Apache-2.0 licence and Synveda ownership, as
+authorised by the owner on 2026-09-19. Root `LICENSE` and `NOTICE` are canonical;
+the SDK generator copies them into both packages. npm/PyPI publishing access,
+signing/provenance custody, the supported runtime matrix and compatibility window
 must be established before public distribution. The clients depend on stable
 generated OpenAPI and test OIDC credentials. gRPC support, if accepted under
 ADPT-3, is separate.
@@ -73,19 +73,19 @@ published product release is `v0.2.0`, whose tag resolves to
 The checkout also calls its API `0.2.0`; that number alone cannot identify a
 compatible server. No test against the published product was run.
 
-The owner's direction settles the licence relationship and intended ownership:
-both SDKs inherit the repository terms and remain Synveda-managed. A subsequent
-read of GitHub's repository API identifies the `synveda` organization as owner,
-returns `license: null`, and returns HTTP 404 for the repository licence
-endpoint. The checkout likewise has no first-party licence file. Registry
+The owner authorised Apache or MIT for the repository; ADR-0106 selects
+Apache-2.0, including both SDKs, with attribution to Synveda contributors.
+Both packages remain Synveda-managed. GitHub's repository API identifies the
+`synveda` organization as owner; its remote licence metadata is not evidence
+that these local changes have been pushed or released. Registry
 administration is separate from GitHub ownership: the TypeScript package goes
 to npm and the Python package to PyPI, each with its own publishing permissions.
 Keep the current package names while verifying that Synveda controls them;
-do not invent a licence or infer registry access from the GitHub organization.
+do not infer registry access from the GitHub organization.
 
 | Decision | Proposed smallest choice | Evidence / remaining owner input | Acceptance before public distribution |
 | --- | --- | --- | --- |
-| First-party terms | Confirmed direction: inherit the repository's licence and required notices for both SDKs. | No root `LICENSE`; GitHub reports no licence; `README.md` records the unresolved terms; `crates/synveda-gateway/src/openapi.rs` says `Proprietary`; neither SDK manifest specifies a licence. | Establish approved repository terms and copyright holder, then include that same text and matching metadata in both installed archives; regenerate OpenAPI if the approved terms change its source annotation. |
+| First-party terms | Apache-2.0 for the repository and both SDKs, with Synveda contributor attribution. | Root `LICENSE`/`NOTICE`, inherited Cargo metadata, npm/Python manifests and generated OpenAPI agree. SDK copies come from the existing generator; third-party terms are unchanged. | Existing archive checks verify the licence metadata and exact root text in the installed npm package and Python sdist/wheel; the generator rejects drift. No public-release qualification follows. |
 | Names and ownership | Confirmed direction: Synveda manages both packages. Retain `@synveda/sdk` on npm and `synveda-sdk` on PyPI, subject to verified registry control. | GitHub confirms the `synveda` organization owns the repository. Both anonymous package metadata requests returned HTTP 404 on 2026-09-19; that establishes neither name availability nor registry ownership. | Verify Synveda's npm scope administrator, PyPI project owner and release maintainer access and first-publication setup through the registries without recording credentials. |
 | First candidate and server boundary | Use npm `0.1.0-rc.1` and Python `0.1.0rc1` as the same candidate, tied to one exact server source/image and checked OpenAPI digest. SDK versions remain independent of the product version. | Existing SDK version is `0.1.0`; generated API version is `0.2.0`. Current digest and tested environments are in the [SDK guide](../../sdks/README.md#compatibility-and-release-boundary). A releasable server candidate has not been selected. | Version/digest drift checks, installed-package tests and the shared authenticated workflow pass against the named candidate. Do not advertise compatibility with the old `v0.2.0` release from its version label. |
 | Publisher identity | One SDK-only GitHub Actions workflow in this repository, named `sdk-release.yml`, with an `sdk-release` environment and registry OIDC trusted publishers. Keep its candidate tags outside the product workflow's `v*` trigger, for example `sdk-v0.1.0-rc.1`. | Existing `release.yml` publishes product artifacts and checks their version against Cargo; it has no SDK publisher. Owner must name the registry/account recovery custodian and environment reviewer. These proposed workflow/environment names are not configured. | A credential-free dry run produces the same tested archives. Only the publish jobs receive OIDC permission. Registry attestations identify the expected repository, workflow, commit and archive digest; a fresh consumer verifies and installs the downloaded bytes. |
@@ -112,10 +112,10 @@ publisher or environment was changed during this inspection.
 
 After those decisions, use at most three implementation batches:
 
-1. **Package metadata and terms.** Amend ADR-0106 with the accepted choices;
-   add approved licence/notices, repository/readme metadata and candidate
-   versions through the existing manifests/generator. Extend the existing
-   archive checks to prove those files and metadata survive installation.
+1. **Package metadata and terms.** Apache-2.0 and its packaged notice are
+   implemented under ADR-0106. Complete repository/readme metadata and candidate
+   versions through the existing manifests/generator, reusing the archive
+   checks to prove those values and files survive installation.
 2. **Build and publish one candidate.** Reuse `sdk-check`, `sdk-package-check`,
    their locks and the existing shared gateway acceptance. Keep build/test
    jobs separate from the minimal OIDC publish jobs, use immutable action
@@ -220,11 +220,27 @@ package evidence, not a native CI, live OIDC or published-install qualification.
 The public repository, latest product tag and anonymous registry-name reads
 were inspected for the proposal; no registry or workflow settings were changed.
 Exact images and reproduction are in the SDK guide; the interoperability plan
-records the check limits. The owner has directed both packages to follow the
-repository's licence and ownership. Approved repository licence text and
-verified Synveda publishing access remain outstanding.
+records the check limits. Both packages follow the repository's Apache-2.0
+licence and Synveda ownership. Verified registry publishing access remains
+outstanding.
+
+**Repository licence checkpoint (2026-09-19; starting at `9365c92`)**
+
+Apache-2.0 is selected under the owner's MIT/Apache authorisation and ADR-0106.
+The unmodified root licence and contributor notice are copied through the
+existing SDK generator. Cargo and npm/Python metadata agree; Utoipa derives
+the OpenAPI licence from Cargo. All operations/schemas are unchanged; the
+document digest changes only because its licence metadata changes.
+Installed npm and Python sdist/wheel checks verify the exact root text and
+standard licence metadata. Both native arm64 runtime pairs pass all nine tests
+per SDK, zero skips, and produce identical archives across clean builds and
+platforms. Synthetic file/SPDX changes are refused by the drift gate.
+Six OpenAPI tests and strict workspace Clippy pass. The
+[interoperability checkpoint](../INTEROPERABILITY_PLAN.md#repository-licence-checkpoint)
+records the hashes, focused gates and explicit validation limits. Licence
+selection is complete; registry publication and wider ADPT-4 scope remain open.
 
 Next: resolve the concrete choices in the release decision proposal above,
-starting with the missing repository terms and verified registry access, then execute only
+starting with verified registry access, then execute only
 the selected release path and support policy. No public package was published.
 ADPT-4 remains open for those decisions and its wider scope.

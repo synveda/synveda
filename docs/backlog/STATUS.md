@@ -33,11 +33,15 @@ package/API version changes fail the existing generator drift gate. CI now
 declares both pairs, with gateway acceptance only on the minimum pair; those
 remote jobs remain unverified. The [SDK guide](../../sdks/README.md#compatibility-and-release-boundary)
 separates the measured matrix from public support commitments.
-The owner has directed both SDKs to follow the repository's licence and Synveda
-ownership. GitHub confirms the `synveda` organization owns the repository but
-reports no licence; the checkout has no first-party licence file. Public
-distribution still needs the repository terms, verified npm/PyPI publishing
-access, provenance custody and the supported server/runtime window.
+The owner-authorised Apache-2.0 choice now covers the repository and both SDKs,
+with Synveda contributor attribution in root `NOTICE`. Cargo, npm/Python and
+generated OpenAPI metadata agree. Existing SDK generation checks the exact
+root licence/notice copies; the real npm archive and Python sdist/wheel include
+them. All nine installed tests per SDK pass on Docker Linux arm64 and host
+macOS arm64, zero skips, with matching reproducible archive hashes. Six OpenAPI
+tests and strict workspace Clippy pass; only the API licence metadata changed.
+Public distribution still needs verified npm/PyPI publishing access,
+provenance custody and the supported server/runtime window.
 The [release decision proposal](ADPT-4.md#release-decision-proposal)
 now gives concrete choices and three small follow-on batches. At `09ff50a`,
 the existing archive suites also pass all 18 tests under pinned offline
@@ -45,8 +49,8 @@ emulated Linux amd64, zero skips, with hashes identical to the earlier native
 arm64 results. Native amd64 CI remains unverified. Both proposed public package
 names returned anonymous HTTP 404; namespace ownership is still unverified.
 The published product `v0.2.0` predates the checked contract, so matching version
-labels do not establish SDK/server compatibility. No release configuration,
-licence or public package was changed.
+labels do not establish SDK/server compatibility. No release configuration or
+public package was changed.
 
 OPS-8/CPR-39 now includes the compiled Codex hook and its existing shared
 Session runtime in the current plugin archive. Eight captured tests pass from

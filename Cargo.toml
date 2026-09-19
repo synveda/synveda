@@ -39,6 +39,7 @@ version = "0.2.0"
 edition = "2024"
 rust-version = "1.96"
 publish = false
+license = "Apache-2.0"
 
 # Internal crates. The dependency rule (seed §8; synveda-crypto added by
 # TEN-4, ADR-0064 decision 13):

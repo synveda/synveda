@@ -13,6 +13,7 @@ import tempfile
 import tomllib
 import venv
 import zipfile
+from email.parser import BytesParser
 from importlib.metadata import version
 from pathlib import Path
 
@@ -66,6 +67,8 @@ def build(stage):
         archive.extractall(extracted, filter="data")
     projects = list(extracted.iterdir())
     assert len(projects) == 1 and projects[0].is_dir()
+    for name in ("LICENSE", "NOTICE"):
+        assert (projects[0] / name).read_bytes() == (ROOT / name).read_bytes()
     run(
         [
             sys.executable,
@@ -110,6 +113,29 @@ def main():
         ], "two clean Python builds must agree"
         wheel = first[1]
         with zipfile.ZipFile(wheel) as archive:
+            records = [
+                name
+                for name in archive.namelist()
+                if name.endswith(".dist-info/METADATA")
+            ]
+            assert len(records) == 1
+            package_metadata = BytesParser().parsebytes(archive.read(records[0]))
+            assert (
+                package_metadata["License-Expression"]
+                == metadata["project"]["license"]
+                == api["info"]["license"]["name"]
+            )
+            assert set(package_metadata.get_all("License-File", [])) == {
+                "LICENSE",
+                "NOTICE",
+            }
+            for name in ("LICENSE", "NOTICE"):
+                assert (
+                    archive.read(
+                        records[0].removesuffix("METADATA") + "licenses/" + name
+                    )
+                    == (ROOT / name).read_bytes()
+                )
             for name in (
                 "__init__.py",
                 "client.py",
@@ -152,8 +178,8 @@ def main():
                 "-I",
                 "-c",
                 """
-import importlib.util, json, sys
-from importlib.metadata import version
+import hashlib, importlib.util, json, sys
+from importlib.metadata import distribution, version
 from importlib.resources import files
 from pathlib import Path
 import synveda
@@ -166,6 +192,10 @@ assert contract['openapi_sha256'] == sys.argv[1]
 assert OPENAPI_SHA256 == sys.argv[1]
 assert SDK_VERSION == version('synveda-sdk') == sys.argv[2]
 assert API_VERSION == sys.argv[3]
+installed = distribution('synveda-sdk')
+assert installed.metadata['License-Expression'] == sys.argv[4]
+for name, expected in zip(('LICENSE', 'NOTICE'), sys.argv[5:7], strict=True):
+    assert hashlib.sha256(installed.read_text('licenses/' + name).encode()).hexdigest() == expected
 assert len(contract['operations']) == 15
 assert files('synveda').joinpath('py.typed').is_file()
 assert callable(operations.open_session) and models.OpenSessionBody
@@ -173,6 +203,9 @@ assert callable(operations.open_session) and models.OpenSessionBody
                 digest(ROOT / "docs/api/openapi.json"),
                 metadata["project"]["version"],
                 api["info"]["version"],
+                metadata["project"]["license"],
+                digest(ROOT / "LICENSE"),
+                digest(ROOT / "NOTICE"),
             ],
             scratch,
         )
@@ -204,6 +237,8 @@ assert callable(operations.open_session) and models.OpenSessionBody
                     "wheel_sha256": digest(wheel),
                     "clean_builds_identical": True,
                     "installed_resources_and_types": True,
+                    "license": metadata["project"]["license"],
+                    "installed_license_and_notice": True,
                 }
             )
         )

@@ -476,23 +476,67 @@ verification; system curl then completed with TLS verification retained.
 The [ADPT-4 release proposal](backlog/ADPT-4.md#release-decision-proposal)
 provides concrete licence/ownership inputs, one OIDC publishing path, a narrow
 candidate support policy and three small batches. It changes no runtime,
-manifest, workflow permission, registry state or licence. Owner decisions are
-partially resolved: both SDKs follow the repository's licence and Synveda
-ownership. Repository licence text and registry publishing access remain
-unresolved; GitHub identifies the `synveda` organization as repository owner
-and reports no licence. Remote CI, full CI, database, live Keycloak/Compose acceptance,
+manifest, workflow permission, registry state or licence at that checkpoint.
+The later repository licence checkpoint below resolves first-party terms;
+registry access remains unverified. Remote CI, full CI, database, live Keycloak/Compose acceptance,
 registry publication and provenance verification were not run in this
 documentation/checking increment; no Rust changed, so Clippy is inapplicable.
+
+## Repository licence checkpoint
+
+On 2026-09-19, starting at `9365c926386ee736043323716305ccfc686aa78c`, the owner
+authorised MIT or Apache for the repository. ADR-0106 selects Apache-2.0 for
+first-party source/documentation and both SDKs. Root `LICENSE` is the
+[unmodified Apache text](https://www.apache.org/licenses/LICENSE-2.0.txt), SHA-256
+`cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`;
+`NOTICE` attributes Synveda contributors. Existing third-party terms remain.
+All 14 workspace Cargo packages, the separate gateway test helper and seven
+first-party npm manifests declare Apache-2.0; the Python SDK uses standard
+SPDX/license-file metadata. Existing private/publication settings are retained.
+
+Utoipa now derives licence metadata from Cargo. Regeneration changes only
+OpenAPI's licence name/identifier and the SDKs' document digest; operation and
+schema types, including generated console types, are unchanged. Current digest:
+`1f7c34523fc9f84cffdfd403a99ae24bc7fbfb77f0a28e77c7cc8945f3a8b952`.
+Existing SDK generation also copies the root legal text into the packages and
+rejects copy/SPDX drift. Four isolated mutations (npm licence, Python notice,
+and each package's SPDX field) are refused; clean/restored controls pass.
+
+The existing package suites pass all nine tests per SDK on pinned offline
+Docker Linux arm64 Node 22.23.2/Python 3.11.16 and host macOS arm64 Node
+24.18.0/Python 3.14.6, zero skips. They check real installed licence metadata,
+byte-identical legal text, exports/types/resources and two clean builds.
+Each archive hash agrees across those environments:
+
+| Archive | SHA-256 |
+| --- | --- |
+| npm | `b0404319fd673dd50d44e18c1f9790c6beb53782e485c6848073d4ba2285cfeb` |
+| Python sdist | `8153cc9fa5b578a8def08e87e7c203ad4deec79598457060123c4f9f672f9191` |
+| Python wheel | `ba6e12825fcc9c975e06d9e0338790368a1c492478100505b8ad144e678df122` |
+
+Six OpenAPI tests, strict workspace/all-target Clippy, SDK source/drift checks,
+formatting, dependency direction and generated console checks pass. Rust/npm/
+corpus licence gates pass with their unchanged policies. The initial sandboxed npm
+gate failed because pnpm's signed-version lookup could not reach its registry;
+the bounded rerun with network/cache access passed without disabling signature
+verification. Docker package tests use the existing pinned images and prepared
+hash-locked wheelhouse with networking disabled and read-only source/wheels.
+
+Full CI, fresh database, live Keycloak/Compose acceptance, remote CI, the
+emulated amd64 package repeat and registry publication were not run for this
+licence/packaging change. Licence/notice carriage in native, chart and image
+release artifacts remains outside this source/SDK validation; production
+readiness remains open. No public package was published.
 
 ## Remaining actions
 
 The CPR-45 deterministic-gate checkpoint is closed. Wider live reference
 acceptance remains in its open brief.
 
-1. Resolve ADPT-4's missing repository licence terms, verify Synveda's npm/PyPI
-   publishing access, and settle provenance custody and the public support
-   window before public distribution. Both SDKs inherit the repository terms
-   and remain Synveda-managed; these choices no longer need to be made again.
+1. Verify Synveda's npm/PyPI publishing access, and settle provenance custody
+   and the public support window before public distribution. Both SDKs inherit
+   the repository's Apache-2.0 terms and remain Synveda-managed; these choices
+   no longer need to be made again.
    Use the concrete proposal in the ADPT-4 brief for the remaining release work.
    The measured runtime/contract matrix and local archive build/install/import
    are verified; packages remain unpublished.

@@ -13,6 +13,9 @@ const tsPackage = JSON.parse(readFileSync("sdks/typescript/package.json", "utf8"
 const pyPackage = JSON.parse(execFileSync(process.env.SYNVEDA_PYTHON || "python3", [
   "-I", "-c", "import json,tomllib\nwith open('sdks/python/pyproject.toml','rb') as source:\n    package = tomllib.load(source)['project']\nprint(json.dumps(package))",
 ], { encoding: "utf8", timeout: 10_000 }));
+if (tsPackage.license !== api.info.license.name || pyPackage.license !== api.info.license.name) {
+  throw new Error("SDK licences must match the repository licence in generated OpenAPI");
+}
 const selected = JSON.parse(readFileSync("sdks/operations.json", "utf8"));
 const pending = new Set(selected);
 const paths = {};
@@ -70,6 +73,12 @@ function emit(path, bytes) {
   }
 }
 try {
+  // Packages are standalone; the repository owns their exact legal text.
+  for (const file of ["LICENSE", "NOTICE"]) {
+    for (const language of ["typescript", "python"]) {
+      emit(`sdks/${language}/${file}`, readFileSync(file));
+    }
+  }
   const input = join(scratch, "openapi.json");
   writeFileSync(input, JSON.stringify({ ...api, paths, components: { ...api.components, schemas } }));
   const ts = join(scratch, "api.ts");
