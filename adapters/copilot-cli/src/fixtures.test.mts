@@ -12,6 +12,9 @@ const resume = JSON.parse(readFileSync(new URL("../fixtures/resume-lifecycle.jso
 const resumedEvents = readFileSync(new URL("../fixtures/resume-transcript.jsonl", import.meta.url), "utf8")
   .trim().split("\n").map((line) => JSON.parse(line));
 const resumedInvocation = resume.invocations[0];
+const governed = JSON.parse(readFileSync(new URL("../fixtures/governed-probe.json", import.meta.url), "utf8"));
+const governedEvents = readFileSync(new URL("../fixtures/governed-transcript.jsonl", import.meta.url), "utf8")
+  .trim().split("\n").map((line) => JSON.parse(line));
 
 test("native fixture bytes are pinned and omit private paths and hidden model content", () => {
   const registry = JSON.parse(readFileSync(new URL("../../registry.json", import.meta.url), "utf8"));
@@ -19,14 +22,40 @@ test("native fixture bytes are pinned and omit private paths and hidden model co
   assert.equal(client.support_level, "experimental");
   assert.deepEqual(client.tested_versions, ["1.0.83"]);
   assert.equal(client.conformance.evidence_level, "native-probe");
-  assert.deepEqual(client.conformance.checks, {}, "synthetic probes do not establish public-API conformance");
-  for (const name of ["lifecycle.json", "transcript.jsonl", "resume-lifecycle.json", "resume-transcript.jsonl"]) {
+  assert.deepEqual(client.conformance.checks, {}, "partial probes do not establish a complete native lifecycle");
+  for (const name of ["lifecycle.json", "transcript.jsonl", "resume-lifecycle.json", "resume-transcript.jsonl",
+    "governed-probe.json", "governed-transcript.jsonl"]) {
     const file = readFileSync(new URL(`../fixtures/${name}`, import.meta.url));
     const digest = createHash("sha256").update(file).digest("hex");
     assert.equal(client.authentic_fixtures.find((entry: { path: string }) =>
       entry.path === `adapters/copilot-cli/fixtures/${name}`).sha256, digest);
     assert.doesNotMatch(file.toString("utf8"), /\/Users\/|\/private\/|"(?:access_token|refresh_token|reasoningText|reasoningOpaque|reasoningBlocks|encryptedContent)"/);
   }
+});
+
+test("governed native calls use the injected task and preserve the original delivery failure", () => {
+  const user = governedEvents.find((event) => event.type === "user.message").data.content;
+  assert.ok(!user.includes(governed.synveda_session_id), "the user prompt must not supply the Synveda task");
+  const calls = governedEvents.filter((event) => event.type === "tool.execution_start");
+  const allowed = calls.find((event) => event.data.arguments.session_id === governed.synveda_session_id);
+  assert.equal(allowed.data.toolName, "synveda-recall");
+  const result = governedEvents.find((event) => event.type === "tool.execution_complete" &&
+    event.data.toolCallId === allowed.data.toolCallId);
+  assert.equal(result.data.success, true);
+  assert.ok(result.data.result.content.includes(governed.native_mcp.knowledge_id));
+  const denied = governedEvents.find((event) => event.id === governed.native_mcp.denied_completion_event_id);
+  assert.equal(denied.data.success, false);
+  assert.equal(denied.data.result, undefined);
+  assert.equal(denied.data.error.code, "failure");
+  assert.equal(calls.find((event) => event.data.toolCallId === denied.data.toolCallId).data.arguments.session_id,
+    governed.native_mcp.denied_session_id);
+  const skill = governedEvents.find((event) => event.type === "skill.invoked").data;
+  assert.equal(skill.path, governed.governed_skill.native_path);
+  assert.equal(skill.name, governed.governed_skill.name);
+  assert.equal(skill.trigger, "agent-invoked");
+  assert.equal(governed.observation_delivery.original_status, "failed");
+  assert.equal(governed.observation_delivery.recorded_spool_entries, 0);
+  assert.equal(governed.native_invocation.resume_prompt, "not_run");
 });
 
 test("native new-session order and accepted hook output do not turn a failed marker into a pass", () => {

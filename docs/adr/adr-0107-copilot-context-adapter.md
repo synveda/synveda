@@ -1,6 +1,6 @@
 # ADR-0107: Copilot context uses the existing authenticated Session runtime
 
-- **Status**: Accepted; amended 2026-09-13
+- **Status**: Accepted; amended 2026-09-19
 - **Date**: 2026-09-12
 - **Feature(s)**: ADPT-9
 - **Deciders**: User-directed Copilot adapter continuation
@@ -51,6 +51,15 @@ assistant tool intentions or uncorrelated hook callbacks. Whitelist content
 fields; omit system instructions, reasoning, encrypted data and diagnostics.
 The native `skill.invoked` record proves host activation but does not establish
 a governed Synveda binding/version, so it emits no typed Skill-usage claim.
+
+The authenticated CLI 1.0.83 run on 2026-09-13 captured a denied MCP completion
+with `success: false`, no `result`, and `error: { code: "failure", message }`.
+Accept that demonstrated text-error shape as an ordinary failed tool result,
+correlated by the existing native call ID. Keep its native event ID for replay;
+do not copy other error fields. A successful completion with an error, both
+result/error representations, unknown error codes or non-text error messages
+remain held. This closes the observed whole-transcript hold after an expected
+workspace denial without changing error semantics or adding a fallback parser.
 
 Reuse native `copilot mcp add` and Synveda's existing Skill `--root` override.
 Keep the server unbound for multiple tasks and pass the injected Synveda

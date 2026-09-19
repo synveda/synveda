@@ -68,8 +68,8 @@ the native counter increased from one to two cumulative premium requests.
 An invalid wildcard denial flag was rejected before the retry ran, with no new
 hook or transcript events; documented shell/write/URL denial rules replaced it.
 The earlier failure and successful resume are separately digest-pinned.
-Authenticated native context/observation delivery and the shared SDK lifecycle
-remain unverified; synthetic hook consumption is not that workflow.
+Neither synthetic probe establishes authenticated context, observation delivery
+or the shared SDK lifecycle.
 
 The observation increment starts at `d22f8fd305a989544d237a3c87d68ddacdfa2af3`.
 The amended ADR-0107 records the decision before implementation. Captured
@@ -134,16 +134,55 @@ Full CI, database tests and full Compose acceptance were not rerun. Rust and
 adapter code are unchanged, so strict Clippy and the prior adapter suites were
 not rerun for this evidence/documentation increment.
 
-Next action: run the prepared native Copilot start/resume pair with the real
-hook, approved Skill and authenticated MCP. Between invocations, run both SDK
-examples on the actual native-created Synveda Session with a fresh run key;
-then verify observed tool results, binding/version/hash, persisted audit,
-Capture/end and reuse. The prior two synthetic-prompt allowances are consumed.
-The requested new allowance is at most two user prompts in one native Session,
-sharing the CLI's minimum 30-credit ceiling; neither prompt has run. No automatic
-paid retries are included. Native outage/recovery, compaction, unknown/non-text
-result shapes and packaged installation remain separate unqualified cases.
-Keep the registry experimental until applicable native acceptance is complete.
+### Native denial correction and interrupted qualification — 2026-09-19
+
+The user approved the prepared pair. Its first invocation ran on 2026-09-13 at
+`d71641e`, using Copilot CLI 1.0.83 / gpt-5.6-luna. It consumed authenticated
+hook context, loaded the exact approved Skill and used the injected Synveda
+Session for successful MCP recall; the known foreign Session was denied.
+The installed Skill hash was unchanged before/after activation. The invocation
+took 10.17 seconds and reported one premium request under the saved 30-credit
+ceiling. These counters are not a monetary estimate.
+
+Observation delivery failed: the denied tool completion carried
+`success: false`, no `result`, and `error: { code: "failure", message }`.
+The parser rejected it as `tool_result_shape_unknown` and held all eight
+observations without advancing the cursor. The amended ADR-0107 precedes the
+narrow correction: map only this demonstrated text-error shape into the
+existing failed-tool event. Unknown codes, non-text messages, success/error
+contradictions and both result/error representations remain held.
+
+The [native projection](../../adapters/copilot-cli/fixtures/governed-transcript.jsonl)
+and [partial result](../../adapters/copilot-cli/fixtures/governed-probe.json)
+preserve the original failure. Regression tests prove all eight observations,
+out-of-order tool correlation, local Stop persistence, one delivery despite
+duplicate exit hooks and no implicit task end. No Rust, public API, policy,
+retrieval, Skill registry or orchestration changes are required.
+
+All 140 adapter tests pass with zero skips on macOS arm64 Node 24.18.0 and
+offline pinned Docker Linux arm64 Node 22.23.2: 105 Claude, eight Codex and 27
+Copilot. Strict TypeScript compilation, formatting, dependency direction,
+registry/digests, documentation, backlog and ADR gates pass. Full CI, fresh
+database tests, full Compose acceptance and unchanged package checks were not
+rerun. Strict Rust Clippy is not applicable because no Rust changed.
+
+On the 2026-09-19 retry, the temporary raw captures, native saved Session,
+credentials and spool were absent. The retained projected transcript still
+replays, but is not a native Session backup. The reference Docker stack was
+stopped; canonical `make compose-up` failed before service startup with
+`hosts ownership state was refused`. Read-only inspection found matching
+hosts content but a changed `dev` field in the root-owned backup witness.
+`make compose-hosts-status` also refused; the plan still names the existing
+`acceptance-interop` mapping. No witness or preflight gate was changed.
+
+Next action: resolve the hosts-backup device-witness drift under CPR-45, then
+prepare a replacement governed start/resume qualification with durable private
+state. The original temporary Session cannot be resumed from the retained
+projection. Only one prompt of the newly approved pair ran; no paid prompt ran
+on retry. Keep new-Session cost allowance explicit and do not silently reuse a
+lost Session's budget. Both SDKs, live delivery/audit after this fix, Capture/end
+and reuse on the native task remain unverified. Native outage/compaction,
+other error/result shapes and packaging remain open. Keep support experimental.
 
 ## Dependencies
 

@@ -78,14 +78,24 @@ function translate(
       { type: "tool_use", id: data.toolCallId, name: data.toolName, input: data.arguments },
     ] } };
   }
-  const result = object(data.result);
-  if (typeof data.success !== "boolean" || typeof result.content !== "string") {
-    throw new CopilotInputError("tool_result_shape_unknown");
-  }
+  const content = completionText(data);
   if (!calls.delete(data.toolCallId)) throw new CopilotInputError("tool_pair_unknown");
   return { ...base, type: "user", message: { content: [
-    { type: "tool_result", tool_use_id: data.toolCallId, content: result.content, is_error: !data.success },
+    { type: "tool_result", tool_use_id: data.toolCallId, content, is_error: !data.success },
   ] } };
+}
+
+function completionText(data: ObjectValue): string {
+  const result = object(data.result);
+  const error = object(data.error);
+  if (typeof data.success === "boolean" && data.error === undefined && typeof result.content === "string") {
+    return result.content;
+  }
+  // The authenticated native denial has no result. Preserve its public message
+  // and failure bit; ambiguous shapes must not advance the transcript cursor.
+  if (data.success === false && data.result === undefined && error.code === "failure" &&
+      typeof error.message === "string") return error.message;
+  throw new CopilotInputError("tool_result_shape_unknown");
 }
 
 function text(value: unknown, limit: number): value is string {

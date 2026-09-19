@@ -12,6 +12,9 @@ const nativeId = "a634658f-178c-4477-b448-632bc4ab4724";
 const captured = readFileSync(new URL("../fixtures/transcript.jsonl", import.meta.url), "utf8");
 const resumed = readFileSync(new URL("../fixtures/resume-transcript.jsonl", import.meta.url), "utf8");
 const records = captured.trim().split("\n").map((line) => JSON.parse(line));
+const governed = readFileSync(new URL("../fixtures/governed-transcript.jsonl", import.meta.url), "utf8");
+const governedRecords = governed.trim().split("\n").map((line) => JSON.parse(line));
+const governedId = governedRecords[0].data.sessionId;
 
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "synveda-copilot-reader-"));
@@ -107,6 +110,43 @@ test("an authored negative completion preserves the host boolean for the known t
   const events = toSessionEvents(readCopilotTranscript(path, nativeId), undefined);
   const result = events[2].payload as { tools: { is_error: boolean }[] };
   assert.equal(result.tools[0].is_error, true);
+});
+
+test("native MCP denial preserves all eight observations and out-of-order tool correlation", (t) => {
+  const { path } = fixture(t);
+  writeFileSync(path, governed);
+  const events = toSessionEvents(readCopilotTranscript(path, governedId), undefined);
+  assert.deepEqual(events.map((event) => event.event_type), [
+    "message.user", "tool.invoked", "tool.result", "tool.invoked", "tool.invoked",
+    "tool.result", "tool.result", "message.assistant",
+  ]);
+  const denied = governedRecords.find((record) => record.type === "tool.execution_complete" && record.data.success === false);
+  const result = events.find((event) => event.client_event_id === denied.id)?.payload as {
+    tools: { tool_use_id: string; is_error: boolean; text: string }[];
+  };
+  assert.equal(result.tools[0].tool_use_id, denied.data.toolCallId);
+  assert.equal(result.tools[0].is_error, true);
+  assert.equal(result.tools[0].text, denied.data.error.message);
+  assert.equal(new Set(events.map((event) => event.client_event_id)).size, 8);
+  assert.deepEqual(events, toSessionEvents(readCopilotTranscript(path, governedId), undefined));
+});
+
+test("only the captured failure shape is admitted and unrelated error fields are excluded", (t) => {
+  const { path } = fixture(t);
+  const altered = structuredClone(governedRecords);
+  const failure = altered.find((record) => record.type === "tool.execution_complete" && record.data.success === false);
+  failure.data.error.stack = "private-error-details";
+  writeFileSync(path, altered.map((record) => JSON.stringify(record)).join("\n"));
+  assert.ok(!JSON.stringify(readCopilotTranscript(path, governedId)).includes("private-error-details"));
+  for (const fields of [
+    { success: true }, { result: { content: "ambiguous" } }, { error: { code: "unknown", message: "future" } },
+    { error: { code: "failure", message: { unknown: true } } }, { error: undefined },
+  ]) {
+    const variant = structuredClone(governedRecords);
+    Object.assign(variant.find((record) => record.id === failure.id).data, fields);
+    writeFileSync(path, variant.map((record) => JSON.stringify(record)).join("\n"));
+    assert.throws(() => readCopilotTranscript(path, governedId), /tool_result_shape_unknown/);
+  }
 });
 
 test("the shared file reader refuses oversize, symlink and special-file input", (t) => {

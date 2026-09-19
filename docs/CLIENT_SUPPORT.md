@@ -57,6 +57,8 @@ Authentic fixtures:
 - `adapters/copilot-cli/fixtures/transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `a923453d2ce160f96a9de59551c70210ba5c4a4cd192a1b0904fa1489de800f5`
 - `adapters/copilot-cli/fixtures/resume-lifecycle.json` — captured-real-client-lifecycle, SHA-256 `6e561e4620ade24b37f9314b5614c9a7ff2d6295157d7d229b7b8bfc918338cb`
 - `adapters/copilot-cli/fixtures/resume-transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `93a3b33aead664f15f0fe5f7e9ca6d85c54211435c8271d71adc5f17ec14ce20`
+- `adapters/copilot-cli/fixtures/governed-transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `b63a577b517db674fe32a52d4e474752a986cf097006a36536ba7cfd61886471`
+- `adapters/copilot-cli/fixtures/governed-probe.json` — captured-real-client-partial-result, SHA-256 `440a92f52a55e8cfe5f277578049520114b699896f56d553225ec2d1e8b7c68d`
 
 Conformance:
 
@@ -74,11 +76,12 @@ Conformance:
 Known limits:
 
 - Source-build context/observation adapter. Native synthetic resume context passes; captured events replay through the shared spool with stable task identity, retries and a two-second exit flush. Authenticated native lifecycle remains unverified.
-- CLI 1.0.83 supplied ten authentic hook callbacks across new/resumed invocations and a native skill.invoked event. The approved Skill installer and native discovery now pass against Keycloak; native governed activation and native authenticated MCP remain unverified.
+- CLI 1.0.83 natively loaded the exact approved Skill and recalled allowed Knowledge using the hook-injected Synveda Session. Foreign-workspace MCP denial returned a captured error object. Full governed native resume and audit qualification remain unverified.
 - The first synthetic probe failed after invoking a conflicting Skill. The separately approved corrected retry passed without tool use under the same saved 30-credit limit; the CLI reported two cumulative premium requests. Both outcomes are preserved.
-- Captured text/tool observations pass both mock and authenticated Docker/Keycloak replay. Both SDKs and a stdio MCP test client share one task, with workspace denial, audit, Capture/end and Knowledge reuse; see adapters/copilot-cli/fixtures/public-edge-replay.json. This is not native lifecycle conformance. Non-text/unknown failure-result shapes, native outage/compaction and packaged installation remain unqualified.
+- The native governed probe held its transcript because a denied MCP completion used error.code/message instead of result.content. The narrow parser fix replays all eight observations and preserves failed-tool correlation. Both SDKs, Capture/end and audit passed the earlier public-edge replay on a different task, not this native task.
 - The existing Skill root override and native MCP configuration are used manually; no Synveda configuration writer or packaged Copilot runtime is advertised.
 - Copilot CLI is a distinct target from VS Code and the Copilot cloud agent; this entry makes no support claim for either.
+- The 2026-09-19 retry found the temporary native Session, raw captures, credentials and spool absent. Compose startup refused a changed hosts-backup filesystem device witness despite matching hosts content. No additional paid prompt ran; native resume and live delivery recovery are blocked. See adapters/copilot-cli/fixtures/governed-probe.json.
 
 ### Cursor — `experimental`
 

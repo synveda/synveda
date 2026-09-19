@@ -20,6 +20,7 @@ const capture = JSON.parse(readFileSync(new URL("../fixtures/lifecycle.json", im
 const resume = JSON.parse(readFileSync(new URL("../fixtures/resume-lifecycle.json", import.meta.url), "utf8"));
 const transcript = readFileSync(new URL("../fixtures/transcript.jsonl", import.meta.url), "utf8");
 const resumeTranscript = readFileSync(new URL("../fixtures/resume-transcript.jsonl", import.meta.url), "utf8");
+const governedTranscript = readFileSync(new URL("../fixtures/governed-transcript.jsonl", import.meta.url), "utf8");
 const frame = (cwd: string, extra: Record<string, unknown> = {}) => ({
   sessionId: nativeId, timestamp: 1_789_200_000_000, cwd, source: "startup", ...extra,
 });
@@ -207,6 +208,41 @@ function appended(request: Parameters<Responder>[0]) {
     denied: 0, quarantined: 0,
   } };
 }
+
+test("captured MCP denial drains once through Stop and exit without ending the task", async (t) => {
+  const accepted: { client_event_id: string; payload: unknown }[] = [];
+  const { root, gateway } = await fixture(t, (request) => {
+    if (!request.path.endsWith("/events")) return allowed(request);
+    accepted.push(...request.body.events as typeof accepted);
+    return appended(request);
+  });
+  const records = governedTranscript.trim().split("\n").map((line) => JSON.parse(line));
+  const sessionId = records[0].data.sessionId;
+  const input = frame(root, { sessionId, source: "new", transcriptPath: join(root, "native.jsonl") });
+  writeFileSync(join(root, "native.jsonl"), governedTranscript);
+  await hook(root, gateway.url, input);
+  const requests = gateway.requests.length;
+  await hook(root, gateway.url, input, {}, "agentStop");
+  assert.equal(gateway.requests.length, requests, "Stop must remain local even when a tool failed");
+  assert.equal(saved(root)[0].entries.length, 8);
+  assert.ok(saved(root)[0].entries.every((entry) => !entry.acknowledged));
+  for (let repeat = 0; repeat < 2; repeat += 1) {
+    await hook(root, gateway.url, input, {}, "sessionEnd");
+    await hook(root, gateway.url, input, {}, "agentStop");
+  }
+  assert.equal(accepted.length, 8);
+  assert.equal(new Set(accepted.map((entry) => entry.client_event_id)).size, 8);
+  const denied = records.find((record) => record.data.success === false);
+  const result = accepted.find((entry) => entry.client_event_id === denied.id)?.payload as {
+    tools: { is_error: boolean; text: string }[];
+  };
+  assert.equal(result.tools[0].is_error, true);
+  assert.equal(result.tools[0].text, denied.data.error.message);
+  const [spool] = saved(root);
+  assert.equal(spool.session_id, session);
+  assert.equal(spool.close_requested, false);
+  assert.ok(spool.entries.every((entry) => entry.acknowledged));
+});
 
 test("captured Stop persists locally; outage, exit, resume and duplicate hooks deliver six events on one task", async (t) => {
   let outage = true;

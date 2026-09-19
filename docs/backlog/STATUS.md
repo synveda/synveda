@@ -52,11 +52,20 @@ Docker/Keycloak preflight now passes at `24cd02d`: real hook replay, exact
 approved Skill installation/native discovery, both SDK workflows, two MCP
 connections, foreign-workspace denial and audit correlation. Eight unique
 events yield six Capture candidates; explicit end, Knowledge reuse and audit
-verification through sequence 938 pass. No product code changed. Next run the
-prepared native start/resume pair on a fresh task, subject to a new bounded
-paid-run allowance; prior synthetic allowances are consumed. Native Synveda
-authentication/full conformance remain unverified; no new paid prompt ran.
-Pi is not on PATH.
+verification through sequence 938 pass. The first newly approved native prompt
+at `d71641e` then consumed authenticated context, activated the exact approved
+Skill and performed MCP recall/foreign denial. Its denied completion exposed
+an unsupported error-object shape, holding eight observations. ADPT-9 now maps
+that captured failure through the existing event mapper; regression tests prove
+durable, duplicate-free delivery without closing the task. The original failed
+native delivery remains recorded. All 140 adapter tests (27 Copilot) pass on
+host Node 24 and offline Docker Node 22, with zero skips; strict TypeScript and
+the repository metadata gates pass. The 2026-09-19 retry found the temporary
+native Session/credentials/spool absent and Compose startup blocked by a changed
+hosts-backup device witness. Next resolve that CPR-45 prerequisite and prepare
+a replacement qualification with durable private state. Native resume, live
+delivery after the fix and full conformance remain unverified; no paid prompt
+ran on retry. Pi was not on PATH during the earlier inventory.
 These are independent of the public-release decisions.
 
 The apparent deployment-gate stall was delayed reporting: the unchanged

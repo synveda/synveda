@@ -10,7 +10,11 @@ returned the conflicting Skill's marker, so the context-marker assertion failed.
 The separately approved corrected retry consumed a fresh hook-only marker,
 invoked no tools and resumed the same native Session after process exit.
 Captured text/tool events now replay through the existing durable Session spool.
-Authenticated native Synveda context, MCP and full lifecycle acceptance remain unverified.
+The later governed native probe consumed authenticated context, activated the
+exact approved Skill and performed MCP recall with foreign-workspace denial.
+That denial exposed a failed-tool error shape which held observation delivery;
+the narrow parser correction now passes captured replay. Full native lifecycle
+acceptance remains unverified.
 The Docker/Keycloak public-edge preflight now passes real hook replay, both
 SDKs, exact approved Skill installation/native discovery, MCP reconnect,
 workspace denial, Capture/end and audit. Existing implementations needed no
@@ -104,7 +108,10 @@ The shared reader admits only regular files, refuses the final path component
 when it is a symlink, and limits each read to 8 MiB and 20,000 JSONL lines.
 Malformed/partial content, foreign Session headers and unsupported message/tool
 result shapes are held with content-free diagnostics without advancing the
-cursor. System instructions, reasoning, encrypted fields and separate
+cursor. The captured MCP denial shape (`success: false`, no `result`, and
+`error` containing code `failure` and a text message) becomes a correlated
+failed tool result. Unknown error codes, non-text messages and contradictory
+result/error representations remain held. System instructions, reasoning, encrypted fields and separate
 `skill.invoked` bodies are excluded. Host death before `agentStop` remains a loss boundary;
 native compaction and non-text/other failure-result formats remain unqualified.
 
@@ -251,7 +258,7 @@ with the hook-created Session ID. Keep replay inputs labelled separately from
 authentic invocations. The retained result records the exact fixture hashes;
 private scratch drivers and credentials are not project state.
 
-The prepared native plan is two user prompts on one fresh native Session:
+The approved native plan was two user prompts on one fresh native Session:
 
 1. Load the installed ingestion-retry-review Skill for review, use the injected
    Synveda Session ID for MCP recall, and attempt the known foreign test Session.
@@ -261,14 +268,58 @@ The prepared native plan is two user prompts on one fresh native Session:
    persisted native observations and tool results, exact Skill attribution,
    explicit Capture/end, later Knowledge reuse and content-free audit.
 
-Both earlier synthetic prompts are complete. The proposed pair needs a new
-allowance and shares one 30-credit Session ceiling, with no automatic paid
-retry. Restrict tools to the approved Skill and Synveda recall workflow, disable
+Both earlier synthetic prompts are complete. The new pair was approved with
+one shared 30-credit Session ceiling and no automatic paid retry. Restrict tools
+to the approved Skill and Synveda recall workflow, disable
 built-in MCP servers, remote export and unrelated custom instructions, and keep
 shell/write/URL access denied using the
 [vendor permission patterns](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#tool-permission-patterns).
 Retain native output privately and project only the needed authenticated
 frames; never commit credentials, reasoning or system instructions.
+
+### Native denial and recovery checkpoint
+
+The first invocation ran at `d71641e` on 2026-09-13 using CLI 1.0.83,
+auto-selected gpt-5.6-luna. The
+[projected transcript](../../adapters/copilot-cli/fixtures/governed-transcript.jsonl)
+shows approved Skill activation, allowed MCP recall using the hook-injected
+Synveda Session ID, and a denied call for the foreign Session. The prompt did
+not supply the allowed Synveda Session ID. The preflight matched the enabled
+binding, immutable Skill bytes and installer receipt; native activation named
+that exact installed path and its SHA-256 remained unchanged before/after.
+No typed Skill-usage event is inferred from its name.
+
+The [partial result](../../adapters/copilot-cli/fixtures/governed-probe.json)
+records a 10.17-second invocation and one reported premium request, with the
+30-credit ceiling retained. It also preserves the failed observation delivery:
+the native denied completion used a text `error` object instead of `result`.
+The old parser held the full transcript, leaving zero recorded/acknowledged
+events. The correction accepts only the demonstrated failure shape and reuses
+the existing event mapper and spool. Regression replay preserves all eight
+observations, including out-of-order tool results, and drains them once through
+Stop/exit without implicitly ending the application task.
+
+All 140 adapter tests pass, zero skips, on macOS arm64 Node 24.18.0 and the
+pinned offline Docker Node 22.23.2 image: 105 Claude, eight Codex and 27 Copilot.
+Strict TypeScript, formatting, dependency, registry/digest, docs, backlog and
+ADR checks pass. No Rust changed; strict Clippy is not applicable. Full CI,
+fresh database tests, full Compose acceptance and unchanged package checks
+were not rerun for this correction.
+
+On the 2026-09-19 retry, the temporary raw captures, saved native Session,
+credentials and spool were absent. The retained projection is regression
+evidence, not a backup that can recreate native Session state. Docker was
+stopped, and the documented Compose startup refused the hosts ownership state:
+hosts bytes still matched the recorded digest, but the backup witness's `dev`
+field had changed. The ownership check was preserved. Startup/public smoke,
+native resume, both SDKs on this native task, post-fix live delivery/audit and
+Capture/end could not be completed; the earlier public-edge replay results
+belong to their separately identified task. No paid prompt ran on retry.
+
+Resolve the hosts-backup witness prerequisite before another live qualification.
+Use durable, private qualification state and treat a replacement Session as a
+new run with an explicit cost allowance; it cannot inherit the lost Session's
+remaining ceiling. The second prompt of the original pair was not executed.
 
 Native outage recovery, applicable compaction and unknown/non-text result shapes
 remain unqualified. Vendor `preCompact` is notification-only; no post-compaction

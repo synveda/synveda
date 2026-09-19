@@ -414,14 +414,18 @@ acceptance remains in its open brief.
    connections. Eight unique events, six Capture candidates, explicit end,
    Knowledge reuse and audit verification through sequence 938 are recorded in
    [the content-free replay result](../adapters/copilot-cli/fixtures/public-edge-replay.json).
-   Existing implementations need no corrective change for these checks.
-   Next run the prepared native start/resume pair with both SDKs on its actual
-   task, then verify denial, audit, approved Skill activation and Capture/end.
-   No new paid prompt ran; the prior synthetic allowances are consumed and the
-   proposed pair shares one 30-credit Session ceiling. Native authentication,
-   outage/recovery and full lifecycle remain unverified; non-text/unknown
-   failure-result shapes and compaction need their own evidence. Pi was absent
-   from PATH.
+   The first approved native invocation then consumed authenticated context,
+   activated the exact approved Skill and performed MCP recall/foreign denial.
+   Its denied completion held the transcript because it used an error object.
+   ADPT-9's narrow parser correction and captured regressions now preserve all
+   eight observations, failed-tool correlation and one delivery per event.
+   [The partial native result](../adapters/copilot-cli/fixtures/governed-probe.json)
+   preserves that original failure. On 2026-09-19 the temporary native Session,
+   credentials and spool were absent, and Compose startup refused a changed
+   hosts-backup device witness. Resolve that CPR-45 prerequisite, then use
+   durable private state for a replacement native/SDK qualification with an
+   explicit cost allowance. No paid prompt ran on retry. Native resume,
+   post-fix live delivery/audit, outage/compaction and packaging remain open.
 2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
    Local archive build/install/import is verified; packages remain unpublished.
