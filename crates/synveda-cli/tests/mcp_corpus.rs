@@ -67,6 +67,7 @@ const CASES: &[&str] = &[
     "claude-desktop-probe",
     "claude-desktop-agent",
     "zed",
+    "codex",
     "modern-era",
     "host-owned-write-mode",
     "unsupported-version",

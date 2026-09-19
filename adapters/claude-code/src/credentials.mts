@@ -50,15 +50,18 @@ interface CliToken {
  * A currently-valid bearer, or `undefined` when the user must log in.
  * Never throws: every failure here is "no memory this time" (decision 3).
  */
-export async function resolveBearer(): Promise<Bearer | undefined> {
+export async function resolveBearer(deadlineAt?: number): Promise<Bearer | undefined> {
+  const timeoutMs = deadlineAt === undefined
+    ? CLI_TIMEOUT_MS : Math.min(CLI_TIMEOUT_MS, deadlineAt - Date.now());
+  if (timeoutMs <= 0) return undefined;
   const override = process.env.SYNVEDA_TOKEN;
   if (override !== undefined && override.length > 0) {
     return { token: override, source: "env" };
   }
-  return resolveFromCli();
+  return resolveFromCli(timeoutMs);
 }
 
-async function resolveFromCli(): Promise<Bearer | undefined> {
+async function resolveFromCli(timeoutMs: number): Promise<Bearer | undefined> {
   const binary = process.env.SYNVEDA_CLI ?? "synveda";
   const args = ["auth", "token", "--json"];
   const profile = process.env.SYNVEDA_PROFILE;
@@ -66,7 +69,7 @@ async function resolveFromCli(): Promise<Bearer | undefined> {
 
   let stdout: string;
   try {
-    stdout = await run(binary, args);
+    stdout = await run(binary, args, timeoutMs);
   } catch (error) {
     // Not installed, not logged in, expired past refresh, gateway down
     // mid-refresh: the same outcome either way, and the reason belongs in
@@ -94,12 +97,12 @@ async function resolveFromCli(): Promise<Bearer | undefined> {
   };
 }
 
-function run(binary: string, args: string[]): Promise<string> {
+function run(binary: string, args: string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       binary,
       args,
-      { timeout: CLI_TIMEOUT_MS, encoding: "utf8", windowsHide: true },
+      { timeout: timeoutMs, encoding: "utf8", windowsHide: true },
       (error, stdout, stderr) => {
         if (error !== null) {
           // The CLI's stderr says what to do ("run `synveda login`"); keep

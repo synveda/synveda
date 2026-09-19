@@ -58,6 +58,7 @@
 import { spawn } from "node:child_process";
 
 import { diagnostic, log } from "./log.mjs";
+import { loadConfig } from "./config.mjs";
 
 /**
  * What the user is told when the CLI is not there. The plugin already
@@ -74,7 +75,14 @@ const MISSING_BINARY_MESSAGE =
 const binary = process.env.SYNVEDA_CLI ?? "synveda";
 
 /** Decision 6: a host that already observes its own turns takes no write tool. */
-const child = spawn(binary, ["mcp", "--writes", "host"], {
+const config = loadConfig(process.cwd());
+const args = ["mcp", "--writes", "host"];
+if (config.workspaceId !== undefined) args.push("--workspace", config.workspaceId);
+if (config.projectId !== undefined) args.push("--project", config.projectId);
+const profile = process.env.SYNVEDA_PROFILE;
+if (profile !== undefined && profile.length > 0) args.push("--profile", profile);
+
+const child = spawn(binary, args, {
   stdio: "inherit",
   windowsHide: true,
 });

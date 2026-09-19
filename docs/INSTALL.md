@@ -417,8 +417,9 @@ currently experimental and has not been run by a real Cursor client here.
 
 `synveda mcp` serves governed context to any MCP client over stdio: `recall`
 uses the ordinary Knowledge query on the caller's public session, and
-`remember` appends an assertion event to that session for later capture in
-your own personal scope. Recall returns exact immutable revision and source
+`remember` appends an assertion event to that Session's governed scope for
+later Capture. Appending does not start extraction or publish Knowledge.
+Recall returns exact immutable revision and source
 addresses; it neither consumes a context token budget nor opens the separately
 authorised diagnostics enumeration lens. The deleted tenant-global
 `/v1/recall` route has not returned. You do not have to write the config by
@@ -433,6 +434,17 @@ It changes one key in the client's own config file and writes everything else
 back as it found it, so your other MCP servers are untouched. An existing
 `synveda` entry that differs is reported rather than replaced; pass `--force`
 if you meant to replace it. Restart the client afterwards.
+
+Authenticated calls require application identity independently of the MCP
+connection. Supply `session_id` per tool call when a host shares a server
+between conversations. A dedicated process may instead launch with
+`synveda mcp --session <existing-session-uuid>` or `synveda mcp --task
+<stable-application-key> --project <project-uuid>`. Reuse a task key only for
+the same application task across reconnects; transport disconnect never ends
+it. The outer `--session`/`--task` selectors are also preserved by `mcp install`.
+Claude's hook supplies its Session ID in context. See
+[Codex CLI setup](integrations/codex.md) for its native configuration and the
+[language clients](../sdks/README.md) for shared application workflows.
 
 For a client this release does not know, `synveda mcp install --print` gives you
 the entry to place yourself, and `--config <path>` writes a config kept
@@ -953,8 +965,9 @@ byte-for-byte. No shell removal command deletes editor or AI-client state.
 
 ## Install a release artifact
 
-The release workflow produces native binaries, the console, the Claude plugin,
-the Helm chart and `synveda-reference-<version>.tar.gz`. The reference archive
+The release workflow produces native binaries, the console, a client archive
+containing the Claude marketplace and Codex runtime, the Helm chart and
+`synveda-reference-<version>.tar.gz`. The reference archive
 contains the HTTPS-only canonical Compose runtime and `environment.json`, which
 binds its source SHA and image digests. No tagged candidate has yet completed a
 registry-backed install, so there is no current public installation command.
@@ -980,11 +993,18 @@ certificates and supported external-dependency inputs.
 | `synveda` | the CLI, on your `PATH` |
 | `~/.synveda/bin/{synveda-gateway,synveda-worker}` | direct-binary artifacts; the reference runs their image-contained commands |
 | `~/.synveda/console/` | the admin console bundle |
-| `~/.synveda/plugin/` | the Claude Code marketplace, installed into no client |
+| `~/.synveda/plugin/` | the Claude Code marketplace and Codex/Copilot hook runtimes, configured in no client |
 | `~/.synveda/reference/releases/<version>-<source-sha>/` | immutable digest-bound Docker reference |
 | `~/.synveda/reference/current` | validated symlink to the selected immutable release |
 | `~/.synveda/state/synveda-reference/` | mode-0700 deployment inputs, including keys and issuer state; preserved across upgrades |
 | `~/.synveda/backups/{database,secrets}/synveda-reference/` | separate recovery roots; preserved across upgrades |
+
+For Codex or Copilot CLI, use Node 22+ with the complete
+`~/.synveda/plugin/codex/` or `~/.synveda/plugin/copilot-cli/` tree and point
+normal trusted hooks at its `dist/hook.mjs`. The installer prints the exact
+paths and source-bound setup guides. See [Codex setup](integrations/codex.md)
+and [Copilot setup](integrations/copilot-cli.md). Local archive replay is tested;
+native execution from a published installation remains unqualified.
 
 `SYNVEDA_HOME` moves all of it; `SYNVEDA_BIN` moves the CLI.
 

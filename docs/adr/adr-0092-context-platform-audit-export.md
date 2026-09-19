@@ -36,6 +36,17 @@ authority would violate ADR-0045.
    applied/rejected/expiry evidence so queries do not infer identifiers from
    prose or display resources.
 
+   Session selection matches either recorded identity shape:
+   `payload.session_id` for delivery/Capture evidence or `payload.session.id`
+   for lifecycle snapshots. The typed Session selector is independent of the
+   common artifact/context predicate; all filters are conjoined before the
+   existing sequence cursor and limit. Both shapes are current-epoch evidence,
+   so a repair queries immutable rows without rewriting them or adding a
+   compatibility schema. The existing JSON-containment index and tenant-wide
+   `AuditRead` boundary remain sufficient. Acceptance covers lifecycle and
+   delivery across pages, combined filters, foreign Sessions/tenants and
+   unchanged canonical hashes (CPR-33/ADPT-4).
+
 2. **Valid time and transaction time stay distinct.** The Knowledge audit
    answer uses `valid_at` for the revision's semantic interval and
    `as_known_at` both as the chain-delivery cutoff and the immutable revision's

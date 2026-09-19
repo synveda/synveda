@@ -40,6 +40,7 @@ import {
 } from "./spool.mjs";
 import { harnessSessionId } from "./session-start.mjs";
 import type { HookInput, HookOutput } from "./types.mjs";
+import { readTranscript } from "./transcript.mjs";
 
 /**
  * How long `SessionEnd`'s flush gets.
@@ -50,8 +51,15 @@ import type { HookInput, HookOutput } from "./types.mjs";
  * design exists to avoid.
  */
 const END_FLUSH_BUDGET_MS = 3000;
+// Reusable Codex/Copilot tasks flush within two seconds, including credentials.
+// This also fits Codex 0.152.0's three-second exit-hook ceiling.
+const TASK_EXIT_BUDGET_MS = 2000;
 
-export async function turn(input: HookInput, configured: AdapterConfig): Promise<HookOutput> {
+export async function turn(
+  input: HookInput,
+  configured: AdapterConfig,
+  readEntries: typeof readTranscript = readTranscript,
+): Promise<HookOutput> {
   const hookStarted = Date.now();
   if (!configured.observe) return {};
   if (
@@ -63,13 +71,13 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
     return {};
   }
   const externalId = harnessSessionId(input.session_id);
-  const spool = loadOrCreateSpool(externalId, CLIENT_NAME, installationId());
+  const spool = loadOrCreateSpool(externalId, configured.clientName ?? CLIENT_NAME, installationId());
   if (spool === undefined) return {};
   if (input.transcript_path !== undefined) spool.transcript_path = input.transcript_path;
 
   // Record first, always, and persist before anything touches the network.
   // This is the step the previous design did not have.
-  const recorded = recordDelta(spool, input.transcript_path);
+  const recorded = recordDelta(spool, input.transcript_path, readEntries);
   const durable = saveSpool(spool);
   if (!durable) {
     // The spool did not land. Delivering anyway would risk sending events
@@ -96,7 +104,9 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
     return {};
   }
 
-  const bearer = await resolveBearer();
+  const closesTask = (configured.clientName ?? CLIENT_NAME) === CLIENT_NAME;
+  const taskDeadline = closesTask ? undefined : hookStarted + TASK_EXIT_BUDGET_MS;
+  const bearer = await resolveBearer(taskDeadline);
   // Silent: the session-start hook already told the user to log in, and saying
   // it again on every turn would be noise rather than help. The events are
   // recorded regardless and go out when a credential exists.
@@ -111,12 +121,14 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
     spool,
     config,
     bearer.token,
-    Date.now() + END_FLUSH_BUDGET_MS,
+    taskDeadline ?? Date.now() + END_FLUSH_BUDGET_MS,
   );
 
-  await closeRun(spool, config, bearer.token, endReason(input, result.complete));
+  if (closesTask) {
+    await closeRun(spool, config, bearer.token, endReason(input, result.complete));
+  }
   saveSpool(spool);
-  retireIfComplete(spool);
+  if (closesTask) retireIfComplete(spool);
 
   log("turn.done", {
     session: externalId,

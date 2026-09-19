@@ -53,5 +53,5 @@ mkdir -p "$SYNVEDA_MCP_CAPTURE"
 # alone so the client's own log still shows what the server said about
 # itself. `exec` so signals reach the pipeline rather than this shell.
 exec tee -a "$SYNVEDA_MCP_CAPTURE/in.jsonl" \
-  | "$SYNVEDA_CLI" mcp --writes "$SYNVEDA_MCP_WRITES" \
+  | "$SYNVEDA_CLI" mcp --writes "$SYNVEDA_MCP_WRITES" "$@" \
   | tee -a "$SYNVEDA_MCP_CAPTURE/out.jsonl"

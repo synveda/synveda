@@ -173,7 +173,7 @@ pub(crate) struct EventsParams {
     artifact_id: Option<String>,
     /// Exact immutable version/digest. Requires `artifact_family`.
     artifact_version: Option<String>,
-    /// Exact session recorded in an event payload.
+    /// Exact Session recorded in delivery/Capture or lifecycle evidence.
     session_id: Option<SessionId>,
     /// Exact context run recorded in an event payload.
     context_run_id: Option<ContextRunId>,
@@ -241,6 +241,7 @@ pub(crate) async fn events(
             resource: params.resource,
             from: params.from,
             until: params.until,
+            session_id: params.session_id,
             payload_contains,
         };
 
@@ -1014,9 +1015,6 @@ fn payload_filter(params: &EventsParams) -> Result<Option<Value>> {
             "artifact_references".to_owned(),
             Value::Array(vec![Value::Object(reference)]),
         );
-    }
-    if let Some(session_id) = params.session_id {
-        payload.insert("session_id".to_owned(), json!(session_id));
     }
     if let Some(context_run_id) = params.context_run_id {
         payload.insert("context_run_id".to_owned(), json!(context_run_id));

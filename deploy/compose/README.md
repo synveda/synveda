@@ -99,6 +99,13 @@ this is a recovery contract, not an old-or-new power-loss atomicity claim.
 External-OIDC development owns only the application hostname. Reference mode
 uses operator DNS and never reads or edits `/etc/hosts`.
 
+If status refuses a saved backup witness after its filesystem device number
+changes, rerun the exact confirmed `compose-hosts-install` for the same project.
+The privileged helper renews the public receipt only when every other witness
+field, the protected recovery copy and the installed hosts content still match.
+It preserves hosts content and the backup; unknown drift remains refused.
+An interrupted receipt renewal is retried with the same confirmed install.
+
 ### Removing development hostname ownership
 
 `compose-down` and confirmed `compose-reset` retain the host-wide hostname

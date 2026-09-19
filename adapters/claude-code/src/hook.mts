@@ -90,7 +90,7 @@ async function main(): Promise<void> {
       // session never waits on it, and a hook that returned context from
       // there would be racing the one that does (SKIL-4, ADR-0054
       // decision 18).
-      if (config.skills) await syncSkills();
+      if (config.skills) await syncSkills(config);
       else log("skills.disabled", {});
     } else {
       emit(mode === "start" ? await sessionStart(input, config) : await turn(input, config));

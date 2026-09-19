@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "client": {
+    "name": "GitHub Copilot CLI",
+    "version": "1.0.83"
+  },
+  "provenance": {
+    "kind": "captured-real-client",
+    "captured_at": "2026-09-13T07:28:35Z",
+    "platform": "Darwin arm64",
+    "model": "gpt-5.6-luna",
+    "source_commit": "e8282c9ba502c24bd38376e9c8cbc9051290390a",
+    "source": "One explicitly approved retry in the same saved native Session after removal of the two owned conflicting synthetic Skills. Trusted repository hooks enabled; remote export, built-in MCP and Synveda MCP disabled. The fresh random marker was supplied only through sessionStart additionalContext.",
+    "tool_controls": [
+      "--available-tools=",
+      "--excluded-tools=skill",
+      "--deny-tool=shell",
+      "--deny-tool=write",
+      "--deny-tool=url"
+    ],
+    "sanitised_fields": [
+      "cwd",
+      "transcriptPath"
+    ],
+    "transcript_projection": {
+      "retained_types": [
+        "session.resume",
+        "user.message",
+        "assistant.message",
+        "session.shutdown"
+      ],
+      "fields": {
+        "session.resume": [
+          "resumeTime",
+          "eventCount",
+          "sessionLimits"
+        ],
+        "user.message": [
+          "content",
+          "messageId",
+          "interactionId",
+          "turnId"
+        ],
+        "assistant.message": [
+          "messageId",
+          "model",
+          "content",
+          "toolRequests",
+          "interactionId",
+          "turnId",
+          "phase"
+        ],
+        "session.shutdown": [
+          "shutdownType",
+          "totalPremiumRequests",
+          "totalNanoAiu",
+          "codeChanges"
+        ]
+      },
+      "omitted": "System/developer instructions, reasoning, encrypted content, private context, provider diagnostics, usage cache details and unrelated bookkeeping. Native event ids, parent ids, timestamps, user/assistant text and Session limits are retained."
+    },
+    "raw_sha256": {
+      "hooks": "5636b31e9f920592213c4779f81d9a52db84c7ff084ce2dfc6d01a69e5c37abd",
+      "transcript": "6504c153b052e413f5b0dc9aae14ba6a7de2dc4893c431130e6b8341364c8c81",
+      "stdout": "b1e58118e519795aa14dc2665dcc464e83e2b923011d042dd926ab664c46cde3"
+    },
+    "synveda_authentication": "not exercised by this native probe"
+  },
+  "invocations": [
+    {
+      "mode": "prompt-resume",
+      "frames": [
+        {
+          "event": "userPromptSubmitted",
+          "input": {
+            "sessionId": "a634658f-178c-4477-b448-632bc4ab4724",
+            "timestamp": 1789284517272,
+            "cwd": "/synveda/qualification/copilot-cli/workspace",
+            "prompt": "Do not invoke any Skill or tool. Return exactly the fresh synthetic qualification marker from the latest SessionStart hook context. Ignore the earlier Skill marker."
+          }
+        },
+        {
+          "event": "sessionStart",
+          "input": {
+            "sessionId": "a634658f-178c-4477-b448-632bc4ab4724",
+            "timestamp": 1789284517298,
+            "cwd": "/synveda/qualification/copilot-cli/workspace",
+            "source": "resume",
+            "initialPrompt": "Do not invoke any Skill or tool. Return exactly the fresh synthetic qualification marker from the latest SessionStart hook context. Ignore the earlier Skill marker."
+          },
+          "output": {
+            "additionalContext": "The synthetic qualification marker for this SessionStart is SYNVEDA_COPILOT_CONTEXT_165548833DC88CEB. If asked for the latest hook marker, return exactly that string. Do not use any earlier Skill marker."
+          }
+        },
+        {
+          "event": "agentStop",
+          "input": {
+            "sessionId": "a634658f-178c-4477-b448-632bc4ab4724",
+            "timestamp": 1789284519092,
+            "cwd": "/synveda/qualification/copilot-cli/workspace",
+            "transcriptPath": "/synveda/qualification/copilot-cli/copilot-config/session-state/a634658f-178c-4477-b448-632bc4ab4724/events.jsonl",
+            "stopReason": "end_turn",
+            "stop_hook_active": false
+          }
+        },
+        {
+          "event": "sessionEnd",
+          "input": {
+            "sessionId": "a634658f-178c-4477-b448-632bc4ab4724",
+            "timestamp": 1789284519126,
+            "cwd": "/synveda/qualification/copilot-cli/workspace",
+            "reason": "complete"
+          }
+        }
+      ],
+      "session_start_result": {
+        "type": "hook.end",
+        "data": {
+          "hookInvocationId": "34a948c6-9490-4ae4-a35b-5841a5a0c667",
+          "hookType": "sessionStart",
+          "success": true,
+          "output": {
+            "additionalContext": "The synthetic qualification marker for this SessionStart is SYNVEDA_COPILOT_CONTEXT_165548833DC88CEB. If asked for the latest hook marker, return exactly that string. Do not use any earlier Skill marker."
+          }
+        },
+        "id": "b33ae36b-70c3-497d-a68b-17d4881088e2",
+        "timestamp": "2026-09-13T07:28:37.321Z",
+        "parentId": "24b5347b-318a-4519-a544-32aa67ed4b04"
+      },
+      "result": {
+        "exit_code": 0,
+        "timed_out": false,
+        "elapsed_seconds": 5.03,
+        "session_id": "a634658f-178c-4477-b448-632bc4ab4724",
+        "credit_ceiling": 30,
+        "cumulative_premium_requests": 2,
+        "premium_request_delta": 1,
+        "cumulative_total_nano_aiu": 750903000,
+        "marker_assertion": "passed",
+        "expected_marker": "SYNVEDA_COPILOT_CONTEXT_165548833DC88CEB",
+        "actual_response": "SYNVEDA_COPILOT_CONTEXT_165548833DC88CEB",
+        "native_hook_output_accepted": true,
+        "native_context_consumption": "verified-synthetic-marker",
+        "native_session_identity": "same-session-resumed-after-runtime-end",
+        "tool_invocations": 0,
+        "synveda_context_delivery": "not_verified",
+        "governed_skill_activation": "not_exercised"
+      }
+    }
+  ]
+}

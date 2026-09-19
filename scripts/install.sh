@@ -21,11 +21,12 @@
 #   $SYNVEDA_HOME/reference/      immutable releases and validated current link
 #   $SYNVEDA_HOME/state/          deployment secrets and authority state
 #   $SYNVEDA_HOME/backups/        database and recovery-secret archives
-#   $SYNVEDA_HOME/plugin/         the Claude Code plugin, as a marketplace
+#   $SYNVEDA_HOME/plugin/         the Claude marketplace and Codex/Copilot runtimes
 #
 # It touches **nothing** belonging to an editor or an AI client. Hooking one
 # up is a separate, explicit step — `synveda plugin install` for Claude Code,
-# `synveda mcp install --client …` for everything else — because an
+# native configuration and trusted hooks for Codex/Copilot, or the documented
+# `synveda mcp install --client …` targets — because an
 # installer that silently reconfigures somebody's tools is not one to run
 # from a pipe.
 #
@@ -248,6 +249,17 @@ require_plain_file "$work/synveda-gateway" "$archive synveda-gateway binary"
 require_plain_file "$work/synveda-worker" "$archive synveda-worker binary"
 require_plain_directory "$work/console" "$console console root"
 require_plain_directory "$work/plugin" "$plugin plugin root"
+for client in codex copilot-cli; do
+  case "$client" in
+    codex) client_label=Codex ;;
+    copilot-cli) client_label=Copilot ;;
+  esac
+  for client_asset in package.json dist/hook.mjs dist/transcript.mjs \
+    node_modules/@synveda/claude-code-adapter/package.json \
+    node_modules/@synveda/claude-code-adapter/dist/session-runtime.mjs; do
+    require_plain_file "$work/plugin/$client/$client_asset" "$plugin $client_label $client_asset"
+  done
+done
 reference_bundle="$work/synveda-reference-$plain"
 require_plain_directory "$reference_bundle" "$reference canonical root"
 require_plain_file "$reference_bundle/synveda-compose" "$reference launcher"
@@ -390,9 +402,8 @@ rm -rf "$HOME_DIR/console"
 cp -R "$work/console" "$HOME_DIR/console"
 printf '%s\n' console > "$HOME_DIR/console/.synveda-installer-owned"
 
-# The Claude Code plugin, as the marketplace `synveda plugin install` points
-# Claude Code at. Unpacked here and installed *nowhere* — this script does
-# not touch `~/.claude`.
+# The Claude marketplace and Codex/Copilot runtimes share this owned archive root.
+# No client is configured here; its normal trust/setup flow remains explicit.
 rm -rf "$HOME_DIR/plugin"
 cp -R "$work/plugin" "$HOME_DIR/plugin"
 printf '%s\n' plugin > "$HOME_DIR/plugin/.synveda-installer-owned"
@@ -528,5 +539,9 @@ say "After the gateway is running, client setup remains explicit:"
 say ""
 say "  synveda plugin install             # Claude Code: hooks + MCP, one command"
 say "  synveda mcp install --client claude-desktop   # or cursor, or zed"
+say "  Codex hook (Node 22+): $HOME_DIR/plugin/codex/dist/hook.mjs"
+say "  Codex setup: https://github.com/$REPO/blob/$source_sha/docs/integrations/codex.md"
+say "  Copilot hook (Node 22+): $HOME_DIR/plugin/copilot-cli/dist/hook.mjs"
+say "  Copilot setup: https://github.com/$REPO/blob/$source_sha/docs/integrations/copilot-cli.md"
 say ""
 say "Docs: https://github.com/$REPO/blob/$source_sha/docs/INSTALL.md"

@@ -176,7 +176,10 @@ export function loadOrCreateSpool(
     });
     return undefined;
   }
-  if (state.spool.external_session_id !== externalSessionId) {
+  if (
+    state.spool.external_session_id !== externalSessionId ||
+    state.spool.client_name !== clientName
+  ) {
     log("spool.held", { session: externalSessionId, reason: "session_mismatch", corrupt: 0 });
     return undefined;
   }

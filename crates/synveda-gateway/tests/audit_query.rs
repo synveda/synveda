@@ -318,6 +318,20 @@ async fn get(app: &Router, path: &str, token: &str) -> (StatusCode, Value) {
     call(app, request).await
 }
 
+async fn post(app: &Router, path: &str, token: &str, key: &str, body: Value) -> Value {
+    let request = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("authorization", format!("Bearer {token}"))
+        .header("idempotency-key", key)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("build post request");
+    let (status, body) = call(app, request).await;
+    assert!(status.is_success(), "POST {path}: {status} {body}");
+    body
+}
+
 /// Grant a role through the product surface, so the act lands on the chain
 /// as `access.granted` — which is what makes the authority half of a
 /// disclosure answer non-empty. A grant written straight to the store
@@ -1293,6 +1307,189 @@ async fn typed_artifact_session_and_context_filters_select_exact_evidence() {
             "the exact evidence is addressable through {path}: {filtered}"
         );
     }
+}
+
+/// Produce lifecycle and delivery evidence through real routes, including
+/// terminal Capture freezing. No audit payload is fabricated by the fixture.
+async fn recorded_session(w: &World, key: &str) -> (String, String) {
+    let place = session_seed::seed_run_for(&w.pool, w.tenant, key, "alice").await;
+    let opened = post(
+        &w.app,
+        "/v1/sessions",
+        &w.alice,
+        key,
+        json!({"workspace_id": place.workspace_id, "client_name": "audit-test"}),
+    )
+    .await;
+    let id = opened["id"].as_str().expect("Session id").to_owned();
+    let (status, context) = inject(&w.app, &w.alice, id.parse().expect("Session UUID")).await;
+    assert_eq!(status, StatusCode::CREATED, "context: {context}");
+    post(
+        &w.app,
+        &format!("/v1/sessions/{id}/events"),
+        &w.alice,
+        key,
+        json!({"events": [{
+            "event_type": "message.user",
+            "client_event_id": key,
+            "occurred_at": Utc::now(),
+            "payload": {"text": "Synthetic Session audit-filter acceptance."}
+        }]}),
+    )
+    .await;
+    post(
+        &w.app,
+        &format!("/v1/sessions/{id}/end"),
+        &w.alice,
+        key,
+        json!({"status": "ended"}),
+    )
+    .await;
+    (
+        id,
+        context["id"].as_str().expect("ContextRun id").to_owned(),
+    )
+}
+
+#[tokio::test]
+async fn session_filter_covers_lifecycle_pages_without_crossing_sessions_or_tenants() {
+    let Some(w) = world().await else { return };
+    let (session, context) = recorded_session(&w, "aud2-lifecycle").await;
+    let (other_session, other_context) = recorded_session(&w, "aud2-other").await;
+    let Some(foreign) = world().await else { return };
+    let (foreign_session, _) = recorded_session(&foreign, "aud2-foreign").await;
+
+    // Audit queries themselves record the Session filter. A fixed time bound
+    // excludes those later reads while comparing one completed task history.
+    let until = stamp(Utc::now());
+    let (status, snapshot) = get(&w.app, "/v1/audit/export?limit=1000", &w.dana).await;
+    assert_eq!(status, StatusCode::OK, "snapshot: {snapshot}");
+    assert!(snapshot["next_cursor"].is_null(), "fixture fits one page");
+    synveda_audit::verify_export(&snapshot).expect("valid prefix before filtering");
+    let (status, all) = get(
+        &w.app,
+        &format!("/v1/audit/events?until={until}&limit=1000"),
+        &w.dana,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "unfiltered evidence: {all}");
+    let expected: Vec<Value> = all["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .filter(|event| {
+            event["payload"]["session_id"] == session
+                || event["payload"]["session"]["id"] == session
+        })
+        .cloned()
+        .collect();
+    let actions: Vec<&str> = expected
+        .iter()
+        .map(|event| event["action"].as_str().expect("action"))
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            "session.opened",
+            "context.candidates.retrieved",
+            "context.selections.made",
+            "session.context.composed",
+            "session.events.appended",
+            "session.ended",
+            "capture.batch.created"
+        ],
+        "fixture must exercise both recorded identity shapes"
+    );
+
+    let base = format!("/v1/audit/events?session_id={session}&until={until}");
+    let mut after = 0;
+    let mut paged = Vec::new();
+    for _ in 0..4 {
+        let (status, page) = get(&w.app, &format!("{base}&after={after}&limit=2"), &w.dana).await;
+        assert_eq!(status, StatusCode::OK, "Session page: {page}");
+        let events = page["events"].as_array().expect("events");
+        assert!(events.len() <= 2, "SQL limit bounds every page");
+        paged.extend(events.iter().cloned());
+        if let Some(next) = page["next_cursor"].as_i64() {
+            assert!(next > after, "cursor advances");
+            after = next;
+        } else {
+            assert_eq!(paged.len(), 7, "final page includes the complete history");
+            break;
+        }
+    }
+    assert_eq!(
+        paged, expected,
+        "exact rows/hashes/order without duplicates"
+    );
+
+    for (extra, expected_actions) in [
+        ("&action=session.opened".to_owned(), vec!["session.opened"]),
+        ("&action=session.ended".to_owned(), vec!["session.ended"]),
+        ("&actor=bob".to_owned(), vec![]),
+        ("&outcome=deny".to_owned(), vec![]),
+        (format!("&from={until}"), vec![]),
+        (format!("&resource=session%20{other_session}"), vec![]),
+        (format!("&context_run_id={other_context}"), vec![]),
+        (
+            format!(
+                "&context_run_id={context}&artifact_family=knowledge&artifact_id={}&artifact_version={}",
+                w.runbook, w.runbook_revision
+            ),
+            vec!["session.context.composed"],
+        ),
+        (
+            format!("&context_run_id={context}&action=session.ended"),
+            vec![],
+        ),
+    ] {
+        let (status, filtered) = get(&w.app, &format!("{base}{extra}"), &w.dana).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "combined filter {extra}: {filtered}"
+        );
+        let actual: Vec<&str> = filtered["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .map(|event| event["action"].as_str().expect("action"))
+            .collect();
+        assert_eq!(actual, expected_actions, "combined filter {extra}");
+    }
+
+    for absent in [foreign_session, synveda_types::SessionId::new().to_string()] {
+        let (status, answer) = get(
+            &w.app,
+            &format!("/v1/audit/events?session_id={absent}&until={until}"),
+            &w.dana,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "foreign/absent Session: {answer}");
+        assert_eq!(answer["events"], json!([]));
+    }
+    let (status, denied) = get(&w.app, &base, &w.erin).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "tenant AuditRead required: {denied}"
+    );
+
+    let through = snapshot["snapshot_seq"].as_i64().expect("snapshot seq");
+    let (status, repeated) = get(
+        &w.app,
+        &format!("/v1/audit/export?through={through}&limit=1000"),
+        &w.dana,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "repeat frozen prefix: {repeated}");
+    assert_eq!(
+        repeated, snapshot,
+        "filtering changes no canonical row byte"
+    );
+    let (status, verified) = get(&w.app, "/v1/audit/verify", &w.dana).await;
+    assert_eq!(status, StatusCode::OK, "verification: {verified}");
+    assert_eq!(verified["valid"], true, "later reads also retain the chain");
 }
 
 /// Export pages are one frozen prefix even though every page read appends a

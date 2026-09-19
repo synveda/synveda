@@ -22,7 +22,7 @@
  * in the README and INSTALL.md rather than left for somebody to discover.
  */
 
-import { appendEvents, endSession } from "./client.mjs";
+import { appendEvents, CLIENT_NAME, endSession } from "./client.mjs";
 import type { AdapterConfig } from "./config.mjs";
 import { chunk, MAX_EVENTS_PER_BATCH, toSessionEvents } from "./events.mjs";
 import { log } from "./log.mjs";
@@ -55,14 +55,18 @@ export interface Delivered {
  * else on purpose: `PreCompact` runs while compaction proceeds, so the content
  * must be in memory before the transcript can be rewritten underneath us.
  */
-export function recordDelta(spool: Spool, transcriptPath: string | undefined): number {
+export function recordDelta(
+  spool: Spool,
+  transcriptPath: string | undefined,
+  readEntries: typeof readTranscript = readTranscript,
+): number {
   const path = transcriptPath ?? spool.transcript_path;
   if (path === undefined) {
     log("record.no_transcript", { session: spool.external_session_id });
     return 0;
   }
   spool.transcript_path = path;
-  const delta = entriesAfter(readTranscript(path), spool.recorded_through);
+  const delta = entriesAfter(readEntries(path), spool.recorded_through);
   if (delta.resynced) {
     // The watermark named an entry the transcript no longer holds — a
     // compaction, a `/clear`, a fork. Everything it still holds is re-read;
@@ -103,7 +107,8 @@ export async function deliver(
   let acknowledged = 0;
   let complete = true;
   for (const batch of chunk(pending(spool), MAX_EVENTS_PER_BATCH)) {
-    if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+    const remainingMs = deadlineAt === undefined ? config.timeoutMs : deadlineAt - Date.now();
+    if (remainingMs <= 0) {
       complete = false;
       log("deliver.deadline", {
         session: spool.external_session_id,
@@ -120,7 +125,7 @@ export async function deliver(
         occurred_at: entry.occurred_at,
         payload: entry.payload,
       })),
-    });
+    }, Math.min(config.timeoutMs, remainingMs));
     log("deliver.batch", {
       session: spool.external_session_id,
       events: batch.length,
@@ -214,8 +219,14 @@ export async function retryBacklog(
   let delivered = 0;
   for (const { path, spool } of allSpools()) {
     if (spool.external_session_id === exceptExternalId) continue;
+    // A background retry has the same deployment boundary as the active hook.
+    // Never send a saved conversation to the gateway selected by a later login.
+    if (
+      spool.client_name !== (config.clientName ?? CLIENT_NAME) ||
+      spool.gateway_url !== config.gatewayUrl
+    ) continue;
     if (pending(spool).length === 0 && !spool.close_requested) {
-      retireIfComplete(spool, path);
+      if (spool.client_name === CLIENT_NAME) retireIfComplete(spool, path);
       continue;
     }
     if (Date.now() >= deadlineAt) {
@@ -228,7 +239,9 @@ export async function retryBacklog(
       await closeRun(spool, config, bearer, spool.end_reason);
     }
     saveSpool(spool, path);
-    retireIfComplete(spool, path);
+    // Codex/Copilot task owners end explicitly. Retain acknowledged bindings
+    // across another conversation's start and native runtime exits.
+    if (spool.client_name === CLIENT_NAME) retireIfComplete(spool, path);
   }
   if (delivered > 0) log("backlog.delivered", { events: delivered });
   return delivered;

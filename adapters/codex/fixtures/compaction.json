@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "client": {
+    "name": "Codex CLI",
+    "version": "0.152.0"
+  },
+  "provenance": {
+    "kind": "captured-real-client",
+    "captured_at": "2026-09-12T19:10:02.383580+00:00",
+    "source": "Installed native CLI /compact followed by a no-tool prompt on the same resumed synthetic task, using normal trusted project hooks. Captured before the adapter accepted compact events.",
+    "platform": "Darwin arm64",
+    "model": "gpt-5.5",
+    "reasoning_effort": "low",
+    "sanitised_fields": [
+      "cwd",
+      "transcript_path"
+    ],
+    "synveda_authentication": "ordinary Keycloak OIDC/PKCE profile; native outage/recovery already completed on the same Synveda Session",
+    "transcript_projection": "Native Session identity; last authored user/assistant messages before and after compaction; compacted metadata with replacement_history omitted. Native IDs, ordinals, timestamps and message fields are unchanged."
+  },
+  "frames": [
+    {
+      "session_id": "01a09702-0a65-7bd2-8495-64db63bfe23a",
+      "turn_id": "01a09705-f177-75f3-bbb8-6ad09fd2d17c",
+      "transcript_path": "/synveda/qualification/codex/transcript-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "PreCompact",
+      "model": "gpt-5.5",
+      "trigger": "manual"
+    },
+    {
+      "session_id": "01a09702-0a65-7bd2-8495-64db63bfe23a",
+      "turn_id": "01a09705-f177-75f3-bbb8-6ad09fd2d17c",
+      "transcript_path": "/synveda/qualification/codex/transcript-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "PostCompact",
+      "model": "gpt-5.5",
+      "trigger": "manual"
+    },
+    {
+      "session_id": "01a09702-0a65-7bd2-8495-64db63bfe23a",
+      "transcript_path": "/synveda/qualification/codex/transcript-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "SessionStart",
+      "model": "gpt-5.5",
+      "permission_mode": "default",
+      "source": "resume"
+    },
+    {
+      "session_id": "01a09702-0a65-7bd2-8495-64db63bfe23a",
+      "transcript_path": "/synveda/qualification/codex/transcript-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "SessionStart",
+      "model": "gpt-5.5",
+      "permission_mode": "default",
+      "source": "compact"
+    },
+    {
+      "session_id": "01a09702-0a65-7bd2-8495-64db63bfe23a",
+      "turn_id": "01a09706-c6cd-78e2-ad8b-7c3b7dcb683e",
+      "transcript_path": "/synveda/qualification/codex/transcript-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "UserPromptSubmit",
+      "model": "gpt-5.5",
+      "permission_mode": "default",
+      "prompt": "After this manual compaction, keep the same synthetic task active. Do not use tools, read files or inspect credentials. State the Synveda Session ID and the ingestion retry rule in one short paragraph."
+    },
+    {
+      "session_id": "01a09702-0a65-7bd2-8495-64db63bfe23a",
+      "turn_id": "01a09706-c6cd-78e2-ad8b-7c3b7dcb683e",
+      "transcript_path": "/synveda/qualification/codex/transcript-compaction.jsonl",
+      "cwd": "/synveda/qualification/codex",
+      "hook_event_name": "Stop",
+      "model": "gpt-5.5",
+      "permission_mode": "default",
+      "stop_hook_active": false,
+      "last_assistant_message": "Synveda Session ID `01a09702-10aa-79b2-ae1a-fca231deb5af`; ingestion retries must reuse the original `Idempotency-Key`, return `409` while the original request is still running, and after completion replay the stored response without starting a second ingestion."
+    }
+  ]
+}

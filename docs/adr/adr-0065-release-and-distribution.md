@@ -1,12 +1,57 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted, **amended eight times** — two on 2026-08-11 while
-  building it, six on 2026-08-12, each by running the previous release on a
-  real machine rather than by review. Every amendment below says what it
-  changed and what still stands; none reverses a decision.
+- **Status**: Accepted; amended ten times. The current Docker deployment
+  contract is ADR-0102; the native/client artifact decisions below remain.
 - **Date**: 2026-08-11
-- **Feature(s)**: OPS-8
+- **Feature(s)**: OPS-8, CPR-39, ADPT-9
 - **Deciders**: sujitn
+
+## Amendment 10 (2026-09-19): carry the qualified Copilot hook runtime
+
+At `571a6c6`, Copilot CLI 1.0.83 passes native qualification from the checkout,
+but the release archive still contains only the Claude and Codex runtimes.
+Extend amendment 9's explicit client list with `plugin/copilot-cli`: its two
+compiled hook/reader modules and the same closed shared Session runtime as a
+private, release-versioned Node dependency. Preserve the Claude marketplace.
+No new dependency, bundler, import rewriting or plugin manager is needed.
+
+Build all three adapters in the existing release step. Before changing an
+installation, require the Copilot manifests, hook, reader and shared runtime
+entry point, as for Codex. Print the installed hook path and source-bound guide;
+client configuration and hook trust remain user-owned. Reinstall and upgrade
+replace the owned runtime bytes while preserving client configuration.
+
+Acceptance reuses both clients' captured hook/reader tests against the extracted
+archive outside the checkout, checks local dependency resolution and unchanged
+compiled bytes, and exercises installer convergence and incomplete-archive
+refusal. Run these checks on the host and pinned offline Docker Node 22. This
+proves local archive execution, not native execution from a published release;
+ADR-0107's version, platform and lifecycle qualification limits remain.
+
+## Amendment 9 (2026-09-12): carry the verified Codex hook runtime
+
+At `d17bd4d`, `scripts/package-plugin.sh` produced 106 archive entries and no
+Codex entry. The Codex lifecycle worked from the checkout, but a release user
+could not run its hook without installing build tools and workspace sources.
+
+Keep the existing `synveda-plugin-<version>.tar.gz` artifact and installer.
+Alongside its unchanged Claude marketplace, add `plugin/codex/dist` with the
+compiled Codex hook/reader and its existing shared Session runtime as a normal
+private Node dependency. Copy a closed runtime-file list; package no dependency
+symlink, test fixture, source tree or development dependency for Codex. Node's
+standard module resolver loads the dependency; no new bundler, import rewriter,
+delivery engine or plugin registry is needed. Both private package manifests
+name the release version. The installer already copies that complete archive
+into its owned `plugin/` directory and continues to edit no client configuration.
+
+Build both adapters in the existing release step. Acceptance must execute the
+captured lifecycle suite against the extracted hook outside the checkout, prove
+the shared runtime resolves inside the archive, and prove installer upgrade
+replaces the Codex bytes while preserving client configuration and mutable
+state. Reuse the existing lifecycle and installer tests. This is installed
+artifact/replay evidence; native Codex loading, release publication and other
+platforms need their own evidence. Normal Codex hook trust and task ownership
+from ADR-0106 remain unchanged.
 
 ## Amendment 8 (2026-08-12): the upgrade that reached everything except the plugin
 

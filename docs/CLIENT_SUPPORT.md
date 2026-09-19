@@ -7,8 +7,10 @@ A connection recipe is not a support claim. `captured` means authentic frames re
 | Client | Level | Tested versions | Lifecycle | Principal limit |
 | --- | --- | --- | --- | --- |
 | Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. |
+| GitHub Copilot CLI | `verified` | 1.0.83 | Captured sessionStart context, agentStop recording and sessionEnd flush; native MCP configuration | Verified source-build lifecycle only for Copilot CLI 1.0.83 / gpt-5.6-luna on macOS arm64 with the documented Docker/Keycloak setup. Native execution from a published installation and other versions/platforms remain unqualified. |
 | Cursor | `experimental` | none | Cursor Hooks v1 plus MCP | No Cursor executable or authenticated client was available on 2026-08-25. |
 | Visual Studio Code | `configured` | none | VS Code agent hooks Preview plus MCP | The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive. |
+| Codex CLI | `verified` | 0.152.0 | Native hooks and MCP over the existing Session runtime; manual/automatic compaction and outage/recovery verified | Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, native execution from a published installation and other client versions/platforms remain unqualified. |
 | Claude Desktop | `captured` | 1.25927.0 | MCP tool calls only | Authentic discovery and tool-call frames are replayed, but MCP alone does not prove session capture or end semantics. |
 | Zed | `captured` | 1.13.2 | MCP tool calls only | Authentic non-Anthropic tool frames are replayed, but no session lifecycle/capture contract is available. |
 | Windsurf | `configured` | none | MCP configuration only | Documented config shape only; no authentic exchange or lifecycle run is claimed. |
@@ -44,6 +46,47 @@ Known limits:
 - A spool is pinned to its first authenticated gateway origin; a profile switch to another deployment holds the run instead of sending it.
 - Payload hashes detect accidental corruption but do not authenticate local state against an attacker with arbitrary write access to the same account.
 - Skill execution evidence remains host-observed at the sync/advertisement seam; a model statement alone never counts.
+
+### GitHub Copilot CLI — `verified`
+
+Contract: Hooks schema version 1 / captured Copilot CLI 1.0.83 (2026-09-19). Evidence level: `live-client`.
+
+Authentic fixtures:
+
+- `adapters/copilot-cli/fixtures/lifecycle.json` — captured-real-client-lifecycle, SHA-256 `5da9955570a6a742db9a05d3dead220d716b7679496890e77e01ac4336207525`
+- `adapters/copilot-cli/fixtures/transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `a923453d2ce160f96a9de59551c70210ba5c4a4cd192a1b0904fa1489de800f5`
+- `adapters/copilot-cli/fixtures/resume-lifecycle.json` — captured-real-client-lifecycle, SHA-256 `6e561e4620ade24b37f9314b5614c9a7ff2d6295157d7d229b7b8bfc918338cb`
+- `adapters/copilot-cli/fixtures/resume-transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `93a3b33aead664f15f0fe5f7e9ca6d85c54211435c8271d71adc5f17ec14ce20`
+- `adapters/copilot-cli/fixtures/governed-transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `b63a577b517db674fe32a52d4e474752a986cf097006a36536ba7cfd61886471`
+- `adapters/copilot-cli/fixtures/governed-probe.json` — captured-real-client-partial-result, SHA-256 `440a92f52a55e8cfe5f277578049520114b699896f56d553225ec2d1e8b7c68d`
+- `adapters/copilot-cli/fixtures/shared-workflow-transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `bb636f9e4f460f28844690718b475fe9fad6aa8151d024089f8ecf822ea33f9c`
+- `adapters/copilot-cli/fixtures/shared-workflow.json` — captured-live-client-partial-result, SHA-256 `9a5d0ab47c9f02405dbaf60f0d030026a3a00f3d63fb84a51d90668cfdb18a47`
+- `adapters/copilot-cli/fixtures/clean-lifecycle-transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `f2f94476e1accf36cb34a7a5b03d7c6cd22a82876ce0e5b805fb5f517089dfcb`
+- `adapters/copilot-cli/fixtures/clean-lifecycle.json` — captured-live-client-result, SHA-256 `7c77c323150c0a9bb5c78b9c8a905402d82a9b07ed6641e0cbb5a92fd5f430c6`
+
+Conformance:
+
+- `session_creation`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `event_delivery`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `context_request_delivery`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `capture`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `session_end`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `retry_idempotency`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `skill_advertisement_activation`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `tool_configuration`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `cross_session_knowledge_reuse`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `persisted_audited_outcomes`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+
+Known limits:
+
+- Verified source-build lifecycle only for Copilot CLI 1.0.83 / gpt-5.6-luna on macOS arm64 with the documented Docker/Keycloak setup. Native execution from a published installation and other versions/platforms remain unqualified.
+- Native new/resume context, exact approved Skill activation, MCP recall and foreign-workspace denial pass on one explicit Synveda task shared by both SDK examples. Actual response traces correlate with content-free audit.
+- Sixteen native observations plus two SDK Skill events persist. Exact public-API replay appends no duplicates. Capture yields 16 reviewable candidates; explicit end and later Knowledge reuse pass; audit verifies through sequence 1179.
+- The final assistant observation becomes deliverable on a later native reopen/exit. Runtime exit keeps the task active. Native Skill activation alone emits no typed Skill-usage event.
+- The clean pair used two approved prompts in one saved Session under a shared 30-credit soft limit: two cumulative premium requests and 575693000 nano-AIU. The no-prompt reopen did not increase these counters; native auxiliary model startup failed separately.
+- Earlier marker, denied-result parser and misplaced-hook failures remain pinned as failed evidence. Exact retry IDs were exercised through the public API; native outage recovery, compaction/reinjection and unknown/non-text result formats remain unqualified.
+- The release archive includes the compiled hook and its private shared runtime. All 23 hook/reader tests pass from the extracted archive on Node 24/macOS arm64 and pinned Docker Node 22/Linux arm64 and emulated x86_64. This is archive replay, not native execution from a published installation.
+- The existing approved Skill root override, native MCP configuration and trusted-hook setup are manual. Copilot CLI support makes no VS Code or cloud-agent claim.
 
 ### Cursor — `experimental`
 
@@ -99,14 +142,56 @@ Known limits:
 - VS Code 1.133.0 was installed locally, but no authenticated agent profile or real run was available.
 - MCP configuration alone does not provide reliable capture lifecycle semantics.
 
+### Codex CLI — `verified`
+
+Contract: Codex CLI 0.152.0 native hooks / MCP 2025-06-18. Evidence level: `live-client`.
+
+Authentic fixtures:
+
+- `crates/synveda-cli/fixtures/mcp/codex.json` — captured-client-frames, SHA-256 `d807a328550a652430c35a2c4b65f0c29b193447b8255a7e9c2fcf2d49d71289`
+- `adapters/codex/fixtures/lifecycle.json` — captured-client-hooks, SHA-256 `3bb629ff3d42681b64c1eb8abd21404aebef87bf986f084e90e44dea02b66a39`
+- `adapters/codex/fixtures/transcript.jsonl` — captured-client-transcript, SHA-256 `57d88963968808bba39b344115604df9e49fd4e21355bef65bc797401dbf9915`
+- `adapters/codex/fixtures/transcript-mcp.jsonl` — captured-client-transcript, SHA-256 `aa69cffbeec03a5a458388772837b2e28b0ab118393ab0407c939f9771508262`
+- `adapters/codex/fixtures/keycloak-qualification.json` — captured-live-client-result, SHA-256 `9b7a2322b6b83f18c8f1904f8af39db15996bfec1c293d393e8c389974573c3b`
+- `adapters/codex/fixtures/compaction.json` — captured-client-hooks, SHA-256 `bf179cf50f92137645803a6760a168d5a390f297bbda6c7ec91e5c90f248f902`
+- `adapters/codex/fixtures/transcript-compaction.jsonl` — captured-client-transcript, SHA-256 `6df542215f9b7e269adef11e8151747346d59d603631ad9785ec33b46127454f`
+- `adapters/codex/fixtures/recovery-qualification.json` — captured-live-client-result, SHA-256 `6712dd6c475d0e323838d4130924bf1d7e57f013d4747d13b8f07b0906f22003`
+- `adapters/codex/fixtures/auto-compaction.json` — captured-client-hooks, SHA-256 `185cc368cafc7e76ba964cb58fca42482655355115eaa5e97cf559d6838b2a06`
+- `adapters/codex/fixtures/transcript-auto-compaction.jsonl` — captured-client-transcript, SHA-256 `bbed4be2a90887364cba6a2c495a73bee90a5cbbe2f623fbc9ece6c0a164bcc9`
+- `adapters/codex/fixtures/live-qualification.json` — captured-live-client-result, SHA-256 `05f19af7bb451693964fb334cda3b460bf2561f615b6b9c1f07790fcd242e31f`
+
+Conformance:
+
+- `session_creation`: passed — `adapters/codex/fixtures/live-qualification.json`
+- `event_delivery`: passed — `adapters/codex/fixtures/live-qualification.json`
+- `context_request_delivery`: passed — `adapters/codex/fixtures/live-qualification.json`
+- `capture`: passed — `adapters/codex/fixtures/live-qualification.json`
+- `session_end`: passed — `adapters/codex/fixtures/live-qualification.json`
+- `retry_idempotency`: passed — `adapters/codex/fixtures/live-qualification.json`, `adapters/codex/src/hook.test.mts`
+- `skill_advertisement_activation`: not_applicable — `adapters/codex/fixtures/live-qualification.json`, `adapters/codex/README.md`
+- `tool_configuration`: passed — `adapters/codex/fixtures/live-qualification.json`
+- `cross_session_knowledge_reuse`: passed — `adapters/codex/fixtures/live-qualification.json`
+- `persisted_audited_outcomes`: passed — `adapters/codex/fixtures/live-qualification.json`
+
+Known limits:
+
+- Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, native execution from a published installation and other client versions/platforms remain unqualified.
+- The release archive includes the compiled hook and its existing shared runtime. All eight captured tests pass from that archive on Node 22/Linux arm64 and Node 24/macOS arm64; this is archive replay, not a native-client installation run.
+- Use native Codex MCP configuration and normal trusted-hook setup; Synveda does not write its TOML file.
+- SessionEnd reason=other is followed by resume of the same Codex session; it cannot automatically close a Synveda task. Explicit application ownership remains required.
+- Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version. File reading is observed; automatic activation is not claimed.
+- Native hook capture requires normal project/hook trust loading. --ignore-user-config did not emit hooks in the probe.
+- Native recovery delivered four pending outage events once. Manual and automatic compaction preserve the task and reinject allowed context. A companion Python/public-API probe verified live revoke/re-authorisation with an unchanged bearer and client.
+- The 1000-token threshold is a qualification override only: a second interactive turn repeatedly compacted and was interrupted; normal-settings resume succeeded. The reader holds transcripts over 8 MiB/20,000 records; host death before a hook can lose an unfinished turn.
+
 ### Claude Desktop — `captured`
 
 Contract: MCP 2025-11-25 captured. Evidence level: `captured-protocol`.
 
 Authentic fixtures:
 
-- `crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json` — captured-client-frames, SHA-256 `08defbfbddbe99a48271ffa9ca203e658782e431d601ae97478b532981e5a022`
-- `crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json` — captured-client-frames, SHA-256 `8ac8fac8d07913a562f440933ae8cbd77ebbacb26e70f851304ab0498e6389d9`
+- `crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json` — captured-client-frames, SHA-256 `71b69ccbfefdd67a0d0aafa7b2ae8692892d49a909769710ac06c1ee91b421eb`
+- `crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json` — captured-client-frames, SHA-256 `cd54bc373b89495bd730da8bf6656d51a06ff238a2330b925ff274cdda6e68ac`
 
 Conformance:
 
@@ -131,7 +216,7 @@ Contract: MCP 2025-11-25 captured. Evidence level: `captured-protocol`.
 
 Authentic fixtures:
 
-- `crates/synveda-cli/fixtures/mcp/zed.json` — captured-client-frames, SHA-256 `8248caaa969cdae1606ba3c6c0ba39ee30b89702f29b49c901a3181e7d81cb3b`
+- `crates/synveda-cli/fixtures/mcp/zed.json` — captured-client-frames, SHA-256 `ebb6ce26f329d653cba2f4061160708c34e9ce17dbd82d0bde8830e03fc3b3d5`
 
 Conformance:
 

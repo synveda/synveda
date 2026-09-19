@@ -1,0 +1,7 @@
+[
+  {"operation":"get_me","options":{},"method":"GET","url":"/v1/me","body":null,"response":{"principal":{"subject":"fixture"}}},
+  {"operation":"get_skill_version_file","options":{"path":{"id":"skill","version_id":"v1","path":"nested/a b(1).md"}},"method":"GET","url":"/v1/skills/skill/versions/v1/files/nested%2Fa%20b%281%29.md","body":null,"response":{"content":"approved exact bytes"}},
+  {"operation":"list_audit_events","options":{"query":{"after":"offset +/~*","limit":2}},"method":"GET","url":"/v1/audit/events?after=offset+%2B%2F%7E*&limit=2","body":null,"response":{"events":[],"next_cursor":null}},
+  {"operation":"open_session","options":{"body":{"workspace_id":"w1","client_name":"interop","external_session_id":"task-1"},"idempotencyKey":"open-task-1"},"method":"POST","url":"/v1/sessions","body":{"workspace_id":"w1","client_name":"interop","external_session_id":"task-1"},"response":{"id":"session-1"}},
+  {"operation":"append_session_events","options":{"path":{"session_id":"session-1"},"body":{"events":[{"client_event_id":"turn-1","event_type":"memory.asserted","payload":{"text":"Unicode ✓"},"occurred_at":"2026-09-12T00:00:00Z"}]}},"method":"POST","url":"/v1/sessions/session-1/events","body":{"events":[{"client_event_id":"turn-1","event_type":"memory.asserted","payload":{"text":"Unicode ✓"},"occurred_at":"2026-09-12T00:00:00Z"}]},"response":{"appended":1,"duplicates":0}}
+]

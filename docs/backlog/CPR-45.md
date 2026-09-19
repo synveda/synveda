@@ -38,6 +38,35 @@ private OpenTelemetry Collector. Synveda and Keycloak use separate databases
 and roles. Keycloak stays behind the generic OIDC/OAuth2 + PKCE boundary and is
 the only bundled identity provider. Temporal is absent.
 
+### Hosts witness recovery — 2026-09-19
+
+At `fbb340973ae482be5ee62f128957660bced9442c`, the existing
+`acceptance-interop` deployment refused startup because the protected hosts
+backup's saved `dev` alone had changed. Installed hosts bytes still matched
+their recorded digest. The ADR-0102 amendment adds a confirmed privileged
+installation repair: verify the complete protected backup and exact installed
+target, preserve every other witness field, and republish only the public
+receipt through existing interrupted-install recovery. Status and removal
+remain strict. Unknown drift is never adopted.
+
+The operator ran the exact same-project install confirmation. Ownership and
+resolver checks, canonical `compose-up` and `compose-smoke` now pass with the
+existing volumes and secrets. The hosts content digest remained
+`5e318b3359804b40b3929f3a2ea7803a67892e896d34af6164b784f1b9a76876`.
+Ordinary approver and author browser PKCE logins also passed for ADPT-9.
+
+All 345 `make check-deploy` tests pass with no skips, followed by the Compose
+render and deployment-convergence checks. The hosts suite passes 39/39 on
+macOS Node 24.18.0 and 37/39 on pinned Linux arm64 Node 22.23.2: the Linux run
+explicitly skips the unavailable xattr tool fixture and Darwin ACL fixture.
+The bare Node image first failed five checks because its required Linux `acl`
+package was absent; installing that documented system dependency in a
+disposable container resolved those failures. Formatting, dependency direction,
+docs, backlog and ADR gates pass. No Rust changed; Clippy is not applicable.
+Full CI, fresh database tests and the full live Compose restart acceptance were
+not rerun. This repair does not close the reference deployment's remaining
+platform, recovery, upgrade or published-installation qualification.
+
 ## Scope
 
 - Keep one provider-neutral configuration, image, command, schema, health,
@@ -152,6 +181,18 @@ boundary.
 
 ### Current local demonstration validation
 
+A subsequent interoperability run on 2026-09-12 completed the owned hosts handoff
+and fresh `acceptance-interop` acceptance at `0a6dfb5` plus the working-tree client
+increment. Browser seed/login, all six service restarts and final verification
+passed. After the response-trace correction, canonical down/up with retained
+PostgreSQL and secrets and the `demo` profile passed smoke. Native Codex and both
+SDKs then passed the shared ordinary Keycloak workflow through the public proxy,
+including Capture, explicit task end and a valid audit chain. The current local
+project is `synveda-development-acceptance-interop`, pool `10.231.46.0/24`; the
+earlier `acceptance-e2e` product data and secrets remain retained. Details and
+remaining client limits are in `docs/INTEROPERABILITY_PLAN.md`. This adds no new
+platform, reference-HTTPS, HA or SaaS-readiness claim.
+
 The 2026-09-12 run uses `feat/CPR-45` at starting commit
 `d1486929d73dc459ed6dc0bf029c5c825d3a1bb6` plus this working-tree increment.
 The host is macOS 26.6.2 arm64, OrbStack Docker Engine 29.4.0, Compose 5.1.2,
@@ -210,6 +251,33 @@ acceptance has no remaining blocker. The next wider-feature action is the
 supported-host/reference repetition below. This is one-host local evidence,
 not Docker Desktop/Linux, reference HTTPS, recovery, upgrade, Apalis,
 installed-release or production evidence.
+
+### Deterministic gate progress (2026-09-12)
+
+The apparent interrupted-build stall recorded during archive validation was
+delayed test reporting. At `f06926a`, the unchanged 89-test lifecycle suite
+passed in 360 seconds on macOS arm64 Node 24.18.0 with a 30-second per-test
+deadline and zero skips. The interrupted-build case completed in 2.5 seconds;
+later backup, restore and upgrade fixtures kept running while its result was
+buffered. A process sample showed synchronous fixture execution nested inside
+the child-exit callback. The two earlier terminated full gates remain incomplete
+runs, not passes.
+
+`scripts/compose-lifecycle.test.mjs` now yields to the event loop after each
+case so pending report I/O can flush. Assertions, test selection, production
+deadlines, signal cleanup and exact-project lock retention are unchanged.
+This is a test scheduling correction under ADR-0105's deterministic evidence
+class, with no architecture or deployment-contract change.
+
+The complete unfiltered `make check-deploy` passes all 342 tests with zero
+failures, cancellations or skips, including the 169 combined script checks,
+the Compose render matrix and final deployment convergence. Results now flush
+past the interrupted-build case while later fixtures are still running. Four
+focused build/failure/interruption checks also pass on pinned Node 22.23.2
+Linux arm64 Docker as the ordinary `node` user. Formatting and backlog/ADR/docs
+checks pass; no Rust changed, so strict Clippy is not applicable to this fix.
+Full CI, database and live deployment acceptance were not rerun. This closes
+the deterministic-gate checkpoint without changing the remaining live criteria.
 
 ### Remaining live acceptance
 

@@ -292,7 +292,7 @@ test("a degraded composition still delivers context and says nothing to the user
   }
 });
 
-test("an empty block contributes no context and is not an error", async () => {
+test("an empty Knowledge block still supplies the task Session ID for MCP", async () => {
   const mock = await gateway(
     script((request) =>
       request.path.endsWith("/context-runs")
@@ -305,7 +305,9 @@ test("an empty block contributes no context and is not an error", async () => {
       { hook_event_name: "SessionStart", session_id: "s5", source: "startup" },
       config(mock.url),
     );
-    assert.deepEqual(output, {});
+    assert.match(output.hookSpecificOutput?.additionalContext ?? "",
+      /Synveda Session ID: 22222222-2222-2222-2222-222222222222/);
+    assert.match(output.hookSpecificOutput?.additionalContext ?? "", /session_id/);
   } finally {
     await mock.close();
   }
@@ -543,6 +545,13 @@ test("a spool never crosses from one gateway deployment to another", async () =>
     assert.ok(held);
     assert.equal(pending(held).length, 1);
     assert.equal(held.gateway_url, first.url);
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "f3-gateway-new", source: "startup" },
+      config(second.url, { inject: false }),
+    );
+    assert.ok(!second.requests.some((request) => request.path.endsWith("/events")),
+      "another conversation's backlog must also respect the saved gateway");
+    assert.equal(pending(loadSpool("f3-gateway")!).length, 1);
   } finally {
     await second.close();
   }

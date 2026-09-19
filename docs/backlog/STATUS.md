@@ -1,11 +1,99 @@
 # Feature inventory
 
-142 features in this index. This file is authoritative for feature identity,
+143 features in this index. This file is authoritative for feature identity,
 phase and delivered/open state. Delivered names identify historical slices;
 current contracts live in code, generated artefacts and accepted ADRs, while git
 retains their implementation evidence. Open entries link to current briefs.
 
-110 delivered; 32 open. The inventory and open-brief shape are checked in CI.
+112 delivered; 31 open. The inventory and open-brief shape are checked in CI.
+
+The 2026-09-12 [interoperability execution plan](../INTEROPERABILITY_PLAN.md)
+records ADPT-1/2 and CPR-12/23 repairs, the initial ADPT-4 SDK slice and CPR-39
+delivery. Codex CLI 0.152.0 joins Claude Code as a verified lifecycle in the
+authoritative registry. Its native Keycloak run covered automatic compaction,
+approved Skill reading, MCP recall, outage/recovery and both SDKs on one task:
+19 unique events, 17 Capture candidates, explicit end, Knowledge reuse and a
+valid audit chain through sequence 858. Disposable public-API grants proved
+live deny/allow/revoke/re-authorisation with one unchanged bearer and client.
+Eight Codex tests replay the authentic manual/automatic boundaries and retain
+bounded delivery and stable task identity. No product code changed for this
+qualification; broader CI/database evidence remains dated in the plan.
+
+Under [ADPT-4](ADPT-4.md), clean npm packing now builds its entry point instead
+of producing an unusable archive. Installed npm/wheel validation passed nine
+tests per SDK on Docker Linux arm64 Node 22.23.2/Python 3.11.16 and macOS arm64
+Node 24.18.0/Python 3.14.6, with matching clean-build hashes and no skips.
+`make sdk-package-check` also checks exported types and packaged contract
+resources; CI invokes it, but the remote job was not run locally.
+The 2026-09-19 compatibility increment derives SDK/API versions and the OpenAPI
+digest from their existing manifests, exposes them through both public imports
+and removes the hard-coded client-header version. Both measured runtime pairs
+pass installed metadata/header checks and produce identical archives. Synthetic
+package/API version changes fail the existing generator drift gate. CI now
+declares both pairs, with gateway acceptance only on the minimum pair; those
+remote jobs remain unverified. The [SDK guide](../../sdks/README.md#compatibility-and-release-boundary)
+separates the measured matrix from public support commitments.
+The owner-authorised Apache-2.0 choice now covers the repository and both SDKs,
+with Synveda contributor attribution in root `NOTICE`. Cargo, npm/Python and
+generated OpenAPI metadata agree. Existing SDK generation checks the exact
+root licence/notice copies; the real npm archive and Python sdist/wheel include
+them. All nine installed tests per SDK pass on Docker Linux arm64 and host
+macOS arm64, zero skips, with matching reproducible archive hashes. Six OpenAPI
+tests and strict workspace Clippy pass; only the API licence metadata changed.
+Public distribution still needs verified npm/PyPI publishing access,
+provenance custody and the supported server/runtime window.
+The [release decision proposal](ADPT-4.md#release-decision-proposal)
+now gives concrete choices and three small follow-on batches. At `09ff50a`,
+the existing archive suites also pass all 18 tests under pinned offline
+emulated Linux amd64, zero skips, with hashes identical to the earlier native
+arm64 results. Native amd64 CI remains unverified. Both proposed public package
+names returned anonymous HTTP 404; namespace ownership is still unverified.
+The published product `v0.2.0` predates the checked contract, so matching version
+labels do not establish SDK/server compatibility. No release configuration or
+public package was changed.
+
+OPS-8/CPR-39 now includes the compiled Codex hook and its existing shared
+Session runtime in the current plugin archive. Eight captured tests pass from
+the extracted archive on Node 22/Linux arm64 and Node 24/macOS arm64. The
+installer preserves client configuration, replaces the hook on upgrade and
+refuses an incomplete runtime before mutation. Native execution from a published
+installation, non-text Codex results and other client versions/platforms remain
+unqualified. ADPT-9 delivers a verified Copilot CLI 1.0.83 /
+gpt-5.6-luna source-build lifecycle on macOS arm64 with the Docker/Keycloak
+reference. The clean pair at `c86d5c6` delivered authenticated context at both
+native start and resume, retained one task across both SDK workflows, activated
+the exact approved Skill and passed MCP recall and foreign-workspace denial.
+Eighteen unique events, zero duplicates on public-API replay, 16 Capture
+candidates, explicit end, Knowledge reuse and audit verification through
+sequence 1179 pass. The last assistant event arrived on a later no-user-prompt
+reopen/exit without increased usage counters. All 144 adapter tests (31 Copilot)
+pass on macOS Node 24 and pinned offline Docker Node 22, zero skips. Earlier
+marker, parser and hook-location failures remain preserved in their fixtures.
+CPR-45's confirmed hosts-witness renewal restored Compose/PKCE; current smoke
+passes and the earlier deployment checkpoint passed 345 tests without skips.
+ADPT-9 also packages the existing runtime through the archive/installer path.
+Eight Codex and 23 Copilot tests pass from the extracted archive on host Node
+24/macOS arm64 and pinned offline Docker Node 22/Linux arm64 and emulated
+x86_64. All 12 installer fixtures pass on host and Docker x86_64, preserving
+client configuration and refusing incomplete runtimes before mutation. The
+initial Linux arm64 installer run failed ten tests at the deliberately
+unsupported-platform boundary; it is not counted as passing. All 347 deployment
+tests and static gates pass across completed component runs; the full command's
+deadline failure and sandbox socket denial remain explicit in
+[the package evidence](../integrations/copilot-cli.md#release-archive-validation).
+Native outage/compaction, other result formats/platforms and execution from a
+published installation remain unqualified. Pi had no executable in the earlier inventory.
+These are independent of the public-release decisions.
+
+The apparent deployment-gate stall was delayed reporting: the unchanged
+89-test lifecycle suite passed in 360 seconds, and the interrupted build itself
+exited in 2.5 seconds. A test-only event-loop yield now lets results flush between
+synchronous fixtures. The full unfiltered `make check-deploy` passes all 342
+tests with zero skips plus the Compose render and deployment-convergence checks.
+Four focused checks also pass on Node 22/Linux arm64 Docker as an ordinary user.
+[CPR-45](CPR-45.md#deterministic-gate-progress-2026-09-12) records the closed
+checkpoint and the remaining live acceptance. The two earlier terminated gates
+remain incomplete runs, not passes.
 
 ## Phase 0 — Foundation (wk 1)
 
@@ -104,6 +192,7 @@ retains their implementation evidence. Open entries link to current briefs.
 - [ ] [ADPT-6: LlamaIndex memory adapter](ADPT-6.md) — open
 - [ ] [ADPT-7: Semantic Kernel memory connector](ADPT-7.md) — open
 - [x] ADPT-8: Observation that survives a session that does not wait — delivered 2026-08-24; ADR-0027
+- [x] ADPT-9: GitHub Copilot CLI adapter — delivered 2026-09-19; ADR-0107
 - [ ] [PRMT-3: Prompt experiment evidence](PRMT-3.md) — open
 - [ ] [SKIL-5: Authentic Skill usage reporting](SKIL-5.md) — open
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open
@@ -158,7 +247,7 @@ retains their implementation evidence. Open entries link to current briefs.
 - [x] CPR-36: One-runtime deployment convergence — delivered 2026-08-25; ADR-0095
 - [x] CPR-37: Conflict, supersession and freshness engine — delivered 2026-08-25; ADR-0096
 - [x] CPR-38: Bounded graph-augmented retrieval — delivered 2026-08-25; ADR-0097
-- [ ] [CPR-39: Second verified client](CPR-39.md) — open
+- [x] CPR-39: Second verified client — delivered 2026-09-12; ADR-0098, ADR-0106
 - [x] CPR-40: Context-platform product and trust evaluation — delivered 2026-08-26; ADR-0099
 - [x] CPR-41: One-command realistic product demo — delivered 2026-08-26; ADR-0100
 - [x] CPR-42: Context-platform security and product-integrity audit — delivered 2026-08-26; ADR-0078

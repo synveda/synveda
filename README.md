@@ -269,7 +269,7 @@ procedures.
 projection and distinguishes configuration, authentic captured frames,
 deterministic replay and live verification.
 
-Claude Code 2.1.241 is the only verified lifecycle. Other clients remain at
+Verified client lifecycles: Claude Code 2.1.241, GitHub Copilot CLI 1.0.83, Codex CLI 0.152.0. Other clients remain at
 their evidenced registry level; a connection recipe or generic MCP
 configuration is not lifecycle support.
 
@@ -280,10 +280,12 @@ register. In particular, a successful local demo does not establish published
 artifact parity, signing, production recovery or key custody, HA, SaaS or Helm
 production readiness.
 
-The repository currently has no `LICENSE` grant while generated OpenAPI
-metadata says `Proprietary`. That metadata is not complete distribution or use
-terms. An owner/legal decision is still required; the permissive dependency
-policy does not license Synveda itself.
+## Licence
+
+Synveda's first-party code and documentation, including the Python and
+TypeScript SDKs, are licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE)
+for attribution. Third-party components and materials retain their own
+licences and notices. The dependency licence policy remains a separate gate.
 
 ## Documentation
 
@@ -291,8 +293,11 @@ policy does not license Synveda itself.
   Knowledge, Context, Skills, Tools, governance and the distinct packaged
   workflow.
 - [Client support](docs/CLIENT_SUPPORT.md) and the [Claude Code adapter](adapters/claude-code/README.md)
-  cover the only currently verified agent lifecycle and the optional generic
-  MCP integration.
+  cover measured support levels, the Claude lifecycle and generic MCP integration.
+- [Python and TypeScript clients](sdks/README.md) cover the initial authenticated
+  API slice; [experimental Copilot CLI setup](docs/integrations/copilot-cli.md)
+  reuses the same Session boundary; [Codex CLI setup and evidence](docs/integrations/codex.md) records
+  its verified lifecycle and remaining qualification limits.
 - [Contributing](CONTRIBUTING.md), [agent rules](AGENTS.md) and the
   [feature inventory](docs/backlog/STATUS.md) define the development workflow.
 - [Product principles](docs/SYNVEDA_SEED.md), the [technical plan](docs/SYNVEDA_TECH_PLAN.md),

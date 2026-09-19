@@ -67,7 +67,8 @@ use synveda_types::GrantId;
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{
     CompositionConfig, IdentityId, PackConfig, ProposalId, ProposalState, RedactionConfig,
-    RedactionMode, ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId, TenantStatus,
+    RedactionMode, ScanSeverity, ScopeId, SessionId, SkillIndex, SkillScanConfig, TenantId,
+    TenantStatus,
 };
 
 #[derive(Parser)]
@@ -199,6 +200,14 @@ enum Command {
         /// omit it for workspace-scoped memory with no project Tool binding.
         #[arg(long)]
         project: Option<String>,
+        /// Bind this process to an existing Synveda Session. A shared host
+        /// can instead supply `session_id` in each tool call.
+        #[arg(long, conflicts_with = "task")]
+        session: Option<SessionId>,
+        /// Stable application task key for idempotent Session creation.
+        /// Reuse it after reconnect; use a different key for a new task.
+        #[arg(long, conflicts_with = "session")]
+        task: Option<String>,
         /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
         /// `default`.
         #[arg(long)]
@@ -2220,11 +2229,25 @@ async fn run(cli: Cli) -> Result<(), String> {
             writes,
             workspace,
             project,
+            session,
+            task,
             profile,
-        } => mcp::serve(profile_name(profile)?, writes, workspace, project).await,
+        } => {
+            mcp::serve(
+                profile_name(profile)?,
+                writes,
+                workspace,
+                project,
+                session,
+                task,
+            )
+            .await
+        }
         Command::Mcp {
             workspace,
             project,
+            session,
+            task,
             command:
                 Some(McpCommand::Install {
                     client,
@@ -2246,6 +2269,8 @@ async fn run(cli: Cli) -> Result<(), String> {
             },
             workspace.as_deref(),
             project.as_deref(),
+            session,
+            task.as_deref(),
         ),
         Command::Mcp {
             workspace: _,

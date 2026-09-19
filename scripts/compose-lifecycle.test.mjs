@@ -16,10 +16,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import test from "node:test";
+import test, { afterEach } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { generateTestTlsChain } from "./test-certificate.mjs";
+
+// Synchronous fixture chains can run inside a child-exit callback and delay
+// the test runner's report for minutes. Let pending I/O flush between cases.
+afterEach(() => setImmediate());
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WRAPPER = join(ROOT, "deploy/compose/scripts/compose.sh");

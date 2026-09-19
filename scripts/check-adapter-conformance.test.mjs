@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import {
   readmeSupportFindings,
   readmeSupportStatement,
+  renderTypescript,
   validateRegistry,
 } from "./check-adapter-conformance.mjs";
 
@@ -39,13 +40,27 @@ test("a configured recipe cannot be promoted to verified without a real lifecycl
 });
 
 test("a verified client cannot lose a required criterion", () => {
-  const registry = copy();
-  delete registry.clients.find((client) => client.id === "claude-code").conformance.checks.capture;
-  assert.match(validateRegistry(registry, root).join("\n"), /missing capture/);
+  for (const client of source.clients.filter((entry) => entry.support_level === "verified")) {
+    const registry = copy();
+    delete registry.clients.find((entry) => entry.id === client.id).conformance.checks.capture;
+    assert.match(validateRegistry(registry, root).join("\n"), /missing capture/);
+  }
 });
 
 test("captured evidence is content addressed", () => {
   const registry = copy();
   registry.clients.find((client) => client.id === "zed").authentic_fixtures[0].sha256 = "0".repeat(64);
   assert.match(validateRegistry(registry, root).join("\n"), /fixture digest drift/);
+});
+
+test("a capture without an installer is not offered as an installable client", () => {
+  const registry = copy();
+  const client = registry.clients.find((client) => client.id === "zed");
+  client.configuration = null;
+  assert.deepEqual(validateRegistry(registry, root), []);
+  assert.ok(!renderTypescript(registry).includes('"id": "zed"'));
+  client.support_level = "configured";
+  assert.match(validateRegistry(registry, root).join("\n"), /MCP configuration needs/);
+  client.support_level = "verified";
+  assert.match(validateRegistry(registry, root).join("\n"), /verified requires live-client evidence/);
 });

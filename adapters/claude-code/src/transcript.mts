@@ -8,7 +8,37 @@
  * releases, not to validate them.
  */
 
-import { readFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readFileSync, readSync } from "node:fs";
+
+/** Shared file boundary for captured Codex/Copilot formats (ADR-0106/0107). */
+export const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
+
+export class TranscriptReadError extends Error {
+  constructor(readonly reason: "unreadable" | "size_or_type" | "changed_during_read") { super(reason); }
+}
+
+export function readBoundedTranscript(path: string): string | undefined {
+  let fd: number;
+  try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+  catch (error) {
+    if (error !== null && typeof error === "object" && (error as { code?: unknown }).code === "ENOENT") return undefined;
+    throw new TranscriptReadError("unreadable");
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > MAX_TRANSCRIPT_BYTES) throw new TranscriptReadError("size_or_type");
+    // One extra byte detects growth without allocating from unbounded input.
+    const bytes = Buffer.alloc(stat.size + 1);
+    let size = 0;
+    while (size < bytes.length) {
+      const count = readSync(fd, bytes, size, bytes.length - size, null);
+      if (count === 0) break;
+      size += count;
+    }
+    if (size !== stat.size) throw new TranscriptReadError("changed_during_read");
+    return bytes.subarray(0, size).toString("utf8");
+  } finally { closeSync(fd); }
+}
 
 /** Inject's own cap on a task (`MAX_TASK_CHARS` in the gateway). */
 export const MAX_TASK_CHARS = 4096;

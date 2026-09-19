@@ -67,11 +67,21 @@ for a test, at exactly the layer this feature keeps thin.
 | `claude-desktop-probe` | claude-desktop · legacy · `--writes tool` | captured | Claude Desktop's **first** launch: an enumeration probe whose `clientInfo` is `claude-ai`, asking only what tools exist. Its `tools/list` carries `"params": {}`. Nothing predicted that the app starts the server twice. |
 | `claude-desktop-agent` | claude-desktop · legacy · `--writes tool` | captured | The **second** launch, the agent session — `clientInfo` is `local-agent-mode-synveda`, and it negotiates `roots.listChanged` and an `io.modelcontextprotocol/ui` extension the probe does not. Carries both `tools/call` frames, composed by the model: `recall` with a `query` and a `limit`, `remember` with prose. Both stop at the credential seam and answer `isError` with readable text, which pins the failure posture ADR-0057 inverts from the hooks — a caller who *asked* is told, not handed a protocol error the client renders opaquely. Its `tools/list` sends **no** `params` member, unlike the probe's. |
 | `zed` | zed · legacy · `--writes tool` | captured | The non-Anthropic client decision 11 names as amended. Opens at `2025-11-25`, ids from `0`, `tools/list` with no `params` — and asks twice. |
+| `codex` | Codex CLI 0.152.0 · legacy · `--writes tool` | captured | Recorded 2026-09-12: opens at `2025-06-18`, advertises elicitation, includes progress and task metadata, and calls recall. No Synveda credential was supplied; the sign-in refusal is real. This is protocol evidence only. |
 | `modern-era` | spec · modern · `--writes tool` | authored | The `2026-07-28` era decision 3 requires: `server/discover`, the version carried per request in `_meta`, no handshake at all. Attributed to the **specification, not a vendor**, because neither AC client opens here — so this is the only thing exercising that path, and it says so rather than borrowing a vendor's name for frames the vendor does not send. Becomes `captured` the day a client ships that opens there. |
 | `host-owned-write-mode` | repository contract · legacy · `--writes host` | authored | A deliberately vendor-neutral case for a launch this repository owns: a host which already observes starts `--writes host`, so `tools/list` carries `recall` alone and `tools/call remember` is `-32602`. No external-client support claim is inferred from authored input. |
 | `unsupported-version` | any · modern · `--writes tool` | authored | Synthetic by construction, and permanently so: no client sends a version on purpose in order to be refused. What *any* client on a revision this server does not implement must be told — `-32022` carrying `{requested, supported}`, which is what lets it retry instead of fail. |
 
 ## What is not here, and why
+
+ADR-0106 requires explicit application identity for authenticated calls: a
+dedicated process uses `--session <uuid>` or `--task <stable-key>`, while a
+shared process receives `session_id` per tool call. A transport disconnect
+never ends the Session. Existing host hooks supply the resolved Synveda ID
+in context. Old client configurations still discover tools, but must now
+provide identity before an authenticated call can proceed. The separate
+`scripts/interop-mcp.test.mjs` suite exercises reconnect, interleaving, target
+mismatch and write ownership; this corpus stays independent of a gateway.
 
 **No gateway.** Every case is decided by the server alone, so the suite runs
 in CI with nothing running. That bounds `tools/call`: the cases that make one

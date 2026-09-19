@@ -41,6 +41,10 @@ make db-test
 
 Database, live-model and proprietary-client gates require their documented
 services or credentials. Missing prerequisites are not passing results.
+`make ci` includes the SDK contract gate; install the hash-locked Python
+development requirements described in [the SDK guide](sdks/README.md) first.
+`make interop-acceptance` exercises the shared harness/SDK workflow using the
+same fresh exact-role Docker fixture as the other database gates.
 
 ## Review expectations
 

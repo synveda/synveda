@@ -17,6 +17,32 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  adapters/codex:
+    dependencies:
+      '@synveda/claude-code-adapter':
+        specifier: workspace:*
+        version: link:../claude-code
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  adapters/copilot-cli:
+    dependencies:
+      '@synveda/claude-code-adapter':
+        specifier: workspace:*
+        version: link:../claude-code
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   console:
     dependencies:
       react:
@@ -50,6 +76,15 @@ importers:
       playwright-core:
         specifier: 1.62.1
         version: 1.62.1
+
+  sdks/typescript:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
 
 packages:
 

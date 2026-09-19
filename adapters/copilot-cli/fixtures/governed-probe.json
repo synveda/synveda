@@ -1,0 +1,174 @@
+{
+  "provenance": {
+    "kind": "captured-real-client-partial-result",
+    "feature": "ADPT-9",
+    "checkout_base": "d71641e0f9f622a0069b2618571687e0262178ec",
+    "client": "GitHub Copilot CLI",
+    "client_version": "1.0.83",
+    "model": "gpt-5.6-luna",
+    "deployment_project": "synveda-development-acceptance-interop",
+    "authentication": "ordinary stored Keycloak approver profile; native hook and rmcp server use public APIs",
+    "tested_at": "2026-09-13T08:53:12.430718+00:00",
+    "transcript_projection": "adapters/copilot-cli/fixtures/governed-transcript.jsonl",
+    "transcript_sha256": "b63a577b517db674fe32a52d4e474752a986cf097006a36536ba7cfd61886471",
+    "record_projection": {
+      "retained_types": [
+        "assistant.message",
+        "session.shutdown",
+        "session.start",
+        "skill.invoked",
+        "tool.execution_complete",
+        "tool.execution_start",
+        "user.message"
+      ],
+      "common_fields": [
+        "type",
+        "id",
+        "timestamp",
+        "parentId",
+        "data"
+      ],
+      "field_policy": "Explicit per-type fields only. Message text, tool call identity/arguments, text result.content, error.code/message and Skill discovery/activation metadata retained. Session limits and shutdown counters retained.",
+      "omitted": [
+        "system and hook context records",
+        "reasoning and encrypted fields",
+        "tool telemetry and detailedContent",
+        "skill.invoked content body",
+        "unrelated lifecycle and diagnostic events"
+      ],
+      "private_prefix_replacement": "/synveda/qualification/copilot-cli-governed"
+    },
+    "partial_capture_limit": "The projected transcript was retained in the checkout. Temporary raw output, full hook captures, credentials, spool and saved native Session were absent when work resumed on 2026-09-19. Hook summaries below were observed during the original invocation; no full native hook-frame fixture is claimed."
+  },
+  "native_invocation": {
+    "session_id": "a65f28e6-3af8-40aa-a852-85b604b8be63",
+    "exit_code": 0,
+    "elapsed_seconds": 10.17,
+    "shared_session_credit_ceiling": 30,
+    "premium_requests": 1,
+    "total_nano_aiu": 368287000,
+    "counters_are_not_price_estimates": true,
+    "prompts_executed_in_approved_pair": 1,
+    "resume_prompt": "not_run"
+  },
+  "observed_hook_summary": [
+    {
+      "event": "sessionStart",
+      "source": "new",
+      "elapsed_ms": 135,
+      "exit_code": 0,
+      "allowed_context_delivered": true
+    },
+    {
+      "event": "agentStop",
+      "elapsed_ms": 35,
+      "exit_code": 0
+    },
+    {
+      "event": "sessionEnd",
+      "elapsed_ms": 41,
+      "exit_code": 0
+    }
+  ],
+  "synveda_session_id": "01a099f8-822a-7ce2-8607-97e591ca7f64",
+  "governed_skill": {
+    "name": "ingestion-retry-review",
+    "skill_id": "01a096a1-914d-7c22-8fd0-8e72c0775e72",
+    "binding_id": "01a096a1-a6d2-7453-998f-3b47c7ff8d04",
+    "binding_revision": 1,
+    "version_id": "01a096a1-914d-7c22-8fd0-8e89acc65450",
+    "bundle_digest": "1ac0b2a1296fdf5a25b835ec1a35dec279de974cb04b8ddb715cfe97fe1e3da0",
+    "manifest_object_hash": "a0df167a06d0a8f86cf313a3b34694893ba3a22f47b72401fea69dbd34b68e0b",
+    "skill_file_sha256": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+    "native_path": "/synveda/qualification/copilot-cli-governed/workspace/.github/skills/ingestion-retry-review/SKILL.md",
+    "source": "project",
+    "trigger": "agent-invoked",
+    "installed_sha256_before": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+    "installed_sha256_after": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+    "attribution": "Preflight compared the enabled public binding, immutable Skill bytes and installer receipt; the native activation path matches that installed file and its before/after SHA-256 remained unchanged. The adapter does not infer a typed skill.loaded event from a name."
+  },
+  "native_mcp": {
+    "allowed_tool": "synveda-recall",
+    "allowed_session_id": "01a099f8-822a-7ce2-8607-97e591ca7f64",
+    "knowledge_id": "01a096a1-9cb3-79b0-a5bd-6316a49499c3",
+    "denied_session_id": "01a096ab-f2ec-79e1-af15-b8687a59b148",
+    "denied_completion_event_id": "a3130d24-411d-48b2-9684-40216ddd48c4",
+    "denied_error_code": "failure",
+    "approved_skill_activation": "agent-invoked"
+  },
+  "observation_delivery": {
+    "original_status": "failed",
+    "recorded_spool_entries": 0,
+    "acknowledged_spool_entries": 0,
+    "close_requested": false,
+    "reason": "tool_result_shape_unknown: denied tool completion has error.code/message and no result; the entire transcript was held without advancing its cursor",
+    "correction": "Accept only success=false, no result, error.code=failure and a string error.message, reusing the existing mapper and stable event IDs. Ambiguous and unknown shapes remain held.",
+    "validation": "Eight native observations replay and drain once through Stop/sessionEnd against the HTTP contract fixture. This is not a repeated native or live-gateway delivery pass."
+  },
+  "remaining_native_acceptance": [
+    "resume with the same native and Synveda Session",
+    "both SDK workflows on this native-created task",
+    "live observation delivery, retry and audit correlation after the parser correction",
+    "Capture, explicit task-owner end and Knowledge reuse",
+    "native outage/compaction and other result shapes",
+    "packaged installation"
+  ],
+  "retry_environment": {
+    "checked_at": "2026-09-19",
+    "native_saved_session_available": false,
+    "temporary_credentials_and_spool_available": false,
+    "compose_up": "blocked before service startup: hosts ownership state was refused",
+    "hosts_content_matches_recorded_digest": true,
+    "backup_witness_mismatches": [
+      "dev"
+    ],
+    "compose_smoke": "not_run: startup prerequisite failed",
+    "paid_prompts_executed_on_retry": 0
+  },
+  "correction_validation": {
+    "date": "2026-09-19",
+    "source_base": "d71641e0f9f622a0069b2618571687e0262178ec plus working-tree correction",
+    "changed_runtime_source": "adapters/copilot-cli/src/transcript.mts",
+    "changed_runtime_sha256": "fe1e0a2475d719d3f55e5fb721e812a86d56d6cd9538e95470cf08d3512bc913",
+    "strict_typescript": "passed",
+    "host": {
+      "platform": "macOS arm64",
+      "node": "24.18.0",
+      "adapter_tests": 140,
+      "passed": 140,
+      "skipped": 0
+    },
+    "docker": {
+      "platform": "Linux arm64",
+      "node": "22.23.2",
+      "image": "node@sha256:7725a5c2c83eed1d36258c66efae14b1ceccd021db9ed1d9559d3335ed3d68ed",
+      "network": "none",
+      "uid": 1000,
+      "checkout": "read-only",
+      "adapter_tests": 140,
+      "passed": 140,
+      "skipped": 0
+    },
+    "breakdown": {
+      "claude": 105,
+      "codex": 8,
+      "copilot": 27
+    },
+    "repository_gates": [
+      "formatting",
+      "dependency direction",
+      "adapter registry and fixture digests",
+      "documentation",
+      "backlog",
+      "ADR status"
+    ],
+    "not_run": [
+      "strict Rust Clippy: no Rust changes",
+      "full CI",
+      "fresh database suite",
+      "full Compose acceptance",
+      "SDK archive and Codex package regression: unchanged",
+      "native resume and post-fix live public-API workflow: environment blocked"
+    ]
+  }
+}

@@ -91,12 +91,14 @@ call `synveda auth token --json` for a currently-valid bearer, and the
 CLI refreshes it through the gateway when it expires. The adapter holds
 no OAuth code of its own (ADR-0027 decisions 4 to 6).
 
-The composed block is passed through verbatim; the hook renders nothing of
-its own.
+The composed block is passed through verbatim, preceded by the resolved
+Synveda Session ID. That identifier lets MCP calls use this application task.
 
-The injected context block is budgeted. For a deeper search, `synveda recall
---query` and the MCP `recall` tool open a separate governed Session and call
-`POST /v1/sessions/{session_id}/knowledge-query`. There is no global
+The injected context block is budgeted. For deeper MCP recall, pass the
+`session_id` supplied in that context; the tool reads the same authorised
+Session and calls `POST /v1/sessions/{session_id}/knowledge-query`.
+The standalone `synveda recall --query` command owns its separate Session.
+There is no global
 `/v1/recall` route or direct Knowledge-by-ID fetch tool.
 
 ### The MCP tool
@@ -107,6 +109,9 @@ protocol implementation is the shared `synveda mcp` command used by supported
 clients. `dist/mcp-server.mjs` is a thin launcher: it resolves `SYNVEDA_CLI` or
 `synveda` on `PATH`, passes through the client's stdio, and reports a missing
 CLI instead of starting with an empty tool list.
+The launcher forwards workspace, project and credential profile settings.
+It does not infer a task from its transport connection: multiple conversations
+can use the server with their own explicit Synveda Session IDs.
 
 It launches `synveda mcp --writes host`, hard-coded. This plugin's `Stop`
 hook already records the turn as session events, so a `remember` tool here
@@ -118,11 +123,12 @@ which the other value is right, so there is no flag for it.
 
 ### Governed skills
 
-Since SKIL-4 a second `SessionStart` entry reconciles this plugin's own
-`skills/` directory with what the registry publishes to your identity:
-it writes every skill on your placement chain that policy lets you read,
-and **removes** the ones it no longer serves you. That removal is what
-makes a FLOW-7 rollback, or a move between teams, reach a laptop.
+A second `SessionStart` entry reconciles this plugin's own `skills/` directory
+with approved enabled bindings at the configured project's scope, otherwise
+the authenticated principal's scope. It supplies that exact `--scope` to the
+existing CLI sync. A refused explicit project never falls back to a different
+scope. Successful sync writes the selected immutable versions and removes
+owned installations no longer advertised at that distribution scope.
 
 It writes into `${CLAUDE_PLUGIN_ROOT}/skills/` and never into
 `~/.claude/skills/` — a reconcile prunes, and the only directory this

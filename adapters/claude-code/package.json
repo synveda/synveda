@@ -2,8 +2,12 @@
   "name": "@synveda/claude-code-adapter",
   "version": "0.2.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Claude Code plugin: SessionStart context run + durable Stop/PreCompact/SessionEnd delivery (ADPT-1, ADR-0027; ADR-0078)",
   "type": "module",
+  "exports": {
+    "./session-runtime": "./dist/session-runtime.mjs"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node --test --test-timeout=60000 \"dist/*.test.mjs\""

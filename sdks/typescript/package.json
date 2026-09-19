@@ -1,0 +1,16 @@
+{
+  "name": "@synveda/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/client.d.mts", "import": "./dist/client.mjs" } },
+  "files": ["dist/client.mjs", "dist/client.d.mts", "dist/generated", "LICENSE", "NOTICE"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "test": "tsc -p tsconfig.json && node --test --test-timeout=30000 'dist/*.test.mjs'"
+  },
+  "devDependencies": { "@types/node": "^22.10.0", "typescript": "^5.7.0" }
+}

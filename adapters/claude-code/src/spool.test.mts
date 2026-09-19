@@ -133,6 +133,13 @@ describe("the spool", () => {
     assert.equal(spool.gateway_url, "https://one.example");
   });
 
+  test("a different harness cannot adopt an existing spool", () => {
+    const spool = fresh("native-id-collision");
+    saveSpool(spool);
+    assert.equal(loadOrCreateSpool("native-id-collision", "codex", "install-1"), undefined);
+    assert.equal(loadSpool("native-id-collision")?.client_name, "claude-code");
+  });
+
   /**
    * Acknowledgement is keyed by the client's own id, so a batch whose answers
    * come back in a different order still marks the right rows.

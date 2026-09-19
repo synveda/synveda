@@ -69,6 +69,7 @@ export async function appendEvents(
   bearer: string,
   sessionId: string,
   request: AppendEventsRequest,
+  timeoutMs?: number,
 ): Promise<CallResult<AppendEventsResponse>> {
   return call<AppendEventsResponse>(
     config,
@@ -76,6 +77,8 @@ export async function appendEvents(
     "POST",
     `/v1/sessions/${encodeURIComponent(sessionId)}/events`,
     request,
+    undefined,
+    timeoutMs,
   );
 }
 
@@ -125,7 +128,7 @@ async function call<T>(
   let status: number | undefined;
   const headers: Record<string, string> = {
     authorization: `Bearer ${bearer}`,
-    "x-synveda-client": `${CLIENT_NAME}/${CLIENT_VERSION}`,
+    "x-synveda-client": `${config.clientName ?? CLIENT_NAME}/${CLIENT_VERSION}`,
     traceparent: traceparent(),
   };
   if (body !== undefined) headers["content-type"] = "application/json";

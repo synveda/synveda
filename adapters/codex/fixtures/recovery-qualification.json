@@ -1,0 +1,307 @@
+{
+  "provenance": {
+    "kind": "captured-live-client-result",
+    "client": "Codex CLI",
+    "client_version": "0.152.0",
+    "model": "gpt-5.5",
+    "reasoning_effort": "low",
+    "platform": "macOS 26.6.2 arm64",
+    "authentication": "ordinary Keycloak OIDC/PKCE profiles; separate workspace member and tenant auditor",
+    "deployment_project": "synveda-development-acceptance-interop",
+    "checkout_base": "8ff38a6a944f7e17ed2b21e3957bff0ba1140a7d",
+    "scope": "native outage/recovery and manual compaction plus shared SDK lifecycle; automatic compaction remains unverified",
+    "hook_updated_between_manual_compaction_probes": true
+  },
+  "tested_at": "2026-09-12T19:22:16.641665+00:00",
+  "session_id": "01a09702-10aa-79b2-ae1a-fca231deb5af",
+  "external_session_id": "codex:01a09702-0a65-7bd2-8495-64db63bfe23a",
+  "event_counts": {
+    "message.assistant": 10,
+    "message.user": 7,
+    "skill.loaded": 2,
+    "tool.invoked": 3,
+    "tool.result": 3
+  },
+  "event_count": 25,
+  "duplicate_client_event_ids": 0,
+  "capture_batch_id": "01a09712-025b-76c0-bf66-d52cf7faacaf",
+  "capture_state": "completed",
+  "capture_candidate_count": 23,
+  "task_owner_end_status": "ended",
+  "reuse_session_id": "01a09712-087b-7103-98df-620ad137b14a",
+  "knowledge_id": "01a096a1-9cb3-79b0-a5bd-6316a49499c3",
+  "skill_id": "01a096a1-914d-7c22-8fd0-8e72c0775e72",
+  "skill_version_id": "01a096a1-914d-7c22-8fd0-8e89acc65450",
+  "denied_session_id": "01a096ab-f2ec-79e1-af15-b8687a59b148",
+  "audit_valid": true,
+  "audit_head_seq": 655,
+  "audit_head_hash": "5b87c20f708fe946584865b42e5b7ead041021b9905dec682f4735b1c206c849",
+  "session_audit_events": [
+    {
+      "seq": 457,
+      "action": "session.opened",
+      "trace_id": "c359135024623c2215534689a556e2ae"
+    },
+    {
+      "seq": 458,
+      "action": "context.candidates.retrieved",
+      "trace_id": "82a55fc0e067f8b28c4d06225c671a49"
+    },
+    {
+      "seq": 459,
+      "action": "context.selections.made",
+      "trace_id": "82a55fc0e067f8b28c4d06225c671a49"
+    },
+    {
+      "seq": 460,
+      "action": "session.context.composed",
+      "trace_id": "82a55fc0e067f8b28c4d06225c671a49"
+    },
+    {
+      "seq": 463,
+      "action": "session.events.appended",
+      "trace_id": "092b50de3266ceda384b4b0259def91e"
+    },
+    {
+      "seq": 477,
+      "action": "session.events.appended",
+      "trace_id": "cb43864e74ada6e4b8bc41716e35e8d0"
+    },
+    {
+      "seq": 478,
+      "action": "context.candidates.retrieved",
+      "trace_id": "e4b468934aeca47bef6a85e878f2df5e"
+    },
+    {
+      "seq": 479,
+      "action": "context.selections.made",
+      "trace_id": "e4b468934aeca47bef6a85e878f2df5e"
+    },
+    {
+      "seq": 480,
+      "action": "session.context.composed",
+      "trace_id": "e4b468934aeca47bef6a85e878f2df5e"
+    },
+    {
+      "seq": 481,
+      "action": "session.events.appended",
+      "trace_id": "faee2b5bffec7c6ee5a08700af729d4e"
+    },
+    {
+      "seq": 519,
+      "action": "context.candidates.retrieved",
+      "trace_id": "c55dba6e1d74ac2e48967664ca5e1539"
+    },
+    {
+      "seq": 520,
+      "action": "context.selections.made",
+      "trace_id": "c55dba6e1d74ac2e48967664ca5e1539"
+    },
+    {
+      "seq": 521,
+      "action": "session.context.composed",
+      "trace_id": "c55dba6e1d74ac2e48967664ca5e1539"
+    },
+    {
+      "seq": 522,
+      "action": "session.events.appended",
+      "trace_id": "4ad0a36e795274d264e58eee0045b1e1"
+    },
+    {
+      "seq": 523,
+      "action": "context.candidates.retrieved",
+      "trace_id": "8fae384b101e0166c4eb4e65d3043244"
+    },
+    {
+      "seq": 524,
+      "action": "context.selections.made",
+      "trace_id": "8fae384b101e0166c4eb4e65d3043244"
+    },
+    {
+      "seq": 525,
+      "action": "session.context.composed",
+      "trace_id": "8fae384b101e0166c4eb4e65d3043244"
+    },
+    {
+      "seq": 526,
+      "action": "session.events.appended",
+      "trace_id": "ad45b3f5bcdd2ae6e99e46839768af47"
+    },
+    {
+      "seq": 530,
+      "action": "context.candidates.retrieved",
+      "trace_id": "59c8fe1dd0b530416e2139131176abed"
+    },
+    {
+      "seq": 531,
+      "action": "context.selections.made",
+      "trace_id": "59c8fe1dd0b530416e2139131176abed"
+    },
+    {
+      "seq": 532,
+      "action": "session.context.composed",
+      "trace_id": "59c8fe1dd0b530416e2139131176abed"
+    },
+    {
+      "seq": 533,
+      "action": "session.events.appended",
+      "trace_id": "16817785972d07b9b44ab86641ef037e"
+    },
+    {
+      "seq": 558,
+      "action": "context.candidates.retrieved",
+      "trace_id": "153d96cfb0d1f6dd45eb832a54303b14"
+    },
+    {
+      "seq": 559,
+      "action": "context.selections.made",
+      "trace_id": "153d96cfb0d1f6dd45eb832a54303b14"
+    },
+    {
+      "seq": 560,
+      "action": "session.context.composed",
+      "trace_id": "153d96cfb0d1f6dd45eb832a54303b14"
+    },
+    {
+      "seq": 564,
+      "action": "session.events.appended",
+      "trace_id": "8bd38c0f685b657d88204c169e832629"
+    },
+    {
+      "seq": 569,
+      "action": "authz.decision",
+      "trace_id": "5b8d8e0838eb46502bdc57752cb85427"
+    },
+    {
+      "seq": 571,
+      "action": "context.candidates.retrieved",
+      "trace_id": "ee2ac72b788700c981715c7148e21f99"
+    },
+    {
+      "seq": 572,
+      "action": "context.selections.made",
+      "trace_id": "ee2ac72b788700c981715c7148e21f99"
+    },
+    {
+      "seq": 573,
+      "action": "session.context.composed",
+      "trace_id": "ee2ac72b788700c981715c7148e21f99"
+    },
+    {
+      "seq": 577,
+      "action": "session.events.appended",
+      "trace_id": "a6d6304c5a256e5297e146d96ce79771"
+    },
+    {
+      "seq": 582,
+      "action": "authz.decision",
+      "trace_id": "024933ea9b3ecfd4338bf6a59694822b"
+    },
+    {
+      "seq": 586,
+      "action": "context.candidates.retrieved",
+      "trace_id": "ceb83d9b1ce99fb9df8c7669dfd79b86"
+    },
+    {
+      "seq": 587,
+      "action": "context.selections.made",
+      "trace_id": "ceb83d9b1ce99fb9df8c7669dfd79b86"
+    },
+    {
+      "seq": 588,
+      "action": "session.context.composed",
+      "trace_id": "ceb83d9b1ce99fb9df8c7669dfd79b86"
+    },
+    {
+      "seq": 589,
+      "action": "session.events.appended",
+      "trace_id": "7e02a651ab2e5d460544453a2f85ef43"
+    },
+    {
+      "seq": 644,
+      "action": "capture.batch.created",
+      "trace_id": "f1c90bfbccd03b01c54b3199d3453693"
+    },
+    {
+      "seq": 647,
+      "action": "capture.batch.completed",
+      "trace_id": null
+    },
+    {
+      "seq": 650,
+      "action": "session.ended",
+      "trace_id": "50be3568834a5292c2dd2a89ec1d0fde"
+    }
+  ],
+  "sdk_workflows": [
+    {
+      "client": "typescript",
+      "session_id": "01a09702-10aa-79b2-ae1a-fca231deb5af",
+      "context_run_id": "01a09710-7219-7031-92d7-facf4b37bbd4",
+      "proposal_id": "01a09710-7251-70d0-9e16-aaf7ac0f4863",
+      "trace_id": "153d96cfb0d1f6dd45eb832a54303b14"
+    },
+    {
+      "client": "python",
+      "session_id": "01a09702-10aa-79b2-ae1a-fca231deb5af",
+      "context_run_id": "01a09710-7328-7142-a316-cc3f8ffb76d4",
+      "proposal_id": "01a09710-7352-7c80-8b82-1ed7d6107ace",
+      "trace_id": "ee2ac72b788700c981715c7148e21f99"
+    }
+  ],
+  "outage_recovery": {
+    "gateway_fault": "pause only the owned gateway container, with unconditional restoration",
+    "native_completed_while_paused": true,
+    "before_event_count": 8,
+    "pending_at_native_exit": 5,
+    "recovered_event_count": 15,
+    "all_pending_events_delivered_once": true,
+    "pending_after_recovery": 0,
+    "same_native_and_synveda_session": true,
+    "native_exit_kept_task_active": true
+  },
+  "manual_compaction": {
+    "observed_sequence": [
+      "PreCompact:manual",
+      "PostCompact:manual",
+      "SessionStart:compact"
+    ],
+    "before_fix_compact_hook_output_bytes": 0,
+    "after_fix_compact_hook_output_bytes": 2300,
+    "allowed_context_and_same_session_in_hook_output": true,
+    "all_23_native_observations_persisted_once": true,
+    "post_compact_has_no_separate_delivery_path": true
+  },
+  "automatic_compaction_probe": {
+    "invocation": "codex exec resume with model_auto_compact_token_limit=1000",
+    "native_turn_completed": true,
+    "observed_compaction_hooks": 0,
+    "qualified": false,
+    "reason": "The invocation completed a normal resumed turn without an automatic compaction boundary. Model text is not evidence of compaction."
+  },
+  "checks": {
+    "native_startup_and_resume_same_session": true,
+    "approved_skill_file_read_by_native_command": true,
+    "authenticated_mcp_recall": true,
+    "typescript_and_python_same_session": true,
+    "proposals_pending_and_idempotent": true,
+    "cross_workspace_read_denied": true,
+    "audit_contains_no_context_or_proposal_markers": true,
+    "session_audit_includes_open_and_end": true
+  },
+  "not_qualified": [
+    "automatic compaction and reinjection",
+    "live revoke and re-authorisation",
+    "non-text MCP results",
+    "automatic Skill activation callback",
+    "installation packaging",
+    "other client versions/platforms"
+  ],
+  "source_sha256": {
+    "adapters/codex/src/hook.mts": "083d81fb237a0a3a1f88bddf36cb1c06ef89fa1ec419a13d77fe5b1174d71615",
+    "adapters/codex/src/transcript.mts": "723373022c55f4d40675ba474defe76d65c39ed4ad0d3980eb5f461b13a0e10e",
+    "adapters/claude-code/src/session-start.mts": "8ba6358fc110ba49392cd00cd686ff19cbd3e70fe3bb543ec65a2b478e2af012",
+    "adapters/claude-code/src/turn.mts": "e7e5cb5cc5fb1ea1d47ecf57648d7fc5dd4d9d9e213f453b4c532b38b2e05169",
+    "adapters/claude-code/src/deliver.mts": "e9e496e2015141f1585a973f9621f7dd3a13da84c28d5bff7071ae3d565f2543"
+  }
+}

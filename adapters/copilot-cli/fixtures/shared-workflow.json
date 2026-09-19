@@ -1,0 +1,431 @@
+{
+  "provenance": {
+    "kind": "captured-live-client-partial-result",
+    "feature": "ADPT-9",
+    "checkout_base": "8336c22cc5cf2b84970426f78f2e4cd16c50d40b",
+    "client_version": "1.0.83",
+    "model": "gpt-5.6-luna",
+    "platform": "macOS arm64 / Node 24.18.0",
+    "deployment_project": "synveda-development-acceptance-interop",
+    "authentication": "ordinary Keycloak approver and separate author/auditor profiles; public API only",
+    "product_code_changed_during_run": false,
+    "transcript_projection": "adapters/copilot-cli/fixtures/shared-workflow-transcript.jsonl",
+    "transcript_sha256": "bb636f9e4f460f28844690718b475fe9fad6aa8151d024089f8ecf822ea33f9c",
+    "raw_transcript_sha256": "d35538d1aa4c7a49f20327e8fa54d4465add5b3018fe62dd57dfa7a4ccaaf03b",
+    "projection": {
+      "fields": {
+        "session.start": [
+          "sessionId",
+          "version",
+          "producer",
+          "copilotVersion",
+          "startTime",
+          "selectedModel",
+          "sessionLimits"
+        ],
+        "session.resume": [
+          "resumeTime",
+          "eventCount",
+          "sessionLimits"
+        ],
+        "user.message": [
+          "content",
+          "messageId",
+          "interactionId",
+          "turnId"
+        ],
+        "assistant.message": [
+          "content",
+          "messageId",
+          "model",
+          "phase",
+          "interactionId",
+          "turnId"
+        ],
+        "tool.execution_start": [
+          "toolCallId",
+          "toolName",
+          "arguments"
+        ],
+        "tool.execution_complete": [
+          "toolCallId",
+          "success"
+        ],
+        "skill.invoked": [
+          "name",
+          "path",
+          "source",
+          "trigger",
+          "model"
+        ],
+        "session.shutdown": [
+          "shutdownType",
+          "totalPremiumRequests",
+          "totalNanoAiu"
+        ]
+      },
+      "common_fields": [
+        "type",
+        "id",
+        "timestamp",
+        "parentId"
+      ],
+      "tool_result_fields": [
+        "content"
+      ],
+      "tool_error_fields": [
+        "code",
+        "message"
+      ],
+      "private_prefix": "/synveda/qualification/copilot-cli-shared",
+      "omitted": "Provider instructions/reasoning/encrypted fields, Skill bodies, telemetry, tool detailedContent and unrelated records. Hook input initialPrompt and context output are omitted; output digests and native success receipts retained."
+    }
+  },
+  "tested_at": "2026-09-19T09:43:31.138Z",
+  "native_session_id": "f1a9bae4-7ad2-44da-aa90-b2d28dc7266c",
+  "synveda_session_id": "01a0b908-aef7-7ad2-a74a-2660930536f1",
+  "qualification_status": "shared authenticated workflow passed; clean first-start/resume pair incomplete",
+  "initial_start": {
+    "started_at": "2026-09-19T09:33:30.873Z",
+    "finished_at": "2026-09-19T09:33:45.875Z",
+    "exit_code": 0,
+    "hook_discovery": "failed",
+    "synveda_session_id": null,
+    "native_git_root": "/synveda/source",
+    "hook_file": "/synveda/qualification/copilot-cli-shared/project/.github/hooks/synveda.json",
+    "cause": "Scratch directory inherited the parent repository; native hooks load from the Git root.",
+    "correction": "Initialized the already-owned isolated project as its own Git repository; no adapter change."
+  },
+  "corrected_resume": {
+    "started_at": "2026-09-19T09:39:07.044Z",
+    "finished_at": "2026-09-19T09:39:15.934Z",
+    "exit_code": 0,
+    "source": "resume",
+    "allowed_context_consumed": true,
+    "approved_skill_activated": true,
+    "allowed_mcp_recall": true,
+    "foreign_workspace_denied": true,
+    "created_synveda_session": true
+  },
+  "hooks": [
+    {
+      "event": "sessionEnd",
+      "input": {
+        "sessionId": "f1a9bae4-7ad2-44da-aa90-b2d28dc7266c",
+        "timestamp": 1789810639064,
+        "cwd": "/synveda/qualification/copilot-cli-shared/project",
+        "reason": "user_exit"
+      },
+      "exit_code": 0,
+      "elapsed_ms": 49,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "allowed_context_delivered": false
+    },
+    {
+      "event": "sessionStart",
+      "input": {
+        "sessionId": "f1a9bae4-7ad2-44da-aa90-b2d28dc7266c",
+        "timestamp": 1789810749094,
+        "cwd": "/synveda/qualification/copilot-cli-shared/project",
+        "source": "resume"
+      },
+      "exit_code": 0,
+      "elapsed_ms": 151,
+      "output_sha256": "742d3274604dcfdf0e92f13b41a0a4ff4210200787886189b8fb44b1d705fae2",
+      "allowed_context_delivered": true
+    },
+    {
+      "event": "agentStop",
+      "input": {
+        "sessionId": "f1a9bae4-7ad2-44da-aa90-b2d28dc7266c",
+        "timestamp": 1789810754698,
+        "cwd": "/synveda/qualification/copilot-cli-shared/project",
+        "transcriptPath": "/synveda/qualification/copilot-cli-shared/copilot-home/session-state/f1a9bae4-7ad2-44da-aa90-b2d28dc7266c/events.jsonl",
+        "stopReason": "end_turn",
+        "stop_hook_active": false
+      },
+      "exit_code": 0,
+      "elapsed_ms": 39,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "allowed_context_delivered": false
+    },
+    {
+      "event": "sessionEnd",
+      "input": {
+        "sessionId": "f1a9bae4-7ad2-44da-aa90-b2d28dc7266c",
+        "timestamp": 1789810754775,
+        "cwd": "/synveda/qualification/copilot-cli-shared/project",
+        "reason": "complete"
+      },
+      "exit_code": 0,
+      "elapsed_ms": 92,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "allowed_context_delivered": false
+    },
+    {
+      "event": "sessionEnd",
+      "input": {
+        "sessionId": "f1a9bae4-7ad2-44da-aa90-b2d28dc7266c",
+        "timestamp": 1789810855789,
+        "cwd": "/synveda/qualification/copilot-cli-shared/project",
+        "reason": "user_exit"
+      },
+      "exit_code": 0,
+      "elapsed_ms": 82,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "allowed_context_delivered": false
+    }
+  ],
+  "native_hook_receipts": [
+    {
+      "id": "3f1bf2c8-b971-4c5c-a471-4ea0da97659a",
+      "timestamp": "2026-09-19T09:37:19.151Z",
+      "hookInvocationId": "26ba1d35-0cd1-4044-98e9-e4dfbebf52d6",
+      "hookType": "sessionEnd",
+      "success": true
+    },
+    {
+      "id": "3135db8f-309d-4608-9751-e5685d7dbbd2",
+      "timestamp": "2026-09-19T09:39:09.270Z",
+      "hookInvocationId": "19b20874-ec81-4012-8b7b-cdba2086d87a",
+      "hookType": "sessionStart",
+      "success": true
+    },
+    {
+      "id": "905b77cb-bd48-4480-9e77-b36291b1f270",
+      "timestamp": "2026-09-19T09:39:14.775Z",
+      "hookInvocationId": "baccd2d3-7acd-40d9-bfc4-70a03c0b67fa",
+      "hookType": "agentStop",
+      "success": true
+    },
+    {
+      "id": "6ecaa644-12af-46a2-ba5a-cfcb340284fb",
+      "timestamp": "2026-09-19T09:39:14.890Z",
+      "hookInvocationId": "92edecc5-10b1-4d3d-ba8b-0b785f55722f",
+      "hookType": "sessionEnd",
+      "success": true
+    },
+    {
+      "id": "df8bfcb7-f21b-4d2a-a796-4339999d1c56",
+      "timestamp": "2026-09-19T09:40:55.898Z",
+      "hookInvocationId": "89a9b42a-bd1b-4370-bd89-598529ae8c3e",
+      "hookType": "sessionEnd",
+      "success": true
+    }
+  ],
+  "usage": {
+    "approved_prompts": 2,
+    "executed_prompts": 2,
+    "shared_session_soft_credit_limit": 30,
+    "total_premium_requests": 2,
+    "total_nano_aiu": 847087000,
+    "counters_are_not_price_estimates": true,
+    "no_prompt_reopens_increased_usage": false
+  },
+  "observation_delivery": {
+    "after_corrected_prompt": 15,
+    "after_no_prompt_reopen_exit": 16,
+    "final_message_delivered_on_later_exit": true,
+    "driver_note": "A first no-prompt PTY probe did not request context. Its child exited on TERM; the waiting driver was stopped. A subsequent script-backed native reopen and /exit succeeded, with unchanged usage counters.",
+    "explicit_close_requested_by_hooks": false
+  },
+  "approved_skill": {
+    "name": "ingestion-retry-review",
+    "skill_id": "01a096a1-914d-7c22-8fd0-8e72c0775e72",
+    "version_id": "01a096a1-914d-7c22-8fd0-8e89acc65450",
+    "binding_id": "01a096a1-a6d2-7453-998f-3b47c7ff8d04",
+    "binding_revision": 1,
+    "binding_enabled": true,
+    "bundle_digest": "1ac0b2a1296fdf5a25b835ec1a35dec279de974cb04b8ddb715cfe97fe1e3da0",
+    "manifest_object_hash": "a0df167a06d0a8f86cf313a3b34694893ba3a22f47b72401fea69dbd34b68e0b",
+    "file_sha256_before": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+    "file_sha256_after": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+    "native_path": "/synveda/qualification/copilot-cli-shared/project/.github/skills/ingestion-retry-review/SKILL.md"
+  },
+  "sdk_results": [
+    {
+      "client": "typescript",
+      "session_id": "01a0b908-aef7-7ad2-a74a-2660930536f1",
+      "context_run_id": "01a0b90b-b352-7493-9409-0e248e83fd9a",
+      "proposal_id": "01a0b90b-b380-77c0-98f6-64e7009eae7f",
+      "trace_id": "f6e2c45ca8bc5346d91db9d9d3d9fe3e"
+    },
+    {
+      "client": "python",
+      "session_id": "01a0b908-aef7-7ad2-a74a-2660930536f1",
+      "context_run_id": "01a0b90b-b59b-79f2-90ab-4df8fda845bc",
+      "proposal_id": "01a0b90b-b5c9-7fb1-927b-f3ed6dfb850e",
+      "trace_id": "3163bd6502da2c6a161d3f5563699a6c"
+    }
+  ],
+  "workflow": {
+    "tested_at": "2026-09-19T09:43:31.138Z",
+    "session_id": "01a0b908-aef7-7ad2-a74a-2660930536f1",
+    "native_events": 16,
+    "total_events": 18,
+    "unique_client_event_ids": 18,
+    "payloads_match_native_spool": true,
+    "duplicate_replay_appended": 0,
+    "event_counts": {
+      "message.assistant": 2,
+      "message.user": 2,
+      "skill.loaded": 2,
+      "tool.invoked": 6,
+      "tool.result": 6
+    },
+    "active_after_native_exit": true,
+    "capture_batch_id": "01a0b90c-a9a1-7170-833b-6b0d79e15193",
+    "capture_state": "completed",
+    "capture_candidate_count": 16,
+    "session_state": "ended",
+    "reuse_session_id": "01a0b90c-ade4-7450-a825-112b57e41a09",
+    "reuse_context_run_id": "01a0b90c-ae0f-7a93-b0b9-32e7cb09ddf6",
+    "reused_knowledge_id": "01a096a1-9cb3-79b0-a5bd-6316a49499c3"
+  },
+  "audit": {
+    "valid": true,
+    "head_seq": 1059,
+    "head_hash": "5132e975d5095f4260edd0d87dca839c344ec8242de1a324501476f75a484fe7",
+    "session_events": [
+      {
+        "seq": 978,
+        "action": "session.opened",
+        "trace_id": "7e526a6dd64bd9781b3a2747f554a37b"
+      },
+      {
+        "seq": 979,
+        "action": "context.candidates.retrieved",
+        "trace_id": "6608f8417df662ad5a1c01a826b91b77"
+      },
+      {
+        "seq": 980,
+        "action": "context.selections.made",
+        "trace_id": "6608f8417df662ad5a1c01a826b91b77"
+      },
+      {
+        "seq": 981,
+        "action": "session.context.composed",
+        "trace_id": "6608f8417df662ad5a1c01a826b91b77"
+      },
+      {
+        "seq": 986,
+        "action": "session.events.appended",
+        "trace_id": "7c07db7587a4db4bfe7d9503450d147c"
+      },
+      {
+        "seq": 994,
+        "action": "session.events.appended",
+        "trace_id": "8e9dccae537ec2992921ec6eeb36ba26"
+      },
+      {
+        "seq": 999,
+        "action": "context.candidates.retrieved",
+        "trace_id": "f6e2c45ca8bc5346d91db9d9d3d9fe3e"
+      },
+      {
+        "seq": 1000,
+        "action": "context.selections.made",
+        "trace_id": "f6e2c45ca8bc5346d91db9d9d3d9fe3e"
+      },
+      {
+        "seq": 1001,
+        "action": "session.context.composed",
+        "trace_id": "f6e2c45ca8bc5346d91db9d9d3d9fe3e"
+      },
+      {
+        "seq": 1005,
+        "action": "session.events.appended",
+        "trace_id": "405e38b322e8c4a0f23f9117210be2ac"
+      },
+      {
+        "seq": 1010,
+        "action": "authz.decision",
+        "trace_id": "c97dd4e60ba9561bf1cf73cfa89cef10"
+      },
+      {
+        "seq": 1012,
+        "action": "context.candidates.retrieved",
+        "trace_id": "3163bd6502da2c6a161d3f5563699a6c"
+      },
+      {
+        "seq": 1013,
+        "action": "context.selections.made",
+        "trace_id": "3163bd6502da2c6a161d3f5563699a6c"
+      },
+      {
+        "seq": 1014,
+        "action": "session.context.composed",
+        "trace_id": "3163bd6502da2c6a161d3f5563699a6c"
+      },
+      {
+        "seq": 1018,
+        "action": "session.events.appended",
+        "trace_id": "14bfdc8c3397528768e3a6f026664f2a"
+      },
+      {
+        "seq": 1023,
+        "action": "authz.decision",
+        "trace_id": "69932f9494382e89e753eb2b89b6a47b"
+      },
+      {
+        "seq": 1043,
+        "action": "session.events.appended",
+        "trace_id": "37422988dd05ffede1dc949efceaece4"
+      },
+      {
+        "seq": 1046,
+        "action": "capture.batch.created",
+        "trace_id": "d00bbcf854587f0f7119c2e1359c6fca"
+      },
+      {
+        "seq": 1048,
+        "action": "capture.batch.completed"
+      },
+      {
+        "seq": 1050,
+        "action": "session.ended",
+        "trace_id": "a4f934870543935e39ac309d48115c36"
+      }
+    ],
+    "foreign_session_denials": [
+      {
+        "seq": 968,
+        "occurred_at": "2026-09-19T09:33:42.341975Z",
+        "action": "authz.decision",
+        "resource": "session 01a096ab-f2ec-79e1-af15-b8687a59b148",
+        "outcome": "deny",
+        "trace_id": "7536d299833706c847dc62fef8f3648a"
+      },
+      {
+        "seq": 985,
+        "occurred_at": "2026-09-19T09:39:13.184860Z",
+        "action": "authz.decision",
+        "resource": "session 01a096ab-f2ec-79e1-af15-b8687a59b148",
+        "outcome": "deny",
+        "trace_id": "978a136fd497e684cfc106e4a4dad7ee"
+      },
+      {
+        "seq": 1008,
+        "occurred_at": "2026-09-19T09:42:26.966055Z",
+        "action": "authz.decision",
+        "resource": "session 01a096ab-f2ec-79e1-af15-b8687a59b148",
+        "outcome": "deny",
+        "trace_id": "8872cd0d4e6bd1cc679551cb6951f9aa"
+      },
+      {
+        "seq": 1021,
+        "occurred_at": "2026-09-19T09:42:27.546702Z",
+        "action": "authz.decision",
+        "resource": "session 01a096ab-f2ec-79e1-af15-b8687a59b148",
+        "outcome": "deny",
+        "trace_id": "d181abb2eb624788d6501885ef096b2d"
+      }
+    ],
+    "sdk_response_traces_correlated": true,
+    "context_and_proposal_markers_absent": true
+  },
+  "remaining": [
+    "Clean correctly rooted native first-start/resume pair on one task; the first approved prompt here had no hooks.",
+    "Native outage and compaction, other result shapes, other versions/platforms, and packaging remain unqualified."
+  ]
+}

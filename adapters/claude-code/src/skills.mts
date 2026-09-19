@@ -32,6 +32,10 @@ import { execFile } from "node:child_process";
 import { join } from "node:path";
 
 import { diagnostic, log } from "./log.mjs";
+import { me } from "./client.mjs";
+import { loadConfig, resolveGateway, type AdapterConfig } from "./config.mjs";
+import { resolveBearer } from "./credentials.mjs";
+import type { MeResponse } from "./types.mjs";
 
 /**
  * How long the sync gets. Above the 3s per-call deadline the inject path
@@ -70,14 +74,26 @@ export function governedRoot(): string | undefined {
  * hook, where stdout is context the model reads (ADR-0027 decision 3, and
  * its secrets note).
  */
-export async function syncSkills(): Promise<void> {
+export async function syncSkills(config: AdapterConfig = loadConfig(process.cwd())): Promise<void> {
   const root = governedRoot();
   if (root === undefined) {
     log("skills.no_plugin_root", {});
     return;
   }
+  const bearer = await resolveBearer();
+  if (bearer === undefined) return;
+  const result = await me(resolveGateway(config, bearer), bearer.token);
+  if (!result.ok) {
+    log("skills.unavailable", { reason: result.reason });
+    return;
+  }
+  const scope = distributionScope(result.value, config);
+  if (scope === undefined) {
+    log("skills.unavailable", { reason: "distribution_scope_unavailable" });
+    return;
+  }
   const binary = process.env.SYNVEDA_CLI ?? "synveda";
-  const args = ["skill", "sync", "--client", "claude-code", "--root", root, "--json"];
+  const args = ["skill", "sync", "--scope", scope, "--client", "claude-code", "--root", root, "--json"];
   const profile = process.env.SYNVEDA_PROFILE;
   if (profile !== undefined && profile.length > 0) args.push("--profile", profile);
 
@@ -107,6 +123,23 @@ export async function syncSkills(): Promise<void> {
     unchanged: count(parsed.unchanged),
     removed: count(parsed.removed),
   });
+}
+
+/** Placement is read from the public bootstrap; a forecast grants nothing.
+ * An unavailable explicit project never falls back to personal distribution.
+ */
+export function distributionScope(me: MeResponse, config: AdapterConfig): string | undefined {
+  if (config.projectId !== undefined) {
+    const project = me.projects?.find((project) => project.id === config.projectId);
+    if (config.workspaceId !== undefined && project?.workspace_id !== config.workspaceId) {
+      return undefined;
+    }
+    return typeof project?.scope_id === "string" ? project.scope_id : undefined;
+  }
+  const principal = me.anchors?.find(
+    (anchor) => anchor.kind === "principal" && anchor.source === "principal_scope",
+  );
+  return typeof principal?.scope_id === "string" ? principal.scope_id : undefined;
 }
 
 /** A count from either a number or the array the CLI actually sends. */

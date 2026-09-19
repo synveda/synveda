@@ -222,6 +222,29 @@ eval-read:
 db-test:
 	bash scripts/db-test.sh
 
+# ADPT-4: base clients share one ordinary authenticated application workflow.
+# Install sdks/python/requirements-dev.lock first; no dependency downloads here.
+SYNVEDA_PYTHON ?= python3
+.PHONY: sdk-check sdk-package-check interop-acceptance
+sdk-check:
+	SYNVEDA_PYTHON="$(SYNVEDA_PYTHON)" SYNVEDA_DATAMODEL_CODEGEN="$(SYNVEDA_DATAMODEL_CODEGEN)" node scripts/generate-sdk-contract.mjs --check
+	pnpm --filter @synveda/sdk test
+	PYTHONPATH=sdks/python $(SYNVEDA_PYTHON) -m unittest discover -s sdks/python/tests -v
+
+# Prepared wheelhouse and locked development dependencies are prerequisites;
+# both consumers install offline and reuse the existing SDK test suites.
+sdk-package-check:
+	node scripts/check-sdk-package.mjs
+	$(SYNVEDA_PYTHON) scripts/check-sdk-package.py
+
+interop-acceptance:
+	cargo build -q -p synveda-cli
+	pnpm --filter @synveda/claude-code-adapter build
+	pnpm --filter @synveda/sdk build
+	node --test --test-timeout=30000 scripts/interop-mcp.test.mjs
+	SYNVEDA_PYTHON="$(SYNVEDA_PYTHON)" bash scripts/db-test.sh \
+		-p synveda-gateway --test skills -- --include-ignored --test-threads=1
+
 # CPR-14's deterministic tier: authentic Claude Code frames through the built
 # hook, the real gateway/PDP/schema, persisted events, timeline and audit chain.
 # A fresh scratch database is created and dropped by db-test.sh.
@@ -289,7 +312,7 @@ check-demos:
 # deliberately different support levels. This also checks the fixture hashes
 # and the generated public support/onboarding surfaces plus README summary.
 check-adapters:
-	node --test scripts/check-adapter-conformance.test.mjs
+	node --test scripts/check-adapter-conformance.test.mjs scripts/check-codex-fixtures.test.mjs
 	node scripts/check-adapter-conformance.mjs
 
 # CPR-42: the Rust/TypeScript suites execute each adversarial case; this
@@ -360,6 +383,12 @@ check-release-parity:
 	node --test scripts/check-release-parity.test.mjs scripts/install.test.mjs
 	node scripts/check-release-parity.mjs
 
+# OPS-8/CPR-39/ADPT-9: all three adapters must be built from the frozen lockfile.
+# Replay the captured lifecycle through the actual, extracted release archive.
+.PHONY: plugin-package-check
+plugin-package-check:
+	node scripts/check-plugin-package.mjs
+
 # The Helm chart renders in both shapes CI covers: the
 # minimum a real install must state, and every optional path at once.
 # Needs helm. The chart's defaults deliberately do not render — five values
@@ -394,4 +423,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check sdk-check ts-build plugin-package-check check-npm-licences ts-test

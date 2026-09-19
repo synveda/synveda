@@ -1,0 +1,9 @@
+/** Internal workspace seam for explicit harness translations (ADR-0106/0107).
+ * Keep credential resolution and durable public-API delivery in one place.
+ */
+export { loadConfig, type AdapterConfig } from "./config.mjs";
+export { diagnostic, log } from "./log.mjs";
+export { sessionStart } from "./session-start.mjs";
+export { turn } from "./turn.mjs";
+export { readBoundedTranscript, TranscriptReadError, MAX_TRANSCRIPT_BYTES, type TranscriptEntry } from "./transcript.mjs";
+export type { HookInput, HookOutput } from "./types.mjs";
