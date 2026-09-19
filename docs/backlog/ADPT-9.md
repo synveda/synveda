@@ -2,8 +2,9 @@
 
 ## Problem and evidence
 
-The installed Copilot CLI 1.0.83 exposes MCP, Skills and lifecycle hooks but has
-no qualified Synveda lifecycle. The starting checkout is
+Copilot CLI 1.0.83 now has a verified source-build lifecycle for the documented
+macOS arm64 / gpt-5.6-luna / Docker-Keycloak setup. The remaining delivery gap is
+packaging through the existing archive and installer. The starting checkout was
 `668b4f21e7f3dc10c902c42f396c28c601f47a50`. Native local configuration and Skill
 discovery are available without model execution; full context consumption,
 observations, task recovery and audit evidence require a real client run.
@@ -227,16 +228,53 @@ documented Compose smoke passes again. Strict Rust Clippy is not applicable. Ful
 fresh database tests, full Compose acceptance and unchanged package checks were
 not rerun.
 
-Next action: run a fresh, correctly rooted native start/resume pair and require
-both hooks to deliver context on the same Synveda task. The corrected resume
-above does not prove that clean pair, so `context_request_delivery` remains
-failed and support remains experimental. Both approved prompts were used; a
-new Session needs a new explicit two-prompt, 30-credit soft allowance. Its
-isolated Git root and hook paths are now verified; approved Skill installation,
-exact immutable bytes, native discovery and foreign HTTP 403 preflight pass.
-Its runner refuses execution without new allowance and refuses the second
-prompt unless the first start's context check passes. No fresh prompt has run.
-Native outage/compaction, other result shapes and packaging remain unqualified.
+The partial run above does not prove a clean pair. Its first missing-hook
+prompt remains failed in its captured result; the separate clean run below
+supplies the registry's current context evidence.
+
+### Clean native qualification — 2026-09-19
+
+At `c86d5c6c11e1a7d2085ca776b4b88750a8febb02`, the correctly rooted project passed
+the independently approved two-prompt pair under one shared 30-credit soft
+limit. Actual `new` and `resume` hooks delivered allowed context and the same
+Synveda task, which neither prompt supplied. Both unchanged SDK examples ran
+between the prompts on that task. Approved Skill activation, MCP recall,
+foreign-workspace denial, pending proposals and actual audit traces passed.
+The [result](../../adapters/copilot-cli/fixtures/clean-lifecycle.json) and
+[transcript](../../adapters/copilot-cli/fixtures/clean-lifecycle-transcript.jsonl)
+pin the authentic frames without credentials, model reasoning or system text.
+
+Seven native observations arrived at first exit, 15 at resumed exit and the
+last assistant event arrived on a no-user-prompt reopen/exit. Both usage
+counters remained unchanged by that reopen: two cumulative premium requests
+and 575693000 nano-AIU, not a price estimate. Native auxiliary model startup
+failed separately; it added no user prompt or recorded usage. Runtime exit
+kept the task active. All 18 native/SDK events have unique IDs and the native
+payloads match the spool. Public-API replay appended zero duplicates; explicit
+Capture produced 16 candidates, task-owner end and Knowledge reuse passed,
+and audit verified through sequence 1179. No product implementation changed.
+
+All ten registry lifecycle criteria now pass for this named source-build setup.
+The first credential preflight failed before ordinary PKCE renewal. Initial
+external-invocation approval review refused the payload disclosure; source and
+public-API comparison proved the payload exactly matched synthetic demo data,
+and the reviewed retry proceeded. No prompt was spent on either prerequisite.
+
+All 144 adapter tests pass on macOS arm64 Node 24.18.0 and pinned offline Docker
+Linux arm64 Node 22.23.2 with zero skips: 105 Claude, eight Codex and 31 Copilot.
+Strict TypeScript, formatting, dependency direction, registry/digests, docs,
+backlog and ADR gates and the current Compose smoke pass. Rust is unchanged;
+strict Clippy is not applicable. Full CI, fresh database tests, full
+Compose restart acceptance and unchanged archive/installer checks were not run
+for this qualification increment.
+
+Next action: include the compiled Copilot runtime in the existing plugin archive
+and installer, replay its captured lifecycle from an extracted archive on host
+and pinned offline Docker Node 22, and prove reinstall/upgrade preserves client
+configuration and refuses missing runtime files before mutation. No new plugin
+system or dependency is needed. Native outage/compaction, other result shapes,
+other platforms and native execution from a published installation remain
+unqualified; they are separate from the verified source-build workflow.
 
 ## Dependencies
 

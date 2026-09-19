@@ -269,7 +269,7 @@ procedures.
 projection and distinguishes configuration, authentic captured frames,
 deterministic replay and live verification.
 
-Verified client lifecycles: Claude Code 2.1.241, Codex CLI 0.152.0. Other clients remain at
+Verified client lifecycles: Claude Code 2.1.241, GitHub Copilot CLI 1.0.83, Codex CLI 0.152.0. Other clients remain at
 their evidenced registry level; a connection recipe or generic MCP
 configuration is not lifecycle support.
 

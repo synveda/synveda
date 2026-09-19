@@ -82,12 +82,12 @@ release archive before its native qualification.
 
 - Positive: one explicit application identity, credential boundary and context
   path across harness and SDK calls, with no new runtime dependency.
-- Accepted trade-off: experimental, source-build support. The 2026-09-19 native
-  resume and shared SDK workflow passed with 18 unique events, 16 Capture
-  candidates and audit verification through sequence 1059. The last assistant
-  event required a subsequent native reopen/exit to become deliverable. The
-  initial prompt had no hooks because the scratch project inherited its parent
-  Git root; a clean correctly rooted start/resume pair is still required.
+- Accepted trade-off: verification is limited to CLI 1.0.83 / gpt-5.6-luna,
+  macOS arm64 and the documented source-build/Docker-Keycloak setup. The clean
+  2026-09-19 native start/resume and shared SDK workflow passed with 18 unique
+  events, 16 Capture candidates and audit verification through sequence 1179.
+  The last assistant event required a subsequent native reopen/exit to become
+  deliverable. Earlier missing-hook and parser failures remain pinned.
   Native outage/compaction and packaging remain unqualified. The approved
   Skill's exact binding/file and activation path are evidenced separately;
   native activation alone still emits no typed Skill-usage event.

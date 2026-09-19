@@ -34,51 +34,22 @@ the extracted archive on Node 22/Linux arm64 and Node 24/macOS arm64. The
 installer preserves client configuration, replaces the hook on upgrade and
 refuses an incomplete runtime before mutation. Native execution from a published
 installation, non-text Codex results and other client versions/platforms remain
-unqualified. [ADPT-9](ADPT-9.md) adds an experimental source-build Copilot CLI
-start/resume context adapter over the same authenticated Session runtime.
-CLI 1.0.83 local MCP configuration and synthetic Skill discovery work. The
-approved 2026-09-13 native probe captured six hook events and Skill activation,
-but failed its marker assertion after invoking a conflicting synthetic Skill.
-The separately approved corrected retry consumed the fresh hook-only marker
-without tools and resumed the same native Session after runtime end under its
-saved 30-credit limit. Both captured runs need no production-code change.
-Captured text/tool observations now use the shared bounded reader and spool.
-`agentStop` records locally; runtime exit uses a two-second credential/delivery
-budget and retains the task. All 136 adapter tests (23 Copilot) and eight
-extracted Codex archive tests pass on macOS Node 24 and offline Docker Node 22,
-zero skips. Original native transcripts replay into six unique observations;
-the existing `acceptance-interop` Compose smoke also passes. The governed
-Docker/Keycloak preflight now passes at `24cd02d`: real hook replay, exact
-approved Skill installation/native discovery, both SDK workflows, two MCP
-connections, foreign-workspace denial and audit correlation. Eight unique
-events yield six Capture candidates; explicit end, Knowledge reuse and audit
-verification through sequence 938 pass. The first newly approved native prompt
-at `d71641e` then consumed authenticated context, activated the exact approved
-Skill and performed MCP recall/foreign denial. Its denied completion exposed
-an unsupported error-object shape, holding eight observations. ADPT-9 now maps
-that captured failure through the existing event mapper; regression tests prove
-durable, duplicate-free delivery without closing the task. The original failed
-native delivery remains recorded. All 140 adapter tests (27 Copilot) pass on
-host Node 24 and offline Docker Node 22, with zero skips; strict TypeScript and
-the repository metadata gates pass. The 2026-09-19 retry found the temporary
-native Session/credentials/spool absent and Compose startup blocked by a changed
-hosts-backup device witness. CPR-45 now repairs that exact device-only drift
-through confirmed installation after rechecking the protected recovery copy.
-Canonical up/smoke, resolver checks and ordinary browser PKCE login pass;
-all 345 deployment tests pass without skips. At `8336c22`, the separately
-approved replacement pair used durable private state. Its first prompt missed
-hooks because the scratch project inherited the parent Git root. After that
-setup correction, native resume consumed allowed context, activated the exact
-approved Skill and passed MCP recall/foreign denial. Both SDKs shared the
-native-created task: 18 unique events, zero duplicates on replay, 16 Capture
-candidates, explicit end, Knowledge reuse and valid audit through sequence 1059.
-The last native assistant event arrived on a later no-prompt reopen/exit.
-All 142 adapter tests (29 Copilot) pass on host/Docker, zero skips. ADPT-9 stays
-experimental until a clean correctly rooted start/resume pair passes; the two
-approved prompts were used. A fresh project has passed Git-root, approved Skill
-and foreign-denial preflight and awaits its own explicit two-prompt, 30-credit
-soft allowance. Native outage/compaction and packaging remain unqualified. Pi was
-not on PATH during the earlier inventory.
+unqualified. [ADPT-9](ADPT-9.md) now records a verified Copilot CLI 1.0.83 /
+gpt-5.6-luna source-build lifecycle on macOS arm64 with the Docker/Keycloak
+reference. The clean pair at `c86d5c6` delivered authenticated context at both
+native start and resume, retained one task across both SDK workflows, activated
+the exact approved Skill and passed MCP recall and foreign-workspace denial.
+Eighteen unique events, zero duplicates on public-API replay, 16 Capture
+candidates, explicit end, Knowledge reuse and audit verification through
+sequence 1179 pass. The last assistant event arrived on a later no-user-prompt
+reopen/exit without increased usage counters. All 144 adapter tests (31 Copilot)
+pass on macOS Node 24 and pinned offline Docker Node 22, zero skips. Earlier
+marker, parser and hook-location failures remain preserved in their fixtures.
+CPR-45's confirmed hosts-witness renewal restored Compose/PKCE; current smoke
+passes and the earlier deployment checkpoint passed 345 tests without skips.
+The next ADPT-9 increment is the existing archive/installer path. Native
+outage/compaction, other result formats/platforms and execution from a published
+installation remain unqualified. Pi had no executable in the earlier inventory.
 These are independent of the public-release decisions.
 
 The apparent deployment-gate stall was delayed reporting: the unchanged

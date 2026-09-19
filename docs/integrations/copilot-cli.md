@@ -1,20 +1,21 @@
 # GitHub Copilot CLI interoperability (ADPT-9)
 
-Copilot CLI has an **experimental context and observation adapter** built from
-source. `adapters/registry.json` owns the support level. CLI 1.0.83 on macOS
-arm64 has passed authenticated native resume, approved Skill activation, MCP
-recall and foreign-workspace denial against the Docker/Keycloak public edge.
+Copilot CLI has a **verified source-build context and observation adapter** for
+CLI 1.0.83 / gpt-5.6-luna on macOS arm64 with the documented Docker/Keycloak
+setup. `adapters/registry.json` owns the support level. Native start and resume,
+approved Skill activation, MCP recall and foreign-workspace denial have passed
+against the public edge.
 Both unchanged SDK examples shared its task for context, Skill loading,
 proposals and audit correlation. Eighteen unique events, Capture, explicit end
 and later Knowledge reuse passed without product implementation changes.
 
-A clean initial-start/resume pair remains unqualified: the first replacement
-prompt did not discover hooks because its scratch directory inherited the
-parent Git root. The corrected resume passed, and both outcomes are retained
-in the [shared workflow result](../../adapters/copilot-cli/fixtures/shared-workflow.json).
-The last assistant observation required a subsequent native reopen/exit.
-Native outage/compaction and packaging also remain unqualified. This entry
-makes no Copilot cloud-agent or VS Code support claim.
+The [clean lifecycle result](../../adapters/copilot-cli/fixtures/clean-lifecycle.json)
+proves both native starts use the same Synveda task, with both SDKs running
+between the prompts. Earlier failures remain in their original fixtures.
+The last assistant observation requires a subsequent native reopen/exit.
+Native outage/compaction, unknown/non-text result formats, other client
+versions/platforms and packaging remain unqualified. This entry makes no
+Copilot cloud-agent or VS Code support claim.
 
 ## Build and connect
 
@@ -337,8 +338,8 @@ first prompt did not discover the nested project's hooks. Checking the native
 Git root exposed the setup error; `git init` in the owned scratch project fixed
 discovery. The second prompt's real `sessionStart` with `source: "resume"`
 created the Synveda task, injected allowed context and led to exact approved
-Skill activation, allowed MCP recall and foreign-Session denial. A clean pair
-must still prove that initial start and resume both use the same governed task.
+Skill activation, allowed MCP recall and foreign-Session denial. This partial
+run did not establish a clean initial-start/resume pair.
 
 The [result](../../adapters/copilot-cli/fixtures/shared-workflow.json) pins the
 [native projection](../../adapters/copilot-cli/fixtures/shared-workflow-transcript.jsonl),
@@ -357,10 +358,54 @@ traces. It records these measured boundaries:
 
 Native activation names the exact installed approved Skill but does not infer
 a typed Skill-usage event. Candidate Capture and SDK proposals do not publish
-Knowledge. The first missing-hook prompt remains a failed context check in the
-registry. Both approved prompts were used; another clean pair needs a fresh
-two-prompt allowance under the CLI's 30-credit soft minimum. No additional paid
-prompt was run. Full CI, fresh database tests, full Compose acceptance, native
+Knowledge. The first missing-hook prompt remains failed in its captured result.
+The separate clean pair below provides the registry's current context evidence.
+Both approved prompts in this partial run were used. Full CI, fresh database tests, full Compose acceptance, native
 outage/compaction and packaging were not run for this evidence increment.
 Strict TypeScript and repository metadata gates passed; the documented Compose
 smoke passed again. Rust is unchanged, so strict Clippy is not applicable.
+
+### Clean lifecycle qualification — 2026-09-19
+
+At `c86d5c6c11e1a7d2085ca776b4b88750a8febb02`, the fresh project passed Git-root,
+approved Skill and workspace-denial preflight. Initial credential resolution
+failed; ordinary browser PKCE renewal restored both profiles. Automatic approval
+review initially refused the external invocation pending payload-disclosure
+evidence. Public-API inspection proved that both selected Knowledge items and
+the installed Skill exactly matched the repository's synthetic demo source; the
+reviewed retry was permitted. No model prompt ran before that resolution.
+
+Two approved prompts then passed in one native Session. Actual `sessionStart`
+hooks with sources `new` and `resume` delivered allowed context and the same
+Synveda task ID. Neither user prompt supplied that ID. Both prompts activated
+the exact approved Skill, recalled allowed Knowledge and received the expected
+foreign-workspace denial. Both existing SDK examples ran between the prompts
+on the same task and verified pending proposals and actual audit trace IDs.
+
+The [result](../../adapters/copilot-cli/fixtures/clean-lifecycle.json) and
+[transcript projection](../../adapters/copilot-cli/fixtures/clean-lifecycle-transcript.jsonl)
+pin seven authentic hook receipts and 16 native observations. Seven observations
+arrived at first exit and 15 at resumed exit. A later native reopen with no user
+prompt and `/exit` delivered the last assistant event. Its recorded usage stayed
+at two cumulative premium requests and 575693000 nano-AIU under the shared
+30-credit soft limit. Native interactive startup emitted a separate auxiliary
+gpt-4o-mini failure; it did not add a user prompt or increase those counters.
+
+All 18 events, including the two SDK Skill events, persisted with unique IDs;
+native payloads matched the spool, and exact public-API replay appended zero
+duplicates. Runtime exit retained the active task. Explicit Capture completed
+with 16 reviewable candidates, task-owner end and later Knowledge reuse passed,
+and the content-free audit chain verified through sequence 1179. All ten
+registry lifecycle criteria pass for this named source-build setup. Public-API
+replay establishes idempotency; it is not native outage-recovery evidence.
+
+No product implementation changed. Native outage/compaction, other result
+formats and client platforms, published installation, full CI, fresh database
+tests and full Compose restart acceptance were not exercised. Packaging through
+the existing archive and installer is the next ADPT-9 increment.
+
+All 144 adapter tests passed on macOS arm64 Node 24.18.0 and pinned offline
+Docker Linux arm64 Node 22.23.2, zero skips: 105 Claude, eight Codex and 31
+Copilot. Strict TypeScript, formatting, dependency direction, registry/digests,
+docs, backlog and ADR gates passed. Rust is unchanged, so strict Clippy is not
+applicable.

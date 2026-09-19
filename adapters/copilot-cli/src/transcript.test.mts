@@ -17,6 +17,18 @@ const governed = readFileSync(new URL("../fixtures/governed-transcript.jsonl", i
 const governedRecords = governed.trim().split("\n").map((line) => JSON.parse(line));
 const governedId = governedRecords[0].data.sessionId;
 
+test("clean native lifecycle replays all observations and excludes auxiliary model records", () => {
+  const path = new URL("../fixtures/clean-lifecycle-transcript.jsonl", import.meta.url);
+  const records = readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const events = toSessionEvents(readCopilotTranscript(fileURLToPath(path), records[0].data.sessionId), undefined);
+  assert.equal(events.length, 16);
+  assert.equal(new Set(events.map((event) => event.client_event_id)).size, 16);
+  assert.deepEqual(events, toSessionEvents(readCopilotTranscript(fileURLToPath(path), records[0].data.sessionId), undefined));
+  assert.equal(events.filter((event) => event.event_type === "message.assistant").length, 2);
+  assert.equal(events.filter((event) => event.event_type === "tool.result").length, 6);
+  assert.ok(!events.some((event) => event.event_type.startsWith("skill.")));
+});
+
 test("shared native transcript replays all sixteen persisted observations with stable ids", () => {
   const path = new URL("../fixtures/shared-workflow-transcript.jsonl", import.meta.url);
   const records = readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line));

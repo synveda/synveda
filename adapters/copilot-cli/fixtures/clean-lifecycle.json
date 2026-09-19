@@ -1,0 +1,547 @@
+{
+  "provenance": {
+    "kind": "captured-live-client-result",
+    "feature": "ADPT-9",
+    "checkout_base": "c86d5c6c11e1a7d2085ca776b4b88750a8febb02",
+    "client_version": "1.0.83",
+    "model": "gpt-5.6-luna",
+    "platform": "macOS arm64 / Node 24.18.0",
+    "deployment_project": "synveda-development-acceptance-interop",
+    "authentication": "ordinary Keycloak approver and separate author/auditor profiles; public API only",
+    "product_code_changed_during_run": false,
+    "transcript_projection": "adapters/copilot-cli/fixtures/clean-lifecycle-transcript.jsonl",
+    "transcript_sha256": "f2f94476e1accf36cb34a7a5b03d7c6cd22a82876ce0e5b805fb5f517089dfcb",
+    "raw_transcript_sha256": "1a513a40a283795f6843089a925192e69928331cc061b41c536f3a4f6cd0735f",
+    "projection": {
+      "fields": {
+        "session.start": [
+          "sessionId",
+          "version",
+          "producer",
+          "copilotVersion",
+          "startTime",
+          "selectedModel",
+          "sessionLimits"
+        ],
+        "session.resume": [
+          "resumeTime",
+          "eventCount",
+          "sessionLimits"
+        ],
+        "user.message": [
+          "content",
+          "messageId",
+          "interactionId",
+          "turnId"
+        ],
+        "assistant.message": [
+          "content",
+          "messageId",
+          "model",
+          "phase",
+          "interactionId",
+          "turnId"
+        ],
+        "tool.execution_start": [
+          "toolCallId",
+          "toolName",
+          "arguments"
+        ],
+        "tool.execution_complete": [
+          "toolCallId",
+          "success"
+        ],
+        "skill.invoked": [
+          "name",
+          "path",
+          "source",
+          "trigger",
+          "model"
+        ],
+        "session.shutdown": [
+          "shutdownType",
+          "totalPremiumRequests",
+          "totalNanoAiu"
+        ]
+      },
+      "common_fields": [
+        "type",
+        "id",
+        "timestamp",
+        "parentId"
+      ],
+      "tool_result_fields": [
+        "content"
+      ],
+      "tool_error_fields": [
+        "code",
+        "message"
+      ],
+      "private_prefix": "/synveda/qualification/copilot-cli-clean",
+      "omitted": "Provider instructions/reasoning/encrypted fields, Skill bodies, telemetry, tool detailedContent and unrelated records. Hook input initialPrompt and context output are omitted; output digests and native success receipts retained. Native auxiliary model diagnostics also omitted."
+    }
+  },
+  "tested_at": "2026-09-19T10:40:12.343Z",
+  "native_session_id": "6c698d42-d161-466a-a747-29790ec973fa",
+  "synveda_session_id": "01a0b93b-ef9c-7c43-8ecf-00a4d3c9d343",
+  "qualification_status": "passed: clean native start/resume and shared authenticated SDK workflow",
+  "preflight": {
+    "isolated_git_root_verified": true,
+    "docker_smoke": "passed",
+    "ordinary_pkce_profiles_renewed": true,
+    "initial_credential_preflight": "failed before renewal; passed afterward",
+    "payload_provenance": {
+      "tested_at": "2026-09-19T10:34:38.056Z",
+      "synthetic_fixture": "cpr45-retry-review-v1",
+      "knowledge": [
+        {
+          "id": "01a096a1-9122-7603-9d3a-3f0bd0781b2d",
+          "source_matches": true,
+          "synthetic": true,
+          "body_sha256": "679c8eb8455410471fb97c5370f459efccb1ed89abadff0e073badb5467cde43"
+        },
+        {
+          "id": "01a096a1-9cb3-79b0-a5bd-6316a49499c3",
+          "source_matches": true,
+          "synthetic": true,
+          "body_sha256": "23ac4be488ecdd64bfa5542f6142181f0d22f567a14a156f8e8ccc315e50e45f"
+        }
+      ],
+      "installed_skill_matches_demo_source": true,
+      "skill_sha256": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+      "context_entry_count": 2,
+      "recall_items": 2,
+      "context_contains_only_demo_knowledge_and_skill_advertisement": true,
+      "paid_model_prompts_started": 0
+    },
+    "approval_review": "Initial launch refused before execution pending model-payload disclosure evidence. Local public-API/source comparison established synthetic demo content; reviewed retry was permitted."
+  },
+  "invocations": [
+    {
+      "phase": "start",
+      "started_at": "2026-09-19T10:35:05.414Z",
+      "finished_at": "2026-09-19T10:35:16.346Z",
+      "exit_code": 0,
+      "elapsed_ms": 10932,
+      "skill_file_sha256_before": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+      "skill_file_sha256_after": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20"
+    },
+    {
+      "phase": "resume",
+      "started_at": "2026-09-19T10:37:37.568Z",
+      "finished_at": "2026-09-19T10:37:45.550Z",
+      "exit_code": 0,
+      "elapsed_ms": 7982,
+      "skill_file_sha256_before": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+      "skill_file_sha256_after": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20"
+    }
+  ],
+  "hooks": [
+    {
+      "event": "sessionStart",
+      "input": {
+        "sessionId": "6c698d42-d161-466a-a747-29790ec973fa",
+        "timestamp": 1789814107976,
+        "cwd": "/synveda/qualification/copilot-cli-clean/project",
+        "source": "new"
+      },
+      "exit_code": 0,
+      "elapsed_ms": 138,
+      "output_sha256": "e5a7a8279eb94c39351e38fe3484c2b3c2e683b4bb3c9255c722012a6b116e29",
+      "allowed_context_delivered": true
+    },
+    {
+      "event": "agentStop",
+      "input": {
+        "sessionId": "6c698d42-d161-466a-a747-29790ec973fa",
+        "timestamp": 1789814115531,
+        "cwd": "/synveda/qualification/copilot-cli-clean/project",
+        "transcriptPath": "/synveda/qualification/copilot-cli-clean/copilot-home/session-state/6c698d42-d161-466a-a747-29790ec973fa/events.jsonl",
+        "stopReason": "end_turn",
+        "stop_hook_active": false
+      },
+      "exit_code": 0,
+      "elapsed_ms": 43,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "allowed_context_delivered": false
+    },
+    {
+      "event": "sessionEnd",
+      "input": {
+        "sessionId": "6c698d42-d161-466a-a747-29790ec973fa",
+        "timestamp": 1789814115608,
+        "cwd": "/synveda/qualification/copilot-cli-clean/project",
+        "reason": "complete"
+      },
+      "exit_code": 0,
+      "elapsed_ms": 76,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "allowed_context_delivered": false
+    },
+    {
+      "event": "sessionStart",
+      "input": {
+        "sessionId": "6c698d42-d161-466a-a747-29790ec973fa",
+        "timestamp": 1789814259833,
+        "cwd": "/synveda/qualification/copilot-cli-clean/project",
+        "source": "resume"
+      },
+      "exit_code": 0,
+      "elapsed_ms": 139,
+      "output_sha256": "3b1d660a020beaab8e1f393e4c47e9c5bf071cde00af25637f20b2c78ba15d98",
+      "allowed_context_delivered": true
+    },
+    {
+      "event": "agentStop",
+      "input": {
+        "sessionId": "6c698d42-d161-466a-a747-29790ec973fa",
+        "timestamp": 1789814264124,
+        "cwd": "/synveda/qualification/copilot-cli-clean/project",
+        "transcriptPath": "/synveda/qualification/copilot-cli-clean/copilot-home/session-state/6c698d42-d161-466a-a747-29790ec973fa/events.jsonl",
+        "stopReason": "end_turn",
+        "stop_hook_active": false
+      },
+      "exit_code": 0,
+      "elapsed_ms": 42,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "allowed_context_delivered": false
+    },
+    {
+      "event": "sessionEnd",
+      "input": {
+        "sessionId": "6c698d42-d161-466a-a747-29790ec973fa",
+        "timestamp": 1789814264203,
+        "cwd": "/synveda/qualification/copilot-cli-clean/project",
+        "reason": "complete"
+      },
+      "exit_code": 0,
+      "elapsed_ms": 77,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "allowed_context_delivered": false
+    },
+    {
+      "event": "sessionEnd",
+      "input": {
+        "sessionId": "6c698d42-d161-466a-a747-29790ec973fa",
+        "timestamp": 1789814363435,
+        "cwd": "/synveda/qualification/copilot-cli-clean/project",
+        "reason": "user_exit"
+      },
+      "exit_code": 0,
+      "elapsed_ms": 118,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "allowed_context_delivered": false
+    }
+  ],
+  "native_hook_receipts": [
+    {
+      "id": "08045821-9c6d-4e95-be6b-89a77e990fe7",
+      "timestamp": "2026-09-19T10:35:08.143Z",
+      "hookInvocationId": "44ead905-1e23-41f1-8cd9-35348a7654e4",
+      "hookType": "sessionStart",
+      "success": true
+    },
+    {
+      "id": "b6279186-aff6-407a-b6fc-e687fde59ae7",
+      "timestamp": "2026-09-19T10:35:15.608Z",
+      "hookInvocationId": "b6e3d833-52e8-44cf-9402-53a6ed1e1528",
+      "hookType": "agentStop",
+      "success": true
+    },
+    {
+      "id": "4dee2706-583b-4556-8313-cd618e388f19",
+      "timestamp": "2026-09-19T10:35:15.708Z",
+      "hookInvocationId": "90d1b318-92a2-420a-8c41-664e6592098a",
+      "hookType": "sessionEnd",
+      "success": true
+    },
+    {
+      "id": "27688284-cfa2-4f32-addd-cc212a5316c2",
+      "timestamp": "2026-09-19T10:37:39.999Z",
+      "hookInvocationId": "5a2541d0-a047-4393-b54d-e933a9af16f3",
+      "hookType": "sessionStart",
+      "success": true
+    },
+    {
+      "id": "a0c8dd9d-aeb1-4dc8-9e94-1576b672639a",
+      "timestamp": "2026-09-19T10:37:44.203Z",
+      "hookInvocationId": "02643052-9405-4398-b1af-54988b2a2b19",
+      "hookType": "agentStop",
+      "success": true
+    },
+    {
+      "id": "19a50760-be4b-44a1-9abf-9e40462ec63c",
+      "timestamp": "2026-09-19T10:37:44.305Z",
+      "hookInvocationId": "251e06c3-8c3e-4e91-a99b-ae887ec5c688",
+      "hookType": "sessionEnd",
+      "success": true
+    },
+    {
+      "id": "f74942d1-6cad-4362-a206-5da6cb51891c",
+      "timestamp": "2026-09-19T10:39:23.583Z",
+      "hookInvocationId": "d757ddf7-6f0d-4044-a97b-f1b3bc893a91",
+      "hookType": "sessionEnd",
+      "success": true
+    }
+  ],
+  "context": {
+    "initial_source": "new",
+    "initial_context_consumed": true,
+    "initial_context_sha256": "240d447d5fe7b5af748a5fb1c4cb3888027bebc879bc801107c63d441539ad3d",
+    "resume_source": "resume",
+    "resume_context_consumed": true,
+    "resume_context_sha256": "e216d2e957ed796612129ca40041832732b578731a520854770a1c47c6e55437",
+    "same_application_task": true,
+    "sdk_workflows_ran_between_native_prompts": true
+  },
+  "usage": {
+    "approved_prompts": 2,
+    "executed_prompts": 2,
+    "shared_session_soft_credit_limit": 30,
+    "total_premium_requests": 2,
+    "total_nano_aiu": 575693000,
+    "counters_are_not_price_estimates": true,
+    "no_prompt_reopen_increased_usage": false
+  },
+  "observation_delivery": {
+    "after_first_prompt": 7,
+    "after_resume_prompt": 15,
+    "after_no_prompt_reopen_exit": 16,
+    "final_message_delivered_on_later_exit": true,
+    "explicit_close_requested_by_hooks": false,
+    "no_prompt_reopen": {
+      "started_at": "2026-09-19T10:39:05.520Z",
+      "finished_at": "2026-09-19T10:39:24.261Z",
+      "code": 0,
+      "signal": null,
+      "model_prompt_sent": false,
+      "auxiliary_model_failure_observed": "Native interactive startup emitted a gpt-4o-mini model.turn_failed record without a user prompt; recorded usage counters were unchanged."
+    }
+  },
+  "approved_skill": {
+    "name": "ingestion-retry-review",
+    "skill_id": "01a096a1-914d-7c22-8fd0-8e72c0775e72",
+    "version_id": "01a096a1-914d-7c22-8fd0-8e89acc65450",
+    "binding_id": "01a096a1-a6d2-7453-998f-3b47c7ff8d04",
+    "binding_revision": 1,
+    "binding_enabled": true,
+    "bundle_digest": "1ac0b2a1296fdf5a25b835ec1a35dec279de974cb04b8ddb715cfe97fe1e3da0",
+    "manifest_object_hash": "a0df167a06d0a8f86cf313a3b34694893ba3a22f47b72401fea69dbd34b68e0b",
+    "file_sha256_before": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+    "file_sha256_after": "941bdc0838097ed2609a5d2e906fe49382f96f99a573e23fe4efc52568350d20",
+    "native_path": "/synveda/qualification/copilot-cli-clean/project/.github/skills/ingestion-retry-review/SKILL.md"
+  },
+  "sdk_results": [
+    {
+      "client": "typescript",
+      "session_id": "01a0b93b-ef9c-7c43-8ecf-00a4d3c9d343",
+      "context_run_id": "01a0b93d-f0fd-7ee0-b2f8-5b669298ec09",
+      "proposal_id": "01a0b93d-f132-7243-b49a-782f5ca2b584",
+      "trace_id": "59fb272f3fa4d8050da89badae3a58dc"
+    },
+    {
+      "client": "python",
+      "session_id": "01a0b93b-ef9c-7c43-8ecf-00a4d3c9d343",
+      "context_run_id": "01a0b93d-f2ba-7ea2-b323-c4fd425548b9",
+      "proposal_id": "01a0b93d-f2e5-7c81-a8e7-ecbcb6c2e708",
+      "trace_id": "0ca6f7cf2e8da5411b1a3ef45cf9ef95"
+    }
+  ],
+  "workflow": {
+    "tested_at": "2026-09-19T10:40:12.343Z",
+    "session_id": "01a0b93b-ef9c-7c43-8ecf-00a4d3c9d343",
+    "native_events": 16,
+    "total_events": 18,
+    "unique_client_event_ids": 18,
+    "payloads_match_native_spool": true,
+    "duplicate_replay_appended": 0,
+    "event_counts": {
+      "message.assistant": 2,
+      "message.user": 2,
+      "skill.loaded": 2,
+      "tool.invoked": 6,
+      "tool.result": 6
+    },
+    "active_after_native_exit": true,
+    "capture_batch_id": "01a0b940-8f89-7ca3-a875-33b0f30e199e",
+    "capture_state": "completed",
+    "capture_candidate_count": 16,
+    "session_state": "ended",
+    "reuse_session_id": "01a0b940-93d2-77a2-86dc-b01bf28460ac",
+    "reuse_context_run_id": "01a0b940-93fc-7f52-b3cb-c383f0331787",
+    "reused_knowledge_id": "01a096a1-9cb3-79b0-a5bd-6316a49499c3"
+  },
+  "audit": {
+    "valid": true,
+    "head_seq": 1179,
+    "head_hash": "f6b384106acb231c9b6b16c7114be56fb35ebc0caf7d1447b910402aeaf2bffd",
+    "session_events": [
+      {
+        "seq": 1088,
+        "action": "session.opened",
+        "trace_id": "94f83299e01f591b36d32008090dac61"
+      },
+      {
+        "seq": 1089,
+        "action": "context.candidates.retrieved",
+        "trace_id": "115ba71349820ad5b3e372b2ae423188"
+      },
+      {
+        "seq": 1090,
+        "action": "context.selections.made",
+        "trace_id": "115ba71349820ad5b3e372b2ae423188"
+      },
+      {
+        "seq": 1091,
+        "action": "session.context.composed",
+        "trace_id": "115ba71349820ad5b3e372b2ae423188"
+      },
+      {
+        "seq": 1095,
+        "action": "session.events.appended",
+        "trace_id": "536bd143f152e088e574c9e54083956e"
+      },
+      {
+        "seq": 1098,
+        "action": "context.candidates.retrieved",
+        "trace_id": "59fb272f3fa4d8050da89badae3a58dc"
+      },
+      {
+        "seq": 1099,
+        "action": "context.selections.made",
+        "trace_id": "59fb272f3fa4d8050da89badae3a58dc"
+      },
+      {
+        "seq": 1100,
+        "action": "session.context.composed",
+        "trace_id": "59fb272f3fa4d8050da89badae3a58dc"
+      },
+      {
+        "seq": 1104,
+        "action": "session.events.appended",
+        "trace_id": "57d0d66d2efc9b3245f75c86cba7eada"
+      },
+      {
+        "seq": 1109,
+        "action": "authz.decision",
+        "trace_id": "d54136ef625953cba4f10d825f118a99"
+      },
+      {
+        "seq": 1111,
+        "action": "context.candidates.retrieved",
+        "trace_id": "0ca6f7cf2e8da5411b1a3ef45cf9ef95"
+      },
+      {
+        "seq": 1112,
+        "action": "context.selections.made",
+        "trace_id": "0ca6f7cf2e8da5411b1a3ef45cf9ef95"
+      },
+      {
+        "seq": 1113,
+        "action": "session.context.composed",
+        "trace_id": "0ca6f7cf2e8da5411b1a3ef45cf9ef95"
+      },
+      {
+        "seq": 1117,
+        "action": "session.events.appended",
+        "trace_id": "0d67eb211ac26cfc9cdc4636763966c5"
+      },
+      {
+        "seq": 1122,
+        "action": "authz.decision",
+        "trace_id": "d0310f8619f7e6e567ebeea1dc177cab"
+      },
+      {
+        "seq": 1126,
+        "action": "session.events.appended",
+        "trace_id": "6eb99ed17d089660434418c010cfe0c9"
+      },
+      {
+        "seq": 1127,
+        "action": "context.candidates.retrieved",
+        "trace_id": "cc6e83ac9cd7ff0b650d7a2abf1c76d1"
+      },
+      {
+        "seq": 1128,
+        "action": "context.selections.made",
+        "trace_id": "cc6e83ac9cd7ff0b650d7a2abf1c76d1"
+      },
+      {
+        "seq": 1129,
+        "action": "session.context.composed",
+        "trace_id": "cc6e83ac9cd7ff0b650d7a2abf1c76d1"
+      },
+      {
+        "seq": 1134,
+        "action": "session.events.appended",
+        "trace_id": "2de2aa09642d47e915bd6b56d92958f5"
+      },
+      {
+        "seq": 1142,
+        "action": "session.events.appended",
+        "trace_id": "c639e501308a8a68498385618f8facb5"
+      },
+      {
+        "seq": 1162,
+        "action": "session.events.appended",
+        "trace_id": "58adbb31eb808556bc06e68d019ffe99"
+      },
+      {
+        "seq": 1165,
+        "action": "capture.batch.created",
+        "trace_id": "d4ba4e8d2f904d7c9ea664c768c3584b"
+      },
+      {
+        "seq": 1167,
+        "action": "capture.batch.completed"
+      },
+      {
+        "seq": 1169,
+        "action": "session.ended",
+        "trace_id": "867cd0f4ed692b8015519f3ae214d3af"
+      }
+    ],
+    "foreign_session_denials": [
+      {
+        "seq": 1094,
+        "occurred_at": "2026-09-19T10:35:13.306270Z",
+        "action": "authz.decision",
+        "resource": "session 01a096ab-f2ec-79e1-af15-b8687a59b148",
+        "outcome": "deny",
+        "trace_id": "d19b5c85d362f79ab41ea0a513adc6a2"
+      },
+      {
+        "seq": 1107,
+        "occurred_at": "2026-09-19T10:37:19.561752Z",
+        "action": "authz.decision",
+        "resource": "session 01a096ab-f2ec-79e1-af15-b8687a59b148",
+        "outcome": "deny",
+        "trace_id": "3f8a16bf3134cf46a0182a313a1bc681"
+      },
+      {
+        "seq": 1120,
+        "occurred_at": "2026-09-19T10:37:19.988506Z",
+        "action": "authz.decision",
+        "resource": "session 01a096ab-f2ec-79e1-af15-b8687a59b148",
+        "outcome": "deny",
+        "trace_id": "eac57e1726c6bfc553a8a2de64cd286a"
+      },
+      {
+        "seq": 1132,
+        "occurred_at": "2026-09-19T10:37:42.896983Z",
+        "action": "authz.decision",
+        "resource": "session 01a096ab-f2ec-79e1-af15-b8687a59b148",
+        "outcome": "deny",
+        "trace_id": "2fe4d6e2ee37e6a11fa254a6ad61ba9a"
+      }
+    ],
+    "sdk_response_traces_correlated": true,
+    "context_and_proposal_markers_absent": true
+  },
+  "limits": [
+    "Source-build qualification only; native execution from a published installation is not established.",
+    "Exact public-API replay proves event idempotency; native outage recovery was not exercised.",
+    "Native compaction/reinjection, unknown/non-text result formats and other client versions/platforms remain unqualified.",
+    "The final assistant event becomes deliverable on a later native reopen/exit. Native Skill activation is not inferred as a typed Skill-usage event."
+  ]
+}

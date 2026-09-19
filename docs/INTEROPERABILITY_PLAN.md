@@ -83,8 +83,8 @@ Packaging, non-text results and other versions/platforms remain unqualified.
 - Acceptance: authenticated context delivery, events, Capture, task end,
   replay/restart, Skill discovery and persisted audited outcomes under
   ADR-0098. Promote the exact client version only after live evidence passes.
-- Copilot CLI now has ADPT-9's experimental start/resume context adapter;
-  native lifecycle qualification is open. Pi remains a later candidate with no
+- Copilot CLI now has ADPT-9's verified source-build lifecycle for its named
+  setup; packaging is next. Pi remains a later candidate with no
   adapter. VS Code's contract is separate; configuration is not qualification.
 
 ## Evidence and outcomes
@@ -403,25 +403,21 @@ changed to obtain the successful rerun.
 The CPR-45 deterministic-gate checkpoint is closed. Wider live reference
 acceptance remains in its open brief.
 
-1. Complete [ADPT-9's Copilot CLI qualification](backlog/ADPT-9.md). CPR-45's
-   confirmed hosts-witness renewal restored the Docker/Keycloak reference;
-   all 345 deployment tests pass without skips. At `8336c22`, the separately
-   approved native pair used durable private state. Its first prompt missed
-   hooks because the nested project inherited the parent Git root. After
-   initializing the owned scratch project, native resume delivered allowed
-   context, activated the exact approved Skill and passed MCP recall/foreign
-   denial. Both SDKs shared that task: 18 unique events, zero duplicates on
-   replay, 16 Capture candidates, explicit end, Knowledge reuse and audit
-   verification through sequence 1059. The final assistant observation arrived
-   on a later no-prompt reopen/exit. The [native workflow result](../adapters/copilot-cli/fixtures/shared-workflow.json)
-   retains the initial failure; the [earlier denial result](../adapters/copilot-cli/fixtures/governed-probe.json)
-   retains the parser failure. All 142 adapter tests (29 Copilot) pass on
-   macOS Node 24 and pinned offline Docker Node 22, zero skips. Next run a
-   clean correctly rooted start/resume pair on one governed task. Both approved
-   prompts were used. A fresh project has passed Git-root, approved Skill and
-   foreign-denial preflight and awaits a new two-prompt, 30-credit soft
-   allowance. Support remains experimental; native
-   outage/compaction, other result shapes and packaging remain unqualified.
+1. Package [ADPT-9's verified Copilot CLI runtime](backlog/ADPT-9.md) through
+   the existing archive and installer. The clean native start/resume pair at
+   `c86d5c6` passed on CLI 1.0.83 / gpt-5.6-luna, macOS arm64 and the restored
+   Docker/Keycloak reference. Both SDKs used the same task between prompts;
+   approved Skill activation, MCP recall, foreign denial, proposals and audit
+   correlation passed. The [clean lifecycle result](../adapters/copilot-cli/fixtures/clean-lifecycle.json)
+   records 18 unique events, zero duplicates on replay, 16 Capture candidates,
+   explicit end, Knowledge reuse and valid audit through sequence 1179. All 144
+   adapter tests (31 Copilot) pass on host and pinned offline Docker, zero skips.
+   Earlier failures remain pinned separately. Reuse the package fixture and
+   installer tests to prove extracted runtime resolution, captured lifecycle
+   replay, preserved client configuration and refusal before mutation when
+   runtime files are missing. Native outage/compaction, other result formats
+   and versions/platforms, and native execution from a published installation
+   remain unqualified.
 2. Resolve ADPT-4's existing package ownership/licence, signing/provenance,
    runtime/server matrix and release ownership before public distribution.
    Local archive build/install/import is verified; packages remain unpublished.

@@ -7,7 +7,7 @@ A connection recipe is not a support claim. `captured` means authentic frames re
 | Client | Level | Tested versions | Lifecycle | Principal limit |
 | --- | --- | --- | --- | --- |
 | Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. |
-| GitHub Copilot CLI | `experimental` | 1.0.83 | Captured sessionStart context, agentStop recording and sessionEnd flush; native MCP configuration | Source-build experiment: the corrected native resume and shared authenticated SDK workflow pass. The first prompt had no hooks because its scratch directory inherited the parent Git root; a clean correctly rooted first-start/resume pair remains required. |
+| GitHub Copilot CLI | `verified` | 1.0.83 | Captured sessionStart context, agentStop recording and sessionEnd flush; native MCP configuration | Verified source-build lifecycle only for Copilot CLI 1.0.83 / gpt-5.6-luna on macOS arm64 with the documented Docker/Keycloak setup. Native execution from a published installation and other versions/platforms remain unqualified. |
 | Cursor | `experimental` | none | Cursor Hooks v1 plus MCP | No Cursor executable or authenticated client was available on 2026-08-25. |
 | Visual Studio Code | `configured` | none | VS Code agent hooks Preview plus MCP | The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive. |
 | Codex CLI | `verified` | 0.152.0 | Native hooks and MCP over the existing Session runtime; manual/automatic compaction and outage/recovery verified | Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, native execution from a published installation and other client versions/platforms remain unqualified. |
@@ -47,7 +47,7 @@ Known limits:
 - Payload hashes detect accidental corruption but do not authenticate local state against an attacker with arbitrary write access to the same account.
 - Skill execution evidence remains host-observed at the sync/advertisement seam; a model statement alone never counts.
 
-### GitHub Copilot CLI — `experimental`
+### GitHub Copilot CLI — `verified`
 
 Contract: Hooks schema version 1 / captured Copilot CLI 1.0.83 (2026-09-19). Evidence level: `live-client`.
 
@@ -61,27 +61,31 @@ Authentic fixtures:
 - `adapters/copilot-cli/fixtures/governed-probe.json` — captured-real-client-partial-result, SHA-256 `440a92f52a55e8cfe5f277578049520114b699896f56d553225ec2d1e8b7c68d`
 - `adapters/copilot-cli/fixtures/shared-workflow-transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `bb636f9e4f460f28844690718b475fe9fad6aa8151d024089f8ecf822ea33f9c`
 - `adapters/copilot-cli/fixtures/shared-workflow.json` — captured-live-client-partial-result, SHA-256 `9a5d0ab47c9f02405dbaf60f0d030026a3a00f3d63fb84a51d90668cfdb18a47`
+- `adapters/copilot-cli/fixtures/clean-lifecycle-transcript.jsonl` — captured-real-client-transcript-projection, SHA-256 `f2f94476e1accf36cb34a7a5b03d7c6cd22a82876ce0e5b805fb5f517089dfcb`
+- `adapters/copilot-cli/fixtures/clean-lifecycle.json` — captured-live-client-result, SHA-256 `7c77c323150c0a9bb5c78b9c8a905402d82a9b07ed6641e0cbb5a92fd5f430c6`
 
 Conformance:
 
-- `session_creation`: passed — `adapters/copilot-cli/fixtures/shared-workflow.json`
-- `event_delivery`: passed — `adapters/copilot-cli/fixtures/shared-workflow.json`
-- `context_request_delivery`: failed — `adapters/copilot-cli/fixtures/shared-workflow.json`
-- `capture`: passed — `adapters/copilot-cli/fixtures/shared-workflow.json`
-- `session_end`: passed — `adapters/copilot-cli/fixtures/shared-workflow.json`
-- `retry_idempotency`: passed — `adapters/copilot-cli/fixtures/shared-workflow.json`
-- `skill_advertisement_activation`: passed — `adapters/copilot-cli/fixtures/shared-workflow.json`
-- `tool_configuration`: passed — `adapters/copilot-cli/fixtures/shared-workflow.json`
-- `cross_session_knowledge_reuse`: passed — `adapters/copilot-cli/fixtures/shared-workflow.json`
-- `persisted_audited_outcomes`: passed — `adapters/copilot-cli/fixtures/shared-workflow.json`
+- `session_creation`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `event_delivery`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `context_request_delivery`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `capture`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `session_end`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `retry_idempotency`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `skill_advertisement_activation`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `tool_configuration`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `cross_session_knowledge_reuse`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
+- `persisted_audited_outcomes`: passed — `adapters/copilot-cli/fixtures/clean-lifecycle.json`
 
 Known limits:
 
-- Source-build experiment: the corrected native resume and shared authenticated SDK workflow pass. The first prompt had no hooks because its scratch directory inherited the parent Git root; a clean correctly rooted first-start/resume pair remains required.
-- Native context, exact approved Skill activation, MCP recall and foreign-workspace denial pass on CLI 1.0.83. Both SDK examples share its Synveda Session and correlate actual response traces with audit.
-- Sixteen native observations plus two SDK Skill events persist without duplicates. The last assistant message arrived on a subsequent native reopen/exit; runtime exit retains the application task. Explicit Capture produced 16 candidates, explicit end and Knowledge reuse passed, and audit verified through sequence 1059.
-- The prior denial-result parser failure and the first missing-hook run remain recorded. The current workflow used two approved prompts; no-prompt reopens left its two cumulative premium requests and 847087000 nano-AIU unchanged.
-- The approved Skill root override and native MCP configuration need no new adapter dependencies. Packaging, native outage/compaction, other result formats and other versions/platforms remain unqualified. Copilot CLI support makes no VS Code or cloud-agent claim.
+- Verified source-build lifecycle only for Copilot CLI 1.0.83 / gpt-5.6-luna on macOS arm64 with the documented Docker/Keycloak setup. Native execution from a published installation and other versions/platforms remain unqualified.
+- Native new/resume context, exact approved Skill activation, MCP recall and foreign-workspace denial pass on one explicit Synveda task shared by both SDK examples. Actual response traces correlate with content-free audit.
+- Sixteen native observations plus two SDK Skill events persist. Exact public-API replay appends no duplicates. Capture yields 16 reviewable candidates; explicit end and later Knowledge reuse pass; audit verifies through sequence 1179.
+- The final assistant observation becomes deliverable on a later native reopen/exit. Runtime exit keeps the task active. Native Skill activation alone emits no typed Skill-usage event.
+- The clean pair used two approved prompts in one saved Session under a shared 30-credit soft limit: two cumulative premium requests and 575693000 nano-AIU. The no-prompt reopen did not increase these counters; native auxiliary model startup failed separately.
+- Earlier marker, denied-result parser and misplaced-hook failures remain pinned as failed evidence. Exact retry IDs were exercised through the public API; native outage recovery, compaction/reinjection and unknown/non-text result formats remain unqualified.
+- The existing approved Skill root override and native MCP configuration are manual. Packaging is the next ADPT-9 increment. Copilot CLI support makes no VS Code or cloud-agent claim.
 
 ### Cursor — `experimental`
 
