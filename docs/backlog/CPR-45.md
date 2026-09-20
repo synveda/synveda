@@ -105,9 +105,21 @@ rerun. No Rust, database schema, generated API or application feature changed.
 Remaining blocker: no new compatible tag has been published, and hosted
 anonymous pull checks have not run. The latest public release is still v0.2.0
 with the old profile archive, verified through the GitHub release API on
-2026-09-20. Next: select an unused matching workspace/chart version, complete
-the normal CI and release dry run, configure GHCR package visibility/access,
-then publish and run the existing reference acceptance on an empty host.
+2026-09-20. Source version 0.3.0 is now prepared across the workspace, console,
+adapters and chart, with matching starter image tags and generated API metadata.
+
+Version preparation passed Rust formatting, strict workspace Clippy, six OKF
+tests, six OpenAPI tests, release parity, chart image and Helm lint/render gates,
+all 144 adapter tests, extracted plugin replay, SDK drift/source/archive checks,
+the console build, and dependency/client-support/backlog/ADR/docs gates.
+The built CLI reports `synveda 0.3.0`. SDK archives retain their independent
+0.1.0 package version and target API 0.3.0. No container publication, hosted
+release run, fresh database suite or live deployment acceptance was performed
+for this version change.
+
+Next: complete the normal CI and release dry run, configure GHCR package
+visibility/access, then publish and run the existing reference acceptance on
+an empty host.
 See [release operations](../RELEASING.md). Linux/Docker Desktop, Windows/WSL2,
 recovery, N-1 and production readiness are not qualified by an image check.
 

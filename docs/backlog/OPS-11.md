@@ -467,7 +467,8 @@ acceptance did not run in this increment.
 Exact blocker for release completion: a
 newly versioned, authorised, published and pull-verified current artifact set, an
 explicit supported prior release, and the still-unavailable real OpenShift/cloud
-target. Next action after local acceptance: select an unused release version,
-run an owner-authorised candidate workflow and empty-registry installation, then qualify the declared upgrade
-pair and target platform. No external publication or account credentials are
-used by the local work.
+target. Source version 0.3.0 is now prepared, including the chart and explicit
+starter provider image tags. Next action after local acceptance: validate that
+revision, run an owner-authorised candidate workflow and empty-registry
+installation, then qualify the declared upgrade pair and target platform.
+No external publication or account credentials are used by the local work.

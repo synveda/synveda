@@ -12,10 +12,11 @@ OPS-8/CPR-45 extends prebuilt distribution under
 AMD64/ARM64 anonymous image pulls, source/version/platform checks and isolated
 executable checks gate the GitHub Release announcement. The existing archive
 now carries a server-only guide, licence/notice and safe preparation commands.
-No backend runtime or running deployment changes. The latest public v0.2.0
-still predates the current archive; publication and live reference acceptance
-remain open. [Release operations](../RELEASING.md) records the package-access,
-visibility and new-version steps; measured local validation is in
+Running deployments remain unchanged. The latest public v0.2.0
+still predates the current archive; the source version is now 0.3.0, with
+publication and live reference acceptance open.
+[Release operations](../RELEASING.md) records the package-access,
+visibility and publication steps; measured local validation is in
 [CPR-45](CPR-45.md#prebuilt-container-release-increment-2026-09-20).
 The full deployment gate passed 359 tests without skips; the current product
 image build, eight local ARM64 executable/asset checks, extracted-archive
@@ -77,7 +78,7 @@ recovery, migration contention and retained reinstall; exact local limits and
 measurements are recorded in the open brief. Public v0.2.0 lacks the current chart/reference artifacts and
 predates epoch 3, so a supported published N-1 upgrade remains unavailable;
 publication and actual platform qualification still block delivery.
-Next: select an unused release version, authorise the candidate workflow and
+Next: validate the prepared 0.3.0 revision, authorise the candidate workflow and
 pull-install its complete artifact set on an empty target; then qualify the
 declared N-1 pair and actual target platform. No schema reset is an upgrade.
 

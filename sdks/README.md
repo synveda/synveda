@@ -3,7 +3,7 @@
 This initial, unpublished slice covers 15 operations from Synveda's checked
 OpenAPI: Sessions, observations, Context, approved immutable Skills, Knowledge
 proposals and audit pages. The generated contracts include the source SHA-256;
-they target the 0.2.0 API in this checkout. Broader API coverage, published
+they target the 0.3.0 API in this checkout. Broader API coverage, published
 packages and a public support policy remain in `docs/backlog/ADPT-4.md`.
 
 TypeScript uses Node's maintained Fetch implementation; Python uses HTTPX.
@@ -70,8 +70,8 @@ generated types, operation bindings, contract metadata and `py.typed`.
 
 ## Compatibility and release boundary
 
-SDK version **0.1.0** targets API version **0.2.0** and checked OpenAPI SHA-256
-`1f7c34523fc9f84cffdfd403a99ae24bc7fbfb77f0a28e77c7cc8945f3a8b952`.
+SDK version **0.1.0** targets API version **0.3.0** and checked OpenAPI SHA-256
+`a6b0582833524c94e00a2b2827d7d2b45098d1d6a7c9f9ae80452f9dcab1c675`.
 That digest covers the whole API document; the SDK exposes only the 15 selected
 operations. Another server version or contract has no compatibility claim from
 these checks. Regenerate after reviewed contract or package-version changes,
@@ -92,6 +92,14 @@ The generator reads each package manifest and checked OpenAPI; request headers
 use that generated SDK version. Installed-package checks compare all three
 values with their sources and verify the actual client-identification header.
 They print the OS, architecture and runtime with content-free archive evidence.
+
+The 2026-09-20 product version bump regenerates the API version and document
+digest; all 15 operation bindings and 52 SDK schemas remain unchanged. Local
+macOS arm64 checks with Node 24.18.0/Python 3.14.6 pass nine source tests and nine
+installed-package tests per SDK, including identical clean builds, installed
+types/resources, licence text and 0.3.0 target metadata. Authenticated gateway
+acceptance and the Linux runtime matrix were not rerun for this metadata change;
+the earlier evidence below remains tied to its named source.
 
 The 2026-09-19 Apache-2.0 increment starting at `9365c92` repeats the two
 native arm64 rows below, including exact installed licence/notice checks.
@@ -125,7 +133,7 @@ policy and three implementation batches. The owner has confirmed repository
 licence inheritance and Synveda stewardship; the release mechanics and support
 policy remain proposed choices. The published product `v0.2.0` predates this
 checked contract, so a release must name
-the exact tested server source/image and digest, not just API version `0.2.0`.
+the exact tested server source/image and digest, not just an API version string.
 
 ## Check local package archives
 

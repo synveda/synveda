@@ -312,7 +312,7 @@ fn render_item(
         .cloned()
         .unwrap_or_else(|| {
             json!({
-                "by": "synveda/0.2.0",
+                "by": concat!("synveda/", env!("CARGO_PKG_VERSION")),
                 "at": item.content.valid_from.to_rfc3339_opts(SecondsFormat::Secs, true),
             })
         });

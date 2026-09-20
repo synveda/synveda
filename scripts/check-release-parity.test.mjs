@@ -276,11 +276,19 @@ test("release workflow binds the chart and digest-addressed reference images", (
 
 test("workspace and chart default to one versioned GHCR image pair", () => {
   const current = currentChartInputs();
-  assert.equal(workspaceVersion(current[0]), "0.2.0");
+  const version = workspaceVersion(current[0]);
+  assert.ok(version);
+  assert.equal(validateVersion(version).status, 0);
   assert.deepEqual(chartParityFindings(...current), []);
 
   const mutants = [
-    current.with(1, current[1].replace('appVersion: "0.2.0"', 'appVersion: "0.2.1"')),
+    current.with(
+      1,
+      current[1].replace(
+        `appVersion: "${version}"`,
+        `appVersion: "${version}-mismatch"`,
+      ),
+    ),
     current.with(
       2,
       current[2].replace("repository: ghcr.io/synveda/product", "repository: synveda/product"),

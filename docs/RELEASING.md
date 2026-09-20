@@ -8,11 +8,15 @@ dispatch builds and packages a dry run without publishing anything.
 As of 2026-09-20, the latest public release is v0.2.0. It contains the retired
 profile archive and predates the current database schema. Do not reuse that
 tag or claim it is compatible with the current reference launcher.
+The source is prepared for **0.3.0**; its tag and release artifacts have not
+been published.
 
 ## Before the first current release
 
-1. Select a new, unused version and update the workspace/chart version inputs
-   together. `make check-release-parity` checks their agreement. Commit the
+1. Keep the workspace, console/adapters, chart and starter image versions
+   aligned with the intended unused release tag. Regenerate OpenAPI, the console
+   client and SDK contract metadata after changing the workspace version.
+   `make check-release-parity` checks workspace/chart agreement. Commit the
    intended source, including required brand assets, and require the normal CI
    gates for that revision. The release workflow is not a replacement for CI.
 2. Confirm the repository's Actions token may publish packages and releases.

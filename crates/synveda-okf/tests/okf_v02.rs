@@ -314,6 +314,24 @@ fn deterministic_export_round_trips_extensions_without_v01_residue() {
         )
         .unwrap();
     assert_eq!(round_trip.concepts.len(), 2);
+    let imported = round_trip
+        .concepts
+        .iter()
+        .find(|concept| concept.content.title == "Webhook identity")
+        .unwrap();
+    assert_eq!(
+        imported.content.verification_metadata["okf"]["generated"]["by"],
+        "human:alice"
+    );
+    let authored = round_trip
+        .concepts
+        .iter()
+        .find(|concept| concept.content.title == "Trace header")
+        .unwrap();
+    assert_eq!(
+        authored.content.verification_metadata["okf"]["generated"]["by"],
+        concat!("synveda/", env!("CARGO_PKG_VERSION"))
+    );
     assert!(round_trip.concepts.iter().any(|concept| {
         concept.content.metadata["okf"]["frontmatter"]["vendor_extension"]["kept"] == true
     }));

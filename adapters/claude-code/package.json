@@ -1,6 +1,6 @@
 {
   "name": "@synveda/claude-code-adapter",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "Claude Code plugin: SessionStart context run + durable Stop/PreCompact/SessionEnd delivery (ADPT-1, ADR-0027; ADR-0078)",
