@@ -49,9 +49,11 @@ the two earlier ARM64 checks missed. FND-7 now uses a pinned WebAssembly rendere
 and checks both native Linux architectures before deployment (ADR-0113 amendment).
 All 11 exports match exactly on macOS ARM64 Node 24, Linux ARM64 Node 22 and
 emulated Linux AMD64 Node 22. Both stale-export regression tests, full site checks,
-the unchanged licence gate, documentation checks and workflow lint pass. Hosted
-validation of this correction remains the next Pages run; no live success is
-inferred from local checks.
+the unchanged licence gate, documentation checks and workflow lint pass.
+[Pages run 35511266591](https://github.com/synveda/synveda/actions/runs/35511266591)
+then passed on native AMD64 and ARM64 and deployed correction `a2e819e`. All 11
+published page/asset files returned HTTP 200 with bytes identical to the local
+build at [the live site](https://synveda.github.io/synveda/).
 
 [OPS-11](OPS-11.md) records the next small-team Kubernetes milestone under
 ADR-0109. The [deployment audit](../../deploy/README.md#small-team-kubernetes-release-contract)

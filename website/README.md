@@ -182,5 +182,10 @@ Both tests and all 11 exact export checks pass on macOS ARM64 Node 24.18.0,
 Linux ARM64 Node 22.23.2 and emulated Linux AMD64 Node 22.23.2. Fresh frozen-lockfile
 Linux installations also pass the complete site check and unchanged npm licence
 gate. The public allowlist remains 12 files with no WASM or renderer code.
-Documentation, workflow lint and formatting pass. The hosted Pages run provides
-the separate native AMD64/ARM64 and deployment result.
+Documentation, workflow lint and formatting pass.
+
+[Pages run 35511266591](https://github.com/synveda/synveda/actions/runs/35511266591)
+passed both native AMD64 and ARM64 builds and deployed correction `a2e819e`.
+All 11 published page/asset files at [the live site](https://synveda.github.io/synveda/)
+returned HTTP 200 and matched the local build byte-for-byte. Account avatar and
+repository social-preview uploads remain separate owner actions.
