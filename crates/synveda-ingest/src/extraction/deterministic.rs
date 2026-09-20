@@ -24,7 +24,7 @@ const KEYWORD_CONFIDENCE: f64 = 0.6;
 
 /// The ruleset version recorded as `model_version` in provenance. Bump
 /// whenever a rule changes: provenance must name what actually ran.
-/// `@2` added entity mentions (GRPH-2, ADR-0044 decision 2); `@4` recognises
+/// `@2` added entity mentions; `@4` recognises
 /// explicit imperative and architectural-choice forms after the session-plane
 /// cut removed the caller-supplied Record kind; `@5` recognises short
 /// definitional noun phrases without requiring a capitalised one-word name.
@@ -64,9 +64,8 @@ static ENTITY_DEFINITION: LazyLock<Regex> = LazyLock::new(|| {
         .expect("static entity-definition pattern compiles")
 });
 /// The opaque spans MEM-2 leaves behind (ADR-0021). Removed before
-/// mention detection so `REDACTED` never reads as a proper noun — the
-/// linker refuses a mention carrying the marker (ADR-0044 decision 9),
-/// and this makes sure the marker is still attached when it looks.
+/// mention detection so `REDACTED` never reads as a proper noun or gives
+/// unrelated redacted values a shared entity identity.
 static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\[REDACTED:[^\]]*\]").expect("static placeholder pattern compiles")
 });
@@ -75,7 +74,7 @@ static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| {
 /// is stripped of these from the front, so "If Postgres fails" yields
 /// `Postgres` and "We decided" yields nothing.
 ///
-/// A stoplist rather than a position rule (GRPH-2, ADR-0044 decision 2):
+/// A stoplist rather than a position rule:
 /// refusing single capitalised tokens at sentence starts would
 /// systematically miss every entity that opens a sentence, while a
 /// stoplist misses only the words that are not on it — and a list is data
@@ -343,17 +342,15 @@ fn collect_strings<'a>(value: &'a serde_json::Value, into: &mut Vec<&'a str>) {
     }
 }
 
-/// The proper names this content mentions (GRPH-2, ADR-0044 decision 2):
+/// The proper names this content mentions:
 /// runs of capitalised tokens, stripped of the sentence-opening words that
 /// are capitalised by grammar rather than by name.
 ///
 /// Honest about what it is, exactly as the classifier above is: a
 /// capitalisation heuristic, no network and no model. It misses lowercase
-/// names and will occasionally intern an opener that
-/// [`SENTENCE_OPENERS`] does not carry — which is why GRPH-2 measures the
-/// orphan rate rather than claiming a recall number, and why the LLM
-/// extractors, which fill the same field from the shared prompt, are the
-/// product path.
+/// names and may report an opener that [`SENTENCE_OPENERS`] does not carry.
+/// Mentions remain candidate evidence; they do not publish Knowledge or
+/// grant authority (ADR-0097).
 fn mentions(content: &str) -> Vec<String> {
     let text = PLACEHOLDER.replace_all(content, " ");
     let mut found: Vec<String> = Vec::new();

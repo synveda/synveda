@@ -14,9 +14,9 @@
 //! Validators run in code on the candidate match (Luhn for cards, mod-97
 //! for IBANs, Shannon entropy for keyword-anchored generic secrets — the
 //! gitleaks keyword + regex + entropy discipline), so "16 digits" alone
-//! is not a card and prose after `token:` is not a secret. The tech
-//! plan's regex+ML split (§1.2) is honoured as a seam: a future ML/NER
-//! pass joins behind [`Ruleset`] without moving the enforcement point.
+//! is not a card and prose after `token:` is not a secret. A future ML/NER
+//! pass would join behind [`Ruleset`] without moving the enforcement point;
+//! the current scanner uses deterministic rules only.
 
 use std::sync::LazyLock;
 

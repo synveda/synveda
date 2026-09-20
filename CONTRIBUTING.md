@@ -1,96 +1,97 @@
-# Contributing
+# Contributing to Synveda
 
-Synveda's trust boundaries are part of its product contract. Read
-[AGENTS.md](AGENTS.md), the
-[Seed invariants](docs/SYNVEDA_SEED.md#2-product-principles-non-negotiable) and the
-relevant accepted ADRs before changing code. The root
-[documentation index](README.md#documentation) separates local use, product
-use, architecture and deployment limits.
+Synveda welcomes code, tests, documentation, accessibility improvements and
+reproducible bug reports. You do not need an AI assistant, a cloud account or
+paid model access to contribute. To try the product first, use the
+[Docker installation](deploy/compose/PREBUILT.md); to change its source, follow
+[the developer guide](docs/DEVELOPMENT.md).
 
-## Workflow
+<a id="local-deployment"></a>
 
-1. Map the change to the [feature inventory](docs/backlog/STATUS.md). For new
-   work, add an open entry and its implementation brief together.
-2. Use `feat/<ID>` for ordinary feature work and include the feature ID in each
-   commit subject.
-3. Record architectural decisions before implementation using
-   [the ADR template](docs/adr/adr-0000-template.md).
-4. Add behaviour-level tests and runnable acceptance under `demos/` where the
-   feature has an executable path.
-5. Keep generated OpenAPI, console types and SQLx metadata derived from their
-   sources; never hand-edit them.
-6. Update the brief and delivered/open state with the same change. When work is
-   delivered, retain its contract in tests/ADRs/docs and delete the brief; git
-   is the implementation archive.
+## First contribution
 
-Do not add a test-only path around Cedar or tenant RLS. Use a test policy pack
-and the ordinary tenant transaction boundary.
+1. Find a small change in the [code map](docs/DEVELOPMENT.md#code-map) or browse
+   [open issues](https://github.com/synveda/synveda/issues). A typo, test or
+   focused fix can go straight to a pull request. For a larger design or public
+   contract change, start a conversation in an issue before implementation;
+   GitHub Discussions is not enabled.
+2. Fork the repository on GitHub, clone your fork and create a working branch:
 
-## Local checks
+   ```sh
+   git clone https://github.com/YOUR-USERNAME/synveda.git
+   cd synveda
+   git switch -c fix/describe-your-change
+   ```
 
-Run focused tests while working. Before review, run the gates appropriate to
-the change and record prerequisites that were unavailable:
+3. Follow [source setup and the fast check](docs/DEVELOPMENT.md#source-setup).
+   Make one focused change and run the checks for that area. Explain any check
+   you could not run and its missing prerequisite.
+4. Push your branch to your fork and open a PR against `synveda/synveda:main`.
+   Explain the problem, resulting behavior and validation. Screenshots help
+   for UI changes; use fictional data and exclude credentials or tenant content.
+   Documentation-only changes are welcome through the same short PR template.
 
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-make ci
-make db-test
-```
+Use an existing ID from the [feature inventory](docs/backlog/STATUS.md) in the
+PR and commit subject, for example `FND-1: clarify contributor setup`. A small
+correction does not need a new feature, planning brief or ADR. A new feature
+needs an inventory entry and a brief while it is open. Record a new or changed
+architectural choice using the [ADR template](docs/adr/adr-0000-template.md).
+Delivered work retains its contract in tests, accepted decisions and operator
+docs; remove the completed brief. Git retains implementation history.
 
-Database, live-model and proprietary-client gates require their documented
-services or credentials. Missing prerequisites are not passing results.
-`make ci` includes the SDK contract gate; install the hash-locked Python
-development requirements described in [the SDK guide](sdks/README.md) first.
-`make interop-acceptance` exercises the shared harness/SDK workflow using the
-same fresh exact-role Docker fixture as the other database gates.
+## Checks and coding expectations
 
-## Review expectations
+[The developer guide](docs/DEVELOPMENT.md#validation) owns the exact commands
+and prerequisites. Start with `make check-fast`, then focused tests. Rust
+changes require formatting and strict Clippy for the affected crates. Run the
+fresh database fixture for persistence or authorization changes; ordinary
+workspace tests can skip database cases when no database is supplied. Report
+those skips honestly. Hosted CI runs additional integration jobs.
 
-A review should be able to identify:
+Preserve the [product invariants](docs/SYNVEDA_SEED.md#2-product-principles-non-negotiable):
+Cedar decides reads and writes, forced PostgreSQL RLS backstops tenant isolation,
+and governed changes use VedaFlow with content-free audit evidence. Tests use
+ordinary tenant transactions and test policy packs. Configuration cannot bypass
+these boundaries. Read the relevant [current ADRs](docs/adr/README.md) when
+working on them.
 
-- the acceptance criterion and test that demonstrate the change;
-- the PDP, RLS, VedaFlow and audit effects, including an explicit “unchanged”;
-- all new resource bounds, timeouts and retry/idempotency behaviour;
-- generated-contract or schema effects;
-- operational rollout, rollback and compatibility consequences;
-- any remaining production-readiness gap.
+Keep dependency direction, explicit control flow and bounded input/work intact.
+Prefer private items and preserve causal errors without leaking secrets or
+resource existence. Avoid unjustified panics and unchecked unwraps in production.
+Keep product SQL static, SQLx checked and in `synveda-store`. Do not introduce
+pre-1.0 compatibility paths or unrelated dependency upgrades. Add tests that
+prove changed behavior and relevant refusal cases; a prose-only correction
+usually needs the documentation checks, not a new test.
 
-Keep commits small enough to review independently. Do not combine semantic
-changes with bulk file movement, generated churn or historical-document cleanup.
+Generated OpenAPI, console types, SDK contracts and SQLx metadata must be
+regenerated from their sources. Use [the documented commands](docs/DEVELOPMENT.md#generated-contracts),
+review the diff, and avoid unrelated generated changes. Preserve the repository's
+[Apache-2.0 licence](LICENSE), [notices](NOTICE) and third-party attribution;
+do not copy code or assets without checking their terms.
 
-## Security
+## Documentation and review
 
-This checkout does not yet publish a vulnerability-reporting channel or
-response SLA; that is a production-readiness gap. Do not put vulnerability
-details, secrets, tenant content or unredacted diagnostics in public issues,
-logs, fixtures or audit evidence. The repository owner must publish a private
-reporting route before accepting external distribution or contributions.
+Keep setup commands in their canonical guide and link to them elsewhere.
+Distinguish implemented behavior, deterministic replay, live verification and
+open work. Documentation links and site assets have local checks; external
+network availability is not a routine PR requirement. Keep credentials, logs,
+local inventories and session handoffs out of the change.
 
-## Local deployment
+Maintainers decide scope and merge readiness in the PR. Reviewers should be
+able to understand the change without reading an earlier agent conversation.
+Explain compatibility, security, resource bounds and rollout effects when they
+change; ordinary corrections need no large checklist. Keep unrelated cleanup
+out of a behavior change. Support and review are best effort; no response time
+or supported-version window is promised. Be respectful, discuss the work, and
+do not harass people or disclose their private information.
 
-Use Rust 1.96.0, Node 22+, pnpm 11.13.1, Git, GNU Make, OpenSSL, Docker and
-Compose. Source acceptance builds its images with the local default Buildx
-builder and uses the existing `.test` hostname contract. It is deliberately
-separate from the prebuilt localhost installation.
+AI assistance is optional. Contributors remain responsible for understanding
+the diff, checking correctness and licensing, and reporting tests accurately.
+The same review standards apply to all changes. Do not submit bulk generated
+code or documentation that you have not reviewed.
 
-```sh
-git clone https://github.com/synveda/synveda.git
-cd synveda
-pnpm install --frozen-lockfile
-make compose-hosts-plan
-make compose-hosts-status
-```
+## Security reports
 
-Follow [hostname setup](deploy/compose/README.md#development-hostname-setup)
-for the deliberate privileged hosts edit and resolver refresh. Then:
-
-```sh
-SYNVEDA_COMPOSE_PROFILES=demo make compose-up
-SYNVEDA_COMPOSE_PROFILES=demo make compose-smoke
-```
-
-The canonical [source Compose guide](deploy/compose/README.md) owns that
-workflow, optional model/monitoring services and source acceptance commands.
-Use [the website guide](website/README.md) for the static site preview.
+Use [private vulnerability reporting](SECURITY.md), not public issues, for
+suspected security problems. Ordinary bug reports should use minimal synthetic
+reproductions and redacted diagnostics.

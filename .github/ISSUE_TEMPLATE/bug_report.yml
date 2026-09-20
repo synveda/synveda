@@ -1,0 +1,26 @@
+name: Bug report
+description: Describe a reproducible product, tooling or documentation problem.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For suspected vulnerabilities, use [private reporting](https://github.com/synveda/synveda/security/advisories/new).
+        Use synthetic data and remove secrets, tokens and private content.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include what you expected instead. Documentation problems can name the page and confusing step.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How can we reproduce it?
+      description: Minimal steps or example, if known; no private logs are required.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Version and environment
+      description: Release or commit, OS, relevant tool/client versions, and Docker or Kubernetes setup if applicable.

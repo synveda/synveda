@@ -124,6 +124,11 @@ No external deployment is automatically seeded.
 ## State and ordinary lifecycle
 
 Use one `SYNVEDA_HOME` (default `$HOME/.synveda`) throughout this deployment.
+The launcher always owns the fixed **`synveda-evaluation`** Compose project.
+Changing `SYNVEDA_HOME`, the port or the bundle directory does **not** create an
+independent installation. If that project's containers or volumes already
+exist, retain their original state or use a separate disposable Docker host;
+never delete existing data merely to repeat a first-run test.
 The private `state/synveda-evaluation` contains the matching issuer, database
 credentials, Keycloak authority and encryption keys. PostgreSQL's named volume
 contains **both** the Synveda and separate Keycloak databases, with different
@@ -258,4 +263,4 @@ Generic OIDC support does not qualify every provider.
   to bypass a diagnostic.
 
 [Readiness and platform evidence](../../docs/PRODUCTION_READINESS.md) ·
-[Build from source](../../CONTRIBUTING.md#local-deployment)
+[Build from source](../../docs/DEVELOPMENT.md#running-your-changes)

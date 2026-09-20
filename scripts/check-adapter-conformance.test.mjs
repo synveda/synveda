@@ -24,10 +24,12 @@ test("the shipped registry is internally truthful", () => {
 });
 
 test("a competing README lifecycle summary is rejected", () => {
-  const readme = readFileSync(resolve(root, "README.md"), "utf8").replace(
-    "## Known production gaps",
-    "A different client is also verified.\n\n## Known production gaps",
+  const original = readFileSync(resolve(root, "README.md"), "utf8");
+  const readme = original.replace(
+    readmeSupportStatement(source),
+    `${readmeSupportStatement(source)} A different client is also verified.`,
   );
+  assert.notEqual(readme, original, "the fixture must change the support claim");
   assert.match(readmeSupportFindings(readme, copy()).join("\n"), /must match/u);
 });
 

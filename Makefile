@@ -1,4 +1,5 @@
-# Mirrors .github/workflows/ci.yml exactly — `make ci` locally == CI green.
+# Local validation aggregate. Hosted CI also runs database-backed evaluation,
+# replay and Kind acceptance; `make ci` alone does not establish those results.
 
 # The isolated EVAL-4 TEI image is per architecture. Upstream ships a
 # versioned amd64 release and an unversioned
@@ -265,6 +266,11 @@ claude-acceptance-live:
 
 fmt:
 	cargo fmt --all --check
+
+# FND-1: quick feedback using existing gates, with Git, Make and Node only.
+# Focused code tests and the service-backed acceptance suites remain separate.
+.PHONY: check-fast
+check-fast: check-docs check-backlog check-adr-status check-api-types check-adapters check-context-security check-context-hard-cut check-product-eval check-corpus-licences check-benchmarks
 
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings

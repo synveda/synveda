@@ -27,7 +27,7 @@ The later live Keycloak run passed both examples through the canonical Docker
 public proxy on a native Codex-created Session. It covered allowed context,
 approved Skill bytes, pending/idempotent proposals, workspace denial and audit
 correlation. Capture, explicit task-owner end, cross-session reuse and audit-
-chain verification also passed. See `docs/INTEROPERABILITY_PLAN.md` and the
+chain verification also passed. See the [Codex qualification](../docs/integrations/codex.md) and the
 content-free `adapters/codex/fixtures/keycloak-qualification.json` result.
 
 The completed Codex 0.152.0 qualification additionally exercised native
@@ -131,7 +131,7 @@ The [release decision proposal](../docs/backlog/ADPT-4.md#release-decision-propo
 names a first candidate, an SDK-only OIDC publishing path, a narrow compatibility
 policy and three implementation batches. The owner has confirmed repository
 licence inheritance and Synveda stewardship; the release mechanics and support
-policy remain proposed choices. The published product `v0.2.0` predates this
+policy remain proposed choices. The older product release `v0.2.0` predates this
 checked contract, so a release must name
 the exact tested server source/image and digest, not just an API version string.
 
@@ -272,4 +272,6 @@ python sdks/python/workflow.py /path/to/scenario.json
 Their output contains only client, Session, ContextRun, proposal and trace IDs.
 Follow `deploy/compose/README.md` for the canonical Keycloak/issuer/hosts/secret
 setup. Reusing an old deployment is not evidence of passing fresh Compose
-acceptance; the execution results are recorded in `docs/INTEROPERABILITY_PLAN.md`.
+acceptance; the named live results are recorded in the
+[Codex](../docs/integrations/codex.md) and
+[Copilot](../docs/integrations/copilot-cli.md) guides and their linked fixtures.

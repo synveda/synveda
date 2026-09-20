@@ -102,10 +102,32 @@ must leave the lexical/vector answer usable and explicitly degraded.
 - Negative / accepted trade-offs: expansion makes bounded repeated PDP and
   adjacency calls rather than one recursive SQL sweep; only one best supporting
   path is retained per candidate; exact paths disappear on later revocation.
-- Reversal trigger: graph-expansion p95 exceeds ADR-0029's 150ms slice or the
+- Reversal trigger: graph-expansion p95 exceeds the 150ms engineering budget or the
   bounded repeated decisions dominate planner latency on production-shaped
   data → measure a policy-safe materialised two-hop projection before changing
   engines or widening a bound.
+
+## Retained graph-engine rationale
+
+This decision replaces ADR-0004, ADR-0029, ADR-0043 and ADR-0044. Those records
+described Apache AGE and the later Record-backed graph, both removed. The
+150ms expansion budget is a design/re-evaluation trigger, not a measured SLO
+for today's Knowledge graph; EVAL-6 must establish a production envelope.
+
+Plain PostgreSQL adjacency keeps static, bound, SQLx-checked queries, atomic
+Knowledge/relation writes, forced RLS and one recovery boundary. AGE's graph
+name/query restrictions and catalogue overhead added complexity without a
+current need for Cypher. A separate engine would add synchronization, custody,
+backup and dependency-licence obligations. Do not revive a second engine or
+dual-write graph without a concrete requirement and an accepted decision.
+
+If bounded adjacency fails the measured budget, evaluate a policy-safe
+materialized two-hop projection first. Deeper or variable-length traversal
+requires a new product/security decision; neither the old spike's measurements
+nor its removed Record schema establish current capacity. Entity resolution
+must not turn redaction placeholders or guessed/fuzzy identity into authority.
+Capture creates reviewable candidates; only typed Knowledge changes publish
+relations. A relationship never grants access to either endpoint.
 
 ## Compliance notes
 
