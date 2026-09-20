@@ -464,12 +464,16 @@ credential/CA/hostname, exact issuer and wrong-audience refusals. Full hosted
 CI, real OpenShift/cloud, native client replay and registry-backed release
 acceptance did not run in this increment.
 
-Exact blocker for release completion: a
-newly versioned, authorised, published and pull-verified current artifact set, an
-explicit supported prior release, and the still-unavailable real OpenShift/cloud
-target. The owner started v0.3.0 separately. The current unpublished 0.4.0 installation
-increment is coordinated in [CPR-45](CPR-45.md#installation-mission-2026-09-20), including the chart and explicit
-starter provider image tags. Next action after local acceptance: validate that
-revision, run an owner-authorised candidate workflow and empty-registry
-installation, then qualify the declared upgrade pair and target platform.
-No external publication or account credentials are used by the local work.
+The published v0.4.0 installation increment is recorded in
+[CPR-45](CPR-45.md#installation-mission-2026-09-20). Native Linux AMD64/ARM64
+runners anonymously pulled the exact image set and exercised all four ownership
+modes, operational recovery and real browser port-forward login with the
+packaged chart. The anonymous OCI chart matches the public archive; both
+checksummed Kubernetes reports are release attachments. Publication recovered
+the original qualified bytes after an upload-only failure; no tag/image was rebuilt.
+
+Remaining blockers: an explicit supported prior release and the unavailable
+real OpenShift/cloud targets. Next: supply a disposable platform target and
+declare the compatible upgrade pair, then qualify those exact configurations.
+Kind restricted-UID tests do not establish SCC, router, CNI/CSI or managed-provider
+support. The local work used only owned disposable fixtures.

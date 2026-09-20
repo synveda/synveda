@@ -8,9 +8,11 @@ dispatch builds and packages a dry run without publishing anything.
 The **v0.3.0** workflow passed its builds and isolated image checks, but its
 publication failed because the release page already existed. Keep that release
 immutable. The additive Docker/Kubernetes installation
-increment is prepared as **0.4.0**, following the existing pre-1.0 minor-version
-policy. It is unpublished. A tag's existence or an in-progress release page
-does not establish that its complete artifact set is installable.
+increment is published as **[v0.4.0](https://github.com/synveda/synveda/releases/tag/v0.4.0)**
+from `e59284619567d6a13b70ce3f3b3e81121b7621e6`. Both native installation suites
+passed. All 15 public assets matched the qualified bytes on anonymous download;
+the OCI chart matched the downloadable archive. A tag's existence alone does
+not establish that its complete artifact set is installable.
 
 ## Before the first current release
 
@@ -81,12 +83,22 @@ installer's host.
 `publish` runs only after both jobs succeed. It attaches the complete archive
 set, Helm overlays and checksummed `release-images-<arch>.json`,
 `release-docker-<arch>.json` and `release-kubernetes-<arch>.json` reports.
+Assembly selects packaged files explicitly; publication validates all 15 regular
+files before creating the release. Repository `assets/brand` and `assets/product`
+directories are not release downloads.
 BuildKit generates image SBOM/provenance
 attestations; identity-bound signature verification remains unimplemented.
 
 If a workflow fails after pushing images, registry artifacts may exist without
 an announced release. Inspect the run before retrying. Never retag a released
 version to different source, or suggest a partially published set to users.
+If only upload fails after qualification, recover the original `release-assets`
+and both `release-verification-*` artifacts from that run. Verify their original
+checksums, source and image identities, append the six report checksums, then
+publish only the validated inventory against the existing tag. Do not rebuild
+or retag qualified artifacts. The v0.4.0 publication used this recovery after
+the original upload glob included a checkout directory; the original workflow
+run remains failed, while its qualification jobs and recovered release are verified.
 
 ## After publication
 
@@ -105,5 +117,5 @@ published N-1 upgrade, or production readiness. Do not remove
 the [readiness gaps](PRODUCTION_READINESS.md) on the strength of a green image
 job alone. Change `docs/installation.json` to `published`, update the checked
 README/guide markers and publish matching Pages copy only once the complete
-compatible public release and its evidence exist. Main-branch copy currently
-labels 0.4.0 download instructions as pending.
+compatible public release and its evidence exist. The 0.4.0 manifest and current
+installation guides now record that verified publication.

@@ -53,15 +53,13 @@ durations are in [OPS-11](backlog/OPS-11.md) and the
 does not qualify encrypted off-host custody, WAL/PITR, a published N-1 upgrade,
 production RPO/RTO or recurring drills.
 
-**Verdict: Not ready.** Three P0 readiness gaps remain: no tagged release has
-published and pull-verified the chart, five deployment images and
-browser-acceptance fixture;
-the existing-Secret KMS wiring has no owned production custody and rotation
-procedure; and there is
-no production backup/PITR and recurring live restore drill. P1 gaps also leave the gateway
-single-replica, restart-shaped, without production abuse controls, operational
-SLOs or a tested tenant lifecycle. A controlled evaluation remains useful, but
-it is not a production deployment.
+**Verdict: Not ready.** Published v0.4.0 now establishes anonymous artifact
+retrieval and native Linux AMD64/ARM64 installation evidence. Release parity
+remains conditional on the optional CNPG deployment path; production key
+custody/rotation and backup/PITR with recurring live restore remain P0 gaps.
+P1 gaps also leave the gateway single-replica, restart-shaped, without production
+abuse controls, operational SLOs or a tested tenant lifecycle. A controlled
+evaluation remains useful, but it is not a production deployment.
 
 The 2026-09-20 [ADR-0115](adr/adr-0115-prebuilt-container-release-verification.md)
 increment prepares required release gates that anonymously pull the complete
@@ -71,24 +69,24 @@ before creating the GitHub Release. The
 [server-only archive guide](../deploy/compose/PREBUILT.md) removes source-build,
 host Node/OpenSSL and hostname-edit prerequisites from loopback evaluation.
 
-The unpublished 0.4.0 local candidate has macOS/OrbStack ARM64 evidence for
-real browser/CLI authentication, optional repeatable sample Capture, preserved
-credentials/data across recreation, and paired logical restore with usable
-access. The packaged Kind chart has four-mode, restricted-admission,
-assigned-UID, failed-migration refusal, retained-reinstall and joint-restore
-evidence. The [installation record](backlog/CPR-45.md#installation-mission-2026-09-20)
-links the content-free reports and exact commands. These use locally built,
-digest-bound images, not anonymously published artifacts. Hosted native Linux,
-Docker Desktop, Windows/WSL2 and real OpenShift qualification remain pending;
-the release P0 and production custody/recovery gaps remain open.
+The published [v0.4.0 release](https://github.com/synveda/synveda/releases/tag/v0.4.0)
+passed anonymous image pulls, real browser/CLI authentication, optional repeatable
+sample Capture, preserved credentials/data across recreation, deliberate fault
+refusal and paired logical restore on native Linux AMD64/ARM64. Both runners
+also passed the packaged chart's four ownership modes, restricted admission,
+assigned UID, migration refusal/recovery, retained reinstall and joint restore.
+The [installation record](backlog/CPR-45.md#installation-mission-2026-09-20)
+links the six checksummed reports and exact source/image identities. All 15
+public assets were anonymously downloaded and matched the qualified bytes;
+the OCI/downloadable chart archives are identical. The upload-only workflow
+failure was recovered using its original artifacts, without rebuilding or
+moving the tag. Local macOS/OrbStack candidate evidence remains separately labelled.
 
-CPR-45 and ADR-0102 now define a Docker-first reference deployment programme.
-Its acceptance can prove controlled single-host installation, Keycloak OIDC,
-separate workers, private telemetry and local isolated recovery. It cannot by
-itself close the three production P0s: release parity still needs pullable
-published artifacts, key custody still needs an owner-approved production
-ceremony, and backup/restore still needs off-host retention plus recurring
-measured drills against owned RPO/RTO.
+Docker Desktop, Windows/WSL2, real OpenShift, an optional CNPG controller-backed
+deployment of these published bytes, and a supported published N-1 pair remain
+unqualified. CPR-45's single-host and Kind drills do not establish production
+custody/rotation, encrypted off-host retention, PITR or recurring measured
+recovery against owned RPO/RTO.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
@@ -98,7 +96,7 @@ score for the implemented code.
 
 | Scope | Status | Exit evidence | Limit |
 |---|---|---|---|
-| Bundled loopback candidate | Conditional | Local macOS/OrbStack ARM64 installation, authentication, sample, recreation and paired restore passed; published/native host qualification pending | Unpublished 0.4.0; localhost HTTP; one host; no off-host custody or N-1 guarantee |
+| Bundled loopback release | Conditional | Published v0.4.0 passed anonymous retrieval, installation, authentication, sample, recreation and paired restore on native Linux AMD64/ARM64; local macOS/OrbStack candidate also passed | Localhost HTTP; one host; Docker Desktop/WSL2, off-host custody and N-1 remain unqualified |
 | Development Compose | Not ready | Repeat the clean-volume browser/product lifecycle on Linux and Docker Desktop; one macOS/OrbStack run passed | Explicit loopback HTTP; no reference security claim |
 | Single-host reference | Not ready | Linux and desktop HTTPS runs with the restart matrix, joint logical database/key restore, Apalis canary and the implemented Operations view | One host; planned interruption; no HA, owned RPO/RTO or DR |
 | External OIDC | Not assessed | Same product image boots against a named conformant provider | Configuration-only evidence is not provider support |
@@ -214,7 +212,7 @@ platform remains later supportability work.
 
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |
 |---|---|---|---|---|---|---|---|---|
-| Release/Helm artifact parity and reproducibility | Not ready | P0 | The source workflow packages the chart and a digest-bound Docker reference with one validated native amd64/arm64 plan for exactly six first-party images: product, single-host PostgreSQL, CloudNativePG PostgreSQL, optimized Keycloak, reference proxy and browser acceptance. Helm consumes the product at `Chart.appVersion` and optional CNPG at `17.11-synveda-<Chart.appVersion>`; `make check-release-parity` proves all six workflow tuples, repeatable chart/reference packaging and the source-SHA/image environment manifest without Docker or network access. Deployment Dockerfile bases are tag-plus-full-digest gated. Release packaging also produces immutable Helm overlays, and tag-only OCI chart push/pull plus BuildKit provenance/SBOM generation are prepared and statically checked. | `make check-release-parity`; `make chart-lint`; `make check-chart-images`; executable Helm/image-input checks; no tagged workflow or completed current registry-backed acceptance | No tagged candidate has published and pull-verified this atomic set. ADR-0115 adds anonymous native pull/executable jobs and platform-descriptor reports before the release announcement, but those hosted jobs have not run. Signatures and current registry-backed deployment results remain absent. Static packaging and a generated environment manifest are not registry or cross-checkout reproducibility evidence. | A tagged release publishes the chart, reference archive and all six pullable multi-arch images from the exact Dockerfiles they reference; an empty registry-authenticated reference host completes Keycloak login/context, and an empty cluster consumes its Helm pair and boots every accepted chart enum. | Publish a candidate tag, capture OCI index/platform descriptors, authenticate and pull the manifest-bound set, then run the existing live acceptances from empty targets. | Choose OCI chart/image registry and retention; release owner supplies publish credentials. |
+| Release/Helm artifact parity and reproducibility | Conditional | P0 | v0.4.0 publishes the chart, digest-bound Docker reference, six first-party multi-arch images, Helm overlays and six native qualification reports from `e59284619567d6a13b70ce3f3b3e81121b7621e6`. All 15 assets downloaded anonymously with matching bytes; the OCI chart equals the downloadable archive. Both native Linux runners passed Docker lifecycle/recovery and the four bundled/external chart combinations. | `make check-release-parity`; `make chart-lint`; `make check-chart-images`; release reports linked in CPR-45 | These release bytes have not run through the optional CNPG controller-backed chart path. Independent image-build reproducibility and signature verification remain unproved; signing is tracked separately. | A tagged release publishes the exact chart/reference/six-image set; empty hosts complete login/context and empty clusters boot every accepted chart mode with matching digests. | Qualify the published CNPG image/chart pair with its declared operator in an explicitly authorised disposable cluster; retain the immutable release and native reports. | Operator/cluster authorisation and registry retention. |
 | Installer, upgrade, rollback and deployment parity | Not ready | P1 | Deterministic installer evidence proves required checksums, canonical reference archive identity, a two-version `reference/current` update, idempotent reinstall with mutable state preserved and pre-mutation refusal of the retired profile footprint. Automatic artifact removal is deliberately fail-closed pending an OPS-10 ownership receipt. Canonical Compose has a deterministic same-schema product-image lifecycle: the candidate checks exact epoch/ledger/authority read-only, then gateway and worker alone traverse candidate, starting rollback and final candidate while browser/product evidence is repeated. Helm remains restart-shaped and the database hard cut has no translator. | Release-install demo and installer tests; `make check-deploy`; deterministic `compose-upgrade-smoke` lifecycle tests; chart lint | The installed Compose lifecycle has not run against two published images on a supported reference host. There is no receipt-bound artifact uninstall, supported general N-1 window, schema/provider upgrade or downgrade, zero-downtime upgrade, package manager or production Compose/Helm parity. | N-1 to N and failed-N rollback run in installed-host and Helm shapes with preserved data/key; versions/schema/contract are checked before traffic; previous artifact remains recoverable; default uninstall removes only receipt-owned artifacts and preserves recovery state. | Run the bounded installed Compose image smoke from a published manifest, then add the strict OPS-10 ownership receipt and widen the compatibility matrix only after artifact parity and DR. | Owner sets support window and acceptable upgrade outage. |
 | Platforms, version support and project licence | Not ready | P1 | Release builds macOS arm64 and Linux x86_64 and declares unsigned limits (`.github/workflows/release.yml`). The owner-authorised Apache-2.0 licence is in root `LICENSE` with attribution in `NOTICE`; Cargo, npm/Python and generated OpenAPI metadata agree under ADR-0106. SDK generation and archive checks carry the same terms. | Native binary smoke in release workflow; SDK drift and installed-archive checks | Windows/Linux arm64 binaries and version windows are absent. This licence increment does not qualify licence/notice carriage in the native, chart or image release artifacts. | A support matrix names tested OS/arch/Postgres/Kubernetes versions and lifecycle; CI exercises each claimed target; root `LICENSE`/`NOTICE` ship in every first-party artifact and generated metadata agrees. | Retain Apache-2.0 and existing third-party terms; verify remaining release artifact contents and add targets only after native CI/install evidence. | First-party licence is decided; support policy and registry publishing access remain open. |
 | SaaS deployment and residency | Not ready | P1 | Current Helm is one regional installation and OPS-3 residency routing remains open (`docs/backlog/OPS-3.md:13-19`). No control-plane/data-plane regional routing or SaaS tenant operations are present. | Single-cluster deployment checks | No regional isolation, tenant placement/move, multi-region failover, billing, regional support boundary or SaaS provisioning/suspension/erasure control plane. | A tenant pinned to a region keeps data/embeddings within it under network-policy tests; failover and support access preserve that boundary; lifecycle and DR meet regional RPO/RTO. | Treat as a later control-plane feature; do not add speculative abstractions to the single-region core. | Hosting topology, jurisdictions, subprocessors and billing are owner decisions. |
@@ -260,7 +258,7 @@ rows above.
 
 | ID / feature | Severity | Exact scope and architecture seam | Non-goals | Acceptance tests | Rollout and rollback | Dependencies / owner decision |
 |---|---|---|---|---|---|---|
-| PR-01 / release artifact parity | P0 | Publish the exact chart, Docker reference archive and six-image Compose/Helm set; Helm consumes the same product and CNPG-compatible version. | No product-profile branch or chart redesign. | Pull all artifacts from an empty authenticated registry and complete login plus one context run; verify digests and existing chart contract checks. Signing remains a separate unimplemented claim. | Publish a candidate tag first; retain the previous atomic manifest and chart version for rollback. | OCI registry, release credentials, publisher identity and retention. |
+| PR-01 / release artifact parity | P0 | Complete the optional CNPG deployment qualification for the published v0.4.0 pair; native Linux Docker and four bundled/external chart modes now pass. | No product-profile branch or chart redesign. | Pull the exact images/chart anonymously into the authorised empty target; complete login/context and verify digests and the existing chart contract. Signing remains separate. | Keep v0.4.0 immutable; retain the prior atomic manifest/chart for rollback. | Disposable cluster with the declared CNPG operator and explicit installation authorisation; registry retention. |
 | PR-02 / key custody acceptance | P0 | Exercise the existing Helm Secret/local-KMS seam through key use, rotation, restart and joint DB/key restore. | No cloud KMS/HSM implementation until its provider/custody decision is accepted. | Correct key restores and opens data; missing, stale and wrong keys fail closed; rendered artifacts/logs contain no plaintext. | Rehearse on isolated restored data; keep the prior KEK/envelopes until verification completes and document reversal. | Security owner chooses custody, delivery, backup and rotation ceremony. |
 | PR-03 / OPS-5 | P0 | Add encrypted CNPG base backup/WAL archive, isolated PITR restore and post-restore schema/Knowledge/audit/index verification. | No multi-region failover or invented RPO/RTO. | Restore to chosen points before/after writes, verify frozen audit prefix and rebuilt indexes, and measure recurring RPO/RTO. | Enable on a non-production cluster, validate restore, then stage retention; rollback disables new scheduling without deleting valid backups. | Object store/region, retention, key custody, RPO/RTO and drill owner. |
 | PR-04 / OPS-7 + drain | P1 | Persist login handoff, provide cross-process PDP/entity invalidation, withdraw readiness on termination and join/release workers within a bound. | No distributed cache product, second queue plane or multi-worker scale claim without evidence. | Three replicas finish cross-pod login, see an authority mutation within the bound, survive pod loss, and drain in-flight requests/leases on SIGTERM. | Shadow invalidation lag first; retain one-replica/Recreate settings until the complete test passes, with rollback to that shape. | Availability/staleness/drain SLO and invalidation/leadership choice. |

@@ -161,6 +161,11 @@ export function releaseWorkflowFindings(source) {
       !publishJob.includes("sha256sum release-images-*.json release-docker-*.json release-kubernetes-*.json >> SHA256SUMS")) {
     findings.push("announcement must carry the assembled assets and both checksummed reports");
   }
+  if (!assemblyJob.includes("          path: |\n            assets/SHA256SUMS\n            assets/synveda-*.tar.gz\n            assets/synveda-*.tgz\n            assets/synveda-*.yaml\n") ||
+      assemblyJob.includes("path: assets/*") || publishJob.includes("assets/*") ||
+      !publishJob.includes('test -f "$asset" && test ! -L "$asset"')) {
+    findings.push("release uploads must select only the regular packaged asset inventory");
+  }
   const untrustedInput = "${{ inputs.version }}";
   const qualification = stepBlock(verificationJob, "Qualify the exact Docker and chart artifacts");
   if (!qualification.includes("if: needs.version.outputs.publish == 'true'") ||
@@ -379,7 +384,7 @@ export function releaseWorkflowFindings(source) {
     '          gh release create "${GITHUB_REF_NAME}" ' + continuation,
     '            --title "Synveda ${GITHUB_REF_NAME}" ' + continuation,
     "            --notes-file notes.md " + continuation,
-    "            assets/*",
+    '            "${release_assets[@]}"',
   ].join("\n");
   if (
     publishJob.split("      - name: Publish\n").length - 1 !== 1 ||

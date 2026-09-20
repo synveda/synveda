@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -164,6 +165,9 @@ test("release workflow binds the chart and digest-addressed reference images", (
     current.replace('mktemp -d "$RUNNER_TEMP/synveda-anonymous-docker.XXXXXX"', 'echo /home/runner/.docker'),
     current.replace("test -s release-images-arm64.json", "true"),
     current.replace("GH_REPO: ${{ github.repository }}", "GH_REPO: another/repository"),
+    current.replace('"${release_assets[@]}"\n', 'assets/*\n'),
+    current.replace('test -f "$asset" && test ! -L "$asset"', "true"),
+    current.replace("          path: |\n            assets/SHA256SUMS\n            assets/synveda-*.tar.gz\n            assets/synveda-*.tgz\n            assets/synveda-*.yaml\n", "          path: assets/*\n"),
     current.replace('version="$INPUT_VERSION"', 'version="${{ inputs.version }}"'),
     current.replace('sh scripts/release-version.sh "$version"', "true"),
     current.replace("permissions:\n  contents: read\n\njobs:", "permissions:\n  contents: write\n\njobs:"),
@@ -277,6 +281,57 @@ test("release workflow binds the chart and digest-addressed reference images", (
     ),
   ].entries()) {
     assert.ok(releaseWorkflowFindings(mutant).length > 0, `mutant ${index}`);
+  }
+});
+
+test("publication uploads exactly the release files despite checkout asset directories", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-release-publication-"));
+  const version = "0.4.0";
+  const names = [
+    "SHA256SUMS", `synveda-${version}-darwin-arm64.tar.gz`,
+    `synveda-${version}-linux-x86_64.tar.gz`, `synveda-console-${version}.tar.gz`,
+    `synveda-reference-${version}.tar.gz`, `synveda-plugin-${version}.tar.gz`,
+    `synveda-${version}.tgz`, `synveda-cnpg-image-${version}.yaml`,
+    `synveda-images-${version}.yaml`,
+    ...["amd64", "arm64"].flatMap((arch) => ["images", "docker", "kubernetes"].map((report) => `release-${report}-${arch}.json`)),
+  ];
+  try {
+    mkdirSync(join(scratch, "bin"));
+    mkdirSync(join(scratch, "assets", "brand"), { recursive: true });
+    mkdirSync(join(scratch, "assets", "product"));
+    writeFileSync(join(scratch, "assets", "brand", "logo.svg"), "brand");
+    writeFileSync(join(scratch, "assets", "synveda-9.9.9.tgz"), "unrelated version");
+    for (const name of names) writeFileSync(join(scratch, "assets", name), "fixture");
+    const capture = join(scratch, "arguments");
+    writeFileSync(join(scratch, "bin", "gh"), '#!/bin/sh\nprintf "%s\\n" "$@" > "$CAPTURE"\nexit "${GH_EXIT_CODE:-0}"\n', { mode: 0o755 });
+    const workflow = read(".github/workflows/release.yml");
+    const start = workflow.indexOf("          release_assets=(\n");
+    assert.ok(start > 0);
+    const command = `version=${version}\n${workflow.slice(start).replace(/^ {10}/gm, "")}`;
+    const run = (extra = {}) => spawnSync("bash", ["-euo", "pipefail", "-c", command], {
+      cwd: scratch, encoding: "utf8",
+      env: { ...process.env, PATH: `${join(scratch, "bin")}:${process.env.PATH}`, GITHUB_REF_NAME: `v${version}`, CAPTURE: capture, ...extra },
+    });
+    assert.equal(run().status, 0);
+    assert.deepEqual(readFileSync(capture, "utf8").trim().split("\n"), [
+      "release", "create", `v${version}`, "--title", `Synveda v${version}`,
+      "--notes-file", "notes.md", ...names.map((name) => `assets/${name}`),
+    ]);
+    assert.equal(run({ GH_EXIT_CODE: "55" }).status, 55, "upload failures must propagate");
+    rmSync(capture);
+    const required = join(scratch, "assets", names[1]);
+    rmSync(required);
+    assert.equal(run().status, 1, "missing archive must fail before publication");
+    assert.equal(existsSync(capture), false);
+    mkdirSync(required);
+    assert.equal(run().status, 1, "directory must fail before publication");
+    assert.equal(existsSync(capture), false);
+    rmSync(required, { recursive: true });
+    symlinkSync(join(scratch, "assets", "SHA256SUMS"), required);
+    assert.equal(run().status, 1, "symlink must fail before publication");
+    assert.equal(existsSync(capture), false);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
 

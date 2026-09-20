@@ -5,18 +5,19 @@ evaluation, or select the reference HTTPS configuration for infrastructure you
 operate. Both use the same Compose services, database authority checks,
 Cedar, forced RLS, VedaFlow and audit.
 
-<!-- installation-version: 0.4.0; publication: unreleased -->
-**Publication: 0.4.0 is unreleased.** These are candidate instructions. The
-owner's v0.3.0 build is separate; do not combine its images with this bundle.
+<!-- installation-version: 0.4.0; publication: published -->
+**[v0.4.0 is published](https://github.com/synveda/synveda/releases/tag/v0.4.0).**
+Use the matching archive, image manifest and checksummed installation reports.
 The [release manifest](../../docs/installation.json) owns this status.
 
 ## Requirements
 
 An ordinary account with access to a **local Docker daemon**, Compose 2.33.1+
 (the minimum for the existing merge contract), curl, tar and a SHA-256 utility.
-Actual candidate testing uses macOS/OrbStack, Engine 29.4.0, Compose 5.1.2 and
-Apple Silicon. Other host/architecture combinations remain unqualified until
-their recorded runtime gates pass. Use at least 6 GiB available to Docker for
+The published bundle passed on native Linux AMD64/ARM64 with Docker 28.0.4 and
+Compose 2.38.2. Local candidate testing also used macOS/OrbStack, Engine 29.4.0,
+Compose 5.1.2 and Apple Silicon. Docker Desktop and Windows/WSL2 remain
+unqualified. Use at least 6 GiB available to Docker for
 PostgreSQL, Keycloak, gateway, worker and private telemetry; this is an
 operational starting allocation, not a measured capacity guarantee.
 
@@ -28,7 +29,7 @@ HTTPS for remote users. Do not forward the local port onto an untrusted network.
 
 ## Download and verify
 
-The following download is **pending publication**. After 0.4.0 is approved:
+Download the release archive and verify its entry in the checksum inventory:
 
 ```sh
 version=0.4.0

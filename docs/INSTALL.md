@@ -6,13 +6,15 @@ and exposure do not select a different product edition or confer readiness.
 
 ## Choose an installation workflow
 
-<!-- installation-version: 0.4.0; publication: unreleased -->
-**Candidate 0.4.0 is unreleased; the in-flight v0.3.0 build is separate.**
+<!-- installation-version: 0.4.0; publication: published -->
+**[v0.4.0 is published](https://github.com/synveda/synveda/releases/tag/v0.4.0).**
+Its checksummed artifacts and native Linux AMD64/ARM64 installation reports are
+publicly downloadable without a registry account.
 
 | Choice | Canonical instructions | Prerequisites and evidence |
 |---|---|---|
-| Run with Docker | [Prebuilt bundle](../deploy/compose/PREBUILT.md) | Docker Compose; loopback bundled evaluation; local macOS/OrbStack evidence |
-| Deploy to Kubernetes | [Application chart](../deploy/helm/synveda/README.md) | Namespaced permissions, supplied Secrets/storage; local Kind 1.36.1 evidence |
+| Run with Docker | [Prebuilt bundle](../deploy/compose/PREBUILT.md) | Docker Compose; loopback bundled evaluation; native Linux AMD64/ARM64 release evidence and local macOS/OrbStack candidate evidence |
+| Deploy to Kubernetes | [Application chart](../deploy/helm/synveda/README.md) | Namespaced permissions, supplied Secrets/storage; packaged-chart Kind 1.36.1 evidence on native Linux AMD64/ARM64 |
 | Use existing infrastructure | [Provider contract](../deploy/helm/synveda/CONFIGURATION.md) | Supplied database/identity endpoints and trusted CA inputs; no provider takeover |
 | Build from source | [Contributing](../CONTRIBUTING.md#local-deployment) | Contributor tools and source-only hostname setup |
 
@@ -833,7 +835,10 @@ Docker installation does not require the native installer.
 ## Current verification boundary
 
 Read [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) and the content-free
-reports under [demos/evidence](../demos/evidence). Static gates, local source/candidate
-runtime, hosted release qualification and anonymous published retrieval are
-distinct evidence. The publication manifest must remain unreleased until the
-referenced assets exist and qualification succeeds.
+reports under [demos/evidence](../demos/evidence) and attached to
+[v0.4.0](https://github.com/synveda/synveda/releases/tag/v0.4.0). Static gates,
+local source/candidate runtime, hosted release qualification and anonymous
+published retrieval are distinct evidence. All 15 release assets were downloaded
+anonymously and matched the qualified bytes; all 14 SHA256SUMS entries passed.
+The OCI and downloadable chart archives are identical. Broader platform,
+N-1 upgrade and production recovery claims remain unqualified.

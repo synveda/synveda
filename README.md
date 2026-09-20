@@ -24,10 +24,9 @@ curl, tar and a SHA-256 utility. Local evaluation uses loopback, generated priva
 credentials and bundled PostgreSQL/Keycloak. No source checkout, compiler, host
 Node/OpenSSL, DNS changes or model subscription is required.
 
-<!-- installation-version: 0.4.0; publication: unreleased -->
-**0.4.0 is unreleased.** The following commands are for its candidate archive;
-the download step becomes available only after release qualification and approval.
-The in-flight 0.3.0 release does not contain these changes.
+<!-- installation-version: 0.4.0; publication: published -->
+**[Download v0.4.0](https://github.com/synveda/synveda/releases/tag/v0.4.0).**
+The release includes checksums and native Linux AMD64/ARM64 installation reports.
 
 ```sh
 # After downloading and checking synveda-reference-0.4.0.tar.gz:
@@ -49,7 +48,7 @@ Keycloak/OIDC. Bundled PostgreSQL is one persistent, namespaced instance with
 no operator prerequisite. CNPG remains an explicit operator-managed option.
 
 ```sh
-# Pending the same 0.4.0 release; OCI and .tgz contain the same chart:
+# OCI and the downloadable .tgz contain the same chart:
 helm pull oci://ghcr.io/synveda/charts/synveda --version 0.4.0 --untar
 sh synveda/examples/prepare-local.sh "$HOME/.synveda-kubernetes"
 ```
@@ -71,11 +70,11 @@ explains the remaining explicit review and skill-binding steps.
 
 ## Support status
 
-Local candidate evidence covers macOS/OrbStack on Apple Silicon and Kubernetes
-1.36.1 in disposable Kind, including all four dependency combinations. Published
-anonymous installation, native Linux AMD64/ARM64, Docker Desktop, Windows/WSL2
-and real OpenShift qualification are pending. A rendered manifest establishes
-no additional platform support.
+The published artifacts passed anonymous pulls and complete Docker installation,
+authentication, recreation and paired recovery on native Linux AMD64/ARM64.
+The same images and packaged chart passed all four dependency combinations in
+Kind with Kubernetes 1.36.1. Local candidate evidence also covers macOS/OrbStack
+on Apple Silicon. Docker Desktop, Windows/WSL2 and real OpenShift remain unqualified.
 
 This is a self-hosted evaluation release: one gateway and worker, no HA claim,
 no cross-epoch database upgrade, and no completed off-host disaster-recovery

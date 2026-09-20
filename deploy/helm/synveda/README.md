@@ -6,10 +6,10 @@ or existing OIDC. Bundled PostgreSQL is a persistent namespaced StatefulSet;
 CNPG is an explicit alternative requiring an operator you already manage.
 All modes preserve Cedar, forced RLS, VedaFlow, audit and the migration contract.
 
-<!-- installation-version: 0.4.0; publication: unreleased -->
-**0.4.0 is unreleased.** The v0.3.0 build is separate and does not contain the
-installation changes documented here. Download/pull commands are pending
-qualification and publication of the exact matching artifacts.
+<!-- installation-version: 0.4.0; publication: published -->
+**[v0.4.0 is published](https://github.com/synveda/synveda/releases/tag/v0.4.0).**
+The OCI chart and downloadable archive are identical. Both native Linux
+architectures passed the four ownership modes using the published image digests.
 
 Start with the [complete loopback evaluation recipe](examples/README.md).
 It prepares private Secrets in a short-lived container, installs no cluster-wide
@@ -37,11 +37,12 @@ private networking and registry access. Bundled PostgreSQL needs persistent stor
 a preinstalled CNPG operator. Loopback evaluation needs neither DNS nor ingress TLS. The chart creates no CRD/operator, ingress
 controller, certificate issuer, storage class or monitoring stack.
 
-The candidate qualification uses Kind 0.32.0, Kubernetes and kubectl 1.36.1,
+The release qualification uses Kind 0.32.0, Kubernetes and kubectl 1.36.1,
 Helm 4.2.3, PostgreSQL 17.11 with vector 0.8.6 and btree_gin 1.3, and Keycloak
 26.7.2 via locked keycloakx 7.3.2. Earlier explicit CNPG evidence used operator
-1.30.0; the bundled candidate installs no operator. Containers are Linux arm64
-on macOS/OrbStack. The four-mode fixture uses private-CA HTTPS; the local recipe
+1.30.0; the bundled release installs no operator. Native Linux AMD64/ARM64
+runners qualified the published artifacts; local candidate evidence also covers
+Linux arm64 on macOS/OrbStack. The four-mode fixture uses private-CA HTTPS; the local recipe
 uses loopback port-forwarding. Real ingress,
 OpenShift, cloud services and a general Kubernetes minor-version window remain
 unqualified. Structural API validation is distinct from execution evidence.

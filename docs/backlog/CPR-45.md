@@ -17,13 +17,13 @@ evidence for a portable single-host installation is still missing. The
 canonical Compose graph, digest-bound reference archive, logical recovery,
 same-schema upgrade and experimental Apalis canary are implemented and covered
 by deterministic contracts. Development acceptance has run from a clean volume
-on one macOS/OrbStack host; the complete set has not run from an empty published
-installation on Linux and Docker Desktop.
+on one macOS/OrbStack host. The v0.4.0 artifacts now pass native Linux
+AMD64/ARM64 qualification; Docker Desktop remains unqualified.
 
 Static configuration cannot prove that an operator can pull the artifacts,
 sign in through Keycloak, use the product, restart it, recover it and upgrade
-it. The local 0.4.0 candidate now has installation/recovery evidence below;
-published artifacts, the supported-host matrix and N-1 upgrade remain pending.
+it. Local and published 0.4.0 installation/recovery evidence is recorded below;
+the broader supported-host matrix and N-1 upgrade remain pending.
 
 [ADR-0102](../adr/adr-0102-portable-reference-deployment.md) makes Compose the
 canonical single-host deployment contract. Helm implements the same contract
@@ -46,15 +46,25 @@ Starting checkout: `736c729c681c9973e271f02e36454e4e4acbb694`, branch `main`,
 only untracked `design/` (preserved). Coordinates OPS-11, OPS-8 and FND-7 under
 [ADR-0115](../adr/adr-0115-prebuilt-container-release-verification.md). The owner
 started v0.3.0 before this increment; these additive installation capabilities
-are prepared as 0.4.0. Source commit
+are published as 0.4.0. Source commit
 `e59284619567d6a13b70ce3f3b3e81121b7621e6` and tag `v0.4.0` are pushed.
 All 13 [hosted CI jobs](https://github.com/synveda/synveda/actions/runs/35522813753)
 and the [packaging dry run](https://github.com/synveda/synveda/actions/runs/35522831120)
 passed. The [tagged release workflow](https://github.com/synveda/synveda/actions/runs/35525132082)
-passed builds, assembly and anonymous image/executable checks on native AMD64
-and ARM64. Completion of the required Docker/Kubernetes qualifications and
-publication is not yet verified in this record. Pages deployed the candidate
-copy successfully; live HTML and screenshot bytes matched the checked build.
+passed builds, assembly and every required native AMD64/ARM64 image, Docker and
+Kubernetes qualification. Only publication failed: `assets/*` also selected the
+checkout's `assets/brand` directory. Recovery published the original artifacts
+without rebuilding or changing the tag/image digests. All 15
+[release downloads](https://github.com/synveda/synveda/releases/tag/v0.4.0)
+were anonymously retrieved and matched the qualified bytes; all 14 checksum
+entries passed. The anonymously pulled OCI chart was byte-identical at digest
+`sha256:a711bcc1593b78e0b8db6bf76d9ce4cbc67621f14a94c6e55a0be86f6b0f628b`.
+The failed workflow remains visible; its native reports establish qualification.
+The workflow fix excludes checkout directories and checks the exact 15 regular
+files before publication. Regression tests cover missing files, directories,
+symlinks and a failed GitHub upload. Pages previously deployed the candidate
+copy with matching HTML/screenshot bytes; the shared manifest now selects
+published copy on the next deployment.
 
 Verified starting inventory: the README led to source builds or the host
 Node/OpenSSL, DNS/TLS reference launcher. `scripts/package-release.sh` already
@@ -96,7 +106,7 @@ Implemented in the existing packaging/chart mechanisms:
   ownership query in logical restore; it now joins `pg_database` to the activity
   statistics instead of reading `datdba` from `pg_stat_database`.
 - README, installation selection, Docker and chart guides and the existing static
-  site share checked 0.4.0/unpublished metadata. Contributor details moved to
+  site share checked 0.4.0/published metadata. Contributor details moved to
   CONTRIBUTING. Existing anchors and STARTER.md remain replacement pointers;
   current ADRs, trust contracts, attribution and acceptance evidence are retained.
   The approved branding is unchanged. `OPERATIONS.md` is now size-neutral.
@@ -120,7 +130,8 @@ explicit in the [Docker report](../../demos/evidence/cpr45-evaluation.json) and
 | Kubernetes database/identity ownership | PASS: bundled/bundled, external/bundled, bundled/external and external/external; providers provisioned separately in owned fixture namespaces |
 | Kubernetes operations | PASS: real PKCE, ordinary runtime roles, tenant/workspace denial, service/MCP access and revocation, pod recreation, same-release reapply and retained reinstall; joint restore and interruption/migration drills on bundled/bundled and external/external |
 | Packaged local Kubernetes recipe | PASS: actual browser login/logout through loopback forwards, restricted admission, UID 1000900000 for gateway/worker/install/Keycloak/PostgreSQL, failed runtime-role migration and successful subsequent reapply |
-| Published 0.4.0 / other native hosts | NOT RUN: artifacts unpublished; no native Linux-host, Docker Desktop or Windows/WSL2 target supplied |
+| Published 0.4.0 / native Linux | PASS: anonymous retrieval; both native AMD64/ARM64 image smoke, full Docker lifecycle/fault/recovery, four-mode chart operations and real browser port-forward login |
+| Docker Desktop / Windows/WSL2 | NOT RUN: no target supplied |
 | Real OpenShift / cloud / N-1 | NOT RUN: no authorised target, credentials or qualified published N-1 pair; generic Kind does not establish these claims |
 
 The Kubernetes run used Kind 0.32.0, Kubernetes **and kubectl 1.36.1**, Helm
@@ -140,6 +151,17 @@ optional `sample` is a fourth. Local Helm install-to-ready took **30.637 s**,
 excluding cluster creation, image import and private-file preparation. Joint
 Kind restores took **35.882 s** bundled and **35.729 s** external; these small
 synthetic same-host measurements are not production RTOs.
+
+The published native reports are attached as `release-images-<arch>.json`,
+`release-docker-<arch>.json` and `release-kubernetes-<arch>.json`. Both runners
+used Docker 28.0.4, Compose 2.38.2, Kind 0.32.0, Kubernetes/kubectl 1.36.1 and
+Helm 4.2.3 with 4 CPUs and approximately 16.7 GB engine RAM. All report sources
+equal `e59284619567d6a13b70ce3f3b3e81121b7621e6`; deployment reports record
+`sourceDirty: false` and match every original manifest image digest. Preparation,
+cached-image startup and warm recreation took 1.333/537.730/416.594 seconds on
+AMD64 and 0.833/573.754/435.672 seconds on ARM64. Downloads happened in the
+preceding image job and were not timed by the deployment report. These hosted
+fixture measurements are not platform-wide performance guarantees.
 
 Exact candidate qualification commands, from this checkout (the temporary
 paths identify this local run, not downloadable release coordinates):
@@ -194,18 +216,13 @@ untouched. All owned evaluation containers and Kind clusters are stopped or
 removed. Only labelled disposable fixture volumes were reset; final private
 state, data and backups are retained. No cluster-wide operator was installed.
 
-Remaining publication/platform boundary: 0.4.0 is unpublished. Native hosted
-Linux AMD64/ARM64, macOS Docker Desktop, Windows/WSL2, real OpenShift, public
-OCI/chart retrieval and a supported published N-1 pair require their named
-infrastructure/artifacts. The prepared required tests must run there; a manifest
-render or local ARM64 cache is not a substitute. Off-host custody, PITR and
-production DR remain separate readiness gaps. Next: verify successful completion
-of release run `35525132082`, anonymously download the complete release asset
-set, check SHA256SUMS and the six native qualification reports against source
-`e59284619567d6a13b70ce3f3b3e81121b7621e6`, and verify OCI/downloadable chart
-byte equality. Then update the installation manifest, guide markers, platform
-evidence and matching Pages copy to published. Keep the existing tag and image
-digests immutable; inspect any failed gate before retrying.
+Remaining platform boundary: macOS Docker Desktop, Windows/WSL2, real OpenShift
+and a supported published N-1 pair require their named infrastructure/artifacts.
+The prepared tests must run there; native Linux/Kind qualification does not
+establish these claims. Off-host custody, PITR and production DR remain separate
+readiness gaps. Next: supply the remaining disposable host/platform targets and
+declare a compatible N-1 pair, then run the corresponding installation/upgrade
+drills. Keep the existing tag and image digests immutable.
 See [release operations](../RELEASING.md).
 
 ### Continuing deployment scope

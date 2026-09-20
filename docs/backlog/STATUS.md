@@ -7,27 +7,25 @@ retains their implementation evidence. Open entries link to current briefs.
 
 114 delivered; 32 open. The inventory and open-brief shape are checked in CI.
 
-CPR-45/OPS-11/OPS-8/FND-7 prepare the **unpublished 0.4.0 installation
-increment**, separately from v0.3.0, whose publication workflow failed because
-its release page already existed. The 0.4.0 source and tag are pushed at
-`e59284619567d6a13b70ce3f3b3e81121b7621e6`; all 13 hosted CI jobs and the release
-packaging dry run passed. The [tagged release workflow](https://github.com/synveda/synveda/actions/runs/35525132082)
-passed builds, assembly and anonymous image checks on both architectures.
-Completion of its native installation gates and publication remains unverified.
-Next: verify the complete public assets and reports, then update installation
-publication metadata, platform evidence and matching Pages copy. The existing release
-bundle gains containerized loopback preparation and governed optional sample;
-the existing chart gains operator-free persistent PostgreSQL and independent
-identity ownership. README/site preserve the brand and label unpublished
-commands. ADR-0115 records the decision. Full candidate Docker recovery and
-Kubernetes dependency/operational drills now gate release announcement after
-anonymous pulls on both native architectures. Local Docker lifecycle/fault
-qualification and all four packaged-chart ownership modes passed, including
-real loopback browser access, retained reinstall and paired recovery. Exact
-measurements and remaining blockers live in one
-[CPR-45 record](CPR-45.md#installation-mission-2026-09-20).
-Publication and unavailable platform/N-1 qualification keep these deployment
-features open; local checks do not close production readiness gaps.
+CPR-45/OPS-11/OPS-8/FND-7 published the **[v0.4.0 installation increment](https://github.com/synveda/synveda/releases/tag/v0.4.0)**
+from immutable source `e59284619567d6a13b70ce3f3b3e81121b7621e6`. All 13 hosted
+CI jobs and the packaging dry run passed. The
+[tagged release workflow](https://github.com/synveda/synveda/actions/runs/35525132082)
+passed both native Linux AMD64/ARM64 image, Docker lifecycle/fault/recovery and
+four-mode Kubernetes qualifications. Publication alone failed because its
+upload glob included `assets/brand`; recovery published the original qualified
+bytes without rebuilding or moving the tag. All 15 assets downloaded anonymously,
+all 14 checksum entries passed, and the anonymous OCI chart matched the archive.
+The workflow now selects and validates the complete regular-file inventory;
+regressions cover unrelated directories, missing files, symlinks and upload failure.
+The installation manifest, guides and Pages source now record published status.
+The bundle provides containerized loopback preparation and a governed optional
+sample; the chart provides operator-free persistent PostgreSQL and independent
+identity ownership. ADR-0115 records the decision; exact evidence and remaining
+blockers live in the [CPR-45 record](CPR-45.md#installation-mission-2026-09-20).
+Next: qualify Docker Desktop/WSL2, real OpenShift and an explicitly supported
+published N-1 pair on supplied targets. These gaps keep the broader deployment
+features open; publication does not close production custody or recovery gaps.
 
 CNSL-5 aligns the console with the approved brand and simplifies Home,
 navigation, connection onboarding and the root README under
@@ -73,7 +71,7 @@ normal migration/tenant Job. ADR-0110 adds independently optional persistent
 Keycloak/CNPG, explicit team admission, scoped agent credentials and an
 organisation Configuration target. MEM-7 now refuses overlapping issuer/tenant
 bindings; durable federation and issuer replacement remain open. OpenShift and
-operational/release qualification keep OPS-11 open; measured acceptance and the
+broader platform/upgrade qualification keep OPS-11 open; measured acceptance and the
 exact next action are in the brief.
 
 ADR-0112 adds the current operability work under OPS-11: existing-job
@@ -84,10 +82,10 @@ operational profiles passed, including fresh logical restore, fenced Capture
 recovery, migration contention and retained reinstall; exact local limits and
 measurements are recorded in the open brief. Public v0.2.0 lacks the current chart/reference artifacts and
 predates epoch 3, so a supported published N-1 upgrade remains unavailable;
-publication and actual platform qualification still block delivery.
+supported upgrade and actual platform qualification still block delivery.
 The current installation increment and its publication boundary are recorded
-in CPR-45 above. Qualify the declared N-1 pair and actual target platform after
-the complete artifacts exist. No schema reset is an upgrade.
+in CPR-45 above. Qualify the declared N-1 pair and actual target platform using
+the complete published artifacts. No schema reset is an upgrade.
 
 ADR-0111 adds the restricted portability increment: assigned-ID contexts,
 explicit seccomp, a narrow fsGroup/setgid bootstrap fix, edge Routes with named

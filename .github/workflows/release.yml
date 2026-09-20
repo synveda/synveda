@@ -501,7 +501,13 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-assets
-          path: assets/*
+          # The checkout also contains assets/brand and assets/product. Only
+          # packaged downloads belong in the release artifact.
+          path: |
+            assets/SHA256SUMS
+            assets/synveda-*.tar.gz
+            assets/synveda-*.tgz
+            assets/synveda-*.yaml
           if-no-files-found: error
 
   # Fresh runners and an empty Docker credential directory prove the images
@@ -697,7 +703,31 @@ jobs:
 
           See [docs/INSTALL.md](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/docs/INSTALL.md).
           NOTES
+          # Validate the complete flat inventory before creating a release;
+          # unrelated checkout directories must never become upload arguments.
+          release_assets=(
+            assets/SHA256SUMS
+            "assets/synveda-$version-darwin-arm64.tar.gz"
+            "assets/synveda-$version-linux-x86_64.tar.gz"
+            "assets/synveda-console-$version.tar.gz"
+            "assets/synveda-reference-$version.tar.gz"
+            "assets/synveda-plugin-$version.tar.gz"
+            "assets/synveda-$version.tgz"
+            "assets/synveda-cnpg-image-$version.yaml"
+            "assets/synveda-images-$version.yaml"
+          )
+          for arch in amd64 arm64; do
+            for report in images docker kubernetes; do
+              release_assets+=("assets/release-$report-$arch.json")
+            done
+          done
+          for asset in "${release_assets[@]}"; do
+            test -f "$asset" && test ! -L "$asset" || {
+              echo "missing or non-regular release asset: $asset" >&2
+              exit 1
+            }
+          done
           gh release create "${GITHUB_REF_NAME}" \
             --title "Synveda ${GITHUB_REF_NAME}" \
             --notes-file notes.md \
-            assets/*
+            "${release_assets[@]}"
