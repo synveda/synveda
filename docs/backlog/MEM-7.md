@@ -21,6 +21,16 @@ Authentication verifies OIDC per issuer, but persistent user lookup is currently
 
 ## Architecture seam
 
+ADR-0110 delivers the narrower OPS-11 admission constraint: OIDC configuration
+rejects overlapping static tenant bindings and refuses a claim-bound issuer
+alongside any other issuer. Distinct static tenants remain supported. Focused
+tests reject these cases before token validation or network access. This
+prevents simultaneous cross-issuer subject collisions under the starter's
+single-issuer contract; it does not add durable issuer-qualified bindings or
+permit replacing an existing tenant's issuer. The next action remains the
+binding/migration decision below, including directory adoption and operator
+replacement semantics.
+
 OIDC verification yields the exact issuer and subject; provisioning resolves their binding in `synveda-store` before constructing `IdentityContext`. A stable user `IdentityId` and its principal scope remain the placement/authority spine. Link mutations are typed governed effects with dedicated Cedar actions, forced RLS, content-free audit, bounded metrics, and reauthorization on every later request.
 
 ## Acceptance criteria

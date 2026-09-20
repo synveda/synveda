@@ -338,11 +338,7 @@ pub async fn recreate(
             &fresh_target,
         )
         .await?;
-        let metadata = crate::migrate_reporting_connection(&mut migrator, database_roles).await?;
-        migrator.close().await.map_err(|err| Error::Storage {
-            message: format!("close the migrated reset-target connection: {err}"),
-        })?;
-        Ok(metadata)
+        crate::migrate_reporting_connection(migrator, database_roles).await
     }
     .await;
     let metadata = match migration {

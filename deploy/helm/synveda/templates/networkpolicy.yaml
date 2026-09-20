@@ -1,0 +1,120 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $components := list "gateway" "worker" "install" -}}
+{{- if .Values.keycloak.enabled }}{{- $components = append $components "keycloak" -}}{{- end -}}
+{{- if .Values.tei.enabled }}{{- $components = append $components "tei" -}}{{- end -}}
+{{- range $component := $components }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "synveda.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "synveda.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- if eq $component "keycloak" }}
+      {{- include "keycloak.selectorLabels" $.Subcharts.keycloak | nindent 6 }}
+      {{- else }}
+      {{- include "synveda.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $component }}
+      {{- end }}
+  policyTypes: [Ingress, Egress]
+  {{- if has $component (list "gateway" "keycloak") }}
+  ingress:
+    - from:
+        {{- toYaml $.Values.networkPolicy.ingress | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ if eq $component "gateway" }}8120{{ else }}8080{{ end }}
+  {{- else if eq $component "tei" }}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "synveda.selectorLabels" $ | nindent 14 }}
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [gateway, worker]
+      ports:
+        - protocol: TCP
+          port: 8080
+  {{- else }}
+  ingress: []
+  {{- end }}
+  egress:
+    - to:
+        {{- toYaml $.Values.networkPolicy.dns | nindent 8 }}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    {{- if ne $component "tei" }}
+    - to:
+        {{- toYaml $.Values.networkPolicy.database | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ if eq $component "keycloak" }}{{ $.Values.keycloak.database.port }}{{ else if eq $.Values.postgres.mode "external" }}{{ $.Values.postgres.external.port }}{{ else }}5432{{ end }}
+    {{- end }}
+    {{- if has $component (list "gateway" "worker") }}
+    {{- toYaml $.Values.networkPolicy.oidc | nindent 4 }}
+    {{- if $.Values.tei.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "synveda.selectorLabels" $ | nindent 14 }}
+              app.kubernetes.io/component: tei
+      ports:
+        - {protocol: TCP, port: 8080}
+    {{- end }}
+    {{- end }}
+    {{- with index $.Values.networkPolicy.extraEgress $component }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- if eq .Values.postgres.mode "cnpg" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "synveda.fullname" . }}-postgres
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ include "synveda.clusterName" . }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "synveda.selectorLabels" . | nindent 14 }}
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [gateway, worker, install]
+        {{- if .Values.keycloak.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "keycloak.selectorLabels" .Subcharts.keycloak | nindent 14 }}
+        {{- end }}
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ include "synveda.clusterName" . }}
+      ports:
+        - {protocol: TCP, port: 5432}
+    {{- toYaml .Values.networkPolicy.postgresIngress | nindent 4 }}
+  egress:
+    - to:
+        {{- toYaml .Values.networkPolicy.dns | nindent 8 }}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ include "synveda.clusterName" . }}
+      ports:
+        - {protocol: TCP, port: 5432}
+    {{- toYaml .Values.networkPolicy.postgresEgress | nindent 4 }}
+{{- end }}
+{{- end }}

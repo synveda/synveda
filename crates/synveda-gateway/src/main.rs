@@ -39,7 +39,7 @@ use std::time::Duration;
 use synveda_gateway::app::{self, AppState, ConfiguredLogin};
 use synveda_gateway::authority::{self, AuthorityGate, AuthorityMonitor, CheckOutcome};
 use synveda_gateway::{authz, runtime_config, shutdown, telemetry};
-use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, OidcVerifier, TokenVerifier};
+use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, TokenVerifier};
 use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::Pdp;
 
@@ -111,10 +111,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             (Some(json), None) => {
                 let issuers = synveda_identity::parse_issuers(&json)?;
                 let redirect_uri = public_url.callback().to_owned();
-                let oidc = Arc::new(OidcVerifier::new_with_insecure_development_http(
-                    issuers,
-                    runtime_config::insecure_development_http_enabled()?,
-                )?);
+                let oidc = Arc::new(runtime_config::oidc_verifier(issuers)?);
                 // Prime this exact verifier before binding the public socket.
                 // Compose's one-shot protects initial graph creation, but a
                 // direct launch or automatic container restart must enforce

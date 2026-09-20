@@ -6,6 +6,10 @@ across deployment shapes lives in the
 [deployment contract](../docs/DEPLOYMENT_CONTRACT.md), and unproved operational
 claims remain in [production readiness](../docs/PRODUCTION_READINESS.md).
 
+For the next release, see the [small-team Kubernetes contract and audit](#small-team-kubernetes-release-contract).
+The [portable chart guide](helm/synveda/README.md) covers the implemented external-services
+installation and starter; the feature brief records remaining release/platform work.
+
 Synveda has one context-platform runtime. Direct binaries, source/release
 Compose services and Helm Deployments use the same product commands, schema
 epoch, generated `/v1` contract, embedded Cedar PDP, VedaFlow effects and
@@ -33,9 +37,9 @@ freshness or Skill/Tool advertisement.
   This is also the only source-development product topology. Evaluation-only
   dependencies use isolated fixtures and do not define another Synveda stack.
 - `helm/` is the Kubernetes infrastructure: separate gateway and worker
-  Deployments from the same image, CloudNativePG, optional TEI, ingress and
-  external IdP/secret wiring. The CloudNativePG operator is deliberately a
-  separately installed cluster dependency. The release workflow packages this
+  Deployments from the same image, external PostgreSQL or optional CloudNativePG,
+  optional TEI, explicit HTTPS ingress and file-mounted external IdP/Secret wiring.
+  Only CNPG mode requires a separately installed operator. The release workflow packages this
   chart and a digest-bound reference bundle using one versioned six-image plan:
   product, single-host and CloudNativePG PostgreSQL, optimized Keycloak,
   reference proxy and browser acceptance. No tagged candidate has yet proved
@@ -46,7 +50,7 @@ freshness or Skill/Tool advertisement.
 Deployment-owned bootstrap and the Helm install job do only the operations for
 which no authenticated product principal exists yet:
 
-1. provision the exact migrator, gateway and worker roles and extensions;
+1. provision roles/extensions for bundled databases; external providers do this separately;
 2. prove database/peer isolation and apply the current schema chain;
 3. optionally admit the first tenant;
 4. establish deployment key and issuer material.
@@ -74,12 +78,12 @@ forced-RLS contract, peer isolation and database identity. Authority closure
 withdraws readiness and governed work; conclusive refusal terminates the
 process. This is process enforcement, not only a readiness probe.
 
-Compose supplies role-scoped files. Helm renders separate migrator, gateway
-and worker Secrets and the same explicit role contract; runtime Deployments do
-not receive the database owner or superuser credential. Its bootstrap,
-preflight and migration stages are bounded and ordered. Remaining Helm gaps
-include file-mount parity for issuer/KMS material and full promotion
-acceptance, not gateway-owner credential reuse.
+Compose and Helm reference separate migrator, gateway and worker files and the
+same explicit role contract; runtime Deployments receive no database owner or
+superuser credential. Helm also mounts issuer/KMS/extractor Secrets. External
+PostgreSQL mode provisions no administrative objects, requires verify-full,
+and uses the same bounded preflight and migration implementation. Full
+production promotion, starter identity, recovery and OpenShift remain open.
 
 Direct-binary database commands require explicit `DATABASE_URL` or
 `DATABASE_URL_FILE`; there is no implicit development credential. Compose
@@ -140,3 +144,27 @@ profile remains pending.
   completed tagged run for the aligned chart/image set, captured OCI
   descriptors, signatures or provenance. The generated environment manifest
   has deterministic static coverage but no published-registry evidence.
+
+## Small-team Kubernetes release contract
+
+[OPS-11](../docs/backlog/OPS-11.md) owns this milestone. The former baseline
+audit and implementation plan are retained in Git; current operator instructions
+are consolidated in the [Kubernetes installation guide](helm/synveda/README.md),
+[configuration reference](helm/synveda/CONFIGURATION.md) and
+[operations runbook](helm/synveda/OPERATIONS.md). Architecture remains governed
+by ADR-0109 through ADR-0112 and the deployment contract above.
+
+| Boundary | Current implementation and evidence |
+|---|---|
+| Providers | External PostgreSQL/OIDC and independently optional CNPG/Keycloak; four ownership combinations passed local Kind acceptance |
+| Team admission | Explicit initial owner, invitation/direct grant, viewer/member/service access and unchanged-token revocation; no email-based authority |
+| Runtime | One product image, gateway-served console, separate worker and existing PostgreSQL jobs; mandatory authority readiness separate from optional provider diagnostics |
+| Portability | Restricted-ID Kind simulation and Kubernetes/OpenShift structural schemas; real SCC/router/CNI/CSI/cloud execution remains unqualified |
+| Recovery | Writer-quiesced native PostgreSQL archives, original key/issuer custody and clean-namespace functional verification; actual measurements are recorded in OPS-11, not inferred from retained PVCs |
+| Upgrade | Same-epoch migration reruns/locking and retained reinstall; public v0.2.0 predates epoch 3, so no supported published N-1 pair exists |
+| Distribution | Existing native/image/chart workflow, digest-bound Helm overlays, checksums and prepared BuildKit provenance/SBOM; no new artifacts published in this work |
+
+The release remains blocked on a pull-verified candidate, supported upgrade
+baseline and real target-platform qualification. External administrators own
+provider compatibility and backup custody. No operator, workflow engine,
+service mesh, schema translator or application replica knob is introduced.

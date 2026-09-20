@@ -34,6 +34,16 @@ public APIs; the server remains the authority.
 The screenshot is from the real seeded console in this checkout. The names and
 content are fictional demo data; no credential or secret is shown.
 
+## Choose an installation
+
+- [Existing local Compose](deploy/compose/README.md): the current single-host workflow.
+- [Small-team starter](deploy/helm/synveda/README.md#choose-the-preset): persistent PostgreSQL/Keycloak with a preinstalled CNPG operator.
+- [Existing or external services](deploy/helm/synveda/README.md): the same chart with organisation-owned PostgreSQL/OIDC.
+
+The current Kubernetes candidate still needs publication and a verified public
+pull/install. Read its [configuration](deploy/helm/synveda/CONFIGURATION.md) and
+[operations runbook](deploy/helm/synveda/OPERATIONS.md) before deployment.
+
 ## Quick start from a source checkout
 
 This path builds and runs the product from source. It is distinct from the

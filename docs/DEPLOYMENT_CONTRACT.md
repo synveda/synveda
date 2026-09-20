@@ -7,9 +7,15 @@ binary execution, Docker Compose, the current Helm chart and future Kubernetes
 promotion. The authoritative implementation is the product image, its commands,
 the configuration readers, the database schema and the generated public API.
 
-Source-checkout operator steps live only in the
-[canonical Compose guide](../deploy/compose/README.md). This document is the
+Source-checkout operator steps live in the
+[canonical Compose guide](../deploy/compose/README.md) and
+[portable Helm guide](../deploy/helm/synveda/README.md). This document is the
 normative cross-deployment mapping, not another quickstart.
+
+The next small-team Kubernetes release target and its evidence are maintained
+in the [deployment guide](../deploy/README.md#small-team-kubernetes-release-contract)
+under OPS-11/ADR-0109. Helm now defaults to external PostgreSQL/OIDC, retaining
+CNPG as an optional mode; the Compose selector restrictions below are unchanged.
 
 ## Principles
 
@@ -182,9 +188,12 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_OIDC_ISSUER | exact external issuer URL |
 | SYNVEDA_OIDC_ISSUERS_FILE | mounted provider-neutral issuer document |
 | SYNVEDA_DATABASE_ROLES_FILE | mounted database role contract |
-| SYNVEDA_DATABASE_EXPECTED_HOST | external PostgreSQL DNS authority asserted by preflight |
-| SYNVEDA_DATABASE_EXPECTED_PORT | external PostgreSQL canonical TCP port asserted by preflight |
-| SYNVEDA_DATABASE_EXPECTED_NAME | external PostgreSQL database asserted by preflight |
+| SYNVEDA_DATABASE_EXPECTED_HOST | external PostgreSQL authority asserted by every configured product connection |
+| SYNVEDA_DATABASE_EXPECTED_PORT | external PostgreSQL canonical TCP port |
+| SYNVEDA_DATABASE_EXPECTED_NAME | external PostgreSQL database |
+| SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE | requires verify-full and this exact mounted CA path on every configured connection |
+| SYNVEDA_DATABASE_EXPECTED_CLIENT_CERT_FILE / SYNVEDA_DATABASE_EXPECTED_CLIENT_KEY_FILE | optional paired mounted client certificate/key paths; server verification remains required |
+| SYNVEDA_OIDC_CA_CERT_FILE | optional bounded PEM root added to OIDC discovery/JWKS/token-exchange trust |
 | SYNVEDA_BOOTSTRAP_TENANT_ID | UUIDv7 bound into backup and required unchanged at restore |
 | SYNVEDA_COMPOSE_IPV4_POOL | explicit private /24 for reference/evidence |
 | SYNVEDA_PRODUCT_IMAGE | immutable product image reference |
@@ -207,7 +216,10 @@ The Compose selector validates and derives the runtime settings. Its
 The application processes receive DATABASE_URL_FILE,
 SYNVEDA_KMS_KEY_FILE, SYNVEDA_KMS_KEY_REF_FILE,
 SYNVEDA_OIDC_ISSUERS_FILE, their listen address and the public URL.
-Standard outbound proxy/custom-CA support is an external-dependency gap; no
+General outbound proxy/custom-CA support remains a provider-specific gap;
+OIDC now accepts one explicit root CA through the shared runtime loader, and
+PostgreSQL supports the mounted verify-full contract. Other provider clients
+have no implied custom-CA support; no
 provider-specific value enters a domain crate or public DTO.
 
 Object storage and SMTP are not active runtime dependencies in this reference
@@ -515,10 +527,11 @@ implementation remains validation-pending and does not establish:
 - enterprise compliance certification;
 - complete disaster recovery.
 
-Before promotion, Helm must map the same image commands to Deployments/Jobs,
-Secrets or external secret managers, Services/Ingress, NetworkPolicies,
-security contexts, PVC/external PostgreSQL, external OIDC, external OTLP and
-operator-owned backup facilities. Multi-replica prerequisites, disruption
-budgets, topology spread, OpenShift arbitrary UID, offline/private-registry
-distribution, customer CA/proxy, KMS and FIPS requirements remain explicit
-promotion gaps.
+The portable Helm increment maps the same image commands to Deployments/Jobs,
+file-mounted existing Secrets, ClusterIP/optional HTTPS Ingress, non-root
+security contexts, verified external PostgreSQL, optional CNPG and external
+OIDC with a private CA. It retains the existing optional TEI and OTLP settings.
+NetworkPolicies, operator-owned backup facilities, multi-replica prerequisites,
+disruption budgets, topology spread, OpenShift assigned-UID qualification,
+offline/private-registry distribution, proxy/OTLP private-CA support, KMS and
+FIPS requirements remain explicit promotion gaps.

@@ -420,6 +420,17 @@ impl OidcVerifier {
         configs: Vec<IssuerConfig>,
         insecure_development_http: bool,
     ) -> Result<Self> {
+        Self::new_with_transport(configs, insecure_development_http, None)
+    }
+
+    /// Adds one deployment-owned PEM root to platform trust without changing
+    /// certificate, hostname, issuer or token verification. The same client
+    /// performs discovery, JWKS reads and the browser flow's token exchange.
+    pub fn new_with_transport(
+        configs: Vec<IssuerConfig>,
+        insecure_development_http: bool,
+        root_certificate: Option<&str>,
+    ) -> Result<Self> {
         if configs.is_empty() {
             return Err(Error::Invalid {
                 message: "at least one OIDC issuer must be configured".to_owned(),
@@ -498,7 +509,25 @@ impl OidcVerifier {
                 });
             }
         }
-        let http = reqwest::Client::builder()
+        // Persistent principals are tenant/subject keyed. Until issuer-qualified
+        // bindings land, distinct issuers must never admit the same tenant.
+        // A claim-bound issuer can name any tenant, so it must stand alone.
+        if issuers.len() > 1 {
+            let mut tenants = std::collections::HashSet::new();
+            for entry in issuers.values() {
+                let TenantBinding::Static { tenant_id } = entry.config.tenant else {
+                    return Err(Error::Invalid {
+                        message: "multiple OIDC issuers require disjoint static tenant bindings; a claim-bound issuer must be configured alone (MEM-7)".to_owned(),
+                    });
+                };
+                if !tenants.insert(tenant_id) {
+                    return Err(Error::Invalid {
+                        message: "each tenant must trust exactly one OIDC issuer; use distinct tenants until issuer-qualified identity bindings are supported (MEM-7)".to_owned(),
+                    });
+                }
+            }
+        }
+        let mut http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
             // Ambient proxy variables are not part of the OIDC trust
@@ -507,11 +536,27 @@ impl OidcVerifier {
             .no_proxy()
             // IdP metadata, keys, and tokens must come from the configured
             // host, not wherever it redirects.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|err| Error::Internal {
-                message: format!("building the OIDC HTTP client: {err}"),
-            })?;
+            .redirect(reqwest::redirect::Policy::none());
+        if let Some(pem) = root_certificate {
+            let invalid_ca = || Error::Invalid {
+                message: "OIDC root CA must contain one PEM certificate of at most 65536 bytes"
+                    .to_owned(),
+            };
+            if pem.len() > 65_536
+                || !pem.trim().starts_with("-----BEGIN CERTIFICATE-----")
+                || !pem.trim().ends_with("-----END CERTIFICATE-----")
+                || pem.matches("-----BEGIN CERTIFICATE-----").count() != 1
+                || pem.matches("-----END CERTIFICATE-----").count() != 1
+            {
+                return Err(invalid_ca());
+            }
+            let certificate =
+                reqwest::Certificate::from_pem(pem.as_bytes()).map_err(|_| invalid_ca())?;
+            http = http.add_root_certificate(certificate);
+        }
+        let http = http.build().map_err(|err| Error::Internal {
+            message: format!("building the OIDC HTTP client: {err}"),
+        })?;
         Ok(Self {
             http,
             issuers,
@@ -1860,6 +1905,28 @@ mod tests {
     }
 
     #[test]
+    fn malformed_or_ambiguous_private_ca_is_refused_without_disclosing_input() {
+        for pem in [
+            String::new(),
+            "PRIVATE_CA_SENTINEL".to_owned(),
+            "-----BEGIN CERTIFICATE-----\nPRIVATE_CA_SENTINEL\n-----END CERTIFICATE-----"
+                .to_owned(),
+            "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n".repeat(2),
+            "PRIVATE_CA_SENTINEL".repeat(4096),
+        ] {
+            let configs = parse_issuers(
+                r#"[{"issuer":"https://idp.example.test","client_id":"browser","audience":"api"}]"#,
+            )
+            .expect("issuer");
+            let error = OidcVerifier::new_with_transport(configs, false, Some(&pem))
+                .err()
+                .expect("malformed CA must be refused");
+            assert!(matches!(error, Error::Invalid { .. }));
+            assert!(!error.to_string().contains("PRIVATE_CA_SENTINEL"));
+        }
+    }
+
+    #[test]
     fn unverified_issuer_reads_iss_only_from_well_formed_tokens() {
         let payload = URL_SAFE_NO_PAD.encode(r#"{"iss":"http://idp","sub":"alice"}"#);
         let token = format!("h.{payload}.s");
@@ -1880,13 +1947,40 @@ mod tests {
         assert_eq!(one.sole_issuer(), Some("https://a"));
         let two = OidcVerifier::new(
             parse_issuers(
-                r#"[{"issuer":"https://a","client_id":"c","audience":"api-a"},
-                    {"issuer":"https://b","client_id":"c","audience":"api-b"}]"#,
+                r#"[{"issuer":"https://a","client_id":"c","audience":"api-a",
+                     "tenant":{"static":{"tenant_id":"019b53c0-7c00-7000-8000-000000000001"}}},
+                    {"issuer":"https://b","client_id":"c","audience":"api-b",
+                     "tenant":{"static":{"tenant_id":"019b53c0-7c00-7000-8000-000000000002"}}}]"#,
             )
             .unwrap(),
         )
         .unwrap();
         assert_eq!(two.sole_issuer(), None);
+    }
+
+    #[test]
+    fn overlapping_issuer_tenants_are_refused_before_token_or_network_use() {
+        let tenant = serde_json::json!({"static": {
+            "tenant_id": "019b53c0-7c00-7000-8000-000000000001"
+        }});
+        let claim = serde_json::json!({"claim": {"name": "tid"}});
+        for (first, second) in [
+            (tenant.clone(), tenant.clone()),
+            (claim.clone(), tenant.clone()),
+            (tenant, claim.clone()),
+            (claim.clone(), claim),
+        ] {
+            let document = serde_json::json!([
+                {"issuer":"https://first.example.test", "client_id":"browser",
+                 "audience":"api", "tenant":first},
+                {"issuer":"https://second.example.test", "client_id":"browser",
+                 "audience":"api", "tenant":second}
+            ]);
+            let configs = parse_issuers(&document.to_string()).expect("valid issuer syntax");
+            let error = OidcVerifier::new(configs).err().expect("overlap refused");
+            assert!(matches!(error, Error::Invalid { .. }));
+            assert!(error.to_string().contains("MEM-7"));
+        }
     }
 
     #[tokio::test]

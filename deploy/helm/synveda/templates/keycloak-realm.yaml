@@ -1,0 +1,58 @@
+{{- if .Values.keycloak.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-keycloak-realm" .Release.Name | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+data:
+  # Keycloak's native startup import skips an existing realm. Upgrades must
+  # never overwrite operator-managed users, credentials or membership.
+  synveda-realm.json: |
+    {
+      "realm": "synveda",
+      "enabled": true,
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "registrationEmailAsUsername": false,
+      "rememberMe": false,
+      "verifyEmail": false,
+      "resetPasswordAllowed": false,
+      "editUsernameAllowed": false,
+      "duplicateEmailsAllowed": false,
+      "bruteForceProtected": true,
+      "accessTokenLifespan": 300,
+      "ssoSessionIdleTimeout": 1800,
+      "ssoSessionMaxLifespan": 28800,
+      "revokeRefreshToken": true,
+      "refreshTokenMaxReuse": 0,
+      "defaultSignatureAlgorithm": "RS256",
+      "eventsEnabled": true,
+      "eventsExpiration": 604800,
+      "adminEventsEnabled": true,
+      "adminEventsDetailsEnabled": false,
+      "groups": [{"name": "synveda-admins"}],
+      "clients": [{
+        "clientId": "synveda",
+        "enabled": true,
+        "protocol": "openid-connect",
+        "publicClient": true,
+        "standardFlowEnabled": true,
+        "implicitFlowEnabled": false,
+        "directAccessGrantsEnabled": false,
+        "serviceAccountsEnabled": false,
+        "fullScopeAllowed": false,
+        "rootUrl": {{ .Values.gateway.publicUrl | toJson }},
+        "baseUrl": {{ printf "%s/console/" .Values.gateway.publicUrl | toJson }},
+        "redirectUris": [{{ printf "%s/auth/callback" .Values.gateway.publicUrl | toJson }}],
+        "webOrigins": [{{ .Values.gateway.publicUrl | toJson }}],
+        "defaultClientScopes": ["basic", "email", "profile"],
+        "optionalClientScopes": [],
+        "attributes": {"pkce.code.challenge.method": "S256"},
+        "protocolMappers": [
+          {{ .Files.Get "files/synveda-audience-mapper.json" | fromJson | toJson }},
+          {{ .Files.Get "files/synveda-groups-mapper.json" | fromJson | toJson }}
+        ]
+      }]
+    }
+{{- end }}

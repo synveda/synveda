@@ -1,0 +1,46 @@
+# OPS-11 disposable Kind acceptance only. Images are source-built and loaded.
+fullnameOverride: synveda
+image:
+  repository: synveda/product
+  tag: ops11
+  pullPolicy: Never
+gateway:
+  publicUrl: http://synveda.synveda-test.svc.cluster.local:8120
+  insecureDevelopmentHttp: true
+  databaseExistingSecret: synveda-gateway-db
+  resources: {}
+worker:
+  databaseExistingSecret: synveda-worker-db
+  resources: {}
+oidc:
+  existingSecret: synveda-oidc
+  caExistingSecret: synveda-provider-ca
+kms:
+  existingSecret: synveda-kms
+embedder: deterministic
+postgres:
+  mode: external
+  external:
+    host: postgres.synveda-dependencies.svc.cluster.local
+    port: 5432
+    database: synveda
+    migratorExistingSecret: synveda-migrator-db
+    migratorUrlSecretKey: DATABASE_URL
+    caExistingSecret: synveda-provider-ca
+    caSecretKey: ca.crt
+    clientExistingSecret: synveda-postgres-client
+    clientCertSecretKey: tls.crt
+    clientKeySecretKey: tls.key
+    roles:
+      migrator: synveda_migrator
+      gateway: synveda_gateway
+      worker: synveda_worker
+      administrators: [postgres]
+      administrative_memberships: []
+      forbidden_databases: [postgres, template1]
+      isolated_peer_roles: []
+install:
+  tenant:
+    id: 019b53c0-7c00-7000-8000-000000000011
+    slug: acme
+    name: ACME Corporation

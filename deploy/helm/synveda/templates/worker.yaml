@@ -24,8 +24,9 @@ spec:
       labels:
         {{- include "synveda.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: worker
-      {{- with .Values.worker.podAnnotations }}
       annotations:
+        checksum/database-roles: {{ include "synveda.databaseRolesJson" . | sha256sum }}
+      {{- with .Values.worker.podAnnotations }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
@@ -37,7 +38,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- include "synveda.podSecurity" (dict "root" . "context" .Values.podSecurityContext) | nindent 8 }}
       containers:
         - name: worker
           image: {{ include "synveda.image" . }}
@@ -46,6 +47,7 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
+            {{- include "synveda.outboundEnv" . | nindent 12 }}
             - name: DATABASE_URL_FILE
               value: /run/secrets/synveda-worker/database_url
             - name: SYNVEDA_DATABASE_ROLES_FILE
@@ -56,26 +58,18 @@ spec:
               value: {{ .Values.worker.shutdownSeconds | quote }}
             - name: SYNVEDA_WORKER_LISTEN_ADDR
               value: 127.0.0.1:8121
-            - name: SYNVEDA_OIDC_ISSUERS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.oidc.existingSecret }}
-                  key: {{ .Values.oidc.secretKey }}
-            - name: SYNVEDA_KMS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.kms.existingSecret }}
-                  key: {{ .Values.kms.secretKey }}
-            - name: SYNVEDA_KMS_KEY_REF
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.kms.existingSecret }}
-                  key: {{ .Values.kms.keyRefSecretKey }}
+            - name: SYNVEDA_OIDC_ISSUERS_FILE
+              value: /run/secrets/synveda-runtime/issuers.json
+            - name: SYNVEDA_KMS_KEY_FILE
+              value: /run/secrets/synveda-runtime/kms_key
+            - name: SYNVEDA_KMS_KEY_REF_FILE
+              value: /run/secrets/synveda-runtime/kms_key_ref
+            {{- include "synveda.databaseTransportEnv" . | nindent 12 }}
             - name: SYNVEDA_EMBEDDER
               value: {{ .Values.embedder | quote }}
-            {{- with .Values.embedderModel }}
+            {{- if eq .Values.embedder "tei" }}
             - name: SYNVEDA_EMBEDDER_MODEL
-              value: {{ . | quote }}
+              value: {{ default .Values.tei.model .Values.embedderModel | quote }}
             {{- end }}
             {{- if eq .Values.embedder "tei" }}
             - name: SYNVEDA_TEI_URL
@@ -88,11 +82,8 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- if eq .Values.extractor.kind "claude" }}
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.extractor.existingSecret }}
-                  key: ANTHROPIC_API_KEY
+            - name: ANTHROPIC_API_KEY_FILE
+              value: /run/secrets/synveda-extractor/api_key
             {{- end }}
             {{- if eq .Values.extractor.kind "vllm" }}
             - name: SYNVEDA_VLLM_BASE_URL
@@ -104,6 +95,12 @@ spec:
             {{- end }}
             - name: RUST_LOG
               value: {{ .Values.worker.logLevel | quote }}
+          startupProbe:
+            exec:
+              command: ["/usr/local/bin/synveda-container", "probe", "worker", "live"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 120
           livenessProbe:
             exec:
               command:
@@ -124,6 +121,16 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           volumeMounts:
+            {{- include "synveda.outboundMounts" . | nindent 12 }}
+            {{- include "synveda.databaseTransportMounts" . | nindent 12 }}
+            - name: runtime-secrets
+              mountPath: /run/secrets/synveda-runtime
+              readOnly: true
+            {{- if eq .Values.extractor.kind "claude" }}
+            - name: extractor
+              mountPath: /run/secrets/synveda-extractor
+              readOnly: true
+            {{- end }}
             - name: worker-database
               mountPath: /run/secrets/synveda-worker
               readOnly: true
@@ -137,10 +144,22 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        {{- include "synveda.outboundVolumes" . | nindent 8 }}
+        {{- include "synveda.databaseTransportVolumes" . | nindent 8 }}
+        {{- include "synveda.runtimeSecretVolume" . | nindent 8 }}
+        {{- if eq .Values.extractor.kind "claude" }}
+        - name: extractor
+          secret:
+            secretName: {{ .Values.extractor.existingSecret }}
+            defaultMode: 0444
+            items:
+              - key: {{ .Values.extractor.secretKey }}
+                path: api_key
+        {{- end }}
         - name: worker-database
           secret:
             secretName: {{ .Values.worker.databaseExistingSecret }}
-            defaultMode: 0440
+            defaultMode: 0444
             items:
               - key: {{ .Values.worker.databaseUrlSecretKey }}
                 path: database_url

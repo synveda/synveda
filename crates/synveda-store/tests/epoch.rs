@@ -407,6 +407,108 @@ fn a_fresh_empty_database_bootstraps_to_the_current_epoch() {
     });
 }
 
+/// The advisory lock must cover the epoch stamp, not just SQLx's DDL. Holding
+/// the marker row exposes the old gap: both migrators could enter serializable
+/// stamp transactions, and the second then failed after the first committed.
+#[test]
+fn concurrent_install_and_stamp_are_one_migration_boundary() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let (first, second) = tokio::join!(
+            synveda_store::migrate(&pool, &scratch.roles),
+            synveda_store::migrate(&pool, &scratch.roles),
+        );
+        first.expect("first fresh migrator");
+        second.expect("concurrent fresh migrator");
+
+        let mut blocker = scratch.options.connect().await.expect("stamp blocker");
+        let mut transaction = blocker.begin().await.expect("block stamp transaction");
+        sqlx::query("select * from schema_metadata for update")
+            .fetch_all(&mut *transaction)
+            .await
+            .expect("hold only this disposable database's marker row");
+        let runners = (0..2)
+            .map(|_| {
+                let pool = pool.clone();
+                let roles = scratch.roles.clone();
+                tokio::spawn(async move { synveda_store::migrate(&pool, &roles).await })
+            })
+            .collect::<Vec<_>>();
+        // Observe actual database waits rather than guessing when both tasks
+        // have reached the marker. One waits on the row, the other on SQLx.
+        let mut waits = Vec::<String>::new();
+        for _ in 0..80 {
+            sqlx::query("select pg_stat_clear_snapshot()")
+                .execute(&mut *transaction)
+                .await
+                .expect("refresh lock observation");
+            waits = sqlx::query_scalar(
+                "select wait_event from pg_stat_activity where datname=current_database() and pid<>pg_backend_pid() and wait_event_type='Lock' order by wait_event",
+            )
+            .fetch_all(&mut *transaction)
+            .await
+            .expect("observe migration waits");
+            if waits.len() == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        transaction.rollback().await.expect("release marker row");
+        assert!(waits.contains(&"advisory".to_owned()), "the second migrator must wait outside the stamp transaction: {waits:?}");
+        for runner in runners {
+            tokio::time::timeout(std::time::Duration::from_secs(10), runner)
+                .await
+                .expect("bounded migrator completion")
+                .expect("migration task joined")
+                .expect("stamp completes without serialization failure");
+        }
+        let rows: i64 = sqlx::query_scalar("select count(*) from _sqlx_migrations where success")
+            .fetch_one(&pool)
+            .await
+            .expect("one migration ledger");
+        assert_eq!(rows, 1);
+        epoch::verify(&pool).await.expect("complete current marker");
+
+        // Cancellation while holding the outer lock must close the dedicated
+        // connection, including any nested SQLx session lock on an error path.
+        let mut transaction = blocker.begin().await.expect("block cancelled stamp");
+        sqlx::query("select * from schema_metadata for update")
+            .fetch_all(&mut *transaction)
+            .await
+            .expect("hold marker for cancellation");
+        let cancel_pool = pool.clone();
+        let cancel_roles = scratch.roles.clone();
+        let cancelled = tokio::spawn(async move {
+            synveda_store::migrate(&cancel_pool, &cancel_roles).await
+        });
+        let mut waiting = false;
+        for _ in 0..80 {
+            sqlx::query("select pg_stat_clear_snapshot()")
+                .execute(&mut *transaction)
+                .await
+                .expect("refresh cancellation observation");
+            waiting = sqlx::query_scalar("select exists(select 1 from pg_stat_activity where datname=current_database() and pid<>pg_backend_pid() and wait_event_type='Lock')")
+                .fetch_one(&mut *transaction)
+                .await
+                .expect("observe cancelled stamp wait");
+            if waiting { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        cancelled.abort();
+        assert!(cancelled.await.expect_err("task cancelled").is_cancelled());
+        transaction.rollback().await.expect("release cancelled stamp");
+        assert!(waiting, "cancellation must interrupt an actual locked stamp");
+        tokio::time::timeout(std::time::Duration::from_secs(10), synveda_store::migrate(&pool, &scratch.roles))
+            .await
+            .expect("no advisory lock survives cancellation")
+            .expect("migration resumes after cancellation");
+        blocker.close().await.expect("close stamp blocker");
+        pool.close().await;
+    });
+}
+
 /// SQLx commits a transactional migration and its success ledger before it
 /// can update timing metadata or Synveda can begin the epoch-stamp
 /// transaction. A process death at that exact seam must be restart-idempotent.

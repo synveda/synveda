@@ -17,6 +17,7 @@ import {
   configurationTarget,
   demoConfigurationDraft,
   mutationMessage,
+  organisationConfigurationTarget,
   renderConfiguration,
   type DemoConfigurationDraft,
 } from "./configuration.mjs";
@@ -50,9 +51,11 @@ function refreshConfiguration(): void {
 
 export function Configuration() {
   const { me, workspace, project } = useApp();
+  const [organisation, setOrganisation] = useState(false);
+  const organisationTarget = useMemo(() => organisationConfigurationTarget(me), [me]);
   const target = useMemo(
-    () => configurationTarget(me, workspace, project),
-    [me, workspace, project],
+    () => organisation ? organisationTarget : configurationTarget(me, workspace, project),
+    [me, workspace, project, organisation, organisationTarget],
   );
   const templates = useQuery("configuration/templates", () =>
     request("list_configuration_templates", {}),
@@ -76,6 +79,15 @@ export function Configuration() {
         advertisement, and provider boundaries. A profile name is provenance only; runtime code
         reads the exact selected version.
       </p>
+      {organisationTarget && (
+        <label>
+          Configuration scope
+          <select value={organisation ? "organisation" : "selected"} onChange={(event) => setOrganisation(event.target.value === "organisation")}>
+            <option value="selected">Current workspace, project or private scope</option>
+            <option value="organisation">Organisation</option>
+          </select>
+        </label>
+      )}
       {target ? (
         <p className="muted">
           Editing selection for <strong>{target.label}</strong> · scope {target.id}

@@ -1,0 +1,18 @@
+# Render-checked common shape for an existing managed/self-managed cluster.
+# No managed database/identity/driver combination is qualified by this sample.
+# Layer over your external-service values. Your existing controller must
+# implement this class and HTTP-to-HTTPS redirect (controller-specific).
+ingress:
+  enabled: true
+  className: organisation-ingress
+  host: synveda.example.com
+  tls:
+    - hosts: [synveda.example.com]
+      secretName: application-tls
+# Mirror every enabled image. CNPG, packaged Keycloak and TEI have independent
+# image coordinates; product imagePullSecrets also cover Jobs, TEI and CNPG.
+imagePullSecrets:
+  - name: organisation-registry
+keycloak:
+  imagePullSecrets:
+    - name: organisation-registry

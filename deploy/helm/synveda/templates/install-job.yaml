@@ -2,16 +2,17 @@
 The required, revision-named install Job implements the same authority order as
 the Compose reference (CPR-45, ADR-0102):
 
-  1. database-bootstrap — superuser-only role, extension, ownership and ACL
-     convergence through the shared audited PostgreSQL command;
+  1. database-bootstrap — CNPG-only role, extension, ownership and ACL
+     convergence through the shared administrator PostgreSQL command;
   2. database-preflight — the product proves the migrator, gateway and worker
      credentials select one writable database generation and exact roles;
   3. migrate — the product advances application DDL as `synveda_migrator`;
-  4. tenant — optional, install-only admission under that same migrator.
+  4. tenant — optional, idempotent admission under that same migrator.
 
 The superuser password is mounted only into the bootstrap init container.
-Product and runtime containers never receive it. The Job is not a Helm hook:
-the CNPG Cluster and generated Secrets must exist first. Gateway and worker may
+Product and runtime containers never receive it. External providers are already
+provisioned. The Job is not a Helm hook: CNPG resources can be created beside it.
+Gateway and worker may
 start independently, but their product-owned authority sentinels remain closed
 until this Job has established the complete contract. A revision suffix is
 required because a Job spec is immutable.
@@ -32,6 +33,10 @@ spec:
       labels:
         {{- include "synveda.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: install
+      {{- with .Values.install.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       restartPolicy: Never
       serviceAccountName: {{ include "synveda.serviceAccountName" . }}
@@ -41,15 +46,18 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- include "synveda.podSecurity" (dict "root" . "context" .Values.podSecurityContext) | nindent 8 }}
       initContainers:
+        {{- if eq .Values.postgres.mode "cnpg" }}
         - name: database-bootstrap
           image: {{ include "synveda.postgresImage" . }}
+          resources:
+            {{- toYaml .Values.install.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           # Kubernetes' atomic Secret writer exposes projected keys as
           # symlinks. The shared bootstrap command deliberately refuses every
-          # symlink, so this container copies four fixed, read-only projection
+          # symlink, so this container copies only fixed, read-only projection
           # paths into a private memory-backed volume before invoking it. No
           # value is placed in an argument, environment variable or log.
           command: ["/bin/sh", "-ec"]
@@ -60,7 +68,8 @@ spec:
                 postgres_bootstrap_password \
                 synveda_migrator_password \
                 synveda_gateway_password \
-                synveda_worker_password
+                synveda_worker_password{{ if .Values.keycloak.enabled }} \
+                keycloak_database_password{{ end }}
               do
                 source=/run/bootstrap-projection/$secret
                 destination=/run/secrets/$secret
@@ -77,7 +86,22 @@ spec:
               fi
               cp -- /run/database-roles/roles.json /run/secrets/database_roles.json
               chmod 0600 /run/secrets/database_roles.json
+              {{- if .Values.keycloak.enabled }}
+              mkdir -p /run/database-authority/private
+              # fsGroup volumes carry setgid. Clear inherited special bits and
+              # select our own primary group without root or changing the mount.
+              chgrp "$(id -g)" /run/database-authority/private
+              chmod 00700 /run/database-authority/private
+              /usr/local/bin/synveda-database-bootstrap synveda
+              /usr/local/bin/synveda-database-bootstrap keycloak
+              # This content-free witness crosses images with different UIDs.
+              # Init-container ordering leaves no concurrent writer; preflight
+              # copies the read-only handoff into its own private directory.
+              cp /run/database-authority/private/keycloak-cluster.json /run/database-authority/keycloak-cluster.json
+              chmod 0444 /run/database-authority/keycloak-cluster.json
+              {{- else }}
               exec /usr/local/bin/synveda-database-bootstrap synveda
+              {{- end }}
           env:
             - name: SYNVEDA_POSTGRES_BOOTSTRAP_USER
               valueFrom:
@@ -92,6 +116,12 @@ spec:
               value: /run/secrets
             - name: SYNVEDA_DATABASE_ROLES_FILE
               value: /run/secrets/database_roles.json
+            {{- if .Values.keycloak.enabled }}
+            - name: SYNVEDA_DATABASE_REQUIRE_KEYCLOAK_PASSWORD
+              value: "true"
+            - name: SYNVEDA_DATABASE_AUTHORITY_DIR
+              value: /run/database-authority/private
+            {{- end }}
           volumeMounts:
             - name: bootstrap-projection
               mountPath: /run/bootstrap-projection
@@ -103,14 +133,42 @@ spec:
             - name: database-roles
               mountPath: /run/database-roles
               readOnly: true
+            {{- if .Values.keycloak.enabled }}
+            - name: database-authority
+              mountPath: /run/database-authority
+            {{- end }}
 
+        {{- end }}
         - name: database-preflight
           image: {{ include "synveda.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          resources:
+            {{- toYaml .Values.install.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          args: ["database-preflight"]
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              {{- if and .Values.keycloak.enabled (eq .Values.postgres.mode "cnpg") }}
+              umask 077
+              mkdir -p /run/preflight-authority/private
+              chgrp "$(id -g)" /run/preflight-authority/private
+              chmod 00700 /run/preflight-authority/private
+              cp /run/database-authority/keycloak-cluster.json /run/preflight-authority/private/keycloak-cluster.json
+              chmod 0600 /run/preflight-authority/private/keycloak-cluster.json
+              {{- end }}
+              attempt=1
+              while ! /usr/local/bin/synveda-container database-preflight; do
+                if [ "$attempt" -ge 12 ]; then
+                  echo "database preflight exhausted 12 bounded attempts" >&2
+                  exit 1
+                fi
+                echo "database preflight pending; retry $attempt/12" >&2
+                attempt=$((attempt + 1))
+                sleep 5
+              done
           env:
+            {{- include "synveda.databaseTransportEnv" . | nindent 12 }}
             - name: SYNVEDA_MIGRATOR_DATABASE_URL_FILE
               value: /run/secrets/synveda-preflight/migrator_database_url
             - name: SYNVEDA_GATEWAY_DATABASE_URL_FILE
@@ -119,26 +177,49 @@ spec:
               value: /run/secrets/synveda-preflight/worker_database_url
             - name: SYNVEDA_DATABASE_ROLES_FILE
               value: /etc/synveda/database/roles.json
+            {{- if and .Values.keycloak.enabled (eq .Values.postgres.mode "cnpg") }}
+            - name: SYNVEDA_DATABASE_REQUIRED_PEER
+              value: keycloak
+            - name: SYNVEDA_DATABASE_PEER_WITNESS_FILE
+              value: /run/preflight-authority/private/keycloak-cluster.json
+            {{- end }}
           volumeMounts:
+            - name: product-tmp
+              mountPath: /tmp
+            {{- include "synveda.databaseTransportMounts" . | nindent 12 }}
             - name: preflight-databases
               mountPath: /run/secrets/synveda-preflight
               readOnly: true
             - name: database-roles
               mountPath: /etc/synveda/database
               readOnly: true
+            {{- if and .Values.keycloak.enabled (eq .Values.postgres.mode "cnpg") }}
+            - name: database-authority
+              mountPath: /run/database-authority
+              readOnly: true
+            - name: preflight-authority
+              mountPath: /run/preflight-authority
+            {{- end }}
 
         - name: migrate
           image: {{ include "synveda.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          resources:
+            {{- toYaml .Values.install.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          args: ["migrate"]
+          command: ["/usr/bin/timeout", "--signal=TERM", "--kill-after=5s", "300s"]
+          args: ["/usr/local/bin/synveda-container", "migrate"]
           env:
+            {{- include "synveda.databaseTransportEnv" . | nindent 12 }}
             - name: DATABASE_URL_FILE
               value: /run/secrets/synveda-migrator/database_url
             - name: SYNVEDA_DATABASE_ROLES_FILE
               value: /etc/synveda/database/roles.json
           volumeMounts:
+            - name: product-tmp
+              mountPath: /tmp
+            {{- include "synveda.databaseTransportMounts" . | nindent 12 }}
             - name: migrator-database
               mountPath: /run/secrets/synveda-migrator
               readOnly: true
@@ -150,35 +231,35 @@ spec:
         - name: tenant
           image: {{ include "synveda.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          resources:
+            {{- toYaml .Values.install.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          {{- if and .Release.IsInstall .Values.install.tenant.slug }}
-          command:
-            - sh
-            - -ec
-            - |
-              if out=$(/usr/local/bin/synveda tenant create \
-                --slug "$SYNVEDA_TENANT_SLUG" \
-                --name "$SYNVEDA_TENANT_NAME" 2>&1); then
-                echo "$out"
-              else
-                case "$out" in
-                  *duplicate*|*"already exists"*)
-                    echo "tenant $SYNVEDA_TENANT_SLUG is already admitted; leaving it alone" ;;
-                  *)
-                    echo "$out" >&2; exit 1 ;;
-                esac
-              fi
+          {{- if .Values.install.tenant.slug }}
+          args: ["tenant-converge"]
           env:
-            - name: SYNVEDA_TENANT_SLUG
+            - name: SYNVEDA_BOOTSTRAP_TENANT_ID
+              value: {{ .Values.install.tenant.id | quote }}
+            - name: SYNVEDA_BOOTSTRAP_TENANT_SLUG
               value: {{ .Values.install.tenant.slug | quote }}
-            - name: SYNVEDA_TENANT_NAME
+            - name: SYNVEDA_BOOTSTRAP_TENANT_NAME
               value: {{ default .Values.install.tenant.slug .Values.install.tenant.name | quote }}
+            - name: SYNVEDA_KMS_KEY_FILE
+              value: /run/secrets/synveda-kms/key
+            - name: SYNVEDA_KMS_KEY_REF_FILE
+              value: /run/secrets/synveda-kms/reference
             - name: DATABASE_URL_FILE
               value: /run/secrets/synveda-migrator/database_url
             - name: SYNVEDA_DATABASE_ROLES_FILE
               value: /etc/synveda/database/roles.json
+            {{- include "synveda.databaseTransportEnv" . | nindent 12 }}
           volumeMounts:
+            - name: product-tmp
+              mountPath: /tmp
+            {{- include "synveda.databaseTransportMounts" . | nindent 12 }}
+            - name: tenant-kms
+              mountPath: /run/secrets/synveda-kms
+              readOnly: true
             - name: migrator-database
               mountPath: /run/secrets/synveda-migrator
               readOnly: true
@@ -186,22 +267,42 @@ spec:
               mountPath: /etc/synveda/database
               readOnly: true
           {{- else }}
-          command:
-            - sh
-            - -ec
-            - |
-              echo "database roles, targets and schema converged."
-              {{- if .Values.install.tenant.slug }}
-              echo "tenant admission runs on install only; this is revision {{ .Release.Revision }}."
-              {{- else }}
-              echo "no tenant requested (install.tenant.slug is empty)."
-              {{- end }}
+          command: ["/bin/sh", "-ec"]
+          args: ["echo 'database preflight and migration complete; tenant admission is operator-owned'"]
           {{- end }}
 
+      {{- with .Values.install.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.install.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.install.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
+        - name: product-tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- include "synveda.databaseTransportVolumes" . | nindent 8 }}
+        {{- if .Values.install.tenant.slug }}
+        - name: tenant-kms
+          secret:
+            secretName: {{ .Values.kms.existingSecret }}
+            defaultMode: 0444
+            items:
+              - key: {{ .Values.kms.secretKey }}
+                path: key
+              - key: {{ .Values.kms.keyRefSecretKey }}
+                path: reference
+        {{- end }}
+        {{- if eq .Values.postgres.mode "cnpg" }}
         - name: bootstrap-projection
           projected:
-            defaultMode: 0440
+            defaultMode: 0444
             sources:
               - secret:
                   name: {{ include "synveda.superuserSecret" . }}
@@ -223,6 +324,23 @@ spec:
                   items:
                     - key: {{ .Values.worker.databasePasswordSecretKey }}
                       path: synveda_worker_password
+              {{- if .Values.keycloak.enabled }}
+              - secret:
+                  name: {{ .Values.keycloak.database.existingSecret }}
+                  items:
+                    - key: {{ .Values.keycloak.database.existingSecretKey }}
+                      path: keycloak_database_password
+              {{- end }}
+        {{- if .Values.keycloak.enabled }}
+        - name: database-authority
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Ki
+        - name: preflight-authority
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Ki
+        {{- end }}
         - name: bootstrap-private
           emptyDir:
             medium: Memory
@@ -238,14 +356,15 @@ spec:
             # Compose bootstrap tmpfs so either supported /bin/sh strategy
             # fits without turning /tmp into unbounded node storage.
             sizeLimit: 16Mi
+        {{- end }}
         - name: preflight-databases
           projected:
-            defaultMode: 0440
+            defaultMode: 0444
             sources:
               - secret:
                   name: {{ include "synveda.migratorSecret" . }}
                   items:
-                    - key: uri
+                    - key: {{ include "synveda.migratorUrlKey" . }}
                       path: migrator_database_url
               - secret:
                   name: {{ .Values.gateway.databaseExistingSecret }}
@@ -260,9 +379,9 @@ spec:
         - name: migrator-database
           secret:
             secretName: {{ include "synveda.migratorSecret" . }}
-            defaultMode: 0440
+            defaultMode: 0444
             items:
-              - key: uri
+              - key: {{ include "synveda.migratorUrlKey" . }}
                 path: database_url
         - name: database-roles
           configMap:

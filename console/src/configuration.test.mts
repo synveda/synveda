@@ -8,6 +8,7 @@ import {
   applyDemoConfigurationDraft,
   configurationSummary,
   configurationTarget,
+  organisationConfigurationTarget,
   demoConfigurationDraft,
   mutationMessage,
   parseConfiguration,
@@ -153,6 +154,22 @@ test("the selected project is the nearest configuration target", () => {
     id: "personal-scope",
     label: "your private scope",
   });
+});
+
+test("organisation configuration follows the exact tenant-root PDP forecast", () => {
+  const me = {
+    onboarding: { tenant_scope_id: "tenant-root" },
+    capabilities: { role_keys: ["administrator"] },
+    anchors: [{ kind: "tenant", scope_id: "tenant-root", actions: { "configuration.write": false } }],
+  } as unknown as MeView;
+  assert.equal(organisationConfigurationTarget(me), null);
+  me.anchors[0].actions["configuration.write"] = true;
+  assert.deepEqual(organisationConfigurationTarget(me), { id: "tenant-root", label: "organisation" });
+  me.onboarding.tenant_scope_id = "another-root";
+  assert.equal(organisationConfigurationTarget(me), null);
+  me.onboarding.tenant_scope_id = "tenant-root";
+  me.anchors[0].actions["configuration.write"] = false;
+  assert.equal(organisationConfigurationTarget(me), null);
 });
 
 test("mutation outcomes never imply a pending change is effective", () => {

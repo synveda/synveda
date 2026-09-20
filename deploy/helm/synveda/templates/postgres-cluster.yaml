@@ -1,3 +1,7 @@
+{{- if eq .Values.postgres.mode "cnpg" }}
+{{- if and (eq (int .Values.postgres.instances) 1) (eq .Values.postgres.primaryUpdateStrategy "supervised") }}
+{{- fail "CNPG requires unsupervised primary updates with one instance; pin the database image and change it only during planned maintenance" }}
+{{- end }}
 {{- /*
 The Kubernetes data plane (OPS-2, ADR-0062 decision 1). CloudNativePG runs
 the cluster, elects the primary and publishes two secrets:
@@ -13,12 +17,21 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: {{ include "synveda.clusterName" . }}
+  {{- if .Values.postgres.retain }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
   labels:
     {{- include "synveda.labels" . | nindent 4 }}
 spec:
   instances: {{ .Values.postgres.instances }}
   imageName: {{ include "synveda.postgresImage" . }}
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   enableSuperuserAccess: true
+  primaryUpdateStrategy: {{ .Values.postgres.primaryUpdateStrategy }}
 
   bootstrap:
     initdb:
@@ -57,3 +70,5 @@ spec:
   resources:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+
+{{- end }}

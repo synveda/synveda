@@ -1,0 +1,66 @@
+{{- if .Values.route.enabled }}
+{{- $targets := list (dict "name" "app" "url" .Values.gateway.publicUrl "service" (include "synveda.fullname" .) "paths" (list "/auth" "/v1" "/console" "/scim/v2") "secret" .Values.route.existingCertificateSecret) -}}
+{{- if .Values.keycloak.enabled -}}
+{{- $targets = append $targets (dict "name" "identity" "url" .Values.keycloak.publicUrl "service" (include "keycloak.fullname" .Subcharts.keycloak) "paths" (list "/realms/synveda" "/resources") "secret" .Values.route.keycloakCertificateSecret) -}}
+{{- end -}}
+{{- range $target := $targets }}
+{{- range $index, $path := $target.paths }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "synveda.fullname" $ }}-{{ $target.name }}-{{ $index }}
+  labels:
+    {{- include "synveda.labels" $ | nindent 4 }}
+  annotations:
+    # Replace client-supplied forwarding headers at the only public edge.
+    haproxy.router.openshift.io/set-forwarded-headers: replace
+    {{- with $.Values.route.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  host: {{ (urlParse $target.url).host | quote }}
+  path: {{ $path }}
+  to:
+    kind: Service
+    name: {{ $target.service }}
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+    {{- if $target.secret }}
+    externalCertificate:
+      name: {{ $target.secret }}
+    {{- end }}
+  wildcardPolicy: None
+{{- end }}
+{{- end }}
+{{- $secrets := compact (list .Values.route.existingCertificateSecret .Values.route.keycloakCertificateSecret) | uniq }}
+{{- if $secrets }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "synveda.fullname" . }}-route-certificate
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: {{ toJson $secrets }}
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "synveda.fullname" . }}-route-certificate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "synveda.fullname" . }}-route-certificate
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.route.routerServiceAccount.name }}
+    namespace: {{ .Values.route.routerServiceAccount.namespace }}
+{{- end }}
+{{- end }}

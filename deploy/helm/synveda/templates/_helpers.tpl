@@ -33,7 +33,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "synveda.image" -}}
+{{- if .Values.image.digest -}}
+{{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
+{{- else -}}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "synveda.postgresImage" -}}
@@ -54,7 +58,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "synveda.migratorSecret" -}}
+{{- if eq .Values.postgres.mode "external" -}}
+{{- .Values.postgres.external.migratorExistingSecret -}}
+{{- else -}}
 {{- printf "%s-app" (include "synveda.clusterName" .) -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "synveda.superuserSecret" -}}
@@ -66,8 +74,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "synveda.migratorRole" -}}synveda_migrator{{- end -}}
 {{- define "synveda.gatewayRole" -}}synveda_gateway{{- end -}}
 {{- define "synveda.workerRole" -}}synveda_worker{{- end -}}
+{{- define "synveda.migratorUrlKey" -}}
+{{- if eq .Values.postgres.mode "external" -}}{{ .Values.postgres.external.migratorUrlSecretKey }}{{- else -}}uri{{- end -}}
+{{- end -}}
+
 {{- define "synveda.databaseRolesJson" -}}
-{"migrator":"{{ include "synveda.migratorRole" . }}","gateway":"{{ include "synveda.gatewayRole" . }}","worker":"{{ include "synveda.workerRole" . }}","administrators":["postgres"],"administrative_memberships":[],"forbidden_databases":["postgres","template1"],"isolated_peer_roles":[]}
+{{- if eq .Values.postgres.mode "external" -}}
+{{- toJson .Values.postgres.external.roles -}}
+{{- else -}}
+{"migrator":"{{ include "synveda.migratorRole" . }}","gateway":"{{ include "synveda.gatewayRole" . }}","worker":"{{ include "synveda.workerRole" . }}","administrators":["postgres"],"administrative_memberships":[],"forbidden_databases":[{{ if .Values.keycloak.enabled }}"keycloak",{{ end }}"postgres","template1"],"isolated_peer_roles":[{{ if .Values.keycloak.enabled }}"keycloak"{{ end }}]}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -134,10 +150,10 @@ silent if the chart rendered it anyway.
 {{- fail "kms.keyRefSecretKey must name the Secret key containing the stable KMS key reference" -}}
 {{- end -}}
 
-{{- /* Runtime credentials are operator-owned. The chart converges the fixed
-       roles but never generates, copies or renders their passwords. */ -}}
+{{- /* Runtime credentials are operator-owned. Only CNPG mode provisions roles;
+       no credential value enters the rendered release. */ -}}
 {{- if not .Values.gateway.databaseExistingSecret -}}
-{{- fail "gateway.databaseExistingSecret is required: name an operator-owned Secret holding DATABASE_URL and password for the fixed synveda_gateway login.\n  Database bootstrap consumes the password; the gateway mounts only the DSN file." -}}
+{{- fail "gateway.databaseExistingSecret is required: name an operator-owned Secret holding the gateway DATABASE_URL. CNPG mode additionally needs the password-only bootstrap key." -}}
 {{- end -}}
 {{- if not .Values.gateway.databaseUrlSecretKey -}}
 {{- fail "gateway.databaseUrlSecretKey must name the Secret key containing the gateway PostgreSQL URL" -}}
@@ -145,11 +161,11 @@ silent if the chart rendered it anyway.
 {{- if not .Values.gateway.databasePasswordSecretKey -}}
 {{- fail "gateway.databasePasswordSecretKey must name the Secret key containing the gateway login password" -}}
 {{- end -}}
-{{- if eq .Values.gateway.databaseUrlSecretKey .Values.gateway.databasePasswordSecretKey -}}
+{{- if and (eq .Values.postgres.mode "cnpg") (eq .Values.gateway.databaseUrlSecretKey .Values.gateway.databasePasswordSecretKey) -}}
 {{- fail "gateway database URL and password Secret keys must be distinct" -}}
 {{- end -}}
 {{- if not .Values.worker.databaseExistingSecret -}}
-{{- fail "worker.databaseExistingSecret is required: name an operator-owned Secret holding DATABASE_URL and password for the fixed synveda_worker login.\n  The install job creates/converges that non-owner login; the worker mounts only the DSN file." -}}
+{{- fail "worker.databaseExistingSecret is required: name an operator-owned Secret holding the worker DATABASE_URL. CNPG mode additionally needs the password-only bootstrap key." -}}
 {{- end -}}
 {{- if not .Values.worker.databaseUrlSecretKey -}}
 {{- fail "worker.databaseUrlSecretKey must name the Secret key containing the worker PostgreSQL URL" -}}
@@ -157,7 +173,7 @@ silent if the chart rendered it anyway.
 {{- if not .Values.worker.databasePasswordSecretKey -}}
 {{- fail "worker.databasePasswordSecretKey must name the Secret key containing the worker login password" -}}
 {{- end -}}
-{{- if eq .Values.worker.databaseUrlSecretKey .Values.worker.databasePasswordSecretKey -}}
+{{- if and (eq .Values.postgres.mode "cnpg") (eq .Values.worker.databaseUrlSecretKey .Values.worker.databasePasswordSecretKey) -}}
 {{- fail "worker database URL and password Secret keys must be distinct" -}}
 {{- end -}}
 {{- if eq .Values.gateway.databaseExistingSecret .Values.worker.databaseExistingSecret -}}
@@ -166,9 +182,9 @@ silent if the chart rendered it anyway.
 {{- range $component := list "gateway" "worker" -}}
 {{- $secret := index (index $.Values $component) "databaseExistingSecret" -}}
 {{- if eq $secret (include "synveda.migratorSecret" $) -}}
-{{- fail (printf "%s.databaseExistingSecret must not be the CloudNativePG migrator Secret: runtime processes refuse database-owner roles" $component) -}}
+{{- fail (printf "%s.databaseExistingSecret must not be the migrator Secret: runtime processes refuse database-owner roles" $component) -}}
 {{- end -}}
-{{- if eq $secret (include "synveda.superuserSecret" $) -}}
+{{- if and (eq $.Values.postgres.mode "cnpg") (eq $secret (include "synveda.superuserSecret" $)) -}}
 {{- fail (printf "%s.databaseExistingSecret must not be the CloudNativePG superuser Secret" $component) -}}
 {{- end -}}
 {{- end -}}
@@ -218,7 +234,7 @@ silent if the chart rendered it anyway.
 {{- fail "worker.dbMaxConnections must be between 1 and 64, matching the application startup bound" -}}
 {{- end -}}
 {{- $runtimeConnections := add (int .Values.gateway.dbMaxConnections) (int .Values.worker.dbMaxConnections) -}}
-{{- if ge $runtimeConnections (int .Values.postgres.maxConnections) -}}
+{{- if and (eq .Values.postgres.mode "cnpg") (ge $runtimeConnections (int .Values.postgres.maxConnections)) -}}
 {{- fail (printf "gateway.dbMaxConnections + worker.dbMaxConnections (%d) must be below postgres.maxConnections (%d): the cluster needs headroom for migration, operator and probe connections" $runtimeConnections (int .Values.postgres.maxConnections)) -}}
 {{- end -}}
 {{- if or (lt (int .Values.worker.shutdownSeconds) 3) (gt (int .Values.worker.shutdownSeconds) 300) -}}
@@ -234,15 +250,47 @@ silent if the chart rendered it anyway.
 {{- fail "install.ttlSecondsAfterFinished must be between 300 and 604800" -}}
 {{- end -}}
 
-{{- /*
-   Decision 1's precondition — the CloudNativePG operator — is deliberately
-   *not* checked here. `.Capabilities.APIVersions` is a fabricated set under
-   `helm lint` and `helm template`, so a check on it would fail every render
-   that has no cluster to ask, and `helm lint` (Helm 4) has no flag to feed
-   it one. Helm's own error names the missing kind clearly enough:
-   "no matches for kind \"Cluster\" in version postgresql.cnpg.io/v1".
-   The requirement is stated in Chart.yaml's annotation, in NOTES.txt and in
-   deploy/README.md instead.
-*/ -}}
-
+{{- if and (eq .Values.postgres.mode "cnpg") (not (.Capabilities.APIVersions.Has "postgresql.cnpg.io/v1")) -}}
+{{- fail "postgres.mode=cnpg requires the preinstalled CloudNativePG operator/API postgresql.cnpg.io/v1; use external mode otherwise (offline template: --api-versions postgresql.cnpg.io/v1)" -}}
+{{- end -}}
+{{- if and .Values.ingress.enabled (not (.Capabilities.APIVersions.Has "networking.k8s.io/v1")) -}}
+{{- fail "ingress.enabled requires the networking.k8s.io/v1 API and an existing ingress controller" -}}
+{{- end -}}
+{{- if and .Values.image.digest .Values.image.tag -}}
+{{- fail "image.tag and image.digest are mutually exclusive" -}}
+{{- end -}}
+{{- if eq .Values.postgres.mode "cnpg" -}}
+{{- if .Values.postgres.external -}}{{ fail "postgres.external must be empty in cnpg mode" }}{{- end -}}
+{{- else -}}
+{{- if or .Values.postgres.image (ne (int .Values.postgres.instances) 1) .Values.postgres.parameters .Values.postgres.storage.storageClass (ne .Values.postgres.storage.size "100Gi") (ne (int .Values.postgres.maxConnections) 200) .Values.postgres.retain (ne .Values.postgres.primaryUpdateStrategy "unsupervised") -}}
+{{- fail "CNPG image, instances, parameters, storage and maxConnections overrides require postgres.mode=cnpg" -}}
+{{- end -}}
+{{- if ne (toJson .Values.postgres.resources) (toJson (dict "requests" (dict "cpu" "1" "memory" "2Gi"))) -}}{{ fail "postgres.resources overrides require postgres.mode=cnpg" }}{{- end -}}
+{{- if or (ne .Values.gateway.databasePasswordSecretKey "password") (ne .Values.worker.databasePasswordSecretKey "password") -}}{{ fail "password-only Secret key overrides require postgres.mode=cnpg; external credentials use complete DATABASE_URL files" }}{{- end -}}
+{{- end -}}
+{{- if and .Values.ingress.enabled (hasPrefix "https://" .Values.gateway.publicUrl) (not .Values.ingress.externalTlsTermination) -}}
+{{- $tlsHost := false -}}
+{{- range .Values.ingress.tls -}}
+{{- if and .secretName (has $.Values.ingress.host .hosts) -}}{{- $tlsHost = true -}}{{- end -}}
+{{- end -}}
+{{- if not $tlsHost -}}{{ fail "HTTPS ingress requires a TLS Secret covering ingress.host or explicit ingress.externalTlsTermination=true" }}{{- end -}}
+{{- end -}}
+{{- if and (not .Values.ingress.enabled) (or .Values.ingress.host .Values.ingress.className .Values.ingress.annotations .Values.ingress.tls .Values.ingress.externalTlsTermination) -}}
+{{- fail "ingress settings require ingress.enabled=true" -}}
+{{- end -}}
+{{- if and (eq .Values.embedder "deterministic") .Values.tei.url -}}{{ fail "tei.url requires embedder=tei" }}{{- end -}}
+{{- if and (ne .Values.extractor.kind "claude") .Values.extractor.existingSecret -}}{{ fail "extractor.existingSecret requires extractor.kind=claude" }}{{- end -}}
+{{- if and (ne .Values.extractor.kind "claude") (ne .Values.extractor.secretKey "ANTHROPIC_API_KEY") -}}{{ fail "extractor.secretKey overrides require extractor.kind=claude" }}{{- end -}}
+{{- if and (not .Values.oidc.caExistingSecret) (ne .Values.oidc.caSecretKey "ca.crt") -}}{{ fail "oidc.caSecretKey overrides require oidc.caExistingSecret" }}{{- end -}}
+{{- if and (ne .Values.extractor.kind "vllm") .Values.extractor.baseUrl -}}{{ fail "extractor.baseUrl requires extractor.kind=vllm" }}{{- end -}}
+{{- if and (eq .Values.extractor.kind "deterministic") .Values.extractor.model -}}{{ fail "extractor.model is unused by the deterministic extractor" }}{{- end -}}
+{{- if and .Values.install.tenant.name (not .Values.install.tenant.slug) -}}{{ fail "install.tenant.name requires id and slug" }}{{- end -}}
+{{- if ne (empty .Values.install.tenant.id) (empty .Values.install.tenant.slug) -}}{{ fail "install.tenant.id and slug must be configured together" }}{{- end -}}
+{{- if and (eq .Values.embedder "deterministic") .Values.embedderModel -}}{{ fail "embedderModel requires embedder=tei" }}{{- end -}}
+{{- if and .Values.tei.enabled .Values.embedderModel (ne .Values.embedderModel .Values.tei.model) -}}{{ fail "embedderModel must match tei.model for bundled TEI" }}{{- end -}}
+{{- if and (not .Values.tei.enabled) (or (ne .Values.tei.model "BAAI/bge-m3") (ne .Values.tei.image "ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1") (ne (int .Values.tei.maxBatchTokens) 4096) (ne .Values.tei.cache.size "20Gi") .Values.tei.cache.storageClass) -}}{{ fail "TEI image/model/batch/cache overrides require tei.enabled=true; external model identity uses embedderModel" }}{{- end -}}
+{{- if and (not .Values.tei.enabled) (or .Values.tei.nodeSelector .Values.tei.tolerations .Values.tei.affinity .Values.tei.podAnnotations (ne (toJson .Values.tei.resources) (toJson (dict "requests" (dict "cpu" "2" "memory" "4Gi")))) (ne (toJson .Values.tei.podSecurityContext) (toJson (dict "runAsNonRoot" true "runAsUser" 1000 "fsGroup" 1000)))) -}}{{ fail "TEI workload overrides require tei.enabled=true" }}{{- end -}}
+{{- if eq .Values.kms.secretKey .Values.kms.keyRefSecretKey -}}{{ fail "kms.secretKey and kms.keyRefSecretKey must be distinct" }}{{- end -}}
+{{- if and (not .Values.serviceAccount.create) .Values.serviceAccount.annotations -}}{{ fail "serviceAccount.annotations require serviceAccount.create=true" }}{{- end -}}
+{{- if hasKey .Values.postgres.parameters "max_connections" -}}{{ fail "use postgres.maxConnections rather than postgres.parameters.max_connections" }}{{- end -}}
 {{- end -}}

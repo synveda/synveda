@@ -1,0 +1,32 @@
+# Non-secret specimen; supply endpoints, Secrets and an image built from this checkout.
+# The minimum a real install must state. Every value here has no default
+# on purpose (ADR-0062 decisions 6 and 10), so this file is also the list
+# of decisions an operator cannot avoid making.
+gateway:
+  publicUrl: https://synveda.example.com
+  databaseExistingSecret: synveda-gateway-db
+worker:
+  databaseExistingSecret: synveda-worker-db
+oidc:
+  existingSecret: synveda-oidc
+kms:
+  existingSecret: synveda-kms
+embedder: deterministic
+postgres:
+  mode: external
+  external:
+    host: postgres.database.example.test
+    port: 5432
+    database: synveda
+    migratorExistingSecret: synveda-migrator-db
+    migratorUrlSecretKey: DATABASE_URL
+    caExistingSecret: synveda-postgres-ca
+    caSecretKey: ca.crt
+    roles:
+      migrator: synveda_migrator
+      gateway: synveda_gateway
+      worker: synveda_worker
+      administrators: [postgres]
+      administrative_memberships: []
+      forbidden_databases: [postgres, template1]
+      isolated_peer_roles: []

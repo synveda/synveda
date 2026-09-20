@@ -239,7 +239,7 @@ spec:
                 secretKeyRef:
                   name: synveda-pg-superuser
         - name: database-preflight
-          args: ["database-preflight"]
+          command: ["/usr/local/bin/synveda-container database-preflight"]
           env:
             - name: SYNVEDA_MIGRATOR_DATABASE_URL_FILE
             - name: SYNVEDA_GATEWAY_DATABASE_URL_FILE

@@ -130,6 +130,26 @@ proxy_image="ghcr.io/synveda/proxy@$proxy_digest"
 browser_image="ghcr.io/synveda/browser-acceptance@$browser_digest"
 helm_postgres_image="ghcr.io/synveda/cnpg-postgres@$helm_postgres_digest"
 
+# OPS-11: use the same immutable images in Helm. Separate overlays preserve
+# the chart's refusal of unused CNPG settings in external-database mode.
+cat > "$outdir/synveda-images-$version.yaml" <<EOF
+# Generated from release $version, source $source_sha. Contains no credentials.
+image:
+  repository: ghcr.io/synveda/product
+  tag: ""
+  digest: $product_digest
+keycloak:
+  image:
+    repository: ghcr.io/synveda/keycloak
+    tag: ""
+    digest: $keycloak_digest
+EOF
+cat > "$outdir/synveda-cnpg-image-$version.yaml" <<EOF
+# Apply only with postgres.mode=cnpg; keep the PostgreSQL version in the tag.
+postgres:
+  image: ghcr.io/synveda/cnpg-postgres:17.11-synveda-$version@$helm_postgres_digest
+EOF
+
 cat > "$stage/environment.json" <<EOF
 {
   "schema_version": 1,
