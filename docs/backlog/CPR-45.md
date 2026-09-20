@@ -46,9 +46,15 @@ Starting checkout: `736c729c681c9973e271f02e36454e4e4acbb694`, branch `main`,
 only untracked `design/` (preserved). Coordinates OPS-11, OPS-8 and FND-7 under
 [ADR-0115](../adr/adr-0115-prebuilt-container-release-verification.md). The owner
 started v0.3.0 before this increment; these additive installation capabilities
-are prepared as 0.4.0. The owner has authorised committing, pushing and releasing
-this increment. Publication remains pending hosted CI, the packaging dry run
-and both native installation qualifications.
+are prepared as 0.4.0. Source commit
+`e59284619567d6a13b70ce3f3b3e81121b7621e6` and tag `v0.4.0` are pushed.
+All 13 [hosted CI jobs](https://github.com/synveda/synveda/actions/runs/35522813753)
+and the [packaging dry run](https://github.com/synveda/synveda/actions/runs/35522831120)
+passed. The [tagged release workflow](https://github.com/synveda/synveda/actions/runs/35525132082)
+passed builds, assembly and anonymous image/executable checks on native AMD64
+and ARM64. Completion of the required Docker/Kubernetes qualifications and
+publication is not yet verified in this record. Pages deployed the candidate
+copy successfully; live HTML and screenshot bytes matched the checked build.
 
 Verified starting inventory: the README led to source builds or the host
 Node/OpenSSL, DNS/TLS reference launcher. `scripts/package-release.sh` already
@@ -193,9 +199,13 @@ Linux AMD64/ARM64, macOS Docker Desktop, Windows/WSL2, real OpenShift, public
 OCI/chart retrieval and a supported published N-1 pair require their named
 infrastructure/artifacts. The prepared required tests must run there; a manifest
 render or local ARM64 cache is not a substitute. Off-host custody, PITR and
-production DR remain separate readiness gaps. Next: push the authorised increment,
-require hosted CI and the packaging dry run, then tag the same source and run
-the hosted qualifications before changing public metadata to published.
+production DR remain separate readiness gaps. Next: verify successful completion
+of release run `35525132082`, anonymously download the complete release asset
+set, check SHA256SUMS and the six native qualification reports against source
+`e59284619567d6a13b70ce3f3b3e81121b7621e6`, and verify OCI/downloadable chart
+byte equality. Then update the installation manifest, guide markers, platform
+evidence and matching Pages copy to published. Keep the existing tag and image
+digests immutable; inspect any failed gate before retrying.
 See [release operations](../RELEASING.md).
 
 ### Continuing deployment scope

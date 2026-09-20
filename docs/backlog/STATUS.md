@@ -9,8 +9,13 @@ retains their implementation evidence. Open entries link to current briefs.
 
 CPR-45/OPS-11/OPS-8/FND-7 prepare the **unpublished 0.4.0 installation
 increment**, separately from v0.3.0, whose publication workflow failed because
-its release page already existed. Publication of 0.4.0 is owner-authorised and
-pending hosted CI, packaging and native installation gates. The existing release
+its release page already existed. The 0.4.0 source and tag are pushed at
+`e59284619567d6a13b70ce3f3b3e81121b7621e6`; all 13 hosted CI jobs and the release
+packaging dry run passed. The [tagged release workflow](https://github.com/synveda/synveda/actions/runs/35525132082)
+passed builds, assembly and anonymous image checks on both architectures.
+Completion of its native installation gates and publication remains unverified.
+Next: verify the complete public assets and reports, then update installation
+publication metadata, platform evidence and matching Pages copy. The existing release
 bundle gains containerized loopback preparation and governed optional sample;
 the existing chart gains operator-free persistent PostgreSQL and independent
 identity ownership. README/site preserve the brand and label unpublished
