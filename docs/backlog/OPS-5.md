@@ -18,6 +18,15 @@ The Helm chart has no backup stanza, and the local KMS key or externally owned
 Helm Secret must be restored with the database. This is a P0 gap in
 [production readiness](../PRODUCTION_READINESS.md).
 
+The OPS-11 / ADR-0112 local Kubernetes drill now exercises quiesced native
+logical archives of Synveda and Keycloak, independent fresh storage, original
+KEK/issuer custody, sealed-session decryption and frozen audit-prefix equality.
+Its exact point and elapsed time are recorded in [OPS-11](OPS-11.md). This is
+bounded local recovery evidence; it does not close encrypted off-host custody,
+WAL/PITR, owned RPO/RTO or recurring drills. The next action remains an
+owner-selected backup destination and retention/custody policy, followed by a
+production-shaped PITR rehearsal.
+
 ## Scope
 
 - Encrypt and retain PostgreSQL base backups plus WAL in an owner-selected

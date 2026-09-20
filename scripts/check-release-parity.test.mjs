@@ -248,6 +248,13 @@ test("release workflow binds the chart and digest-addressed reference images", (
       "scripts/install.sh | sh",
     ),
     current.replace('"synveda-$version.tgz"; do', '"synveda-plugin-$version.tar.gz"; do'),
+    current.replace("          provenance: mode=max", "          provenance: false"),
+    current.replace("          sbom: true", "          sbom: false"),
+    current.replace(
+      "      - name: Publish and pull the OCI chart\n        if: needs.version.outputs.publish == 'true'\n",
+      "      - name: Publish and pull the OCI chart\n",
+    ),
+    current.replace('cmp "assets/synveda-$version.tgz" "pulled-chart/synveda-$version.tgz"', "true"),
     current.replace(
       "      - name: Publish\n        if: needs.version.outputs.publish == 'true'\n",
       "      - name: Publish\n        if: false\n",

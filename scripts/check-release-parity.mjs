@@ -198,6 +198,8 @@ export function releaseWorkflowFindings(source) {
       ...(target === null ? [] : [["target", target]]),
       ["platforms", "${{ matrix.platform }}"],
       ["push", "${{ needs.version.outputs.publish == 'true' }}"],
+      ["provenance", "mode=max"],
+      ["sbom", "true"],
       [
         "tags",
         `ghcr.io/synveda/${repository}:${tagPrefix}\${{ needs.version.outputs.version }}-\${{ matrix.arch }}`,
@@ -278,8 +280,17 @@ export function releaseWorkflowFindings(source) {
   ) {
     findings.push("reference package is not digest-bound after image join and before inventory");
   }
-  if (!source.includes("sha256sum synveda-*.tar.gz synveda-*.tgz > SHA256SUMS")) {
-    findings.push("release checksums omit the Helm chart");
+  if (!source.includes("sha256sum synveda-*.tar.gz synveda-*.tgz synveda-*.yaml > SHA256SUMS")) {
+    findings.push("release checksums omit the Helm chart or immutable image overlays");
+  }
+  const ociChart = stepBlock(source, "Publish and pull the OCI chart");
+  if (!ociChart.includes("        if: needs.version.outputs.publish == 'true'") ||
+      !ociChart.includes("helm registry login ghcr.io") ||
+      !ociChart.includes("--password-stdin") ||
+      !ociChart.includes('helm push "assets/synveda-$version.tgz" oci://ghcr.io/synveda/charts') ||
+      !ociChart.includes('helm pull oci://ghcr.io/synveda/charts/synveda --version "$version"') ||
+      !ociChart.includes('cmp "assets/synveda-$version.tgz" "pulled-chart/synveda-$version.tgz"')) {
+    findings.push("OCI chart publication must be tag-only and pull-verified");
   }
   if (
     !source.includes('"synveda-reference-$version.tar.gz"') ||
@@ -453,6 +464,18 @@ function packageAndRenderChart(version) {
       });
     }
     const name = `synveda-${version}.tgz`;
+    const digests = "123456".split("").map((c) => `sha256:${c.repeat(64)}`);
+    execFileSync("bash", ["scripts/package-release.sh", version, first, "0".repeat(40), ...digests], { cwd: ROOT, stdio: "pipe" });
+    for (const mode of ["external", "cnpg"]) for (const identity of ["external", "packaged"]) {
+      const args = ["template", "synveda", join(first, name), "-f", `deploy/helm/synveda/ci/${mode}-values.yaml`];
+      if (identity === "packaged") args.push("-f", "deploy/helm/synveda/ci/packaged-keycloak-values.yaml");
+      args.push("-f", join(first, `synveda-images-${version}.yaml`));
+      if (mode === "cnpg") args.push("--api-versions", "postgresql.cnpg.io/v1", "-f", join(first, `synveda-cnpg-image-${version}.yaml`));
+      const locked = execFileSync("helm", args, { cwd: ROOT, encoding: "utf8" });
+      if (!locked.includes(`ghcr.io/synveda/product@${digests[0]}`)) throw new Error("release overlay lost immutable product image");
+      if (identity === "packaged" && !locked.includes(`ghcr.io/synveda/keycloak@${digests[2]}`)) throw new Error("release overlay lost immutable Keycloak image");
+      if (mode === "cnpg" && !locked.includes(`17.11-synveda-${version}@${digests[5]}`)) throw new Error("release overlay lost version-bearing CNPG digest");
+    }
     const firstBytes = readFileSync(join(first, name));
     const secondBytes = readFileSync(join(second, name));
     if (!firstBytes.equals(secondBytes)) {

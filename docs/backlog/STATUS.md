@@ -20,6 +20,38 @@ bindings; durable federation and issuer replacement remain open. OpenShift and
 operational/release qualification keep OPS-11 open; measured acceptance and the
 exact next action are in the brief.
 
+ADR-0112 adds the current operability work under OPS-11: existing-job
+interruption, native joint logical recovery, migration locking, repeated public
+workloads and digest-bound Helm release overlays. The install, configuration
+and operations instructions are consolidated. Both starter and external
+operational profiles passed, including fresh logical restore, fenced Capture
+recovery, migration contention and retained reinstall; exact local limits and
+measurements are recorded in the open brief. Public v0.2.0 lacks the current chart/reference artifacts and
+predates epoch 3, so a supported published N-1 upgrade remains unavailable;
+publication and actual platform qualification still block delivery.
+Next: select an unused release version, authorise the candidate workflow and
+pull-install its complete artifact set on an empty target; then qualify the
+declared N-1 pair and actual target platform. No schema reset is an upgrade.
+
+ADR-0111 adds the restricted portability increment: assigned-ID contexts,
+explicit seccomp, a narrow fsGroup/setgid bootstrap fix, edge Routes with named
+certificates, opt-in NetworkPolicies, CA/proxy inputs and a restricted-v3
+post-renderer for the unchanged Keycloak dependency. Kubernetes/OpenShift API
+schema checks and deployment/Compose regressions are separate from real platform
+qualification. No OpenShift or cloud target is configured; OPS-11 remains open
+for actual SCC, router, CNI/CSI and provider acceptance. The
+[portability guide](../../deploy/helm/synveda/PORTABILITY.md) records the exact
+constraints and the next disposable-project checks.
+
+The restricted Kind 0.32.0/Kubernetes v1.36.1 run passed all four ownership
+combinations with namespace PSA restricted/v1.33 and simulated UID 1000900000
+for the product, migration/bootstrap and Keycloak. Each completed 400 captured
+events, 80 context runs, persistence/restart/upgrade/reinstall and revocation;
+audit verification reached 526 events. The
+[portability report](../../demos/evidence/ops11-portability.json) records the
+simulation boundary. The initial setgid failure remains documented alongside
+the fix and clean rerun; it is not counted as a passing attempt.
+
 The 2026-09-19 external Kind run passed clean installation, real Keycloak PKCE,
 Session/context/audit, verified database TLS with a client certificate, bad
 credential/CA/hostname/issuer/audience refusals, runtime restarts and the normal

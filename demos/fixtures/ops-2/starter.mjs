@@ -2,19 +2,25 @@
 // OPS-11: real provider matrix in a selected disposable cluster. No host kubeconfig changes.
 import assert from "node:assert/strict";
 import { spawnSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
+import { operations } from "./operations.mjs";
 
 const cluster = process.env.CLUSTER ?? "synveda-ops11-starter";
 assert.match(cluster, /^synveda-ops11-starter(?:-[a-z0-9-]+)?$/);
 const cases = ["cnpg-packaged", "external-packaged", "cnpg-external", "external-external"];
 if (process.env.STARTER_CASE) assert.ok(cases.includes(process.env.STARTER_CASE));
-for (const name of ["KEEP", "REUSE", "SKIP_BUILD"]) assert.ok([undefined, "0", "1"].includes(process.env[name]));
+for (const name of ["KEEP", "REUSE", "SKIP_BUILD", "PORTABILITY", "OPERATIONS"]) assert.ok([undefined, "0", "1"].includes(process.env[name]));
+const portability = process.env.PORTABILITY === "1";
 const scratch = mkdtempSync(join(tmpdir(), "synveda-starter-"));
 const env = { ...process.env, KUBECONFIG: join(scratch, "kubeconfig") };
-const chart = "deploy/helm/synveda";
+const operational = process.env.OPERATIONS === "1";
+// Day-two CI covers both ownership endpoints; the ordinary starter matrix
+// retains all four combinations, including the two mixed-provider paths.
+const selectedCases = process.env.STARTER_CASE ? [process.env.STARTER_CASE] : operational ? ["cnpg-packaged", "external-external"] : cases;
+const chart = operational ? join(scratch, "chart", "synveda") : "deploy/helm/synveda";
 const product = "synveda/product:ops11-starter";
 const cnpg = "synveda/cnpg-postgres:17.11-ops11-starter";
 const postgres = "synveda/postgres:ops11";
@@ -23,6 +29,7 @@ const proxy = "synveda/proxy:2.11.4-dev";
 const node = "node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5";
 const tenant = "019b53c0-7c00-7000-8000-000000000012";
 const report = { date: new Date().toISOString(), workload: "4 concurrent agents, each 20 batches of 5 session events and 20 context runs; deterministic extraction and lexical retrieval", cases: [] };
+if (portability) report.admission = { policy: "Pod Security Admission restricted", version: "v1.33", simulatedUid: 1000900000, openShiftScc: null, userNamespaces: false, networkPolicyEnforcement: "not tested: Kind default CNI" };
 let owned = false;
 
 function run(command, args, { input, timeout = 120000, quiet = false, allowFailure = false } = {}) {
@@ -208,14 +215,21 @@ async function mcp(namespace, shouldDeny = false) {
 }
 
 try {
+  if (operational) {
+    run("sh", ["scripts/package-chart.sh", "0.2.0-ops11-local", scratch]);
+    mkdirSync(join(scratch, "chart"));
+    run("tar", ["-xzf", join(scratch, "synveda-0.2.0-ops11-local.tgz"), "-C", join(scratch, "chart")]);
+    report.chart = { version: "0.2.0-ops11-local", locallyPackaged: true, published: false };
+  }
   const existing = run("kind", ["get", "clusters"]).trim().split(/\s+/).includes(cluster);
   if (existing) assert.equal(process.env.REUSE, "1", "explicit REUSE=1 required");
   else run("kind", ["create", "cluster", "--name", cluster, "--kubeconfig", env.KUBECONFIG, "--config", "demos/fixtures/ops-2/kind-cluster.yaml", "--wait", "120s"], { timeout: 240000 });
   owned = !existing;
   file("kubeconfig", run("kind", ["get", "kubeconfig", "--name", cluster]));
   if (process.env.SKIP_BUILD !== "1") {
-    for (const [image, source] of [[product, "product"], [postgres, "postgres"], [keycloak, "keycloak"], [proxy, "proxy"]]) run("docker", ["build", "-t", image, "-f", `deploy/compose/${source}/Dockerfile`, "."], { timeout: 1200000 });
-    run("docker", ["build", "-t", cnpg, "-f", "deploy/helm/postgres/Dockerfile", "."], { timeout: 600000 });
+    for (const [image, source] of [[product, "product"], [keycloak, "keycloak"]]) run("bash", ["scripts/build-kind-image.sh", image, `deploy/compose/${source}/Dockerfile`, source], { timeout: 1800000 });
+    for (const [image, source] of [[postgres, "postgres"], [proxy, "proxy"]]) run("docker", ["build", "-t", image, "-f", `deploy/compose/${source}/Dockerfile`, "."], { timeout: 600000 });
+    run("bash", ["scripts/build-kind-image.sh", cnpg, "deploy/helm/postgres/Dockerfile", "cnpg-postgres"], { timeout: 600000 });
   }
   // The fixture's public, digest-pinned Node image is pulled by Kubernetes.
   // Import only source-built images: Docker may retain an incomplete upstream
@@ -229,12 +243,15 @@ try {
   const ca = readFileSync(join(scratch, "ca.crt"), "utf8");
   report.kubernetes = JSON.parse(k(["version", "-o", "json"])).serverVersion.gitVersion;
   report.engine = run("docker", ["info", "--format", "{{.NCPU}} CPUs; {{.MemTotal}} bytes engine RAM"]).trim();
-  for (const selected of process.env.STARTER_CASE ? [process.env.STARTER_CASE] : cases) {
+  report.tools = { helm: run("helm", ["version", "--short"]).trim(), kind: run("kind", ["version"]).trim(), kubectl: JSON.parse(k(["version", "--client", "-o", "json"])).clientVersion.gitVersion };
+  report.images = [product, postgres, cnpg, keycloak, proxy].map((tag) => ({ tag, localId: run("docker", ["image", "inspect", tag, "--format", "{{.Id}}"]).trim() }));
+  for (const selected of selectedCases) {
     const [database, identity] = selected.split("-");
     const ns = `starter-${selected}`, providers = `${ns}-providers`;
     for (const namespace of [ns, providers]) {
       assert.equal(k(["get", "namespace", namespace, "--ignore-not-found", "-o", "name"]).trim(), "", "fixture namespace exists; select a clean cluster");
       k(["create", "namespace", namespace]);
+      if (portability) k(["label", "namespace", namespace, "pod-security.kubernetes.io/enforce=restricted", "pod-security.kubernetes.io/enforce-version=v1.33"]);
     }
     const app = `https://app.${ns}.svc.cluster.local:8443`, auth = `https://auth.${ns}.svc.cluster.local:8443`;
     const passwords = Object.fromEntries(["postgres_bootstrap_password", "synveda_migrator_password", "synveda_gateway_password", "synveda_worker_password", "keycloak_database_password"].map((key) => [key, randomBytes(32).toString("hex")]));
@@ -262,6 +279,13 @@ try {
       keycloak: { enabled: true, fullnameOverride: "keycloak", image: { repository: "synveda/keycloak", tag: "ops11", pullPolicy: "Never" }, publicUrl: auth, proxyTrustedAddresses: "10.244.0.0/16", adminExistingSecret: "synveda-keycloak-admin", databaseCaExistingSecret: database === "cnpg" && identity === "packaged" ? "synveda-pg-ca" : "provider-ca", database: { hostname: dbHost, existingSecret: "synveda-keycloak-db" } },
     });
     const backend = `keycloak-http.${identityNs}.svc.cluster.local:80`;
+    if (portability) {
+      // Simulate assigned identities on ordinary Kubernetes. This does not
+      // simulate SCC/SELinux/user-namespace or CSI admission.
+      values.podSecurityContext = { ...security, runAsUser: 1000900000, runAsGroup: 0, fsGroup: 1000900000 };
+      values.keycloak.podSecurityContext = { ...values.podSecurityContext };
+      values.keycloak.securityContext = { ...restricted, runAsNonRoot: true, runAsUser: 1000900000 };
+    }
     proxyDeployment(ns, app, auth, backend);
     if (identity === "external") {
       // Render the same initial realm, but the independent provider release owns it.
@@ -273,24 +297,38 @@ try {
       const realm = rendered.split(/^---\s*$/m).find((doc) => /name: synveda-keycloak-realm\n/.test(doc) && /^kind: ConfigMap$/m.test(doc));
       assert.ok(realm);
       k(["apply", "-n", providers, "-f", "-"], { input: realm, quiet: true });
-      helm(providers, providerValues, "synveda", `${chart}/charts/keycloakx-7.3.2.tgz`);
+      // Helm's packaged parent contains the dependency as an expanded chart.
+      const dependencyArchive = `${chart}/charts/keycloakx-7.3.2.tgz`;
+      helm(providers, providerValues, "synveda", existsSync(dependencyArchive) ? dependencyArchive : `${chart}/charts/keycloakx`);
       values.keycloak.enabled = false;
     }
     helm(ns, values);
+    if (portability) {
+      for (const [namespace, target] of [[ns, "deployment/synveda"], [ns, "deployment/synveda-worker"], [identityNs, "statefulset/keycloak"]]) {
+        assert.equal(k(["exec", "-n", namespace, target, "--", "id", "-u"]).trim(), "1000900000");
+        k(["exec", "-n", namespace, target, "--", "sh", "-ec", "test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token; test ! -w /etc/passwd; test ! -w /usr; touch /tmp/synveda-portability; rm /tmp/synveda-portability"]);
+      }
+    }
     const secretHash = credentialsHash(ns);
     const claimIds = JSON.parse(k(["get", "pvc", "-n", ns, "-o", "json"])).items.map((p) => p.metadata.uid).sort();
-    apply(ns, { apiVersion: "v1", kind: "ConfigMap", metadata: { name: "team-scripts" }, data: { "starter-team.mjs": readFileSync("demos/fixtures/ops-2/starter-team.mjs", "utf8") } });
+    apply(ns, { apiVersion: "v1", kind: "ConfigMap", metadata: { name: "team-scripts" }, data: { "starter-team.mjs": readFileSync("demos/fixtures/ops-2/starter-team.mjs", "utf8"), "blocked-extractor.mjs": readFileSync("demos/fixtures/ops-2/blocked-extractor.mjs", "utf8") } });
     apply(ns, { apiVersion: "v1", kind: "Pod", metadata: { name: "team-test" }, spec: { restartPolicy: "Never", automountServiceAccountToken: false, securityContext: security,
       containers: [{ name: "node", image: node, command: ["sleep", "infinity"], securityContext: restricted,
         env: [{ name: "APP", value: app }, { name: "AUTH", value: auth }, { name: "ADMIN_URL", value: `http://${backend}` }, { name: "NODE_EXTRA_CA_CERTS", value: "/ca/ca.crt" }],
         volumeMounts: [{ name: "work", mountPath: "/work" }, { name: "scripts", mountPath: "/scripts", readOnly: true }, { name: "ca", mountPath: "/ca", readOnly: true }, { name: "admin", mountPath: "/admin", readOnly: true }] },
-        { name: "cli", image: product, command: ["sleep", "infinity"], securityContext: restricted, env: [{ name: "SYNVEDA_GATEWAY", value: app }, { name: "SSL_CERT_FILE", value: "/ca/ca.crt" }], volumeMounts: [{ name: "work", mountPath: "/work" }, { name: "ca", mountPath: "/ca", readOnly: true }] }],
+        { name: "cli", image: product, command: ["sleep", "infinity"], securityContext: restricted, env: [{ name: "SYNVEDA_GATEWAY", value: app }, { name: "SSL_CERT_FILE", value: "/ca/ca.crt" }], volumeMounts: [{ name: "work", mountPath: "/work" }, { name: "ca", mountPath: "/ca", readOnly: true }] },
+        ...(process.env.OPERATIONS === "1" ? [{ name: "extractor", image: node, command: ["node", "/scripts/blocked-extractor.mjs"], securityContext: restricted, volumeMounts: [{ name: "scripts", mountPath: "/scripts", readOnly: true }] }] : [])],
       volumes: [{ name: "work", emptyDir: {} }, { name: "scripts", configMap: { name: "team-scripts" } }, { name: "ca", secret: { secretName: "provider-ca" } }, { name: "admin", secret: { secretName: "test-admin" } }],
     } });
+    if (process.env.OPERATIONS === "1") {
+      k(["label", "-n", ns, "pod/team-test", "app=team-test"]);
+      service(ns, "team-test", { app: "team-test" }, 8088);
+    }
     k(["wait", "-n", ns, "pod/team-test", "--for=condition=Ready", "--timeout=120s"], { timeout: 130000 });
     const seed = team(ns, "seed");
     await mcp(ns);
     const { workload, resources } = await measuredWorkload(ns, providers);
+    const dayTwo = process.env.OPERATIONS === "1" ? await operations({ ns, providers, identityNs, database, identity, values, k, run, env, scratch, chart, parseYaml, apply, secret, providerDatabase, ca, passwords, roles, helm, wait, team, quiesce }) : undefined;
     console.log(`${ns}: planned pod recreation`);
     // Quiesce clients for this single-instance maintenance test. Preserve the
     // provider's shutdown grace; force deletion would not prove safe recovery.
@@ -313,14 +351,15 @@ try {
     team(ns, "verify");
     const revoke = team(ns, "revoke");
     await mcp(ns, true);
-    report.cases.push({ selection: selected, seed, workload, revoke, resources, persistentCredentials: true, persistentContent: true, uninstallReinstall: true });
+    report.cases.push({ selection: selected, seed, workload, revoke, resources, dayTwo, persistentCredentials: true, persistentContent: true, uninstallReinstall: true });
     console.log(`PASS ${selected}: install, PKCE/team/service/MCP, recreation, upgrade, retained reinstall and revocation`);
     quiesce(ns, identityNs);
     k(["delete", "namespace", ns, providers, "--wait=true", "--timeout=180s"], { timeout: 200000 });
   }
   mkdirSync("demos/evidence", { recursive: true });
-  writeFileSync("demos/evidence/ops11-starter.json", JSON.stringify(report, null, 2) + "\n");
-  console.log("PASS starter matrix; content-free measurements: demos/evidence/ops11-starter.json");
+  const reportPath = operational ? `demos/evidence/ops11-operations${process.env.STARTER_CASE ? `-${process.env.STARTER_CASE}` : ""}.json` : portability ? "demos/evidence/ops11-portability.json" : "demos/evidence/ops11-starter.json";
+  writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n");
+  console.log(`PASS starter matrix; content-free measurements: ${reportPath}`);
 } finally {
   if (process.env.KEEP === "1") console.log(`KEEP=1: ${cluster}; private operator scratch: ${scratch}`);
   else {
