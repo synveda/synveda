@@ -74,7 +74,7 @@ pub mod tenants;
 pub mod tool_registry;
 pub mod workspaces;
 
-use sqlx::migrate::Migrator;
+use sqlx::migrate::{Migrate, Migrator};
 use sqlx::{Connection, PgExecutor, PgPool};
 use synveda_types::{Error, Result};
 
@@ -151,10 +151,10 @@ pub async fn migrate_reporting(
     pool: &PgPool,
     database_roles: &runtime_role::DatabaseRoles,
 ) -> Result<epoch::SchemaMetadata> {
-    let mut connection = pool.acquire().await.map_err(|error| Error::Storage {
+    let connection = pool.acquire().await.map_err(|error| Error::Storage {
         message: format!("acquire migration connection: {error}"),
     })?;
-    migrate_reporting_connection(&mut connection, database_roles).await
+    migrate_reporting_connection(connection.detach(), database_roles).await
 }
 
 /// Connection-owned migration path used when a caller has already proved the
@@ -162,6 +162,33 @@ pub async fn migrate_reporting(
 /// connection prevents a routing proxy from changing clusters on pool
 /// reacquisition.
 pub(crate) async fn migrate_reporting_connection(
+    mut connection: sqlx::PgConnection,
+    database_roles: &runtime_role::DatabaseRoles,
+) -> Result<epoch::SchemaMetadata> {
+    // SQLx's lock is session-scoped and reentrant. Its inner run releases only
+    // its own acquisition; this outer acquisition also covers the preflight
+    // and epoch stamp. Own (never return to a pool) this physical connection so
+    // cancellation or an inner migration error cannot strand advisory locks.
+    // Reset passes its already-proved target connection through this same seam.
+    let result = async {
+        runtime_role::initialize_product_session_connection(&mut connection).await?;
+        Migrate::lock(&mut connection)
+            .await
+            .map_err(|error| Error::Storage {
+                message: format!("acquire migration boundary lock: {error}"),
+            })?;
+        migrate_locked_connection(&mut connection, database_roles).await
+    }
+    .await;
+    let closed = connection.close().await.map_err(|error| Error::Storage {
+        message: format!("close migration boundary connection: {error}"),
+    });
+    let metadata = result?;
+    closed?;
+    Ok(metadata)
+}
+
+async fn migrate_locked_connection(
     connection: &mut sqlx::PgConnection,
     database_roles: &runtime_role::DatabaseRoles,
 ) -> Result<epoch::SchemaMetadata> {
@@ -170,7 +197,6 @@ pub(crate) async fn migrate_reporting_connection(
         .map_err(|refusal| Error::Storage {
             message: refusal.to_string(),
         })?;
-    runtime_role::initialize_product_session_connection(&mut *connection).await?;
     {
         let mut authority = connection.begin().await.map_err(|error| Error::Storage {
             message: format!("begin pre-migration authority snapshot: {error}"),
@@ -202,7 +228,7 @@ pub(crate) async fn migrate_reporting_connection(
         })?;
     }
     MIGRATOR
-        .run(&mut *connection)
+        .run_direct(&mut *connection)
         .await
         .map_err(|err| Error::Storage {
             message: format!("migration failed: {err}"),
