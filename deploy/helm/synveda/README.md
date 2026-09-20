@@ -1,35 +1,48 @@
-# Install Synveda on Kubernetes
+# Deploy to Kubernetes
 
-One chart runs one gateway/console and one private worker. Choose external
-PostgreSQL/OIDC, or the persistent small-team starter with an already-installed
-CloudNativePG operator and optional Keycloak. The four ownership combinations
-share the same Cedar, forced-RLS, VedaFlow, audit and job contracts. Upgrades
-interrupt service; application replicas remain one.
+The existing chart runs one gateway/console and one private worker. Select
+bundled or existing application PostgreSQL independently of bundled Keycloak
+or existing OIDC. Bundled PostgreSQL is a persistent namespaced StatefulSet;
+CNPG is an explicit alternative requiring an operator you already manage.
+All modes preserve Cedar, forced RLS, VedaFlow, audit and the migration contract.
 
-**Release availability, checked 2026-09-20:** [public v0.2.0](https://github.com/synveda/synveda/releases/tag/v0.2.0) has only the old
-native/console/plugin/profile archives. It has no current chart or reference
-bundle and predates epoch 3. Do not use that tag as this guide's release.
-The new workflow is prepared and locally package-tested; publication and an
-empty-registry pull/install remain prerequisites. The live commands below are
-labelled as measured source-fixture commands or operator commands requiring a
-verified candidate. This guide does not call an unpublished candidate installable.
+<!-- installation-version: 0.4.0; publication: unreleased -->
+**0.4.0 is unreleased.** The v0.3.0 build is separate and does not contain the
+installation changes documented here. Download/pull commands are pending
+qualification and publication of the exact matching artifacts.
 
-Read [configuration](CONFIGURATION.md) for file formats and exact database
-privileges; use [operations](OPERATIONS.md) for maintenance, recovery, upgrades
-and uninstall. [Portability](PORTABILITY.md) contains only platform differences
-and outstanding OpenShift/cloud qualification, not a separate installer.
+Start with the [complete loopback evaluation recipe](examples/README.md).
+It prepares private Secrets in a short-lived container, installs no cluster-wide
+infrastructure, and exposes the console through explicit loopback port-forwards.
+For your existing infrastructure use the configuration below.
+
+## Dependency ownership
+
+| Application database | Identity | Starting values |
+|---|---|---|
+| Bundled | Bundled Keycloak | [local recipe](examples/README.md) or [bundled DB](ci/bundled-values.yaml) + [Keycloak](examples/bundled-keycloak.yaml) |
+| Existing | Existing OIDC | [external](ci/external-values.yaml) |
+| Existing | Bundled Keycloak | [external](ci/external-values.yaml) + [separate identity DB](examples/external-database-keycloak.yaml) |
+| Bundled | Existing OIDC | [bundled DB](ci/bundled-values.yaml) |
+
+Read [configuration](CONFIGURATION.md) for exact database privileges, issuer
+and Secret formats; [operations](OPERATIONS.md) for maintenance and recovery;
+[portability](PORTABILITY.md) for existing ingress, Gateway API and OpenShift
+configuration. Generic OIDC compatibility is not verified support for every IdP.
 
 ## Cluster administrator prerequisites
 
 The administrator supplies a namespace, installer RBAC, quotas, DNS, trusted TLS,
-private networking and registry access. Starter PostgreSQL additionally needs
-CNPG and persistent storage. The chart creates no CRD/operator, ingress
+private networking and registry access. Bundled PostgreSQL needs persistent storage. Only `postgres.mode=cnpg` needs
+a preinstalled CNPG operator. Loopback evaluation needs neither DNS nor ingress TLS. The chart creates no CRD/operator, ingress
 controller, certificate issuer, storage class or monitoring stack.
 
-Measured local versions are Kind 0.32.0, Kubernetes 1.36.1, Helm 4.2.3,
-kubectl 1.33.9, CNPG 1.30.0, PostgreSQL 17.11 with vector 0.8.6 and btree_gin
-1.3, and Keycloak 26.7.2 via locked keycloakx 7.3.2. Containers are Linux arm64
-on macOS/OrbStack. Kind used a private-CA HTTPS fixture proxy. Real ingress,
+The candidate qualification uses Kind 0.32.0, Kubernetes and kubectl 1.36.1,
+Helm 4.2.3, PostgreSQL 17.11 with vector 0.8.6 and btree_gin 1.3, and Keycloak
+26.7.2 via locked keycloakx 7.3.2. Earlier explicit CNPG evidence used operator
+1.30.0; the bundled candidate installs no operator. Containers are Linux arm64
+on macOS/OrbStack. The four-mode fixture uses private-CA HTTPS; the local recipe
+uses loopback port-forwarding. Real ingress,
 OpenShift, cloud services and a general Kubernetes minor-version window remain
 unqualified. Structural API validation is distinct from execution evidence.
 
@@ -360,16 +373,27 @@ cluster and namespaces, generates synthetic credentials, runs the real chart,
 then removes only its test resources. It requires no team kubeconfig or secrets:
 
 ```sh
+BUNDLED_MATRIX=1 PORTABILITY=1 OPERATIONS=1 STARTER_MATRIX=1 bash demos/ops-2-helm-install.sh
 OPERATIONS=1 STARTER_MATRIX=1 STARTER_CASE=cnpg-packaged bash demos/ops-2-helm-install.sh
 OPERATIONS=1 STARTER_MATRIX=1 STARTER_CASE=external-external bash demos/ops-2-helm-install.sh
 POSTGRES_MODE=external bash demos/ops-2-helm-install.sh
 ```
 
-The first two commands package and extract the chart, then exercise each
-ownership endpoint through all day-two drills and write a separate report.
+The first command exercises all four bundled/external combinations without an
+operator. The next two commands package and extract the chart, then exercise
+each ownership endpoint through all day-two drills and write a separate report.
+The explicit CNPG fixture installs its operator only inside its disposable Kind
+cluster; it requires authorisation for that cluster-wide test infrastructure.
 Omit `STARTER_CASE` to run both sequentially. The last command retains the database TLS/client-certificate and
 OIDC negative matrix. `PORTABILITY=1 STARTER_MATRIX=1` additionally exercises
 all four ownership combinations under simulated restricted IDs. These use
 local source images, not a verified public release. `KEEP=1` retains diagnostic
 state; `REUSE=1` requires empty selected fixture namespaces. Results and exact
 executed profiles live in [OPS-11](../../../docs/backlog/OPS-11.md).
+
+Release qualification uses `scripts/qualify-kubernetes-release.mjs` with the
+extracted candidate bundle, packaged chart archive and report path. It disables
+builds, imports the manifest-bound images and also exercises the shipped local
+preparation and browser port-forward recipe. The
+[installation record](../../../docs/backlog/CPR-45.md#installation-mission-2026-09-20)
+and content-free reports distinguish local candidates from published artifacts.

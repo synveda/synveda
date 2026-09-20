@@ -154,6 +154,12 @@ test("release workflow binds the chart and digest-addressed reference images", (
   for (const [index, mutant] of [
     current.replace("needs: [version, assemble, verify-images]", "needs: [version, assemble]"),
     current.replace("node scripts/verify-release-images.mjs", "echo skipped"),
+    current.replace("node scripts/qualify-release.mjs", "echo skipped"),
+    current.replace("node scripts/qualify-kubernetes-release.mjs", "echo skipped"),
+    current.replace('test -s "release-docker-$arch.json"', "true"),
+    current.replace('test -s "release-kubernetes-$arch.json"', "true"),
+    current.replace('cmp "assets/synveda-$VERSION.tgz" "anonymous-chart/synveda-$VERSION.tgz"', "true"),
+    current.replace("- name: Qualify the exact Docker and chart artifacts", "- name: Qualify the exact Docker and chart artifacts\n        continue-on-error: true"),
     current.replace("org.opencontainers.image.revision=${{ github.sha }}", "org.opencontainers.image.revision=old"),
     current.replace('mktemp -d "$RUNNER_TEMP/synveda-anonymous-docker.XXXXXX"', 'echo /home/runner/.docker'),
     current.replace("test -s release-images-arm64.json", "true"),

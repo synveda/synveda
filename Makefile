@@ -415,6 +415,7 @@ check-deploy: check-release-parity check-chart-images check-compose-contract
 	node scripts/check-deploy-convergence.mjs
 
 check-compose-contract:
+	node --test scripts/evaluation.test.mjs
 	node --test scripts/generate-compose-issuer.test.mjs
 	node --test scripts/check-tls-inputs.test.mjs
 	node --test scripts/manage-hosts-file.test.mjs

@@ -240,6 +240,7 @@ test("installer converges the canonical reference and preserves mutable state", 
       ...process.env,
       HOME: fixture.env.HOME,
       SYNVEDA_HOME: fixture.home,
+      SYNVEDA_COMPOSE_RUNTIME: "reference",
       SYNVEDA_APP_HOST: "app.example.com",
       SYNVEDA_AUTH_HOST: "auth.example.com",
     },
@@ -287,7 +288,8 @@ test("server-only archive prepares private inputs without native binaries and pr
   const env = {
     ...process.env,
     SYNVEDA_HOME: installRoot,
-    SYNVEDA_APP_HOST: "app.example.com",
+    SYNVEDA_COMPOSE_RUNTIME: "reference",
+      SYNVEDA_APP_HOST: "app.example.com",
     SYNVEDA_AUTH_HOST: "auth.example.com",
     SYNVEDA_COMPOSE_PROJECT_SUFFIX: `acceptance-prebuilt-${process.pid}`,
   };

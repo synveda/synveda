@@ -1,0 +1,10 @@
+# Layer on ci/external-values.yaml. Provision this separate durable DB first.
+keycloak:
+  enabled: true
+  publicUrl: https://auth.example.test
+  proxyTrustedAddresses: 10.244.0.0/16 # replace with your actual proxy network
+  adminExistingSecret: synveda-keycloak-admin
+  databaseCaExistingSecret: keycloak-database-ca
+  database:
+    hostname: identity-database.example.test
+    existingSecret: synveda-keycloak-db

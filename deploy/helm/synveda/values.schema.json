@@ -408,7 +408,8 @@
         "mode": {
           "enum": [
             "external",
-            "cnpg"
+            "cnpg",
+            "bundled"
           ]
         },
         "external": {
@@ -654,6 +655,74 @@
             "supervised",
             "unsupervised"
           ]
+        },
+        "bundled": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "image": {
+              "type": "string"
+            },
+            "administratorExistingSecret": {
+              "type": "string"
+            },
+            "administratorPasswordSecretKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "migratorExistingSecret": {
+              "type": "string"
+            },
+            "migratorPasswordSecretKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "migratorUrlSecretKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tlsExistingSecret": {
+              "type": "string"
+            },
+            "tlsCertSecretKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tlsKeySecretKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "caSecretKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "existingClaim": {
+              "type": "string"
+            },
+            "storageClass": {
+              "type": "string"
+            },
+            "size": {
+              "type": "string",
+              "minLength": 1
+            },
+            "podSecurityContext": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "object"
+            },
+            "nodeSelector": {
+              "type": "object"
+            },
+            "tolerations": {
+              "type": "array"
+            },
+            "affinity": {
+              "type": "object"
+            }
+          },
+          "required": []
         }
       },
       "required": [
@@ -1225,6 +1294,12 @@
           "type": "string"
         },
         "databaseCaSecretKey": {
+          "type": "string"
+        },
+        "localEvaluation": {
+          "type": "boolean"
+        },
+        "evaluationAccountsExistingSecret": {
           "type": "string"
         }
       }

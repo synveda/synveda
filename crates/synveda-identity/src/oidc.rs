@@ -227,6 +227,11 @@ pub struct IssuerConfig {
     /// Issuer URL, compared byte-for-byte with the discovery document and
     /// the `iss` claim.
     pub issuer: String,
+    /// Optional operator-owned discovery document URL for a private backchannel.
+    /// The document and every token must still name `issuer` byte-for-byte.
+    /// This changes network routing, never the trusted issuer identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovery_url: Option<String>,
     /// OAuth2 client id registered at the IdP; also the ID-token audience.
     pub client_id: String,
     /// Expected bearer/API-token audience. This must be distinct from
@@ -497,6 +502,17 @@ impl OidcVerifier {
             } else {
                 MetadataEndpointTransport::LoopbackHttpOnly
             };
+            if let Some(discovery_url) = &config.discovery_url {
+                validate_issuer_identifier(discovery_url)?;
+                validate_metadata_endpoint(
+                    discovery_url,
+                    "configured discovery endpoint",
+                    metadata_endpoint_transport,
+                )
+                .map_err(|_| Error::Invalid {
+                    message: "OIDC discovery_url must obey the canonical issuer transport policy; private HTTP requires explicit development HTTP".to_owned(),
+                })?;
+            }
             let entry = IssuerEntry {
                 config,
                 metadata_endpoint_transport,
@@ -900,7 +916,27 @@ impl OidcVerifier {
         &self,
         entry: &IssuerEntry,
     ) -> std::result::Result<IssuerState, OidcDiagnosticError> {
-        let discovery = self.fetch_discovery(&entry.config.issuer).await?;
+        let discovery = self
+            .fetch_discovery(&entry.config.issuer, entry.config.discovery_url.as_deref())
+            .await?;
+        if let Some(discovery_url) = &entry.config.discovery_url {
+            // Keycloak's supported dynamic backchannel keeps authorization on
+            // the public origin and advertises token/JWKS on the private origin.
+            // Configuration cannot substitute a different browser authority.
+            for (endpoint, authority) in [
+                (&discovery.authorization_endpoint, &entry.config.issuer),
+                (&discovery.token_endpoint, discovery_url),
+                (&discovery.jwks_uri, discovery_url),
+            ] {
+                let endpoint = url::Url::parse(endpoint)
+                    .map_err(|_| OidcDiagnosticError::refused("backchannel origin"))?;
+                let authority = url::Url::parse(authority)
+                    .map_err(|_| OidcDiagnosticError::refused("backchannel origin"))?;
+                if endpoint.origin() != authority.origin() {
+                    return Err(OidcDiagnosticError::refused("backchannel origin"));
+                }
+            }
+        }
         validate_metadata_endpoint(
             &discovery.authorization_endpoint,
             "authorization endpoint",
@@ -952,12 +988,15 @@ impl OidcVerifier {
     async fn fetch_discovery(
         &self,
         issuer: &str,
+        discovery_url: Option<&str>,
     ) -> std::result::Result<DiscoveryDocument, OidcDiagnosticError> {
         let url = format!(
             "{}/.well-known/openid-configuration",
             issuer.trim_end_matches('/')
         );
-        let document: DiscoveryDocument = self.fetch_json(&url, "discovery").await?;
+        let document: DiscoveryDocument = self
+            .fetch_json(discovery_url.unwrap_or(&url), "discovery")
+            .await?;
         // Byte-for-byte per ADR-0010: a document that names another issuer
         // is misconfiguration or an attack, never something to normalise.
         if document.issuer != issuer {

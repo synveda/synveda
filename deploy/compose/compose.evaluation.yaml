@@ -1,0 +1,27 @@
+# CPR-45: release evaluation uses the canonical services and prebuilt images.
+# One public loopback origin; the private Keycloak backchannel preserves issuer.
+services:
+  proxy:
+    ports:
+      - target: ${SYNVEDA_PUBLIC_PORT}
+        published: ${SYNVEDA_PUBLIC_PORT}
+        host_ip: 127.0.0.1
+        protocol: tcp
+  keycloak:
+    environment:
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+  keycloak-realm-convergence:
+    # First-run identity reconciliation performs bounded credential/authority
+    # proofs. Allow CPU-constrained hosts time inside the launcher's 600s bound;
+    # successful health still requires the unchanged complete generation gate.
+    healthcheck:
+      start_period: 5m
+  issuer-diagnostic:
+    networks:
+      identity-backend: {}
+  gateway:
+    networks:
+      identity-backend: {}
+  worker:
+    networks:
+      identity-backend: {}

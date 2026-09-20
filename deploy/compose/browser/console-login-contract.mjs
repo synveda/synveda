@@ -68,11 +68,13 @@ export function validateSettings(appRaw, issuerRaw) {
   if (app.pathname !== "/" || issuer.pathname !== "/realms/synveda") {
     refuse("configuration");
   }
-  if (app.protocol !== issuer.protocol || app.port !== issuer.port) {
+  const localEvaluation = app.protocol === "http:" && issuer.protocol === "http:" &&
+    app.hostname === "localhost" && issuer.hostname === "localhost" && app.port !== "" && issuer.port !== "";
+  if (app.protocol !== issuer.protocol || (!localEvaluation && app.port !== issuer.port)) {
     refuse("configuration");
   }
-  if (app.hostname === issuer.hostname) refuse("configuration");
-  if (app.protocol === "http:") {
+  if (app.hostname === issuer.hostname && !localEvaluation) refuse("configuration");
+  if (app.protocol === "http:" && !localEvaluation) {
     if (
       !app.hostname.endsWith(".test") ||
       !issuer.hostname.endsWith(".test") ||

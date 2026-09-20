@@ -5,180 +5,93 @@
 
 # Synveda
 
-**Shared memory and context for AI agents.**
+**Governed knowledge, context and skills for AI agents.** Synveda gives agents
+reusable knowledge with clear ownership, evidence and review. Capture a finding
+from a session, review the proposed change, then make the approved revision
+available to a later task. Run it on your own infrastructure: PostgreSQL stores
+the data, Cedar decides access, and the web console shows what changed and why.
 
-Synveda keeps useful knowledge from your agents' work so you can use it again.
-Connect an agent, review the findings from its sessions, and keep the decisions,
-conventions and procedures that matter to your project. Future tasks can
-retrieve that knowledge without needing the original conversation.
+![Synveda New Learnings in the fictional Northstar sample: source evidence and a proposed learning awaiting review](assets/product/review-learning.png)
 
-You choose what gets published, who can access it, and which skills and tool
-definitions a project can use. Synveda runs on your infrastructure, with
-PostgreSQL storing the data and a web console for managing it.
+The screenshot is from the locally tested installation candidate and fictional
+sample. Synthetic replay is labelled; it is not a live-agent or human-review claim.
 
-[Prebuilt Docker deployment](#run-with-prebuilt-docker-images) ·
-[Try it locally](#quick-start-from-a-source-checkout) ·
-[Connect an agent](#agent-setup) ·
-[Product guide](docs/INSTALL.md) ·
-[Contribute](CONTRIBUTING.md)
+## Run with Docker
 
-> **Current status: local evaluation.** The source demo is available today.
-> Prebuilt deployment needs a new release: public v0.2.0 is older than the
-> current code and database schema. Production deployment still has
-> [open requirements](#known-production-gaps).
+Download the versioned **prebuilt Docker bundle** and verify its checksum. It
+uses images containing the console, CLI and preparation tools; the host needs Docker Compose,
+curl, tar and a SHA-256 utility. Local evaluation uses loopback, generated private
+credentials and bundled PostgreSQL/Keycloak. No source checkout, compiler, host
+Node/OpenSSL, DNS changes or model subscription is required.
 
-## What you can do
-
-| In the console        | Use it to                                                                  |
-| --------------------- | -------------------------------------------------------------------------- |
-| **Sessions**          | See what your agents worked on and inspect their activity.                 |
-| **New Learnings**     | Review suggestions captured from sessions before adding them to Knowledge. |
-| **Knowledge**         | Find project knowledge, edit it, and see its sources and revision history. |
-| **Context**           | Request information for a task and inspect what was selected and why.      |
-| **Skills and Tools**  | Manage reusable skill versions and approved MCP server definitions.        |
-| **Reviews and Audit** | Review proposed changes and inspect the recorded decisions.                |
-
-For example, an agent might discover why a service retries failed requests. You
-can review that finding, publish it with its source, and make it available to
-later sessions. Capture proposes the finding; your policy decides how it can be
-published.
-
-## Run with prebuilt Docker images
-
-A small team should not need to compile the server. The release workflow
-builds **Linux AMD64 and ARM64** images and packages a launcher that downloads
-the matching versions. The console, gateway and worker are already compiled.
-
-Use the [prebuilt Docker guide](deploy/compose/PREBUILT.md) when a compatible
-release is available. You download one deployment archive, verify its checksum,
-configure DNS and TLS, then run `synveda-compose up` and `synveda-compose smoke`.
-The host needs Docker, Compose, Node.js and OpenSSL; it needs no Git checkout,
-Rust compiler or pnpm. Each agent user connects to that shared server.
-
-The current public v0.2.0 release does **not** include this archive. The next
-release must pass anonymous image pulls and executable checks on both
-architectures before it is announced. This does not establish production
-readiness or Windows/WSL2 support. For a local evaluation now, use the source
-demo below; for an existing Kubernetes cluster, see the
-[Helm guide](deploy/helm/synveda/README.md).
-
-## Quick start from a source checkout
-
-The local demo builds Synveda and starts it with PostgreSQL and Keycloak. You
-do not need a model API key or paid agent account to explore the console.
-
-### Before you start
-
-- **macOS or Linux**, using a regular user account. Windows and WSL2 setup are
-  not yet documented or tested. The completed deployment run used macOS with
-  OrbStack; Linux and Docker Desktop acceptance are still pending.
-- **Docker Engine 28+**, **Compose 2.33.1+**, and a running **default Buildx
-  builder** using the local **docker** driver. Remote Docker contexts are not
-  supported by these scripts.
-- **Git, Node.js 22+, OpenSSL and GNU Make**. Rust is only needed if you also
-  want to build the CLI or work on the backend.
-- Permission to add two local hostname entries. The hosts helper needs a
-  root-owned, non-writable, ACL-free Node installation at /usr/bin/node or
-  /usr/local/bin/node. Linux also needs getfacl from the acl package. See the
-  [hostname setup guide](deploy/compose/README.md#development-hostname-setup).
-
-### 1. Prepare the local addresses
+<!-- installation-version: 0.4.0; publication: unreleased -->
+**0.4.0 is unreleased.** The following commands are for its candidate archive;
+the download step becomes available only after release qualification and approval.
+The in-flight 0.3.0 release does not contain these changes.
 
 ```sh
-git clone https://github.com/synveda/synveda.git
-cd synveda
-make compose-hosts-plan
-make compose-hosts-status
+# After downloading and checking synveda-reference-0.4.0.tar.gz:
+tar -xzf synveda-reference-0.4.0.tar.gz
+cd synveda-reference-0.4.0
+./synveda-compose up
+./synveda-compose credential
 ```
 
-Review the proposed hostname entries. With the default settings, install them:
+Open **http://localhost:8080/console/**. Create an empty workspace, or explicitly
+run `./synveda-compose sample` for the fictional walkthrough.
+
+[Docker download, configuration and lifecycle](deploy/compose/PREBUILT.md)
+
+## Deploy to Kubernetes
+
+Use the existing chart with independently bundled or existing PostgreSQL and
+Keycloak/OIDC. Bundled PostgreSQL is one persistent, namespaced instance with
+no operator prerequisite. CNPG remains an explicit operator-managed option.
 
 ```sh
-SYNVEDA_CONFIRM_HOSTS_INSTALL=install:127.0.0.1:synveda-development:app.synveda.test:auth.synveda.test \
-  make compose-hosts-install
+# Pending the same 0.4.0 release; OCI and .tgz contain the same chart:
+helm pull oci://ghcr.io/synveda/charts/synveda --version 0.4.0 --untar
+sh synveda/examples/prepare-local.sh "$HOME/.synveda-kubernetes"
 ```
 
-Only this hosts helper needs elevated privileges. Run the other commands as
-your regular user. If another Synveda project already owns these names or
-port 8080, follow the hostname guide before continuing.
+Review the current Kubernetes context, create the documented evaluation
+namespace and apply the private Secret file before installing. Follow the
+[complete Kubernetes recipe](deploy/helm/synveda/examples/README.md) for the
+bounded install and loopback port-forwards. Existing infrastructure uses
+[reviewable values examples](deploy/helm/synveda/README.md#dependency-ownership).
 
-<details>
-<summary>Refresh your DNS cache, then check the addresses</summary>
+## First useful result
 
-On macOS:
+The opt-in sample creates a fictional workspace, a source session and a proposed
+learning using normal authenticated APIs. Sign in as the separate reviewer to
+inspect the evidence and approve or reject it. Applied Knowledge becomes
+available to subsequent Context selection. The
+[sample walkthrough](deploy/compose/PREBUILT.md#first-workspace-and-sample)
+explains the remaining explicit review and skill-binding steps.
 
-```sh
-sudo dscacheutil -flushcache
-sudo killall -HUP mDNSResponder
-```
+## Support status
 
-On Linux with systemd-resolved:
+Local candidate evidence covers macOS/OrbStack on Apple Silicon and Kubernetes
+1.36.1 in disposable Kind, including all four dependency combinations. Published
+anonymous installation, native Linux AMD64/ARM64, Docker Desktop, Windows/WSL2
+and real OpenShift qualification are pending. A rendered manifest establishes
+no additional platform support.
 
-```sh
-sudo resolvectl flush-caches
-```
+This is a self-hosted evaluation release: one gateway and worker, no HA claim,
+no cross-epoch database upgrade, and no completed off-host disaster-recovery
+qualification. Read the [readiness gaps](docs/PRODUCTION_READINESS.md) and
+[installation choices](docs/INSTALL.md).
 
-For other Linux resolvers, follow their cache-flush procedure. Then run:
+## Build from source
 
-```sh
-make compose-hosts-status
-make compose-resolver-check
-```
+Contributor prerequisites and the existing source workflow are in
+[CONTRIBUTING.md](CONTRIBUTING.md#local-deployment). Source builds are separate
+from released installation.
 
-</details>
-
-### 2. Start Synveda
-
-```sh
-export SYNVEDA_COMPOSE_PROFILES=demo
-make compose-config
-make compose-up
-make compose-smoke
-```
-
-There is no .env file to copy. Startup reads the checked-in defaults, generates
-private secrets locally, prepares the databases and starts the services.
-Rerunning it keeps the existing data and secrets. The smoke check verifies the
-services and endpoints; browser sign-in is the next step.
-
-### 3. Open the console
-
-Visit **[app.synveda.test:8080/console/](http://app.synveda.test:8080/console/)**,
-or the exact address printed by startup. Use that hostname rather than localhost
-so sign-in returns to the correct place.
-
-Sign in as **synveda-demo-admin**. Its display name is **Avery Author**. Use the
-generated password stored in this local file, and keep the file private:
-
-```text
-deploy/compose/runtime/synveda-development/secrets/keycloak_demo_admin_password
-```
-
-On a fresh database, **Getting started** walks you through creating a workspace,
-adding a project and connecting a client. Once set up, **Home** links to sessions,
-new learnings, knowledge and context requests.
-
-Want to explore populated data? Follow the
-[ingestion-retry walkthrough](deploy/compose/README.md#governed-ingestion-retry-walkthrough).
-It uses fictional demo content to walk through capture, review, publication and
-retrieval. It needs the source CLI: build it with
-`cargo build --locked -p synveda-cli`, then use `./target/debug/synveda` wherever
-the guide says `synveda`, unless that binary is already on your PATH.
-
-### Stop and return later
-
-From the same shell, with the same profile and any project selectors:
-
-```sh
-make compose-down
-# When you want to return:
-make compose-up
-```
-
-Stopping preserves your data and generated secrets. Data reset and hostname
-removal are separate operations in the [Compose guide](deploy/compose/README.md).
-If startup fails, begin with `make compose-hosts-status` and
-`make compose-resolver-check`, then use the log commands printed by startup.
+<a id="run-with-prebuilt-docker-images"></a>
+<a id="quick-start-from-a-source-checkout"></a>
+The previous installation anchors now point to the Docker and contributor
+instructions above.
 
 ## Agent setup
 
@@ -212,7 +125,7 @@ needed. High availability and several operational checks also remain open.
 The [readiness register](docs/PRODUCTION_READINESS.md) lists the gaps and the
 checks needed to close them.
 
-For deployment work, start with [Docker Compose](deploy/compose/README.md).
+For deployment work, start with [Run with Docker](deploy/compose/PREBUILT.md).
 There is also a [Kubernetes chart](deploy/helm/synveda/README.md), currently
 limited to one gateway and one worker. Both have qualification limits; a local
 demo passing does not establish a production deployment.
@@ -245,33 +158,8 @@ Read the [security model](docs/SECURITY.md) or
 
 ## Working on Synveda
 
-Use Rust **1.96.0**, Node.js **22+** and pnpm **11.13.1**.
-
-```sh
-pnpm install --frozen-lockfile
-pnpm -r test
-pnpm -r build
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo build --workspace
-```
-
-Rust builds use the committed SQLx offline metadata. `make db-test` runs the
-fresh-database suite; `make ci` runs the full PR checks and also needs the
-[Python development dependencies](sdks/README.md#install-locally-and-check).
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before making changes.
-
-To work only on the public site:
-
-```sh
-pnpm install --frozen-lockfile --filter @synveda/website
-pnpm --filter @synveda/website check
-pnpm --filter @synveda/website preview
-```
-
-Open [127.0.0.1:4173/synveda/](http://127.0.0.1:4173/synveda/).
-The [website guide](website/README.md) covers branding, GitHub Pages and uploads.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for source builds and tests and the
+[website guide](website/README.md) for local Pages preview and brand maintenance.
 
 ## Documentation
 

@@ -7,7 +7,7 @@ import { runProductAcceptance } from "./product-demo-runner.mjs";
 try {
   if (
     process.argv.length !== 3 ||
-    !["seed", "verify"].includes(process.argv[2])
+    !["seed", "verify", "sample"].includes(process.argv[2])
   ) throw new BrowserContractError("configuration");
   const phase = process.argv[2];
   await runProductAcceptance({ chromium, phase });

@@ -522,7 +522,7 @@ export async function runProductAcceptance({
     environment.SYNVEDA_BROWSER_ISSUER,
   );
   if (
-    !["seed", "verify"].includes(phase) ||
+    !["seed", "verify", "sample"].includes(phase) ||
     typeof chromium?.launch !== "function" ||
     typeof readPassword !== "function" ||
     typeof browserCheckpoint !== "function"
@@ -534,7 +534,7 @@ export async function runProductAcceptance({
   let viewerPassword;
   try {
     adminPassword = readPassword(ADMIN_PASSWORD_FILE);
-    if (phase === "seed") {
+    if (phase !== "verify") {
       memberPassword = readPassword(MEMBER_PASSWORD_FILE);
       if (localRetryReview) {
         approverPassword = readPassword(APPROVER_PASSWORD_FILE);
@@ -543,9 +543,9 @@ export async function runProductAcceptance({
     }
     if (
       !Buffer.isBuffer(adminPassword) ||
-      (phase === "seed" && !Buffer.isBuffer(memberPassword)) ||
-      (phase === "seed" && localRetryReview && !Buffer.isBuffer(approverPassword)) ||
-      (phase === "seed" && localRetryReview && !Buffer.isBuffer(viewerPassword))
+      (phase !== "verify" && !Buffer.isBuffer(memberPassword)) ||
+      (phase !== "verify" && localRetryReview && !Buffer.isBuffer(approverPassword)) ||
+      (phase !== "verify" && localRetryReview && !Buffer.isBuffer(viewerPassword))
     ) {
       throw failure("password-file");
     }
@@ -559,7 +559,7 @@ export async function runProductAcceptance({
       timeout: loginTimeout,
       spawnProcess,
     });
-    if (phase === "seed") {
+    if (phase !== "verify") {
       await login({
         chromium,
         environment,
@@ -629,7 +629,7 @@ export async function runProductAcceptance({
     );
     return true;
   }
-  if (phase === "seed") {
+  if (phase === "seed" || phase === "sample") {
     const seedArgs = [
       "demo",
       "retry-review",
@@ -652,6 +652,19 @@ export async function runProductAcceptance({
       demoTimeout,
       spawnProcess,
     );
+    if (phase === "sample") {
+      // Reuse the CLI's durable receipt and idempotency keys. Approval remains
+      // an explicit action by a reviewer; this command never approves a proposal.
+      const receipt = first.state === "seeded"
+        ? await command(
+          ["demo", "retry-review", "capture", "--author-credentials", "author",
+            "--confirm-target", settings.appOrigin, "--json"],
+          environment, demoTimeout, spawnProcess,
+        ) : first;
+      validateRetryReviewReceipt(receipt, receipt.state, settings.appOrigin);
+      process.stdout.write(`Fictional Northstar sample: ${receipt.state}. Open ${settings.appOrigin}/console/ and review the proposed learning. No reviews were approved by this command.\n`);
+      return true;
+    }
     validateRetryReviewReceipt(first, "seeded");
     await browserCheckpoint({
       chromium,

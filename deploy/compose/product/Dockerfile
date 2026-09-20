@@ -12,8 +12,8 @@
 # a stylesheet should not recompile Cedar.
 #
 # This is also what keeps decision 1's promise concrete — the image gains a
-# static directory, not a second runtime. Node appears here and never in
-# the runtime stage.
+# static directory, not a second service. The same pinned Node executable also
+# runs short-lived release preparation; gateway and worker remain Rust processes.
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS console
 ARG HTTP_PROXY
 ARG http_proxy
@@ -132,7 +132,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY deploy/compose/browser/package.json deploy/compose/browser/package.json
 RUN pnpm install --frozen-lockfile --prod --filter @synveda/compose-browser-acceptance...
 COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
-COPY --chmod=0555 deploy/compose/browser/console-login.mjs deploy/compose/browser/product-demo.mjs deploy/compose/browser/
+COPY --chmod=0555 deploy/compose/browser/console-login.mjs deploy/compose/browser/product-demo.mjs deploy/compose/browser/evaluation.mjs deploy/compose/browser/
 COPY --chmod=0444 deploy/compose/browser/console-login-runner.mjs deploy/compose/browser/console-login-contract.mjs deploy/compose/browser/console-product-runner.mjs deploy/compose/browser/product-demo-runner.mjs deploy/compose/browser/product-demo-contract.mjs deploy/compose/browser/
 COPY --chmod=0444 deploy/compose/browser/PLAYWRIGHT-LICENSE deploy/compose/browser/PLAYWRIGHT-NOTICE deploy/compose/browser/seccomp_profile.NOTICE /usr/share/licenses/synveda-browser-acceptance/
 
@@ -164,8 +164,10 @@ RUN /usr/local/bin/assert-build-proxy-closed
 # ca-certificates for OIDC discovery against an external issuer over TLS;
 # libssl3 for SQLx's external-PostgreSQL TLS backend; curl for health probes.
 RUN apt-get update \
- && apt-get install --no-install-recommends --yes ca-certificates curl libssl3 \
+ && apt-get install --no-install-recommends --yes ca-certificates curl libssl3 libstdc++6 openssl util-linux \
  && rm -rf /var/lib/apt/lists/*
+COPY --from=console /usr/local/bin/node /usr/local/bin/node
+COPY --from=console /usr/local/LICENSE /usr/share/licenses/node/LICENSE
 # Product binaries and no mutable data: the Cedar schema, the base layer and all three
 # product packs are `include_str!`d into synveda-policy, so there is no
 # policy directory to ship and no way for the image's policy to differ from
@@ -183,7 +185,7 @@ COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 COPY --chmod=0755 deploy/compose/product/synveda-container /usr/local/bin/synveda-container
 
 # The console bundle is static data served by the gateway from its own origin
-# (CNSL-1, ADR-0056 decision 1). No Node process runs in this stage; gateway and
+# (CNSL-1, ADR-0056 decision 1). No resident Node service runs here; gateway and
 # worker remain separate invocations of this same immutable image.
 COPY --from=console /src/console/dist /usr/share/synveda/console
 ENV HOME=/tmp \

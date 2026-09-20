@@ -72,7 +72,7 @@ spec:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 {{- end }}
-{{- if eq .Values.postgres.mode "cnpg" }}
+{{- if ne .Values.postgres.mode "external" }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -81,7 +81,12 @@ metadata:
 spec:
   podSelector:
     matchLabels:
+      {{- if eq .Values.postgres.mode "cnpg" }}
       cnpg.io/cluster: {{ include "synveda.clusterName" . }}
+      {{- else }}
+      {{- include "synveda.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+      {{- end }}
   policyTypes: [Ingress, Egress]
   ingress:
     - from:

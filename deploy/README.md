@@ -1,12 +1,15 @@
 # Deployment
 
+Public entry points: [Run with Docker](compose/PREBUILT.md) and
+[Deploy to Kubernetes](helm/synveda/README.md). Candidate 0.4.0 is unpublished.
+
 This file is the infrastructure-shape overview. Source-checkout operator steps
 live in the [canonical Compose guide](compose/README.md); the normative mapping
 across deployment shapes lives in the
 [deployment contract](../docs/DEPLOYMENT_CONTRACT.md), and unproved operational
 claims remain in [production readiness](../docs/PRODUCTION_READINESS.md).
 
-For the next release, see the [small-team Kubernetes contract and audit](#small-team-kubernetes-release-contract).
+For the next release, see the [Kubernetes release contract](#kubernetes-release-contract).
 The [portable chart guide](helm/synveda/README.md) covers the implemented external-services
 installation and starter; the feature brief records remaining release/platform work.
 
@@ -37,7 +40,7 @@ freshness or Skill/Tool advertisement.
   This is also the only source-development product topology. Evaluation-only
   dependencies use isolated fixtures and do not define another Synveda stack.
 - `helm/` is the Kubernetes infrastructure: separate gateway and worker
-  Deployments from the same image, external PostgreSQL or optional CloudNativePG,
+  Deployments from the same image, bundled or external PostgreSQL, with optional CloudNativePG,
   optional TEI, explicit HTTPS ingress and file-mounted external IdP/Secret wiring.
   Only CNPG mode requires a separately installed operator. The release workflow packages this
   chart and a digest-bound reference bundle using one versioned six-image plan:
@@ -145,7 +148,9 @@ profile remains pending.
   descriptors, signatures or provenance. The generated environment manifest
   has deterministic static coverage but no published-registry evidence.
 
-## Small-team Kubernetes release contract
+<a id="small-team-kubernetes-release-contract"></a>
+
+## Kubernetes release contract
 
 [OPS-11](../docs/backlog/OPS-11.md) owns this milestone. The former baseline
 audit and implementation plan are retained in Git; current operator instructions
@@ -156,7 +161,7 @@ by ADR-0109 through ADR-0112 and the deployment contract above.
 
 | Boundary | Current implementation and evidence |
 |---|---|
-| Providers | External PostgreSQL/OIDC and independently optional CNPG/Keycloak; four ownership combinations passed local Kind acceptance |
+| Providers | Bundled or external PostgreSQL, independently bundled Keycloak/existing OIDC; both operator-free and CNPG matrices have local Kind evidence |
 | Team admission | Explicit initial owner, invitation/direct grant, viewer/member/service access and unchanged-token revocation; no email-based authority |
 | Runtime | One product image, gateway-served console, separate worker and existing PostgreSQL jobs; mandatory authority readiness separate from optional provider diagnostics |
 | Portability | Restricted-ID Kind simulation and Kubernetes/OpenShift structural schemas; real SCC/router/CNI/CSI/cloud execution remains unqualified |

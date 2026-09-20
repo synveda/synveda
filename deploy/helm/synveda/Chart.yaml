@@ -2,8 +2,8 @@ apiVersion: v2
 name: synveda
 description: |
   Synveda's context-platform runtime — separate gateway and core worker
-  processes from one image, external PostgreSQL or optional CloudNativePG, and a
-  customer's IdP. Product profiles are governed Configuration data, not chart
+  processes from one image, bundled or existing PostgreSQL, optional CloudNativePG,
+  and independently bundled Keycloak or existing OIDC. Product profiles are governed Configuration data, not chart
   variants. CPR-45; ADR-0102.
 type: application
 
@@ -11,8 +11,8 @@ type: application
 # tracks the workspace version in Cargo.toml; the image tag defaults to it,
 # so `helm upgrade` without an explicit tag deploys what the chart says it
 # deploys.
-version: 0.3.0
-appVersion: "0.3.0"
+version: 0.4.0
+appVersion: "0.4.0"
 
 kubeVersion: ">=1.29.0-0"
 

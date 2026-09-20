@@ -10,7 +10,7 @@ Helm values never carry passwords, keys or tokens.
 | `gateway.publicUrl`, exposure host and TLS Secret | Actual HTTPS application origin; exact callback is this origin plus `/auth/callback` |
 | `install.tenant.id`, `slug`, `name` | Stable UUIDv7 and organisation names; use the same UUID in the issuer Secret on every upgrade |
 | `image.repository` with `image.digest` | Product artifact from the verified release; clear `image.tag` when using a digest |
-| `postgres.mode` | `external` by default, or `cnpg` with a preinstalled operator |
+| `postgres.mode` | `external`, `bundled` (one persistent instance), or `cnpg` with a preinstalled operator |
 | Database Secret names and external host/CA/roles | Three distinct credentials: migrator, gateway and worker |
 | `oidc.existingSecret`, optional `oidc.caExistingSecret` | Exact trusted issuer/client/audience and optional private root |
 | `kms.existingSecret` | Original 64-hex KEK plus stable reference; keep a protected recovery copy |
@@ -106,7 +106,7 @@ proof. Run the existing `database-preflight` before promotion; do not relax the
 verifier to accommodate a managed service. Budget the two runtime pools plus
 migration/operator headroom against the provider's connection limit.
 
-CNPG mode alone runs the existing bounded administrator bootstrap, then the
+CNPG and bundled modes run the existing bounded administrator bootstrap, then the
 same ordinary-role preflight/migrator. Its existing private in-cluster URLs use
 the driver's default transport; **that mode does not claim verify-full**.
 Keep that traffic within a trusted private cluster network. Use the verified
@@ -124,9 +124,20 @@ scopes; configure the provider to emit those claims. Register exactly
 `<gateway.publicUrl>/auth/callback` for the existing authorization-code + S256
 PKCE flow, with the public origin as the allowed web origin. No wildcard
 redirect or Keycloak administrator credential is used by the application.
-The issuer must be byte-identical in discovery and tokens and reachable by
-browsers and pods. A confidential client's `client_secret`, if used, stays in
-the server-side issuer Secret, never the console bundle.
+The canonical issuer is byte-identical in discovery and tokens. The login
+client is **public**, with authorization code + S256 PKCE; this trust entry has
+no `client_secret` field. Service credentials use the separately documented
+service-identity flow, not a secret in browser JavaScript.
+
+An optional `discovery_url` selects a provider's explicit backchannel.
+Discovery must still return the canonical issuer, its authorization endpoint
+must retain the public origin, and token/JWKS endpoints must retain the
+configured backchannel origin. HTTPS issuers cannot downgrade to HTTP.
+Loopback evaluation explicitly permits private HTTP; external HTTPS uses
+trusted certificates. This implements Keycloak's supported dynamic backchannel,
+not arbitrary forwarded-header trust. Console Sign out revokes Synveda's sealed
+session and cookie; provider SSO remains until its own logout or browser-session
+closure. No provider logout redirect is registered or implicitly performed.
 
 `oidc.caExistingSecret` / `caSecretKey` optionally mount one organisation PEM
 root. `SYNVEDA_OIDC_CA_CERT_FILE` augments the same client's trust for discovery,

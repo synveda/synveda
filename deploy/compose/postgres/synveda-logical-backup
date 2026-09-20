@@ -20,7 +20,7 @@ backup_id=${SYNVEDA_BACKUP_ID:-}
 tenant_id=${SYNVEDA_BACKUP_TENANT_ID:-}
 postgres_image=${SYNVEDA_BACKUP_POSTGRES_IMAGE:-}
 case "$project" in
-    synveda-development|synveda-reference|\
+    synveda-development|synveda-reference|synveda-evaluation|\
     synveda-development-acceptance-[a-z0-9]*|\
     synveda-reference-acceptance-[a-z0-9]*) ;;
     *) echo "logical-backup: source project was refused" >&2; exit 64 ;;

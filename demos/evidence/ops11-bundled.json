@@ -1,0 +1,599 @@
+{
+  "date": "2026-09-20T15:16:11.467Z",
+  "workload": "4 concurrent agents, each 20 batches of 5 session events and 20 context runs; deterministic extraction and lexical retrieval",
+  "cases": [
+    {
+      "selection": "bundled-packaged",
+      "seed": {
+        "privateEndpointsDenied": true,
+        "ownerBootstrap": true,
+        "strangerNotAdministrator": true,
+        "laterBootstrapGroupDenied": true,
+        "consoleCookie": true,
+        "memberInvitation": true,
+        "viewer": true,
+        "governedPublication": true,
+        "foreignWorkspaceDenied": true,
+        "serviceTokenSeconds": 300,
+        "unregisteredServiceDenied": true
+      },
+      "workload": {
+        "concurrentAgents": 4,
+        "sessions": 4,
+        "events": 400,
+        "contextRuns": 80,
+        "capturedSessions": 4,
+        "capturedEvents": 400,
+        "candidates": 256,
+        "durationMs": 13362
+      },
+      "revoke": {
+        "memberToViewer": true,
+        "unchangedBearerDenied": true,
+        "memberReloginDenied": true,
+        "serviceBearerDenied": true,
+        "auditValid": true,
+        "auditEvents": 2535,
+        "observedChecksMs": 229
+      },
+      "resources": {
+        "source": "kubelet stats/summary, sampled every 2 seconds; server pod peaks, excluding test clients, operator and cluster overhead; null means unavailable; not capacity guarantees",
+        "samples": 8,
+        "started": "2026-09-20T15:17:28.304Z",
+        "ended": "2026-09-20T15:17:41.826Z",
+        "peaks": [
+          {
+            "namespace": "starter-bundled-packaged",
+            "pod": "synveda-fd6689fd5-whsds",
+            "cpuNanoCores": 83039849,
+            "workingSetBytes": 72310784
+          },
+          {
+            "namespace": "starter-bundled-packaged",
+            "pod": "synveda-pg-0",
+            "cpuNanoCores": 24016988,
+            "workingSetBytes": 192991232
+          },
+          {
+            "namespace": "starter-bundled-packaged",
+            "pod": "synveda-worker-ddb8cc88-fplz6",
+            "cpuNanoCores": 7017012,
+            "workingSetBytes": 37978112
+          },
+          {
+            "namespace": "starter-bundled-packaged",
+            "pod": "keycloak-0",
+            "cpuNanoCores": 538853021,
+            "workingSetBytes": 803823616
+          },
+          {
+            "namespace": "starter-bundled-packaged",
+            "pod": "proxy-797d7cfd8-2s8s5",
+            "cpuNanoCores": 8364091,
+            "workingSetBytes": 60182528
+          }
+        ]
+      },
+      "dayTwo": {
+        "interruptedJob": {
+          "completed": true,
+          "attempts": 2,
+          "candidates": 1,
+          "duplicateDatabaseEffects": 0,
+          "exactlyOnceProviderEffects": false,
+          "recoveryMs": 60654,
+          "providerCalls": 2,
+          "cancelledProviderRequests": 1,
+          "exitCode": 0,
+          "readinessWithdrawn": true
+        },
+        "gatewayShutdown": {
+          "exitCode": 0,
+          "restartedReadyMs": 12594,
+          "inFlightHttpDrainTested": false
+        },
+        "repeatedWorkload": {
+          "rounds": [
+            {
+              "concurrentAgents": 4,
+              "sessions": 4,
+              "events": 400,
+              "contextRuns": 80,
+              "capturedSessions": 4,
+              "capturedEvents": 400,
+              "candidates": 256,
+              "durationMs": 11918
+            },
+            {
+              "concurrentAgents": 4,
+              "sessions": 4,
+              "events": 400,
+              "contextRuns": 80,
+              "capturedSessions": 4,
+              "capturedEvents": 400,
+              "candidates": 256,
+              "durationMs": 12863
+            },
+            {
+              "concurrentAgents": 4,
+              "sessions": 4,
+              "events": 400,
+              "contextRuns": 80,
+              "capturedSessions": 4,
+              "capturedEvents": 400,
+              "candidates": 256,
+              "durationMs": 11840
+            },
+            {
+              "concurrentAgents": 4,
+              "sessions": 4,
+              "events": 400,
+              "contextRuns": 80,
+              "capturedSessions": 4,
+              "capturedEvents": 400,
+              "candidates": 256,
+              "durationMs": 11893
+            },
+            {
+              "concurrentAgents": 4,
+              "sessions": 4,
+              "events": 400,
+              "contextRuns": 80,
+              "capturedSessions": 4,
+              "capturedEvents": 400,
+              "candidates": 256,
+              "durationMs": 11873
+            }
+          ],
+          "durationMs": 64051
+        },
+        "migration": {
+          "concurrentWaiters": 2,
+          "completedReruns": 2,
+          "baselineRows": 1
+        },
+        "recoveryPoint": {
+          "recordedAt": "2026-09-20T15:20:54.818Z",
+          "auditEvents": 2388,
+          "auditHead": "d7c3075f4957d4e081f7f2946f40334fb7b336463aa6bf1072a1cc8bbbc485c2",
+          "durableSession": true,
+          "sealedConsoleSession": true
+        },
+        "backup": {
+          "quiesced": true,
+          "durationMs": 1967,
+          "archives": [
+            {
+              "database": "synveda",
+              "bytes": 1503928,
+              "sha256": "41f3c0edfa82be689b9f01a083e2cbe4c1fdc2cd58e3bda7bd69082d216231b2"
+            },
+            {
+              "database": "keycloak",
+              "bytes": 268827,
+              "sha256": "9ffb330a4a5b212407860134f199aad439d840c23837e4b27d06ee58ece602b6"
+            }
+          ],
+          "offPvc": true,
+          "encryptedOffHostCopy": false
+        },
+        "restore": {
+          "freshLogin": true,
+          "stableSubjects": true,
+          "membershipAndIsolation": true,
+          "knowledgeAndRetrieval": true,
+          "durablePayload": true,
+          "sealedSessionOpened": true,
+          "auditValid": true,
+          "frozenAuditPrefixPreserved": true,
+          "minimumAuditEvents": 2388,
+          "durationMs": 35882,
+          "target": "fresh namespace; independent PostgreSQL; packaged Keycloak",
+          "issuerPreserved": true,
+          "sourceDataRetained": true
+        }
+      },
+      "persistentCredentials": true,
+      "persistentContent": true,
+      "uninstallReinstall": true
+    },
+    {
+      "selection": "external-packaged",
+      "seed": {
+        "privateEndpointsDenied": true,
+        "ownerBootstrap": true,
+        "strangerNotAdministrator": true,
+        "laterBootstrapGroupDenied": true,
+        "consoleCookie": true,
+        "memberInvitation": true,
+        "viewer": true,
+        "governedPublication": true,
+        "foreignWorkspaceDenied": true,
+        "serviceTokenSeconds": 300,
+        "unregisteredServiceDenied": true
+      },
+      "workload": {
+        "concurrentAgents": 4,
+        "sessions": 4,
+        "events": 400,
+        "contextRuns": 80,
+        "capturedSessions": 4,
+        "capturedEvents": 400,
+        "candidates": 256,
+        "durationMs": 11850
+      },
+      "revoke": {
+        "memberToViewer": true,
+        "unchangedBearerDenied": true,
+        "memberReloginDenied": true,
+        "serviceBearerDenied": true,
+        "auditValid": true,
+        "auditEvents": 526,
+        "observedChecksMs": 182
+      },
+      "resources": {
+        "source": "kubelet stats/summary, sampled every 2 seconds; server pod peaks, excluding test clients, operator and cluster overhead; null means unavailable; not capacity guarantees",
+        "samples": 7,
+        "started": "2026-09-20T15:24:38.606Z",
+        "ended": "2026-09-20T15:24:50.598Z",
+        "peaks": [
+          {
+            "namespace": "starter-external-packaged-providers",
+            "pod": "postgres-744f74fd8-vqqvd",
+            "cpuNanoCores": 156425016,
+            "workingSetBytes": 159612928
+          },
+          {
+            "namespace": "starter-external-packaged",
+            "pod": "keycloak-0",
+            "cpuNanoCores": 1171288246,
+            "workingSetBytes": 756715520
+          },
+          {
+            "namespace": "starter-external-packaged",
+            "pod": "synveda-859f79675b-slnv6",
+            "cpuNanoCores": 51578456,
+            "workingSetBytes": 38346752
+          },
+          {
+            "namespace": "starter-external-packaged",
+            "pod": "synveda-worker-55f54d5b98-lcgwv",
+            "cpuNanoCores": 29316254,
+            "workingSetBytes": 37457920
+          },
+          {
+            "namespace": "starter-external-packaged",
+            "pod": "proxy-797d7cfd8-xd4z5",
+            "cpuNanoCores": 5675167,
+            "workingSetBytes": 45547520
+          }
+        ]
+      },
+      "persistentCredentials": true,
+      "persistentContent": true,
+      "uninstallReinstall": true
+    },
+    {
+      "selection": "bundled-external",
+      "seed": {
+        "privateEndpointsDenied": true,
+        "ownerBootstrap": true,
+        "strangerNotAdministrator": true,
+        "laterBootstrapGroupDenied": true,
+        "consoleCookie": true,
+        "memberInvitation": true,
+        "viewer": true,
+        "governedPublication": true,
+        "foreignWorkspaceDenied": true,
+        "serviceTokenSeconds": 300,
+        "unregisteredServiceDenied": true
+      },
+      "workload": {
+        "concurrentAgents": 4,
+        "sessions": 4,
+        "events": 400,
+        "contextRuns": 80,
+        "capturedSessions": 4,
+        "capturedEvents": 400,
+        "candidates": 256,
+        "durationMs": 11850
+      },
+      "revoke": {
+        "memberToViewer": true,
+        "unchangedBearerDenied": true,
+        "memberReloginDenied": true,
+        "serviceBearerDenied": true,
+        "auditValid": true,
+        "auditEvents": 526,
+        "observedChecksMs": 173
+      },
+      "resources": {
+        "source": "kubelet stats/summary, sampled every 2 seconds; server pod peaks, excluding test clients, operator and cluster overhead; null means unavailable; not capacity guarantees",
+        "samples": 7,
+        "started": "2026-09-20T15:27:03.715Z",
+        "ended": "2026-09-20T15:27:15.700Z",
+        "peaks": [
+          {
+            "namespace": "starter-bundled-external",
+            "pod": "synveda-worker-7fb55cb89c-2xpjv",
+            "cpuNanoCores": 26410286,
+            "workingSetBytes": 40931328
+          },
+          {
+            "namespace": "starter-bundled-external",
+            "pod": "proxy-797d7cfd8-l87mq",
+            "cpuNanoCores": 5137637,
+            "workingSetBytes": 18317312
+          },
+          {
+            "namespace": "starter-bundled-external",
+            "pod": "synveda-659d45cd87-4qgx8",
+            "cpuNanoCores": 52444002,
+            "workingSetBytes": 78237696
+          },
+          {
+            "namespace": "starter-bundled-external-providers",
+            "pod": "postgres-744f74fd8-twbkt",
+            "cpuNanoCores": 10441587,
+            "workingSetBytes": 63770624
+          },
+          {
+            "namespace": "starter-bundled-external",
+            "pod": "synveda-pg-0",
+            "cpuNanoCores": 75637310,
+            "workingSetBytes": 100225024
+          },
+          {
+            "namespace": "starter-bundled-external-providers",
+            "pod": "keycloak-0",
+            "cpuNanoCores": 1029443571,
+            "workingSetBytes": 710959104
+          }
+        ]
+      },
+      "persistentCredentials": true,
+      "persistentContent": true,
+      "uninstallReinstall": true
+    },
+    {
+      "selection": "external-external",
+      "seed": {
+        "privateEndpointsDenied": true,
+        "ownerBootstrap": true,
+        "strangerNotAdministrator": true,
+        "laterBootstrapGroupDenied": true,
+        "consoleCookie": true,
+        "memberInvitation": true,
+        "viewer": true,
+        "governedPublication": true,
+        "foreignWorkspaceDenied": true,
+        "serviceTokenSeconds": 300,
+        "unregisteredServiceDenied": true
+      },
+      "workload": {
+        "concurrentAgents": 4,
+        "sessions": 4,
+        "events": 400,
+        "contextRuns": 80,
+        "capturedSessions": 4,
+        "capturedEvents": 400,
+        "candidates": 256,
+        "durationMs": 11921
+      },
+      "revoke": {
+        "memberToViewer": true,
+        "unchangedBearerDenied": true,
+        "memberReloginDenied": true,
+        "serviceBearerDenied": true,
+        "auditValid": true,
+        "auditEvents": 2565,
+        "observedChecksMs": 220
+      },
+      "resources": {
+        "source": "kubelet stats/summary, sampled every 2 seconds; server pod peaks, excluding test clients, operator and cluster overhead; null means unavailable; not capacity guarantees",
+        "samples": 8,
+        "started": "2026-09-20T15:29:39.881Z",
+        "ended": "2026-09-20T15:29:51.961Z",
+        "peaks": [
+          {
+            "namespace": "starter-external-external",
+            "pod": "synveda-84fb577cb-ztvmp",
+            "cpuNanoCores": 58351579,
+            "workingSetBytes": 67923968
+          },
+          {
+            "namespace": "starter-external-external-providers",
+            "pod": "postgres-744f74fd8-5r8qp",
+            "cpuNanoCores": 109727546,
+            "workingSetBytes": 190877696
+          },
+          {
+            "namespace": "starter-external-external-providers",
+            "pod": "keycloak-0",
+            "cpuNanoCores": 1042597610,
+            "workingSetBytes": 767393792
+          },
+          {
+            "namespace": "starter-external-external",
+            "pod": "proxy-797d7cfd8-97kz9",
+            "cpuNanoCores": 4325776,
+            "workingSetBytes": 41873408
+          },
+          {
+            "namespace": "starter-external-external",
+            "pod": "synveda-worker-7498b458dc-snrbr",
+            "cpuNanoCores": 28677795,
+            "workingSetBytes": 33824768
+          }
+        ]
+      },
+      "dayTwo": {
+        "interruptedJob": {
+          "completed": true,
+          "attempts": 2,
+          "candidates": 1,
+          "duplicateDatabaseEffects": 0,
+          "exactlyOnceProviderEffects": false,
+          "recoveryMs": 60238,
+          "providerCalls": 2,
+          "cancelledProviderRequests": 1,
+          "exitCode": 0,
+          "readinessWithdrawn": true
+        },
+        "gatewayShutdown": {
+          "exitCode": 0,
+          "restartedReadyMs": 5274,
+          "inFlightHttpDrainTested": false
+        },
+        "repeatedWorkload": {
+          "rounds": [
+            {
+              "concurrentAgents": 4,
+              "sessions": 4,
+              "events": 400,
+              "contextRuns": 80,
+              "capturedSessions": 4,
+              "capturedEvents": 400,
+              "candidates": 256,
+              "durationMs": 11820
+            },
+            {
+              "concurrentAgents": 4,
+              "sessions": 4,
+              "events": 400,
+              "contextRuns": 80,
+              "capturedSessions": 4,
+              "capturedEvents": 400,
+              "candidates": 256,
+              "durationMs": 12091
+            },
+            {
+              "concurrentAgents": 4,
+              "sessions": 4,
+              "events": 400,
+              "contextRuns": 80,
+              "capturedSessions": 4,
+              "capturedEvents": 400,
+              "candidates": 256,
+              "durationMs": 12211
+            },
+            {
+              "concurrentAgents": 4,
+              "sessions": 4,
+              "events": 400,
+              "contextRuns": 80,
+              "capturedSessions": 4,
+              "capturedEvents": 400,
+              "candidates": 256,
+              "durationMs": 11944
+            },
+            {
+              "concurrentAgents": 4,
+              "sessions": 4,
+              "events": 400,
+              "contextRuns": 80,
+              "capturedSessions": 4,
+              "capturedEvents": 400,
+              "candidates": 256,
+              "durationMs": 13361
+            }
+          ],
+          "durationMs": 65160
+        },
+        "migration": {
+          "concurrentWaiters": 2,
+          "completedReruns": 2,
+          "baselineRows": 1
+        },
+        "reconnect": {
+          "unavailableReadiness": 503,
+          "liveDuringOutage": 200,
+          "gateRecoveredMs": 10378,
+          "freshLogin": true,
+          "stableSubjects": true,
+          "persistentContent": true,
+          "authorizedRecall": true,
+          "failedLoginAttempts": 1,
+          "loginRecoveryMs": 1748,
+          "recoveredMs": 12192
+        },
+        "recoveryPoint": {
+          "recordedAt": "2026-09-20T15:33:11.486Z",
+          "auditEvents": 2418,
+          "auditHead": "eaba1e16453d58374b0ffdc6ffdf7d5a0712781ff6562168d8424243a32de073",
+          "durableSession": true,
+          "sealedConsoleSession": true
+        },
+        "backup": {
+          "quiesced": true,
+          "durationMs": 2443,
+          "archives": [
+            {
+              "database": "synveda",
+              "bytes": 1511499,
+              "sha256": "16b457acbcf237b609c0769ab119321ec612b732a55d89af83ae77f5e418ef6b"
+            },
+            {
+              "database": "keycloak",
+              "bytes": 270506,
+              "sha256": "c44af552e3188389f31ae7aeb568b9fb65ea2e00ff23110aa366514ec82b10d6"
+            }
+          ],
+          "offPvc": true,
+          "encryptedOffHostCopy": false
+        },
+        "restore": {
+          "freshLogin": true,
+          "stableSubjects": true,
+          "membershipAndIsolation": true,
+          "knowledgeAndRetrieval": true,
+          "durablePayload": true,
+          "sealedSessionOpened": true,
+          "auditValid": true,
+          "frozenAuditPrefixPreserved": true,
+          "minimumAuditEvents": 2418,
+          "durationMs": 35729,
+          "target": "fresh namespace; independent PostgreSQL; packaged Keycloak",
+          "issuerPreserved": true,
+          "sourceDataRetained": true
+        }
+      },
+      "persistentCredentials": true,
+      "persistentContent": true,
+      "uninstallReinstall": true
+    }
+  ],
+  "admission": {
+    "policy": "Pod Security Admission restricted",
+    "version": "v1.33",
+    "simulatedUid": 1000900000,
+    "openShiftScc": null,
+    "userNamespaces": false,
+    "networkPolicyEnforcement": "not tested: Kind default CNI"
+  },
+  "kubernetes": "v1.36.1",
+  "engine": "18 CPUs; 16817168384 bytes engine RAM",
+  "tools": {
+    "helm": "v4.2.3+g43e8b7f",
+    "kind": "kind v0.32.0 go1.26.3 darwin/arm64",
+    "kubectl": "v1.36.1"
+  },
+  "images": [
+    {
+      "tag": "synveda/release-product:0.4.0",
+      "localId": "sha256:528cb42ae42a16e5dd6cdf34ef9f8fb289421931f6287490ee6bc0e7f84515b3"
+    },
+    {
+      "tag": "synveda/release-postgres:0.4.0",
+      "localId": "sha256:3ebf723e289c22bb5a0fd467301ff80f3682d814159a9aa99906a1bf964a69a0"
+    },
+    {
+      "tag": "synveda/release-keycloak:0.4.0",
+      "localId": "sha256:b9d09ac44c2c0a41b921d2f8697b7056e4f14c09ecd30e96e9620be76100f3e9"
+    },
+    {
+      "tag": "synveda/release-proxy:0.4.0",
+      "localId": "sha256:dbc30b3d2c9b333f9bed3f4e5ee3936305a76e33afa76a1d621e55330eb938db"
+    }
+  ]
+}

@@ -73,13 +73,26 @@ read-only verification on 2026-09-20 confirmed that configuration and the URL
 [synveda.github.io/synveda](https://synveda.github.io/synveda/).
 Check the latest Pages workflow's deployment result before claiming a live site.
 
+The installation refresh reads `docs/installation.json`; unreleased commands
+remain visibly pending. Its product screenshot is a real fictional sample
+awaiting governed review, captured with `deploy/compose/browser/evaluation.mjs`.
+The approved mark, palette, typography and existing brand exports are retained.
+There are no JavaScript copy buttons: the short commands are selectable text.
+
+Prepared repository settings (not applied by this task): description
+**Governed knowledge, context and skills for AI agents. Self-host with Docker or
+Kubernetes.** Website: **https://synveda.github.io/synveda/**. Topics:
+`ai-agents`, `knowledge-management`, `context`, `self-hosted`, `postgresql`,
+`rust`, `mcp`. An owner must approve and apply settings changes.
+
 The [Pages workflow](../.github/workflows/pages.yml) checks every PR and main
 push, covering site sources, brand assets, lockfiles, documentation and the
 workflow itself without path-filtered required checks. The full check runs on
 native Linux AMD64 and ARM64; deployment waits for both, with only AMD64 uploading
 the one public artifact. PRs receive no deploy permissions. Only main in the canonical repository can upload the explicit
 public output and deploy through the github-pages environment. Manual dispatch
-from another branch also cannot deploy. Existing CI is unchanged.
+from another branch also cannot deploy. Deployment qualification belongs to
+the existing release workflow.
 
 For a new repository or a configuration change:
 
@@ -120,6 +133,20 @@ These instructions do not authorise or perform identity changes:
   image; there is no separate repository-avatar setting.
 
 ## Validation
+
+The 2026-09-20 installation increment uses an actual 0.4.0 local-candidate
+browser capture in `assets/product/review-learning.png`. It shows the fictional
+Northstar learning's source evidence and its VedaFlow change awaiting review;
+it contains no credentials and claims no live-agent or human-review history.
+The existing approved brand exports are unchanged. The rebuilt `/synveda/`
+artifact has 13 files (668,360 bytes), with no client JavaScript or analytics.
+Brave/Playwright checks pass at 1440, 768, 390 and 320 pixels for images,
+horizontal overflow, keyboard/skip/menu navigation and fragment refresh.
+axe-core 4.11.0 reports zero detected WCAG 2 A/AA or 2.1 AA violations; its
+incomplete items were non-text decorative arrows, inspected manually.
+This increment has not been deployed to Pages. Public copy labels 0.4.0 pending;
+the [installation record](../docs/backlog/CPR-45.md#installation-mission-2026-09-20)
+owns runtime and release qualification.
 
 Before publishing, run the focused site check and repository documentation
 gates, then inspect the production build at its real project base path:

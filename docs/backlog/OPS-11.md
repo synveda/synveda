@@ -6,7 +6,7 @@ The Docker MVP is owner-validated. The 2026-09-19 audit at `1194c0a` found an
 existing working Helm foundation, but no external-database branch, persistent
 Keycloak starter or qualified OpenShift installation. The compact evidence,
 operator inputs and four-stage plan are maintained in the
-[deployment guide](../../deploy/README.md#small-team-kubernetes-release-contract).
+[deployment guide](../../deploy/README.md#kubernetes-release-contract).
 CPR-45 retains its separate Docker qualification work; OPS-2 remains the
 delivered chart foundation.
 
@@ -467,7 +467,8 @@ acceptance did not run in this increment.
 Exact blocker for release completion: a
 newly versioned, authorised, published and pull-verified current artifact set, an
 explicit supported prior release, and the still-unavailable real OpenShift/cloud
-target. Source version 0.3.0 is now prepared, including the chart and explicit
+target. The owner started v0.3.0 separately. The current unpublished 0.4.0 installation
+increment is coordinated in [CPR-45](CPR-45.md#installation-mission-2026-09-20), including the chart and explicit
 starter provider image tags. Next action after local acceptance: validate that
 revision, run an owner-authorised candidate workflow and empty-registry
 installation, then qualify the declared upgrade pair and target platform.

@@ -22,8 +22,8 @@ installation on Linux and Docker Desktop.
 
 Static configuration cannot prove that an operator can pull the artifacts,
 sign in through Keycloak, use the product, restart it, recover it and upgrade
-it. Until those gates pass, the verdict is “Docker reference implemented; live
-validation pending.”
+it. The local 0.4.0 candidate now has installation/recovery evidence below;
+published artifacts, the supported-host matrix and N-1 upgrade remain pending.
 
 [ADR-0102](../adr/adr-0102-portable-reference-deployment.md) makes Compose the
 canonical single-host deployment contract. Helm implements the same contract
@@ -38,90 +38,165 @@ private OpenTelemetry Collector. Synveda and Keycloak use separate databases
 and roles. Keycloak stays behind the generic OIDC/OAuth2 + PKCE boundary and is
 the only bundled identity provider. Temporal is absent.
 
-### Hosts witness recovery — 2026-09-19
-
-At `fbb340973ae482be5ee62f128957660bced9442c`, the existing
-`acceptance-interop` deployment refused startup because the protected hosts
-backup's saved `dev` alone had changed. Installed hosts bytes still matched
-their recorded digest. The ADR-0102 amendment adds a confirmed privileged
-installation repair: verify the complete protected backup and exact installed
-target, preserve every other witness field, and republish only the public
-receipt through existing interrupted-install recovery. Status and removal
-remain strict. Unknown drift is never adopted.
-
-The operator ran the exact same-project install confirmation. Ownership and
-resolver checks, canonical `compose-up` and `compose-smoke` now pass with the
-existing volumes and secrets. The hosts content digest remained
-`5e318b3359804b40b3929f3a2ea7803a67892e896d34af6164b784f1b9a76876`.
-Ordinary approver and author browser PKCE logins also passed for ADPT-9.
-
-All 345 `make check-deploy` tests pass with no skips, followed by the Compose
-render and deployment-convergence checks. The hosts suite passes 39/39 on
-macOS Node 24.18.0 and 37/39 on pinned Linux arm64 Node 22.23.2: the Linux run
-explicitly skips the unavailable xattr tool fixture and Darwin ACL fixture.
-The bare Node image first failed five checks because its required Linux `acl`
-package was absent; installing that documented system dependency in a
-disposable container resolved those failures. Formatting, dependency direction,
-docs, backlog and ADR gates pass. No Rust changed; Clippy is not applicable.
-Full CI, fresh database tests and the full live Compose restart acceptance were
-not rerun. This repair does not close the reference deployment's remaining
-platform, recovery, upgrade or published-installation qualification.
-
 ## Scope
 
-### Prebuilt container release increment — 2026-09-20
+### Installation mission — 2026-09-20
 
-[ADR-0115](../adr/adr-0115-prebuilt-container-release-verification.md) keeps
-the existing six-image native build matrix and adds fresh anonymous AMD64 and
-ARM64 digest pulls, release-label checks and isolated executable/asset smoke
-before the GitHub Release announcement. Checksummed per-platform reports
-accompany successful releases. Dry dispatches still publish nothing and label
-their synthetic digests as unusable for installation.
+Starting checkout: `736c729c681c9973e271f02e36454e4e4acbb694`, branch `main`,
+only untracked `design/` (preserved). Coordinates OPS-11, OPS-8 and FND-7 under
+[ADR-0115](../adr/adr-0115-prebuilt-container-release-verification.md). The owner
+started v0.3.0 before this increment; these additive installation capabilities
+are prepared as 0.4.0. The owner has authorised committing, pushing and releasing
+this increment. Publication remains pending hosted CI, the packaging dry run
+and both native installation qualifications.
 
-The existing archive now carries a source-bound server-only guide and root
-LICENSE/NOTICE. Its `secrets` and `issuer` actions invoke the existing locked
-generators with `--if-missing`; no second installer or deployment graph is
-added. Root and install documentation distinguish this path from source builds
-and the smaller native-client platform matrix.
+Verified starting inventory: the README led to source builds or the host
+Node/OpenSSL, DNS/TLS reference launcher. `scripts/package-release.sh` already
+packaged six image identities and the Compose closure. The chart already
+supported independent external/CNPG and external/Keycloak choices with real
+Kind evidence; its persistent starter required a preinstalled CNPG operator.
+The governed demo existed, but its staged review tour required four CLI
+profiles. These were implementation/usability gaps, not absent deployment code.
+Pages settings confirm `https://synveda.github.io/synveda/`, built from
+`website/`; the About description, homepage and topics were empty. The public
+release API reports v0.3.0 with an empty asset list (2026-09-20); its workflow
+passed builds and isolated image checks but failed publication because that
+release page already existed. Anonymous
+requests resolve all six v0.3.0 image indexes with Linux AMD64/ARM64 descriptors;
+the OCI chart downloads anonymously at digest
+`sha256:2ebf89156802cb4024f01d458c275fabad7fbd0f16a59608bc68d00a15e15c7d`.
+These are metadata/chart retrieval checks, not empty-cache image-layer pulls
+or full installation qualification, and they do not include this increment.
 
-Local checks passed on the working tree: the current product Docker image
-built with the updated console, and all eight isolated executable/asset checks
-passed across its six Linux ARM64 image roles (the unchanged dependency and
-browser images were reused from the local cache). The extracted archive
-prepared secrets and issuer settings, preserved them on repeat, refused force
-and external-provider misuse, validated temporary TLS inputs, and rendered 13
-digest-pinned services with no build contexts. This render used synthetic
-digests and a test certificate; it did not pull or start a deployment. Its
-first temporary-directory attempt was correctly refused for an inherited root
-group; rerunning in an operator-group-owned temporary directory passed.
-All 12 focused release/verifier tests passed on macOS Node 24 and offline Linux
-ARM64 Node 22. Workflow lint, shell syntax, formatting and documentation gates
-passed. The full `make check-deploy` passed all 359 tests with zero failures
-or skips, followed by the Compose render and deployment-convergence checks.
-Its loopback fixture ran outside the filesystem/network sandbox. No full
-backend CI, database suite, hosted workflow or live deployment acceptance was
-rerun. No Rust, database schema, generated API or application feature changed.
+Implemented in the existing packaging/chart mechanisms:
 
-Remaining blocker: no new compatible tag has been published, and hosted
-anonymous pull checks have not run. The latest public release is still v0.2.0
-with the old profile archive, verified through the GitHub release API on
-2026-09-20. Source version 0.3.0 is now prepared across the workspace, console,
-adapters and chart, with matching starter image tags and generated API metadata.
+- The release launcher defaults to a loopback evaluation graph. A bounded,
+  network-disabled utility prepares private files without a Docker socket,
+  host Node/OpenSSL, Git, Make or a compiler. Exact issuer/audience/PKCE checks
+  remain intact with an explicitly configured private discovery backchannel.
+  Repeated starts preserve keys; incomplete credentials refuse. State locks
+  serialize operations and remote Docker contexts refuse.
+- The existing chart adds persistent namespaced PostgreSQL, with independently
+  selected existing/bundled identity and no operator installation. CNPG remains
+  explicit. Existing Secret references, TLS, ordinary runtime roles, the
+  advisory-locked migration Job and restricted contexts are retained. A shipped
+  preparation example and loopback port-forward recipe provide real login.
+- One optional `sample` command uses the packaged CLI/browser and normal public
+  APIs with distinct fictional accounts. It resumes its receipt and stops at
+  proposed learning; reviewer/approver actions remain deliberate. No approvals
+  are represented as human actions by automated acceptance.
+- The Docker lifecycle adds paired database/private-key backup and fresh-volume
+  restore through the existing helpers. The live drill exposed an incorrect
+  ownership query in logical restore; it now joins `pg_database` to the activity
+  statistics instead of reading `datdba` from `pg_stat_database`.
+- README, installation selection, Docker and chart guides and the existing static
+  site share checked 0.4.0/unpublished metadata. Contributor details moved to
+  CONTRIBUTING. Existing anchors and STARTER.md remain replacement pointers;
+  current ADRs, trust contracts, attribution and acceptance evidence are retained.
+  The approved branding is unchanged. `OPERATIONS.md` is now size-neutral.
+- Release announcement requires anonymous image/chart pulls and full candidate
+  Docker/Kubernetes qualification on native AMD64 and ARM64. Candidates are
+  built once; qualifiers consume digest-bound images and the packaged chart.
+  Third-party workflow actions are pinned to recorded commit SHAs. Local
+  synthetic/cached image tests never count as anonymous-public evidence.
 
-Version preparation passed Rust formatting, strict workspace Clippy, six OKF
-tests, six OpenAPI tests, release parity, chart image and Helm lint/render gates,
-all 144 adapter tests, extracted plugin replay, SDK drift/source/archive checks,
-the console build, and dependency/client-support/backlog/ADR/docs gates.
-The built CLI reports `synveda 0.3.0`. SDK archives retain their independent
-0.1.0 package version and target API 0.3.0. No container publication, hosted
-release run, fresh database suite or live deployment acceptance was performed
-for this version change.
+Local qualification completed on macOS 26.6.2 arm64, OrbStack Engine 29.4.0,
+Compose 5.1.2, Node 24.18.0 and Playwright 1.62.1. The native browser was Brave
+153.1.95.104; container acceptance used the pinned browser fixture. The engine
+exposed 18 CPUs and 16.8 GB RAM. Local image digests and `sourceDirty: true` are
+explicit in the [Docker report](../../demos/evidence/cpr45-evaluation.json) and
+[Kubernetes report](../../demos/evidence/ops11-release-candidate.json).
 
-Next: complete the normal CI and release dry run, configure GHCR package
-visibility/access, then publish and run the existing reference acceptance on
-an empty host.
-See [release operations](../RELEASING.md). Linux/Docker Desktop, Windows/WSL2,
-recovery, N-1 and production readiness are not qualified by an image check.
+| Scope | Result and boundary |
+|---|---|
+| Docker archive, bundled services | PASS: concurrent/repeated preparation, missing-key refusal/recovery, real empty-console login/logout, public-API sample and repeat, retained recreation, paired backup/reset/fresh restore and usable access |
+| Docker deliberate faults | PASS: wrong issuer, unreachable backchannel, missing credential, confirmed full disposable tmpfs and occupied port refuse; documented recreation restores the actual host URL |
+| Kubernetes database/identity ownership | PASS: bundled/bundled, external/bundled, bundled/external and external/external; providers provisioned separately in owned fixture namespaces |
+| Kubernetes operations | PASS: real PKCE, ordinary runtime roles, tenant/workspace denial, service/MCP access and revocation, pod recreation, same-release reapply and retained reinstall; joint restore and interruption/migration drills on bundled/bundled and external/external |
+| Packaged local Kubernetes recipe | PASS: actual browser login/logout through loopback forwards, restricted admission, UID 1000900000 for gateway/worker/install/Keycloak/PostgreSQL, failed runtime-role migration and successful subsequent reapply |
+| Published 0.4.0 / other native hosts | NOT RUN: artifacts unpublished; no native Linux-host, Docker Desktop or Windows/WSL2 target supplied |
+| Real OpenShift / cloud / N-1 | NOT RUN: no authorised target, credentials or qualified published N-1 pair; generic Kind does not establish these claims |
+
+The Kubernetes run used Kind 0.32.0, Kubernetes **and kubectl 1.36.1**, Helm
+4.2.3, PostgreSQL 17.11/vector 0.8.6 and Keycloak 26.7.2. An earlier installed
+kubectl 1.33.9 was outside supported skew; the final run used a checksum-verified
+temporary matching client. Two subsequent chart documentation corrections were
+checked to leave every runtime/dependency file byte-identical; the packaged
+browser/migration recipe passed again. The report records both archive hashes.
+
+Docker preparation took **0.403 s**, cached-image cold startup **278.494 s** and
+warm recreation **223.088 s**. Image download time was not measured. A
+post-restore snapshot totalled approximately **1.02 GiB** across running
+deployment services; it excludes browser/one-shot utilities and engine overhead
+and is not peak usage or a capacity guarantee. After extraction, the guide has
+three operator steps: `up`, deliberate credential retrieval, browser sign-in;
+optional `sample` is a fourth. Local Helm install-to-ready took **30.637 s**,
+excluding cluster creation, image import and private-file preparation. Joint
+Kind restores took **35.882 s** bundled and **35.729 s** external; these small
+synthetic same-host measurements are not production RTOs.
+
+Exact candidate qualification commands, from this checkout (the temporary
+paths identify this local run, not downloadable release coordinates):
+
+```sh
+candidate=/private/tmp/synveda-candidate-0.4.0-qualified
+node scripts/qualify-release.mjs "$candidate/synveda-reference-0.4.0" demos/evidence/cpr45-evaluation.json
+PATH=/private/tmp/synveda-qualification-tools:$PATH \
+  SYNVEDA_TEST_BROWSER_EXECUTABLE='/Applications/Brave Browser.app/Contents/MacOS/Brave Browser' \
+  node scripts/qualify-kubernetes-release.mjs \
+  "$candidate/synveda-reference-0.4.0" "$candidate/synveda-0.4.0.tgz" \
+  demos/evidence/ops11-release-candidate.json
+```
+
+The Docker qualifier runs the extracted `synveda-compose` preparation, startup,
+sample twice, down/up, backup and explicitly confirmed reset/restore commands.
+It used **port 18080**, preserving the existing development port; the published
+default remains 8080. No source CLI or runtime image build occurs in either
+qualifier. Public download/OCI commands for 0.4.0 remain **pending publication**.
+The immutable archive guide now refers to published qualification reports
+instead of freezing main's temporary publication status into the release.
+Only `INSTALL.md` changed in that final documentation refresh; all executable
+and configuration files were verified byte-identical, and the packaging
+acceptance gate passed again. The Docker report records both archive hashes.
+
+Formatting, strict workspace Clippy, 1,662 workspace Rust tests, the final
+identity library/integration tests, licence/API/SDK/adapter/security/evaluation
+and TypeScript gates passed. `make check-deploy` passed **364 tests**, the
+Compose render matrix and deployment convergence. The whole `make ci` command
+was not rerun as one invocation; its component gates were executed separately.
+The fresh complete `make db-test` and live proprietary-client suites were not
+rerun for this increment. The hard-cut checker now distinguishes the exact
+Kubernetes RBAC `RoleBinding` from the retired product DTO, with adversarial
+regressions retaining the product ban.
+
+The site build passed with 13 public files (668,360 bytes), unchanged approved
+brand exports, the genuine fictional-sample screenshot, valid links/metadata
+and no JavaScript/analytics. Browser/keyboard/overflow/fragment checks passed
+at 1440/768/390/320 px. axe-core 4.11.0 found zero WCAG 2 A/AA or 2.1 AA
+violations; decorative-arrow incomplete items were inspected manually.
+
+The live drills also fixed PostgreSQL readiness racing the entrypoint's
+temporary socket-only server, and allowed bounded identity reconciliation
+inside the existing startup deadline. The occupied-port drill exposed an
+engine retaining an unbound proxy endpoint after allocation failure; the
+documented down/up recovery is tested against the host URL. Storage exhaustion
+correctly returned 78; its test verifies a full filesystem because shell
+`printf` reports ENOSPC as a generic I/O error on this image.
+
+The existing `synveda-development-acceptance-interop` remains healthy and
+untouched. All owned evaluation containers and Kind clusters are stopped or
+removed. Only labelled disposable fixture volumes were reset; final private
+state, data and backups are retained. No cluster-wide operator was installed.
+
+Remaining publication/platform boundary: 0.4.0 is unpublished. Native hosted
+Linux AMD64/ARM64, macOS Docker Desktop, Windows/WSL2, real OpenShift, public
+OCI/chart retrieval and a supported published N-1 pair require their named
+infrastructure/artifacts. The prepared required tests must run there; a manifest
+render or local ARM64 cache is not a substitute. Off-host custody, PITR and
+production DR remain separate readiness gaps. Next: push the authorised increment,
+require hosted CI and the packaging dry run, then tag the same source and run
+the hosted qualifications before changing public metadata to published.
+See [release operations](../RELEASING.md).
 
 ### Continuing deployment scope
 
@@ -156,7 +231,8 @@ recovery, N-1 and production readiness are not qualified by an image check.
 
 ## Architecture seam
 
-`deploy/compose/scripts/compose.sh` selects the closed development/reference,
+The packaged evaluation launcher selects a fixed bundled loopback graph.
+`deploy/compose/scripts/compose.sh` retains the closed development/reference,
 PostgreSQL, OIDC and OTLP matrix. Core services are not profile-gated. Optional
 profiles are demo/browser acceptance, bounded local observability and the
 experimental Apalis canary. Reference mode requires real DNS, HTTPS certificate
@@ -186,8 +262,8 @@ planned-interruption validation, not PITR or disaster recovery.
 
 The documentation audit consolidates source-checkout operation in
 `deploy/compose/README.md`, keeps packaged installation distinct, and routes
-beginner navigation through the root documentation index. It does not add live
-deployment evidence or change the remaining acceptance boundary.
+beginner navigation through the root documentation index. Runtime evidence and
+remaining acceptance boundaries are recorded separately above.
 
 The current local fixture uses the existing public API, deterministic Session
 Capture, VedaFlow review/apply, Knowledge provenance, Context and Skill

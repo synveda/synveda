@@ -85,9 +85,15 @@ function productionFiles() {
 
 export function retiredProductionFindings(source, file = "fixture") {
   const findings = [];
+  // The Kubernetes RBAC kind is unrelated to Synveda's retired authority DTO.
+  // Mask only its exact API/kind pair in deployment YAML, preserving offsets;
+  // a legacy type elsewhere in that same file must still fail.
+  const scanned = /^deploy\/.*\.ya?ml$/u.test(file)
+    ? source.replace(/(^apiVersion: rbac\.authorization\.k8s\.io\/v1\r?\nkind: )RoleBinding(?=\r?\n)/gmu, (_match, prefix) => prefix + " ".repeat("RoleBinding".length))
+    : source;
   for (const [label, pattern] of RETIRED_PATTERNS) {
     pattern.lastIndex = 0;
-    for (const match of source.matchAll(pattern)) {
+    for (const match of scanned.matchAll(pattern)) {
       const line = source.slice(0, match.index).split("\n").length;
       findings.push(`${file}:${line}: ${label}: ${match[0]}`);
     }

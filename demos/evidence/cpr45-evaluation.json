@@ -1,0 +1,63 @@
+{
+  "version": "0.4.0",
+  "source": "736c729c681c9973e271f02e36454e4e4acbb694",
+  "sourceDirty": true,
+  "images": {
+    "product": "synveda/installation-candidate@sha256:528cb42ae42a16e5dd6cdf34ef9f8fb289421931f6287490ee6bc0e7f84515b3",
+    "postgres": "synveda/installation-postgres@sha256:3ebf723e289c22bb5a0fd467301ff80f3682d814159a9aa99906a1bf964a69a0",
+    "keycloak": "synveda/keycloak@sha256:b9d09ac44c2c0a41b921d2f8697b7056e4f14c09ecd30e96e9620be76100f3e9",
+    "proxy": "synveda/proxy@sha256:dbc30b3d2c9b333f9bed3f4e5ee3936305a76e33afa76a1d621e55330eb938db",
+    "browser_acceptance": "synveda/installation-browser@sha256:262f3ebc7906131141b1b2a03ad0e833ca38e4afb53895dfad973861c8b91809",
+    "helm_postgres": "synveda/cnpg-postgres@sha256:d11b1a36de2a5f62d20333276458a373eea691d86c12a04747fda9d4bb8e13fe"
+  },
+  "at": "2026-09-20T15:43:02.121Z",
+  "checks": {
+    "concurrentPreparationPreservesSecrets": true,
+    "missingCredentialRefusedAndRetryRecovered": true,
+    "emptyConsoleLoginLogout": true,
+    "optInSampleAndRepeat": true,
+    "recreationPreservesKeysIdentityAndReceipt": true,
+    "pairedDatabaseRestoreAndUsableAccess": true,
+    "noPasswordsOrEncryptionKeyInServiceLogs": true
+  },
+  "imageDownloadMs": null,
+  "preparationMs": 403,
+  "coldStartupMs": 278494,
+  "warmRecreationMs": 223088,
+  "resources": [
+    "synveda-evaluation-worker-1 32.25MiB / 15.66GiB 0.26%",
+    "synveda-evaluation-gateway-1 56.25MiB / 15.66GiB 0.00%",
+    "synveda-evaluation-proxy-1 15.39MiB / 15.66GiB 0.00%",
+    "synveda-evaluation-keycloak-realm-convergence-1 5.918MiB / 512MiB 5.64%",
+    "synveda-evaluation-keycloak-1 721.7MiB / 2GiB 0.35%",
+    "synveda-evaluation-otel-collector-1 82.11MiB / 15.66GiB 0.02%",
+    "synveda-evaluation-postgres-1 127.2MiB / 2GiB 0.48%"
+  ],
+  "tools": {
+    "docker": "29.4.0",
+    "compose": "5.1.2",
+    "architecture": "arm64",
+    "platform": "darwin"
+  },
+  "manualActions": {
+    "definition": "after download/extraction: up, credential retrieval, browser sign-in; optional sample is a fourth command/action",
+    "basic": 3,
+    "withSample": 4
+  },
+  "failures": {
+    "wrongIssuerRefused": true,
+    "unreachableBackchannelRefused": true,
+    "preparationStorageExhaustionRefused": true,
+    "occupiedDockerPortRefused": true,
+    "recoveredAfterFaults": true
+  },
+  "documentationRefresh": {
+    "previousArchiveSha256": "b64bc2292246cfbc328779374561eff8f09ed83cd0f39c1c9aaf3c23497d34d7",
+    "archiveSha256": "b7d5543e4db9391879a8d6bf8d65e2769103fea38ed1b3f75f1e9cd169cf8fe5",
+    "changedFiles": [
+      "INSTALL.md"
+    ],
+    "allExecutableAndConfigurationFilesByteIdentical": true,
+    "packagingContractRechecked": true
+  }
+}

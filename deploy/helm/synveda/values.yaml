@@ -172,8 +172,40 @@ ingress:
 # ── PostgreSQL: external or optional CloudNativePG ───────────────────────
 # CNPG mode renders a Cluster for an operator that is already installed.
 postgres:
-  # external | cnpg. CNPG requires its API/operator already installed.
+  # external | bundled | cnpg. Only cnpg requires a preinstalled operator.
   mode: external
+  # One namespaced server. Secrets are prepared separately and retained by
+  # their operator; templates never generate passwords or encryption keys.
+  bundled:
+    image: ""
+    administratorExistingSecret: ""
+    administratorPasswordSecretKey: password
+    migratorExistingSecret: ""
+    migratorPasswordSecretKey: password
+    migratorUrlSecretKey: uri
+    tlsExistingSecret: ""
+    tlsCertSecretKey: tls.crt
+    tlsKeySecretKey: tls.key
+    caSecretKey: ca.crt
+    existingClaim: ""
+    storageClass: ""
+    size: 10Gi
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 999
+      runAsGroup: 999
+      fsGroup: 999
+      seccompProfile:
+        type: RuntimeDefault
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
   # Required in external mode; use the example in ci/external-values.yaml.
   # host, port, database, migratorExistingSecret, migratorUrlSecretKey,
   # caExistingSecret, caSecretKey and roles select the existing SQLx contract.
@@ -233,13 +265,16 @@ oidc:
 keycloak:
   enabled: false
   publicUrl: ""
+  # Explicit loopback-only port-forward evaluation; HTTPS remains the default.
+  localEvaluation: false
+  evaluationAccountsExistingSecret: ""
   proxyTrustedAddresses: ""
   adminExistingSecret: ""
   databaseCaExistingSecret: ""
   databaseCaSecretKey: ca.crt
   image:
     repository: ghcr.io/synveda/keycloak
-    tag: "0.3.0"
+    tag: "0.4.0"
     digest: ""
   replicas: 1
   updateStrategy: OnDelete
@@ -285,12 +320,15 @@ keycloak:
   extraEnv: |
     - name: KC_HOSTNAME
       value: {{ .Values.publicUrl | quote }}
+    - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+      value: {{ .Values.localEvaluation | quote }}
     - name: KC_HOSTNAME_STRICT
       value: "true"
     - name: KC_PROXY_TRUSTED_ADDRESSES
       value: {{ .Values.proxyTrustedAddresses | quote }}
     - name: KC_DB_URL_PROPERTIES
       value: "?sslmode=verify-full&sslrootcert=/run/keycloak-db-ca/ca.crt"
+    {{- if not .Values.localEvaluation }}
     - name: KC_BOOTSTRAP_ADMIN_USERNAME
       valueFrom:
         secretKeyRef:
@@ -301,6 +339,16 @@ keycloak:
         secretKeyRef:
           name: {{ .Values.adminExistingSecret }}
           key: password
+    {{- end }}
+    {{- if .Values.evaluationAccountsExistingSecret }}
+    {{- range $role := list "admin" "member" "approver" "viewer" }}
+    - name: SYNVEDA_DEMO_{{ upper $role }}_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: {{ $.Values.evaluationAccountsExistingSecret }}
+          key: {{ $role }}
+    {{- end }}
+    {{- end }}
   extraVolumes: |
     - name: realm
       configMap:

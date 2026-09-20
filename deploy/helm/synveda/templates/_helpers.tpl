@@ -41,7 +41,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "synveda.postgresImage" -}}
+{{- if eq .Values.postgres.mode "bundled" -}}
+{{- default (printf "ghcr.io/synveda/postgres:%s" .Chart.AppVersion) .Values.postgres.bundled.image -}}
+{{- else -}}
 {{- default (printf "ghcr.io/synveda/cnpg-postgres:17.11-synveda-%s" .Chart.AppVersion) .Values.postgres.image -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "synveda.serviceAccountName" -}}
@@ -60,13 +64,20 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "synveda.migratorSecret" -}}
 {{- if eq .Values.postgres.mode "external" -}}
 {{- .Values.postgres.external.migratorExistingSecret -}}
+{{- else if eq .Values.postgres.mode "bundled" -}}
+{{- .Values.postgres.bundled.migratorExistingSecret -}}
 {{- else -}}
 {{- printf "%s-app" (include "synveda.clusterName" .) -}}
 {{- end -}}
 {{- end -}}
 
 {{- define "synveda.superuserSecret" -}}
+{{- if eq .Values.postgres.mode "bundled" -}}
+{{- .Values.postgres.bundled.administratorExistingSecret -}}
+{{- else -}}
 {{- printf "%s-superuser" (include "synveda.clusterName" .) -}}
+{{- end -}}
+
 {{- end -}}
 
 {{/* Fixed database principals in the portable deployment contract. */}}
@@ -75,7 +86,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "synveda.gatewayRole" -}}synveda_gateway{{- end -}}
 {{- define "synveda.workerRole" -}}synveda_worker{{- end -}}
 {{- define "synveda.migratorUrlKey" -}}
-{{- if eq .Values.postgres.mode "external" -}}{{ .Values.postgres.external.migratorUrlSecretKey }}{{- else -}}uri{{- end -}}
+{{- if eq .Values.postgres.mode "external" -}}{{ .Values.postgres.external.migratorUrlSecretKey }}{{- else if eq .Values.postgres.mode "bundled" -}}{{ .Values.postgres.bundled.migratorUrlSecretKey }}{{- else -}}uri{{- end -}}
 {{- end -}}
 
 {{- define "synveda.databaseRolesJson" -}}
@@ -93,6 +104,13 @@ silent if the chart rendered it anyway.
 ────────────────────────────────────────────────────────────────────────
 */}}
 {{- define "synveda.validate" -}}
+
+{{- if and (ne .Values.postgres.mode "bundled") (or .Values.postgres.bundled.administratorExistingSecret .Values.postgres.bundled.migratorExistingSecret .Values.postgres.bundled.tlsExistingSecret .Values.postgres.bundled.existingClaim .Values.postgres.bundled.storageClass) -}}
+{{- fail "bundled PostgreSQL credentials/storage are incompatible with the selected postgres.mode" -}}
+{{- end -}}
+{{- if and (not .Values.keycloak.enabled) (or .Values.keycloak.localEvaluation .Values.keycloak.evaluationAccountsExistingSecret) -}}
+{{- fail "local identity evaluation requires keycloak.enabled; external realms are not seeded" -}}
+{{- end -}}
 
 {{- /* Decision 4. Pending login handoff and authority-mutation visibility do
        not have accepted multi-replica evidence. OPS-7 lifts this. */ -}}
@@ -161,7 +179,7 @@ silent if the chart rendered it anyway.
 {{- if not .Values.gateway.databasePasswordSecretKey -}}
 {{- fail "gateway.databasePasswordSecretKey must name the Secret key containing the gateway login password" -}}
 {{- end -}}
-{{- if and (eq .Values.postgres.mode "cnpg") (eq .Values.gateway.databaseUrlSecretKey .Values.gateway.databasePasswordSecretKey) -}}
+{{- if and (ne .Values.postgres.mode "external") (eq .Values.gateway.databaseUrlSecretKey .Values.gateway.databasePasswordSecretKey) -}}
 {{- fail "gateway database URL and password Secret keys must be distinct" -}}
 {{- end -}}
 {{- if not .Values.worker.databaseExistingSecret -}}
@@ -173,7 +191,7 @@ silent if the chart rendered it anyway.
 {{- if not .Values.worker.databasePasswordSecretKey -}}
 {{- fail "worker.databasePasswordSecretKey must name the Secret key containing the worker login password" -}}
 {{- end -}}
-{{- if and (eq .Values.postgres.mode "cnpg") (eq .Values.worker.databaseUrlSecretKey .Values.worker.databasePasswordSecretKey) -}}
+{{- if and (ne .Values.postgres.mode "external") (eq .Values.worker.databaseUrlSecretKey .Values.worker.databasePasswordSecretKey) -}}
 {{- fail "worker database URL and password Secret keys must be distinct" -}}
 {{- end -}}
 {{- if eq .Values.gateway.databaseExistingSecret .Values.worker.databaseExistingSecret -}}
@@ -184,7 +202,7 @@ silent if the chart rendered it anyway.
 {{- if eq $secret (include "synveda.migratorSecret" $) -}}
 {{- fail (printf "%s.databaseExistingSecret must not be the migrator Secret: runtime processes refuse database-owner roles" $component) -}}
 {{- end -}}
-{{- if and (eq $.Values.postgres.mode "cnpg") (eq $secret (include "synveda.superuserSecret" $)) -}}
+{{- if and (ne $.Values.postgres.mode "external") (eq $secret (include "synveda.superuserSecret" $)) -}}
 {{- fail (printf "%s.databaseExistingSecret must not be the CloudNativePG superuser Secret" $component) -}}
 {{- end -}}
 {{- end -}}
@@ -261,7 +279,7 @@ silent if the chart rendered it anyway.
 {{- end -}}
 {{- if eq .Values.postgres.mode "cnpg" -}}
 {{- if .Values.postgres.external -}}{{ fail "postgres.external must be empty in cnpg mode" }}{{- end -}}
-{{- else -}}
+{{- else if eq .Values.postgres.mode "external" -}}
 {{- if or .Values.postgres.image (ne (int .Values.postgres.instances) 1) .Values.postgres.parameters .Values.postgres.storage.storageClass (ne .Values.postgres.storage.size "100Gi") (ne (int .Values.postgres.maxConnections) 200) .Values.postgres.retain (ne .Values.postgres.primaryUpdateStrategy "unsupervised") -}}
 {{- fail "CNPG image, instances, parameters, storage and maxConnections overrides require postgres.mode=cnpg" -}}
 {{- end -}}

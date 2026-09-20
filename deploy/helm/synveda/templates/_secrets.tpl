@@ -1,6 +1,15 @@
 {{/* OPS-11: only file paths and existing Secret references enter Pod specs. */}}
 {{- define "synveda.databaseTransportEnv" -}}
-{{- if eq .Values.postgres.mode "external" -}}
+{{- if eq .Values.postgres.mode "bundled" -}}
+- name: SYNVEDA_DATABASE_EXPECTED_HOST
+  value: {{ printf "%s-rw" (include "synveda.clusterName" .) | quote }}
+- name: SYNVEDA_DATABASE_EXPECTED_PORT
+  value: "5432"
+- name: SYNVEDA_DATABASE_EXPECTED_NAME
+  value: synveda
+- name: SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE
+  value: /run/secrets/synveda-postgres/ca.crt
+{{- else if eq .Values.postgres.mode "external" -}}
 - name: SYNVEDA_DATABASE_EXPECTED_HOST
   value: {{ .Values.postgres.external.host | quote }}
 - name: SYNVEDA_DATABASE_EXPECTED_PORT
@@ -19,7 +28,7 @@
 {{- end -}}
 
 {{- define "synveda.databaseTransportMounts" -}}
-{{- if eq .Values.postgres.mode "external" -}}
+{{- if ne .Values.postgres.mode "cnpg" -}}
 - name: postgres-ca
   mountPath: /run/secrets/synveda-postgres
   readOnly: true
@@ -32,13 +41,13 @@
 {{- end -}}
 
 {{- define "synveda.databaseTransportVolumes" -}}
-{{- if eq .Values.postgres.mode "external" -}}
+{{- if ne .Values.postgres.mode "cnpg" -}}
 - name: postgres-ca
   secret:
-    secretName: {{ .Values.postgres.external.caExistingSecret }}
+    secretName: {{ if eq .Values.postgres.mode "bundled" }}{{ .Values.postgres.bundled.tlsExistingSecret }}{{ else }}{{ .Values.postgres.external.caExistingSecret }}{{ end }}
     defaultMode: 0444
     items:
-      - key: {{ .Values.postgres.external.caSecretKey }}
+      - key: {{ if eq .Values.postgres.mode "bundled" }}{{ .Values.postgres.bundled.caSecretKey }}{{ else }}{{ .Values.postgres.external.caSecretKey }}{{ end }}
         path: ca.crt
 {{- if .Values.postgres.external.clientExistingSecret }}
 - name: postgres-client

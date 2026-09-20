@@ -1,6 +1,6 @@
 {
   "name": "@synveda/codex-adapter",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "Captured Codex 0.152.0 hooks over the existing Synveda Session runtime (CPR-39)",

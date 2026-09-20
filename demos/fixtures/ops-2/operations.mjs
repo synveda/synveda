@@ -12,8 +12,9 @@ export async function operations(c) {
   const result = {};
   const sql = (namespace, target, db, query) => k(["exec", "-n", namespace, target, "--", "psql", "-X", "-qAt", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", db, "-c", query]).trim();
   const primary = () => database === "cnpg"
-    ? k(["get", "cluster/synveda-pg", "-n", ns, "-o", "jsonpath={.status.currentPrimary}"]).trim() : "deployment/postgres";
-  const dbNs = database === "cnpg" ? ns : providers;
+    ? k(["get", "cluster/synveda-pg", "-n", ns, "-o", "jsonpath={.status.currentPrimary}"]).trim()
+    : database === "bundled" ? "synveda-pg-0" : "deployment/postgres";
+  const dbNs = database === "external" ? providers : ns;
 
   // A provider that intentionally holds a request proves the claim is live at
   // SIGTERM. It never returns an untrusted payload or contacts an external model.
@@ -126,7 +127,7 @@ export async function operations(c) {
   const backup = join(scratch, `${ns}-backup`); mkdirSync(backup, { mode: 0o700 });
   const archived = [];
   for (const db of ["synveda", "keycloak"]) {
-    const namespace = db === "synveda" || (database === "cnpg" && identity === "packaged") ? dbNs : providers;
+    const namespace = db === "synveda" || (database !== "external" && identity === "packaged") ? dbNs : providers;
     const target = namespace === dbNs ? primary() : "deployment/postgres";
     assert.equal(sql(namespace, target, "postgres", `SELECT count(*) FROM pg_stat_activity WHERE datname='${db}'`), "0", "all writers must be stopped before the pair is dumped");
     const dump = spawnSync("kubectl", ["exec", "-n", namespace, target, "--", "pg_dump", "-U", "postgres", "-d", db, "--format=custom", "--create", "--lock-wait-timeout=10s"], { env, timeout: 120000, maxBuffer: 64 * 1024 * 1024 });

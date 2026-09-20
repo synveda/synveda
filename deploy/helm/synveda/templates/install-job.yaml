@@ -46,9 +46,15 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        {{- include "synveda.podSecurity" (dict "root" . "context" .Values.podSecurityContext) | nindent 8 }}
+        {{- $installSecurity := deepCopy .Values.podSecurityContext }}
+        {{- if eq .Values.postgres.mode "bundled" }}
+        {{- $_ := set $installSecurity "runAsUser" (default 65532 $installSecurity.runAsUser) }}
+        {{- $_ := set $installSecurity "runAsGroup" (default 65532 $installSecurity.runAsGroup) }}
+        {{- $_ := set $installSecurity "fsGroup" (default 65532 $installSecurity.fsGroup) }}
+        {{- end }}
+        {{- include "synveda.podSecurity" (dict "root" . "context" $installSecurity) | nindent 8 }}
       initContainers:
-        {{- if eq .Values.postgres.mode "cnpg" }}
+        {{- if ne .Values.postgres.mode "external" }}
         - name: database-bootstrap
           image: {{ include "synveda.postgresImage" . }}
           resources:
@@ -104,10 +110,14 @@ spec:
               {{- end }}
           env:
             - name: SYNVEDA_POSTGRES_BOOTSTRAP_USER
+              {{- if eq .Values.postgres.mode "bundled" }}
+              value: postgres
+              {{- else }}
               valueFrom:
                 secretKeyRef:
                   name: {{ include "synveda.superuserSecret" . }}
                   key: username
+              {{- end }}
             - name: SYNVEDA_POSTGRES_BOOTSTRAP_URL
               value: postgresql://$(SYNVEDA_POSTGRES_BOOTSTRAP_USER)@{{ include "synveda.clusterName" . }}-rw:5432/postgres
             - name: SYNVEDA_POSTGRES_BUNDLED_CLUSTER
@@ -149,7 +159,7 @@ spec:
           command: ["/bin/sh", "-ec"]
           args:
             - |
-              {{- if and .Values.keycloak.enabled (eq .Values.postgres.mode "cnpg") }}
+              {{- if and .Values.keycloak.enabled (ne .Values.postgres.mode "external") }}
               umask 077
               mkdir -p /run/preflight-authority/private
               chgrp "$(id -g)" /run/preflight-authority/private
@@ -177,7 +187,7 @@ spec:
               value: /run/secrets/synveda-preflight/worker_database_url
             - name: SYNVEDA_DATABASE_ROLES_FILE
               value: /etc/synveda/database/roles.json
-            {{- if and .Values.keycloak.enabled (eq .Values.postgres.mode "cnpg") }}
+            {{- if and .Values.keycloak.enabled (ne .Values.postgres.mode "external") }}
             - name: SYNVEDA_DATABASE_REQUIRED_PEER
               value: keycloak
             - name: SYNVEDA_DATABASE_PEER_WITNESS_FILE
@@ -193,7 +203,7 @@ spec:
             - name: database-roles
               mountPath: /etc/synveda/database
               readOnly: true
-            {{- if and .Values.keycloak.enabled (eq .Values.postgres.mode "cnpg") }}
+            {{- if and .Values.keycloak.enabled (ne .Values.postgres.mode "external") }}
             - name: database-authority
               mountPath: /run/database-authority
               readOnly: true
@@ -299,7 +309,7 @@ spec:
               - key: {{ .Values.kms.keyRefSecretKey }}
                 path: reference
         {{- end }}
-        {{- if eq .Values.postgres.mode "cnpg" }}
+        {{- if ne .Values.postgres.mode "external" }}
         - name: bootstrap-projection
           projected:
             defaultMode: 0444
@@ -307,12 +317,12 @@ spec:
               - secret:
                   name: {{ include "synveda.superuserSecret" . }}
                   items:
-                    - key: password
+                    - key: {{ if eq .Values.postgres.mode "bundled" }}{{ .Values.postgres.bundled.administratorPasswordSecretKey }}{{ else }}password{{ end }}
                       path: postgres_bootstrap_password
               - secret:
                   name: {{ include "synveda.migratorSecret" . }}
                   items:
-                    - key: password
+                    - key: {{ if eq .Values.postgres.mode "bundled" }}{{ .Values.postgres.bundled.migratorPasswordSecretKey }}{{ else }}password{{ end }}
                       path: synveda_migrator_password
               - secret:
                   name: {{ .Values.gateway.databaseExistingSecret }}

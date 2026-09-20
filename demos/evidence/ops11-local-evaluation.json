@@ -1,0 +1,29 @@
+{
+  "at": "2026-09-20T15:40:26.647Z",
+  "startupMs": 30637,
+  "versions": {
+    "helm": "v4.2.3+g43e8b7f",
+    "kubernetes": "v1.36.1",
+    "kubectl": "v1.36.1"
+  },
+  "restrictedAdmission": true,
+  "assignedUid": 1000900000,
+  "assignedUidProcesses": [
+    "gateway",
+    "worker",
+    "install",
+    "keycloak",
+    "postgres"
+  ],
+  "runtimeRoleMigrationRefused": true,
+  "reapplyAfterRefusal": true,
+  "openShiftScc": "NOT RUN: no OpenShift cluster",
+  "portForward": "127.0.0.1 only",
+  "browserLoginLogout": true,
+  "images": {
+    "product": "synveda/release-product:0.4.0",
+    "postgres": "synveda/release-postgres:0.4.0",
+    "keycloak": "synveda/release-keycloak:0.4.0"
+  },
+  "clusterWideInstall": false
+}

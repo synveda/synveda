@@ -996,3 +996,7 @@ code {
     padding-block: 10px;
   }
 }
+
+.product-shot { margin-top: 1rem; margin-bottom: 4rem; }
+.product-shot img { display: block; width: 100%; height: auto; border: 1px solid var(--line, #d8e0e8); border-radius: 14px; box-shadow: 0 16px 48px #0b1f3b12; }
+.product-shot figcaption { max-width: 54rem; margin: 1rem auto; color: #53657a; font-size: .875rem; line-height: 1.6; text-align: center; }

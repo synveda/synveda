@@ -213,7 +213,7 @@ export async function runBrowserAcceptance({
         timeout,
         waitUntil: "domcontentloaded",
       });
-      await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor({
+      await page.getByRole("heading", { name: "Welcome to Synveda", exact: true }).waitFor({
         state: "visible",
         timeout,
       });
@@ -303,7 +303,7 @@ export async function runBrowserAcceptance({
 
     await atStage("session-cleanup", async () => {
       await page.getByRole("button", { name: "Sign out", exact: true }).click({ timeout });
-      await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor({
+      await page.getByRole("heading", { name: "Welcome to Synveda", exact: true }).waitFor({
         state: "visible",
         timeout,
       });

@@ -7,20 +7,22 @@ retains their implementation evidence. Open entries link to current briefs.
 
 114 delivered; 32 open. The inventory and open-brief shape are checked in CI.
 
-OPS-8/CPR-45 extends prebuilt distribution under
-[ADR-0115](../adr/adr-0115-prebuilt-container-release-verification.md): native
-AMD64/ARM64 anonymous image pulls, source/version/platform checks and isolated
-executable checks gate the GitHub Release announcement. The existing archive
-now carries a server-only guide, licence/notice and safe preparation commands.
-Running deployments remain unchanged. The latest public v0.2.0
-still predates the current archive; the source version is now 0.3.0, with
-publication and live reference acceptance open.
-[Release operations](../RELEASING.md) records the package-access,
-visibility and publication steps; measured local validation is in
-[CPR-45](CPR-45.md#prebuilt-container-release-increment-2026-09-20).
-The full deployment gate passed 359 tests without skips; the current product
-image build, eight local ARM64 executable/asset checks, extracted-archive
-configuration render, focused Linux Node 22 tests and workflow/docs lint passed.
+CPR-45/OPS-11/OPS-8/FND-7 prepare the **unpublished 0.4.0 installation
+increment**, separately from v0.3.0, whose publication workflow failed because
+its release page already existed. Publication of 0.4.0 is owner-authorised and
+pending hosted CI, packaging and native installation gates. The existing release
+bundle gains containerized loopback preparation and governed optional sample;
+the existing chart gains operator-free persistent PostgreSQL and independent
+identity ownership. README/site preserve the brand and label unpublished
+commands. ADR-0115 records the decision. Full candidate Docker recovery and
+Kubernetes dependency/operational drills now gate release announcement after
+anonymous pulls on both native architectures. Local Docker lifecycle/fault
+qualification and all four packaged-chart ownership modes passed, including
+real loopback browser access, retained reinstall and paired recovery. Exact
+measurements and remaining blockers live in one
+[CPR-45 record](CPR-45.md#installation-mission-2026-09-20).
+Publication and unavailable platform/N-1 qualification keep these deployment
+features open; local checks do not close production readiness gaps.
 
 CNSL-5 aligns the console with the approved brand and simplifies Home,
 navigation, connection onboarding and the root README under
@@ -56,8 +58,8 @@ then passed on native AMD64 and ARM64 and deployed correction `a2e819e`. All 11
 published page/asset files returned HTTP 200 with bytes identical to the local
 build at [the live site](https://synveda.github.io/synveda/).
 
-[OPS-11](OPS-11.md) records the next small-team Kubernetes milestone under
-ADR-0109. The [deployment audit](../../deploy/README.md#small-team-kubernetes-release-contract)
+[OPS-11](OPS-11.md) records the Kubernetes deployment milestone under
+ADR-0109. The [deployment audit](../../deploy/README.md#kubernetes-release-contract)
 reuses the existing Helm chart and owner-validated Docker MVP, keeps application
 replicas at one, and orders external services, starter/onboarding, OpenShift,
 then operational and published-release evidence. The chart implements external
@@ -78,9 +80,9 @@ recovery, migration contention and retained reinstall; exact local limits and
 measurements are recorded in the open brief. Public v0.2.0 lacks the current chart/reference artifacts and
 predates epoch 3, so a supported published N-1 upgrade remains unavailable;
 publication and actual platform qualification still block delivery.
-Next: validate the prepared 0.3.0 revision, authorise the candidate workflow and
-pull-install its complete artifact set on an empty target; then qualify the
-declared N-1 pair and actual target platform. No schema reset is an upgrade.
+The current installation increment and its publication boundary are recorded
+in CPR-45 above. Qualify the declared N-1 pair and actual target platform after
+the complete artifacts exist. No schema reset is an upgrade.
 
 ADR-0111 adds the restricted portability increment: assigned-ID contexts,
 explicit seccomp, a narrow fsGroup/setgid bootstrap fix, edge Routes with named

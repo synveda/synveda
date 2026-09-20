@@ -1,6 +1,8 @@
-# Persistent small-team starter
+# Operator-managed PostgreSQL starter
 
-The starter instructions are consolidated into the authoritative
+For an operator-free installation, use the [bundled evaluation recipe](examples/README.md).
+
+The CNPG starter instructions are consolidated into the authoritative
 [Kubernetes installation guide](README.md#choose-the-preset).
 Use [starter-values.yaml](starter-values.yaml), the
 [configuration reference](CONFIGURATION.md), and the

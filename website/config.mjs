@@ -1,5 +1,5 @@
 export const repository = "https://github.com/synveda/synveda";
-// Verified remote/default branch, no Pages site or CNAME as of 2026-09-20.
+// Pages API verified 2026-09-20: workflow build, project base, no CNAME.
 export const defaultSiteUrl = "https://synveda.github.io/synveda/";
 export function siteUrl() {
   const url = new URL(process.env.SITE_URL || defaultSiteUrl);
@@ -21,6 +21,7 @@ export function siteUrl() {
 export const publicFiles = [
   ["website/index.html", "index.html"],
   ["website/styles.css", "styles.css"],
+  ["assets/product/review-learning.png", "assets/review-learning.png"],
   ["assets/brand/synveda-lockup.svg", "assets/synveda-lockup.svg"],
   ["assets/brand/synveda-lockup-dark.svg", "assets/synveda-lockup-dark.svg"],
   ["assets/brand/synveda-mark.svg", "assets/synveda-mark.svg"],

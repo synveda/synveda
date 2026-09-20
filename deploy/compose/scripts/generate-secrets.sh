@@ -30,9 +30,9 @@ command -v openssl >/dev/null 2>&1 || {
 
 runtime=${SYNVEDA_COMPOSE_RUNTIME:-development}
 case "$runtime" in
-    development|reference) ;;
+    development|reference|evaluation) ;;
     *)
-        echo "generate-secrets: SYNVEDA_COMPOSE_RUNTIME must be development|reference" >&2
+        echo "generate-secrets: SYNVEDA_COMPOSE_RUNTIME must be development|reference|evaluation" >&2
         exit 64
         ;;
 esac

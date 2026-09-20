@@ -83,7 +83,7 @@ pg_restore --list "$backup/keycloak.dump" >/dev/null
 cluster_shape=$(
     psql -X -qAt --no-password \
         --host=postgres --port=5432 --username=synveda_owner --dbname=postgres \
-        --command="select count(*) filter (where datname = 'synveda' and pg_get_userbyid(datdba) = 'synveda_migrator'), count(*) filter (where datname = 'keycloak' and pg_get_userbyid(datdba) = 'keycloak'), count(*) filter (where datname in ('synveda','keycloak') and numbackends <> 0) from pg_stat_database"
+        --command="select count(*) filter (where d.datname = 'synveda' and pg_get_userbyid(d.datdba) = 'synveda_migrator'), count(*) filter (where d.datname = 'keycloak' and pg_get_userbyid(d.datdba) = 'keycloak'), count(*) filter (where d.datname in ('synveda','keycloak') and s.numbackends <> 0) from pg_database d join pg_stat_database s on s.datid = d.oid"
 ) || {
     echo "logical-restore: fresh target cluster was unavailable" >&2
     exit 69

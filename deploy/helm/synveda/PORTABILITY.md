@@ -9,7 +9,8 @@ One gateway and one worker remain intentional; upgrades interrupt service.
 
 | Environment | Exact available version / policy | Evidence boundary |
 |---|---|---|
-| Local Kind | Kind 0.32.0, Kubernetes 1.36.1, Linux arm64 on macOS 26.6.2/OrbStack Engine 29.4.0; Helm 4.2.3, kubectl 1.33.9/kustomize 5.6.0 | All four starter ownership combinations passed with namespace PSA `restricted`, pinned to `v1.33`, and simulated UID 1000900000 for product/Jobs/Keycloak; [report](../../../demos/evidence/ops11-portability.json) |
+| Local bundled candidate | Kind 0.32.0, Kubernetes/kubectl 1.36.1, Helm 4.2.3; Linux arm64 on macOS 26.6.2/OrbStack Engine 29.4.0 | Four bundled/external combinations; restricted local browser fixture assigns UID 1000900000 to product, Jobs, Keycloak **and PostgreSQL**; [candidate report](../../../demos/evidence/ops11-release-candidate.json) |
+| Earlier operator starter | Same Kind/server/host, with kubectl 1.33.9/kustomize 5.6.0 | Historical CNPG matrix with PSA `restricted` pinned to `v1.33`; [report](../../../demos/evidence/ops11-portability.json). That kubectl version is outside the supported server skew; new qualification uses 1.36.1. |
 | OpenShift 4.19 target | Kubernetes 1.32.0 structural schemas; `restricted-v2` target | Render/schema checked only; no cluster, patch version or admitted SCC available |
 | OpenShift 4.20 target | Kubernetes 1.33.0 structural schemas; `restricted-v3` target with `hostUsers: false` | Render/schema checked only; no cluster, patch version, SELinux/user-namespace or storage evidence available |
 | Self-managed Kubernetes | The exact local Kind version above | No other distribution, storage or ingress implementation qualified |
@@ -92,6 +93,7 @@ the v3 renderer applies it automatically.
 | Gateway / worker | Same product image; gateway serves immutable console files directly, with no nginx/cache/PID runtime. Image HOME and XDG cache are under `/tmp`, backed by emptyDir. Port 8120; worker health stays loopback 8121. No application PVC. |
 | Migration / tenant Job | Same product image and separate database authority stages. Product stages get bounded `/tmp`. CNPG bootstrap uses its existing narrow memory mounts for copied inputs and authority evidence. Private witness directories clear inherited setgid and select the process's own group before the unchanged strict ownership proof. No root startup. |
 | Packaged Keycloak 26.7.2 / chart 7.3.2 | Existing optimized image, native production command; read-only root, writable bounded `/tmp` and `/opt/keycloak/data`; realm import and CA mounts read-only. Persistent identity is in PostgreSQL, not the temporary data directory. HTTP 8080; management 9000 is private. Optional outbound federation/SMTP needs separate provider/trust qualification. |
+| Bundled PostgreSQL 17.11 | Retained data PVC, memory-backed socket and `/tmp`, read-only Secret mounts. Only its TLS private key is copied into memory and owned by the assigned UID. The local browser fixture passes with UID 1000900000 and restricted admission; OpenShift SCC, SELinux and CSI remain unqualified. |
 | CNPG 1.30.0 / PostgreSQL 17.11 + pgvector 0.8.6 | Existing operator owns instance pods, database PVCs, identity and API access. SQL bootstrap client is covered by the application Job checks; that does not qualify database pods under an OpenShift SCC. Storage class/resources remain existing CNPG values. Importing an existing database volume is not supported by an arbitrary PVC-name switch. |
 | Optional TEI cpu-1.8.1 | Nonprivileged 8080, read-only root, HOME `/tmp`, HF_HOME `/data`, writable cache PVC. `tei.cache.existingClaim` reuses a preloaded claim; storageClass applies only to a newly created claim. Volume group/CSI access and model startup must be tested on the target. A `/data/...` model can be preloaded for offline use. |
 | Tests/helpers | No application Helm hook test existed. The dependency's optional Selenium test assumes UID 1200 and a writable/browser runtime; enabling it is refused. Use the existing real PKCE/team/MCP acceptance fixture. Fixture pods and provider-bootstrap helpers are included in the restricted Kind run; they are not installed into customer projects. |
@@ -200,8 +202,8 @@ establish that enforcement; this remains an explicit unverified item.
 make chart-lint
 # Install kubeconform 0.7.0 outside the repository; uses pinned official Route schemas.
 make chart-schema
-# Creates only its own disposable Kind cluster; no shared kubeconfig mutation.
-PORTABILITY=1 STARTER_MATRIX=1 bash demos/ops-2-helm-install.sh
+# Operator-free matrix in its own disposable Kind cluster/private kubeconfig.
+BUNDLED_MATRIX=1 PORTABILITY=1 STARTER_MATRIX=1 bash demos/ops-2-helm-install.sh
 make check-deploy
 make compose-config
 ```

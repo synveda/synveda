@@ -77,6 +77,8 @@ copy_runtime_asset() {
 for asset in \
   deploy/compose/compose.yaml \
   deploy/compose/compose.reference.yaml \
+  deploy/compose/compose.evaluation.yaml \
+  deploy/compose/compose.evaluation-sample.yaml \
   deploy/compose/compose.postgres.yaml \
   deploy/compose/compose.keycloak.yaml \
   deploy/compose/compose.keycloak-postgres.yaml \
@@ -92,6 +94,7 @@ for asset in \
   deploy/compose/compose.restore.yaml \
   deploy/compose/configs/caddy/Caddyfile \
   deploy/compose/configs/caddy/app.reference.caddy \
+  deploy/compose/configs/caddy/app.evaluation.caddy \
   deploy/compose/configs/caddy/identity.reference.caddy \
   deploy/compose/configs/caddy/identity.external.caddy \
   deploy/compose/configs/database/roles.reference.json \
@@ -104,6 +107,9 @@ for asset in \
   deploy/compose/browser/seccomp_profile.json \
   deploy/compose/browser/seccomp_profile.NOTICE \
   deploy/compose/scripts/compose.sh \
+  deploy/compose/scripts/evaluation.sh \
+  deploy/compose/scripts/prepare-evaluation.mjs \
+  deploy/compose/scripts/evaluation-recovery.mjs \
   deploy/compose/scripts/generate-secrets.sh \
   deploy/compose/scripts/generate-issuer.sh \
   deploy/compose/scripts/project-lock.sh \
@@ -125,8 +131,27 @@ done
 
 # The server-only guide travels with the archive; its further reading stays
 # bound to the same source revision instead of the moving default branch.
-sed "s|https://github.com/synveda/synveda/blob/main/|https://github.com/synveda/synveda/blob/$source_sha/|g" \
-  deploy/compose/PREBUILT.md > "$stage/INSTALL.md"
+node --input-type=module - "$source_sha" "$stage/INSTALL.md" "$version" <<'JS'
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+const [sha, output, version] = process.argv.slice(2);
+const base = `https://github.com/synveda/synveda/blob/${sha}/`;
+const source = readFileSync("deploy/compose/PREBUILT.md", "utf8");
+const statusStart = source.indexOf("<!-- installation-version:");
+const requirements = source.indexOf("## Requirements");
+if (statusStart < 0 || requirements <= statusStart) throw new Error("packaged guide publication boundary missing");
+// Immutable candidate bytes must also read correctly after promotion. Public
+// main-branch status stays in installation.json; the archive points to evidence.
+const qualifiedGuide = source.slice(0, statusStart)
+  + `**Archive ${version}.** Verify SHA256SUMS and the matching image, Docker and\nKubernetes qualification reports from its approved release. A privately built\ncandidate does not establish published or platform support.\n\n`
+  + source.slice(requirements);
+const guide = qualifiedGuide
+  .replace(/The following download is \*\*pending publication\*\*\. After [^\n]+ is approved:/, "For a new host, download only an approved release with its matching reports:")
+  .replaceAll("https://github.com/synveda/synveda/blob/main/", base)
+  .replace(/\]\(([^)#]+)(#[^)]*)?\)/g, (match, target, anchor = "") =>
+    /^(https?:|#)/.test(target) ? match : `](${base}${path.posix.normalize(`deploy/compose/${target}`)}${anchor})`);
+writeFileSync(output, guide);
+JS
 cp LICENSE NOTICE "$stage/"
 
 product_image="ghcr.io/synveda/product@$product_digest"
@@ -144,6 +169,9 @@ image:
   repository: ghcr.io/synveda/product
   tag: ""
   digest: $product_digest
+postgres:
+  bundled:
+    image: $postgres_image
 keycloak:
   image:
     repository: ghcr.io/synveda/keycloak
@@ -178,6 +206,14 @@ cat > "$stage/environment.json" <<EOF
 EOF
 printf '%s\n' "$version" > "$stage/version"
 printf '%s\n' "$source_sha" > "$stage/source-sha"
+printf '%s\n' "$product_image" > "$stage/product-image"
+cat > "$stage/evaluation.json" <<EOF
+{
+  "port": 8080,
+  "subnet": "10.231.60.0/24",
+  "demoAccounts": true
+}
+EOF
 
 cat > "$stage/deploy/compose/.env.example" <<EOF
 # Generated non-secret defaults for Synveda reference release $version.
@@ -211,6 +247,9 @@ cat > "$stage/synveda-compose" <<EOF
 # hostnames, dependency modes and operator-owned paths remain runtime inputs.
 set -eu
 bundle_dir=\$(CDPATH= cd "\$(dirname "\$0")" && pwd -P)
+if [ "\${SYNVEDA_COMPOSE_RUNTIME:-evaluation}" = evaluation ]; then
+  exec sh "\$bundle_dir/deploy/compose/scripts/evaluation.sh" "\$@"
+fi
 case "\$(basename "\$(dirname "\$bundle_dir")")" in
   releases) install_home=\$(dirname "\$(dirname "\$(dirname "\$bundle_dir")")") ;;
   *) install_home=\${SYNVEDA_HOME:-\${HOME:?HOME is required}/.synveda} ;;
@@ -262,23 +301,19 @@ EOF
 chmod 755 "$stage/synveda-compose"
 
 cat > "$stage/README.md" <<EOF
-# Synveda Docker reference $version
+# Synveda Docker bundle $version
 
-This is the implemented digest-bound, single-host reference deployment. The
-repository has deterministic contract checks for this shape, but this archive
-alone is not clean-host, published-image, identity, recovery or upgrade
-evidence. Those validations remain pending. It is not highly available,
-host-loss tolerant, production SaaS or an enterprise certification.
+Read [INSTALL.md](INSTALL.md) for checksum verification, loopback first sign-in,
+optional sample, lifecycle and reference HTTPS. Run \`./synveda-compose up\` to
+prepare private state in a short-lived container and start the pinned services.
+No source checkout, host Node/OpenSSL, Rust toolchain or image build is required
+for evaluation. Only the proxy's selected loopback port is exposed.
 
-Read [INSTALL.md](INSTALL.md) for the server-only download, checksum, DNS,
-TLS and sign-in steps. No source checkout, Rust toolchain or image build is
-needed. The optional native client installer is a separate path.
-
-The launcher pulls the exact image set in \`environment.json\`. Only proxy
-ports 80/443 are public. Mutable keys and configuration live under the install
-root's \`state/\` directory and backups under \`backups/\`, outside immutable
-releases. Published releases include separate per-platform image-pull reports;
-those are executable/asset checks, not a full deployment acceptance result.
+\`environment.json\` records source and immutable image identities. Private
+keys/state and paired backups live below \`SYNVEDA_HOME/state\`, outside the
+release. Preserve them with the databases. An archive alone is not runtime
+qualification: read the release's architecture-specific image, Docker and
+Kubernetes reports. No HA or off-host disaster-recovery claim is implied.
 EOF
 
 if find "$stage" -type f \( -name '.env' -o -iname '*rauthy*' -o \

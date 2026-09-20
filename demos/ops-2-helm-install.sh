@@ -23,6 +23,11 @@
 #         POSTGRES_MODE=external demos/ops-2-helm-install.sh  external TLS fixture
 set -euo pipefail
 
+if [ "${LOCAL_EVALUATION:-0}" = 1 ]; then
+  cd "$(dirname "$0")/.."
+  exec node demos/fixtures/ops-2/local-evaluation.mjs
+fi
+
 if [ "${STARTER_MATRIX:-0}" = 1 ]; then
   cd "$(dirname "$0")/.."
   exec node demos/fixtures/ops-2/starter.mjs

@@ -5,8 +5,28 @@ Synveda {{ .Chart.AppVersion }} — one gateway/console host and one private wor
 {{- if eq .Values.postgres.mode "external" }}
   External database: {{ .Values.postgres.external.host }}:{{ .Values.postgres.external.port }}/{{ .Values.postgres.external.database }}
   Provider provisioning is operator-owned; the release creates no database.
+{{- else if eq .Values.postgres.mode "bundled" }}
+  Bundled PostgreSQL: {{ include "synveda.clusterName" . }}; one persistent instance, no operator.
+  PVC and separately owned Secrets survive uninstall. Keep both to reinstall.
 {{- else }}
   CNPG: {{ include "synveda.clusterName" . }}, {{ .Values.postgres.instances }} instance(s); preinstalled operator required.
+{{- end }}
+{{- if .Values.keycloak.enabled }}
+  Identity: bundled Keycloak; its separate durable database is
+    {{ .Values.keycloak.database.hostname }}:{{ .Values.keycloak.database.port }}/{{ .Values.keycloak.database.database }}.
+{{- else }}
+  Identity: existing OIDC; this release does not create or change the realm.
+{{- end }}
+{{- if .Values.keycloak.localEvaluation }}
+
+Start each loopback port-forward in its own terminal:
+  kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ include "synveda.fullname" . }} {{ (urlParse .Values.gateway.publicUrl).host | splitList ":" | last }}:8120
+  kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ default (printf "%s-keycloak" .Release.Name) .Values.keycloak.fullnameOverride }}-http {{ (urlParse .Values.keycloak.publicUrl).host | splitList ":" | last }}:80
+{{- if .Values.keycloak.evaluationAccountsExistingSecret }}
+  Evaluation login: synveda-demo-admin. Retrieve only in a private terminal:
+  kubectl -n {{ .Release.Namespace }} get secret {{ .Values.keycloak.evaluationAccountsExistingSecret }} -o jsonpath='{.data.admin}' | base64 --decode
+  The chart never prints passwords. See examples/README.md for sample identities.
+{{- end }}
 {{- end }}
 
 The normal Job {{ include "synveda.fullname" . }}-install-{{ .Release.Revision }}
@@ -30,6 +50,6 @@ After externally rotating credentials or CA files, roll the affected process:
 Back up {{ .Values.kms.existingSecret }} separately from the database. Replacing
 a KMS Secret is not a key-rotation ceremony. See deploy/helm/synveda/README.md.
 
-Both processes use Recreate: upgrades interrupt service. No gateway HA,
-claimed-work shutdown qualification, published image availability, cloud or
-OpenShift certification, backup/PITR or old-schema compatibility is claimed.
+Both processes use Recreate: upgrades interrupt service. Local qualification
+is recorded separately from published artifacts. No gateway HA, cloud/OpenShift
+certification, production backup/PITR or old-schema compatibility is claimed.

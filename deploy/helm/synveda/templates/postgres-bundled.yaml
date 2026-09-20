@@ -1,0 +1,160 @@
+{{- if eq .Values.postgres.mode "bundled" }}
+{{- $pg := .Values.postgres.bundled }}
+{{- if or (not $pg.administratorExistingSecret) (not $pg.migratorExistingSecret) (not $pg.tlsExistingSecret) }}
+{{- fail "postgres.mode=bundled requires separate administratorExistingSecret, migratorExistingSecret and tlsExistingSecret; preserve these with the PVC" }}
+{{- end }}
+{{- if eq $pg.administratorExistingSecret $pg.migratorExistingSecret }}
+{{- fail "bundled PostgreSQL administrator and migrator Secrets must be distinct" }}
+{{- end }}
+{{- if or .Values.postgres.external .Values.postgres.image .Values.postgres.parameters (ne (int .Values.postgres.instances) 1) }}
+{{- fail "bundled PostgreSQL is one persistent instance; external and CNPG-specific overrides are incompatible" }}
+{{- end }}
+{{- if and $pg.existingClaim $pg.storageClass }}
+{{- fail "bundled PostgreSQL existingClaim and storageClass are mutually exclusive" }}
+{{- end }}
+{{- if not $pg.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "synveda.clusterName" . }}-data
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if $pg.storageClass }}
+  storageClassName: {{ $pg.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $pg.size }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "synveda.clusterName" . }}-rw
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "synveda.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "synveda.clusterName" . }}
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "synveda.clusterName" . }}-rw
+  updateStrategy:
+    type: OnDelete
+  selector:
+    matchLabels:
+      {{- include "synveda.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "synveda.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 75
+      securityContext:
+        {{- include "synveda.podSecurity" (dict "root" . "context" $pg.podSecurityContext) | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgres
+          image: {{ include "synveda.postgresImage" . }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          # Secret projections are read-only symlinks. PostgreSQL requires its
+          # key owned by the runtime UID, so copy only that key into memory.
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              umask 077
+              cp /run/postgres-tls/tls.key /tmp/postgres.key
+              chmod 0600 /tmp/postgres.key
+              exec /usr/local/bin/docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/run/postgres-tls/tls.crt -c ssl_key_file=/tmp/postgres.key -c max_connections={{ .Values.postgres.maxConnections }}
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_DB
+              value: postgres
+            - name: POSTGRES_PASSWORD_FILE
+              value: /run/postgres-admin/password
+          ports:
+            - name: postgres
+              containerPort: 5432
+          startupProbe:
+            exec:
+              # The entrypoint's temporary init server has only a Unix socket.
+              # TCP readiness waits for the final server after init completes.
+              command: [pg_isready, -h, 127.0.0.1, -U, postgres, -d, postgres]
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -U, postgres, -d, postgres]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -U, postgres, -d, postgres]
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            {{- toYaml $pg.resources | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: socket, mountPath: /var/run/postgresql}
+            - {name: admin, mountPath: /run/postgres-admin, readOnly: true}
+            - {name: tls, mountPath: /run/postgres-tls, readOnly: true}
+      {{- with $pg.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $pg.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $pg.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" (include "synveda.clusterName" .)) $pg.existingClaim }}
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 64Mi}
+        - name: socket
+          emptyDir: {medium: Memory, sizeLimit: 16Mi}
+        - name: admin
+          secret:
+            secretName: {{ $pg.administratorExistingSecret }}
+            items:
+              - {key: {{ $pg.administratorPasswordSecretKey }}, path: password}
+        - name: tls
+          secret:
+            secretName: {{ $pg.tlsExistingSecret }}
+            items:
+              - {key: {{ $pg.tlsCertSecretKey }}, path: tls.crt}
+              - {key: {{ $pg.tlsKeySecretKey }}, path: tls.key}
+{{- end }}

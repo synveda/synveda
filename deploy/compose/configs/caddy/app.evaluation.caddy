@@ -1,0 +1,33 @@
+http://localhost {
+	import synveda_response_headers
+	request_body {
+		max_size 16MB
+	}
+	@identity_ready {
+		path /realms/synveda/* /resources/*
+		file {
+			root /run/synveda/keycloak-public-gate/current
+			try_files cpr45-keycloak-realm-v3.ready
+		}
+	}
+	handle @identity_ready {
+		reverse_proxy keycloak:8080 {
+			import synveda_upstream
+		}
+	}
+	handle /realms/* {
+		respond 503
+	}
+	handle /resources/* {
+		respond 503
+	}
+	@private path /metrics /admin /admin/* /health /health/* /management/*
+	handle @private {
+		respond 404
+	}
+	handle {
+		reverse_proxy gateway:8120 {
+			import synveda_upstream
+		}
+	}
+}

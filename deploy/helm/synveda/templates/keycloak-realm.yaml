@@ -12,7 +12,7 @@ data:
     {
       "realm": "synveda",
       "enabled": true,
-      "sslRequired": "external",
+      "sslRequired": {{ ternary "none" "external" .Values.keycloak.localEvaluation | toJson }},
       "registrationAllowed": false,
       "registrationEmailAsUsername": false,
       "rememberMe": false,
@@ -32,6 +32,18 @@ data:
       "adminEventsEnabled": true,
       "adminEventsDetailsEnabled": false,
       "groups": [{"name": "synveda-admins"}],
+      {{- if .Values.keycloak.evaluationAccountsExistingSecret }}
+      "users": [
+        {{- range $index, $role := list "admin" "member" "approver" "viewer" }}
+        {{ if $index }},{{ end }}{"username": "synveda-demo-{{ $role }}", "enabled": true,
+          "email": "{{ $role }}@synveda.invalid", "emailVerified": true,
+          "firstName": {{ index (dict "admin" "Avery" "member" "Riley" "approver" "Morgan" "viewer" "Vera") $role | toJson }},
+          "lastName": {{ index (dict "admin" "Author" "member" "Reviewer" "approver" "Approver" "viewer" "Restricted Viewer") $role | toJson }},
+          "groups": [{{ if eq $role "admin" }}"synveda-admins"{{ end }}],
+          "credentials": [{"type":"password", "temporary":false, "value":"${SYNVEDA_DEMO_{{ upper $role }}_PASSWORD}"}]}
+        {{- end }}
+      ],
+      {{- end }}
       "clients": [{
         "clientId": "synveda",
         "enabled": true,

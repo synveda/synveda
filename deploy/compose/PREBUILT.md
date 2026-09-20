@@ -1,182 +1,260 @@
-# Run Synveda from prebuilt Docker images
+# Run with Docker
 
-A small team can run the server without compiling Synveda. Download the
-reference deployment archive from a matching release, then use its launcher
-to pull the images and start PostgreSQL, Keycloak, the gateway, worker, proxy
-and private telemetry collector. The web console is already in the product
-image. There is no Git checkout, Rust toolchain, pnpm install or local image
-build on this path.
+Run the versioned prebuilt bundle with bundled dependencies for a local
+evaluation, or select the reference HTTPS configuration for infrastructure you
+operate. Both use the same Compose services, database authority checks,
+Cedar, forced RLS, VedaFlow and audit.
 
-**Availability:** as checked on 2026-09-20, the latest public release is
-v0.2.0. It predates this deployment and has no current reference archive.
-The commands below are for the next compatible release that includes
-`synveda-reference-<version>.tar.gz` and both `release-images-*.json` reports.
-Do not substitute v0.2.0 or mix its files with the current installer.
+<!-- installation-version: 0.4.0; publication: unreleased -->
+**Publication: 0.4.0 is unreleased.** These are candidate instructions. The
+owner's v0.3.0 build is separate; do not combine its images with this bundle.
+The [release manifest](../../docs/installation.json) owns this status.
 
-This remains a controlled single-host evaluation. Production key custody,
-off-host recovery and deployment qualification are still open in the
-[readiness register](https://github.com/synveda/synveda/blob/main/docs/PRODUCTION_READINESS.md).
+## Requirements
 
-## What you need
+An ordinary account with access to a **local Docker daemon**, Compose 2.33.1+
+(the minimum for the existing merge contract), curl, tar and a SHA-256 utility.
+Actual candidate testing uses macOS/OrbStack, Engine 29.4.0, Compose 5.1.2 and
+Apple Silicon. Other host/architecture combinations remain unqualified until
+their recorded runtime gates pass. Use at least 6 GiB available to Docker for
+PostgreSQL, Keycloak, gateway, worker and private telemetry; this is an
+operational starting allocation, not a measured capacity guarantee.
 
-- A macOS or Linux host and a regular, non-root account with Docker access.
-  Images target **Linux AMD64 and ARM64**. Docker supplies the Linux runtime
-  on a Mac. Image availability is separate from deployment qualification:
-  the recorded full development run used macOS/OrbStack; Linux and Docker
-  Desktop reference acceptance remain pending. Native Windows and WSL2 setup
-  are not documented or tested.
-- Docker Engine **28+** on a local Unix socket, Compose **2.33.1+**, Node.js
-  **22+**, OpenSSL, curl, tar and a SHA-256 utility. The launcher uses Node
-  for preflight checks; it needs neither npm packages nor a compiler.
-- Two DNS names you control, such as `app.example.com` and `auth.example.com`,
-  pointing to this host. Browsers and containers must reach the same names.
-- A trusted TLS certificate covering both names and its unencrypted PEM
-  private key. Certificate renewal is operator-managed; the launcher does
-  not request ACME certificates. Private-CA reference deployments are not
-  qualified by this guide.
-- Ports **80 and 443** available, and a private `/24` subnet that does not
-  overlap your LAN, VPN or other Docker networks.
+No Git, Rust, host Node/OpenSSL, Make, Buildx selection, DNS edits, external
+account, paid model or public wildcard DNS is required for local evaluation.
+Preparation runs briefly in the product image with no network or Docker socket.
+The localhost endpoint is plaintext and binds only 127.0.0.1. Use reference
+HTTPS for remote users. Do not forward the local port onto an untrusted network.
 
-You do not need a GitHub account or registry token for public release images.
-An authentication error may mean a package has not been made public; report
-the release and image name rather than adding publishing credentials.
+## Download and verify
 
-## 1. Download one complete release
-
-Open [GitHub Releases](https://github.com/synveda/synveda/releases). Choose a
-release that explicitly includes the current Docker reference, and copy its
-tag into `SYNVEDA_VERSION`. The placeholder below must be replaced.
+The following download is **pending publication**. After 0.4.0 is approved:
 
 ```sh
-export SYNVEDA_VERSION='vMAJOR.MINOR.PATCH'
-version="${SYNVEDA_VERSION#v}"
+version=0.4.0
+release_url="https://github.com/synveda/synveda/releases/download/v$version"
 mkdir "synveda-$version"
 cd "synveda-$version"
-release_url="https://github.com/synveda/synveda/releases/download/$SYNVEDA_VERSION"
 curl -fLO "$release_url/synveda-reference-$version.tar.gz"
 curl -fLO "$release_url/SHA256SUMS"
 awk -v file="synveda-reference-$version.tar.gz" \
   '$2 == file { count++; print } END { if (count != 1) exit 1 }' \
   SHA256SUMS > reference.sha256
-```
-
-On Linux, verify and extract:
-
-```sh
-sha256sum --check reference.sha256 && tar -xzf "synveda-reference-$version.tar.gz"
-```
-
-On macOS, use `shasum -a 256 --check reference.sha256` for the checksum command.
-Stop if verification fails. Checksums detect a damaged download; these
-artifacts are not yet signed.
-
-```sh
+# macOS:
+shasum -a 256 --check reference.sha256
+# Linux alternative: sha256sum --check reference.sha256
+tar -xzf "synveda-reference-$version.tar.gz"
 cd "synveda-reference-$version"
 cat environment.json
+./synveda-compose up
 ```
 
-The manifest records the version, source commit and exact image digests. Keep
-the archive, manifest and release reports with your deployment records. The
-launcher uses these pinned images; it does not follow a moving `latest` tag.
+Stop on a checksum failure. Checksums detect corruption; unsigned assets do
+not authenticate their own download channel. `environment.json` binds source,
+version, image digests and dependencies. The launcher never builds source or
+selects `latest`. No registry login should be required for a published bundle;
+an anonymous-pull failure is a release defect, not a reason to supply a
+publisher's token.
 
-## 2. Set the hostnames and prepare TLS
+The first download is separate from startup and may be large. `up` waits for
+health, completed bootstrap/migrations and issuer diagnostics. It prints the
+console URL without passwords. Normal logs contain no secret values.
 
-Use the same settings whenever you operate this deployment. Save them in an
-operator-owned shell file outside the extracted release; the launcher does
-not automatically load a `.env` file. Replace these example names and subnet:
+Before the first `up`, edit the small `evaluation.json` file if port 8080 is
+occupied or its private /24 overlaps a VPN. Supported keys are `port`, `subnet`
+and the explicit `demoAccounts` choice. Their identity is fixed in private
+state after preparation; an accidental later change is refused. Use paths
+without spaces or shell metacharacters. Do not set source-development
+`SYNVEDA_*` variables to override the prepared contract.
+
+## First workspace and sample
+
+Open **http://localhost:8080/console/**. Retrieve a generated password deliberately
+in your terminal:
 
 ```sh
-export SYNVEDA_HOME="$HOME/.synveda"
+./synveda-compose credential author
+```
+
+Sign in as `synveda-demo-admin` (Avery Author). The generated accounts are local
+evaluation identities, never universal passwords. Create an empty workspace
+through Getting started, or opt into fictional sample content:
+
+```sh
+./synveda-compose sample
+```
+
+The optional browser/CLI image signs in the four distinct generated identities
+and reuses the existing governed demo through public APIs. It creates **Northstar
+Delivery → Ingestion API**, a synthetic source Session, a baseline Knowledge
+revision, a proposed retry learning and a proposed Skill version. The command
+never approves a review and requires no model API. Repeat it safely: its durable
+receipt/idempotency keys preserve existing resources and reviewer edits.
+
+1. In **Sessions**, open the fictional ingestion retry session and inspect its
+   synthetic evidence. **New Learnings** shows the captured candidate and its
+   proposed-change state.
+2. Sign out. Run `./synveda-compose credential reviewer`, then sign in as
+   `synveda-demo-member` (Riley Reviewer). Open **Reviews** and inspect the
+   learning's source, proposed content and required reviewers before deciding.
+3. Approve and apply the learning using the normal review controls. Approval
+   and application are separate states; pending content is not active Knowledge.
+4. In **Context**, select the Ingestion API scope and request context about
+   ingestion retries. Inspect the selected immutable Knowledge revision and
+   source evidence. The sample's Skill version requires the two distinct
+   configured administrators; use `credential approver` only for a deliberate
+   second evaluation decision, then create its binding through **Skills**.
+
+These are your evaluation actions, not verified historical human reviews.
+The automated acceptance fixture can perform explicit test acts; those are
+reported separately. Live-agent verification is owned by the
+[client support matrix](../../docs/CLIENT_SUPPORT.md).
+
+Console **Sign out** removes the Synveda session and makes subsequent API reads
+unauthenticated. Keycloak's SSO session is separate: use a private browser window
+per identity, or end the provider session before switching accounts. No provider
+logout is silently implied.
+
+`demoAccounts:false` creates no evaluation users or sample. An identity
+administrator must provision users and the initial `synveda-admins` mapping;
+for real identities follow [existing infrastructure](#use-existing-infrastructure).
+No external deployment is automatically seeded.
+
+## State and ordinary lifecycle
+
+Use one `SYNVEDA_HOME` (default `$HOME/.synveda`) throughout this deployment.
+The private `state/synveda-evaluation` contains the matching issuer, database
+credentials, Keycloak authority and encryption keys. PostgreSQL's named volume
+contains **both** the Synveda and separate Keycloak databases, with different
+owners and runtime roles. The optional sample's receipt lives in its own named
+volume. Never delete keys while retaining encrypted data.
+
+```sh
+./synveda-compose status
+./synveda-compose logs
+./synveda-compose stop
+./synveda-compose up
+./synveda-compose restart   # gateway and worker only
+./synveda-compose down      # removes containers/networks; preserves volumes/keys
+./synveda-compose up
+```
+
+Mutation commands claim a private operation lock. A concurrent command refuses
+with exit 75. After a killed host process, confirm that its Docker operation and
+containers have stopped before removing the **empty** `state/.evaluation-operation`
+directory. Preparation uses an additional bounded lock and atomic files; do not
+repair concurrency by deleting secrets. Missing keys beside retained data cause
+a refusal with recovery guidance.
+
+## Backup and restore
+
+The existing PostgreSQL 17 logical tooling quiesces gateway, worker and Keycloak,
+dumps both databases, validates the archive/key pair and resumes services. The
+command temporarily interrupts service. Choose a new lowercase backup id:
+
+```sh
+./synveda-compose backup before-update
+```
+
+Keep the entire private `state/backups/before-update` directory together. It
+contains database dumps, hashes and the matching keys, credentials and issuer
+configuration. Copy it to separately protected storage. This command does not
+provide encryption at rest for backup media, off-host storage or disaster recovery.
+An incomplete backup is retained for diagnosis and cannot be restored as complete.
+
+Restore only into an **absent evaluation database volume**, with the matching
+bundle, `evaluation.json`, state and original canonical localhost port. It refuses
+an existing volume and incompatible/mismatched private state:
+
+```sh
+SYNVEDA_CONFIRM_RESTORE=restore:synveda-evaluation:before-update \
+  ./synveda-compose restore before-update
+```
+
+For a new host, securely copy the backup under the same relative state path
+first. Restoring into the current disposable evaluation requires the separate
+explicit reset below. Restore checks the tenant, audit prefix and encryption
+key before normal startup. Sign in and inspect the expected workspace afterwards.
+A logical data restore is different from rolling an application image back.
+
+## Update and removal
+
+Download and verify the complete next bundle; retain the old bundle and private
+state. Back up first. Use the new bundle only when its notes explicitly support
+your schema epoch. Keep the same runtime selection: an existing HTTPS reference
+deployment must retain `SYNVEDA_COMPOSE_RUNTIME=reference`. Switching to the
+loopback evaluation creates a separate deployment; it does not migrate the
+reference volume, realm or issuer. The current baseline is **epoch 3**. Earlier epochs fail with
+reset guidance; there is no compatibility migrator or supported v0.2.0 → current
+data upgrade. Local same-epoch reapply is evidence only for the tested revisions.
+Helm/application rollback never reverses SQL migrations.
+
+Ordinary removal is `down`, followed by deliberate removal of the extracted
+archive if desired. Data and secrets survive. For a disposable destructive reset:
+
+```sh
+SYNVEDA_CONFIRM_RESET=delete:synveda-evaluation:postgres-data \
+  ./synveda-compose reset
+```
+
+This deletes exactly the named evaluation database volume, including Keycloak
+identity state; it retains the generated keys and backups. Remove the optional
+sample receipt volume only when deliberately abandoning that fixture. Global
+Docker pruning is never part of installation, upgrade or removal.
+
+## Use existing infrastructure
+
+Select `SYNVEDA_COMPOSE_RUNTIME=reference` explicitly and follow the existing
+[reference prerequisites](README.md#reference-https) and
+[external PostgreSQL](README.md#external-postgresql) /
+[external OIDC](README.md#external-oidc) inputs. This advanced route retains its
+host Node 22+/OpenSSL, operator DNS and trusted TLS prerequisites. Replace its
+`make compose-*` calls with the extracted `./synveda-compose <action>` launcher.
+It is a different exposure/configuration selection of the same Compose graph.
+For bundled providers on that HTTPS route, prepare the private inputs after
+setting the required hostnames:
+
+```sh
+export SYNVEDA_COMPOSE_RUNTIME=reference
 export SYNVEDA_APP_HOST=app.example.com
 export SYNVEDA_AUTH_HOST=auth.example.com
-export SYNVEDA_COMPOSE_IPV4_POOL=10.231.44.0/24
-install -d -m 700 "$SYNVEDA_HOME" "$SYNVEDA_HOME/state" \
-  "$SYNVEDA_HOME/state/synveda-reference"
 ./synveda-compose secrets
 ./synveda-compose issuer
 ```
 
-These commands create the bundled issuer configuration, private keys and database credentials in
-`$SYNVEDA_HOME/state/synveda-reference/secrets`. Keep that directory: losing the
-encryption key can make stored data unreadable. It is separate from the
-downloaded release and survives replacing it.
+Install the required TLS certificate/key files using the reference guide before
+`up`. External mode requires supplied files instead of these bundled helpers.
 
-Repeated preparation preserves existing keys and issuer settings. External
-providers require operator-supplied credentials and issuer configuration;
-the corresponding bundled helper refuses that mode.
+| PostgreSQL mode | OIDC mode | Database ownership |
+|---|---|---|
+| bundled | bundled | Synveda and Keycloak databases in the bundled server, separate owners |
+| external | external | Provider-owned application DB; provider-owned identity |
+| external | bundled | Supply the application DB **and a distinct durable Keycloak DB** |
+| bundled | external | Bundled application storage; external realm is not mutated |
 
-Copy your leaf-first certificate chain and matching key into the generated
-directory, as the same regular user:
+Never hand an application runtime a PostgreSQL superuser or realm administrator
+credential. Use the [existing service contract](../helm/synveda/CONFIGURATION.md)
+for roles, CA/hostname verification, issuer/client/audiences and initial admission.
+Generic OIDC support does not qualify every provider.
 
-```sh
-install -m 600 /absolute/path/to/fullchain.pem \
-  "$SYNVEDA_HOME/state/synveda-reference/secrets/tls_cert"
-install -m 600 /absolute/path/to/privkey.pem \
-  "$SYNVEDA_HOME/state/synveda-reference/secrets/tls_key"
-```
+## Troubleshooting
 
-The default runtime UID/GID follows the operator. Do not change ownership or
-relax secret-file permissions to fix a failed preflight.
+- **Port already allocated:** choose an unused port in `evaluation.json` before
+  preparation. A persisted issuer cannot be silently moved to another port.
+  If allocation fails after preparation, free the configured port, then run
+  `down` followed by `up` to recreate its binding while preserving data and keys.
+- **Network overlap:** select a private unused /24; do not remove unrelated
+  Docker networks to make room.
+- **Identity unreachable or wrong issuer:** `up` fails its bounded diagnostic.
+  Check the printed endpoint and state; never disable issuer/audience checks.
+- **Missing/unsafe private files:** restore the original private state. The
+  launcher refuses permissive files and replacement credentials beside data.
+- **Storage exhausted:** free or increase storage on the selected Docker host,
+  retain the volume and keys, then rerun preparation/startup. A failed write is
+  not evidence of completed bootstrap.
+- **Interrupted backup or restore:** retain its files, inspect `status` and
+  non-secret logs, and follow the fresh-target rule. Do not reset useful data
+  to bypass a diagnostic.
 
-## 3. Start the server and sign in
-
-For a disposable evaluation, enable the existing demo accounts **before**
-startup:
-
-```sh
-export SYNVEDA_COMPOSE_PROFILES=demo
-```
-
-For real team identities, leave the demo profile unset and have your identity
-administrator provision the users. Bundled Keycloak creates the realm and
-clients, but no ordinary users by default; its admin interface is private.
-Alternatively, use the existing
-[external OIDC settings](https://github.com/synveda/synveda/blob/main/deploy/compose/README.md#external-oidc)
-with this launcher, replacing the source guide's `make compose-*` commands
-with `./synveda-compose <action>`. Configure the provider before the first
-start; changing an existing tenant's issuer is not a supported migration.
-
-```sh
-./synveda-compose config
-./synveda-compose up
-./synveda-compose smoke
-```
-
-`up` pulls the release images, prepares the databases and starts services with
-`--no-build`. Only the proxy exposes public ports. The first download can be
-large; subsequent starts reuse the images and preserve data.
-
-Open `https://<your-application-host>/console/`. For the demo, sign in as
-**synveda-demo-admin**, using the password in
-`$SYNVEDA_HOME/state/synveda-reference/secrets/keycloak_demo_admin_password`.
-For a team, the first qualifying member of the IdP's `synveda-admins` group
-receives the initial Synveda administrator grant. Later access is managed
-through Synveda's governed grants.
-
-Follow **Getting started** to create a workspace and project. Agent users can
-then connect to this server from their own machines. The native CLI/client
-installer is separate and currently targets macOS ARM64 and Linux x86_64;
-it is not required on this Docker host. See the
-[agent setup guide](https://github.com/synveda/synveda/blob/main/README.md#agent-setup).
-
-## Stop, restart and update
-
-From the extracted release directory, with the same environment settings:
-
-```sh
-./synveda-compose down
-./synveda-compose up
-./synveda-compose smoke
-```
-
-`down` keeps the database volume and private state. Keep the previous release
-directory when preparing an update. Download and verify the new complete
-bundle, review its compatibility notes, and back up both databases **and**
-their separate key/identity material before switching. Replacing a bundle is
-not a database migration or a proven rollback. Older schema epochs are refused
-and must never be reset as a team upgrade.
-
-The [operations guide](https://github.com/synveda/synveda/blob/main/docs/INSTALL.md#backing-up-and-restoring-the-compose-reference)
-covers the current recovery boundary. For an existing Kubernetes environment,
-use the [Helm guide](https://github.com/synveda/synveda/blob/main/deploy/helm/synveda/README.md)
-and the same release's digest overlays.
+[Readiness and platform evidence](../../docs/PRODUCTION_READINESS.md) ·
+[Build from source](../../CONTRIBUTING.md#local-deployment)

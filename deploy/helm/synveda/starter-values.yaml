@@ -13,7 +13,7 @@ kms:
 embedder: deterministic
 postgres:
   mode: cnpg
-  image: ghcr.io/synveda/cnpg-postgres:17.11-synveda-0.3.0
+  image: ghcr.io/synveda/cnpg-postgres:17.11-synveda-0.4.0
   instances: 1
   retain: true
   # CNPG requires unsupervised updates with one instance. The fixed image
@@ -26,7 +26,7 @@ keycloak:
   enabled: true
   image:
     repository: ghcr.io/synveda/keycloak
-    tag: "0.3.0"
+    tag: "0.4.0"
   publicUrl: https://auth.example.com
   # Replace with the actual ingress/proxy source range, never a public /0.
   proxyTrustedAddresses: 192.0.2.0/24

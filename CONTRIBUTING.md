@@ -67,3 +67,30 @@ response SLA; that is a production-readiness gap. Do not put vulnerability
 details, secrets, tenant content or unredacted diagnostics in public issues,
 logs, fixtures or audit evidence. The repository owner must publish a private
 reporting route before accepting external distribution or contributions.
+
+## Local deployment
+
+Use Rust 1.96.0, Node 22+, pnpm 11.13.1, Git, GNU Make, OpenSSL, Docker and
+Compose. Source acceptance builds its images with the local default Buildx
+builder and uses the existing `.test` hostname contract. It is deliberately
+separate from the prebuilt localhost installation.
+
+```sh
+git clone https://github.com/synveda/synveda.git
+cd synveda
+pnpm install --frozen-lockfile
+make compose-hosts-plan
+make compose-hosts-status
+```
+
+Follow [hostname setup](deploy/compose/README.md#development-hostname-setup)
+for the deliberate privileged hosts edit and resolver refresh. Then:
+
+```sh
+SYNVEDA_COMPOSE_PROFILES=demo make compose-up
+SYNVEDA_COMPOSE_PROFILES=demo make compose-smoke
+```
+
+The canonical [source Compose guide](deploy/compose/README.md) owns that
+workflow, optional model/monitoring services and source acceptance commands.
+Use [the website guide](website/README.md) for the static site preview.

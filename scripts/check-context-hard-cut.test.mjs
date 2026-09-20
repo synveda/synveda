@@ -33,6 +33,15 @@ const format = "okf-v0.2";
   );
 });
 
+test("only the exact Kubernetes RBAC kind is distinct from the retired product DTO", () => {
+  const rbac = "apiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: router-certificate\n";
+  const file = "deploy/helm/synveda/templates/route.yaml";
+  assert.deepEqual(retiredProductionFindings(rbac, file), []);
+  assert.equal(retiredProductionFindings(`${rbac}data:\n  obsolete: RoleBinding\n`, file).length, 1);
+  assert.equal(retiredProductionFindings(rbac.replace("rbac.authorization.k8s.io", "synveda.example"), file).length, 1);
+  assert.equal(retiredProductionFindings(rbac, "crates/synveda-types/src/access.rs").length, 1);
+});
+
 test("the baseline refuses deployment-owned role and extension DDL", () => {
   assert.deepEqual(
     baselineFindings(`

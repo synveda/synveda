@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { isAbsolute } from "node:path";
 
-const PROJECT = /^synveda-(development|reference)(-acceptance-[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?)?$/;
+const PROJECT = /^(?:synveda-evaluation|synveda-(development|reference)(-acceptance-[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?)?)$/;
 const BACKUP_ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const IMAGE = /^[A-Za-z0-9_./:@+-]+$/;
 const SHA256 = /^[0-9a-f]{64}$/;

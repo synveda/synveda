@@ -1,0 +1,6 @@
+# Opt-in fictional sample replay. The existing browser fixture performs real
+# OIDC logins and public API operations; no credentials reach the shell/logs.
+services:
+  browser-acceptance:
+    networks: !reset []
+    network_mode: service:proxy

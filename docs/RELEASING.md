@@ -5,11 +5,12 @@ native clients, client hooks, console, Helm chart and Docker reference from
 one source revision. A version tag publishes images to GHCR; a manual workflow
 dispatch builds and packages a dry run without publishing anything.
 
-As of 2026-09-20, the latest public release is v0.2.0. It contains the retired
-profile archive and predates the current database schema. Do not reuse that
-tag or claim it is compatible with the current reference launcher.
-The source is prepared for **0.3.0**; its tag and release artifacts have not
-been published.
+The **v0.3.0** workflow passed its builds and isolated image checks, but its
+publication failed because the release page already existed. Keep that release
+immutable. The additive Docker/Kubernetes installation
+increment is prepared as **0.4.0**, following the existing pre-1.0 minor-version
+policy. It is unpublished. A tag's existence or an in-progress release page
+does not establish that its complete artifact set is installable.
 
 ## Before the first current release
 
@@ -31,8 +32,8 @@ been published.
    [GitHub's Container registry guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 4. Configure equivalent access/visibility for the OCI chart at
    `ghcr.io/synveda/charts/synveda` if distributing it publicly. The workflow
-   verifies the chart with its publishing identity; this is separate from the
-   anonymous image checks.
+   verifies identical chart bytes first with its publishing identity and then
+   with an empty registry configuration on each qualification runner.
 5. Run a manual **Release** dispatch against the intended revision. Its workflow
    artifacts contain **synthetic image digests**. They exercise packaging and
    checksums and cannot be installed. They are not published as a GitHub Release.
@@ -45,12 +46,12 @@ scopes. There is no `latest` tag or automatic deployment to a running server.
 
 | Package | Purpose |
 | --- | --- |
-| `ghcr.io/synveda/product:<version>` | Gateway, worker, operator CLI and compiled console |
-| `ghcr.io/synveda/postgres:<version>` | Single-host PostgreSQL with pgvector and bootstrap/recovery tools |
+| `ghcr.io/synveda/product:<version>` | Gateway, worker, CLI, compiled console and one-shot preparation utility |
+| `ghcr.io/synveda/postgres:<version>` | Compose/bundled-chart PostgreSQL with pgvector and bootstrap/recovery tools |
 | `ghcr.io/synveda/keycloak:<version>` | Bundled OIDC provider and reviewed convergence helpers |
 | `ghcr.io/synveda/proxy:<version>` | Reference reverse proxy |
 | `ghcr.io/synveda/cnpg-postgres:17.11-synveda-<version>` | Optional Kubernetes PostgreSQL image |
-| `ghcr.io/synveda/browser-acceptance:<version>` | Acceptance fixture; not required for normal server operation |
+| `ghcr.io/synveda/browser-acceptance:<version>` | Optional sample preparation and real-browser acceptance |
 
 The `assemble` job joins the architecture tags and packages immutable image
 digests in `environment.json` and the Helm image overlays. It checks archive
@@ -60,13 +61,27 @@ Two fresh `verify-images` runners use empty Docker credential directories. Each
 checks archive checksums, resolves both platform descriptors, pulls all six
 first-party and both pinned upstream images by digest, checks the native
 architecture and release labels, and executes the relevant packaged tools.
-Product checks include the compiled console and its font licence. Containers
-have no network, host mounts or deployment credentials. A failed pull,
-architecture, label or executable prevents the GitHub Release announcement.
+Product checks include the compiled console and its font licence. These initial
+smoke containers have no network, host mounts or deployment credentials.
+
+The same runners then execute `scripts/qualify-release.mjs` against the extracted
+archive: private preparation, real loopback console login/logout, governed
+opt-in sample and repeat, retained-volume recreation, paired database/key backup,
+explicit reset and fresh restore. `scripts/qualify-kubernetes-release.mjs` loads
+the already-pulled native image bytes into disposable Kind, uses the packaged
+chart for all four dependency combinations, drills migration serialization and
+joint recovery for bundled/external ownership, and tests the documented
+loopback port-forward with a real browser. Neither qualifier builds images.
+Anonymous OCI chart retrieval must match the downloadable archive exactly.
+Any failure prevents the GitHub Release announcement; no required test is
+silently skipped. The commands need Docker, Helm 4.2.3, Kind 0.32.0, kubectl 1.36.1,
+Node, Ruby, Python and OpenSSL on the **qualification runner**, not on a Docker
+installer's host.
 
 `publish` runs only after both jobs succeed. It attaches the complete archive
-set, Helm overlays and checksummed `release-images-amd64.json` and
-`release-images-arm64.json` reports. BuildKit generates image SBOM/provenance
+set, Helm overlays and checksummed `release-images-<arch>.json`,
+`release-docker-<arch>.json` and `release-kubernetes-<arch>.json` reports.
+BuildKit generates image SBOM/provenance
 attestations; identity-bound signature verification remains unimplemented.
 
 If a workflow fails after pushing images, registry artifacts may exist without
@@ -77,14 +92,18 @@ version to different source, or suggest a partially published set to users.
 
 Download the release from an empty target using the
 [prebuilt Docker guide](../deploy/compose/PREBUILT.md), check the manifest and
-reports, configure DNS/TLS, and run the existing reference acceptance. Record
+reports, and run the default loopback evaluation. Use the explicit reference
+configuration for public DNS/TLS or existing services. Record
 real PKCE login, a governed Session/Knowledge/Context flow, persistence,
 recovery and compatibility evidence in [CPR-45](backlog/CPR-45.md). Qualify the
 packaged chart separately under [OPS-11](backlog/OPS-11.md).
 
-The image reports prove pullability and isolated executable/asset checks.
-They do not prove a working deployment, Windows/WSL2 support, full Linux/Docker
-Desktop parity, a supported N-1 upgrade, or production readiness. Do not remove
+Image reports prove pullability and isolated executable/asset checks; Docker
+and Kubernetes reports separately prove their executed installation scenarios.
+None establishes macOS Docker Desktop, Windows/WSL2, OpenShift, a supported
+published N-1 upgrade, or production readiness. Do not remove
 the [readiness gaps](PRODUCTION_READINESS.md) on the strength of a green image
-job alone. Update the dated availability note in the root README and prebuilt
-guide only once a compatible public release and its actual evidence exist.
+job alone. Change `docs/installation.json` to `published`, update the checked
+README/guide markers and publish matching Pages copy only once the complete
+compatible public release and its evidence exist. Main-branch copy currently
+labels 0.4.0 download instructions as pending.

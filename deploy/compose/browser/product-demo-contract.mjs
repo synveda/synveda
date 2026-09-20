@@ -552,12 +552,12 @@ function retryHandle(value, expectedOutcome) {
   );
 }
 
-function retryBase(value, expectedState) {
+function retryBase(value, expectedState, expectedGateway = "http://app.synveda.test:8080") {
   if (
     !object(value) ||
     value.receipt_version !== 2 ||
     value.fixture !== RETRY_FIXTURE ||
-    value.gateway_url !== "http://app.synveda.test:8080" ||
+    value.gateway_url !== expectedGateway ||
     value.state !== expectedState ||
     !retryIdentity(value.author, "Avery Author", "author") ||
     !retryIdentity(value.reviewer, "Riley Reviewer", "reviewer") ||
@@ -653,8 +653,8 @@ function retryBase(value, expectedState) {
   return resources;
 }
 
-export function validateRetryReviewReceipt(value, expectedState = "seeded") {
-  const resources = retryBase(value, expectedState);
+export function validateRetryReviewReceipt(value, expectedState = "seeded", expectedGateway) {
+  const resources = retryBase(value, expectedState, expectedGateway);
   if (expectedState === "seeded") return true;
   const batch = resources.capture_batch;
   const learning = resources.learning;

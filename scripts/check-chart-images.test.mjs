@@ -100,6 +100,11 @@ test("Helm computed image defaults preserve a safe literal tag prefix", () => {
   assert.deepEqual(helmComputedImageReferences(helper), [
     "ghcr.io/synveda/cnpg-postgres:17.11-synveda-<appVersion>",
   ]);
+  const alternatives = helper.replace('{{- default', '{{- if .Values.postgres.bundled }}\n{{- default (printf "ghcr.io/synveda/postgres:%s" .Chart.AppVersion) .Values.postgres.bundled.image -}}\n{{- else }}\n{{- default');
+  assert.deepEqual(helmComputedImageReferences(alternatives), [
+    "ghcr.io/synveda/postgres:<appVersion>",
+    "ghcr.io/synveda/cnpg-postgres:17.11-synveda-<appVersion>",
+  ]);
   assert.deepEqual(
     helmComputedImageReferences(
       helper.replace(".Chart.AppVersion", '"latest"'),

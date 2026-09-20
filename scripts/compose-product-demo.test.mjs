@@ -1476,3 +1476,28 @@ test("the fixture copies the product CLI and exposes no token-transfer shortcut"
   );
   assert.doesNotMatch(lifecycle, /product_acceptance_state|product-demo\.mjs start/);
 });
+
+
+test("sample uses four authenticated identities and leaves learning approval to the reviewer", async () => {
+  for (const state of ["seeded", "learning_pending"]) {
+    const calls = [];
+    const logins = [];
+    const gateway = "http://localhost:18080";
+    await runProductAcceptance({
+      chromium: { launch: async () => {} }, phase: "sample",
+      environment: { SYNVEDA_BROWSER_APP_URL: gateway, SYNVEDA_BROWSER_ISSUER: `${gateway}/realms/synveda` },
+      readPassword: () => Buffer.from("a".repeat(64)),
+      login: async ({ profile }) => logins.push(profile),
+      command: async (args) => {
+        calls.push(args.slice(0, 3));
+        const receipt = retryReceipt(args[2] === "capture" ? "learning_pending" : state);
+        receipt.gateway_url = gateway;
+        return receipt;
+      },
+    });
+    assert.deepEqual(logins, ["author", "reviewer", "approver", "viewer"]);
+    assert.deepEqual(calls, state === "seeded"
+      ? [["demo", "retry-review", "seed"], ["demo", "retry-review", "capture"]]
+      : [["demo", "retry-review", "seed"]]);
+  }
+});

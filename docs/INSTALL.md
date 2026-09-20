@@ -1,57 +1,40 @@
 # Install and operate Synveda
 
-Synveda has one context-platform runtime: separate gateway and worker
-processes, PostgreSQL, generic OIDC, one public API and the same governed
-configuration semantics in direct binaries, Compose and the current Helm
-chart. Personal, team and enterprise are Configuration documents, not
-deployment editions.
-
-The CPR-45 canonical Compose graph has a bounded lifecycle for development and
-reference HTTPS, with bundled or external PostgreSQL/OIDC selections. The
-digest-bound release archive packages that same reference graph and records its
-source and image identities. Deterministic gates cover packaging, installation,
-private inputs, exact-project locking, authority convergence and smoke
-predicates. Clean-volume development/reference, recovery, upgrade and Apalis
-runs are still pending on Linux and Docker Desktop, so the current verdict is
-“Docker reference implemented; live validation pending.”
-
-The reserved `synveda init` verb is a permanent side-effect-free refusal.
-Canonical Compose owns bootstrap; Keycloak is the only bundled identity
-provider and no legacy deployment profile is supported.
-
-The target contract and current limits are in
-[DEPLOYMENT_CONTRACT.md](DEPLOYMENT_CONTRACT.md).
+Synveda has one governed runtime: gateway, worker, PostgreSQL, generic OIDC,
+the public API, Cedar, forced RLS, VedaFlow and audit. Infrastructure ownership
+and exposure do not select a different product edition or confer readiness.
 
 ## Choose an installation workflow
 
+<!-- installation-version: 0.4.0; publication: unreleased -->
+**Candidate 0.4.0 is unreleased; the in-flight v0.3.0 build is separate.**
+
+| Choice | Canonical instructions | Prerequisites and evidence |
+|---|---|---|
+| Run with Docker | [Prebuilt bundle](../deploy/compose/PREBUILT.md) | Docker Compose; loopback bundled evaluation; local macOS/OrbStack evidence |
+| Deploy to Kubernetes | [Application chart](../deploy/helm/synveda/README.md) | Namespaced permissions, supplied Secrets/storage; local Kind 1.36.1 evidence |
+| Use existing infrastructure | [Provider contract](../deploy/helm/synveda/CONFIGURATION.md) | Supplied database/identity endpoints and trusted CA inputs; no provider takeover |
+| Build from source | [Contributing](../CONTRIBUTING.md#local-deployment) | Contributor tools and source-only hostname setup |
+
+Database and identity ownership are independent on both platforms. Bundled
+Keycloak has a durable database and owner distinct from Synveda's roles.
+Optional CNPG requires its existing operator; bundled evaluation does not.
+The [readiness register](PRODUCTION_READINESS.md) owns unresolved host, release,
+HA, key custody and disaster-recovery qualification. Passing a local drill does
+not certify another platform. Generated [client support](CLIENT_SUPPORT.md)
+owns client claims.
+
 ### Source checkout
 
-[`deploy/compose/README.md`](../deploy/compose/README.md) is the one detailed
-source-checkout Compose guide. It owns prerequisites, hostname setup, the
-project-scoped lifecycle, optional profiles, reference TLS, external providers,
-recovery, upgrade and exact-confirmation reset. Follow it from a clean,
-reviewed checkout; do not combine fragments or abbreviated commands from other
-documents.
-
-The root README provides the verified first-run path; the Compose guide remains
-the sole detailed source-checkout operating procedure. The security model and
-trusted-host boundary are documented separately in
-[SECURITY.md](SECURITY.md#docker-reference-boundary).
+Moved to [Contributing](../CONTRIBUTING.md#local-deployment) and the detailed
+[source Compose guide](../deploy/compose/README.md).
 
 ### Packaged reference
 
-For a server without build tools, follow the
-[prebuilt Docker guide](../deploy/compose/PREBUILT.md). It downloads only the
-reference archive and uses its pinned HTTPS-only launcher. Native CLI and
-client-plugin installation is separate; see
-[Install a release artifact](#install-a-release-artifact).
-The latest public v0.2.0 predates this contract. A new tagged release must
-publish the current archive and pass both native image-verification jobs
-before these instructions have a compatible public artifact to download.
+Moved to the [prebuilt Docker guide](../deploy/compose/PREBUILT.md), including
+loopback evaluation, reference HTTPS, first workspace and lifecycle commands.
 
-The remaining sections describe product use after a gateway has been started
-through either workflow. They are not deployment instructions or evidence that
-the reference is complete.
+The remaining sections describe product use after authenticated startup.
 
 ## Bootstrap policy
 
@@ -73,10 +56,11 @@ place in this product to keep a shortcut past the policy engine (seed §2.2).
 ## Log in — this is where the governed scope tree starts to exist
 
 ```sh
-export SYNVEDA_GATEWAY=http://app.synveda.test:8080
+export SYNVEDA_GATEWAY=http://localhost:8080
 synveda login --gateway "$SYNVEDA_GATEWAY"
 ```
 
+Use your deployment's actual URL when it differs from the bundled default.
 Use credentials provisioned by the deployment's identity operator; no current
 `init` path prints demo credentials. The browser opens, you sign in, and
 **that login is where the tenant's governed product structure starts to
@@ -801,258 +785,55 @@ customer-managed keys or secret-manager resolution inside the gateway.
 
 ## Backing up and restoring the Compose reference
 
-`make compose-backup` and `make compose-restore-smoke` implement the bundled
-PostgreSQL/Keycloak logical recovery path. Restore is never in place: it needs
-an exact confirmation and a fresh suffixed project/private network, then leaves
-that target private and running for inspection. The exact selectors, commands,
-storage roots, reference-TLS preparation, cleanup and interrupted-lock recovery
-procedure are in
-[`deploy/compose/README.md`](../deploy/compose/README.md#logical-backup-and-isolated-restore).
-
-Keep the database archives and separate KMS/reference/Keycloak convergence
-credential set together under operator protection. They are sensitive and are
-not encrypted by the recovery command. Their SHA-256 linkage detects accidental
-change, not malicious replacement. This check is a same-version PostgreSQL 17,
-planned-interruption restore validation; it is not WAL/PITR, an online atomic
-backup, off-host retention, disaster recovery or an RPO/RTO commitment. Those
-remain OPS-5 work.
+Use the [Docker recovery instructions](../deploy/compose/PREBUILT.md#backup-and-restore)
+for the released/candidate evaluation launcher, or the existing
+[source reference guide](../deploy/compose/README.md) for source acceptance.
+Kubernetes recovery is in [OPERATIONS.md](../deploy/helm/synveda/OPERATIONS.md).
+Keep both databases and their original encryption/identity material together.
 
 ## Upgrading
 
-The Docker reference has a bounded same-schema product-image upgrade smoke.
-The canonical Compose guide owns the exact
-[selectors and procedure](../deploy/compose/README.md#same-schema-product-upgrade-smoke).
-It starts with a reference project that has passed browser/product acceptance
-and requires distinct immutable starting and candidate product images while
-retaining the exact DNS, TLS, provider-image and network selections.
-
-The candidate performs a read-only current-schema and database-authority check
-before either runtime process changes. The lifecycle then proves candidate,
-starting-image rollback and final candidate by image-transitioning only gateway
-and worker; it reruns the disposable browser-acceptance service while repeating
-exact image, smoke, Keycloak login and persisted product checks. Success leaves
-the candidate running. A recoverable failure restores
-the last fully verified image and still returns failure; uncertain mutation
-retains the project lock.
-
-This check does not migrate schema, PostgreSQL or Keycloak and does not prove a
-general N-1 window, provider downgrade, Helm parity or zero downtime. Re-running
-the artifact installer is also not deployment upgrade evidence. Those broader
-requirements remain OPS-6 work.
+Use [Docker update and removal](../deploy/compose/PREBUILT.md#update-and-removal)
+or [Kubernetes upgrade and failure recovery](../deploy/helm/synveda/OPERATIONS.md#upgrade-and-failure-recovery).
 
 ### If the upgrade refuses to start: the schema epoch
 
-Synveda is pre-1.0, and one upgrade in this product's life is a **hard cut**
-rather than a migration. Since the context-platform redesign the database
-carries a **schema epoch**, and a build serves exactly one of them. If your
-database was written before the cut, the gateway will not start — it exits
-with a message rather than serving rows in a model it does not implement:
-
-```
-this database carries no Synveda schema epoch marker, so it was written
-before the context platform (epoch 3).
-
-Synveda is pre-1.0 and the context-platform redesign is a hard cut: there is
-no migration from the previous schema, no compatibility path, and nothing that
-translates old rows into the new model. A database from before the cut is
-refused rather than upgraded.
-
-Reset it — this DESTROYS everything in that database:
-
-    synveda reset --database --force
-```
-
-`synveda db migrate` refuses the same database, and writes nothing when it
-does — your rows are left exactly as they were, so you have as long as you
-like to export anything you want before running the reset.
-
-**There is no migrator, deliberately.** Nothing translates old rows into the
-new model; see ADR-0068 for why that is a decision rather than an omission.
-
-```sh
-synveda reset --database --force   # destroys the database, builds a fresh one
-```
-
-After a reset, re-run the deployment-owned database bootstrap and only then
-use the complete explicit authority plan. The withdrawn implicit init command
-cannot bring the deployment back up.
-
-`reset` drops and recreates **the application database** — not volumes,
-installation files, stored logins or any other database on the server. Stop the
-canonical deployment first; the direct-binary command deliberately does not
-discover or kill containers. It installs the extensions, migrates to the
-current epoch and is idempotent.
-
-It requires both flags. `synveda reset --database` on its own tells you what
-it would destroy and destroys nothing. It also refuses a `DATABASE_URL` or
-`DATABASE_URL_FILE` target that points at another machine and directs you to
-that deployment's authenticated recovery procedure. `--force` does not weaken
-the local-only boundary.
-
-If instead you are told the database is at a *newer* epoch than the build,
-**do not reset it**: that database holds data this installation cannot read,
-and the message says to upgrade the installation rather than destroy it.
-
-**If you installed the Claude Code plugin, upgrade it too:**
-
-```sh
-synveda plugin install
-```
-
-The installer replaces the bundle under `~/.synveda/plugin`, but Claude Code
-copies a plugin into a cache of its own when you install it — so the plugin
-that actually *runs* stays on whatever release put it there until you say
-otherwise. `synveda plugin install` compares the two and replaces the
-installed one when they differ, so running it after every upgrade is right
-and doing it twice costs nothing. `claude plugin list` shows the version it
-ended on; start a new Claude Code session to pick it up.
+Epoch 3 is one baseline. Earlier schemas fail with reset guidance; no
+compatibility migrator exists. A destructive reset is not a successful upgrade.
+Application or Helm rollback does not reverse database migrations.
 
 ## Stopping and starting
 
-For a source checkout, use the project-scoped start, stop, restart and reset
-procedures in the
-[canonical Compose guide](../deploy/compose/README.md#default-lifecycle).
-
-For an installed reference, set the same host/provider selectors used at
-startup and invoke its pinned launcher:
-
-```sh
-export SYNVEDA_APP_HOST=app.example.com
-export SYNVEDA_AUTH_HOST=auth.example.com
-~/.synveda/reference/current/synveda-compose down
-~/.synveda/reference/current/synveda-compose up
-```
-
-`compose-down` preserves the database volume and every project input. Reset is
-separate and destructive. Run the workflow's reset action without a
-confirmation first, inspect the exact target it reports, and only then rerun it
-with that displayed value. Reset preserves the secret set, issuer input and KMS
-key; it is not tenant erasure, backup or credential rotation. The Compose guide
-owns the exact [reset contract](../deploy/compose/README.md#reset), lock recovery
-and provider-mode procedures.
+The [Docker lifecycle](../deploy/compose/PREBUILT.md#state-and-ordinary-lifecycle)
+preserves volumes and matching private state. Keep one canonical issuer and
+state directory across recreation.
 
 ## Uninstalling
 
-Automatic artifact removal is deliberately unavailable. The current
-`scripts/uninstall.sh` has no ownership receipt from which it can prove the
-installed release, CLI destination and deployment selection, so normal
-invocation exits 69 without mutation. `--dry-run` is also a no-op and `--purge`
-is refused. This is the open OPS-10 boundary, not a successful uninstall.
-
-Stop an installed deployment with its exact launcher and selectors first:
-
-```sh
-SYNVEDA_APP_HOST=app.example.com SYNVEDA_AUTH_HOST=auth.example.com \
-  ~/.synveda/reference/current/synveda-compose down
-```
-
-That preserves Docker volumes, project state, KMS/OIDC material and backups.
-For destructive deployment reset, run the same launcher's `reset` action and
-supply the exact `SYNVEDA_CONFIRM_RESET` value it prints. Reset does not remove
-immutable release artifacts or recovery backups.
-
-Client configuration is separate and must be removed explicitly before any
-future artifact cleanup:
-
-```sh
-synveda mcp uninstall --client cursor   # removes our entry, and only ours
-synveda plugin uninstall                # removes the Claude Code plugin
-```
-
-`mcp uninstall` is the exact mirror of `mcp install`: your other MCP servers
-survive, and a hand-maintained JSONC config keeps its comments and layout
-byte-for-byte. No shell removal command deletes editor or AI-client state.
+Use the platform's documented retained removal. Automatic global artifact
+uninstallation remains refused until OPS-10 can prove its ownership receipt.
+Client cleanup stays explicit: `synveda mcp uninstall --client cursor` or
+`synveda plugin uninstall` removes only the corresponding integration.
 
 ## Install a release artifact
 
-The release workflow produces native binaries, the console, a client archive
-containing the Claude marketplace and Codex/Copilot runtimes, the Helm chart and
-`synveda-reference-<version>.tar.gz`. The reference archive
-contains the HTTPS-only canonical Compose runtime and `environment.json`, which
-binds its source SHA and image digests. No tagged candidate has yet completed a
-registry-backed install. The [prebuilt guide](../deploy/compose/PREBUILT.md)
-documents the server-only path for the next compatible release.
-Existing tags predate this reference contract. Do not combine one of them with
-the mutable `main` branch installer or pipe that installer into a shell. When a
-candidate is published, use the tag-bound installer and artifacts named by that
-release, inspect the installer first, and compare the release's version, source
-SHA and image identities with the installed manifest.
-
-The implemented installer verifies `SHA256SUMS`, installs artifacts and never
-starts containers or edits an AI client. The checksum detects accidental
-corruption; because signed provenance is not implemented, it does not
-authenticate an artifact obtained through the same channel. Configure real DNS
-and TLS, inspect the installed manifest, then use
-`~/.synveda/reference/current/synveda-compose`. The packaged launcher fixes
-reference HTTPS and image identities; the operator still owns hostnames,
-certificates and supported external-dependency inputs.
+Use the [prebuilt download and checksum instructions](../deploy/compose/PREBUILT.md#download-and-verify).
+The optional native client installer is tag-bound, verifies the release checksum
+inventory and never starts containers or edits an AI client. Inspect it before
+execution; never mix an old release with a mutable main-branch installer.
 
 ## What the artifact installer places
 
-| | |
-|---|---|
-| `synveda` | the CLI, on your `PATH` |
-| `~/.synveda/bin/{synveda-gateway,synveda-worker}` | direct-binary artifacts; the reference runs their image-contained commands |
-| `~/.synveda/console/` | the admin console bundle |
-| `~/.synveda/plugin/` | the Claude Code marketplace and Codex/Copilot hook runtimes, configured in no client |
-| `~/.synveda/reference/releases/<version>-<source-sha>/` | immutable digest-bound Docker reference |
-| `~/.synveda/reference/current` | validated symlink to the selected immutable release |
-| `~/.synveda/state/synveda-reference/` | mode-0700 deployment inputs, including keys and issuer state; preserved across upgrades |
-| `~/.synveda/backups/{database,secrets}/synveda-reference/` | separate recovery roots; preserved across upgrades |
-
-For Codex or Copilot CLI, use Node 22+ with the complete
-`~/.synveda/plugin/codex/` or `~/.synveda/plugin/copilot-cli/` tree and point
-normal trusted hooks at its `dist/hook.mjs`. The installer prints the exact
-paths and source-bound setup guides. See [Codex setup](integrations/codex.md)
-and [Copilot setup](integrations/copilot-cli.md). Local archive replay is tested;
-native execution from a published installation remains unqualified.
-
-`SYNVEDA_HOME` moves all of it; `SYNVEDA_BIN` moves the CLI.
-
-The CLI goes to `/usr/local/bin` by default, which is root-owned on macOS and
-on most Linux. The installer asks `sudo` for that one file and, **if sudo is
-unavailable or refused — a managed machine where you are not an admin, a pipe
-with no terminal to prompt on, or you declining — it puts the CLI in
-`~/.synveda/bin` instead and tells you**. Nothing else here needs a privilege.
-If the directory it lands in is not on your `PATH`, the installer prints the
-`export` line to add. An explicitly selected directory is created when absent
-and refused when it is a symlink. Set `SYNVEDA_BIN` to a reviewed user-owned
-directory when invoking a future tag-bound installer to skip sudo entirely.
-
-**The installer touches nothing belonging to an editor or an AI client.** No
-`~/.claude`, no Claude Desktop config, no `~/.cursor`. Hooking one up is the
-separate, explicit step above, and the OPS-8 demo asserts the absence rather
-than trusting it.
+The native installer places its CLI, console and client hooks below
+`SYNVEDA_HOME` (default `~/.synveda`), plus the immutable version/source-bound
+reference archive and a validated `reference/current` selection. `SYNVEDA_BIN`
+chooses the CLI directory; user-owned paths avoid privilege elevation. Server-only
+Docker installation does not require the native installer.
 
 ## Current verification boundary
 
-`make compose-config` and `make check-deploy` prove static Compose/Helm and
-release-package contracts. The latter includes `make check-release-parity`,
-which rejects unsafe release versions before path construction, proves the
-exact five deployment images plus browser-acceptance fixture, packages the
-reference and chart repeatably, and verifies the source/image environment
-manifest without a daemon or network. Installer tests prove checksum-verified
-installation, version/source identity, a two-version current-link update,
-idempotent reinstall with preserved state and pre-mutation refusal of the
-retired profile footprint. `make db-test` proves exact
-database bootstrap, preflight, migration, forced RLS and authority drift
-behavior against fresh PostgreSQL fixtures. These checks do not build an image
-or prove artifact publication or pulls. Tagged release CI additionally uses
-fresh native AMD64 and ARM64 runners to pull the manifest-bound images
-anonymously and run isolated executable/asset checks before announcing the
-release. Its `release-images-*.json` reports identify the images, platform
-descriptors, source commit and check scope. A workflow dispatch has synthetic
-digests and does not run that registry check. These checks are not a deployment
-startup, login or recovery drill. The implemented
-`make compose-acceptance` command requires a supported live Docker host; its
-deterministic tests are not a browser-login or clean-lifecycle claim.
-Logical backup/restore, the bounded local metrics profile and the experimental
-Apalis canary are implemented and deterministically tested. The same-schema
-product upgrade lifecycle is also implemented and deterministically tested,
-but live recovery/upgrade/queue execution and desktop/Linux parity remain
-unproved.
-
-The Docker reference may be called validated only after
-`make compose-acceptance`, `make compose-backup`, `make compose-restore-smoke`
-and `make compose-upgrade-smoke` pass with the Keycloak issuer path. Until then
-the verdict is “Docker reference implemented; live validation pending.”
+Read [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) and the content-free
+reports under [demos/evidence](../demos/evidence). Static gates, local source/candidate
+runtime, hosted release qualification and anonymous published retrieval are
+distinct evidence. The publication manifest must remain unreleased until the
+referenced assets exist and qualification succeeds.

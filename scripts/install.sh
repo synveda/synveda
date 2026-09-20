@@ -524,7 +524,7 @@ case ":${PATH}:" in
 esac
 say "The digest-bound Docker reference bundle is installed but not started."
 say ""
-say "Configure real DNS and TLS as documented, then use:"
+say "Use the documented loopback evaluation, or explicitly select reference HTTPS, then run:"
 say ""
 say "  SYNVEDA_APP_HOST=app.example.com \\\"
 say "  SYNVEDA_AUTH_HOST=auth.example.com \\\"

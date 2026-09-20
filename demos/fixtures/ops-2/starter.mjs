@@ -10,7 +10,8 @@ import { operations } from "./operations.mjs";
 
 const cluster = process.env.CLUSTER ?? "synveda-ops11-starter";
 assert.match(cluster, /^synveda-ops11-starter(?:-[a-z0-9-]+)?$/);
-const cases = ["cnpg-packaged", "external-packaged", "cnpg-external", "external-external"];
+const bundledMatrix = process.env.BUNDLED_MATRIX === "1";
+const cases = bundledMatrix ? ["bundled-packaged", "external-packaged", "bundled-external", "external-external"] : ["cnpg-packaged", "external-packaged", "cnpg-external", "external-external"];
 if (process.env.STARTER_CASE) assert.ok(cases.includes(process.env.STARTER_CASE));
 for (const name of ["KEEP", "REUSE", "SKIP_BUILD", "PORTABILITY", "OPERATIONS"]) assert.ok([undefined, "0", "1"].includes(process.env[name]));
 const portability = process.env.PORTABILITY === "1";
@@ -19,13 +20,16 @@ const env = { ...process.env, KUBECONFIG: join(scratch, "kubeconfig") };
 const operational = process.env.OPERATIONS === "1";
 // Day-two CI covers both ownership endpoints; the ordinary starter matrix
 // retains all four combinations, including the two mixed-provider paths.
-const selectedCases = process.env.STARTER_CASE ? [process.env.STARTER_CASE] : operational ? ["cnpg-packaged", "external-external"] : cases;
-const chart = operational ? join(scratch, "chart", "synveda") : "deploy/helm/synveda";
-const product = "synveda/product:ops11-starter";
+const selectedCases = process.env.STARTER_CASE ? [process.env.STARTER_CASE] : operational && !bundledMatrix ? ["cnpg-packaged", "external-external"] : cases;
+const chart = process.env.RELEASE_CHART ?? (operational ? join(scratch, "chart", "synveda") : "deploy/helm/synveda");
+const product = process.env.PRODUCT_IMAGE ?? "synveda/product:ops11-starter";
+assert.match(product, /^[a-z0-9./-]+:[a-zA-Z0-9_.-]+$/);
+const productRepository = product.slice(0, product.lastIndexOf(":"));
+const productTag = product.slice(product.lastIndexOf(":") + 1);
 const cnpg = "synveda/cnpg-postgres:17.11-ops11-starter";
-const postgres = "synveda/postgres:ops11";
-const keycloak = "synveda/keycloak:ops11";
-const proxy = "synveda/proxy:2.11.4-dev";
+const postgres = process.env.POSTGRES_IMAGE ?? "synveda/postgres:ops11";
+const keycloak = process.env.KEYCLOAK_IMAGE ?? "synveda/keycloak:ops11";
+const proxy = process.env.PROXY_IMAGE ?? "synveda/proxy:2.11.4-dev";
 const node = "node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5";
 const tenant = "019b53c0-7c00-7000-8000-000000000012";
 const report = { date: new Date().toISOString(), workload: "4 concurrent agents, each 20 batches of 5 session events and 20 context runs; deterministic extraction and lexical retrieval", cases: [] };
@@ -95,7 +99,7 @@ function providerDatabase(namespace, passwords, roles, ca) {
     initContainers: [{ name: "private-inputs", image: postgres, command: ["sh", "-ec", "umask 077; cp /source/* /run/secrets/; cp /config/roles.json /run/secrets/database_roles.json; cp /config/pg_hba.conf /run/secrets/pg_hba.conf; chmod 600 /run/secrets/*"], securityContext: restricted, volumeMounts: [{ name: "source", mountPath: "/source", readOnly: true }, { name: "config", mountPath: "/config", readOnly: true }, mounts[0]] }],
     containers: [{ name: "postgres", image: postgres, securityContext: restricted, args: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/run/secrets/tls.crt", "-c", "ssl_key_file=/run/secrets/tls.key", "-c", "hba_file=/run/secrets/pg_hba.conf"],
       env: [{ name: "POSTGRES_USER", value: "postgres" }, { name: "POSTGRES_DB", value: "postgres" }, { name: "POSTGRES_PASSWORD_FILE", value: "/run/secrets/postgres_bootstrap_password" }, { name: "PGDATA", value: "/var/lib/postgresql/data/pgdata" }],
-      readinessProbe: { exec: { command: ["pg_isready", "-U", "postgres"] }, periodSeconds: 3 }, volumeMounts: mounts }],
+      readinessProbe: { exec: { command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"] }, periodSeconds: 3 }, volumeMounts: mounts }],
     volumes: [{ name: "source", secret: { secretName: "provider-inputs" } }, { name: "config", configMap: { name: "provider-config" } }, { name: "data", persistentVolumeClaim: { claimName: "provider-data" } }, ...["private", "run", "tmp"].map((name) => ({ name, emptyDir: {} }))],
   } } } });
   service(namespace, "postgres", { app: "postgres" }, 5432);
@@ -215,11 +219,12 @@ async function mcp(namespace, shouldDeny = false) {
 }
 
 try {
-  if (operational) {
-    run("sh", ["scripts/package-chart.sh", "0.2.0-ops11-local", scratch]);
+  if (operational && !process.env.RELEASE_CHART) {
+    const version = readFileSync("deploy/helm/synveda/Chart.yaml", "utf8").match(/^version: (.+)$/m)[1];
+    run("sh", ["scripts/package-chart.sh", version, scratch]);
     mkdirSync(join(scratch, "chart"));
-    run("tar", ["-xzf", join(scratch, "synveda-0.2.0-ops11-local.tgz"), "-C", join(scratch, "chart")]);
-    report.chart = { version: "0.2.0-ops11-local", locallyPackaged: true, published: false };
+    run("tar", ["-xzf", join(scratch, `synveda-${version}.tgz`), "-C", join(scratch, "chart")]);
+    report.chart = { version, locallyPackaged: true, published: false };
   }
   const existing = run("kind", ["get", "clusters"]).trim().split(/\s+/).includes(cluster);
   if (existing) assert.equal(process.env.REUSE, "1", "explicit REUSE=1 required");
@@ -229,22 +234,34 @@ try {
   if (process.env.SKIP_BUILD !== "1") {
     for (const [image, source] of [[product, "product"], [keycloak, "keycloak"]]) run("bash", ["scripts/build-kind-image.sh", image, `deploy/compose/${source}/Dockerfile`, source], { timeout: 1800000 });
     for (const [image, source] of [[postgres, "postgres"], [proxy, "proxy"]]) run("docker", ["build", "-t", image, "-f", `deploy/compose/${source}/Dockerfile`, "."], { timeout: 600000 });
-    run("bash", ["scripts/build-kind-image.sh", cnpg, "deploy/helm/postgres/Dockerfile", "cnpg-postgres"], { timeout: 600000 });
+    if (!bundledMatrix) run("bash", ["scripts/build-kind-image.sh", cnpg, "deploy/helm/postgres/Dockerfile", "cnpg-postgres"], { timeout: 600000 });
   }
   // The fixture's public, digest-pinned Node image is pulled by Kubernetes.
   // Import only source-built images: Docker may retain an incomplete upstream
   // multi-platform index which kind's all-platforms archive importer rejects.
-  for (const image of [product, postgres, cnpg, keycloak, proxy]) run("kind", ["load", "docker-image", "--name", cluster, image], { timeout: 600000 });
+  for (const image of [product, postgres, ...(!bundledMatrix ? [cnpg] : []), keycloak, proxy]) {
+    if (process.env.NATIVE_IMPORT === "1") {
+      const architecture = run("docker", ["info", "--format", "{{.Architecture}}"]).trim();
+      const platform = { aarch64: "linux/arm64", arm64: "linux/arm64", x86_64: "linux/amd64", amd64: "linux/amd64" }[architecture];
+      assert.ok(platform, "unsupported native image import platform");
+      const archive = join(scratch, "native-image.tar");
+      run("docker", ["image", "save", "--platform", platform, "-o", archive, image], { timeout: 600000 });
+      run("kind", ["load", "image-archive", "--name", cluster, archive], { timeout: 600000 });
+      rmSync(archive);
+    } else run("kind", ["load", "docker-image", "--name", cluster, image], { timeout: 600000 });
+  }
+  if (!bundledMatrix) {
   const operator = file("cnpg.yaml", run("curl", ["-fLsS", "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.0/cnpg-1.30.0.yaml"]));
   assert.equal(createHash("sha256").update(readFileSync(operator)).digest("hex"), "f8bede43fe4ee0d478c2355b204a36876b2ae4faac60f2a9452280b293da3b88");
   k(["apply", "--server-side", "-f", operator]);
   k(["wait", "-n", "cnpg-system", "deployment/cnpg-controller-manager", "--for=condition=Available", "--timeout=300s"], { timeout: 320000 });
+  }
   run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(scratch, "ca.key"), "-out", join(scratch, "ca.crt"), "-days", "2", "-subj", "/CN=OPS-11 disposable starter CA"], { quiet: true });
   const ca = readFileSync(join(scratch, "ca.crt"), "utf8");
   report.kubernetes = JSON.parse(k(["version", "-o", "json"])).serverVersion.gitVersion;
   report.engine = run("docker", ["info", "--format", "{{.NCPU}} CPUs; {{.MemTotal}} bytes engine RAM"]).trim();
   report.tools = { helm: run("helm", ["version", "--short"]).trim(), kind: run("kind", ["version"]).trim(), kubectl: JSON.parse(k(["version", "--client", "-o", "json"])).clientVersion.gitVersion };
-  report.images = [product, postgres, cnpg, keycloak, proxy].map((tag) => ({ tag, localId: run("docker", ["image", "inspect", tag, "--format", "{{.Id}}"]).trim() }));
+  report.images = [product, postgres, ...(!bundledMatrix ? [cnpg] : []), keycloak, proxy].map((tag) => ({ tag, localId: run("docker", ["image", "inspect", tag, "--format", "{{.Id}}"]).trim() }));
   for (const selected of selectedCases) {
     const [database, identity] = selected.split("-");
     const ns = `starter-${selected}`, providers = `${ns}-providers`;
@@ -259,24 +276,28 @@ try {
     let externalHost;
     if (database === "external" || identity === "external") externalHost = providerDatabase(providers, passwords, roles, ca);
     const identityNs = identity === "packaged" ? ns : providers;
-    const dbHost = database === "cnpg" && identity === "packaged" ? "synveda-pg-rw" : externalHost;
+    const dbHost = database !== "external" && identity === "packaged" ? "synveda-pg-rw" : externalHost;
     secret(identityNs, "synveda-keycloak-db", { password: passwords.keycloak_database_password });
     const admin = { username: "starter-bootstrap", password: randomBytes(32).toString("hex") };
     secret(identityNs, "synveda-keycloak-admin", admin);
     secret(ns, "test-admin", admin);
     for (const namespace of [ns, providers]) secret(namespace, "provider-ca", { "ca.crt": ca });
-    for (const role of ["gateway", "worker", ...(database === "external" ? ["migrator"] : [])]) {
-      const host = database === "cnpg" ? "synveda-pg-rw" : externalHost;
-      const tls = database === "external" ? "?sslmode=verify-full&sslrootcert=/run/secrets/synveda-postgres/ca.crt" : "";
+    for (const role of ["gateway", "worker", ...(database !== "cnpg" ? ["migrator"] : [])]) {
+      const host = database !== "external" ? "synveda-pg-rw" : externalHost;
+      const tls = database !== "cnpg" ? "?sslmode=verify-full&sslrootcert=/run/secrets/synveda-postgres/ca.crt" : "";
       secret(ns, `synveda-${role}-db`, { DATABASE_URL: `postgresql://synveda_${role}:${passwords[`synveda_${role}_password`]}@${host}:5432/synveda${tls}`, password: passwords[`synveda_${role}_password`] });
+    }
+    if (database === "bundled") {
+      secret(ns, "synveda-postgres-admin", { password: passwords.postgres_bootstrap_password });
+      secret(ns, "synveda-pg-ca", { ...certificate(`${ns}-postgres`, ["synveda-pg-rw", `synveda-pg-rw.${ns}.svc.cluster.local`]), "ca.crt": ca });
     }
     secret(ns, "synveda-kms", { SYNVEDA_KMS_KEY: randomBytes(32).toString("hex"), SYNVEDA_KMS_KEY_REF: "local:ops11-starter-disposable" });
     secret(ns, "synveda-oidc", { SYNVEDA_OIDC_ISSUERS: JSON.stringify([{ issuer: `${auth}/realms/synveda`, client_id: "synveda", audience: "synveda-api", service_audiences: ["synveda-agents"], tenant: { static: { tenant_id: tenant } } }]) });
     const base = parseYaml(readFileSync(`${chart}/ci/${database}-values.yaml`, "utf8"));
-    const values = merge(base, { fullnameOverride: "synveda", image: { repository: "synveda/product", tag: "ops11-starter", pullPolicy: "Never" }, gateway: { publicUrl: app, dbMaxConnections: 10 }, worker: { dbMaxConnections: 5 }, oidc: { caExistingSecret: "provider-ca" },
-      postgres: database === "cnpg" ? { mode: "cnpg", image: cnpg, instances: 1, retain: true, primaryUpdateStrategy: "unsupervised", storage: { size: "2Gi" }, resources: { requests: { cpu: "250m", memory: "512Mi" } } } : { mode: "external", external: { host: externalHost, caExistingSecret: "provider-ca", roles } },
+    const values = merge(base, { fullnameOverride: "synveda", image: { repository: productRepository, tag: productTag, pullPolicy: "Never" }, gateway: { publicUrl: app, dbMaxConnections: 10 }, worker: { dbMaxConnections: 5 }, oidc: { caExistingSecret: "provider-ca" },
+      postgres: database === "cnpg" ? { mode: "cnpg", image: cnpg, instances: 1, retain: true, primaryUpdateStrategy: "unsupervised", storage: { size: "2Gi" }, resources: { requests: { cpu: "250m", memory: "512Mi" } } } : database === "bundled" ? { mode: "bundled", bundled: { image: postgres, size: "2Gi", migratorUrlSecretKey: "DATABASE_URL" } } : { mode: "external", external: { host: externalHost, caExistingSecret: "provider-ca", roles } },
       install: { tenant: { id: tenant, slug: "starter", name: "Starter acceptance" } },
-      keycloak: { enabled: true, fullnameOverride: "keycloak", image: { repository: "synveda/keycloak", tag: "ops11", pullPolicy: "Never" }, publicUrl: auth, proxyTrustedAddresses: "10.244.0.0/16", adminExistingSecret: "synveda-keycloak-admin", databaseCaExistingSecret: database === "cnpg" && identity === "packaged" ? "synveda-pg-ca" : "provider-ca", database: { hostname: dbHost, existingSecret: "synveda-keycloak-db" } },
+      keycloak: { enabled: true, fullnameOverride: "keycloak", image: { repository: keycloak.slice(0, keycloak.lastIndexOf(":")), tag: keycloak.slice(keycloak.lastIndexOf(":") + 1), pullPolicy: "Never" }, publicUrl: auth, proxyTrustedAddresses: "10.244.0.0/16", adminExistingSecret: "synveda-keycloak-admin", databaseCaExistingSecret: database !== "external" && identity === "packaged" ? "synveda-pg-ca" : "provider-ca", database: { hostname: dbHost, existingSecret: "synveda-keycloak-db" } },
     });
     const backend = `keycloak-http.${identityNs}.svc.cluster.local:80`;
     if (portability) {
@@ -328,13 +349,14 @@ try {
     const seed = team(ns, "seed");
     await mcp(ns);
     const { workload, resources } = await measuredWorkload(ns, providers);
-    const dayTwo = process.env.OPERATIONS === "1" ? await operations({ ns, providers, identityNs, database, identity, values, k, run, env, scratch, chart, parseYaml, apply, secret, providerDatabase, ca, passwords, roles, helm, wait, team, quiesce }) : undefined;
+    const dayTwo = operational && [cases[0], cases.at(-1)].includes(selected) ? await operations({ ns, providers, identityNs, database, identity, values, k, run, env, scratch, chart, parseYaml, apply, secret, providerDatabase, ca, passwords, roles, helm, wait, team, quiesce }) : undefined;
     console.log(`${ns}: planned pod recreation`);
     // Quiesce clients for this single-instance maintenance test. Preserve the
     // provider's shutdown grace; force deletion would not prove safe recovery.
     quiesce(ns, identityNs);
     if (database === "cnpg") k(["delete", "pod", "-n", ns, "-l", "cnpg.io/cluster=synveda-pg", "--timeout=360s"], { timeout: 380000 });
     if (externalHost) { k(["rollout", "restart", "-n", providers, "deployment/postgres"]); wait(providers, "deployment", "postgres"); }
+    if (database === "bundled") { k(["delete", "pod", "-n", ns, "synveda-pg-0", "--timeout=180s"], { timeout: 200000 }); wait(ns, "statefulset", "synveda-pg"); }
     if (database === "cnpg") k(["wait", "-n", ns, "cluster/synveda-pg", "--for=condition=Ready", "--timeout=360s"], { timeout: 380000 });
     k(["scale", "-n", identityNs, "statefulset/keycloak", "--replicas=1"]);
     wait(identityNs, "statefulset", "keycloak");
@@ -357,7 +379,7 @@ try {
     k(["delete", "namespace", ns, providers, "--wait=true", "--timeout=180s"], { timeout: 200000 });
   }
   mkdirSync("demos/evidence", { recursive: true });
-  const reportPath = operational ? `demos/evidence/ops11-operations${process.env.STARTER_CASE ? `-${process.env.STARTER_CASE}` : ""}.json` : portability ? "demos/evidence/ops11-portability.json" : "demos/evidence/ops11-starter.json";
+  const reportPath = bundledMatrix ? "demos/evidence/ops11-bundled.json" : operational ? `demos/evidence/ops11-operations${process.env.STARTER_CASE ? `-${process.env.STARTER_CASE}` : ""}.json` : portability ? "demos/evidence/ops11-portability.json" : "demos/evidence/ops11-starter.json";
   writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n");
   console.log(`PASS starter matrix; content-free measurements: ${reportPath}`);
 } finally {

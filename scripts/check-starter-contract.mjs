@@ -13,14 +13,14 @@ function render(database, identity, extra = []) {
   if (identity === "packaged") args.push("-f", `${chart}/ci/packaged-keycloak-values.yaml`);
   return spawnSync("helm", [...args, ...extra], { encoding: "utf8" });
 }
-for (const database of ["external", "cnpg"]) {
+for (const database of ["external", "cnpg", "bundled"]) {
   for (const identity of ["external", "packaged"]) {
     const result = render(database, identity);
     assert.equal(result.status, 0, result.stderr);
     const out = result.stdout;
     assert.equal(/^kind: Cluster$/m.test(out), database === "cnpg");
-    assert.equal(/^kind: StatefulSet$/m.test(out), identity === "packaged");
-    assert.equal(out.includes("synveda-database-bootstrap keycloak"), database === "cnpg" && identity === "packaged");
+    assert.equal(/^kind: StatefulSet$/m.test(out), identity === "packaged" || database === "bundled");
+    assert.equal(out.includes("synveda-database-bootstrap keycloak"), database !== "external" && identity === "packaged");
     assert.ok(!/hostPath:|start-dev|automountServiceAccountToken: true/.test(out));
     if (identity === "packaged") {
       assert.match(out, /name: KC_DB_URL_DATABASE\n\s+value: keycloak/);
@@ -30,7 +30,7 @@ for (const database of ["external", "cnpg"]) {
       assert.match(out, /type: OnDelete/);
       assert.match(out, /"registrationAllowed": false/);
       assert.ok(!/"users"\s*:|"credentials"\s*:/.test(out), "no seeded team identities");
-      if (database === "cnpg") {
+      if (database !== "external") {
         assert.match(out, /"forbidden_databases":\["keycloak","postgres","template1"\]/);
         assert.match(out, /"isolated_peer_roles":\["keycloak"\]/);
         assert.match(out, /SYNVEDA_DATABASE_PEER_WITNESS_FILE/);
@@ -44,7 +44,7 @@ const negative = [
   ["keycloak.database.existingSecret=synveda-gateway-db", "must be distinct"],
   ["keycloak.database.database=synveda", "keycloak database/user"],
   ["keycloak.database.username=synveda_migrator", "keycloak database/user"],
-  ["keycloak.database.hostname=unrelated", "share the existing CNPG server"],
+  ["keycloak.database.hostname=unrelated", "share the selected PostgreSQL server"],
   ["keycloak.database.password=not-a-real-password", "inline database passwords"],
   ["keycloak.replicas=2", "one replica"],
   ["keycloak.updateStrategy=RollingUpdate", "explicit maintenance"],
@@ -61,6 +61,19 @@ for (const [setting, refusal] of negative) {
   const result = render("cnpg", "packaged", ["--set", setting]);
   assert.notEqual(result.status, 0, setting);
   assert.ok(result.stderr.includes(refusal), `${setting}: ${result.stderr}`);
+}
+for (const [database, identity, setting, refusal] of [
+  ["bundled", "external", "postgres.bundled.administratorExistingSecret=", "requires separate"],
+  ["bundled", "external", "postgres.bundled.migratorExistingSecret=synveda-postgres-admin", "must be distinct"],
+  ["bundled", "external", "postgres.bundled.existingClaim=retained,postgres.bundled.storageClass=storage", "mutually exclusive"],
+  ["external", "external", "postgres.bundled.administratorExistingSecret=unused", "incompatible"],
+  ["bundled", "external", "keycloak.localEvaluation=true", "requires keycloak.enabled"],
+  ["bundled", "packaged", "keycloak.localEvaluation=true", "localhost"],
+]) {
+  const result = render(database, identity, ["--set", setting]);
+  assert.notEqual(result.status, 0, setting);
+  assert.ok(result.stderr.includes(refusal), `${setting}: ${result.stderr}`);
+  assert.equal(result.stdout, "", "invalid ownership must fail before emitting resources");
 }
 const preset = spawnSync("helm", ["template", "synveda", chart, "--api-versions", "postgresql.cnpg.io/v1", "-f", `${chart}/starter-values.yaml`], { encoding: "utf8" });
 assert.equal(preset.status, 0, preset.stderr);

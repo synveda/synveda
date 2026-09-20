@@ -1,0 +1,17 @@
+# Operator-free, namespaced persistent PostgreSQL; external OIDC by default.
+gateway:
+  publicUrl: https://synveda.example.com
+  databaseExistingSecret: synveda-gateway-db
+worker:
+  databaseExistingSecret: synveda-worker-db
+oidc:
+  existingSecret: synveda-oidc
+kms:
+  existingSecret: synveda-kms
+embedder: deterministic
+postgres:
+  mode: bundled
+  bundled:
+    administratorExistingSecret: synveda-postgres-admin
+    migratorExistingSecret: synveda-migrator-db
+    tlsExistingSecret: synveda-pg-ca

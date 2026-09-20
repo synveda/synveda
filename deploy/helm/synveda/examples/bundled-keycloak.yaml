@@ -1,0 +1,10 @@
+# Layer on ci/bundled-values.yaml; replace public origins and existing Secrets.
+keycloak:
+  enabled: true
+  publicUrl: https://auth.example.test
+  proxyTrustedAddresses: 10.244.0.0/16 # replace with your actual proxy network
+  adminExistingSecret: synveda-keycloak-admin
+  databaseCaExistingSecret: synveda-pg-ca
+  database:
+    hostname: synveda-pg-rw
+    existingSecret: synveda-keycloak-db

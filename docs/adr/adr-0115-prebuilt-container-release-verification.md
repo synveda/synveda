@@ -12,7 +12,8 @@ fixture on native AMD64 and ARM64 runners. The packaged Compose launcher uses
 immutable image digests and never builds source. However, the workflow joins
 and announces these artifacts without pulling and executing the final images
 on fresh runners. Registry write access does not prove anonymous read access.
-The latest public release, v0.2.0, predates the current reference contract.
+At the initial decision, the latest public release, v0.2.0, predated the
+current reference contract. The amendment below records the next increment.
 
 The server does not need the native CLI, console or client-plugin archives.
 Requiring the all-artifact installer unnecessarily restricts a container host
@@ -62,7 +63,40 @@ their synthetic digests must never be presented as an installable release.
 
 ## Compliance notes
 
-There is no change to application code, Cedar, forced RLS, VedaFlow, audit,
-tenant admission or secret handling. Image smoke containers have no network,
+The original image-smoke increment changed no application code, Cedar, forced
+RLS, VedaFlow, audit, tenant admission or secret handling. Its containers have no network,
 host mounts or deployment credentials. Full product acceptance remains with
 the existing Compose and Helm suites.
+
+## Amendment — installation and evaluation contract (2026-09-20)
+
+Accepted for CPR-45 / OPS-11 / OPS-8 at the owner's installation mission.
+The in-flight 0.3.0 release is a separate immutable artifact set; the following
+increment is unreleased until its own candidate passes acceptance.
+
+Reuse the Compose fragments, database bootstrap, public-API demo and existing
+chart. Containerize preparation, leaving Docker Compose itself on the host;
+preparation receives only its deployment directory, never a Docker socket.
+The released evaluation entry point uses prebuilt immutable images, loopback
+exposure and persistent, generated-once private state. Source builds remain a
+contributor workflow. Explicit dependency modes remain independent.
+
+For localhost OIDC, support an explicitly configured discovery URL while
+retaining the exact canonical issuer and all signature, audience, PKCE and
+transport checks. Keycloak's supported dynamic backchannel advertises internal
+token/JWKS endpoints; browser authorization retains the public localhost URL.
+HTTP backchannels require the existing explicit development-HTTP setting.
+External HTTPS deployments retain certificate and hostname verification.
+
+Add `postgres.mode=bundled` to the existing chart: one namespaced persistent
+PostgreSQL StatefulSet using the existing PostgreSQL image and bootstrap tools,
+ordinary separate runtime roles and operator-owned Secret references. No
+operator, CRD, cluster-wide RBAC or privileged init container is installed.
+`cnpg` remains an explicit preinstalled-operator option. Bundled Keycloak has
+its own database/credential contract regardless of application database mode.
+Retain PVCs and independently back up identity state and encryption material;
+neither bundling nor Kubernetes establishes HA or production readiness.
+
+Keep the approved static site and brand. A small checked publication manifest
+distinguishes published artifacts from pending instructions. Release and
+platform claims require native runtime evidence, not chart renders or builds.

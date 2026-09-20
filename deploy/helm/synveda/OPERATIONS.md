@@ -1,4 +1,4 @@
-# Small-team operations
+# Kubernetes operations
 
 Use the [installation guide](README.md) and save the exact chart, values,
 immutable image overlays and Secret custody references. This runbook covers
@@ -111,14 +111,18 @@ On the administrator's workstation, choose a **new private directory outside
 the database PVC and node failure domain**. The following are the native
 commands exercised by the fixture (which uses a private host scratch directory).
 The DBA runs them with an approved backup/admin identity; the gateway and
-worker must never receive that credential. CNPG's local `postgres` access is
-used below. External DBAs use their own service/pgpass files with verified TLS:
+worker must never receive that credential. Bundled PostgreSQL and CNPG provide
+local `postgres` access inside their database pod. External DBAs use their own
+service/pgpass files with verified TLS:
 
 ```sh
 umask 077
 : "${RECOVERY_DIR:?set a new private backup directory on the administrator host}"
 mkdir "$RECOVERY_DIR"
-PGPOD=$(kubectl -n synveda get cluster/synveda-pg -o jsonpath='{.status.currentPrimary}')
+# Bundled StatefulSet, for fullnameOverride: synveda:
+PGPOD=synveda-pg-0
+# For the explicit CNPG mode, use this instead:
+# PGPOD=$(kubectl -n synveda get cluster/synveda-pg -o jsonpath='{.status.currentPrimary}')
 kubectl -n synveda exec "$PGPOD" -- psql -X -qAt -U postgres -d postgres -c "SELECT count(*) FROM pg_stat_activity WHERE datname IN ('synveda','keycloak')"
 # Require zero connections to both databases before proceeding.
 kubectl -n synveda exec "$PGPOD" -- timeout 120 pg_dump -U postgres -d synveda --format=custom --create --lock-wait-timeout=10s > "$RECOVERY_DIR/synveda.dump"

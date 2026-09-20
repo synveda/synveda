@@ -60,6 +60,9 @@ export function chartParityFindings(cargo, chart, values, helpers, cluster, inst
   if (!postgres.includes('  image: ""\n')) {
     findings.push("chart PostgreSQL override is not empty by default");
   }
+  if (!/  bundled:\n(?:[^\n]*\n)*?    image: ""\n/.test(postgres)) {
+    findings.push("bundled PostgreSQL image override must default to the release coordinate");
+  }
   const postgresHelper =
     '{{- default (printf "ghcr.io/synveda/cnpg-postgres:17.11-synveda-%s" .Chart.AppVersion) .Values.postgres.image -}}';
   if (!helpers.includes(postgresHelper)) {
@@ -86,6 +89,15 @@ export function chartParityFindings(cargo, chart, values, helpers, cluster, inst
 
 export function releaseWorkflowFindings(source) {
   const findings = [];
+  const pins = JSON.parse(read(".github/action-pins.json"));
+  for (const match of source.matchAll(/uses: ([^\s]+)(?: # ([^\n]+))?/g)) {
+    const [repository, sha] = match[1].split("@");
+    const ref = `${repository}@${match[2]}`;
+    if (!/^[a-f0-9]{40}$/.test(sha ?? "") || pins[ref] !== sha && pins[`${repository}@${sha}`] !== sha) findings.push(`unreviewed action reference: ${repository}`);
+  }
+  for (const [ref, sha] of Object.entries(pins)) {
+    source = source.replaceAll(`${ref.split("@")[0]}@${sha} # ${ref.split("@")[1]}`, ref);
+  }
   if (!source.includes("permissions:\n  contents: read\n\njobs:")) {
     findings.push("workflow default permissions are not read-only");
   }
@@ -146,10 +158,20 @@ export function releaseWorkflowFindings(source) {
       !publishJob.includes("          pattern: release-verification-*\n") ||
       !publishJob.includes("test -s release-images-amd64.json") ||
       !publishJob.includes("test -s release-images-arm64.json") ||
-      !publishJob.includes("sha256sum release-images-*.json >> SHA256SUMS")) {
+      !publishJob.includes("sha256sum release-images-*.json release-docker-*.json release-kubernetes-*.json >> SHA256SUMS")) {
     findings.push("announcement must carry the assembled assets and both checksummed reports");
   }
   const untrustedInput = "${{ inputs.version }}";
+  const qualification = stepBlock(verificationJob, "Qualify the exact Docker and chart artifacts");
+  if (!qualification.includes("if: needs.version.outputs.publish == 'true'") ||
+      qualification.includes("continue-on-error") ||
+      !qualification.includes("node scripts/qualify-release.mjs") ||
+      !qualification.includes("node scripts/qualify-kubernetes-release.mjs") ||
+      !qualification.includes('cmp "assets/synveda-$VERSION.tgz" "anonymous-chart/synveda-$VERSION.tgz"') ||
+      !publishJob.includes('test -s "release-docker-$arch.json"') ||
+      !publishJob.includes('test -s "release-kubernetes-$arch.json"')) {
+    findings.push("release must require exact Docker/chart qualification and anonymous OCI retrieval");
+  }
   if (
     source.split(untrustedInput).length - 1 !== 1 ||
     !source.includes(`INPUT_VERSION: ${untrustedInput}`)

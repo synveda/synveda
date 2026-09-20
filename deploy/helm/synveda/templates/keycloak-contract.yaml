@@ -6,15 +6,22 @@
 {{- if or (ne (int $kc.replicas) 1) $kc.autoscaling.enabled (ne $kc.updateStrategy "OnDelete") -}}
 {{- fail "packaged Keycloak requires one replica and OnDelete updates; provider upgrades are explicit maintenance" -}}
 {{- end -}}
-{{- if or (not (hasPrefix "https://" $kc.publicUrl)) (hasSuffix "/" $kc.publicUrl) (not $kc.proxyTrustedAddresses) -}}
+{{- if $kc.localEvaluation -}}
+{{- if or (not (regexMatch "^http://localhost:[0-9]{4,5}$" $kc.publicUrl)) (not (regexMatch "^http://localhost:[0-9]{4,5}$" .Values.gateway.publicUrl)) (not .Values.gateway.insecureDevelopmentHttp) $kc.ingress.enabled .Values.ingress.enabled -}}
+{{- fail "Keycloak localEvaluation requires explicit localhost ports, insecureDevelopmentHttp and no ingress; expose only with kubectl port-forward --address 127.0.0.1" -}}
+{{- end -}}
+{{- else if or (not (hasPrefix "https://" $kc.publicUrl)) (hasSuffix "/" $kc.publicUrl) (not $kc.proxyTrustedAddresses) -}}
 {{- fail "packaged Keycloak requires an HTTPS publicUrl without a trailing slash and explicit proxyTrustedAddresses" -}}
+{{- end -}}
+{{- if and $kc.evaluationAccountsExistingSecret (not $kc.localEvaluation) -}}
+{{- fail "evaluation accounts require explicit localEvaluation; create organisation identities in the existing provider" -}}
 {{- end -}}
 {{- range splitList "," $kc.proxyTrustedAddresses -}}
 {{- if or (eq (trim .) "0.0.0.0/0") (eq (trim .) "::/0") -}}
 {{- fail "Keycloak proxyTrustedAddresses must restrict the trusted proxy network" -}}
 {{- end -}}
 {{- end -}}
-{{- if or (not $kc.adminExistingSecret) (not $kc.database.existingSecret) (not $kc.databaseCaExistingSecret) -}}
+{{- if or (and (not $kc.localEvaluation) (not $kc.adminExistingSecret)) (not $kc.database.existingSecret) (not $kc.databaseCaExistingSecret) -}}
 {{- fail "packaged Keycloak requires separate adminExistingSecret, database.existingSecret and databaseCaExistingSecret" -}}
 {{- end -}}
 {{- if or (ne $kc.database.vendor "postgres") (ne $kc.database.database "keycloak") (ne $kc.database.username "keycloak") $kc.database.password (not $kc.database.hostname) -}}
@@ -24,8 +31,8 @@
 {{- if ne (len $secrets) (len (uniq $secrets)) -}}
 {{- fail "Keycloak, Synveda and administrator credential Secrets must be distinct" -}}
 {{- end -}}
-{{- if and (eq .Values.postgres.mode "cnpg") (or (ne $kc.database.hostname (printf "%s-rw" (include "synveda.clusterName" .))) (ne (int $kc.database.port) 5432)) -}}
-{{- fail "packaged PostgreSQL and Keycloak share the existing CNPG server: set keycloak.database.hostname to <cluster>-rw and port to 5432" -}}
+{{- if and (ne .Values.postgres.mode "external") (or (ne $kc.database.hostname (printf "%s-rw" (include "synveda.clusterName" .))) (ne (int $kc.database.port) 5432)) -}}
+{{- fail "packaged PostgreSQL and Keycloak share the selected PostgreSQL server: set keycloak.database.hostname to <cluster>-rw and port to 5432" -}}
 {{- end -}}
 {{- if or (ne $kc.service.type "ClusterIP") $kc.ingress.console.enabled $kc.httpRoute.enabled $kc.route.enabled $kc.serviceAccount.automountServiceAccountToken $kc.serviceAccount.allowReadPods -}}
 {{- fail "packaged Keycloak requires private ClusterIP/admin/management access and no Kubernetes API credentials" -}}

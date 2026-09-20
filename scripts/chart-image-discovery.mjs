@@ -90,27 +90,27 @@ export function helmComputedImageReferences(source) {
     ),
   ];
   for (const [, body] of definitions) {
-    const computed = body.match(
-      /default \(printf "([^"\s]+):([^"\s%]*)%s" \.Chart\.AppVersion\) \.Values\.[A-Za-z0-9.]+/,
-    );
-    if (computed === null) continue;
-    const [, repository, tagPrefix] = computed;
-    if (
-      repository.includes("$") ||
-      repository.includes("@") ||
-      !/^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$/.test(
-        repository,
-      )
-    ) {
-      refuse("helm-computed-image-repository");
+    for (const computed of body.matchAll(
+      /default \(printf "([^"\s]+):([^"\s%]*)%s" \.Chart\.AppVersion\) \.Values\.[A-Za-z0-9.]+/g,
+    )) {
+      const [, repository, tagPrefix] = computed;
+      if (
+        repository.includes("$") ||
+        repository.includes("@") ||
+        !/^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$/.test(
+          repository,
+        )
+      ) {
+        refuse("helm-computed-image-repository");
+      }
+      if (
+        tagPrefix !== "" &&
+        !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(tagPrefix)
+      ) {
+        refuse("helm-computed-image-tag-prefix");
+      }
+      references.push(`${repository}:${tagPrefix}<appVersion>`);
     }
-    if (
-      tagPrefix !== "" &&
-      !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(tagPrefix)
-    ) {
-      refuse("helm-computed-image-tag-prefix");
-    }
-    references.push(`${repository}:${tagPrefix}<appVersion>`);
   }
   return references;
 }
