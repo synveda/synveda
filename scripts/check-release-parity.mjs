@@ -89,27 +89,65 @@ export function releaseWorkflowFindings(source) {
   if (!source.includes("permissions:\n  contents: read\n\njobs:")) {
     findings.push("workflow default permissions are not read-only");
   }
-  const imagesJob = source.slice(source.indexOf("  images:\n"), source.indexOf("\n  publish:\n"));
-  const publishJob = source.slice(source.indexOf("  publish:\n"));
+  const job = (name) => {
+    const start = source.indexOf(`  ${name}:\n`);
+    if (start < 0) return "";
+    const rest = source.slice(start + 3 + name.length);
+    const next = /^  [a-z][a-z-]*:\n/m.exec(rest);
+    return source.slice(start, next ? start + 3 + name.length + next.index : source.length);
+  };
+  const imagesJob = job("images");
+  const assemblyJob = job("assemble");
+  const verificationJob = job("verify-images");
+  const publishJob = job("publish");
   if (!imagesJob.startsWith("  images:\n    needs: version\n")) {
     findings.push("release image plan does not depend exactly on resolved version");
   }
-  if (!publishJob.startsWith("  publish:\n    needs: [version, binaries, bundles, images]\n")) {
-    findings.push("release publication does not await the exact artifact producers");
+  if (!assemblyJob.startsWith("  assemble:\n    needs: [version, binaries, bundles, images]\n")) {
+    findings.push("release assembly does not await the exact artifact producers");
   }
-  if (
-    /^    continue-on-error:/m.test(imagesJob) ||
-    /^    continue-on-error:/m.test(publishJob) ||
-    /^    if:/m.test(imagesJob) ||
-    /^    if:/m.test(publishJob)
-  ) {
-    findings.push("release image or publication job may mask a failed prerequisite");
+  if (!publishJob.startsWith("  publish:\n    needs: [version, assemble, verify-images]\n")) {
+    findings.push("release announcement does not await native anonymous verification");
   }
-  if (!imagesJob.includes("    permissions:\n      contents: read\n      packages: write\n")) {
-    findings.push("image job lacks scoped package-write permission");
+  for (const block of [imagesJob, assemblyJob, verificationJob, publishJob]) {
+    if (/^    (continue-on-error|if):/m.test(block)) {
+      findings.push("release job may mask a failed prerequisite");
+    }
   }
-  if (!publishJob.includes("    permissions:\n      contents: write\n      packages: write\n")) {
-    findings.push("publish job lacks scoped release/package-write permission");
+  for (const block of [imagesJob, assemblyJob]) {
+    if (!block.includes("    permissions:\n      contents: read\n      packages: write\n")) {
+      findings.push("image/assembly job lacks scoped package-write permission");
+    }
+  }
+  if (!publishJob.includes("    permissions:\n      contents: write\n") || publishJob.includes("packages: write")) {
+    findings.push("publish job must have only scoped release-write permission");
+  }
+  if (!verificationJob.includes("    permissions:\n      contents: read\n") ||
+      verificationJob.includes("packages: write") || verificationJob.includes("docker/login-action") ||
+      verificationJob.includes("secrets.") ||
+      !verificationJob.includes("    needs: [version, assemble]\n") ||
+      !verificationJob.includes('mktemp -d "$RUNNER_TEMP/synveda-anonymous-docker.XXXXXX"') ||
+      !verificationJob.includes('echo "DOCKER_CONFIG=$directory" >> "$GITHUB_ENV"')) {
+    findings.push("verification must use fresh anonymous Docker credentials and assembled artifacts");
+  }
+  const verify = stepBlock(verificationJob, "Pull and execute the released images anonymously");
+  if (!verify.includes("        if: needs.version.outputs.publish == 'true'\n") ||
+      !verify.includes("node scripts/verify-release-images.mjs") ||
+      !verify.includes('"$RUNNER_TEMP/synveda-reference-$VERSION" "$PLATFORM"') ||
+      !verify.includes('"$VERSION" "$SOURCE_SHA" "release-images-${{ matrix.arch }}.json"') ||
+      verify.includes("continue-on-error") ||
+      !verificationJob.includes("run: sha256sum --check SHA256SUMS") ||
+      !verificationJob.includes("name: release-verification-${{ matrix.arch }}")) {
+    findings.push("native image verification must bind checksums, version/source and its report");
+  }
+  if (!assemblyJob.includes("          name: release-assets\n") ||
+      !verificationJob.includes("          name: release-assets\n") ||
+      !publishJob.includes("          name: release-assets\n") ||
+      !publishJob.includes("          pattern: release-verification-*\n") ||
+      !publishJob.includes("test -s release-images-amd64.json") ||
+      !publishJob.includes("test -s release-images-arm64.json") ||
+      !publishJob.includes("sha256sum release-images-*.json >> SHA256SUMS")) {
+    findings.push("announcement must carry the assembled assets and both checksummed reports");
   }
   const untrustedInput = "${{ inputs.version }}";
   if (
@@ -142,13 +180,16 @@ export function releaseWorkflowFindings(source) {
     findings.push("release image matrix is not the exact two-architecture contract");
   }
   for (const architecture of nativeArchitectures) {
-    if (!imagesJob.includes(architecture)) {
+    if (!imagesJob.includes(architecture) || !verificationJob.includes(architecture)) {
       findings.push(`release image matrix is missing ${architecture.trim().split("\n")[0]}`);
     }
   }
   if (
     !imagesJob.includes("    runs-on: ${{ matrix.runs-on }}\n") ||
-    imagesJob.includes("docker/setup-qemu-action")
+    imagesJob.includes("docker/setup-qemu-action") ||
+    !verificationJob.includes("    runs-on: ${{ matrix.runs-on }}\n") ||
+    verificationJob.includes("docker/setup-qemu-action") ||
+    (verificationJob.match(/^          - arch:/gm) ?? []).length !== 2
   ) {
     findings.push("release image matrix is not bound to native runners");
   }
@@ -200,11 +241,19 @@ export function releaseWorkflowFindings(source) {
       ["push", "${{ needs.version.outputs.publish == 'true' }}"],
       ["provenance", "mode=max"],
       ["sbom", "true"],
+      ["labels", "|"],
       [
         "tags",
         `ghcr.io/synveda/${repository}:${tagPrefix}\${{ needs.version.outputs.version }}-\${{ matrix.arch }}`,
       ],
     ]);
+    for (const label of [
+      "org.opencontainers.image.source=https://github.com/${{ github.repository }}",
+      "org.opencontainers.image.revision=${{ github.sha }}",
+      "org.opencontainers.image.version=${{ needs.version.outputs.version }}",
+    ]) {
+      if (!block.includes(`            ${label}\n`)) findings.push(`${name}: missing release label`);
+    }
     const allowedInputs = new Set([
       ...semanticInputs.keys(),
       "cache-from",
@@ -249,22 +298,22 @@ export function releaseWorkflowFindings(source) {
     '          docker buildx imagetools inspect "ghcr.io/synveda/cnpg-postgres:$cnpg_tag"',
   ].join("\n");
   if (
-    publishJob.split("      - name: Join the per-architecture image tags\n").length - 1 !== 1 ||
+    assemblyJob.split("      - name: Join the per-architecture image tags\n").length - 1 !== 1 ||
     join !== expectedJoin
   ) {
     findings.push("multi-architecture manifest join is not the exact publish-bound plan");
   }
   const packageReference = stepBlock(source, "Package the digest-bound Docker reference");
-  const packagePosition = publishJob.indexOf(
+  const packagePosition = assemblyJob.indexOf(
     "      - name: Package the digest-bound Docker reference\n",
   );
-  const joinPosition = publishJob.indexOf(
+  const joinPosition = assemblyJob.indexOf(
     "      - name: Join the per-architecture image tags\n",
   );
-  const inventoryPosition = publishJob.indexOf("      - name: Every release asset is present\n");
-  const checksumPosition = publishJob.indexOf("      - name: Checksums\n");
+  const inventoryPosition = assemblyJob.indexOf("      - name: Every release asset is present\n");
+  const checksumPosition = assemblyJob.indexOf("      - name: Checksums\n");
   if (
-    publishJob.split("      - name: Package the digest-bound Docker reference\n").length - 1 !==
+    assemblyJob.split("      - name: Package the digest-bound Docker reference\n").length - 1 !==
       1 ||
     !(joinPosition >= 0 && packagePosition > joinPosition && inventoryPosition > packagePosition) ||
     checksumPosition <= inventoryPosition ||
@@ -320,9 +369,10 @@ export function releaseWorkflowFindings(source) {
     releaseKeys[2][1] !== "run" ||
     releaseKeys[2][2] !== "|" ||
     !release.includes("          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n") ||
+    !release.includes("          GH_REPO: ${{ github.repository }}\n") ||
     !release.includes("installed \\`synveda-compose\\` launcher") ||
     release.includes("installed `synveda-compose` launcher") ||
-    !release.includes("scripts/install.sh | SYNVEDA_VERSION=${GITHUB_REF_NAME} sh") ||
+    !release.includes("SYNVEDA_VERSION=${GITHUB_REF_NAME} sh synveda-install.sh") ||
     !release.trimEnd().endsWith(releaseCommand)
   ) {
     findings.push("GitHub Release publication is not the exact failure-propagating boundary");

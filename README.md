@@ -1,122 +1,133 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/synveda-lockup-dark.svg">
+  <img src="assets/brand/synveda-lockup.svg" alt="Synveda" width="244" height="56">
+</picture>
+
 # Synveda
 
-AI agents are good at using the information in front of them and bad at
-carrying trustworthy information from one run to the next. Synveda gives an
-individual or team one governed place for three things:
+**Shared memory and context for AI agents.**
 
-- **Knowledge** — reviewed facts, decisions, conventions and procedures with
-  immutable revisions and provenance;
-- **Context** — the exact, policy-visible Knowledge selected for one agent
-  Session under a bounded token budget; and
-- **Skills** — versioned instructions distributed to the right projects and
-  principals only after the required review.
+Synveda keeps useful knowledge from your agents' work so you can use it again.
+Connect an agent, review the findings from its sessions, and keep the decisions,
+conventions and procedures that matter to your project. Future tasks can
+retrieve that knowledge without needing the original conversation.
 
-For example, an agent investigating an ingestion failure can record that
-retries must reuse the original `Idempotency-Key`. Synveda preserves the
-Session evidence, lets a reviewer decide whether that learning becomes active
-Knowledge, and can give the approved revision and matching retry Skill to a
-later agent. Teams that need durable agent memory without losing ownership,
-scope, review or audit boundaries are the intended users.
+You choose what gets published, who can access it, and which skills and tool
+definitions a project can use. Synveda runs on your infrastructure, with
+PostgreSQL storing the data and a web console for managing it.
 
-Synveda is a memory and context control plane, not an agent framework, chat
-application, orchestrator or vector-database wrapper. Agent clients use its
-public APIs; the server remains the authority.
+[Prebuilt Docker deployment](#run-with-prebuilt-docker-images) ·
+[Try it locally](#quick-start-from-a-source-checkout) ·
+[Connect an agent](#agent-setup) ·
+[Product guide](docs/INSTALL.md) ·
+[Contribute](CONTRIBUTING.md)
 
-> **Current status: useful local evaluation, not production-ready.** The
-> source-checkout Docker demo has passed clean-volume acceptance on one macOS
-> host with OrbStack. Linux, Docker Desktop, reference HTTPS, published-release,
-> production backup/PITR, key-custody and high-availability evidence remain
-> open. See [Production readiness](docs/PRODUCTION_READINESS.md) for the
-> maintained limitations and exit criteria.
+> **Current status: local evaluation.** The source demo is available today.
+> Prebuilt deployment needs a new release: public v0.2.0 is older than the
+> current code and database schema. Production deployment still has
+> [open requirements](#known-production-gaps).
 
-![Seeded Synveda Knowledge page for the Northstar Delivery Ingestion API project, showing the active Ingestion idempotency baseline revision and its tags.](docs/images/seeded-knowledge-console.jpg)
+## What you can do
 
-The screenshot is from the real seeded console in this checkout. The names and
-content are fictional demo data; no credential or secret is shown.
+| In the console        | Use it to                                                                  |
+| --------------------- | -------------------------------------------------------------------------- |
+| **Sessions**          | See what your agents worked on and inspect their activity.                 |
+| **New Learnings**     | Review suggestions captured from sessions before adding them to Knowledge. |
+| **Knowledge**         | Find project knowledge, edit it, and see its sources and revision history. |
+| **Context**           | Request information for a task and inspect what was selected and why.      |
+| **Skills and Tools**  | Manage reusable skill versions and approved MCP server definitions.        |
+| **Reviews and Audit** | Review proposed changes and inspect the recorded decisions.                |
 
-## Choose an installation
+For example, an agent might discover why a service retries failed requests. You
+can review that finding, publish it with its source, and make it available to
+later sessions. Capture proposes the finding; your policy decides how it can be
+published.
 
-- [Existing local Compose](deploy/compose/README.md): the current single-host workflow.
-- [Small-team starter](deploy/helm/synveda/README.md#choose-the-preset): persistent PostgreSQL/Keycloak with a preinstalled CNPG operator.
-- [Existing or external services](deploy/helm/synveda/README.md): the same chart with organisation-owned PostgreSQL/OIDC.
+## Run with prebuilt Docker images
 
-The current Kubernetes candidate still needs publication and a verified public
-pull/install. Read its [configuration](deploy/helm/synveda/CONFIGURATION.md) and
-[operations runbook](deploy/helm/synveda/OPERATIONS.md) before deployment.
+A small team should not need to compile the server. The release workflow
+builds **Linux AMD64 and ARM64** images and packages a launcher that downloads
+the matching versions. The console, gateway and worker are already compiled.
+
+Use the [prebuilt Docker guide](deploy/compose/PREBUILT.md) when a compatible
+release is available. You download one deployment archive, verify its checksum,
+configure DNS and TLS, then run `synveda-compose up` and `synveda-compose smoke`.
+The host needs Docker, Compose, Node.js and OpenSSL; it needs no Git checkout,
+Rust compiler or pnpm. Each agent user connects to that shared server.
+
+The current public v0.2.0 release does **not** include this archive. The next
+release must pass anonymous image pulls and executable checks on both
+architectures before it is announced. This does not establish production
+readiness or Windows/WSL2 support. For a local evaluation now, use the source
+demo below; for an existing Kubernetes cluster, see the
+[Helm guide](deploy/helm/synveda/README.md).
 
 ## Quick start from a source checkout
 
-This path builds and runs the product from source. It is distinct from the
-currently unverified [packaged-reference workflow](docs/INSTALL.md#packaged-reference).
-Do not copy a local `.env`: the lifecycle reads checked-in non-secret defaults
-and creates private project inputs under the ignored deploy/compose/runtime
-directory.
+The local demo builds Synveda and starts it with PostgreSQL and Keycloak. You
+do not need a model API key or paid agent account to explore the console.
 
-### Host prerequisites
+### Before you start
 
-The host needs:
+- **macOS or Linux**, using a regular user account. Windows and WSL2 setup are
+  not yet documented or tested. The completed deployment run used macOS with
+  OrbStack; Linux and Docker Desktop acceptance are still pending.
+- **Docker Engine 28+**, **Compose 2.33.1+**, and a running **default Buildx
+  builder** using the local **docker** driver. Remote Docker contexts are not
+  supported by these scripts.
+- **Git, Node.js 22+, OpenSSL and GNU Make**. Rust is only needed if you also
+  want to build the CLI or work on the backend.
+- Permission to add two local hostname entries. The hosts helper needs a
+  root-owned, non-writable, ACL-free Node installation at /usr/bin/node or
+  /usr/local/bin/node. Linux also needs getfacl from the acl package. See the
+  [hostname setup guide](deploy/compose/README.md#development-hostname-setup).
 
-- Git and network access for the checkout, base images and build dependencies;
-- a non-root Unix account and a local Docker Engine 28 or newer, reached over
-  its Unix socket (remote Docker contexts are refused);
-- Docker Compose 2.33.1 or newer and Buildx using the running `default` builder
-  with the local `docker` driver;
-- Node.js 22 or newer, OpenSSL and GNU Make; and
-- permission to review and install two loopback-only `/etc/hosts` entries.
-
-No CPU, memory or disk minimum has been established. Docker runs PostgreSQL 17,
-production-mode Keycloak, Caddy, the Synveda gateway and worker, and the private
-OpenTelemetry Collector in containers. Rust is not needed to start that graph;
-the optional seeded CLI tour below additionally needs the repository's pinned
-Rust toolchain.
-
-The only completed platform run is macOS 26.6.2 arm64 with OrbStack Docker
-Engine 29.4.0 and Compose 5.1.2. The implementation targets Unix hosts, but
-Linux and Docker Desktop repetition is still pending; that is not a support
-claim for those platforms.
-
-### 1. Clone and prepare the development names
+### 1. Prepare the local addresses
 
 ```sh
 git clone https://github.com/synveda/synveda.git
 cd synveda
-
 make compose-hosts-plan
 make compose-hosts-status
+```
+
+Review the proposed hostname entries. With the default settings, install them:
+
+```sh
 SYNVEDA_CONFIRM_HOSTS_INSTALL=install:127.0.0.1:synveda-development:app.synveda.test:auth.synveda.test \
   make compose-hosts-install
 ```
 
-The install target is the one consent-requiring host change. Review the plan
-and exact confirmation before allowing its privilege escalation; do not run
-Make or Docker generally as root. Then flush the host's resolver cache. On
-macOS:
+Only this hosts helper needs elevated privileges. Run the other commands as
+your regular user. If another Synveda project already owns these names or
+port 8080, follow the hostname guide before continuing.
+
+<details>
+<summary>Refresh your DNS cache, then check the addresses</summary>
+
+On macOS:
 
 ```sh
 sudo dscacheutil -flushcache
 sudo killall -HUP mDNSResponder
 ```
 
-On a Linux host using `systemd-resolved`:
+On Linux with systemd-resolved:
 
 ```sh
 sudo resolvectl flush-caches
 ```
 
-Finish the prerequisite before starting the stack:
+For other Linux resolvers, follow their cache-flush procedure. Then run:
 
 ```sh
 make compose-hosts-status
 make compose-resolver-check
 ```
 
-Development is explicit loopback HTTP and needs no certificate. Reference mode
-is a separate HTTPS workflow: real DNS and matching mode-0600 certificate/key
-files must exist **before** `make compose-config` or `make compose-up`. Follow
-[Reference HTTPS](deploy/compose/README.md#reference-https); ACME and automatic
-renewal are not implemented.
+</details>
 
-### 2. Configure, start and check the demo
+### 2. Start Synveda
 
 ```sh
 export SYNVEDA_COMPOSE_PROFILES=demo
@@ -125,202 +136,153 @@ make compose-up
 make compose-smoke
 ```
 
-`compose-up` generates missing mode-0600 secrets, writes the bundled issuer
-contract, builds the development images, creates the isolated database roles,
-applies the schema, converges Keycloak and starts the gateway and worker. It is
-safe to rerun and does not rotate existing secrets. The `demo` profile creates
-four Keycloak demo identities; it does not bypass the public API to insert
-product data.
+There is no .env file to copy. Startup reads the checked-in defaults, generates
+private secrets locally, prepares the databases and starts the services.
+Rerunning it keeps the existing data and secrets. The smoke check verifies the
+services and endpoints; browser sign-in is the next step.
 
-Open [http://app.synveda.test:8080/console/](http://app.synveda.test:8080/console/).
-Sign in as `synveda-demo-admin`, displayed in Synveda as **Avery Author**. Its
-password is in:
+### 3. Open the console
+
+Visit **[app.synveda.test:8080/console/](http://app.synveda.test:8080/console/)**,
+or the exact address printed by startup. Use that hostname rather than localhost
+so sign-in returns to the correct place.
+
+Sign in as **synveda-demo-admin**. Its display name is **Avery Author**. Use the
+generated password stored in this local file, and keep the file private:
 
 ```text
 deploy/compose/runtime/synveda-development/secrets/keycloak_demo_admin_password
 ```
 
-`compose-up` prints the resolved URL and all four password-file paths, never
-the passwords. Read the file only through a local password-input mechanism; do
-not put its contents in a command, log or committed file. On a completely fresh
-product database, the console opens **Getting started** and asks you to create a
-workspace, create its first project, attach a repository, choose an agent
-client, copy its connection commands and run the connection check. The header
-then shows your selected workspace/project and the left navigation starts with
-**Home**, **Sessions**, **Knowledge**, **New Learnings**, **Context** and
-**Skills**.
+On a fresh database, **Getting started** walks you through creating a workspace,
+adding a project and connecting a client. Once set up, **Home** links to sessions,
+new learnings, knowledge and context requests.
 
-### 3. Seed the governed Northstar example (optional)
+Want to explore populated data? Follow the
+[ingestion-retry walkthrough](deploy/compose/README.md#governed-ingestion-retry-walkthrough).
+It uses fictional demo content to walk through capture, review, publication and
+retrieval. It needs the source CLI: build it with
+`cargo build --locked -p synveda-cli`, then use `./target/debug/synveda` wherever
+the guide says `synveda`, unless that binary is already on your PATH.
 
-The normal first-run UI is ready after step 2. To reproduce the real records in
-the screenshot, build the existing source CLI and create four local login
-profiles:
+### Stop and return later
 
-```sh
-cargo build --locked -p synveda-cli
-export SYNVEDA_GATEWAY=http://app.synveda.test:8080
-export SYNVEDA_INSECURE_DEVELOPMENT_HTTP=true
-
-./target/debug/synveda login --gateway "$SYNVEDA_GATEWAY" --profile author --no-browser
-./target/debug/synveda login --gateway "$SYNVEDA_GATEWAY" --profile reviewer --no-browser
-./target/debug/synveda login --gateway "$SYNVEDA_GATEWAY" --profile approver --no-browser
-./target/debug/synveda login --gateway "$SYNVEDA_GATEWAY" --profile viewer --no-browser
-```
-
-Open each printed URL in a fresh private browser session and use the matching
-local credential:
-
-| Profile | Keycloak account | Password file |
-| --- | --- | --- |
-| `author` | `synveda-demo-admin` (Avery Author) | `keycloak_demo_admin_password` |
-| `reviewer` | `synveda-demo-member` (Riley Reviewer) | `keycloak_demo_member_password` |
-| `approver` | `synveda-demo-approver` (Morgan Approver) | `keycloak_demo_approver_password` |
-| `viewer` | `synveda-demo-viewer` (Vera Restricted Viewer) | `keycloak_demo_viewer_password` |
-
-All four password files are in the generated
-deploy/compose/runtime/synveda-development/secrets directory. Once the logins
-finish:
+From the same shell, with the same profile and any project selectors:
 
 ```sh
-./target/debug/synveda demo retry-review seed \
-  --author-credentials author \
-  --reviewer-credentials reviewer \
-  --approver-credentials approver \
-  --viewer-credentials viewer \
-  --confirm-target "$SYNVEDA_GATEWAY"
-./target/debug/synveda demo retry-review inspect --author-credentials author
+make compose-down
+# When you want to return:
+make compose-up
 ```
 
-The resumable seed uses public APIs. It creates the **Northstar Delivery**
-workspace and **Ingestion API** project, one approved baseline Knowledge
-revision, one open Skill proposal and one synthetic Session. It deliberately
-stops before Capture so that review remains visible.
+Stopping preserves your data and generated secrets. Data reset and hostname
+removal are separate operations in the [Compose guide](deploy/compose/README.md).
+If startup fails, begin with `make compose-hosts-status` and
+`make compose-resolver-check`, then use the log commands printed by startup.
 
-## A five-click tour
+## Agent setup
 
-After the optional seed, sign in to the console as Avery Author:
+| Client              | Where to start                                                       |
+| ------------------- | -------------------------------------------------------------------- |
+| Claude Code         | [Plugin installation and connection](adapters/claude-code/README.md) |
+| Codex CLI           | [Setup, tested version and limits](docs/integrations/codex.md)       |
+| GitHub Copilot CLI  | [Setup, tested version and limits](docs/integrations/copilot-cli.md) |
+| Other MCP clients   | [MCP connection guide](adapters/claude-code/README.md#the-mcp-tool)  |
+| Python / TypeScript | [SDK guide and local package installation](sdks/README.md)           |
 
-1. On **Home**, confirm the header says **Northstar Delivery** and
-   **Ingestion API**.
-2. Click **Sessions**, then **Synthetic replay: determine ingestion retry
-   behaviour**. Its **Timeline** contains one `message.assistant`; **Capture
-   evidence** says no snapshot has been frozen yet.
-3. Click **Knowledge**, then **Ingestion idempotency baseline**. It is an active
-   project `convention`, revision 1, with the summary “Ingestion requests
-   establish their idempotency record before work.”
-4. Under **Advanced**, click **Reviews**. The seeded `install Skill` proposal
-   for `ingestion-api` is open; **Skills** truthfully remains empty until its
-   governed change is reviewed and applied.
-5. Continue with the [governed ingestion-retry walkthrough](deploy/compose/README.md#governed-ingestion-retry-walkthrough)
-   to Capture the Session, observe Vera's denied review, let Riley and Morgan
-   satisfy the Skill matrix before Avery applies, bind the exact Skill version,
-   and request Context that cites the
-   resulting Knowledge revision.
-
-This is deterministic synthetic replay: it needs no model API, paid service or
-agent subscription. `make compose-acceptance` is the disposable automated
-version and also exercises the restart matrix; its reviews are labelled test
-acts, not human review. Claude Code replay and live-client verification are
-separate gates, and optional semantic retrieval needs the documented TEI
-fixture. External OIDC, PostgreSQL and OTLP endpoints are optional operator
-integrations, not first-run prerequisites or currently verified provider
-claims.
-
-## Operate or remove the local stack
-
-Keep the same `SYNVEDA_*` selectors for every command. For the default demo:
-
-```sh
-SYNVEDA_COMPOSE_PROFILES=demo make compose-smoke
-docker logs --tail 200 synveda-development-gateway-1
-docker logs --tail 200 synveda-development-worker-1
-
-SYNVEDA_COMPOSE_PROFILES=demo make compose-down
-SYNVEDA_COMPOSE_PROFILES=demo make compose-up
-```
-
-`compose-down` is the non-destructive stop: it preserves PostgreSQL data and
-the generated project inputs. The following reset is different and destructive.
-The first command intentionally refuses and prints the required project-bound
-confirmation; for the unchanged default selectors, the confirmed command is:
-
-```sh
-SYNVEDA_COMPOSE_PROFILES=demo make compose-reset
-SYNVEDA_COMPOSE_PROFILES=demo SYNVEDA_CONFIRM_RESET=synveda-development make compose-reset
-```
-
-Reset removes this Compose project's containers, networks and PostgreSQL data
-volume, plus selected disposable browser, metrics or Apalis volumes. It does
-**not** remove the project's issuer document, demo passwords, database
-credentials or KMS key/reference. It is deployment reset, not tenant erasure.
-The managed `/etc/hosts` block also remains until you use the separately
-confirmed [hostname removal procedure](deploy/compose/README.md#removing-development-hostname-ownership).
-
-## Troubleshooting the first run
-
-| Symptom | Check |
-| --- | --- |
-| Docker is unavailable or the lifecycle refuses the context | Start the operator-owned local Engine, select its local Unix-socket context, and check `docker version`, `docker compose version` and `docker buildx inspect default`. Synveda does not install or supervise Docker. |
-| `app.synveda.test` or `auth.synveda.test` does not resolve | Run `make compose-hosts-status`, inspect `make compose-hosts-plan`, flush the active resolver cache, then run `make compose-resolver-check`. The manager refuses foreign, duplicate or drifted ownership instead of rewriting it. |
-| Sign-in loops, discovery fails or the callback is rejected | Use the exact printed `http://app.synveda.test:8080/console/` URL, not `localhost`; verify both `.test` names, clear stale IdP cookies with a private window, and rerun `make compose-smoke`. Browser, gateway, discovery and token issuer authorities must match exactly. |
-| Port 8080 is already in use | Stop the process that owns loopback port 8080, or set one unused `SYNVEDA_DEV_HTTP_PORT` before every hostname/config/start command. Do not change selectors halfway through a project lifecycle. |
-| Reference HTTPS is refused | Install real DNS first, then a leaf-first PEM chain and matching unencrypted mode-0600 private key. The preflight checks format, adjacency, key match, hostname and remaining validity; it does not create or renew certificates or justify bypassing a browser warning. |
-| Startup stops during initialization | Read the bounded gateway/worker logs above and rerun `make compose-up`; it converges existing secrets and jobs. `synveda init` is intentionally a side-effect-free refusal. An older pre-1.0 database is not migrated and requires the explicit project reset. |
-| A prerequisite is genuinely missing | Install the named host tool/version, then rerun `make compose-config` and `make compose-up`. Missing Docker, Buildx, Node, OpenSSL, Make, DNS or credentials is unavailable evidence, not a passing result. |
-
-The [canonical Compose guide](deploy/compose/README.md) owns the full selector,
-recovery, reference HTTPS, external-provider, observability and lock-recovery
-procedures.
+Codex and Copilot verification covers the named source builds on macOS arm64
+with Keycloak. Cursor is experimental; other MCP clients have differing levels
+of partial evidence. The SDKs provide an initial set of 15 operations and are
+not yet published to npm or PyPI. Check the linked guide for your setup.
 
 ## Client support
 
-`adapters/registry.json` is the support authority. The
-[generated client-support matrix](docs/CLIENT_SUPPORT.md) is its checked
-projection and distinguishes configuration, authentic captured frames,
-deterministic replay and live verification.
+Verified client lifecycles: Claude Code 2.1.241, GitHub Copilot CLI 1.0.83, Codex CLI 0.152.0.
 
-Verified client lifecycles: Claude Code 2.1.241, GitHub Copilot CLI 1.0.83, Codex CLI 0.152.0. Other clients remain at
-their evidenced registry level; a connection recipe or generic MCP
-configuration is not lifecycle support.
+See the [client support matrix](docs/CLIENT_SUPPORT.md) for the tested platforms,
+setup and remaining limits. Other clients have partial checks or setup recipes;
+those do not establish a working end-to-end lifecycle. This summary is checked
+against [the adapter registry](adapters/registry.json).
 
 ## Known production gaps
 
-[Production readiness](docs/PRODUCTION_READINESS.md) owns the complete gap
-register. In particular, a successful local demo does not establish published
-artifact parity, signing, production recovery or key custody, HA, SaaS or Helm
-production readiness.
+Synveda is not yet ready for production. A current, fully verified release,
+production key management, and off-host backup and restore procedures are still
+needed. High availability and several operational checks also remain open.
+The [readiness register](docs/PRODUCTION_READINESS.md) lists the gaps and the
+checks needed to close them.
 
-## Licence
+For deployment work, start with [Docker Compose](deploy/compose/README.md).
+There is also a [Kubernetes chart](deploy/helm/synveda/README.md), currently
+limited to one gateway and one worker. Both have qualification limits; a local
+demo passing does not establish a production deployment.
 
-Synveda's first-party code and documentation, including the Python and
-TypeScript SDKs, are licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE)
-for attribution. Third-party components and materials retain their own
-licences and notices. The dependency licence policy remains a separate gate.
+## How it works
+
+```text
+Agent clients / MCP / SDKs / web console
+                  │
+         Authenticated public API
+                  │
+       Gateway + Cedar policy checks
+                  │
+          PostgreSQL + pgvector
+                  │
+    Worker: capture, indexing, expiry
+```
+
+The core, gateway, worker and CLI are written in Rust. The React console and
+adapters use the public API. Agents run in their own clients; Synveda manages
+the knowledge, context, skills and tool definitions they can use.
+
+Every read and write is checked by Cedar. PostgreSQL row-level security keeps
+tenants isolated. Governed changes go through VedaFlow, Synveda's review and
+publication workflow, and leave content-minimised audit evidence. Knowledge
+revisions are immutable, so you can trace a change back to its source.
+
+Read the [security model](docs/SECURITY.md) or
+[technical plan](docs/SYNVEDA_TECH_PLAN.md) for the details.
+
+## Working on Synveda
+
+Use Rust **1.96.0**, Node.js **22+** and pnpm **11.13.1**.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm -r test
+pnpm -r build
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo build --workspace
+```
+
+Rust builds use the committed SQLx offline metadata. `make db-test` runs the
+fresh-database suite; `make ci` runs the full PR checks and also needs the
+[Python development dependencies](sdks/README.md#install-locally-and-check).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before making changes.
+
+To work only on the public site:
+
+```sh
+pnpm install --frozen-lockfile --filter @synveda/website
+pnpm --filter @synveda/website check
+pnpm --filter @synveda/website preview
+```
+
+Open [127.0.0.1:4173/synveda/](http://127.0.0.1:4173/synveda/).
+The [website guide](website/README.md) covers branding, GitHub Pages and uploads.
 
 ## Documentation
 
-- [Install and use the product](docs/INSTALL.md) covers Sessions, Capture,
-  Knowledge, Context, Skills, Tools, governance and the distinct packaged
-  workflow.
-- [Client support](docs/CLIENT_SUPPORT.md) and the [Claude Code adapter](adapters/claude-code/README.md)
-  cover measured support levels, the Claude lifecycle and generic MCP integration.
-- [Python and TypeScript clients](sdks/README.md) cover the initial authenticated
-  API slice; [experimental Copilot CLI setup](docs/integrations/copilot-cli.md)
-  reuses the same Session boundary; [Codex CLI setup and evidence](docs/integrations/codex.md) records
-  its verified lifecycle and remaining qualification limits.
-- [Contributing](CONTRIBUTING.md), [agent rules](AGENTS.md) and the
-  [feature inventory](docs/backlog/STATUS.md) define the development workflow.
-- [Product principles](docs/SYNVEDA_SEED.md), the [technical plan](docs/SYNVEDA_TECH_PLAN.md),
-  [ADR index](docs/adr/README.md) and [security model](docs/SECURITY.md) describe
-  the trust and architecture boundaries.
-- [Deployment overview](deploy/README.md), the [deployment contract](docs/DEPLOYMENT_CONTRACT.md)
-  and [production readiness](docs/PRODUCTION_READINESS.md) separate implemented
-  local behaviour from unsupported production claims.
-- The generated [OpenAPI contract](docs/api/openapi.json) and
-  [benchmarks](docs/BENCHMARKS.md) own application and measured-performance
-  claims.
+- [Product guide](docs/INSTALL.md) — using the console, CLI and integrations.
+- [Deployment overview](deploy/README.md) — packaging and deployment options.
+- [Client support](docs/CLIENT_SUPPORT.md) — what has been tested with each client.
+- [API reference](docs/api/openapi.json) — the generated OpenAPI contract.
+- [Architecture decisions](docs/adr/README.md) — why the system works this way.
+- [Feature inventory](docs/backlog/STATUS.md) — delivered and planned work.
 
-Every application read and write is decided by the embedded Cedar policy
-engine; PostgreSQL forced row-level security is the tenant-isolation backstop;
-governed mutations use VedaFlow; and the audit chain retains content-minimised
-evidence. Deployment mode and demo data do not bypass those boundaries.
+## Licence
+
+Synveda is [Apache-2.0](LICENSE). See [NOTICE](NOTICE) for notices and
+[brand attributions](assets/brand/ATTRIBUTIONS.md) for the Inter font licence.

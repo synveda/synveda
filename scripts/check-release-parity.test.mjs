@@ -152,6 +152,12 @@ test("release workflow binds the chart and digest-addressed reference images", (
   const current = read(".github/workflows/release.yml");
   assert.deepEqual(releaseWorkflowFindings(current), []);
   for (const [index, mutant] of [
+    current.replace("needs: [version, assemble, verify-images]", "needs: [version, assemble]"),
+    current.replace("node scripts/verify-release-images.mjs", "echo skipped"),
+    current.replace("org.opencontainers.image.revision=${{ github.sha }}", "org.opencontainers.image.revision=old"),
+    current.replace('mktemp -d "$RUNNER_TEMP/synveda-anonymous-docker.XXXXXX"', 'echo /home/runner/.docker'),
+    current.replace("test -s release-images-arm64.json", "true"),
+    current.replace("GH_REPO: ${{ github.repository }}", "GH_REPO: another/repository"),
     current.replace('version="$INPUT_VERSION"', 'version="${{ inputs.version }}"'),
     current.replace('sh scripts/release-version.sh "$version"', "true"),
     current.replace("permissions:\n  contents: read\n\njobs:", "permissions:\n  contents: write\n\njobs:"),
@@ -204,8 +210,8 @@ test("release workflow binds the chart and digest-addressed reference images", (
       "    needs: [version, binaries, bundles]",
     ),
     current.replace(
-      "  publish:\n    needs: [version, binaries, bundles, images]\n",
-      "  publish:\n    needs: [version, binaries, bundles, images]\n    if: always()\n",
+      "  assemble:\n    needs: [version, binaries, bundles, images]\n",
+      "  assemble:\n    needs: [version, binaries, bundles, images]\n    if: always()\n",
     ),
     current.replace(
       "      - name: Join the per-architecture image tags\n        if: needs.version.outputs.publish == 'true'\n",
@@ -244,8 +250,8 @@ test("release workflow binds the chart and digest-addressed reference images", (
     current.replace("sha256sum synveda-*.tar.gz synveda-*.tgz", "sha256sum synveda-*.tar.gz"),
     current.replace("installed \\`synveda-compose\\` launcher", "installed `synveda-compose` launcher"),
     current.replace(
-      "scripts/install.sh | SYNVEDA_VERSION=${GITHUB_REF_NAME} sh",
-      "scripts/install.sh | sh",
+      "SYNVEDA_VERSION=${GITHUB_REF_NAME} sh synveda-install.sh",
+      "sh synveda-install.sh",
     ),
     current.replace('"synveda-$version.tgz"; do', '"synveda-plugin-$version.tar.gz"; do'),
     current.replace("          provenance: mode=max", "          provenance: false"),

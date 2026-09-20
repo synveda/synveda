@@ -77,6 +77,15 @@ six first-party image identities: product, single-host PostgreSQL, optimized
 Keycloak, reference proxy, browser acceptance and CloudNativePG PostgreSQL. It
 also records the digest-pinned Collector and Prometheus inputs.
 
+The [prebuilt guide](../deploy/compose/PREBUILT.md) documents direct archive
+installation without native binaries or a source checkout. The archive
+includes a source-bound copy of that guide, LICENSE and NOTICE. Its `secrets`
+and `issuer` launcher actions call the existing generators with `--if-missing`
+so TLS can be prepared before startup without replacing current keys.
+Tagged release CI verifies anonymous pulls and isolated executable/asset checks
+on native AMD64 and ARM64 before announcing the release; full deployment
+acceptance remains separate. See [release operations](RELEASING.md).
+
 The archive contains no development overlay, Dockerfile, database-test fixture,
 local `.env`, secret, runtime state, backup, retired identity provider or
 workflow-scheduler asset. Its launcher fixes reference HTTPS semantics and

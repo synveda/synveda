@@ -111,14 +111,15 @@ export const ROUTES: readonly RouteDef[] = [
     segment: "",
     label: "Home",
     group: "work",
-    blurb: "Where you are, what you have, and what to do next.",
+    blurb: "Review what your agents learned and choose what they use next.",
   },
   {
     id: "operations",
     segment: "operations",
     label: "Operations",
     group: "administration",
-    blurb: "Recent authorised activity and what this console cannot yet measure.",
+    blurb:
+      "Check recent activity and the operational signals available to you.",
   },
   {
     id: "sessions",
@@ -132,14 +133,16 @@ export const ROUTES: readonly RouteDef[] = [
     segment: "sessions/:session_id",
     label: "Session",
     group: "none",
-    blurb: "One run: what it was, how it ended, and everything that happened in it.",
+    blurb:
+      "One run: what it was, how it ended, and everything that happened in it.",
   },
   {
     id: "context-run",
     segment: "context-runs/:context_run_id",
     label: "Context Inspector",
     group: "none",
-    blurb: "What Synveda supplied, why it was selected, and the evidence behind it.",
+    blurb:
+      "What Synveda supplied, why it was selected, and the evidence behind it.",
   },
   {
     id: "knowledge",
@@ -153,56 +156,62 @@ export const ROUTES: readonly RouteDef[] = [
     segment: "knowledge/:knowledge_id",
     label: "Knowledge item",
     group: "none",
-    blurb: "Current content, immutable history, provenance, usage and governed changes.",
+    blurb: "Read this item, see where it came from, and review its history.",
   },
   {
     id: "learnings",
     segment: "learnings",
     label: "New Learnings",
     group: "work",
-    blurb: "What your sessions produced and nobody has stood behind yet.",
+    blurb:
+      "Review suggestions from agent sessions before adding them to Knowledge.",
   },
   {
     id: "context",
     segment: "context",
     label: "Context",
     group: "work",
-    blurb: "Request governed context and inspect what was selected and why.",
+    blurb:
+      "See what information an agent can use for a task, and why it was selected.",
   },
   {
     id: "okf",
     segment: "okf",
     label: "Import / Export",
     group: "administration",
-    blurb: "Validate, review and exchange project Knowledge as pinned OKF v0.2.",
+    blurb: "Move project Knowledge in and out of Synveda using OKF v0.2 files.",
   },
   {
     id: "skills",
     segment: "skills",
     label: "Skills",
     group: "work",
-    blurb: "Immutable Skills, exact bindings, tests and activation evidence.",
+    blurb:
+      "Manage reusable instructions and choose which versions your agents can use.",
   },
   {
     id: "skill-item",
     segment: "skills/:skill_id",
     label: "Skill",
     group: "none",
-    blurb: "Versions, files, provenance, bindings, tests and usage for one Skill.",
+    blurb:
+      "Versions, files, provenance, bindings, tests and usage for one Skill.",
   },
   {
     id: "tools",
     segment: "tools",
     label: "Tools",
     group: "administration",
-    blurb: "Trusted MCP servers, immutable versions and exact project bindings.",
+    blurb:
+      "Review MCP servers and make approved tools available to your projects.",
   },
   {
     id: "tool-server",
     segment: "tools/:server_id",
     label: "MCP server",
     group: "none",
-    blurb: "Discovery evidence, trust, comparisons, tests and bindings for one MCP server.",
+    blurb:
+      "Discovery evidence, trust, comparisons, tests and bindings for one MCP server.",
   },
   {
     id: "people",
@@ -224,7 +233,7 @@ export const ROUTES: readonly RouteDef[] = [
     label: "Reviews",
     group: "advanced",
     capability: "proposal.read",
-    blurb: "The proposals waiting on a verdict.",
+    blurb: "Review proposed changes and check what still needs approval.",
   },
   {
     id: "review",
@@ -249,7 +258,8 @@ export const ROUTES: readonly RouteDef[] = [
     label: "Configuration",
     group: "advanced",
     capability: "configuration.read",
-    blurb: "Versioned runtime profiles, exact scope bindings and immutable history.",
+    blurb:
+      "Manage Capture and Context settings and review their change history.",
   },
   {
     id: "audit",
@@ -272,7 +282,7 @@ export const ROUTES: readonly RouteDef[] = [
     segment: "welcome",
     label: "Getting started",
     group: "none",
-    blurb: "From nothing to an agent that can reach this deployment.",
+    blurb: "Set up a project and connect your agent client.",
   },
 ] as const;
 
@@ -283,6 +293,26 @@ export function routeOf(id: RouteId): RouteDef {
     throw new Error(`no route definition for ${id}`);
   }
   return found;
+}
+
+/** Detail pages keep their containing section selected in navigation. */
+export function navigationRoute(id: RouteId | null): RouteId | null {
+  switch (id) {
+    case "session":
+      return "sessions";
+    case "knowledge-item":
+      return "knowledge";
+    case "context-run":
+      return "context";
+    case "skill-item":
+      return "skills";
+    case "tool-server":
+      return "tools";
+    case "review":
+      return "reviews";
+    default:
+      return id;
+  }
 }
 
 /**
@@ -305,7 +335,10 @@ export interface RouteMatch {
  * `:session_id` into the DOM: a link that looks right and 404s on click is
  * worse than a loud failure in the one place that builds it.
  */
-export function hrefOf(id: RouteId, params: Record<string, string> = {}): string {
+export function hrefOf(
+  id: RouteId,
+  params: Record<string, string> = {},
+): string {
   const segment = routeOf(id).segment;
   if (segment.length === 0) {
     return `${BASE}/`;
@@ -342,7 +375,10 @@ export function matchRoute(pathname: string): RouteMatch | null {
   }
   // Everything between the prefix and any trailing slash, normalised, so
   // `/console`, `/console/` and `/console/people/` all behave.
-  const rest = pathname.slice(BASE.length).replace(/^\/+/, "").replace(/\/+$/, "");
+  const rest = pathname
+    .slice(BASE.length)
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
   const parts = rest.length === 0 ? [] : rest.split("/");
   for (const route of ROUTES) {
     const pattern = route.segment.length === 0 ? [] : route.segment.split("/");
@@ -373,7 +409,10 @@ export function matchRoute(pathname: string): RouteMatch | null {
 }
 
 /** Whether a caller's forecast offers a route. See the forecast note above. */
-export function offersRoute(route: RouteDef, actions: Record<string, boolean>): boolean {
+export function offersRoute(
+  route: RouteDef,
+  actions: Record<string, boolean>,
+): boolean {
   return route.capability === undefined || actions[route.capability] === true;
 }
 
@@ -389,5 +428,7 @@ export function administrationNav(): RouteDef[] {
 
 /** The advanced menu — only the planes this caller is forecast to read. */
 export function advancedNav(actions: Record<string, boolean>): RouteDef[] {
-  return ROUTES.filter((route) => route.group === "advanced" && offersRoute(route, actions));
+  return ROUTES.filter(
+    (route) => route.group === "advanced" && offersRoute(route, actions),
+  );
 }

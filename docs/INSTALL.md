@@ -40,14 +40,14 @@ trusted-host boundary are documented separately in
 
 ### Packaged reference
 
-The packaged reference is a genuinely different workflow: it installs an
-immutable release archive and invokes that archive's pinned HTTPS-only
-launcher. Its implemented layout and present verification boundary are
-described under [Install a release artifact](#install-a-release-artifact).
-There is no currently verified public install command because no tagged
-candidate has completed a registry-backed installation. Existing tags predate
-this CPR-45 reference contract and are not an installation path for the current
-schema epoch.
+For a server without build tools, follow the
+[prebuilt Docker guide](../deploy/compose/PREBUILT.md). It downloads only the
+reference archive and uses its pinned HTTPS-only launcher. Native CLI and
+client-plugin installation is separate; see
+[Install a release artifact](#install-a-release-artifact).
+The latest public v0.2.0 predates this contract. A new tagged release must
+publish the current archive and pass both native image-verification jobs
+before these instructions have a compatible public artifact to download.
 
 The remaining sections describe product use after a gateway has been started
 through either workflow. They are not deployment instructions or evidence that
@@ -966,11 +966,12 @@ byte-for-byte. No shell removal command deletes editor or AI-client state.
 ## Install a release artifact
 
 The release workflow produces native binaries, the console, a client archive
-containing the Claude marketplace and Codex runtime, the Helm chart and
+containing the Claude marketplace and Codex/Copilot runtimes, the Helm chart and
 `synveda-reference-<version>.tar.gz`. The reference archive
 contains the HTTPS-only canonical Compose runtime and `environment.json`, which
 binds its source SHA and image digests. No tagged candidate has yet completed a
-registry-backed install, so there is no current public installation command.
+registry-backed install. The [prebuilt guide](../deploy/compose/PREBUILT.md)
+documents the server-only path for the next compatible release.
 Existing tags predate this reference contract. Do not combine one of them with
 the mutable `main` branch installer or pipe that installer into a shell. When a
 candidate is published, use the tag-bound installer and artifacts named by that
@@ -1036,7 +1037,13 @@ idempotent reinstall with preserved state and pre-mutation refusal of the
 retired profile footprint. `make db-test` proves exact
 database bootstrap, preflight, migration, forced RLS and authority drift
 behavior against fresh PostgreSQL fixtures. These checks do not build an image
-or prove artifact publication or pulls. The implemented
+or prove artifact publication or pulls. Tagged release CI additionally uses
+fresh native AMD64 and ARM64 runners to pull the manifest-bound images
+anonymously and run isolated executable/asset checks before announcing the
+release. Its `release-images-*.json` reports identify the images, platform
+descriptors, source commit and check scope. A workflow dispatch has synthetic
+digests and does not run that registry check. These checks are not a deployment
+startup, login or recovery drill. The implemented
 `make compose-acceptance` command requires a supported live Docker host; its
 deterministic tests are not a browser-login or clean-lifecycle claim.
 Logical backup/restore, the bounded local metrics profile and the experimental

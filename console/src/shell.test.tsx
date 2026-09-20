@@ -16,7 +16,13 @@ import { test } from "node:test";
 
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { NotFound, NotOffered, PageHeading, Shell, appContext } from "./Shell.js";
+import {
+  NotFound,
+  NotOffered,
+  PageHeading,
+  Shell,
+  appContext,
+} from "./Shell.js";
 import { reconcile } from "./selection.mjs";
 import { toText } from "./text.mjs";
 import type { MeView, ProjectView, WorkspaceView } from "./generated/api.js";
@@ -50,7 +56,11 @@ function project(id: string, workspaceId: string, slug: string): ProjectView {
 
 function me(actions: Record<string, boolean>): MeView {
   return {
-    principal: { subject: "robin@example.test", display_name: "Robin", quarantined: false },
+    principal: {
+      subject: "robin@example.test",
+      display_name: "Robin",
+      quarantined: false,
+    },
     tenant: { id: "t", slug: "acme", name: "ACME", status: "active" },
     onboarding: { state: "ready", workspace_count: 1, project_count: 1 },
     workspaces: [workspace("w-1", "payments")],
@@ -95,7 +105,10 @@ test("everybody gets the same product navigation, whatever they hold", () => {
       "People",
       "Settings",
     ]) {
-      assert.ok(rendered.includes(label), `${label} is missing:\n\n${rendered}`);
+      assert.ok(
+        rendered.includes(label),
+        `${label} is missing:\n\n${rendered}`,
+      );
     }
     assert.ok(rendered.includes("Administration"));
   }
@@ -103,9 +116,21 @@ test("everybody gets the same product navigation, whatever they hold", () => {
 
 test("a caller with no governance capability is shown no Advanced section at all", () => {
   const rendered = shell({});
-  assert.ok(!rendered.includes("Advanced"), `an empty Advanced heading was rendered:\n\n${rendered}`);
-  for (const label of ["Reviews", "Scopes", "Configuration", "Audit", "Service identities"]) {
-    assert.ok(!rendered.includes(label), `${label} was offered to a caller with nothing`);
+  assert.ok(
+    !rendered.includes("Advanced"),
+    `an empty Advanced heading was rendered:\n\n${rendered}`,
+  );
+  for (const label of [
+    "Reviews",
+    "Scopes",
+    "Configuration",
+    "Audit",
+    "Service identities",
+  ]) {
+    assert.ok(
+      !rendered.includes(label),
+      `${label} was offered to a caller with nothing`,
+    );
   }
 });
 
@@ -114,7 +139,10 @@ test("the Advanced section carries exactly the planes the forecast offers", () =
   assert.ok(rendered.includes("Advanced"));
   assert.ok(rendered.includes("Reviews"));
   assert.ok(rendered.includes("Configuration"));
-  assert.ok(!rendered.includes("Audit"), `Audit was offered without audit.read:\n\n${rendered}`);
+  assert.ok(
+    !rendered.includes("Audit"),
+    `Audit was offered without audit.read:\n\n${rendered}`,
+  );
   assert.ok(!rendered.includes("Service identities"));
 });
 
@@ -152,8 +180,47 @@ test("a guarded page reached anyway explains the role rather than redirecting", 
   const rendered = toText(renderToStaticMarkup(<NotOffered route="audit" />));
   assert.ok(rendered.includes("audit.read"), rendered);
   assert.ok(rendered.includes("policy decision point"), rendered);
-  assert.ok(rendered.includes("signing in again will not change the answer".toLowerCase()) ||
-    rendered.includes("signing in again will not change the answer"), rendered);
+  assert.ok(
+    rendered.includes("Signing in again will not change your permissions"),
+    rendered,
+  );
+});
+
+test("detail navigation identifies its parent on the link itself and offers a keyboard bypass", () => {
+  const view = me({ "proposal.read": true });
+  const context = appContext(
+    view,
+    reconcile({ workspaceId: null, projectId: null }, view),
+    () => {},
+  );
+  const cases = [
+    ["session", "/console/sessions"],
+    ["knowledge-item", "/console/knowledge"],
+    ["context-run", "/console/context"],
+    ["skill-item", "/console/skills"],
+    ["tool-server", "/console/tools"],
+    ["review", "/console/advanced/reviews"],
+  ] as const;
+  for (const [route, href] of cases) {
+    const html = renderToStaticMarkup(
+      <Shell route={route} context={context}>
+        <p>Content</p>
+      </Shell>,
+    );
+    assert.ok(
+      html.includes(
+        `href="${href}" class="nav-link selected" aria-current="page"`,
+      ),
+      html,
+    );
+    assert.equal((html.match(/aria-current="page"/g) ?? []).length, 1);
+    assert.match(html, /href="#main-content"/);
+    assert.match(html, /<main id="main-content"[^>]*tabindex="-1"/);
+    assert.match(
+      html,
+      /aria-expanded="false" aria-controls="product-navigation"/,
+    );
+  }
 });
 
 test("an address this console does not have is a page, not a silent Home", () => {

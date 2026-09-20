@@ -1,4 +1,6 @@
 import { GENERATED_AGENT_CLIENTS } from "./generated/adapter-clients.js";
+import type { MeView } from "./generated/api.js";
+import type { Selection } from "./selection.mjs";
 
 /**
  * First-run onboarding: the model behind the wizard (CPR-8, ADR-0075
@@ -50,6 +52,17 @@ export const STEPS = [
 
 export type Step = (typeof STEPS)[number];
 
+/** Reconnecting a selected project must not create another workspace. */
+export function initialStep(
+  state: MeView["onboarding"]["state"],
+  selection: Selection,
+): Step {
+  if (state === "ready" && selection.projectId) return "client";
+  if (state === "needs_project" || (state === "ready" && selection.workspaceId))
+    return "project";
+  return "workspace";
+}
+
 /** The step after this one. `done` is terminal. */
 export function nextStep(step: Step): Step {
   const index = STEPS.indexOf(step);
@@ -88,16 +101,14 @@ export function seedPlan(shape: Shape): SeedPlan {
         template: "personal",
         invitesMembers: false,
         summary:
-          "Your own workspace. Everything you capture is available to you immediately, " +
-          "with no review step in the way.",
+          "Start with settings for individual work. You can invite others later.",
       };
     case "team":
       return {
         template: "team",
         invitesMembers: true,
         summary:
-          "A shared workspace. What gets published is reviewed first, and you can invite " +
-          "people and manage them under People.",
+          "Start with settings for shared work, then invite your team from People.",
       };
   }
 }
@@ -144,7 +155,12 @@ export interface AgentClient {
   /** How it is connected: the plugin, or an MCP server entry. */
   via: "plugin" | "mcp";
   /** Evidence level from the product adapter registry. */
-  supportLevel: "configured" | "captured" | "verified" | "experimental" | "unsupported";
+  supportLevel:
+    | "configured"
+    | "captured"
+    | "verified"
+    | "experimental"
+    | "unsupported";
   /** What to say about which surface it gets. */
   note: string;
 }
@@ -172,7 +188,10 @@ export const CLIENTS: readonly AgentClient[] = [
 ] as const;
 
 export function clientOf(id: string): AgentClient {
-  return CLIENTS.find((client) => client.id === id) ?? (CLIENTS[CLIENTS.length - 1] as AgentClient);
+  return (
+    CLIENTS.find((client) => client.id === id) ??
+    (CLIENTS[CLIENTS.length - 1] as AgentClient)
+  );
 }
 
 /**

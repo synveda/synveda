@@ -22,10 +22,17 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { SIGN_IN_URL, type Outcome } from "./api.mjs";
+import { Brand } from "./Brand.js";
 import { request } from "./client.mjs";
 import { Failure, Loading, useQuery, useRefresh } from "./Query.js";
 import { navigate, useHistoryEvents, useRoute } from "./Router.js";
-import { AppProvider, NotFound, NotOffered, Shell, appContext } from "./Shell.js";
+import {
+  AppProvider,
+  NotFound,
+  NotOffered,
+  Shell,
+  appContext,
+} from "./Shell.js";
 import {
   readStored,
   reconcile,
@@ -120,7 +127,9 @@ export function App() {
  * line of it.
  */
 function SignedIn({ me, route }: { me: MeView; route: RouteMatch | null }) {
-  const [preference, setPreference] = useState<Selection>(() => readStored(selectionStore()));
+  const [preference, setPreference] = useState<Selection>(() =>
+    readStored(selectionStore()),
+  );
   const selection = reconcile(preference, me);
 
   const choose = useCallback((next: Selection) => {
@@ -144,7 +153,12 @@ function SignedIn({ me, route }: { me: MeView; route: RouteMatch | null }) {
     // The primitive ids rather than the objects: `reconcile` returns a fresh
     // object every render, so depending on it would re-run this on every
     // render for no reason.
-  }, [selection.workspaceId, selection.projectId, preference.workspaceId, preference.projectId]);
+  }, [
+    selection.workspaceId,
+    selection.projectId,
+    preference.workspaceId,
+    preference.projectId,
+  ]);
 
   const context = appContext(me, selection, choose);
 
@@ -157,7 +171,8 @@ function SignedIn({ me, route }: { me: MeView; route: RouteMatch | null }) {
   // because navigating is a side effect and a render that performs one runs
   // twice under StrictMode.
   const needsOnboarding =
-    me.onboarding.state === "needs_workspace" || me.onboarding.state === "needs_project";
+    me.onboarding.state === "needs_workspace" ||
+    me.onboarding.state === "needs_project";
   useEffect(() => {
     if (needsOnboarding && route?.id !== "welcome") {
       navigate(hrefOf("welcome"), { replace: true });
@@ -166,7 +181,11 @@ function SignedIn({ me, route }: { me: MeView; route: RouteMatch | null }) {
 
   return (
     <AppProvider value={context}>
-      <Shell route={route?.id ?? null} context={context}>
+      <Shell
+        route={route?.id ?? null}
+        pageKey={route ? hrefOf(route.id, route.params) : null}
+        context={context}
+      >
         <Page route={route} me={me} />
       </Shell>
     </AppProvider>
@@ -214,11 +233,17 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
     case "context":
       return <Context />;
     case "context-run":
-      return <ContextInspector contextRunId={route.params.context_run_id as string} />;
+      return (
+        <ContextInspector
+          contextRunId={route.params.context_run_id as string}
+        />
+      );
     case "knowledge":
       return <Knowledge />;
     case "knowledge-item":
-      return <KnowledgeItem knowledgeId={route.params.knowledge_id as string} />;
+      return (
+        <KnowledgeItem knowledgeId={route.params.knowledge_id as string} />
+      );
     case "learnings":
       return <Learnings />;
     case "okf":
@@ -244,18 +269,23 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
 
 function SignIn({ error }: { error: string | null }) {
   return (
-    <main className="centred">
-      <h1>Synveda</h1>
+    <main className="centred sign-in">
+      <Brand />
       {error ? <Banner>Sign-in failed: {error}</Banner> : null}
       <section>
-        <h2>Sign in</h2>
+        <p className="eyebrow">Your agent workspace</p>
+        <h1>Welcome to Synveda</h1>
         <p className="muted">
-          You will be sent to your identity provider and back. The console keeps no token in your
-          browser.
+          Sign in to find shared knowledge, review new learnings and manage the
+          context your agents use.
         </p>
-        <a className="button" href={SIGN_IN_URL}>
+        <a className="button primary" href={SIGN_IN_URL}>
           Sign in
         </a>
+        <p className="sign-in-note muted">
+          Continue with the sign-in provider configured for this Synveda
+          installation.
+        </p>
       </section>
     </main>
   );

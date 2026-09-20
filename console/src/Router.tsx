@@ -41,7 +41,10 @@ function subscribe(listener: Listener): () => void {
  * navigate from an event handler — after a creation, say — without holding
  * a router object it otherwise has no use for.
  */
-export function navigate(href: string, options: { replace?: boolean } = {}): void {
+export function navigate(
+  href: string,
+  options: { replace?: boolean } = {},
+): void {
   if (window.location.pathname + window.location.search === href) {
     return;
   }
@@ -104,11 +107,13 @@ export function Link({
   className,
   children,
   onNavigate,
+  "aria-current": ariaCurrent,
 }: {
   href: string;
   className?: string;
   children: React.ReactNode;
   onNavigate?: () => void;
+  "aria-current"?: "page";
 }) {
   const onClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -129,7 +134,12 @@ export function Link({
     [href, onNavigate],
   );
   return (
-    <a href={href} className={className} onClick={onClick}>
+    <a
+      href={href}
+      className={className}
+      onClick={onClick}
+      aria-current={ariaCurrent}
+    >
       {children}
     </a>
   );

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title"><title id="title">Synveda layered S in monochrome</title>
+    <path id="upper-layer" fill="#0B1F3B" d="M21 55 110 11Q128 2 145 11L244 59Q252 63 244 67L166 106 140 94Q128 88 117 94L51 126 21 112Q8 106 8 94V76Q8 62 21 55Z"/>
+    <path id="middle-layer" fill="#0B1F3B" d="m55 130 64-32q9-5 19 0l67 30v28l-56 24q-9 4-18-1Z"/>
+    <path id="return-layer" fill="#0B1F3B" d="m205 128 28 13q15 7 15 22v13q0 14-13 20l-17 9q-8 4-16 0l-53-25 56-24Z"/>
+    <path id="lower-layer" fill="#0B1F3B" d="M49 149 201 217Q207 220 201 224L145 251Q128 259 111 251L22 208Q8 201 8 187T22 165L39 151Q44 148 49 149Z"/>
+  </svg>

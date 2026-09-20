@@ -123,6 +123,12 @@ for asset in \
   copy_runtime_asset "$asset"
 done
 
+# The server-only guide travels with the archive; its further reading stays
+# bound to the same source revision instead of the moving default branch.
+sed "s|https://github.com/synveda/synveda/blob/main/|https://github.com/synveda/synveda/blob/$source_sha/|g" \
+  deploy/compose/PREBUILT.md > "$stage/INSTALL.md"
+cp LICENSE NOTICE "$stage/"
+
 product_image="ghcr.io/synveda/product@$product_digest"
 postgres_image="ghcr.io/synveda/postgres@$postgres_digest"
 keycloak_image="ghcr.io/synveda/keycloak@$keycloak_digest"
@@ -245,6 +251,12 @@ export SYNVEDA_COMPOSE_RUNTIME SYNVEDA_PUBLIC_SCHEME SYNVEDA_PRODUCT_IMAGE \
   SYNVEDA_SECRETS_DIR SYNVEDA_OIDC_ISSUERS_FILE \
   SYNVEDA_DATABASE_AUTHORITY_DIR SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR \
   SYNVEDA_DATABASE_BACKUP_ROOT SYNVEDA_RECOVERY_SECRETS_ROOT
+case "\${1:-}" in
+  secrets|issuer)
+    [ "\$#" -eq 1 ] || { echo "usage: synveda-compose {secrets|issuer}" >&2; exit 64; }
+    exec "\$bundle_dir/deploy/compose/scripts/generate-\$1.sh" --if-missing
+    ;;
+esac
 exec "\$bundle_dir/deploy/compose/scripts/compose.sh" "\$@"
 EOF
 chmod 755 "$stage/synveda-compose"
@@ -258,19 +270,15 @@ alone is not clean-host, published-image, identity, recovery or upgrade
 evidence. Those validations remain pending. It is not highly available,
 host-loss tolerant, production SaaS or an enterprise certification.
 
-Install it with the tag-bound \`scripts/install.sh\` named by this release,
-configure real DNS and TLS, then run:
+Read [INSTALL.md](INSTALL.md) for the server-only download, checksum, DNS,
+TLS and sign-in steps. No source checkout, Rust toolchain or image build is
+needed. The optional native client installer is a separate path.
 
-    export SYNVEDA_APP_HOST=app.example.com
-    export SYNVEDA_AUTH_HOST=auth.example.com
-    ./synveda-compose up
-    ./synveda-compose smoke
-
-Only ports 80/443 are public. PostgreSQL, Keycloak management, OTLP and
-operator services remain private. Mutable keys and configuration live under
-the install root's \`state/\` directory and backups under \`backups/\`, outside
-immutable releases. See \`docs/INSTALL.md\` at source commit $source_sha for the
-external dependency, reset, backup and recovery contracts.
+The launcher pulls the exact image set in \`environment.json\`. Only proxy
+ports 80/443 are public. Mutable keys and configuration live under the install
+root's \`state/\` directory and backups under \`backups/\`, outside immutable
+releases. Published releases include separate per-platform image-pull reports;
+those are executable/asset checks, not a full deployment acceptance result.
 EOF
 
 if find "$stage" -type f \( -name '.env' -o -iname '*rauthy*' -o \

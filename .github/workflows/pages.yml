@@ -1,0 +1,67 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Check every PR, including shared assets/lockfiles/docs, without filtering out
+# a required check. Deployments serialize; newer PR checks may replace old ones.
+concurrency:
+  group: pages-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @synveda/website
+      - name: Read configured Pages URL
+        id: pages
+        if: github.repository == 'synveda/synveda' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+        # Enabling Pages is a manual owner action; do not enable it via API.
+        with:
+          enablement: false
+      - name: Check brand exports and build the project site
+        run: pnpm --filter @synveda/website check
+        env:
+          SITE_URL: ${{ steps.pages.outputs.base_url || 'https://synveda.github.io/synveda/' }}
+      - name: Check documentation and feature records
+        run: make check-docs check-backlog check-adr-status
+      - name: Upload public site only
+        if: github.repository == 'synveda/synveda' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: website/dist
+
+  deploy:
+    if: github.repository == 'synveda/synveda' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

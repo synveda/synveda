@@ -36,6 +36,8 @@ COPY adapters/claude-code/package.json adapters/claude-code/
 RUN pnpm install --frozen-lockfile --filter @synveda/console...
 COPY tsconfig.base.json ./
 COPY console console
+COPY assets/brand/synveda-lockup.svg assets/brand/synveda-lockup-dark.svg assets/brand/favicon.svg assets/brand/
+COPY assets/brand/fonts/InterVariable.woff2 assets/brand/fonts/OFL.txt assets/brand/fonts/
 RUN pnpm --filter @synveda/console build
 
 FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS build

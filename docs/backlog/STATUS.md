@@ -1,11 +1,48 @@
 # Feature inventory
 
-144 features in this index. This file is authoritative for feature identity,
+146 features in this index. This file is authoritative for feature identity,
 phase and delivered/open state. Delivered names identify historical slices;
 current contracts live in code, generated artefacts and accepted ADRs, while git
 retains their implementation evidence. Open entries link to current briefs.
 
-112 delivered; 32 open. The inventory and open-brief shape are checked in CI.
+114 delivered; 32 open. The inventory and open-brief shape are checked in CI.
+
+OPS-8/CPR-45 extends prebuilt distribution under
+[ADR-0115](../adr/adr-0115-prebuilt-container-release-verification.md): native
+AMD64/ARM64 anonymous image pulls, source/version/platform checks and isolated
+executable checks gate the GitHub Release announcement. The existing archive
+now carries a server-only guide, licence/notice and safe preparation commands.
+No backend runtime or running deployment changes. The latest public v0.2.0
+still predates the current archive; publication and live reference acceptance
+remain open. [Release operations](../RELEASING.md) records the package-access,
+visibility and new-version steps; measured local validation is in
+[CPR-45](CPR-45.md#prebuilt-container-release-increment-2026-09-20).
+The full deployment gate passed 359 tests without skips; the current product
+image build, eight local ARM64 executable/asset checks, extracted-archive
+configuration render, focused Linux Node 22 tests and workflow/docs lint passed.
+
+CNSL-5 aligns the console with the approved brand and simplifies Home,
+navigation, connection onboarding and the root README under
+[ADR-0114](../adr/adr-0114-console-brand-and-navigation.md). All 256 console
+tests pass. The production bundle is byte-identical on macOS/Node 24 and Linux
+arm64/Node 22, including the Docker console stage. Chromium checks cover
+320/390/768/1440 px, both themes, keyboard navigation, skip links, detail-page
+selection, blocked/sign-in/first-run states and reconnecting the selected project.
+The 38 audited states have no detected WCAG 2 A/AA or 2.1 AA violations; they
+use synthetic public-API responses, not a live deployment or user study.
+Website, documentation, adapter, dependency, licence and deployment-contract
+checks pass. The loopback-dependent convergence suite needed a rerun outside
+the filesystem/network sandbox; the other deployment suites had passed.
+No backend acceptance rerun, application redeployment or GitHub push is claimed.
+
+FND-7 delivers the approved public website, developer README and canonical
+brand assets under [ADR-0113](../adr/adr-0113-static-public-site-and-brand.md).
+The isolated static build, reproducible exports on macOS/Node 24 and Linux
+arm64/Node 22, browser/keyboard checks at 320–1440 px, accessibility audit,
+licence and documentation gates pass. The existing Compose demo passes smoke;
+no fresh installation or backend acceptance rerun is claimed. Pages is not yet
+enabled; publication and account image uploads remain manual owner actions in
+the [maintenance guide](../../website/README.md).
 
 [OPS-11](OPS-11.md) records the next small-team Kubernetes milestone under
 ADR-0109. The [deployment audit](../../deploy/README.md#small-team-kubernetes-release-contract)
@@ -183,6 +220,7 @@ the next PR/main runs must compare cold and warm Kind timings with the
 - [x] FND-4: Migrations & bitemporal base tables — delivered 2026-07-18
 - [x] FND-5: Observability baseline — delivered 2026-07-18
 - [x] FND-6: ADRs 0001–0004 — delivered 2026-07-18
+- [x] FND-7: Public website and canonical brand assets — delivered 2026-09-20; ADR-0113
 
 ## Phase 1 — The spine (wk 2–5)
 
@@ -282,6 +320,7 @@ the next PR/main runs must compare cold and warm Kind timings with the
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered 2026-08-24; ADR-0082
+- [x] CNSL-5: Console theme and everyday usability — delivered 2026-09-20; ADR-0114
 - [ ] [AUD-5: Compliance mapping doc](AUD-5.md) — open
 - [ ] [AUTHZ-6: Authorisation scale decision](AUTHZ-6.md) — open
 - [ ] [AUTHZ-7: Governed admin-plane mutation](AUTHZ-7.md) — open

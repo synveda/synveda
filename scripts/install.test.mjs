@@ -141,6 +141,13 @@ test("installer converges the canonical reference and preserves mutable state", 
   );
   const current = join(fixture.home, "reference/current");
   assert.equal(readFileSync(join(current, "version"), "utf8"), `${version}\n`);
+  const guide = readFileSync(join(current, "INSTALL.md"), "utf8");
+  assert.match(guide, /synveda-compose secrets/);
+  assert.ok(guide.includes(`/blob/${sourceSha}/docs/PRODUCTION_READINESS.md`));
+  assert.doesNotMatch(guide, /\/blob\/main\//);
+  for (const document of ["LICENSE", "NOTICE"]) {
+    assert.equal(readFileSync(join(current, document), "utf8"), readFileSync(join(root, document), "utf8"));
+  }
   assert.match(
     readFileSync(join(current, "environment.json"), "utf8"),
     /ghcr\.io\/synveda\/product@sha256:2{64}/,
@@ -263,6 +270,50 @@ test("installer refuses a symlinked explicit binary directory before mutation", 
   assert.match(result.stderr, /SYNVEDA_BIN is not a real directory/);
   assert.equal(existsSync(fixture.home), false);
   assert.equal(existsSync(join(linkTarget, "synveda")), false);
+});
+
+test("server-only archive prepares private inputs without native binaries and preserves keys on repeat", (t) => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-server-only-")));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const assets = buildAssets(scratch);
+  const extracted = join(scratch, "extracted");
+  mkdirSync(extracted);
+  execFileSync("tar", ["-xzf", join(assets, `synveda-reference-${version}.tar.gz`), "-C", extracted]);
+  const bundle = join(extracted, `synveda-reference-${version}`);
+  const project = `synveda-reference-acceptance-prebuilt-${process.pid}`;
+  const installRoot = join(scratch, "server");
+  const state = join(installRoot, "state", project);
+  mkdirSync(state, { recursive: true, mode: 0o700 });
+  const env = {
+    ...process.env,
+    SYNVEDA_HOME: installRoot,
+    SYNVEDA_APP_HOST: "app.example.com",
+    SYNVEDA_AUTH_HOST: "auth.example.com",
+    SYNVEDA_COMPOSE_PROJECT_SUFFIX: `acceptance-prebuilt-${process.pid}`,
+  };
+  const launch = (args, extra = {}) => spawnSync("sh", [join(bundle, "synveda-compose"), ...args], {
+    cwd: scratch, env: { ...env, ...extra }, encoding: "utf8",
+  });
+  for (const action of ["secrets", "issuer"]) {
+    const result = launch([action]);
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const keyPath = join(state, "secrets/synveda_kms_key");
+  const hash = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+  const before = [hash(keyPath), hash(join(state, "issuers.json"))];
+  for (const action of ["secrets", "issuer"]) {
+    const result = launch([action]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(launch([action, "--force"]).status, 64);
+  }
+  assert.deepEqual([hash(keyPath), hash(join(state, "issuers.json"))], before);
+  assert.equal(statSync(keyPath).mode & 0o777, 0o600);
+  assert.equal(statSync(join(state, "secrets")).mode & 0o777, 0o700);
+  assert.match(readFileSync(join(state, "issuers.json"), "utf8"), /https:\/\/auth.example.com\/realms\/synveda/);
+  assert.equal(existsSync(join(bundle, "deploy/compose/runtime")), false);
+  assert.equal(existsSync(join(installRoot, "bin")), false);
+  assert.equal(launch(["secrets"], { SYNVEDA_POSTGRES_MODE: "external" }).status, 69);
+  assert.equal(launch(["issuer"], { SYNVEDA_OIDC_MODE: "external" }).status, 64);
 });
 
 test("installer refuses a non-directory reference root before mutation", (t) => {

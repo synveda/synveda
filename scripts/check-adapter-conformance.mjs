@@ -142,14 +142,12 @@ export function readmeSupportStatement(registry) {
 export function renderReadmeSupportSection(registry) {
   return `## Client support
 
-\`adapters/registry.json\` is the support authority. The
-[generated client-support matrix](docs/CLIENT_SUPPORT.md) is its checked
-projection and distinguishes configuration, authentic captured frames,
-deterministic replay and live verification.
+${readmeSupportStatement(registry)}
 
-${readmeSupportStatement(registry)} Other clients remain at
-their evidenced registry level; a connection recipe or generic MCP
-configuration is not lifecycle support.
+See the [client support matrix](docs/CLIENT_SUPPORT.md) for the tested platforms,
+setup and remaining limits. Other clients have partial checks or setup recipes;
+those do not establish a working end-to-end lifecycle. This summary is checked
+against [the adapter registry](adapters/registry.json).
 
 `;
 }

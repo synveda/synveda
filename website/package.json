@@ -1,0 +1,17 @@
+{
+  "name": "@synveda/website",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node brand.mjs --check && node build.mjs && node check.mjs",
+    "brand": "node brand.mjs",
+    "preview": "node preview.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "1.0.9",
+    "fontkit": "2.0.4"
+  }
+}

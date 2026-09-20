@@ -1,120 +1,163 @@
-/**
- * Home (CPR-8): where you are, what you have, and what to do next.
- *
- * It fetches nothing. Everything on it is already in `/v1/me` — the
- * workspaces, the projects, the onboarding state and the caller's anchors
- * with a real policy decision at each (ADR-0073 decision 8) — and a landing
- * page that re-asked for facts the shell is already holding would be four
- * more round trips before the first pixel, which is exactly what `/v1/me`
- * exists to remove.
- */
-
+/** Home uses only the authorised workspace and access facts already in /v1/me. */
 import { Link } from "./Router.js";
-import { hrefOf } from "./routes.mjs";
+import { NavIcon } from "./NavIcon.js";
+import { hrefOf, type RouteId } from "./routes.mjs";
 import { PageHeading, useApp } from "./Shell.js";
 import { projectsOf } from "./selection.mjs";
+
+const tasks: { route: RouteId; title: string; description: string }[] = [
+  {
+    route: "sessions",
+    title: "Follow your agent sessions",
+    description: "See what ran, what happened and what was captured.",
+  },
+  {
+    route: "learnings",
+    title: "Review new learnings",
+    description: "Check suggestions from sessions and decide what to keep.",
+  },
+  {
+    route: "knowledge",
+    title: "Browse shared knowledge",
+    description:
+      "Find decisions, conventions and procedures your agents can use.",
+  },
+  {
+    route: "context",
+    title: "Try a context request",
+    description: "See which information Synveda selects for a task and why.",
+  },
+];
 
 export function Home() {
   const { me, workspace, project, selection } = useApp();
   const projects = projectsOf(me, selection.workspaceId);
+  const blocked = me.onboarding.state === "blocked";
 
   return (
     <>
       <PageHeading route="home" />
-
-      <section className="cards">
-        <article className="card">
-          <h2>Workspace</h2>
-          {workspace ? (
-            <>
-              <p className="card-value">{workspace.display_name}</p>
-              <p className="muted">
-                {workspace.slug} · {projects.length} project{projects.length === 1 ? "" : "s"} ·{" "}
-                {workspace.status}
-              </p>
-            </>
-          ) : (
-            <p className="muted">Nothing selected.</p>
-          )}
-        </article>
-
-        <article className="card">
-          <h2>Project</h2>
-          {project ? (
-            <>
-              <p className="card-value">{project.display_name}</p>
-              <p className="muted">
-                {project.slug} · revision {project.revision} · {project.status}
-              </p>
-            </>
-          ) : (
-            <p className="muted">
-              No project selected. <Link href={hrefOf("settings")}>Create one</Link>.
-            </p>
-          )}
-        </article>
-
-        <article className="card">
-          <h2>You</h2>
-          <p className="card-value">{me.principal.display_name ?? me.principal.subject}</p>
-          <p className="muted">
-            {me.capabilities.role_keys.length > 0
-              ? `${me.capabilities.role_keys.join(", ")} at the tenant root`
-              : "no role at the tenant root"}
+      {blocked ? (
+        <div className="banner" role="status">
+          <h2>You need access to a workspace</h2>
+          <p>
+            Ask your administrator to invite you. Your workspaces and projects
+            will appear here once you have access.
           </p>
-        </article>
-      </section>
+        </div>
+      ) : (
+        <>
+          <section className="project-overview" aria-label="Current selection">
+            <div>
+              <p className="eyebrow">Workspace</p>
+              <h2>{workspace?.display_name ?? "No workspace selected"}</h2>
+              {workspace ? (
+                <p className="muted">
+                  {projects.length} project{projects.length === 1 ? "" : "s"}{" "}
+                  available to you
+                </p>
+              ) : null}
+            </div>
+            <div>
+              <p className="eyebrow">Project</p>
+              <h2>{project?.display_name ?? "Choose a project"}</h2>
+              <p className="muted">
+                {project
+                  ? "Use the selectors above to switch where you work."
+                  : "Create a project in Settings to organise your agent work."}
+              </p>
+            </div>
+          </section>
 
-      <section>
-        <h2>Where you stand</h2>
-        {/* The anchor list, with the source the gateway gave each one. It is
-            the honest answer to "why can I see this?" and it is a set of
-            real decisions rather than a shape derived from a plan — which
-            is the whole of ADR-0073 decision 8 and worth surfacing rather
-            than hiding behind the switchers. */}
+          <div className="home-columns">
+            <section aria-labelledby="home-tasks">
+              <h2 id="home-tasks">Continue your work</h2>
+              <ul className="task-list">
+                {tasks.map((task) => (
+                  <li key={task.route}>
+                    <Link href={hrefOf(task.route)} className="task-link">
+                      <span className="task-icon">
+                        <NavIcon route={task.route} />
+                      </span>
+                      <span>
+                        <strong>{task.title}</strong>
+                        <span className="muted task-description">
+                          {task.description}
+                        </span>
+                      </span>
+                      <span className="task-arrow" aria-hidden="true">
+                        →
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section className="setup-panel" aria-labelledby="home-setup">
+              <p className="eyebrow">Project setup</p>
+              <h2 id="home-setup">Bring your agent along</h2>
+              <p className="muted">
+                Choose your client and follow the connection instructions for
+                this installation.
+              </p>
+              <Link href={hrefOf("welcome")} className="button primary">
+                Connect an agent
+              </Link>
+              <ul className="setup-links">
+                <li>
+                  <Link href={hrefOf("settings")}>
+                    Manage projects and repositories{" "}
+                    <span aria-hidden="true">→</span>
+                  </Link>
+                </li>
+                <li>
+                  <Link href={hrefOf("people")}>
+                    Invite your team <span aria-hidden="true">→</span>
+                  </Link>
+                </li>
+                <li>
+                  <Link href={hrefOf("skills")}>
+                    Explore reusable skills <span aria-hidden="true">→</span>
+                  </Link>
+                </li>
+              </ul>
+            </section>
+          </div>
+        </>
+      )}
+
+      <details className="access-details">
+        <summary>Your access</summary>
+        <p className="muted">
+          Signed in as{" "}
+          <strong>{me.principal.display_name ?? me.principal.subject}</strong>{" "}
+          in {me.tenant.name}.
+          {me.capabilities.role_keys.length > 0
+            ? ` Tenant roles: ${me.capabilities.role_keys.join(", ")}.`
+            : " You have no tenant-wide role. Workspace and project access is listed below."}
+        </p>
         <ul className="anchors">
           {me.anchors.map((anchor) => (
             <li key={anchor.scope_id}>
+              <strong>{anchor.kind}</strong>{" "}
               <span className={`tag ${anchor.direct ? "direct" : "inherited"}`}>
                 {anchor.source.replace(/_/g, " ")}
               </span>{" "}
-              <strong>{anchor.kind}</strong>{" "}
               <span className="muted">
-                {anchor.roles.length > 0 ? anchor.roles.join(", ") : "no role"} ·{" "}
-                {anchor.direct ? "granted here" : "inherited"}
+                {anchor.roles.length > 0 ? anchor.roles.join(", ") : "no role"}{" "}
+                · {anchor.direct ? "granted here" : "inherited"}
               </span>
             </li>
           ))}
         </ul>
         {me.anchors_not_answered ? (
           <p className="muted">
-            {me.anchors_not_answered} further anchor(s) were not answered — the response bound
-            dropped them rather than truncating silently.
+            Access details for {me.anchors_not_answered} additional scope(s)
+            were not included in this response.
           </p>
         ) : null}
-      </section>
-
-      <section>
-        <h2>Next</h2>
-        <ul className="next">
-          <li>
-            <Link href={hrefOf("learnings")}>Review New Learnings</Link> — decide what your
-            sessions proposed before it can become active Knowledge.
-          </li>
-          <li>
-            <Link href={hrefOf("welcome")}>Connect an agent client</Link> — the commands for
-            Claude Code, Cursor, Claude Desktop or any MCP client.
-          </li>
-          <li>
-            <Link href={hrefOf("people")}>Invite somebody</Link> — a one-time link they redeem
-            with their own credential.
-          </li>
-          <li>
-            <Link href={hrefOf("settings")}>Attach a repository</Link> — what this project is
-            about, by canonical remote rather than by a path on your machine.
-          </li>
-        </ul>
-      </section>
+      </details>
     </>
   );
 }

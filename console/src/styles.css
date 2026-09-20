@@ -1,34 +1,39 @@
-/*
- * Plain CSS, no framework and no external font (ADR-0056 decision 8): the
- * gateway's Content-Security-Policy forbids a third-party fetch outright,
- * so a stylesheet that wanted one would not load in the deployments this
- * product is sold into. System fonts are the ones that are always there.
- */
+/* CNSL-5: local brand assets keep the console usable without external requests. */
+@font-face {
+  font-family: Inter;
+  src: url("../../assets/brand/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
-  --ink: #16181d;
-  --muted: #5d6470;
-  --line: #d9dde4;
-  --bg: #f7f8fa;
+  --ink: #0b1f3b;
+  --muted: #526176;
+  --line: #dce2e8;
+  --bg: #f5f7f8;
   --surface: #ffffff;
-  --surface-subtle: #f0f2f5;
-  --accent: #3157c8;
+  --surface-subtle: #edf3fa;
+  --accent: #2563eb;
+  --teal: #14b8a6;
+  --positive: #086e64;
   --error-bg: #fdf1f0;
-  --error-line: #d98d86;
+  --error-line: #a53c34;
   color-scheme: light dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --ink: #e7e9ee;
-    --muted: #9aa2b1;
-    --line: #333944;
-    --bg: #14161b;
-    --surface: #1a1d23;
-    --surface-subtle: #20242c;
-    --accent: #7fa0ff;
+    --ink: #e8eef7;
+    --muted: #a6b5c9;
+    --line: #30445d;
+    --bg: #091729;
+    --surface: #10223a;
+    --surface-subtle: #172d49;
+    --accent: #94b5ff;
+    --positive: #5dddd0;
     --error-bg: #2a1a19;
-    --error-line: #8a4b45;
+    --error-line: #f0a59e;
   }
 }
 
@@ -40,7 +45,14 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font:
+    15px/1.6 Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -110,7 +122,8 @@ button,
   background: var(--surface);
   color: var(--ink);
   border-radius: 6px;
-  padding: 0.35rem 0.85rem;
+  padding: 0.5rem 0.9rem;
+  min-height: 2.75rem;
   cursor: pointer;
   text-decoration: none;
 }
@@ -131,7 +144,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 summary:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline: 3px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -166,7 +179,7 @@ summary:focus-visible {
 
 .split {
   display: grid;
-  grid-template-columns: minmax(16rem, 22rem) 1fr;
+  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
   gap: 2rem;
   align-items: start;
 }
@@ -228,6 +241,11 @@ ul.queue a.row:hover .row-title {
 
 .row-title {
   font-weight: 600;
+}
+
+.row > .tag {
+  align-self: flex-start;
+  margin-left: 0;
 }
 
 .refusal {
@@ -478,27 +496,55 @@ ul.actions-list {
   font-style: italic;
 }
 
-/*
- * ── The product shell (CPR-8, ADR-0075) ──────────────────────────────────
- *
- * The console stopped being one page and became an application with
- * navigation, so the layout stopped being `main { max-width }` and became a
- * header, a sidebar and an outlet. Plain CSS still — no framework, no
- * external font, and the gateway's `default-src 'none'` policy enforces it
- * rather than trusting it (ADR-0056 decision 8).
- */
+/* The shared shell keeps navigation and project selection separate from page data. */
+a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+button.primary,
+.button.primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+button.primary:hover,
+.button.primary:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+}
 
 .shell {
   min-height: 100vh;
+}
+
+.skip-link {
+  position: fixed;
+  top: -6rem;
+  left: 1rem;
+  z-index: 30;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0.7rem 1rem;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.skip-link:focus {
+  top: 1rem;
 }
 
 .shell-header {
   display: flex;
   align-items: center;
   gap: 1.5rem;
-  flex-wrap: wrap;
+  min-height: 6rem;
   border-bottom: 1px solid var(--line);
-  padding: 0.75rem 1.25rem;
+  margin: 0;
+  padding: 0.85rem 1.5rem;
   background: var(--surface);
   position: sticky;
   top: 0;
@@ -507,25 +553,35 @@ ul.actions-list {
 
 .brand {
   display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 11.5rem;
+  flex-shrink: 0;
 }
 
-.brand-link {
-  color: var(--ink);
-  text-decoration: none;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+.brand-link,
+.brand-artwork {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.brand-artwork img {
+  display: block;
+  width: 157px;
+  height: 36px;
 }
 
 .tenant {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
 .switchers {
   display: flex;
   gap: 1rem;
-  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .identity {
@@ -533,18 +589,30 @@ ul.actions-list {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.identity > span {
+  max-width: 11rem;
+  overflow-wrap: anywhere;
+}
+
+.identity button {
+  white-space: nowrap;
 }
 
 .switcher {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 18rem;
+  flex: 1;
 }
 
 .switcher-label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  font-weight: 500;
   color: var(--muted);
 }
 
@@ -556,38 +624,45 @@ textarea {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 0.3rem 0.5rem;
+  padding: 0.5rem 0.65rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+select,
+input:not([type="checkbox"]):not([type="radio"]) {
+  min-height: 2.75rem;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
 }
 
 .shell-body {
   display: grid;
-  grid-template-columns: 13rem 1fr;
+  grid-template-columns: 14.5rem minmax(0, 1fr);
   align-items: start;
-  gap: 2rem;
-  max-width: 86rem;
-  margin: 0 auto;
-  padding: 1.5rem 1.25rem 4rem;
 }
 
-/* One column on a narrow viewport: the sidebar becomes a strip above the
-   page rather than squeezing the content it exists to reach. */
-@media (max-width: 60rem) {
-  .shell-body {
-    grid-template-columns: 1fr;
-  }
-  .sidebar ul.nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-  }
+.sidebar {
+  position: sticky;
+  top: 6rem;
+  max-height: calc(100vh - 6rem);
+  min-height: calc(100vh - 6rem);
+  overflow-y: auto;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  padding: 1.5rem 1rem;
 }
 
 .nav-heading {
   font-size: 0.7rem;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   color: var(--muted);
-  margin: 1.35rem 0 0.4rem;
+  margin: 1.6rem 0 0.6rem 0.75rem;
 }
 
 ul.nav {
@@ -596,46 +671,81 @@ ul.nav {
   padding: 0;
 }
 
-.nav-link {
-  display: block;
-  padding: 0.38rem 0.6rem;
-  border-radius: 6px;
-  color: var(--ink);
-  text-decoration: none;
-  border-left: 2px solid transparent;
+ul.nav li + li {
+  margin-top: 0.2rem;
 }
 
-.nav-link:hover {
-  border-left-color: var(--line);
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.7rem;
+  min-height: 2.75rem;
+  border-radius: 5px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.nav-link:hover,
+.task-link:hover {
+  color: var(--accent);
+  background: var(--surface-subtle);
 }
 
 .nav-link.selected {
-  border-left-color: var(--accent);
+  background: var(--surface-subtle);
   color: var(--accent);
   font-weight: 600;
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.nav-icon {
+  display: block;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+
+.nav-help {
+  border-top: 1px solid var(--line);
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+}
+
+.menu-toggle {
+  display: none;
 }
 
 .page {
   min-width: 0;
-  max-width: 72rem;
+  max-width: 78rem;
   width: 100%;
+  margin: 0 auto;
+  padding: 2.25rem 2.5rem 4rem;
+  overflow-wrap: anywhere;
+}
+
+.page:focus {
+  outline: none;
 }
 
 .page-heading {
   border: 0;
   padding: 0;
-  margin: 0 0 1.5rem;
+  margin: 0 0 1.8rem;
   display: block;
 }
 
 .page-heading h1 {
-  font-size: 1.65rem;
-  text-transform: none;
-  letter-spacing: 0;
+  font-size: 1.8rem;
+  font-weight: 600;
+  letter-spacing: -0.04em;
 }
 
 .page-heading p {
-  margin: 0.25rem 0 0;
+  margin: 0.5rem 0 0;
+  max-width: 48rem;
 }
 
 .centred {
@@ -644,10 +754,308 @@ ul.nav {
   padding: 0 1.25rem;
 }
 
+.sign-in {
+  padding: 2rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.sign-in .brand-artwork {
+  margin-bottom: 2.5rem;
+}
+
+.sign-in h1 {
+  font-size: 1.8rem;
+  letter-spacing: -0.04em;
+}
+
+.sign-in .eyebrow {
+  color: var(--positive);
+}
+
+.sign-in section {
+  margin-bottom: 0;
+}
+
+.sign-in-note,
+.field-help {
+  font-size: 0.85rem;
+}
+
+.project-overview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  padding: 1.3rem 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--teal);
+  border-radius: 6px;
+}
+
+.project-overview > div + div {
+  border-left: 1px solid var(--line);
+  padding-left: 1.5rem;
+}
+
+.project-overview h2 {
+  font-size: 1.15rem;
+  margin: 0.3rem 0;
+}
+
+.project-overview p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.project-overview .eyebrow {
+  font-size: 0.68rem;
+}
+
+.home-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(16rem, 1fr);
+  gap: 2rem;
+  align-items: start;
+}
+
+ul.task-list,
+ul.setup-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.task-list {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.task-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.task-link {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.task-icon {
+  background: var(--surface-subtle);
+  color: var(--accent);
+  padding: 0.6rem;
+  border-radius: 5px;
+}
+
+.task-description {
+  display: block;
+  font-size: 0.85rem;
+  margin-top: 0.2rem;
+}
+
+.task-arrow {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.setup-panel {
+  padding: 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.setup-panel > .eyebrow {
+  margin-top: 0;
+  color: var(--positive);
+}
+
+ul.setup-links {
+  border-top: 1px solid var(--line);
+  margin-top: 1.5rem;
+  padding-top: 0.5rem;
+}
+
+.setup-links a {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.7rem 0;
+  font-size: 0.85rem;
+}
+
+.access-details {
+  border-top: 1px solid var(--line);
+  padding-top: 1.2rem;
+}
+
+.access-details > summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+progress {
+  display: block;
+  appearance: none;
+  border: 0;
+  border-radius: 4px;
+  width: 100%;
+  height: 4px;
+  background: var(--line);
+  accent-color: var(--positive);
+  margin-top: 1.3rem;
+}
+
+progress::-webkit-progress-bar {
+  background: var(--line);
+  border-radius: 4px;
+}
+progress::-webkit-progress-value {
+  background: var(--positive);
+  border-radius: 4px;
+}
+progress::-moz-progress-bar {
+  background: var(--positive);
+  border-radius: 4px;
+}
+
+@media (max-width: 75rem) {
+  .identity {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.25rem;
+  }
+  .home-columns {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+@media (max-width: 60rem) {
+  .shell-header {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.9rem 1rem;
+    padding: 1rem 1.25rem;
+  }
+  .brand {
+    width: auto;
+  }
+  .menu-toggle {
+    display: block;
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .switchers {
+    grid-column: 1 / -1;
+    gap: 0.75rem;
+  }
+  .switcher {
+    max-width: none;
+  }
+  .identity {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0;
+  }
+  .identity > span {
+    max-width: 70%;
+  }
+  .shell-body {
+    display: block;
+  }
+  .sidebar {
+    display: none;
+    position: static;
+    min-height: 0;
+    max-height: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 1rem;
+  }
+  .sidebar.is-open {
+    display: block;
+  }
+  ul.nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.25rem;
+  }
+  ul.nav li + li {
+    margin-top: 0;
+  }
+  .page {
+    padding: 1.75rem 1.25rem 3rem;
+  }
+  .page-heading h1 {
+    font-size: 1.65rem;
+  }
+  .project-overview {
+    gap: 1rem;
+    padding: 1rem;
+  }
+  .project-overview > div + div {
+    padding-left: 1rem;
+  }
+  .sign-in {
+    margin: 2rem 1rem;
+  }
+}
+
+@media (max-width: 30rem) {
+  .shell-header {
+    padding-inline: 1rem;
+  }
+  .page {
+    padding-inline: 1rem;
+  }
+  .project-overview {
+    grid-template-columns: 1fr;
+  }
+  .project-overview > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 1rem 0 0;
+  }
+  .task-link {
+    padding: 0.85rem;
+    gap: 0.65rem;
+  }
+  .task-icon {
+    padding: 0.4rem;
+  }
+  .task-arrow {
+    display: none;
+  }
+  dl,
+  dl.facts {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+  dd + dt {
+    margin-top: 0.6rem;
+  }
+  .inline-form > label,
+  .filters > label {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
 /* Home's summary cards. */
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
   gap: 1rem;
   margin-bottom: 2rem;
 }
@@ -886,7 +1294,6 @@ ul.sessions li.incomplete {
   color: var(--accent);
 }
 
-
 /* ── The session detail page (CPR-11, ADR-0077) ───────────────────────── */
 
 /* The filter row wraps rather than scrolls: six controls on a narrow screen
@@ -1057,7 +1464,7 @@ button.link {
   gap: 0.5rem;
   flex-wrap: wrap;
   justify-content: flex-end;
-  margin: -2.9rem 0 1rem;
+  margin: 0 0 1rem;
 }
 
 .knowledge-filters {
@@ -1100,6 +1507,9 @@ ul.knowledge-list {
   list-style: none;
   margin: 0;
   padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
 }
 
 ul.knowledge-list li {
@@ -1109,6 +1519,20 @@ ul.knowledge-list li {
 ul.knowledge-list a.row {
   color: inherit;
   text-decoration: none;
+  padding: 1rem;
+  gap: 0.4rem;
+}
+
+ul.knowledge-list a.row p {
+  margin: 0.4rem 0;
+}
+
+ul.knowledge-list li:last-child {
+  border-bottom: 0;
+}
+
+ul.knowledge-list a.row:hover {
+  background: var(--surface-subtle);
 }
 
 ul.knowledge-list a.row:hover strong {
@@ -1253,8 +1677,8 @@ button.danger {
 }
 
 .banner.success {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border-color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 7%, transparent);
 }
 
 .banner.warning {
@@ -1400,7 +1824,7 @@ button.danger {
 
 .comparison-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
   gap: 0.7rem;
 }
 
@@ -1523,7 +1947,12 @@ button.danger {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: color-mix(in srgb, var(--line) 12%, transparent);
-  font: 0.88rem/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font:
+    0.88rem/1.5 ui-monospace,
+    SFMono-Regular,
+    "SF Mono",
+    Menlo,
+    monospace;
 }
 
 .context-selections,
@@ -1697,7 +2126,12 @@ ul.inline-list li {
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: 0.82rem/1.45 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font:
+    0.82rem/1.45 ui-monospace,
+    SFMono-Regular,
+    "SF Mono",
+    Menlo,
+    monospace;
 }
 
 .skill-binding-card {

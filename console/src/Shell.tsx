@@ -19,15 +19,25 @@
  * into a page's data would be a second place a page's state lives.
  */
 
-import { createContext, useCallback, useContext } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { signOut } from "./api.mjs";
+import { Brand } from "./Brand.js";
+import { NavIcon } from "./NavIcon.js";
 import { invalidate } from "./Query.js";
 import { Link } from "./Router.js";
 import {
   administrationNav,
   advancedNav,
   hrefOf,
+  navigationRoute,
   routeOf,
   workNav,
   type RouteDef,
@@ -101,13 +111,45 @@ export function appContext(
 
 export function Shell({
   route,
+  pageKey = route,
   context,
   children,
 }: {
   route: RouteId | null;
+  pageKey?: string | null;
   context: AppContextValue;
   children: React.ReactNode;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const main = useRef<HTMLElement>(null);
+  const previousPage = useRef(pageKey);
+
+  useEffect(() => {
+    document.title = `${route ? routeOf(route).label : "Page not found"} · Synveda`;
+    if (previousPage.current !== pageKey) {
+      setMenuOpen(false);
+      main.current?.focus({ preventScroll: true });
+      previousPage.current = pageKey;
+    }
+  }, [pageKey, route]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        menuButton.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [menuOpen]);
+
+  const closeMenu = () => {
+    setMenuOpen(false);
+    main.current?.focus({ preventScroll: true });
+  };
   const onSignOut = useCallback(async () => {
     await signOut();
     // Reload rather than clear local state: the cookie is gone, so every
@@ -120,10 +162,13 @@ export function Shell({
 
   return (
     <div className="shell">
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       <header className="shell-header">
         <div className="brand">
           <Link href={hrefOf("home")} className="brand-link">
-            Synveda
+            <Brand />
           </Link>
           <span className="muted tenant">{context.me.tenant.name}</span>
         </div>
@@ -139,19 +184,43 @@ export function Shell({
             Sign out
           </button>
         </div>
+        <button
+          ref={menuButton}
+          type="button"
+          className="menu-toggle"
+          aria-expanded={menuOpen}
+          aria-controls="product-navigation"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          {menuOpen ? "Close menu" : "Menu"}
+        </button>
       </header>
 
       <div className="shell-body">
-        <nav className="sidebar" aria-label="Product navigation">
+        <nav
+          id="product-navigation"
+          className={`sidebar${menuOpen ? " is-open" : ""}`}
+          aria-label="Product navigation"
+        >
           <ul className="nav">
             {workNav().map((item) => (
-              <NavItem key={item.id} item={item} current={route} />
+              <NavItem
+                key={item.id}
+                item={item}
+                current={route}
+                onNavigate={closeMenu}
+              />
             ))}
           </ul>
           <h2 className="nav-heading">Administration</h2>
           <ul className="nav">
             {administrationNav().map((item) => (
-              <NavItem key={item.id} item={item} current={route} />
+              <NavItem
+                key={item.id}
+                item={item}
+                current={route}
+                onNavigate={closeMenu}
+              />
             ))}
           </ul>
           {/* Rendered only when there is something in it. An empty
@@ -162,29 +231,54 @@ export function Shell({
               <h2 className="nav-heading">Advanced</h2>
               <ul className="nav">
                 {advanced.map((item) => (
-                  <NavItem key={item.id} item={item} current={route} />
+                  <NavItem
+                    key={item.id}
+                    item={item}
+                    current={route}
+                    onNavigate={closeMenu}
+                  />
                 ))}
               </ul>
             </>
           ) : null}
+          <div className="nav-help">
+            <Link
+              href={hrefOf("welcome")}
+              className="nav-link"
+              onNavigate={closeMenu}
+            >
+              <NavIcon route="welcome" /> Connect an agent
+            </Link>
+          </div>
         </nav>
-        <main className="page">{children}</main>
+        <main id="main-content" className="page" ref={main} tabIndex={-1}>
+          {children}
+        </main>
       </div>
     </div>
   );
 }
 
-function NavItem({ item, current }: { item: RouteDef; current: RouteId | null }) {
-  const selected = item.id === current;
+function NavItem({
+  item,
+  current,
+  onNavigate,
+}: {
+  item: RouteDef;
+  current: RouteId | null;
+  onNavigate: () => void;
+}) {
+  const selected = item.id === navigationRoute(current);
   return (
     <li>
       <Link
         href={hrefOf(item.id)}
         className={selected ? "nav-link selected" : "nav-link"}
-        // The accessible name of "which page am I on" — a class alone says
-        // it to a sighted reader and to nobody else.
+        aria-current={selected ? "page" : undefined}
+        onNavigate={onNavigate}
       >
-        <span aria-current={selected ? "page" : undefined}>{item.label}</span>
+        <NavIcon route={item.id} />
+        <span>{item.label}</span>
       </Link>
     </li>
   );
@@ -262,12 +356,17 @@ export function NotOffered({ route }: { route: RouteId }) {
     <>
       <PageHeading route={route} />
       <div className="banner error" role="alert">
-        You do not hold {def.capability ?? "the role"} in this tenant, so this page has nothing
-        to show you.
+        You do not currently have access to {def.label}.
         <p className="muted">
-          This is what the policy decision point said when this page loaded. Ask an administrator
-          for the role, and reload — signing in again will not change the answer.
+          Ask your administrator for access, then reload this page. Signing in
+          again will not change your permissions.
         </p>
+        <details className="technical-details">
+          <summary>Access details</summary>
+          Required permission:{" "}
+          <code>{def.capability ?? "a role for this page"}</code>. The policy
+          decision point checks each request.
+        </details>
       </div>
     </>
   );

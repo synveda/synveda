@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { readFileSync } from "node:fs";
 
 // The console is served by the gateway under /console/ (ADR-0056
 // decision 1), so every emitted asset URL has to be written for that
@@ -8,7 +9,22 @@ import { defineConfig } from "vite";
 // path the gateway serves and not a path ServeDir would find.
 export default defineConfig({
   base: "/console/",
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "brand-font-licence",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "assets/Inter-OFL.txt",
+          source: readFileSync(
+            new URL("../assets/brand/fonts/OFL.txt", import.meta.url),
+            "utf8",
+          ),
+        });
+      },
+    },
+  ],
   build: {
     outDir: "dist",
     // A build that quietly reuses stale output is a build that can serve

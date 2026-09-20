@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Synveda — Context for capable agents</title>
+    <meta
+      name="description"
+      content="A self-hosted, Postgres-first memory and context control plane for AI agents. Govern knowledge, context, skills and tools through policy and review."
+    />
+    <meta name="theme-color" content="#0B1F3B" />
+    <link rel="canonical" href="{{SITE_URL}}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Synveda" />
+    <meta property="og:title" content="Synveda — Context for capable agents" />
+    <meta
+      property="og:description"
+      content="Governed memory, knowledge, skills and tools. Postgres-first, self-hosted and Apache-2.0."
+    />
+    <meta property="og:url" content="{{SITE_URL}}" />
+    <meta property="og:image" content="{{SITE_URL}}assets/social-preview.png" />
+    <meta property="og:image:width" content="1280" />
+    <meta property="og:image:height" content="640" />
+    <meta
+      property="og:image:alt"
+      content="Synveda. Context for capable agents. Governed memory, knowledge, skills and tools."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:image"
+      content="{{SITE_URL}}assets/social-preview.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="Synveda — Context for capable agents"
+    />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link
+      rel="icon"
+      href="assets/favicon-32.png"
+      type="image/png"
+      sizes="32x32"
+    />
+    <link
+      rel="preload"
+      href="assets/InterVariable.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header wrap">
+      <a class="brand" href="#" aria-label="Synveda home"
+        ><img
+          src="assets/synveda-lockup.svg"
+          width="174"
+          height="40"
+          alt="Synveda"
+      /></a>
+      <nav class="desktop-nav" aria-label="Main navigation">
+        <a href="#product">Product</a><a href="#architecture">Architecture</a
+        ><a href="#docs">Docs</a
+        ><a href="{{REPOSITORY}}">GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
+      <a class="button button-small header-cta" href="#get-started"
+        >Get started <span aria-hidden="true">↗</span></a
+      >
+      <details class="mobile-nav">
+        <summary>Menu <span aria-hidden="true">☰</span></summary>
+        <nav aria-label="Mobile navigation">
+          <a href="#product">Product</a><a href="#architecture">Architecture</a
+          ><a href="#docs">Docs</a><a href="#get-started">Get started</a
+          ><a href="{{REPOSITORY}}">GitHub ↗</a>
+        </nav>
+      </details>
+    </header>
+    <main id="main">
+      <section class="hero wrap" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Context powers capability</p>
+          <h1 id="hero-title">Context for<br />capable agents.</h1>
+          <p class="hero-intro">
+            Give your agents knowledge they can build on.
+          </p>
+          <p class="hero-description">
+            Synveda is a self-hosted memory and context control plane. Bring
+            knowledge, reusable skills and tool definitions into one place, with
+            policy and review built in.
+          </p>
+          <div class="actions">
+            <a class="button" href="#get-started"
+              >Get started <span aria-hidden="true">→</span></a
+            ><a class="button button-outline" href="{{REPOSITORY}}"
+              >View on GitHub <span aria-hidden="true">↗</span></a
+            >
+          </div>
+          <p class="hero-note">
+            Open source · Apache-2.0 · Built on PostgreSQL
+          </p>
+        </div>
+        <figure class="context-visual" aria-labelledby="context-caption">
+          <div class="visual-heading">
+            <span class="eyebrow">A context run</span
+            ><span class="visual-label">Governed at every read</span>
+          </div>
+          <div class="source-pair">
+            <div>
+              <span class="source-dot"></span>Knowledge<span
+                >Immutable revisions</span
+              >
+            </div>
+            <div>
+              <span class="source-dot teal"></span>Authored context<span
+                >Published packs &amp; prompts</span
+              >
+            </div>
+          </div>
+          <div class="visual-connector" aria-hidden="true">
+            <span></span><span></span>
+          </div>
+          <div class="context-engine">
+            <img
+              src="assets/synveda-lockup-dark.svg"
+              width="180"
+              height="42"
+              alt="Synveda"
+            />
+            <p>Policy-aware selection.<br />Context within a token budget.</p>
+            <div class="engine-rule">
+              Cedar authorisation <span aria-hidden="true">·</span> Scoped
+              retrieval
+            </div>
+          </div>
+          <div class="visual-arrow" aria-hidden="true">↓</div>
+          <div class="context-result">
+            <svg
+              viewBox="0 0 24 24"
+              width="25"
+              height="25"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              aria-hidden="true"
+            >
+              <path d="M7 3h10l3 3v15H4V3zM8 9h8M8 13h8M8 17h5" />
+            </svg>
+            <div>
+              Context for the session<span
+                >With revision references and selection evidence</span
+              >
+            </div>
+          </div>
+          <figcaption id="context-caption">
+            From governed sources to an agent’s working context.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section
+        class="product wrap section"
+        id="product"
+        aria-labelledby="product-title"
+      >
+        <div class="section-heading">
+          <p class="eyebrow">A shared foundation</p>
+          <h2 id="product-title">Useful context.<br />Durable knowledge.</h2>
+          <p>
+            Keep what agents learn separate from what they are allowed to use.
+            Synveda connects the two through explicit scope, policy and
+            provenance.
+          </p>
+        </div>
+        <div class="capabilities">
+          <article>
+            <svg
+              viewBox="0 0 32 32"
+              width="32"
+              height="32"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              aria-hidden="true"
+            >
+              <path d="m16 3 13 7-13 7L3 10zM3 16l13 7 13-7M3 22l13 7 13-7" />
+            </svg>
+            <h3>Context</h3>
+            <p>
+              Compose a token-budgeted context block from policy-visible
+              knowledge and authored context. Inspect the selected revisions and
+              reasons.
+            </p>
+          </article>
+          <article>
+            <svg
+              viewBox="0 0 32 32"
+              width="32"
+              height="32"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              aria-hidden="true"
+            >
+              <rect x="5" y="3" width="22" height="26" rx="3" />
+              <path d="M10 10h12M10 16h12M10 22h7" />
+            </svg>
+            <h3>Knowledge</h3>
+            <p>
+              Retain facts, decisions and conventions as immutable revisions.
+              Trace their sources, review new learnings and query past states.
+            </p>
+          </article>
+          <article>
+            <svg
+              viewBox="0 0 32 32"
+              width="32"
+              height="32"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              aria-hidden="true"
+            >
+              <rect x="4" y="3" width="10" height="11" rx="2" />
+              <rect x="4" y="19" width="10" height="10" rx="2" />
+              <rect x="19" y="19" width="10" height="10" rx="2" />
+            </svg>
+            <h3>Skills</h3>
+            <p>
+              Review versioned skill bundles, then bind exact versions to a
+              project or principal. Supported adapters resolve the approved
+              files.
+            </p>
+          </article>
+          <article>
+            <svg
+              viewBox="0 0 32 32"
+              width="32"
+              height="32"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              aria-hidden="true"
+            >
+              <path
+                d="m13 12 5-5a6 6 0 0 1 8 8l-5 5M19 20l-5 5a6 6 0 0 1-8-8l5-5M11 21l10-10"
+              />
+            </svg>
+            <h3>Tools</h3>
+            <p>
+              Govern MCP server definitions and project bindings. Catalogue and
+              discovery stay separate from tool execution in the agent’s
+              environment.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="governance" aria-labelledby="governance-title">
+        <div class="wrap governance-inner">
+          <div>
+            <p class="eyebrow">Trust is part of the architecture</p>
+            <h2 id="governance-title">
+              Learning is a proposal.<br />Publishing is a decision.
+            </h2>
+          </div>
+          <div>
+            <p>
+              Sessions record agent activity. Capture turns selected evidence
+              into reviewable candidates. A typed VedaFlow change governs
+              publication as Knowledge.
+            </p>
+            <p>
+              Every application read and write passes through the embedded Cedar
+              policy engine. PostgreSQL forced row-level security backs tenant
+              isolation, and the audit chain keeps content-minimised evidence.
+            </p>
+            <a
+              class="text-link"
+              href="{{REPOSITORY}}/blob/main/docs/SECURITY.md"
+              >Read the security model <span aria-hidden="true">→</span></a
+            >
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="wrap section architecture"
+        id="architecture"
+        aria-labelledby="architecture-title"
+      >
+        <div class="section-heading split-heading">
+          <div>
+            <p class="eyebrow">How it fits together</p>
+            <h2 id="architecture-title">
+              Your agents.<br />One governed boundary.
+            </h2>
+          </div>
+          <p>
+            Adapters and language clients use the public API. Synveda owns
+            context, knowledge and governance; your harness owns agent
+            execution.
+          </p>
+        </div>
+        <figure class="architecture-figure">
+          <div class="client-boundary">
+            <span class="diagram-label">Clients</span
+            ><strong
+              >Agent adapters <span>·</span> MCP <span>·</span> Python &amp;
+              TypeScript</strong
+            ><span class="diagram-note"
+              >Support varies by client — see below</span
+            >
+          </div>
+          <div class="boundary-arrow">
+            <span aria-hidden="true">↕</span> Authenticated public API
+          </div>
+          <div class="platform-boundary">
+            <div class="platform-title">
+              <img
+                src="assets/synveda-mark.svg"
+                width="32"
+                height="32"
+                alt=""
+              /><strong>Synveda</strong
+              ><span>Memory &amp; context control plane</span>
+            </div>
+            <div class="runtime-pair">
+              <div>
+                <h3>Gateway</h3>
+                <p>
+                  Sessions · Context · Knowledge<br />Skills · Tools · VedaFlow
+                </p>
+              </div>
+              <div>
+                <h3>Core worker</h3>
+                <p>
+                  Capture candidates · Index convergence<br />Policy relaxation
+                  expiry · Directory pull
+                </p>
+              </div>
+            </div>
+            <p class="policy-boundary">
+              Embedded Cedar policy <span aria-hidden="true">·</span> Governed
+              changes <span aria-hidden="true">·</span> Audit evidence
+            </p>
+          </div>
+          <div class="boundary-arrow">
+            <span aria-hidden="true">↕</span> Tenant-bound transactions
+          </div>
+          <div class="database-boundary">
+            <strong>PostgreSQL + pgvector</strong
+            ><span
+              >System of record · Forced row-level security · Full-text
+              search</span
+            >
+          </div>
+          <figcaption>
+            Agents send Session events and request context or scoped Knowledge
+            through the gateway. The separate worker processes captured evidence
+            and indexes revisions. PostgreSQL stores product state. The Compose
+            reference also supplies Keycloak for OIDC, a reverse proxy and a
+            private OpenTelemetry Collector.
+          </figcaption>
+        </figure>
+        <a
+          class="text-link"
+          href="{{REPOSITORY}}/blob/main/docs/SYNVEDA_TECH_PLAN.md"
+          >Explore the technical plan <span aria-hidden="true">→</span></a
+        >
+      </section>
+
+      <section
+        class="integrations surface"
+        aria-labelledby="integrations-title"
+      >
+        <div class="wrap section integration-layout">
+          <div>
+            <p class="eyebrow">Meet your agent where it works</p>
+            <h2 id="integrations-title">Support backed<br />by evidence.</h2>
+            <p>
+              These named client setups have completed a live lifecycle against
+              Synveda’s public API. Version, platform and capability limits
+              still apply.
+            </p>
+            <a
+              class="text-link"
+              href="{{REPOSITORY}}/blob/main/docs/CLIENT_SUPPORT.md"
+              >Full client support matrix <span aria-hidden="true">→</span></a
+            >
+          </div>
+          <div class="integration-list">
+            <a
+              class="integration-row"
+              data-client="claude-code"
+              data-level="verified"
+              data-version="2.1.241"
+              href="{{REPOSITORY}}/blob/main/adapters/claude-code/README.md"
+              ><div>
+                <h3>Claude Code</h3>
+                <p>Plugin hooks + MCP <span>2.1.241</span></p>
+              </div>
+              <span class="status">Verified setup</span
+              ><span aria-hidden="true">↗</span></a
+            >
+            <a
+              class="integration-row"
+              data-client="codex"
+              data-level="verified"
+              data-version="0.152.0"
+              href="{{REPOSITORY}}/blob/main/docs/integrations/codex.md"
+              ><div>
+                <h3>Codex CLI</h3>
+                <p>Native hooks + MCP <span>0.152.0</span></p>
+              </div>
+              <span class="status">Verified setup</span
+              ><span aria-hidden="true">↗</span></a
+            >
+            <a
+              class="integration-row"
+              data-client="copilot-cli"
+              data-level="verified"
+              data-version="1.0.83"
+              href="{{REPOSITORY}}/blob/main/docs/integrations/copilot-cli.md"
+              ><div>
+                <h3>GitHub Copilot CLI</h3>
+                <p>Native hooks + MCP <span>1.0.83</span></p>
+              </div>
+              <span class="status">Verified setup</span
+              ><span aria-hidden="true">↗</span></a
+            >
+            <p class="integration-footnote">
+              Codex and Copilot qualification uses the documented source build
+              on macOS arm64 with Keycloak.
+              <a href="{{REPOSITORY}}/blob/main/sdks/README.md"
+                >Python and TypeScript SDKs</a
+              >
+              cover an initial API slice and remain unpublished. Cursor is
+              experimental; other MCP recipes and captured exchanges do not
+              establish a verified lifecycle.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="wrap section get-started"
+        id="get-started"
+        aria-labelledby="start-title"
+      >
+        <div>
+          <p class="eyebrow">Start with the local demo</p>
+          <h2 id="start-title">See the whole<br />context loop.</h2>
+          <p>
+            Run the Docker Compose stack, sign in and create your workspace. The
+            optional Northstar walkthrough uses synthetic data to demonstrate
+            capture, review, Knowledge and context.
+          </p>
+          <p class="readiness">
+            <strong>For local evaluation.</strong> Production release, recovery,
+            key custody and availability gaps remain.
+            <a href="{{REPOSITORY}}/blob/main/docs/PRODUCTION_READINESS.md"
+              >Read the current assessment.</a
+            >
+          </p>
+        </div>
+        <div class="start-steps">
+          <div>
+            <span class="step-number">01</span>
+            <div>
+              <h3>Prepare your host</h3>
+              <p>
+                Docker Engine 28+, Compose 2.33.1+, local Buildx, Node 22+,
+                OpenSSL and Make. Review the local hostname setup first.
+              </p>
+              <a
+                class="text-link"
+                href="{{REPOSITORY}}#quick-start-from-a-source-checkout"
+                >Follow the complete quick start
+                <span aria-hidden="true">↗</span></a
+              >
+            </div>
+          </div>
+          <div>
+            <span class="step-number">02</span>
+            <div>
+              <h3>Start and verify</h3>
+              <p>
+                From the checkout, after completing the hostname prerequisites:
+              </p>
+              <pre><code>export SYNVEDA_COMPOSE_PROFILES=demo
+make compose-config
+make compose-up
+make compose-smoke</code></pre>
+            </div>
+          </div>
+          <div>
+            <span class="step-number">03</span>
+            <div>
+              <h3>Sign in and explore</h3>
+              <p>
+                Open the printed console URL. Use the generated local demo
+                credentials, then follow the workspace onboarding or the
+                <a
+                  href="{{REPOSITORY}}/blob/main/deploy/compose/README.md#governed-ingestion-retry-walkthrough"
+                  >governed review walkthrough</a
+                >.
+              </p>
+              <p class="stop-note">
+                Stop with <code>make compose-down</code> using the same
+                selectors. Data and generated secrets are preserved.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="wrap docs section" id="docs" aria-labelledby="docs-title">
+        <div>
+          <p class="eyebrow">Go a little deeper</p>
+          <h2 id="docs-title">Read. Run. Contribute.</h2>
+        </div>
+        <div class="doc-links">
+          <a href="{{REPOSITORY}}/blob/main/docs/INSTALL.md"
+            ><h3>Product guide <span aria-hidden="true">↗</span></h3>
+            <p>Sessions, Knowledge, Context and governed artifacts.</p></a
+          >
+          <a href="{{REPOSITORY}}/blob/main/deploy/compose/README.md"
+            ><h3>Compose guide <span aria-hidden="true">↗</span></h3>
+            <p>Local setup, lifecycle and reference configuration.</p></a
+          >
+          <a href="{{REPOSITORY}}/blob/main/CONTRIBUTING.md"
+            ><h3>Contributing <span aria-hidden="true">↗</span></h3>
+            <p>Development workflow, checks and project principles.</p></a
+          >
+        </div>
+      </section>
+    </main>
+    <footer class="wrap site-footer">
+      <div>
+        <a class="brand" href="#" aria-label="Synveda home"
+          ><img
+            src="assets/synveda-lockup.svg"
+            width="148"
+            height="34"
+            alt="Synveda"
+        /></a>
+        <p>Context powers capability.</p>
+      </div>
+      <nav aria-label="Footer">
+        <a href="{{REPOSITORY}}">GitHub</a
+        ><a href="{{REPOSITORY}}/blob/main/LICENSE">Apache-2.0</a
+        ><a href="assets/ATTRIBUTIONS.md">Asset credits</a>
+      </nav>
+    </footer>
+  </body>
+</html>

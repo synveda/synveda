@@ -1,7 +1,7 @@
 # Release (OPS-8, ADR-0065) — turns a tag into something somebody else can
 # install. `make check-release-parity` validates its version, chart and image
-# plan without a daemon; native image builds, registry joins and publication
-# remain tag/workflow evidence that ordinary CI cannot manufacture.
+# plan without a daemon. Tagged releases additionally pull the final images
+# anonymously and run native executable checks before announcing the release.
 #
 # On `v*`:
 #
@@ -271,6 +271,10 @@ jobs:
           platforms: ${{ matrix.platform }}
           provenance: mode=max
           sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
           tags: ghcr.io/synveda/product:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=product-${{ matrix.arch }}
@@ -286,6 +290,10 @@ jobs:
           platforms: ${{ matrix.platform }}
           provenance: mode=max
           sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
           tags: ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=postgres-${{ matrix.arch }}
@@ -301,6 +309,10 @@ jobs:
           platforms: ${{ matrix.platform }}
           provenance: mode=max
           sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
           tags: ghcr.io/synveda/cnpg-postgres:17.11-synveda-${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=cnpg-postgres-${{ matrix.arch }}
@@ -316,6 +328,10 @@ jobs:
           platforms: ${{ matrix.platform }}
           provenance: mode=max
           sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
           tags: ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=keycloak-${{ matrix.arch }}
@@ -330,6 +346,10 @@ jobs:
           platforms: ${{ matrix.platform }}
           provenance: mode=max
           sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
           tags: ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=proxy-${{ matrix.arch }}
@@ -343,15 +363,19 @@ jobs:
           platforms: ${{ matrix.platform }}
           provenance: mode=max
           sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
           tags: ghcr.io/synveda/browser-acceptance:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=product-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=product-${{ matrix.arch }}
 
-  publish:
+  assemble:
     needs: [version, binaries, bundles, images]
     permissions:
-      contents: write
+      contents: read
       packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -367,15 +391,8 @@ jobs:
           # this job checksums and publishes.
           pattern: "{binaries-*,bundles}"
           merge-multiple: true
-      # The multi-arch tag, joined from the per-architecture ones `images`
-      # pushed. A step here rather than a job of its own: a job would be
-      # skipped on a dry run, and a `publish` that needed it would be
-      # skipped too — taking the asset checks above with it, which are the
-      # part of this job a dry run exists to exercise.
-      #
-      # So a dry run proves both architectures **build** and never reaches
-      # this. Joining the manifest is the one part of the release path that
-      # only a real tag covers.
+      # Join only tagged builds. Dry runs still assemble and checksum archives
+      # with explicitly synthetic digests; registry verification needs a tag.
       - uses: docker/login-action@v3
         if: needs.version.outputs.publish == 'true'
         with:
@@ -481,12 +498,104 @@ jobs:
           mkdir pulled-chart
           helm pull oci://ghcr.io/synveda/charts/synveda --version "$version" --destination pulled-chart
           cmp "assets/synveda-$version.tgz" "pulled-chart/synveda-$version.tgz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: assets/*
+          if-no-files-found: error
+
+  # Fresh runners and an empty Docker credential directory prove the images
+  # can be downloaded by a team that has no registry publishing credentials.
+  verify-images:
+    needs: [version, assemble]
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runs-on: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Use an empty Docker credential directory
+        run: |
+          directory="$(mktemp -d "$RUNNER_TEMP/synveda-anonymous-docker.XXXXXX")"
+          echo "DOCKER_CONFIG=$directory" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+        if: needs.version.outputs.publish == 'true'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: assets
+      - name: Verify release archive checksums
+        working-directory: assets
+        run: sha256sum --check SHA256SUMS
+      - name: Pull and execute the released images anonymously
+        if: needs.version.outputs.publish == 'true'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          tar -xzf "assets/synveda-reference-$VERSION.tar.gz" -C "$RUNNER_TEMP"
+          node scripts/verify-release-images.mjs \
+            "$RUNNER_TEMP/synveda-reference-$VERSION" "$PLATFORM" \
+            "$VERSION" "$SOURCE_SHA" "release-images-${{ matrix.arch }}.json"
+      - name: Explain the dry-run boundary
+        if: needs.version.outputs.publish != 'true'
+        run: echo "Dry run only. Synthetic image digests are not pullable; no registry verification or publication ran."
+      - uses: actions/upload-artifact@v4
+        if: needs.version.outputs.publish == 'true'
+        with:
+          name: release-verification-${{ matrix.arch }}
+          path: release-images-${{ matrix.arch }}.json
+          if-no-files-found: error
+
+  publish:
+    needs: [version, assemble, verify-images]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: assets
+      - uses: actions/download-artifact@v4
+        if: needs.version.outputs.publish == 'true'
+        with:
+          pattern: release-verification-*
+          path: assets
+          merge-multiple: true
+      - name: Include both native verification reports
+        if: needs.version.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          cd assets
+          test -s release-images-amd64.json
+          test -s release-images-arm64.json
+          sha256sum release-images-*.json >> SHA256SUMS
+          sha256sum --check SHA256SUMS
       - name: Publish
         if: needs.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
           # Notes in a file rather than an argument: the body is markdown
           # with fenced code in it, and quoting that through a shell is the
           # kind of cleverness that ships a release note full of backslashes.
@@ -496,14 +605,23 @@ jobs:
           start containers; configure the documented DNS, TLS and secret-file
           prerequisites, then use the installed \`synveda-compose\` launcher.
 
+          For a server, download only \`synveda-reference-$version.tar.gz\`
+          and \`SHA256SUMS\`: no source checkout or compiler is needed. Follow
+          the [prebuilt Docker guide](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/deploy/compose/PREBUILT.md)
+          for download verification, DNS, TLS and first sign-in.
+
+          Both Linux AMD64 and ARM64 jobs anonymously pulled the manifest-bound
+          image set and passed isolated executable/asset smoke checks. Their
+          checksummed \`release-images-*.json\` reports are attached. These
+          checks do not start a deployment or verify OIDC login/recovery.
           Docker reference live clean-host acceptance is tracked separately.
           This is a controlled single-host reference, not HA, production SaaS
           or enterprise certification.
 
           \`\`\`sh
-          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${GITHUB_REF_NAME}/scripts/install.sh | SYNVEDA_VERSION=${GITHUB_REF_NAME} sh
-          SYNVEDA_APP_HOST=app.example.com SYNVEDA_AUTH_HOST=auth.example.com \
-            ~/.synveda/reference/current/synveda-compose up
+          curl -fL https://raw.githubusercontent.com/${{ github.repository }}/${GITHUB_REF_NAME}/scripts/install.sh -o synveda-install.sh
+          # Inspect synveda-install.sh before running it on a client machine.
+          SYNVEDA_VERSION=${GITHUB_REF_NAME} sh synveda-install.sh
           \`\`\`
 
           Then give an AI client your team's governed memory:

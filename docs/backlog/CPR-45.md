@@ -69,6 +69,50 @@ platform, recovery, upgrade or published-installation qualification.
 
 ## Scope
 
+### Prebuilt container release increment — 2026-09-20
+
+[ADR-0115](../adr/adr-0115-prebuilt-container-release-verification.md) keeps
+the existing six-image native build matrix and adds fresh anonymous AMD64 and
+ARM64 digest pulls, release-label checks and isolated executable/asset smoke
+before the GitHub Release announcement. Checksummed per-platform reports
+accompany successful releases. Dry dispatches still publish nothing and label
+their synthetic digests as unusable for installation.
+
+The existing archive now carries a source-bound server-only guide and root
+LICENSE/NOTICE. Its `secrets` and `issuer` actions invoke the existing locked
+generators with `--if-missing`; no second installer or deployment graph is
+added. Root and install documentation distinguish this path from source builds
+and the smaller native-client platform matrix.
+
+Local checks passed on the working tree: the current product Docker image
+built with the updated console, and all eight isolated executable/asset checks
+passed across its six Linux ARM64 image roles (the unchanged dependency and
+browser images were reused from the local cache). The extracted archive
+prepared secrets and issuer settings, preserved them on repeat, refused force
+and external-provider misuse, validated temporary TLS inputs, and rendered 13
+digest-pinned services with no build contexts. This render used synthetic
+digests and a test certificate; it did not pull or start a deployment. Its
+first temporary-directory attempt was correctly refused for an inherited root
+group; rerunning in an operator-group-owned temporary directory passed.
+All 12 focused release/verifier tests passed on macOS Node 24 and offline Linux
+ARM64 Node 22. Workflow lint, shell syntax, formatting and documentation gates
+passed. The full `make check-deploy` passed all 359 tests with zero failures
+or skips, followed by the Compose render and deployment-convergence checks.
+Its loopback fixture ran outside the filesystem/network sandbox. No full
+backend CI, database suite, hosted workflow or live deployment acceptance was
+rerun. No Rust, database schema, generated API or application feature changed.
+
+Remaining blocker: no new compatible tag has been published, and hosted
+anonymous pull checks have not run. The latest public release is still v0.2.0
+with the old profile archive, verified through the GitHub release API on
+2026-09-20. Next: select an unused matching workspace/chart version, complete
+the normal CI and release dry run, configure GHCR package visibility/access,
+then publish and run the existing reference acceptance on an empty host.
+See [release operations](../RELEASING.md). Linux/Docker Desktop, Windows/WSL2,
+recovery, N-1 and production readiness are not qualified by an image check.
+
+### Continuing deployment scope
+
 - Keep one provider-neutral configuration, image, command, schema, health,
   public API, OIDC, OTLP, object-store and recovery contract.
 - Keep only the reverse proxy public; database, identity management, worker,

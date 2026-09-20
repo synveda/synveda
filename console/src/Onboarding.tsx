@@ -25,7 +25,7 @@
  * workspace was governed the way they picked.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ME_KEY } from "./App.js";
 import { idempotencyKey, request } from "./client.mjs";
@@ -41,6 +41,7 @@ import {
   checkVerdict,
   clientOf,
   connectionSteps,
+  initialStep,
   nextStep,
   seedPlan,
   seedSentence,
@@ -53,21 +54,39 @@ import {
 } from "./onboarding.mjs";
 
 export function Onboarding() {
-  const { me, chooseWorkspace, chooseProject, reload } = useApp();
+  const { me, selection, chooseWorkspace, chooseProject, reload } = useApp();
   // Resume where the deployment actually is rather than at step one: a
   // person who created a workspace and closed the tab should not be asked
   // to create another. The server's own word decides (`me.onboarding`).
-  const [step, setStep] = useState<Step>(
-    me.onboarding.state === "needs_project" ? "project" : "workspace",
+  const [step, setStep] = useState<Step>(() =>
+    initialStep(me.onboarding.state, selection),
   );
   const [shape, setShape] = useState<Shape>("personal");
   const [seed, setSeed] = useState<SeedOutcome | null>(null);
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [clientId, setClientId] = useState<string>(CLIENTS[0]?.id ?? "claude-code");
+  const [workspaceId, setWorkspaceId] = useState<string | null>(
+    selection.workspaceId,
+  );
+  const [projectId, setProjectId] = useState<string | null>(
+    selection.projectId,
+  );
+  const [reconnecting] = useState(
+    me.onboarding.state === "ready" && selection.projectId !== null,
+  );
+  const [clientId, setClientId] = useState<string>(
+    CLIENTS[0]?.id ?? "claude-code",
+  );
   const [verdict, setVerdict] = useState<CheckVerdict | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const previousStep = useRef(step);
+
+  useEffect(() => {
+    if (previousStep.current !== step) {
+      heading.current?.focus();
+      previousStep.current = step;
+    }
+  }, [step]);
 
   const fail = (message: string) => {
     setBusy(false);
@@ -84,7 +103,11 @@ export function Onboarding() {
         body: { display_name: displayName, slug },
       });
       if (created.kind !== "ok") {
-        fail(created.kind === "unauthenticated" ? "Your session has expired." : created.message);
+        fail(
+          created.kind === "unauthenticated"
+            ? "Your session has expired."
+            : created.message,
+        );
         return;
       }
       const workspace = created.body;
@@ -96,7 +119,9 @@ export function Onboarding() {
       const listed = await request("list_configuration_templates", {});
       const template =
         listed.kind === "ok"
-          ? listed.body.templates.find((candidate) => candidate.name === plan.template)
+          ? listed.body.templates.find(
+              (candidate) => candidate.name === plan.template,
+            )
           : undefined;
       if (!template) {
         setSeed({
@@ -151,7 +176,10 @@ export function Onboarding() {
               ? {
                   kind: "refused",
                   what: `Binding the ${plan.template} runtime Configuration`,
-                  why: bound.kind === "unauthenticated" ? "your session has expired" : bound.message,
+                  why:
+                    bound.kind === "unauthenticated"
+                      ? "your session has expired"
+                      : bound.message,
                 }
               : bound.body.outcome === "pending_review"
                 ? {
@@ -188,7 +216,7 @@ export function Onboarding() {
   /** Step 2: the first project. */
   const createProject = useCallback(
     async (displayName: string, slug: string) => {
-      const parent = workspaceId ?? me.workspaces[0]?.id;
+      const parent = workspaceId;
       if (!parent) {
         fail("No workspace to create this in.");
         return;
@@ -201,7 +229,11 @@ export function Onboarding() {
         body: { display_name: displayName, slug },
       });
       if (created.kind !== "ok") {
-        fail(created.kind === "unauthenticated" ? "Your session has expired." : created.message);
+        fail(
+          created.kind === "unauthenticated"
+            ? "Your session has expired."
+            : created.message,
+        );
         return;
       }
       setProjectId(created.body.id);
@@ -210,7 +242,7 @@ export function Onboarding() {
       setBusy(false);
       setStep(nextStep("project"));
     },
-    [workspaceId, me.workspaces, chooseProject],
+    [workspaceId, chooseProject],
   );
 
   /** Step 3: the repository, which is optional and says so. */
@@ -229,7 +261,9 @@ export function Onboarding() {
       });
       if (attached.kind !== "ok") {
         fail(
-          attached.kind === "unauthenticated" ? "Your session has expired." : attached.message,
+          attached.kind === "unauthenticated"
+            ? "Your session has expired."
+            : attached.message,
         );
         return;
       }
@@ -243,7 +277,7 @@ export function Onboarding() {
   const runCheck = useCallback(async () => {
     setBusy(true);
     setError(null);
-    const id = projectId ?? me.projects[0]?.id;
+    const id = projectId;
     if (!id) {
       setBusy(false);
       setVerdict(
@@ -256,18 +290,26 @@ export function Onboarding() {
       return;
     }
     const project = await request("get_project", { path: { project_id: id } });
-    const repositories = await request("list_repositories", { path: { project_id: id } });
+    const repositories = await request("list_repositories", {
+      path: { project_id: id },
+    });
     setBusy(false);
     setVerdict(
       checkVerdict({
         projectReadable: project.kind === "ok",
-        projectWhy: project.kind === "ok" ? undefined : project.kind === "unauthenticated"
-          ? "your session has expired"
-          : project.message,
-        repositoryCount: repositories.kind === "ok" ? repositories.body.repositories.length : 0,
+        projectWhy:
+          project.kind === "ok"
+            ? undefined
+            : project.kind === "unauthenticated"
+              ? "your session has expired"
+              : project.message,
+        repositoryCount:
+          repositories.kind === "ok"
+            ? repositories.body.repositories.length
+            : 0,
       }),
     );
-  }, [projectId, me.projects]);
+  }, [projectId]);
 
   const finish = useCallback(() => {
     invalidate(ME_KEY);
@@ -275,13 +317,38 @@ export function Onboarding() {
     navigate(hrefOf("home"));
   }, [reload]);
 
+  if (me.onboarding.state === "blocked") {
+    return (
+      <div className="onboarding">
+        <header className="page-heading">
+          <h1>Getting started</h1>
+        </header>
+        <div className="banner" role="status">
+          Ask your administrator for workspace access before connecting an
+          agent.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="onboarding">
       <header className="page-heading">
-        <h1>Getting started</h1>
-        <p className="muted">
-          Step {stepNumber(step)} of {STEP_COUNT}
+        <h1 ref={heading} tabIndex={-1} aria-describedby="setup-progress">
+          {reconnecting ? "Connect an agent" : "Getting started"}
+        </h1>
+        <p id="setup-progress" className="muted">
+          Step {reconnecting ? stepNumber(step) - 3 : stepNumber(step)} of{" "}
+          {reconnecting ? 3 : STEP_COUNT}
+          {projectId
+            ? ` · ${me.projects.find((item) => item.id === projectId)?.display_name ?? "Selected project"}`
+            : ""}
         </p>
+        <progress
+          aria-label="Setup progress"
+          value={reconnecting ? stepNumber(step) - 3 : stepNumber(step)}
+          max={reconnecting ? 3 : STEP_COUNT}
+        />
       </header>
 
       {error ? (
@@ -304,7 +371,7 @@ export function Onboarding() {
           {seed ? <p className="muted">{seedSentence(seed)}</p> : null}
           <NameStep
             title="Your first project"
-            blurb="A project is what an agent works on — usually one repository. It gets its own governed scope beneath the workspace."
+            blurb="A project keeps the sessions, knowledge and settings for one piece of work together. It usually follows a repository."
             placeholder="Payments"
             busy={busy}
             action="Create project"
@@ -322,15 +389,27 @@ export function Onboarding() {
       ) : null}
 
       {step === "client" ? (
-        <ClientStep chosen={clientId} onChoose={setClientId} onNext={() => setStep(nextStep("client"))} />
+        <ClientStep
+          chosen={clientId}
+          onChoose={setClientId}
+          onNext={() => setStep(nextStep("client"))}
+        />
       ) : null}
 
       {step === "instructions" ? (
-        <InstructionsStep clientId={clientId} onNext={() => setStep(nextStep("instructions"))} />
+        <InstructionsStep
+          clientId={clientId}
+          onNext={() => setStep(nextStep("instructions"))}
+        />
       ) : null}
 
       {step === "check" ? (
-        <CheckStep busy={busy} verdict={verdict} onRun={() => void runCheck()} onFinish={finish} />
+        <CheckStep
+          busy={busy}
+          verdict={verdict}
+          onRun={() => void runCheck()}
+          onFinish={finish}
+        />
       ) : null}
     </div>
   );
@@ -352,8 +431,8 @@ function WorkspaceStep({
     <section>
       <h2>Your workspace</h2>
       <p className="muted">
-        Nobody is asked to declare an organisation. A workspace is the first thing you make, and
-        the tenant's root scope is minted underneath it because something needed a parent.
+        A workspace brings your projects and the people working on them
+        together. Give it a name you will recognise.
       </p>
       <fieldset className="choice">
         <legend>Who is this for?</legend>
@@ -378,10 +457,10 @@ function WorkspaceStep({
       </fieldset>
       <p className="muted">{plan.summary}</p>
       <p className="muted">
-        This choice <strong>seeds</strong> the immutable runtime Configuration bound here ({plan.template})
-        {plan.invitesMembers ? " and sets you up to invite people" : ""}. It is not an edition:
-        nothing records it, nothing branches on it, and a workspace made for one person becomes a
-        team's by inviting somebody.
+        Synveda will request the <strong>{plan.template}</strong> settings
+        template for this workspace. Your permissions and review policy still
+        apply. You can change these settings later under Advanced →
+        Configuration.
       </p>
       <NameStep
         title=""
@@ -429,6 +508,7 @@ function NameStep({
         <label>
           <span className="switcher-label">Name</span>
           <input
+            required
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
             placeholder={placeholder}
@@ -437,6 +517,8 @@ function NameStep({
         <label>
           <span className="switcher-label">Handle</span>
           <input
+            required
+            aria-describedby="handle-help"
             value={handle}
             onChange={(event) => {
               setTouched(true);
@@ -444,10 +526,19 @@ function NameStep({
             }}
           />
         </label>
-        <button type="submit" disabled={busy || displayName.trim().length === 0 || handle.length === 0}>
+        <button
+          type="submit"
+          disabled={
+            busy || displayName.trim().length === 0 || handle.length === 0
+          }
+        >
           {action}
         </button>
       </form>
+      <p id="handle-help" className="field-help muted">
+        The handle is a short identifier, filled in from the name. You can edit
+        it before creating.
+      </p>
     </section>
   );
 }
@@ -466,11 +557,9 @@ function RepositoryStep({
     <section>
       <h2>What is this project about?</h2>
       <p className="muted">
-        A repository, identified by its <strong>canonical remote</strong>. Paste it in any form
-        git accepts — <code>https://host/owner/name</code>, <code>git@host:owner/name.git</code>,{" "}
-        <code>ssh://…</code> — and the transport, credential, port and <code>.git</code> collapse
-        into one identity. A path on your machine is refused, because it differs per machine and
-        changes when you move a directory.
+        Add the repository's Git URL so Synveda can recognise the same project
+        across machines. HTTPS and SSH URLs work; a local folder path does not.
+        You can also add this later in Settings.
       </p>
       <form
         className="inline-form"
@@ -480,7 +569,7 @@ function RepositoryStep({
         }}
       >
         <label>
-          <span className="switcher-label">Remote</span>
+          <span className="switcher-label">Repository URL</span>
           <input
             value={remote}
             onChange={(event) => setRemote(event.target.value)}
@@ -488,10 +577,10 @@ function RepositoryStep({
           />
         </label>
         <button type="submit" disabled={busy || remote.trim().length === 0}>
-          Attach
+          Add repository
         </button>
         <button type="button" onClick={onSkip} disabled={busy}>
-          Skip — no repository
+          Skip for now
         </button>
       </form>
     </section>
@@ -533,7 +622,13 @@ function ClientStep({
   );
 }
 
-function InstructionsStep({ clientId, onNext }: { clientId: string; onNext: () => void }) {
+function InstructionsStep({
+  clientId,
+  onNext,
+}: {
+  clientId: string;
+  onNext: () => void;
+}) {
   const client = clientOf(clientId);
   // This deployment's own origin rather than a placeholder: the console is
   // served from the gateway (ADR-0056 decision 1), so the address in the
@@ -543,8 +638,8 @@ function InstructionsStep({ clientId, onNext }: { clientId: string; onNext: () =
     <section>
       <h2>Connect {client.label}</h2>
       <p className="muted">
-        Run these on the machine that runs {client.label}. The console cannot do it for you — it
-        configures an application on your computer, and a browser has no business there.
+        Run these commands in a terminal on the machine where you use{" "}
+        {client.label}. They require the Synveda CLI on your PATH.
       </p>
       <ol className="commands">
         {connectionSteps(client, origin).map((command) => (
@@ -555,9 +650,9 @@ function InstructionsStep({ clientId, onNext }: { clientId: string; onNext: () =
       </ol>
       {client.id === "other" ? (
         <p className="muted">
-          A client this release has not heard of is a config file rather than a release: add it to{" "}
-          <code>~/.config/synveda/mcp-clients.jsonc</code>, or use <code>--print</code> and paste
-          the entry yourself.
+          Add your client's settings to{" "}
+          <code>~/.config/synveda/mcp-clients.jsonc</code>, or use{" "}
+          <code>--print</code> and paste the entry yourself.
         </p>
       ) : null}
       <button type="button" onClick={onNext}>
@@ -587,7 +682,9 @@ function CheckStep({
           <li key={line}>{line}</li>
         ))}
       </ul>
-      <p className="muted">What it cannot check, and does not claim to:</p>
+      <p className="muted">
+        You will still need to check these in your agent client:
+      </p>
       <ul className="muted">
         {CHECK_CANNOT.map((line) => (
           <li key={line}>{line}</li>
@@ -597,9 +694,16 @@ function CheckStep({
         {busy ? "Checking…" : "Run the check"}
       </button>
       {verdict ? (
-        <div className={verdict.kind === "pass" ? "banner" : "banner error"} role="status">
+        <div
+          className={verdict.kind === "pass" ? "banner" : "banner error"}
+          role="status"
+        >
           <p>
-            <strong>{verdict.kind === "pass" ? "Everything answered." : "Something is wrong."}</strong>
+            <strong>
+              {verdict.kind === "pass"
+                ? "Your project is reachable."
+                : "The connection check needs attention."}
+            </strong>
           </p>
           <ul>
             {verdict.lines.map((line) => (
@@ -611,7 +715,7 @@ function CheckStep({
       ) : null}
       <p>
         <button type="button" onClick={onFinish}>
-          Finish
+          Go to Home
         </button>
       </p>
     </section>
