@@ -22,11 +22,15 @@ case "${SYNVEDA_KIND_GHA_CACHE:-0}" in
       echo "Kind's GitHub cache requires the Actions runtime environment" >&2
       exit 64
     fi
-    # Each image retains its own intermediate layers. Cache publication is
-    # best-effort and bounded; build/load errors still fail the acceptance.
-    exec docker buildx build --load -t "$1" -f "$2" \
-      --cache-from "type=gha,version=2,scope=kind-$3,timeout=2m" \
-      --cache-to "type=gha,version=2,scope=kind-$3,mode=max,ignore-error=true,timeout=2m" .
+    # Contributor code may restore main's build layers, but only a main push
+    # publishes reusable cache entries. Build/load failures remain fatal.
+    cache_scope="kind-$3"
+    set -- buildx build --load -t "$1" -f "$2" \
+      --cache-from "type=gha,version=2,scope=$cache_scope,timeout=2m"
+    if [ "${GITHUB_EVENT_NAME:-}" = push ] && [ "${GITHUB_REF:-}" = refs/heads/main ]; then
+      set -- "$@" --cache-to "type=gha,version=2,scope=$cache_scope,mode=max,ignore-error=true,timeout=2m"
+    fi
+    exec docker "$@" .
     ;;
   *)
     echo "SYNVEDA_KIND_GHA_CACHE must be 0 or 1" >&2

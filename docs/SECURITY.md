@@ -1,5 +1,7 @@
 # Context-platform security model
 
+For private vulnerability reports, use the [reporting policy](../SECURITY.md).
+
 This document records the current security boundary and repeatable adversarial
 evidence for Synveda's context platform. It is not a claim that one process
 remains secure after compromise of its host, database superuser or signing

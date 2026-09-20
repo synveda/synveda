@@ -1,0 +1,21 @@
+name: Feature or improvement
+description: Suggest a focused improvement to the product, docs or contributor experience.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What would this help you do?
+      description: Describe the current limitation and who encounters it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggested change
+      description: A small example or acceptance criterion is useful; a design document is optional.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or related work
+      description: Optional; link existing issues or explain a workaround.

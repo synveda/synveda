@@ -430,7 +430,7 @@ impl Pdp {
     ///
     /// The measurement this exists for: at 516 candidate scopes, four
     /// tiers each, re-materialising per call put the plan stage at 378ms
-    /// against ADR-0029's 15ms allowance — the cost is
+    /// against the historical 15ms planning allowance — the cost is
     /// `Entities::from_entities`, not Cedar evaluation. Building it once
     /// is what makes a universe wider than the chain affordable at all.
     ///

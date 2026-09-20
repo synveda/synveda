@@ -7,14 +7,14 @@ OpenTelemetry Collector. Optional settings add a bounded local Prometheus
 operator view, external trace export or one experimental Apalis-backed
 Skill-validation worker.
 
-For the concise developer-first path and a real seeded-console walkthrough,
-start with the root [Quick start](../../README.md#quick-start-from-a-source-checkout),
-then return here for the complete lifecycle and optional modes.
+For source prerequisites, focused tests and the code map, start with the
+[developer guide](../../docs/DEVELOPMENT.md). This guide owns the complete
+source-deployment lifecycle and optional modes.
 
 To run a server without a checkout or compiler, use the
 [prebuilt Docker guide](PREBUILT.md). It uses this same deployment graph and a
-release-pinned launcher. A compatible current release is still required;
-public v0.2.0 predates the reference archive.
+release-pinned launcher. The published v0.4.0 bundle includes the reference
+archive; earlier pre-epoch-3 databases are deliberately refused.
 
 It supports development and reference configuration. A clean development
 acceptance passed on macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0 and

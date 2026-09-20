@@ -16,7 +16,7 @@ publicly downloadable without a registry account.
 | Run with Docker | [Prebuilt bundle](../deploy/compose/PREBUILT.md) | Docker Compose; loopback bundled evaluation; native Linux AMD64/ARM64 release evidence and local macOS/OrbStack candidate evidence |
 | Deploy to Kubernetes | [Application chart](../deploy/helm/synveda/README.md) | Namespaced permissions, supplied Secrets/storage; packaged-chart Kind 1.36.1 evidence on native Linux AMD64/ARM64 |
 | Use existing infrastructure | [Provider contract](../deploy/helm/synveda/CONFIGURATION.md) | Supplied database/identity endpoints and trusted CA inputs; no provider takeover |
-| Build from source | [Contributing](../CONTRIBUTING.md#local-deployment) | Contributor tools and source-only hostname setup |
+| Build from source | [Source development](DEVELOPMENT.md#running-your-changes) | Contributor tools and source-only hostname setup |
 
 Database and identity ownership are independent on both platforms. Bundled
 Keycloak has a durable database and owner distinct from Synveda's roles.
@@ -28,7 +28,7 @@ owns client claims.
 
 ### Source checkout
 
-Moved to [Contributing](../CONTRIBUTING.md#local-deployment) and the detailed
+Moved to [Source development](DEVELOPMENT.md#running-your-changes) and the detailed
 [source Compose guide](../deploy/compose/README.md).
 
 ### Packaged reference

@@ -349,7 +349,7 @@ SDKs then passed the shared ordinary Keycloak workflow through the public proxy,
 including Capture, explicit task end and a valid audit chain. The current local
 project is `synveda-development-acceptance-interop`, pool `10.231.46.0/24`; the
 earlier `acceptance-e2e` product data and secrets remain retained. Details and
-remaining client limits are in `docs/INTEROPERABILITY_PLAN.md`. This adds no new
+remaining client limits are in [the client support matrix](../CLIENT_SUPPORT.md). This adds no new
 platform, reference-HTTPS, HA or SaaS-readiness claim.
 
 The 2026-09-12 run uses `feat/CPR-45` at starting commit
@@ -511,6 +511,14 @@ the native PostgreSQL worker is its rollback. Restore always targets a fresh,
 confirmed project.
 
 ## Dependencies
+
+The contributor walkthrough needs unoccupied deployment resources. On the
+current development host, retained `synveda-evaluation_postgres-data` and the
+managed hosts block for `synveda-development-acceptance-interop` prevent a
+separate clean install: the launchers refuse mismatched state or hosts
+ownership. Next: repeat the README and source-guide walkthrough on a disposable
+Docker host, or arrange an explicit operator handoff with the original state.
+Do not reset retained volumes or replace another deployment's hosts entries.
 
 Completion needs a supported Docker Engine, Linux and Docker Desktop hosts,
 browser trust for the selected issuer, and one published candidate. Production

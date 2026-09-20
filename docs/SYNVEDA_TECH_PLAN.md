@@ -1,6 +1,6 @@
-# SYNVEDA — Technical Plan v1
+# Synveda — technical architecture
 
-Companion to SYNVEDA_SEED.md. This document fixes the technology stack (open source,
+Companion to [the product invariants](SYNVEDA_SEED.md). This document describes the technology stack (open source,
 Postgres-first, Rust-native where sensible), and specifies **VedaFlow** — the git-style
 propose/review/approve workflow for all knowledge assets.
 
@@ -39,7 +39,7 @@ it does not substitute for the still-open restore and failover evidence.
 | Why not OPA | Rego is powerful but adds a Go sidecar + network hop on every context decision; Cedar embeds in-process in the product binaries | | OPA remains a possible adapter for shops that mandate it, not a shipped runtime |
 | OIDC provider (bundled reference) | **Keycloak** (Apache-2.0) | Apache-2.0 | ADR-0102 selects production-mode Keycloak behind the generic OIDC/PKCE boundary. No bundled-provider compatibility mode exists. |
 | Enterprise IdP | Bring-your-own: Entra ID, Okta, Keycloak, Zitadel — standard OIDC + SCIM 2.0 | — | Synveda is an OIDC *client*, never the source of truth for identity |
-| Secrets/PII detection | Rust regex+ML pipeline; **gitleaks** ruleset port for secrets | MIT | Runs in `synveda-ingest` before persistence |
+| Secrets/PII detection | Rust regex rules with format/entropy validators; gitleaks-derived secret rules | MIT | The [redaction scanner](../crates/synveda-ingest/src/redaction.rs) runs at bounded input/capture boundaries. ML/NER detection is not implemented. |
 
 ### 1.3 Services & runtime — all Rust
 
@@ -50,7 +50,7 @@ it does not substitute for the still-open restore and failover evidence.
 | Embeddings serving | Optional **text-embeddings-inference** serving BGE-M3 for the measured dense path. Production model support, generation cutover and re-embedding remain open. |
 | Summarisation/extraction LLM | Pluggable: Claude API, or self-hosted via vLLM for air-gapped; behind `Extractor` trait |
 | Observability | OpenTelemetry remains the application trace contract. Canonical Compose keeps application metrics off public proxy routes and optionally uses a closed private Collector scrape/fan-in with a digest-pinned, loopback-only Prometheus UI and 72-hour/1-GB TSDB block-retention thresholds (not a disk quota). Public-PKI external OTLP export is configured only through that private Collector. The customer-safe Operations route exposes four policy-visible aggregates and states which signals remain unavailable. Live validation remains open. |
-| Packaging | CPR-45 implementation, with live validation pending: one product image/configuration contract and Docker Compose as the single-host reference. The current Helm chart maps the runtime contract and enforces one gateway and one core-worker replica; recovery parity and production promotion remain open. |
+| Packaging | One product image/configuration contract and Docker Compose as the single-host reference. Published v0.4.0 has native Linux AMD64/ARM64 Docker and four-mode Kind qualification; see [CPR-45](backlog/CPR-45.md#installation-mission-2026-09-20) for exact evidence and remaining hosts. Helm retains one gateway and one core-worker replica; wider platform, N-1 upgrade and production promotion remain open. |
 
 ### 1.4 Explicit non-choices
 
@@ -73,8 +73,8 @@ with approval authority derived from governed scopes and grants. Nothing reaches
 
 Git-*like*, implemented natively in Postgres rather than on bare git repos, because approvals,
 policy checks, audit chaining, and row-level tenant isolation must be transactional with the
-content. (A `git bridge` using **gitoxide** (Rust, MIT/Apache-2.0) mirrors published branches to
-real repos for teams who want GitHub/GitLab visibility — export first, import later.)
+content. A Git export bridge is open work under [FLOW-8](backlog/FLOW-8.md);
+no repository mirroring is implemented.
 
 Conceptual VedaFlow storage (the epoch-3 migration is authoritative; proposal
 references are validated typed JSON, not free-form source/target strings):
@@ -157,8 +157,8 @@ recording the act. Rules can require the reviewer to differ from the author and
 the effect actor to differ from both author and counting reviewers. Applying or
 publishing remains a separate PDP-authorised act and repeats artifact revision
 checks. The author cancels through the one withdrawal transition; rejection is
-a reviewer verdict with a reason. The git bridge may also surface authored
-channel reviews as pull requests for engineering-culture teams.
+a reviewer verdict with a reason. A future Git bridge could surface authored-channel reviews as pull requests;
+that integration remains FLOW-8 work.
 
 ### 2.4.1 Approval threat boundary
 
@@ -219,33 +219,18 @@ global `/v1/recall` route and no direct-store adapter path.
 |---|---|---|
 | Footprint | Reverse proxy, separate gateway/worker, PostgreSQL + pgvector, production-mode Keycloak and private OTel Collector; optional local visibility, Apalis experiment and backup-test services. The Compose semantic profile remains pending; TEI is available in the isolated evaluation fixture. | The same product commands/configuration with Kubernetes-native ingress, jobs, secrets, networks and external dependencies; optional TEI is already charted. |
 | Product behaviour | Governed Configuration documents select policy, capture and context behaviour; deployment shape does not. | The same runtime and Configuration model; no edition branch. |
-| Status | Accepted target under CPR-45; no validation claim until clean Linux + desktop acceptance passes. | Existing chart remains one gateway replica and is not promoted by mechanically translating Compose. |
+| Status | Published v0.4.0 has native Linux AMD64/ARM64 installation evidence; source development also has macOS/OrbStack evidence. Docker Desktop/WSL2 remain unqualified. | Four-mode Kind qualification passed for v0.4.0. Real OpenShift, cloud and N-1 upgrade qualification remain open; Kind is not evidence for those platforms. |
 | Residency | One host/region; no host-loss tolerance. | Single deployment region; OPS-3 regional routing is not implemented. |
 | Keys | local deployment KEK wrapping deployment and per-tenant DEKs | the same shipped local provider; cloud KMS/HSM/CMK and WORM custody are extension points, not current support |
 
 ---
 
-## 5. Revised build order
+## 5. Delivery and maturity
 
-- **Phases 0–2 — delivered foundation and governance proof**: workspace,
-  Postgres-first stack, OIDC, embedded Cedar, RLS, hash-chained audit and
-  VedaFlow objects/commits/refs/proposals. Their fixed hierarchy, record and
-  global runtime-route implementations are replaced rather than preserved.
-- **Phase 3 — paused enterprise surface**: the delivered skill, directory,
-  console, deployment and key-plane foundations are re-anchored by explicit
-  Phase 5 packages before the remaining enterprise backlog resumes.
-- **Directory boundary (CPR-34/ADR-0093)**: SCIM push and scheduled pull
-  project onto one identity/principal and the shared Group graph. Membership
-  is identity-keyed; provider source/resource ids remain provenance; only a
-  separately PDP-governed `scope_grants` assignment turns a directory group
-  into product authority. There is no directory-only permission model.
-- **Phase 4 — ecosystem**: SDKs, adapters, import/export, telemetry, DR and
-  scale-out work follows the public context-platform contract.
-- **Phase 5 — context platform hard cut (current)**: generic governed scopes;
-  workspace/project/session runtime; stable Knowledge and immutable revisions;
-  capture candidates; explainable retrieval; versioned skills, tools and
-  configuration; one generated application contract; security/evaluation/demo
-  gates; then one clean pre-1.0 baseline schema. ADR-0068 locks the programme.
+[STATUS](backlog/STATUS.md) owns feature identity and open work;
+[production readiness](PRODUCTION_READINESS.md) owns qualification gaps.
+Historical implementation phases are not a contributor setup sequence.
+Use [the developer guide](DEVELOPMENT.md) for source setup and checks.
 
 ---
 
@@ -258,8 +243,7 @@ global `/v1/recall` route and no direct-store adapter path.
   tests constrain the current implementation. AUTHZ-6 is an open spike, not
   evidence of an OpenFGA adapter.
 - **Graph layer earning its place** → graph features are additive (retrieval works without
-  graph-links); degrade gracefully. (Was "AGE maturity"; ADR-0043 removed the engine risk by
-  removing the engine. Governed Configuration can set the graph budget to zero;
+  graph-links); degrade gracefully. (ADR-0097 uses plain PostgreSQL relations. Governed Configuration can set the graph budget to zero;
   there is no Cargo feature flag or second graph runtime.)
 - **Background execution coupling** → PostgreSQL remains operation authority,
   workers re-enter forced-RLS tenant transactions and experimental executors

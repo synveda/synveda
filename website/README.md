@@ -4,7 +4,8 @@ The site is semantic HTML/CSS with no browser JavaScript, framework, remote
 fonts, analytics or product-runtime dependency. [ADR-0113](../docs/adr/adr-0113-static-public-site-and-brand.md)
 records the boundary. Product claims come from the checkout, especially the
 [adapter registry](../adapters/registry.json) and [readiness register](../docs/PRODUCTION_READINESS.md).
-The approved boards remain in design/reference and never enter the public build.
+The canonical editable assets live in `assets/brand/`; local design reference
+boards are not repository prerequisites or public build inputs.
 
 ## Build and preview
 

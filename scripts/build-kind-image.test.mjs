@@ -28,6 +28,8 @@ exit "\${SYNVEDA_BUILD_TEST_STATUS:-0}"
           SYNVEDA_KIND_GHA_CACHE: "0",
           ACTIONS_RUNTIME_TOKEN: "",
           ACTIONS_RESULTS_URL: "",
+          GITHUB_EVENT_NAME: "",
+          GITHUB_REF: "",
           SYNVEDA_BUILD_TEST_ARGS: log,
           SYNVEDA_BUILD_TEST_STATUS: "0",
           ...extra,
@@ -42,6 +44,8 @@ const cacheRuntime = {
   SYNVEDA_KIND_GHA_CACHE: "1",
   ACTIONS_RUNTIME_TOKEN: "test-only-runtime-token",
   ACTIONS_RESULTS_URL: "https://cache.example.invalid/",
+  GITHUB_EVENT_NAME: "push",
+  GITHUB_REF: "refs/heads/main",
 };
 
 test("local acceptance builds the requested Dockerfile without GitHub credentials", (t) => {
@@ -65,6 +69,22 @@ test("CI builds and loads each image with a separate intermediate-layer cache", 
       "--cache-from", `type=gha,version=2,scope=kind-${scope},timeout=2m`,
       "--cache-to", `type=gha,version=2,scope=kind-${scope},mode=max,ignore-error=true,timeout=2m`, "."]);
     assert.ok(!result.args.join(" ").includes(cacheRuntime.ACTIONS_RUNTIME_TOKEN));
+  }
+});
+
+test("PRs and non-main runs restore layers without publishing a cache", (t) => {
+  const f = fixture(t);
+  for (const context of [
+    { GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/12/merge" },
+    { GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/heads/main" },
+    { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/contributor" },
+    { GITHUB_EVENT_NAME: "", GITHUB_REF: "" },
+  ]) {
+    const result = f.run({ ...cacheRuntime, ...context });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(result.args.includes("--cache-from"));
+    assert.ok(!result.args.includes("--cache-to"));
+    assert.equal(result.args.at(-1), ".");
   }
 });
 

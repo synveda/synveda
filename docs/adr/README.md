@@ -1,13 +1,13 @@
 # Architecture decision record index
 
-This is the current classification overlay for Synveda's ADRs. ADR bodies
-remain the historical decision record and are not rewritten when the product
-changes. The header-status column preserves each ADR's declared lifecycle
-status, with long amendment prose compacted. `Current` means the rationale or
-proposal has not been removed; it does not turn a `Proposed` header into an
-accepted or implemented decision.
+Use the current decisions for new work. Partially superseded records retain
+rationale that still matters; their replacement column identifies the current
+boundary. Proposed records describe open work, not implemented capabilities.
+The [technical architecture](../SYNVEDA_TECH_PLAN.md) provides the overview.
 
-The template is intentionally excluded. Every other ADR appears exactly once.
+Each retained ADR appears once below. Retired identifiers remain discoverable
+through their replacement link; their full history is in Git. Records are not
+renumbered. The template is excluded.
 
 ## ADR-0001 through ADR-0034
 
@@ -16,7 +16,7 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0001](adr-0001-postgres-first-rust-stack.md) | Postgres-first Rust stack | Accepted | Current | FND-6 (FND-1, FND-2) | — |
 | [ADR-0002](adr-0002-cedar-embedded-pdp.md) | Embedded Cedar PDP | Accepted | Current | FND-6, AUTHZ-1, AUTHZ-6 | The application facade is elaborated by ADR-0012. |
 | [ADR-0003](adr-0003-vedaflow-in-postgres.md) | VedaFlow in Postgres | Accepted; object model specified by ADR-0030 | Current | FND-6, FLOW-1..8 | Object storage is ADR-0030; typed review is ADR-0091. |
-| [ADR-0004](adr-0004-multi-graph-age-schema.md) | Named Apache AGE graphs | Accepted; amended; engine choice superseded by ADR-0043 | Removed with Record/AGE graph (ADR-0097/CPR-38) | FND-6, GRPH-1..4 | ADR-0097 defines bounded `KnowledgeRelation` expansion without AGE. |
+| ADR-0004 → [replacement](adr-0097-bounded-knowledge-graph-retrieval.md) | Named Apache AGE graphs | Accepted; amended; engine choice superseded by ADR-0043 | Removed; rationale in ADR-0097 | FND-6, GRPH-1..4 | ADR-0097 defines bounded `KnowledgeRelation` expansion without AGE. |
 | [ADR-0005](adr-0005-uuidv7-identifiers.md) | UUIDv7 domain identifiers | Accepted | Current | FND-3, FND-4 | — |
 | [ADR-0006](adr-0006-bitemporal-tables.md) | Bitemporal current/history tables | Accepted | Current | FND-4 | Knowledge history and temporal queries are refined by ADR-0080 and ADR-0096. |
 | [ADR-0007](adr-0007-observability-baseline.md) | Tracing, OpenTelemetry and metrics baseline | Accepted; deferred clause landed | Current | FND-5 | — |
@@ -41,7 +41,7 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0026](adr-0026-inject-api.md) | Injection degradation ladder | Accepted; partially superseded by ADR-0078 | Current (partially superseded by ADR-0078) | CTX-3 | `/v1/inject` was removed; bounded context-run degradation remains. |
 | [ADR-0027](adr-0027-claude-code-adapter.md) | Claude Code adapter | Accepted; amended three times | Current | ADPT-1, ADPT-8, CPR-14 | Lifecycle evidence is ADR-0079; support claims are governed by ADR-0098. |
 | [ADR-0028](adr-0028-eval-harness.md) | Unprivileged evaluation harness | Accepted | Current | EVAL-1 | Product outcome methodology is extended by ADR-0099. |
-| [ADR-0029](adr-0029-graph-traversal-gate.md) | Apache AGE adoption gate | Accepted | Removed with Apache AGE graph (ADR-0043/GRPH-1) | GRPH-4, GRPH-1..3, MEM-5, CTX-5 | ADR-0097 carries the surviving explicit-bound and fallback requirements. |
+| ADR-0029 → [replacement](adr-0097-bounded-knowledge-graph-retrieval.md) | Apache AGE adoption gate | Accepted | Removed; budget and fallback in ADR-0097 | GRPH-4, GRPH-1..3, MEM-5, CTX-5 | ADR-0097 carries the surviving explicit-bound and fallback requirements. |
 | [ADR-0030](adr-0030-vedaflow-object-store.md) | VedaFlow content-addressed object store | Accepted | Current | FLOW-1 | — |
 | [ADR-0031](adr-0031-vedaflow-channels.md) | VedaFlow channels and derived publication | Accepted | Current | FLOW-2 | — |
 | [ADR-0032](adr-0032-vedaflow-proposals-approval-matrix.md) | VedaFlow proposal approval matrix | Accepted | Current (partially superseded by ADR-0091) | FLOW-3 | ADR-0091 replaces recorded proposal review decision 7 with one typed artifact lifecycle. |
@@ -60,8 +60,8 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0040](adr-0040-decay-ttl-and-staleness.md) | Record decay and staleness | Accepted | Superseded by ADR-0096 | MEM-6 | Governed, version-evidenced Knowledge freshness replaces pack-time Record decay. |
 | [ADR-0041](adr-0041-tiered-injection.md) | Tiered context rendering | Accepted | Current (partially superseded by ADR-0084) | CTX-4 | ContextRun selection and authored-context composition replace the inject-specific surface. |
 | [ADR-0042](adr-0042-recall-api-and-mcp-tool.md) | Scoped recall query | Accepted; partially superseded by ADR-0078 | Current (partially superseded by ADR-0078) | CTX-5 | `/v1/recall` was removed; Knowledge/context queries and the generic MCP boundary carry the surviving query doctrine. |
-| [ADR-0043](adr-0043-graph-schema.md) | Record adjacency graph | Superseded by ADR-0097 | Superseded by ADR-0097 | GRPH-1, GRPH-2, GRPH-3 | Bounded `KnowledgeRelation` traversal replaces the Record graph. |
-| [ADR-0044](adr-0044-graph-linking.md) | Record extraction graph linking | Superseded by ADR-0097 | Superseded by ADR-0097 | GRPH-2, GRPH-3 | Explicit immutable Knowledge relations replace extractor-written graph edges. |
+| ADR-0043 → [replacement](adr-0097-bounded-knowledge-graph-retrieval.md) | Record adjacency graph | Superseded by ADR-0097 | Removed; replaced by ADR-0097 | GRPH-1, GRPH-2, GRPH-3 | Bounded `KnowledgeRelation` traversal replaces the Record graph. |
+| ADR-0044 → [replacement](adr-0097-bounded-knowledge-graph-retrieval.md) | Record extraction graph linking | Superseded by ADR-0097 | Removed; candidate/graph boundary in ADR-0097 | GRPH-2, GRPH-3 | Explicit immutable Knowledge relations replace extractor-written graph edges. |
 | [ADR-0045](adr-0045-audit-query-surface.md) | Tenant-complete audit query | Accepted | Current | AUD-2, AUD-3, AUD-4, CNSL-3 | ADR-0092 adds typed context-platform evidence and frozen-head export. |
 | [ADR-0046](adr-0046-extraction-quality-suite.md) | Extraction quality gate | Accepted | Current | EVAL-2 | ADR-0099 incorporates it into the product outcome suite. |
 | [ADR-0047](adr-0047-retrieval-and-injection-quality.md) | Retrieval and context quality gate | Accepted | Current (partially superseded by ADR-0099) | EVAL-4 | ContextRun delivery/use outcomes replace the deleted injection lens. |
@@ -125,8 +125,8 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0100](adr-0100-public-api-pulseboard-demo.md) | Resumable public-API demo | Accepted | Current | CPR-41 | Partially supersedes ADR-0066's demo shape. |
 | [ADR-0101](adr-0101-production-hardening-boundary.md) | Production-hardening boundary | Accepted | Current | CPR-44 | — |
 | [ADR-0102](adr-0102-portable-reference-deployment.md) | Portable reference deployment contract | Accepted; amended by ADR-0105 and 2026-09-19 | Current (live validation pending) | CPR-45 | Compose is the canonical single-host reference; Keycloak replaces Rauthy, workers are separate and optional Apalis remains a leaf adapter. ADR-0105 replaces provider simulation with direct Compose acceptance; confirmed hosts installation can renew a verified device-only witness change. |
-| [ADR-0103](adr-0103-cooperative-live-provider-reservation.md) | Cooperative aggregate live-provider reservation | Superseded by ADR-0105 | Removed | CPR-45 | The non-executing provider-reservation fixture was deleted; a supported Docker engine is an operator-owned prerequisite. |
-| [ADR-0104](adr-0104-indivisible-live-provider-effect-generation.md) | Indivisible live-provider effect generation | Superseded by ADR-0105 | Removed | CPR-45 | The fixture-only provider-effect grammar was deleted; acceptance now exercises the canonical Compose graph directly. |
+| ADR-0103 → [replacement](adr-0105-direct-compose-acceptance.md) | Cooperative aggregate live-provider reservation | Superseded by ADR-0105 | Removed; replaced by ADR-0105 | CPR-45 | The non-executing provider-reservation fixture was deleted; a supported Docker engine is an operator-owned prerequisite. |
+| ADR-0104 → [replacement](adr-0105-direct-compose-acceptance.md) | Indivisible live-provider effect generation | Superseded by ADR-0105 | Removed; replaced by ADR-0105 | CPR-45 | The fixture-only provider-effect grammar was deleted; acceptance now exercises the canonical Compose graph directly. |
 | [ADR-0105](adr-0105-direct-compose-acceptance.md) | Direct Docker Compose acceptance | Accepted | Current | CPR-45 | Supersedes ADR-0103/0104 and removes container-engine simulation. Logical recovery, Operations and the Apalis canary are implemented; live Docker/upgrade/external acceptance remains, while S3/WAL-PITR stays with OPS-5. |
 | [ADR-0106](adr-0106-authenticated-client-task-boundary.md) | Explicit task identity and public client interoperability | Accepted; amended | Current | ADPT-1, ADPT-2, ADPT-4, CPR-12, CPR-23, CPR-39 | Amends ADR-0057's launch identity; preserves public API enforcement and ADR-0098 evidence gates. SDK build metadata and repository Apache-2.0 licence/notice are checked through installed packages; runtime test evidence is separate from public support policy. |
 | [ADR-0107](adr-0107-copilot-context-adapter.md) | Copilot context and observations | Accepted; amended | Current | ADPT-9 | Native CLI 1.0.83 start/resume and the shared SDK task are verified for the named source-build setup. Text/tool events reuse the bounded reader and spool; runtime exit retains task identity. ADR-0065 packages the existing runtime. |

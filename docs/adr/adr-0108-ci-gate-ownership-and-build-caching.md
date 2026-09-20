@@ -80,3 +80,22 @@ fixture. Cache credentials are supplied through GitHub's runtime environment,
 never command arguments or repository files. Cached layers contain build
 inputs and outputs, not acceptance databases or generated runtime secrets.
 No image is published by CI and no production-readiness claim changes.
+
+## Amendment: contributor validation and fork isolation (2026-09-20)
+
+`make check-fast` composes the existing local documentation, generated-contract
+and static boundary checks. It needs Git, Make and Node, without a database,
+model account or Python environment. It is a first feedback loop, not a
+replacement for focused tests or the deeper CI jobs. `make ci` is a local
+aggregate; hosted CI additionally owns database-backed and Kind acceptance.
+
+PR validation uses GitHub-hosted runners, a read-only repository token and
+checkouts without persisted credentials. Only main may save reusable Rust or
+Kind build caches; PRs may restore them. Release publication stays in the
+separate release workflow. Existing check names and all-PR triggers remain,
+including documentation-only PRs. No privileged PR event or maintainer runner
+is needed for a first contribution.
+
+Contributor instructions live in CONTRIBUTING and the source-development
+guide. Small fixes use an existing feature ID and need neither an advance issue
+nor an ADR unless they change an architectural decision.

@@ -7,7 +7,7 @@ The initial slice in `sdks/` now generates 15 operations and 52 schemas from the
 ## Scope
 
 The authorised initial slice and execution checkpoints are in
-[the interoperability plan](../INTEROPERABILITY_PLAN.md), under ADR-0106.
+[the SDK guide](../../sdks/README.md), under ADR-0106.
 It adds approved Skill retrieval and typed Knowledge proposal submission to
 the shared authenticated scenario without closing the wider release scope.
 
@@ -156,9 +156,9 @@ query. It matches lifecycle snapshots and delivery identities before pagination;
 isolation and unchanged canonical hashes. Canonical Compose up/smoke and live
 Keycloak queries returned all 23 saved events, including open/end, across 12
 pages with unchanged prefix hashes and continued workspace denial; see
-`docs/INTEROPERABILITY_PLAN.md`. Package ownership, licence, release
-provenance and broader runtime/server decisions still require resolution before
-publication.
+[the Codex qualification](../integrations/codex.md). Registry access, release
+provenance and broader runtime/server decisions remain open; Apache-2.0
+licensing is settled under ADR-0106.
 
 The completed CPR-39 run at `8e90358` adds automatic compaction and native
 outage/recovery on the same task used by both SDKs, plus live public-API grant
@@ -177,9 +177,9 @@ consumers, verifies public types/resources and reuses all nine tests per SDK.
 It passed on pinned Docker Linux arm64 Node 22.23.2/Python 3.11.16 and macOS
 arm64 Node 24.18.0/Python 3.14.6, with identical archive hashes and no skips.
 CI now invokes the same check; that remote job and the broader CI/database
-suites were not rerun for this packaging-only batch. Exact hashes, corrected
-environment failures and reproduction are in `docs/INTEROPERABILITY_PLAN.md`
-and `sdks/README.md`.
+suites were not rerun for this packaging-only batch. Current reproduction commands and the tested contract are in
+[the SDK guide](../../sdks/README.md#check-local-package-archives). Older archive
+hashes belong to their historical build inputs, not the current API contract.
 
 **Compatibility increment (2026-09-19; starting at `06bcc096f7d56d5728e2522c21265c94fa07836e`)**
 
@@ -239,8 +239,8 @@ standard licence metadata. Both native arm64 runtime pairs pass all nine tests
 per SDK, zero skips, and produce identical archives across clean builds and
 platforms. Synthetic file/SPDX changes are refused by the drift gate.
 Six OpenAPI tests and strict workspace Clippy pass. The
-[interoperability checkpoint](../INTEROPERABILITY_PLAN.md#repository-licence-checkpoint)
-records the hashes, focused gates and explicit validation limits. Licence
+[SDK compatibility guide](../../sdks/README.md#compatibility-and-release-boundary)
+records the current contract and validation limits. Licence
 selection is complete; registry publication and wider ADPT-4 scope remain open.
 
 Next: resolve the concrete choices in the release decision proposal above,

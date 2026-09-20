@@ -169,8 +169,9 @@ before host death. Skill file reading is observed, but automatic activation is
 not claimed. The audit `session_id` filter now matches both delivery identities
 and lifecycle snapshots. For a completed history across pages, hold `until`
 fixed: audit reads append their own evidence. The earlier qualification receipt
-retains the original filter failure; the correction and its validation are
-recorded in the [interoperability plan](../INTEROPERABILITY_PLAN.md).
+retains the original filter failure; the correction is covered by
+[the audit-query regression suite](../../crates/synveda-gateway/tests/audit_query.rs)
+and the qualification fixtures linked above.
 CPR-39's applicable ADR-0098 lifecycle criteria pass for this exact setup.
 
 ## Reproduce the qualification boundaries

@@ -16,6 +16,10 @@ dist/
 # for `node --test`, separate from the Vite bundle in dist/.
 dist-test/
 *.tsbuildinfo
+# Local outputs from the documented Python SDK and evaluation checks.
+/sdks/python/.venv/
+/sdks/python/**/__pycache__/
+/eval-report/
 .DS_Store
 Thumbs.db
 

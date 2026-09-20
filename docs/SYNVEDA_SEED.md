@@ -1,8 +1,9 @@
-# SYNVEDA — Project Seed Prompt
+# Synveda — product direction and invariants
 
-> Feed this document to your coding agent as the founding context for all work on Synveda.
-> It defines what the product is, the invariants that must never be violated, the architecture,
-> the domain model, and the build order. When in doubt, this document wins.
+This document defines the product direction, domain and mandatory invariants.
+Current implementation and maturity are established by code, generated contracts,
+accepted current ADRs and [production readiness](PRODUCTION_READINESS.md).
+Start contributing through [CONTRIBUTING](../CONTRIBUTING.md).
 
 ---
 
@@ -202,8 +203,10 @@ Deploy: canonical Compose or Helm, one gateway/core worker; optional Apalis cana
 **Language decisions**: core/gateway/worker in **Rust** (one product image with
 separate request and worker binaries, on-prem friendly, latency-critical read
 path). Claude Code adapter in **TypeScript** (hooks ecosystem).
-The admin console is React and uses the generated OpenAPI client. Public Rust,
-TypeScript and Python SDKs remain open work; deleted stubs are not support.
+The admin console is React and uses the generated OpenAPI client. TypeScript
+and Python SDKs implement a local 15-operation slice; publication and support
+policy remain open under [ADPT-4](backlog/ADPT-4.md). See the
+[SDK contract](../sdks/README.md) for its tested limits. No public Rust SDK ships.
 
 > **Footnote, added by ADPT-2 (ADR-0057, amended 2026-08-05).** The *generic MCP
 > server* in the adapters row ships as `synveda mcp`, a subcommand of the Rust CLI,
@@ -261,46 +264,20 @@ Dependency rule: `types ← crypto ← {policy, store, identity, audit, vedaflow
 ← retrieval/ingest ← gateway`; `synveda-okf` is a types-only format leaf.
 `synveda-apalis` is an optional deployment leaf over the gateway/store seams;
 no core or public-contract crate imports it. Nothing else imports "upward".
-Adapters and future SDKs depend only on the public API, never on crates. The
+Adapters and SDKs depend only on the public API, never on crates. The
 check enumerates the CLI's local bootstrap exceptions and keeps the evaluation
 crate dependency-free.
 
 ---
 
-## 9. Build order (vertical slices, each independently demoable)
+## 9. Current delivery scope
 
-**Phase 0 — Skeleton (delivered)**
-Repo scaffold, CI, `synveda-types`, ADR-0001, Docker Compose and the
-Postgres-first development stack.
-
-**Phase 1 — The original spine (delivered, runtime model replaced in Phase 5)**
-OIDC, Cedar, RLS, audit and the first Claude Code slice proved the thesis. The
-fixed hierarchy, global observe/inject/recall routes and record aggregate from
-that slice are deleted by the pre-1.0 Phase 5 cut; their invariants survive on
-governed scopes, sessions and Knowledge.
-
-**Phase 2 — Governance depth (delivered, later re-cut)**
-Policy packs, governed relaxations, sensitivity, redaction, audit query,
-authored context packs and bitemporal Knowledge queries survive on the current
-scope/Knowledge model.
-
-**Phase 3 — Enterprise surface (paused, partially delivered)**
-SCIM, directory projection, Skills, Tools, the console and Helm foundations are
-implemented. Live Entra/Okta evidence, scale-out, tenancy operations and
-regional routing remain open in the backlog.
-
-**Phase 4 — Ecosystem (open)**
-The initial Python/TypeScript SDK slice and two named harness lifecycles have
-checked evidence; package publication, importers and wider client support remain open.
-The committed evaluation suite covers the implemented context platform.
-
-**Phase 5 — Context platform hard cut (current runtime)**
-One scope tree and role vocabulary; workspace/project/session runtime; stable
-Knowledge with immutable revisions and provenance; capture candidates;
-explainable context planning; versioned skills/tools/configuration; public API
-and generated console client; adversarial acceptance; one clean pre-1.0 schema.
-CPR-39's second verified lifecycle is Codex CLI 0.152.0; the registry and
-generated client-support matrix define its tested setup and limits.
+[The feature inventory](backlog/STATUS.md) owns delivery state and links to open
+work. The current runtime uses governed scopes, Sessions and immutable Knowledge;
+there is no earlier Record or hierarchy compatibility path. Named client support
+comes from [the generated matrix](CLIENT_SUPPORT.md), not the product direction
+in this document. [Production readiness](PRODUCTION_READINESS.md) owns the
+remaining operational and enterprise qualification gaps.
 
 ---
 
@@ -322,13 +299,3 @@ generated client-support matrix define its tested setup and limits.
 - SOC 2 / ISO 27001 mapping remains open as AUD-5.
 - PDP, RLS, VedaFlow, erasure and context selection require adversarial and
   behaviour-level tests. Coverage percentages are reported only when measured.
-
----
-
-## 11. Instructions to the coding agent
-
-Follow `AGENTS.md`, the current feature record and the accepted ADRs for the
-area being changed. Do not restart the historical build order. When prose
-conflicts with executable code, generated contracts or current accepted ADRs,
-fix the prose or raise the decision before implementation; §2 remains the
-product invariant.
