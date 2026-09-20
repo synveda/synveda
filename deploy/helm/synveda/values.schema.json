@@ -770,6 +770,9 @@
             },
             "storageClass": {
               "type": "string"
+            },
+            "existingClaim": {
+              "type": "string"
             }
           },
           "required": [
@@ -1225,6 +1228,180 @@
           "type": "string"
         }
       }
+    },
+    "platform": {
+      "enum": [
+        "kubernetes",
+        "openshift"
+      ]
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "existingCertificateSecret": {
+          "type": "string"
+        },
+        "keycloakCertificateSecret": {
+          "type": "string"
+        },
+        "routerServiceAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "namespace": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "name",
+            "namespace"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "annotations",
+        "existingCertificateSecret",
+        "keycloakCertificateSecret",
+        "routerServiceAccount"
+      ]
+    },
+    "outbound": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proxyExistingSecret": {
+          "type": "string"
+        },
+        "caBundleExistingSecret": {
+          "type": "string"
+        },
+        "caBundleSecretKey": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "proxyExistingSecret",
+        "caBundleExistingSecret",
+        "caBundleSecretKey"
+      ]
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingress": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "$ref": "#/definitions/networkPeer"
+          }
+        },
+        "dns": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "$ref": "#/definitions/networkPeer"
+          }
+        },
+        "database": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "$ref": "#/definitions/networkPeer"
+          }
+        },
+        "oidc": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/egressRule"
+          }
+        },
+        "extraEgress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "gateway": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/egressRule"
+              }
+            },
+            "worker": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/egressRule"
+              }
+            },
+            "install": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/egressRule"
+              }
+            },
+            "keycloak": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/egressRule"
+              }
+            },
+            "tei": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/egressRule"
+              }
+            }
+          },
+          "required": [
+            "gateway",
+            "worker",
+            "install",
+            "keycloak",
+            "tei"
+          ]
+        },
+        "postgresIngress": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ingressRule"
+          }
+        },
+        "postgresEgress": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/egressRule"
+          }
+        }
+      },
+      "required": [
+        "enabled",
+        "ingress",
+        "dns",
+        "database",
+        "oidc",
+        "extraEgress",
+        "postgresIngress",
+        "postgresEgress"
+      ]
     }
   },
   "required": [
@@ -1254,6 +1431,223 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|[eptgmk])?$"
+    },
+    "networkPeer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "podSelector": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "matchLabels": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "matchExpressions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "operator": {
+                    "enum": [
+                      "In",
+                      "NotIn",
+                      "Exists",
+                      "DoesNotExist"
+                    ]
+                  },
+                  "values": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "operator"
+                ]
+              }
+            }
+          },
+          "required": []
+        },
+        "namespaceSelector": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "matchLabels": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "matchExpressions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "operator": {
+                    "enum": [
+                      "In",
+                      "NotIn",
+                      "Exists",
+                      "DoesNotExist"
+                    ]
+                  },
+                  "values": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "operator"
+                ]
+              }
+            }
+          },
+          "required": []
+        },
+        "ipBlock": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cidr": {
+              "type": "string",
+              "pattern": "^.+/[0-9]+$"
+            },
+            "except": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "cidr"
+          ]
+        }
+      },
+      "required": [],
+      "minProperties": 1,
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "ipBlock",
+              "podSelector"
+            ]
+          },
+          {
+            "required": [
+              "ipBlock",
+              "namespaceSelector"
+            ]
+          }
+        ]
+      }
+    },
+    "egressRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "to": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/networkPeer"
+          }
+        },
+        "ports": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "protocol": {
+                "enum": [
+                  "TCP",
+                  "UDP",
+                  "SCTP"
+                ]
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "required": [
+              "port",
+              "protocol"
+            ]
+          }
+        }
+      },
+      "required": [
+        "to",
+        "ports"
+      ]
+    },
+    "ingressRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/networkPeer"
+          }
+        },
+        "ports": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "protocol": {
+                "enum": [
+                  "TCP",
+                  "UDP",
+                  "SCTP"
+                ]
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "required": [
+              "port",
+              "protocol"
+            ]
+          }
+        }
+      },
+      "required": [
+        "from",
+        "ports"
+      ]
     }
   },
   "allOf": [

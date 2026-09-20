@@ -24,6 +24,47 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# OpenShift omits numeric IDs from application/TEI pod contexts. See PORTABILITY.md
+# for the restricted-v2/v3 overlays, admission evidence and v3 post-renderer.
+platform: kubernetes
+
+route:
+  enabled: false
+  annotations: {}
+  # Empty uses the existing router's default certificate. OpenShift 4.19+.
+  existingCertificateSecret: ""
+  keycloakCertificateSecret: ""
+  routerServiceAccount:
+    name: router
+    namespace: openshift-ingress
+
+# Native HTTP client inputs only; OIDC deliberately ignores proxy variables.
+# The Secret must contain HTTP_PROXY, HTTPS_PROXY and NO_PROXY (empty permitted).
+outbound:
+  proxyExistingSecret: ""
+  caBundleExistingSecret: ""
+  caBundleSecretKey: ca-bundle.crt
+
+# Opt-in: specify actual peers before isolating workloads. No FQDN enforcement.
+# ingress/dns/database are NetworkPolicyPeer lists; oidc and extraEgress contain
+# complete NetworkPolicyEgressRule objects, including destination ports.
+networkPolicy:
+  enabled: false
+  ingress: []
+  dns: []
+  database: []
+  oidc: []
+  extraEgress:
+    gateway: []
+    worker: []
+    install: []
+    keycloak: []
+    tei: []
+  # CNPG operator-managed pods need operator/control-plane allowances in addition
+  # to SQL/replication. Required in CNPG mode when policies are enabled.
+  postgresIngress: []
+  postgresEgress: []
+
 # ── The gateway ──────────────────────────────────────────────────────────
 gateway:
   # There is no `replicas` key, and setting one is an error rather than a
@@ -306,7 +347,9 @@ keycloak:
   resources:
     requests:
       cpu: 500m
-      memory: 768Mi
+      # OPS-11's four-agent run observed about 1 GiB after identity startup.
+      # Reserve headroom; this remains a starting point, not a capacity promise.
+      memory: 1280Mi
     limits:
       memory: 2Gi
 
@@ -350,6 +393,7 @@ tei:
   # BGE-M3 is ~2.3 GB. A pod that re-downloads it on every restart is a pod
   # that is never ready, so the cache is a volume rather than emptyDir.
   cache:
+    existingClaim: ""
     size: 20Gi
     storageClass: ""
   resources:
@@ -423,6 +467,8 @@ serviceAccount:
 
 podSecurityContext:
   runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
   # No fixed UID/GID: ordinary Kubernetes uses the image UID; platforms may
   # assign an allowed identity. Projected Secrets are readable only in the
   # containers that mount them (0444); no application container shares them.
@@ -431,3 +477,5 @@ securityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault

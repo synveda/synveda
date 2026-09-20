@@ -46,7 +46,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- include "synveda.podSecurity" (dict "root" . "context" .Values.podSecurityContext) | nindent 8 }}
       initContainers:
         {{- if eq .Values.postgres.mode "cnpg" }}
         - name: database-bootstrap
@@ -88,7 +88,10 @@ spec:
               chmod 0600 /run/secrets/database_roles.json
               {{- if .Values.keycloak.enabled }}
               mkdir -p /run/database-authority/private
-              chmod 0700 /run/database-authority/private
+              # fsGroup volumes carry setgid. Clear inherited special bits and
+              # select our own primary group without root or changing the mount.
+              chgrp "$(id -g)" /run/database-authority/private
+              chmod 00700 /run/database-authority/private
               /usr/local/bin/synveda-database-bootstrap synveda
               /usr/local/bin/synveda-database-bootstrap keycloak
               # This content-free witness crosses images with different UIDs.
@@ -149,7 +152,8 @@ spec:
               {{- if and .Values.keycloak.enabled (eq .Values.postgres.mode "cnpg") }}
               umask 077
               mkdir -p /run/preflight-authority/private
-              chmod 0700 /run/preflight-authority/private
+              chgrp "$(id -g)" /run/preflight-authority/private
+              chmod 00700 /run/preflight-authority/private
               cp /run/database-authority/keycloak-cluster.json /run/preflight-authority/private/keycloak-cluster.json
               chmod 0600 /run/preflight-authority/private/keycloak-cluster.json
               {{- end }}
@@ -180,6 +184,8 @@ spec:
               value: /run/preflight-authority/private/keycloak-cluster.json
             {{- end }}
           volumeMounts:
+            - name: product-tmp
+              mountPath: /tmp
             {{- include "synveda.databaseTransportMounts" . | nindent 12 }}
             - name: preflight-databases
               mountPath: /run/secrets/synveda-preflight
@@ -211,6 +217,8 @@ spec:
             - name: SYNVEDA_DATABASE_ROLES_FILE
               value: /etc/synveda/database/roles.json
           volumeMounts:
+            - name: product-tmp
+              mountPath: /tmp
             {{- include "synveda.databaseTransportMounts" . | nindent 12 }}
             - name: migrator-database
               mountPath: /run/secrets/synveda-migrator
@@ -246,6 +254,8 @@ spec:
               value: /etc/synveda/database/roles.json
             {{- include "synveda.databaseTransportEnv" . | nindent 12 }}
           volumeMounts:
+            - name: product-tmp
+              mountPath: /tmp
             {{- include "synveda.databaseTransportMounts" . | nindent 12 }}
             - name: tenant-kms
               mountPath: /run/secrets/synveda-kms
@@ -274,6 +284,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       volumes:
+        - name: product-tmp
+          emptyDir:
+            sizeLimit: 64Mi
         {{- include "synveda.databaseTransportVolumes" . | nindent 8 }}
         {{- if .Values.install.tenant.slug }}
         - name: tenant-kms

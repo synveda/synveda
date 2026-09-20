@@ -1,0 +1,24 @@
+# Render target: OpenShift 4.19 / restricted-v2. Not runtime qualification.
+# Layer over your external/starter values; replace both public DNS names there.
+platform: openshift
+route:
+  enabled: true
+  # existingCertificateSecret: application-tls
+  # keycloakCertificateSecret: identity-tls
+gateway:
+  podAnnotations:
+    openshift.io/required-scc: restricted-v2
+worker:
+  podAnnotations:
+    openshift.io/required-scc: restricted-v2
+install:
+  podAnnotations:
+    openshift.io/required-scc: restricted-v2
+keycloak:
+  podAnnotations:
+    openshift.io/required-scc: restricted-v2
+# OpenShift 4.20 / restricted-v3: also pass
+# --post-renderer synveda-openshift-v3 (Helm 4; see PORTABILITY.md)
+# on EVERY install and upgrade. It selects v3 and sets hostUsers=false on all
+# rendered workloads, including Keycloak. CNPG-generated pods are not rendered
+# by Helm and need separately qualified operator/storage support.

@@ -1,0 +1,82 @@
+{{- if .Values.route.enabled -}}
+{{- if not (.Capabilities.APIVersions.Has "route.openshift.io/v1") -}}
+{{- fail "route.enabled requires the existing OpenShift route.openshift.io/v1 API (offline: --api-versions route.openshift.io/v1)" -}}
+{{- end -}}
+{{- if or .Values.ingress.enabled (and .Values.keycloak.enabled .Values.keycloak.ingress.enabled) -}}
+{{- fail "select exactly one exposure path: Route or Ingress" -}}
+{{- end -}}
+{{- range $url := list .Values.gateway.publicUrl -}}
+{{- if not (regexMatch "^https://[a-zA-Z0-9.-]+$" $url) -}}
+{{- fail "Routes require an HTTPS origin without a port or path" -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.keycloak.enabled (not (regexMatch "^https://[a-zA-Z0-9.-]+$" .Values.keycloak.publicUrl)) -}}
+{{- fail "Keycloak Routes require an HTTPS origin without a port or path" -}}
+{{- end -}}
+{{- if and (not .Values.keycloak.enabled) .Values.route.keycloakCertificateSecret -}}
+{{- fail "route.keycloakCertificateSecret requires packaged Keycloak" -}}
+{{- end -}}
+{{- if hasKey .Values.route.annotations "haproxy.router.openshift.io/set-forwarded-headers" -}}
+{{- fail "Route forwarding headers are always replaced; remove the override" -}}
+{{- end -}}
+{{- else if or .Values.route.annotations .Values.route.existingCertificateSecret .Values.route.keycloakCertificateSecret -}}
+{{- fail "route settings require route.enabled=true" -}}
+{{- end -}}
+{{- if and (eq .Values.platform "openshift") .Values.keycloak.enabled -}}
+{{- range $context := list .Values.keycloak.podSecurityContext .Values.keycloak.securityContext -}}
+{{- range $key := list "runAsUser" "runAsGroup" "fsGroup" -}}
+{{- if hasKey $context $key -}}{{ fail "OpenShift Keycloak must omit numeric runAsUser/runAsGroup/fsGroup" }}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.keycloak.enabled .Values.keycloak.test.enabled -}}
+{{- fail "the upstream Selenium Helm test is not a restricted workload; use the Synveda acceptance fixture" -}}
+{{- end -}}
+{{- if .Values.keycloak.enabled -}}
+{{- if not .Values.keycloak.serviceAccount.create -}}
+{{- fail "packaged Keycloak requires its chart-owned token-free ServiceAccount; the upstream pod cannot override token automount" -}}
+{{- end -}}
+{{- if or .Values.keycloak.securityContext.privileged .Values.keycloak.securityContext.capabilities.add -}}
+{{- fail "packaged Keycloak cannot request privilege or additional capabilities" -}}
+{{- end -}}
+{{- if or (ne (toJson .Values.keycloak.securityContext.capabilities.drop) (toJson (list "ALL"))) (ne .Values.keycloak.podSecurityContext.seccompProfile.type "RuntimeDefault") -}}
+{{- fail "packaged Keycloak requires dropped ALL capabilities and RuntimeDefault seccomp" -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.otel.endpoint (not (hasPrefix "http://" .Values.otel.endpoint)) -}}
+{{- fail "the OTLP gRPC client uses a private HTTP Collector; configure verified remote TLS on that Collector" -}}
+{{- end -}}
+{{- if and (not .Values.outbound.caBundleExistingSecret) (ne .Values.outbound.caBundleSecretKey "ca-bundle.crt") -}}
+{{- fail "outbound.caBundleSecretKey requires outbound.caBundleExistingSecret" -}}
+{{- end -}}
+{{- if and .Values.tei.cache.existingClaim .Values.tei.cache.storageClass -}}
+{{- fail "tei.cache.existingClaim cannot select a storageClass; configure the existing claim" -}}
+{{- end -}}
+{{- if and (not .Values.tei.enabled) .Values.tei.cache.existingClaim -}}
+{{- fail "tei.cache.existingClaim requires tei.enabled=true" -}}
+{{- end -}}
+{{- if .Values.networkPolicy.enabled -}}
+{{- range $key := list "ingress" "dns" "database" "oidc" -}}
+{{- if not (index $.Values.networkPolicy $key) -}}
+{{- fail (printf "networkPolicy.enabled requires explicit networkPolicy.%s allowances" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq .Values.postgres.mode "cnpg") (or (not .Values.networkPolicy.postgresIngress) (not .Values.networkPolicy.postgresEgress)) -}}
+{{- fail "CNPG NetworkPolicy requires postgresIngress for the operator and postgresEgress for the API server" -}}
+{{- end -}}
+{{- if and .Values.tei.enabled (not (hasPrefix "/data/" .Values.tei.model)) (not .Values.networkPolicy.extraEgress.tei) -}}
+{{- fail "TEI model download requires networkPolicy.extraEgress.tei or a preloaded /data/ model" -}}
+{{- end -}}
+{{- if and (ne .Values.extractor.kind "deterministic") (not .Values.networkPolicy.extraEgress.worker) -}}
+{{- fail "the extractor requires networkPolicy.extraEgress.worker" -}}
+{{- end -}}
+{{- if and (eq .Values.embedder "tei") (not .Values.tei.enabled) (or (not .Values.networkPolicy.extraEgress.gateway) (not .Values.networkPolicy.extraEgress.worker)) -}}
+{{- fail "external TEI requires gateway and worker extraEgress rules" -}}
+{{- end -}}
+{{- if and .Values.otel.endpoint (or (not .Values.networkPolicy.extraEgress.gateway) (not .Values.networkPolicy.extraEgress.worker)) -}}
+{{- fail "OTLP requires gateway and worker extraEgress rules" -}}
+{{- end -}}
+{{- if and .Values.outbound.proxyExistingSecret (or (not .Values.networkPolicy.extraEgress.gateway) (not .Values.networkPolicy.extraEgress.worker)) -}}
+{{- fail "HTTP proxies require gateway and worker extraEgress rules" -}}
+{{- end -}}
+{{- end -}}

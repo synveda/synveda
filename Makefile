@@ -399,6 +399,12 @@ chart-lint:
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
 	node scripts/check-helm-contract.mjs
 	node scripts/check-starter-contract.mjs
+	node scripts/check-portability-contract.mjs
+
+# Requires kubeconform 0.7.0 and network access to the pinned official schemas.
+.PHONY: chart-schema
+chart-schema:
+	node scripts/check-portability-schema.mjs
 
 # CPR-36/CPR-45: canonical Compose, Helm, generated API and the packaged
 # reference are one runtime. Unsafe legacy uninstall automation stays refused

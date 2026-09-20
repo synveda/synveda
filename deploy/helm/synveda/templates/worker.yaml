@@ -38,7 +38,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- include "synveda.podSecurity" (dict "root" . "context" .Values.podSecurityContext) | nindent 8 }}
       containers:
         - name: worker
           image: {{ include "synveda.image" . }}
@@ -47,6 +47,7 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
+            {{- include "synveda.outboundEnv" . | nindent 12 }}
             - name: DATABASE_URL_FILE
               value: /run/secrets/synveda-worker/database_url
             - name: SYNVEDA_DATABASE_ROLES_FILE
@@ -120,6 +121,7 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           volumeMounts:
+            {{- include "synveda.outboundMounts" . | nindent 12 }}
             {{- include "synveda.databaseTransportMounts" . | nindent 12 }}
             - name: runtime-secrets
               mountPath: /run/secrets/synveda-runtime
@@ -142,6 +144,7 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        {{- include "synveda.outboundVolumes" . | nindent 8 }}
         {{- include "synveda.databaseTransportVolumes" . | nindent 8 }}
         {{- include "synveda.runtimeSecretVolume" . | nindent 8 }}
         {{- if eq .Values.extractor.kind "claude" }}

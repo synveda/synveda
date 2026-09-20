@@ -295,9 +295,9 @@ requireMarkers("install Job Secret projection", install, [
 ]);
 
 const bootstrapPrivateLimit = install.match(
-  /name: bootstrap-private[\s\S]*?sizeLimit: ([0-9]+)Ki/,
+  /^ {8}- name: bootstrap-private\n[\s\S]*?sizeLimit: ([0-9]+)Ki/m,
 );
-if (!bootstrapPrivateLimit) fail("install Job lacks a bounded bootstrap-private volume");
+if (!bootstrapPrivateLimit) throw new Error("install Job lacks a bounded bootstrap-private volume");
 const maxCredentialBytes = 4096;
 const copiedInputBytes = 4 * maxCredentialBytes + 4096;
 const escapedPgpassBytes = 3 * (2 * maxCredentialBytes + 256);
@@ -306,14 +306,14 @@ if (
   Number.parseInt(bootstrapPrivateLimit[1], 10) * 1024 <
   copiedInputBytes + escapedPgpassBytes + bootstrapWorkingHeadroom
 ) {
-  fail("install Job bootstrap-private volume cannot hold every accepted bounded input");
+  throw new Error("install Job bootstrap-private volume cannot hold every accepted bounded input");
 }
 
 const bootstrapSnapshotLimit = install.match(
-  /name: bootstrap-snapshots[\s\S]*?sizeLimit: ([0-9]+)Mi/,
+  /^ {8}- name: bootstrap-snapshots\n[\s\S]*?sizeLimit: ([0-9]+)Mi/m,
 );
 if (!bootstrapSnapshotLimit || Number.parseInt(bootstrapSnapshotLimit[1], 10) !== 16) {
-  fail("install Job bootstrap-snapshots volume must match the bounded 16Mi Compose /tmp contract");
+  throw new Error("install Job bootstrap-snapshots volume must match the bounded 16Mi Compose /tmp contract");
 }
 
 const withTenant = render([

@@ -1,0 +1,28 @@
+# EXAMPLE ONLY: substitute actual selectors/CIDRs/ports before enabling.
+# RFC 5737 addresses below cannot reach your database/IdP. Standard policies
+# have no hostname semantics. See PORTABILITY.md for CNI/DNS/NAT prerequisites.
+networkPolicy:
+  enabled: true
+  ingress:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-ingress
+      podSelector:
+        matchLabels:
+          ingresscontroller.operator.openshift.io/deployment-ingresscontroller: default
+  dns:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-dns
+      podSelector:
+        matchLabels:
+          dns.operator.openshift.io/daemonset-dns: default
+  database:
+    - ipBlock:
+        cidr: 192.0.2.10/32
+  oidc:
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.20/32
+      ports:
+        - {protocol: TCP, port: 443}
