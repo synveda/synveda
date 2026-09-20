@@ -6,12 +6,14 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "check": "node brand.mjs --check && node build.mjs && node check.mjs",
+    "check": "node --test brand.test.mjs && node brand.mjs --check && node build.mjs && node check.mjs",
     "brand": "node brand.mjs",
     "preview": "node preview.mjs"
   },
   "devDependencies": {
-    "@napi-rs/canvas": "1.0.9",
+    "@xmldom/xmldom": "0.9.12",
+    "canvaskit-wasm": "0.42.0",
+    "canvg": "4.0.3",
     "fontkit": "2.0.4"
   }
 }

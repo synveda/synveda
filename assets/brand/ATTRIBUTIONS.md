@@ -18,8 +18,15 @@ The console bundles the same light/dark lockups, favicon and WOFF2 directly
 from these sources. Its Vite build includes the font licence as
 assets/Inter-OFL.txt; no external font or image request is required.
 
-The build-only renderer @napi-rs/canvas 1.0.9 and fontkit 2.0.4 use MIT licences
-([Canvas](https://github.com/Brooooooklyn/canvas/blob/v1.0.9/LICENSE),
-[fontkit](https://github.com/foliojs/fontkit/blob/v2.0.4/README.md#license)). Their
-code is not shipped in the static site; resolved npm licences remain checked by
-the existing repository licence gate.
+Build-only tools are pinned in the workspace lockfile:
+
+- CanvasKit 0.42.0 uses [BSD-3-Clause](https://skia.googlesource.com/skia/+/main/LICENSE)
+  and supplies the same WebAssembly rasteriser/PNG encoder on every architecture.
+- Canvg 4.0.3 uses [MIT](https://github.com/canvg/canvg/blob/v4.0.3/LICENSE);
+  xmldom 0.9.12 uses [MIT](https://github.com/xmldom/xmldom/blob/0.9.12/LICENSE).
+  They parse the generated SVGs for CanvasKit.
+- Fontkit 2.0.4 uses [MIT](https://github.com/foliojs/fontkit/blob/v2.0.4/README.md#license)
+  and outlines the licensed Inter font.
+
+Their code and WASM are not shipped in the static site or console; resolved npm
+licences remain checked by the existing repository licence gate.

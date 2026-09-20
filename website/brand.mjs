@@ -1,8 +1,8 @@
 // FND-7: all production variants derive from the editable mark and licensed font.
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { create } from "fontkit";
+import { rasterize } from "./rasterize.mjs";
 
 const brand = new URL("../assets/brand/", import.meta.url);
 const check = process.argv.includes("--check");
@@ -93,19 +93,13 @@ const outputs = new Map([
   ["synveda-avatar.svg", avatar],
   ["favicon.svg", favicon],
 ]);
-for (const [name, source, width] of [
-  ["synveda-avatar-512.png", avatar, 512],
-  ["synveda-avatar-256.png", avatar, 256],
-  ["favicon-32.png", favicon, 32],
-  ["social-preview.png", social, 1280],
+for (const [name, source, width, height] of [
+  ["synveda-avatar-512.png", avatar, 512, 512],
+  ["synveda-avatar-256.png", avatar, 256, 256],
+  ["favicon-32.png", favicon, 32, 32],
+  ["social-preview.png", social, 1280, 640],
 ]) {
-  const image = await loadImage(Buffer.from(source));
-  const canvas = createCanvas(
-    width,
-    Math.round((width * image.height) / image.width),
-  );
-  canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-  outputs.set(name, canvas.toBuffer("image/png"));
+  outputs.set(name, await rasterize(source, width, height));
 }
 for (const [name, content] of outputs) {
   const path = new URL(name, brand);

@@ -1,6 +1,6 @@
 # ADR-0113: A static public site and one canonical brand geometry
 
-- **Status**: Accepted
+- **Status**: Accepted; amended once
 - **Date**: 2026-09-20
 - **Feature(s)**: FND-7
 - **Deciders**: Synveda owner through the approved design implementation brief
@@ -58,3 +58,19 @@ No product API, authentication, Cedar, RLS, VedaFlow, audit or database change.
 The site contains public product descriptions, not tenant data. No tracking,
 cookies, third-party photography, customer claims or production-readiness
 promotion. Website generation needs no product credential or running backend.
+
+## Amendment: portable raster generation (2026-09-20)
+
+The first AMD64 Pages build reproduced a native Skia rasterisation difference:
+the same SVG inputs generated different PNG edge pixels on AMD64 and ARM64.
+Earlier macOS/Linux checks both used ARM64 and did not cover that boundary.
+
+Use one pinned CanvasKit WebAssembly renderer, with Canvg parsing the generated
+SVGs and xmldom providing its build-only DOM. These dependencies use the existing
+permissive build-tool licence policy. Fontkit still outlines the same licensed
+font, and the canonical SVG geometry remains unchanged. No renderer or WASM is
+copied to the public site or console.
+
+Retain exact byte comparison for every derived export. Verify the complete site
+on both native Linux runner architectures before deployment; do not accept
+pixel tolerances or skip the stale-asset gate on a different host architecture.

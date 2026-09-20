@@ -19,7 +19,7 @@ pnpm --filter @synveda/website preview
 Open [the local project-path preview](http://127.0.0.1:4173/synveda/).
 Stop the preview with Ctrl-C. Rebuild after editing; there is no watcher.
 `pnpm --filter @synveda/website build` only copies and substitutes metadata;
-`check` also verifies reproducible brand exports, links/anchors, client claims,
+`check` also tests stale-export refusal and verifies reproducible brand exports, links/anchors, client claims,
 image sizes and the public allowlist. No backend or credentials are required.
 
 Only files enumerated in config.mjs plus the generated .nojekyll marker enter
@@ -37,8 +37,10 @@ pnpm --filter @synveda/website brand
 pnpm --filter @synveda/website check
 ```
 
-The build-only fontkit library outlines the Inter 4.1 TTF; Skia Canvas rasterises
-SVGs without system fonts. The wordmark uses weight 650, optical size 32, cv11
+The build-only fontkit library outlines the Inter 4.1 TTF. Canvg/xmldom parse
+the SVGs for pinned CanvasKit WebAssembly, which rasterises and encodes PNGs
+with the same binary on every host. No system fonts or GPU are used. Small
+PNGs render at their export dimensions. The wordmark uses weight 650, optical size 32, cv11
 single-storey a and tightened spacing. Dark variants lighten only the central
 navy plane for visibility. There is no raster embedded in any SVG.
 
@@ -65,20 +67,21 @@ shared assets, also run `pnpm --filter @synveda/console test` and
 
 ## Pages deployment and owner steps
 
-Read-only verification on 2026-09-20 found public `synveda/synveda`, default
-branch `main`, `has_pages: false`, no homepage and no Pages API resource. There
-is no checked-in CNAME. The intended project URL is
-[synveda.github.io/synveda](https://synveda.github.io/synveda/); deployment has
-not been enabled or observed by this implementation.
+The public `synveda/synveda` repository uses `main` and has no checked-in CNAME.
+After the initial implementation, the owner enabled Pages using GitHub Actions;
+read-only verification on 2026-09-20 confirmed that configuration and the URL
+[synveda.github.io/synveda](https://synveda.github.io/synveda/).
+Check the latest Pages workflow's deployment result before claiming a live site.
 
 The [Pages workflow](../.github/workflows/pages.yml) checks every PR and main
 push, covering site sources, brand assets, lockfiles, documentation and the
-workflow itself without path-filtered required checks. PRs receive no deploy
-permissions. Only main in the canonical repository can upload the explicit
+workflow itself without path-filtered required checks. The full check runs on
+native Linux AMD64 and ARM64; deployment waits for both, with only AMD64 uploading
+the one public artifact. PRs receive no deploy permissions. Only main in the canonical repository can upload the explicit
 public output and deploy through the github-pages environment. Manual dispatch
 from another branch also cannot deploy. Existing CI is unchanged.
 
-After reviewing/merging the implementation, the owner must:
+For a new repository or a configuration change:
 
 1. In **synveda/synveda → Settings → Pages → Build and deployment → Source**,
    choose **GitHub Actions**. The workflow deliberately does not enable Pages
@@ -134,7 +137,7 @@ changing copy. Application/demo validation is separate: use the current
 [Compose instructions](../deploy/compose/README.md), preserve existing project
 selectors and data, and report missing services rather than claiming a pass.
 
-### Implementation validation — 2026-09-20
+### Initial implementation validation — 2026-09-20
 
 - Production /synveda/ build and checks passed on macOS arm64 Node 24.18.0
   and pinned Docker Linux arm64 Node 22.23.2, using the frozen pnpm lockfile.
@@ -162,6 +165,22 @@ selectors and data, and report missing services rather than claiming a pass.
   seeded-console image remains linked in the root README; the site uses
   architecture visuals rather than publishing live demo Session content.
 
-Pages/account settings and image uploads were not modified. The owner steps
-above are still required; the local and Linux checks do not establish live
-GitHub deployment or native Linux amd64 browser/asset evidence.
+This initial validation did not modify Pages/account settings or upload images.
+Its two local platforms both used ARM64; it did not establish AMD64 asset
+reproducibility or live GitHub deployment.
+
+### Portable export correction — 2026-09-20
+
+The first AMD64 Pages check failed because native Skia produced different edge
+pixels from the same SVG. A pinned WebAssembly renderer now replaces the native
+addon. Every SVG, the 512 px avatar and social preview are unchanged; the smaller
+PNGs are regenerated directly at their final dimensions. Exact byte checks remain
+mandatory on both CI architectures. Regression tests verify that checking rejects
+a modified PNG without rewriting it and that a canonical edit reaches every PNG.
+
+Both tests and all 11 exact export checks pass on macOS ARM64 Node 24.18.0,
+Linux ARM64 Node 22.23.2 and emulated Linux AMD64 Node 22.23.2. Fresh frozen-lockfile
+Linux installations also pass the complete site check and unchanged npm licence
+gate. The public allowlist remains 12 files with no WASM or renderer code.
+Documentation, workflow lint and formatting pass. The hosted Pages run provides
+the separate native AMD64/ARM64 and deployment result.

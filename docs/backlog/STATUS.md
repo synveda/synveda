@@ -40,9 +40,18 @@ brand assets under [ADR-0113](../adr/adr-0113-static-public-site-and-brand.md).
 The isolated static build, reproducible exports on macOS/Node 24 and Linux
 arm64/Node 22, browser/keyboard checks at 320–1440 px, accessibility audit,
 licence and documentation gates pass. The existing Compose demo passes smoke;
-no fresh installation or backend acceptance rerun is claimed. Pages is not yet
-enabled; publication and account image uploads remain manual owner actions in
-the [maintenance guide](../../website/README.md).
+no fresh installation or backend acceptance rerun is claimed. The owner has now
+enabled Pages with GitHub Actions. Account image uploads remain manual owner
+actions in the [maintenance guide](../../website/README.md).
+
+The first Pages AMD64 build exposed native raster edge-pixel differences that
+the two earlier ARM64 checks missed. FND-7 now uses a pinned WebAssembly renderer
+and checks both native Linux architectures before deployment (ADR-0113 amendment).
+All 11 exports match exactly on macOS ARM64 Node 24, Linux ARM64 Node 22 and
+emulated Linux AMD64 Node 22. Both stale-export regression tests, full site checks,
+the unchanged licence gate, documentation checks and workflow lint pass. Hosted
+validation of this correction remains the next Pages run; no live success is
+inferred from local checks.
 
 [OPS-11](OPS-11.md) records the next small-team Kubernetes milestone under
 ADR-0109. The [deployment audit](../../deploy/README.md#small-team-kubernetes-release-contract)
