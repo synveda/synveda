@@ -43,6 +43,13 @@ for actual SCC, router, CNI/CSI and provider acceptance. The
 [portability guide](../../deploy/helm/synveda/PORTABILITY.md) records the exact
 constraints and the next disposable-project checks.
 
+PR #52's Linux schema failure was reproduced as a case-sensitive filename
+mismatch. The OPS-11 runner now writes lowercase `route.json` and preserves
+validator output on failure. The unchanged strict schema matrix passes on
+Linux Node 22 and macOS Node 24: 27/27 resources for each OpenShift target and
+7/7 for Kubernetes, zero errors or skips. Chart lint and formatting also pass;
+actual platform qualification remains open.
+
 The restricted Kind 0.32.0/Kubernetes v1.36.1 run passed all four ownership
 combinations with namespace PSA restricted/v1.33 and simulated UID 1000900000
 for the product, migration/bootstrap and Keycloak. Each completed 400 captured

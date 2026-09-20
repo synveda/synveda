@@ -312,6 +312,19 @@ pulls remain unverified. Complete `make ci`, the exact-role database suite,
 old CNPG failover, native client replay and joint restore were not repeated
 for this chart-only increment.
 
+### PR schema gate repair — 2026-09-20
+
+PR #52's schema check failed on Linux because kubeconform expands
+`{{.ResourceKind}}` to lowercase, while the runner wrote `Route.json`. The
+case-insensitive macOS filesystem hid the mismatch. A read-only Linux arm64
+container with Node 22.23.2, Helm 4.2.3 and kubeconform 0.7.0 reproduced all six
+missing-Route-schema errors. The runner now writes `route.json` and includes
+the failed command, stdout, stderr and spawn errors in its assertion message.
+The unchanged strict matrix passes on Linux and macOS: 27/27 resources for
+each OpenShift target and 7/7 for Kubernetes, with zero errors or skips.
+`make chart-lint` and formatting also pass. Platform and release qualification
+remain open as recorded above.
+
 ## Rollout and rollback
 
 Keep one gateway/worker and the existing CNPG failover path. Promote a candidate

@@ -12,7 +12,9 @@ const scratch = mkdtempSync(join(tmpdir(), "synveda-platform-schema-"));
 const env = { ...process.env, HELM_CACHE_HOME: scratch, HELM_PLUGINS: resolve(chart, "post-renderers") };
 function run(command, args) {
   const result = spawnSync(command, args, { env, encoding: "utf8", timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
-  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  assert.equal(result.status, 0, [
+    `${command} ${args.join(" ")} failed`, result.error?.message, result.stdout, result.stderr,
+  ].filter(Boolean).join("\n"));
   return result.stdout;
 }
 function strict(schema) {
@@ -36,7 +38,8 @@ try {
     definitions["io.k8s.apimachinery.pkg.util.intstr.IntOrString"] = { anyOf: [{ type: "string" }, { type: "integer" }] };
     const schema = { $schema: "http://json-schema.org/draft-04/schema#", ...definitions["com.github.openshift.api.route.v1.Route"], definitions };
     strict(schema);
-    writeFileSync(join(path, "Route.json"), JSON.stringify(schema));
+    // Kubeconform lowercases ResourceKind when expanding schema-location paths.
+    writeFileSync(join(path, "route.json"), JSON.stringify(schema));
     const args = ["template", "synveda", chart, "--kube-version", kube, "--api-versions", "route.openshift.io/v1",
       "-f", `${chart}/ci/external-values.yaml`, "-f", `${chart}/ci/packaged-keycloak-values.yaml`,
       "-f", `${chart}/examples/openshift.yaml`, "-f", `${chart}/examples/network-policy.yaml`,
