@@ -70,7 +70,9 @@ Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
   const warmMs = performance.now() - warm;
   assert.equal(readFileSync(join(home, "state/retained"), "utf8"), "retain deployment state");
   checks.push("repeat-install-preserves-deployment-state");
-  run(nativeNode, [join(root, "scripts/check-windows-state.mjs"), nativeCli, join(scratch, "storage.json"), join(destination, "plugin/synveda/dist")], { env: { ...env, NODE_OPTIONS: "", NODE_PATH: "" } });
+  // Includes several independent PowerShell ACL setup/inspection processes.
+  run(nativeNode, [join(root, "scripts/check-windows-state.mjs"), nativeCli, join(scratch, "storage.json"), join(destination, "plugin/synveda/dist")],
+    { timeout: 480000, env: { ...env, NODE_OPTIONS: "", NODE_PATH: "" } });
   const storage = JSON.parse(readFileSync(join(scratch, "storage.json")));
   assert.equal(storage.arch, process.arch);
   assert.deepEqual(storage.checks, [

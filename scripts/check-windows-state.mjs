@@ -18,8 +18,10 @@ const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 function powershell(path, script, target) {
   const env = { ...process.env, SYNVEDA_TEST_ACL_PATH: path, SYNVEDA_TEST_ACL_TARGET: target ?? "" };
   delete env.PSModulePath;
+  // The independent .NET ACL oracle can cold-start slowly on hosted arm64.
+  // This setup allowance does not change CLI or hook operation deadlines.
   return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference = 'Stop'; ${script}`],
-    { encoding: "utf8", timeout: 15000, env });
+    { encoding: "utf8", timeout: 60000, env });
 }
 function seal(path) {
   powershell(path, `

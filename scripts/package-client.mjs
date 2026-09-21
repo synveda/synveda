@@ -18,7 +18,7 @@ const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=n
   { cwd: root, encoding: "utf8" }).trim().length > 0;
 for (const file of [binary, runtimeArchive]) {
   const info = lstatSync(file);
-  if (!info.isFile() || info.nlink !== 1 || info.size > 256 * 1024 * 1024) throw new Error("package inputs must be bounded regular unlinked files");
+  if (!info.isFile() || info.nlink !== 1 || info.size > 256 * 1024 * 1024) throw new Error(`package inputs must be bounded regular unlinked files: bytes=${info.size}, links=${info.nlink}`);
 }
 if (sha256(readFileSync(runtimeArchive)) !== pin.sha256) throw new Error("private Node archive checksum mismatch");
 mkdirSync(output, { recursive: true });

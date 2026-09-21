@@ -448,9 +448,21 @@ user when creating directories/files, including administrator sessions; existing
 entries are never resealed. The unrelated Linux readiness fixture now uses a
 logical clock and verifies deadline exhaustion instead of relying on a 100-ms
 wall-clock window. Focused tests, both MSVC compile probes and the 405-test
-deployment/chart gate pass locally. Next action: complete both native jobs and
-record exact source/run/report identities here before claiming native
-installation or arm64 qualification. No new release or version is authorized.
+deployment/chart gate pass locally.
+
+The follow-up [native run on `f730813`](https://github.com/synveda/synveda/actions/runs/35643767934)
+passed Rust storage and process-refresh checks on both architectures and the
+Linux release-install gate. Its x64 job passed all five Rust/Node private-state
+checks, then the packager refused the compiler output's input metadata. The
+candidate now supplies an exclusive independent copy, preserving the packager's
+hardlink and size limits, and reports size/link counts on refusal. Arm64 stopped
+at the independent PowerShell ACL fixture's 15-second startup bound; its setup
+allowance now accommodates cold hosted startup without changing operation
+deadlines or assertions. Bootstrap also strips the ZIP directory marker before
+validating a materialized directory path. Native archive execution remains incomplete. Next:
+rerun both jobs, resolve any remaining failures and record exact source/run/report
+identities before claiming native installation or complete arm64 qualification.
+No new release or version is authorized.
 
 ## Rollout and rollback
 

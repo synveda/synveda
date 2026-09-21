@@ -198,7 +198,8 @@ try {
             if ($entry.Length -gt 268435456 -or $total -gt 536870912) { throw 'Expanded archive exceeds its bound' }
         }
         foreach ($entry in $zip.Entries) {
-            $path = Join-Path $scratch $entry.FullName
+            # A ZIP directory marker is metadata, not an empty path component.
+            $path = Join-Path $scratch $entry.FullName.TrimEnd('/')
             if ($entry.FullName.EndsWith('/')) { Create-PrivateDirectory $path; continue }
             Create-PrivateDirectory ([System.IO.Path]::GetDirectoryName($path))
             $inputStream = $entry.Open()
