@@ -114,32 +114,27 @@ client installer downloads no server artifacts and uses private ownership and
 content receipts with an atomic release selection. A macOS arm64 artifact
 passed installation without system Node/Docker on PATH and extracted runtime
 replay. Native release jobs require separate reports for four Unix and two
-Windows targets; those hosted jobs, real issuer/harness use of these archives
-and Windows ACL/path/bootstrap portability remain unqualified. This does not change the
+Windows targets; native archive jobs and real issuer/harness use of these
+archives remain unqualified. This does not change the
 readiness verdict or the published v0.4.0 installation contract.
 
 ADR-0117 isolates the Unix deployment peer witness and shares client path
 fixtures between Rust and Node. Missing HOME no longer selects a repository-local
-spool. The earlier non-Unix receipt/spool boundary refused access. The Windows x64
-build/refusal prerequisite passed on source `5bdf740`. The expanded
-[Windows x64 job](https://github.com/synveda/synveda/actions/runs/35634324225/job/106448482489)
-passed on source `c627375`: native credential ACL/file-identity/replacement,
-mock-gateway process refresh, command refusals and hook path checks. Native
-arm64 execution remains open. This candidate does not qualify Windows
-installation, real issuer authentication, observation or harness execution.
-
-The next ADR-0117 candidate extends private storage to Rust receipts and
+spool. The ADR-0117 candidate extends private storage to Rust receipts and
 version-1 spools plus Windows Node hooks through a bounded local CLI protocol.
 Snapshot comparison refuses stale writes/removals; unsafe or oversized files
-remain held. Native x64/arm64 execution is pending. Local macOS tests do not
-qualify these Windows consumers, PowerShell installation or real harness use.
+remain held. On source `c0710cc`, both native architectures passed strict Clippy,
+Rust storage and mock-gateway refresh checks, and all five Rust/Node private-state
+checks. [OPS-12](backlog/OPS-12.md) records the exact hosted job identities.
+This does not qualify PowerShell installation, real issuer login or harness use.
 
 ADR-0065 amendment 13 adds a Windows ZIP/PowerShell installation candidate with
 protected staging, bounded archive/PE checks and native private-file operations.
 Windows uses an atomic `current.json` selection and a digest-checked PowerShell
 launcher; it retains prior releases and user state. PowerShell syntax passed on
 macOS. Native x64/arm64 installation and refusal checks are configured but have
-not passed; hosted qualification is now running from the pushed candidate.
+not passed: both jobs stopped at plugin packaging's GNU tar drive-prefix handling.
+Its portable basename fix awaits the next native archive run.
 Windows deployment, setup/vendor writers and diagnostic logs still refuse.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and

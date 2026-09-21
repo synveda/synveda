@@ -4,7 +4,8 @@ These commands are in the current source CLI and matching plugin candidate.
 **They are not in published v0.4.0.** Keep using the
 [published installation guide](../deploy/compose/PREBUILT.md) for that release.
 Build the current CLI with `SQLX_OFFLINE=true cargo build -p synveda-cli`, or use
-the client archive candidate below. Native Windows qualification remains open.
+the client archive candidate below. [OPS-12](backlog/OPS-12.md) records native
+execution reports and the remaining qualification gaps.
 
 ## Client archive candidate
 
@@ -12,14 +13,14 @@ the client archive candidate below. Native Windows qualification remains open.
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
-`windows-x86_64`. These are candidate
-targets; only macOS arm64 has local artifact execution evidence so far.
+`windows-x86_64`. These are candidate targets; each requires its own native
+artifact execution report.
 The CLI's Unix peer-witness code is isolated, and CLI/hooks share a tested
 platform path contract. Windows credential storage now has a native candidate
-for ACL, file-identity, bounded reads, locking and replacement checks, with native
-x64 storage and process-refresh evidence in [OPS-12](backlog/OPS-12.md). Private
+for ACL, file-identity, bounded reads, locking and replacement checks. Private
 receipt/spool storage, the Rust/Node bridge and PowerShell installation are now
-implemented candidates; their native x64/arm64 checks have not run yet.
+implemented candidates; exact native storage, process-refresh and archive
+qualification evidence is recorded in [OPS-12](backlog/OPS-12.md).
 Windows setup/vendor configuration writers, deployment and diagnostic logs
 still refuse. The commands in later sections require Unix unless stated otherwise.
 

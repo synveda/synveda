@@ -145,6 +145,11 @@ node -e '
   fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + "\n");
 ' "$manifest" "$version"
 
-tar -czf "$outdir/synveda-plugin-$version.tar.gz" -C "$outdir" plugin
+# Use a basename so GNU tar cannot interpret a Windows drive or a colon in the
+# output directory as the host in a remote archive specification.
+(
+  cd "$outdir"
+  tar -czf "synveda-plugin-$version.tar.gz" plugin
+)
 rm -rf "$stage"
 echo "packaged $outdir/synveda-plugin-$version.tar.gz"

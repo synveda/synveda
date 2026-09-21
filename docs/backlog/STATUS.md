@@ -28,17 +28,16 @@ manual Codex/Copilot trust/setup and broader native qualification remain separat
 Private pinned Node and Unix client-only archives/installation now have local
 macOS arm64 artifact evidence and required native release-report gates. Windows
 credentials now have candidate ACL/file-identity/replacement enforcement with
-passing native Windows x64 storage and process-refresh tests. Private Rust
+passing native Windows x64/arm64 storage and process-refresh tests. Private Rust
 receipt/spool consumers and the bounded Node storage protocol passed all five
-native x64 checks on `f730813`; arm64 interoperability remains pending.
+native checks on both architectures at `c0710cc`.
 PowerShell installation and Windows
 ZIP packaging now have a local implementation and required native archive
 checks (ADR-0065 amendment 13); PowerShell syntax passed locally. Native
-qualification passed strict Clippy and Rust storage/process checks on both
-architectures. X64 then stopped at packaging input validation; arm64 stopped at
-the independent PowerShell ACL fixture's cold-start allowance. Follow-up fixes
-stage an independent compiler-output copy and adjust only fixture timeouts.
-Next: rerun both native archive jobs and resolve their failures,
+qualification then stopped at GNU tar's drive-prefix interpretation on both
+architectures. The follow-up creates the plugin archive by basename and passed
+a fresh macOS archive installation/replay check under a colon/space/Unicode path.
+Next: rerun both native archive jobs and qualify PowerShell installation,
 then retain real issuer/harness acceptance as a separate requirement.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures
 (ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier

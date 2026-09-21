@@ -305,14 +305,12 @@ are environment restrictions, not passing behavior checks.
 zero skips plus deployment, Helm and portability contracts. `git diff --check`
 passes. No schema, generated API, SQLx metadata or dependency lockfile changed.
 
-Release assembly now requires four native client reports matching the archive
+Release assembly now requires six native client reports matching the archive
 hash/size, source, platform and Node pin. Tagged publication additionally requires
 clean source and matching CLI version; the reports enter the attested checksum
-inventory. None of those hosted jobs has run for this increment. The following
-portability prerequisite addresses the Unix code boundary; explicit Windows
-ACL/identity/replacement support remains missing. PowerShell installation
-follows that port and native execution evidence; a Windows matrix row alone
-would not be a working or private client.
+inventory. The Windows storage and installation increments below record their
+separate native evidence. The four Unix release jobs remain unqualified;
+a matrix row alone does not establish a working or private client.
 
 ### Client platform boundary prerequisite (2026-09-21)
 
@@ -324,10 +322,9 @@ witness. Unix-only direct dependencies and imports are conditional. One shared
 LOCALAPPDATA, drive-qualified XDG overrides and UNC/device/relative-path refusal.
 On Unix, missing or relative HOME no longer selects a repository-local spool.
 
-Non-Unix private-state operations deliberately refuse before login, credential
-access or local mutations. Hooks refuse private directory/spool access and do
-not report successful recording or remove retained spool files. This is a
-prerequisite, not implemented Windows ACLs or a working Windows installation.
+The initial non-Unix boundary refused login, credential access and local
+mutations. The Windows storage amendments below selectively replace those
+refusals; unported operations still refuse before mutation.
 The added Windows x64 CI job requires native strict CLI Clippy, path-contract,
 peer-witness and built-executable refusal tests, plus the hook contract checks.
 Its passing hosted execution and subsequent credential evidence are recorded
@@ -343,8 +340,8 @@ resolved by granting local socket access. `make check-fast` and release parity
 (403 Node tests, zero skips); the final stages were rerun with socket access
 after the evaluation fixture's sandbox refusal, retaining the already-passing
 prerequisite results. `git diff --check` passes. The native credential evidence follows below.
-Spool/receipt ACLs and replacement, PowerShell installation and real
-issuer/harness qualification remain outstanding.
+The subsequent Windows storage and installation results follow below;
+real issuer/harness qualification remains outstanding.
 
 ### Windows credential increment (2026-09-21)
 
@@ -396,8 +393,8 @@ timestamps so Node can read them. Purge retains an empty spool that owes a close
 hooks retire only after successfully persisting their completed state.
 The local CLI suite (219 tests) and shared adapter suite (109 tests) passed;
 local loopback fixtures required socket access. Native receipt, spool, protocol
-and Rust/Node interoperability tests have been added to x64/arm64 CI, but their
-execution is pending. The local host has no native Windows; real issuer/harness
+and Rust/Node interoperability tests pass on x64/arm64 CI as recorded below.
+The local host has no native Windows; real issuer/harness
 acceptance stays separate.
 
 ### Windows installation candidate (2026-09-21)
@@ -436,33 +433,26 @@ dirty worktree; this local candidate is not publication evidence.
 The required `make check-deploy chart-lint` gate also passed, including its
 404 Node tests, workflow checks and all chart contract renders.
 
-The receipt/spool checkpoint `c63eb95` and installer checkpoint `a6f3f30` are
-pushed to `main`; native hosted qualification is running. The archive gate now
-requires the five named private-storage checks, replacing an incorrect numeric
-count of six. The first [native run](https://github.com/synveda/synveda/actions/runs/35641396673)
-passed strict Clippy, credential, protocol and receipt checks on both architectures,
-then refused an incorrectly owned malformed-spool fixture before its format
-assertion. The fixture now receives private file ownership and asserts the exact
-format refusal. Bootstrap and native staging also explicitly assign the process
-user when creating directories/files, including administrator sessions; existing
-entries are never resealed. The unrelated Linux readiness fixture now uses a
-logical clock and verifies deadline exhaustion instead of relying on a 100-ms
-wall-clock window. Focused tests, both MSVC compile probes and the 405-test
-deployment/chart gate pass locally.
+On source `c0710cccea025587fdcdcf8ae3811dd1603a1cbd`, the native
+[Windows x64 job](https://github.com/synveda/synveda/actions/runs/35647177593/job/106490783896)
+and [Windows arm64 job](https://github.com/synveda/synveda/actions/runs/35647177593/job/106490783419)
+passed strict Clippy, Rust path/credential/receipt/spool/protocol checks,
+mock-gateway process refresh and all five Rust/Node private-state checks.
+Those checks prove shared installation identity/disclosure, format-preserving
+spool rewrites, stale mutation/retirement refusal, owed-close retention,
+hardlink/ACL/size/junction refusal and confined receipt access. They do not
+establish real issuer or native harness execution.
 
-The follow-up [native run on `f730813`](https://github.com/synveda/synveda/actions/runs/35643767934)
-passed Rust storage and process-refresh checks on both architectures and the
-Linux release-install gate. Its x64 job passed all five Rust/Node private-state
-checks, then the packager refused the compiler output's input metadata. The
-candidate now supplies an exclusive independent copy, preserving the packager's
-hardlink and size limits, and reports size/link counts on refusal. Arm64 stopped
-at the independent PowerShell ACL fixture's 15-second startup bound; its setup
-allowance now accommodates cold hosted startup without changing operation
-deadlines or assertions. Bootstrap also strips the ZIP directory marker before
-validating a materialized directory path. Native archive execution remains incomplete. Next:
-rerun both jobs, resolve any remaining failures and record exact source/run/report
-identities before claiming native installation or complete arm64 qualification.
-No new release or version is authorized.
+Both jobs then failed plugin packaging because GNU tar interpreted the drive
+prefix as a remote host. The packager now creates the archive by basename from
+its output directory. A fresh macOS arm64 candidate under a colon/space/Unicode
+path passed installation/reinstallation and all 31 extracted adapter replays;
+`make check-fast check-release-parity` passed its 70 tests. The 405-test
+deployment/chart gate also passed for the preceding checkpoint. Native Windows
+archive execution remains incomplete. Next: rerun both native archive jobs,
+resolve any remaining failures and record exact source/run/report identities
+before claiming PowerShell installation qualification. No new release or version
+is authorized.
 
 ## Rollout and rollback
 

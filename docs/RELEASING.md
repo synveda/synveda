@@ -30,10 +30,10 @@ Assembly requires all six `synveda-client-report-TARGET.json` reports
 to match archive digests, source, target and runtime pin. Tagged builds also
 require a clean source tree and matching CLI version. Reports enter SHA256SUMS
 before attestation and accompany the release assets. A configured job is not
-hosted execution evidence: only macOS arm64 has been exercised locally.
-The Windows candidate has only local parser/static checks so far. Its native
-execution, real issuer/harness use of these archives and cold network
-download measurements remain open. The two historical server binary archives
+hosted execution evidence. [OPS-12](backlog/OPS-12.md) records local macOS arm64
+archive evidence and the exact hosted Windows qualification results. Real
+issuer/harness use of these archives and cold network download measurements
+remain open. The two historical server binary archives
 and system-Node plugin archive retain their existing contract.
 
 ## Owner setup
