@@ -439,7 +439,16 @@ The required `make check-deploy chart-lint` gate also passed, including its
 The receipt/spool checkpoint `c63eb95` and installer checkpoint `a6f3f30` are
 pushed to `main`; native hosted qualification is running. The archive gate now
 requires the five named private-storage checks, replacing an incorrect numeric
-count of six. Next action: complete both native jobs, fix any failures and
+count of six. The first [native run](https://github.com/synveda/synveda/actions/runs/35641396673)
+passed strict Clippy, credential, protocol and receipt checks on both architectures,
+then refused an incorrectly owned malformed-spool fixture before its format
+assertion. The fixture now receives private file ownership and asserts the exact
+format refusal. Bootstrap and native staging also explicitly assign the process
+user when creating directories/files, including administrator sessions; existing
+entries are never resealed. The unrelated Linux readiness fixture now uses a
+logical clock and verifies deadline exhaustion instead of relying on a 100-ms
+wall-clock window. Focused tests, both MSVC compile probes and the 405-test
+deployment/chart gate pass locally. Next action: complete both native jobs and
 record exact source/run/report identities here before claiming native
 installation or arm64 qualification. No new release or version is authorized.
 

@@ -658,6 +658,8 @@ mod tests {
         let dir = scratch("version");
         let path = dir.join("old.json");
         fs::write(&path, br#"{"spool_version":99,"client_installation_id":"i","client_name":"c","external_session_id":"x","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","entries":[]}"#).expect("write");
+        #[cfg(windows)]
+        windows_private::private(&path);
         let error = read(&path).expect_err("an unknown version is refused");
         assert!(error.contains("spool_version 99"), "{error}");
         let scanned = scan(&dir).unwrap();
@@ -678,7 +680,12 @@ mod tests {
             br#"{"session_id":"claude-code:abc","transcript_path":"/tmp/t.jsonl","cursor":"uuid-1","updated_at":"2026-01-01T00:00:00Z"}"#,
         )
         .expect("write");
-        assert!(read(&path).is_err(), "the old cursor spool must not parse");
+        #[cfg(windows)]
+        windows_private::private(&path);
+        assert_eq!(
+            read(&path).expect_err("the old cursor spool must not parse"),
+            "invalid spool document; retained for inspection"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

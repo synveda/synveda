@@ -187,7 +187,7 @@ test("public readiness wait is explicit and bounded", () => {
   }
 });
 
-test("public readiness retries only transient server unavailability", async () => {
+test("public readiness retries only transient server unavailability", { timeout: 10000 }, async (t) => {
   const selection = parseArguments(
     smokeArguments(
       "development",
@@ -197,6 +197,10 @@ test("public readiness retries only transient server unavailability", async () =
   );
   const originalFetch = globalThis.fetch;
   let discoveryAttempts = 0;
+  let now = 0;
+  // Mocked probes consume logical time; runner load must not exhaust the
+  // retry budget before the fixture has returned its first transient response.
+  t.mock.method(Date, "now", () => now);
   globalThis.fetch = async (source) => {
     const url = new URL(source);
     if (
@@ -204,6 +208,7 @@ test("public readiness retries only transient server unavailability", async () =
       url.pathname.startsWith("/realms/synveda/")
     ) {
       discoveryAttempts += 1;
+      now += 10;
       if (discoveryAttempts === 1) return new Response("", { status: 503 });
       return new Response(JSON.stringify({ issuer: selection.issuer }), {
         status: 200,
@@ -220,6 +225,22 @@ test("public readiness retries only transient server unavailability", async () =
     globalThis.fetch = originalFetch;
   }
   assert.equal(discoveryAttempts, 2);
+});
+
+test("public readiness stops when transient probes exhaust the deadline", { timeout: 10000 }, async (t) => {
+  const selection = parseArguments(smokeArguments(
+    "development", "http://app.synveda.test:8080", "http://auth.synveda.test:8080/realms/synveda",
+  ));
+  let now = 0;
+  let requests = 0;
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(globalThis, "fetch", async () => {
+    requests += 1;
+    now += 100;
+    return new Response("", { status: 503 });
+  });
+  await assert.rejects(waitForPublicEndpoints(selection, 100, 1), /application liveness probe failed/);
+  assert.equal(requests, 1);
 });
 
 test("public readiness never retries an exposed refusal route", async () => {

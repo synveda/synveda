@@ -33,8 +33,10 @@ receipt/spool consumers and the bounded Node storage protocol are now candidates
 with native x64/arm64 execution pending. PowerShell installation and Windows
 ZIP packaging now have a local implementation and required native archive
 checks (ADR-0065 amendment 13); PowerShell syntax passed locally. Native
-qualification is running from the pushed commits on `main`.
-Next: complete both native jobs and resolve their failures,
+qualification passed strict Clippy and receipt checks on both architectures,
+then exposed malformed-spool fixture ownership. That fixture and explicit
+bootstrap/staging ownership have follow-up fixes awaiting native execution.
+Next: rerun both native jobs and resolve their failures,
 then retain real issuer/harness acceptance as a separate requirement.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures
 (ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier

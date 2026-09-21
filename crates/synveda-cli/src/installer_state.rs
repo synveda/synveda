@@ -31,6 +31,13 @@ mod native {
         Tree {
             path: PathBuf,
         },
+        NewDirectory {
+            path: PathBuf,
+        },
+        Stage {
+            path: PathBuf,
+            destination: PathBuf,
+        },
         Read {
             path: PathBuf,
         },
@@ -68,7 +75,25 @@ mod native {
             Request::Tree { path } => {
                 let mut files = 0;
                 let mut size = 0;
-                tree(&path, &mut files, &mut size, 0)?;
+                tree(&path, &mut files, &mut size, 0, None)?;
+                Ok(json!({"files": files, "bytes": size}))
+            }
+            Request::NewDirectory { path } => {
+                let parent = Directory::open(
+                    path.parent().ok_or("installer directory has no parent")?,
+                    false,
+                )
+                .map_err(|e| e.to_string())?
+                .ok_or("installer parent is absent")?;
+                let created = parent
+                    .create_child(leaf(&path)?)
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"created": created}))
+            }
+            Request::Stage { path, destination } => {
+                let mut files = 0;
+                let mut size = 0;
+                tree(&path, &mut files, &mut size, 0, Some(&destination))?;
                 Ok(json!({"files": files, "bytes": size}))
             }
             Request::Read { path } => {
@@ -107,13 +132,30 @@ mod native {
             .ok_or_else(|| "invalid installer filename".to_owned())
     }
 
-    fn tree(path: &Path, count: &mut usize, total: &mut u64, depth: usize) -> Result<(), String> {
+    fn tree(
+        path: &Path,
+        count: &mut usize,
+        total: &mut u64,
+        depth: usize,
+        destination: Option<&Path>,
+    ) -> Result<(), String> {
         if depth > 16 || *count > 1024 {
             return Err("installer tree exceeds its bound".to_owned());
         }
         let dir = Directory::bounded(path, false, 256 * 1024 * 1024)
             .map_err(|e| e.to_string())?
             .ok_or("installer directory is absent")?;
+        let output = if let Some(destination) = destination {
+            let output = Directory::bounded(destination, false, 256 * 1024 * 1024)
+                .map_err(|e| e.to_string())?
+                .ok_or("installer staging directory is absent")?;
+            if !output.names().map_err(|e| e.to_string())?.is_empty() {
+                return Err("installer staging directory is not empty".to_owned());
+            }
+            Some(output)
+        } else {
+            None
+        };
         for name in dir.names().map_err(|e| e.to_string())? {
             *count += 1;
             if *count > 1024 {
@@ -122,12 +164,35 @@ mod native {
             let child = path.join(&name);
             let metadata = std::fs::symlink_metadata(&child).map_err(|e| e.to_string())?;
             if metadata.is_dir() {
-                tree(&child, count, total, depth + 1)?;
+                if let Some(output) = &output
+                    && !output.create_child(&name).map_err(|e| e.to_string())?
+                {
+                    return Err("installer staging entry already exists".to_owned());
+                }
+                let target = destination.map(|path| path.join(&name));
+                tree(&child, count, total, depth + 1, target.as_deref())?;
             } else {
                 dir.check_file(&name).map_err(|e| e.to_string())?;
-                *total += metadata.len();
+                let bytes = if output.is_some() {
+                    Some(
+                        dir.read(&name)
+                            .map_err(|e| e.to_string())?
+                            .ok_or("installer source disappeared")?
+                            .1,
+                    )
+                } else {
+                    None
+                };
+                *total += bytes
+                    .as_ref()
+                    .map_or(metadata.len(), |bytes| bytes.len() as u64);
                 if *total > 512 * 1024 * 1024 {
                     return Err("installer tree exceeds its byte bound".to_owned());
+                }
+                if let (Some(output), Some(bytes)) = (&output, bytes) {
+                    output
+                        .replace_if(&name, &bytes, None)
+                        .map_err(|e| e.to_string())?;
                 }
             }
         }

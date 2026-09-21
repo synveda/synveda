@@ -331,6 +331,22 @@ impl Directory {
         Ok(file)
     }
 
+    /// An administrator token can assign the Administrators group as owner.
+    /// Seal only a directory this call exclusively created below private state.
+    pub(crate) fn create_child(&self, name: &str) -> io::Result<bool> {
+        validate_name(name)?;
+        let path = self.path.join(name);
+        match std::fs::create_dir(&path) {
+            Ok(()) => {
+                let mut file = open_directory(&path, true)?;
+                seal(&mut file, &self.user, true)?;
+                Ok(true)
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     pub(crate) fn replace(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
         let before = self.read(name)?;
         self.replace_snapshot(name, bytes, before)

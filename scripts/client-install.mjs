@@ -11,7 +11,7 @@ const windows = process.platform === "win32";
 let windowsBinary;
 function native(request) {
   const output = execFileSync(windowsBinary, ["installer-state"], { input: JSON.stringify(request),
-    encoding: "utf8", timeout: 15000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
+    encoding: "utf8", timeout: request.operation === "stage" ? 60000 : 15000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
   const response = JSON.parse(output);
   if (response.version !== 1) throw new Error("unsupported native installer protocol");
   return response.result;
@@ -99,8 +99,12 @@ export function installClient(source, home, bin, expected = {}) {
   // is created here; their existing CLI/runtime implementations own privacy.
   directory(home, true);
   const lock = join(home, ".client-install.lock");
-  try { mkdirSync(lock, { mode: 0o700 }); }
-  catch (error) { if (error.code === "EEXIST") throw new Error(`client installer is busy or interrupted; inspect ${lock}`); throw error; }
+  if (windows) {
+    if (!native({ operation: "new_directory", path: lock }).created) throw new Error(`client installer is busy or interrupted; inspect ${lock}`);
+  } else {
+    try { mkdirSync(lock, { mode: 0o700 }); }
+    catch (error) { if (error.code === "EEXIST") throw new Error(`client installer is busy or interrupted; inspect ${lock}`); throw error; }
+  }
   let stage;
   let linkStage;
   try {
@@ -110,7 +114,8 @@ export function installClient(source, home, bin, expected = {}) {
       directory(managed);
       if (plainFile(receipt).toString() !== ownershipBytes) throw new Error("client install ownership changed");
     } else {
-      mkdirSync(managed, { mode: 0o700 });
+      if (windows) directory(managed, true);
+      else mkdirSync(managed, { mode: 0o700 });
       atomicFile(receipt, ownershipBytes, 0o600);
     }
     directory(bin, true);
@@ -133,10 +138,16 @@ export function installClient(source, home, bin, expected = {}) {
       if (validateClient(destination).digest !== digest) throw new Error("immutable client release changed");
       if (windows) native({ operation: "tree", path: destination });
     } else {
-      stage = join(releases, `.stage-${randomUUID()}`);
-      cpSync(source, stage, { recursive: true, force: false, errorOnExist: true });
-      if (windows) native({ operation: "tree", path: stage });
-      else chmodSync(stage, 0o700);
+      const nextStage = join(releases, `.stage-${randomUUID()}`);
+      if (windows) {
+        if (!native({ operation: "new_directory", path: nextStage }).created) throw new Error("client stage already exists");
+        stage = nextStage;
+        native({ operation: "stage", path: source, destination: stage });
+      } else {
+        stage = nextStage;
+        cpSync(source, stage, { recursive: true, force: false, errorOnExist: true });
+        chmodSync(stage, 0o700);
+      }
       if (validateClient(stage).digest !== digest) throw new Error("staged client release changed");
       renameSync(stage, destination);
       stage = undefined;

@@ -14,7 +14,10 @@ and checksum inventory, validates a bounded ordinary-entry archive and native
 PE architecture, then invokes its private pinned Node and existing installer.
 The bootstrap creates a protected temporary directory below a verified private
 local parent. It refuses unsafe ACLs, reparse points and ambiguous paths without
-repair. It needs no system Node, Docker or developer mode, requests no elevation
+repair. Every newly created entry receives the process user as owner, including
+administrator sessions whose default owner can be a group. Native staging copies
+into exclusively created private directories; existing entries are never adopted
+or resealed. It needs no system Node, Docker or developer mode, requests no elevation
 and never changes execution policy. The host must permit the inspected script
 under its existing PowerShell policy.
 

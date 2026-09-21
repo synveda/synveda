@@ -37,6 +37,23 @@ impl Drop for Scratch {
 }
 
 #[test]
+fn windows_private_child_creation_is_exclusive_and_seals_ownership() {
+    let scratch = Scratch::new();
+    let directory = scratch.directory();
+    assert!(directory.create_child("stage").unwrap());
+    assert!(
+        Directory::open(&directory.path.join("stage"), false)
+            .unwrap()
+            .is_some()
+    );
+    assert!(!directory.create_child("stage").unwrap());
+    directory.replace("occupied", b"retained").unwrap();
+    assert!(!directory.create_child("occupied").unwrap());
+    assert_eq!(directory.read("occupied").unwrap().unwrap().1, b"retained");
+    assert!(directory.create_child("../outside").is_err());
+}
+
+#[test]
 fn windows_private_create_read_replace_and_lock_preserve_private_identity() {
     let scratch = Scratch::new();
     let directory = scratch.directory();

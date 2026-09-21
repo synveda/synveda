@@ -81,6 +81,26 @@ function Seal-NewDirectory([string]$Path) {
     Assert-Ancestry $Path $true
 }
 
+function Seal-NewFile([string]$Path) {
+    # Inheritance does not fix an administrator token's default group owner.
+    # This is used only after an exclusive creation inside our private stage.
+    $acl = [System.Security.AccessControl.FileSecurity]::new()
+    $acl.SetOwner([System.Security.Principal.SecurityIdentifier]::new($sid))
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($who in $trusted) {
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new($who), 'FullControl', 'Allow'))
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function Create-PrivateDirectory([string]$Path) {
+    if ([System.IO.Directory]::Exists($Path)) { return }
+    Create-PrivateDirectory ([System.IO.Path]::GetDirectoryName($Path))
+    New-Item -ItemType Directory -Path $Path -ErrorAction Stop | Out-Null
+    Seal-NewDirectory $Path
+}
+
 function Download([string]$Url, [string]$Path, [int64]$Limit) {
     $uri = [Uri]$Url
     if ($uri.Scheme -eq 'file' -and -not $uri.IsUnc) {
@@ -119,6 +139,7 @@ function Download([string]$Url, [string]$Path, [int64]$Limit) {
         if ($null -ne $response) { $response.Dispose() }
         if ($null -ne $client) { $client.Dispose() }
     }
+    Seal-NewFile $Path
 }
 
 function Assert-Pe([string]$Path, [int]$Machine) {
@@ -178,8 +199,8 @@ try {
         }
         foreach ($entry in $zip.Entries) {
             $path = Join-Path $scratch $entry.FullName
-            if ($entry.FullName.EndsWith('/')) { [System.IO.Directory]::CreateDirectory($path) | Out-Null; continue }
-            [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($path)) | Out-Null
+            if ($entry.FullName.EndsWith('/')) { Create-PrivateDirectory $path; continue }
+            Create-PrivateDirectory ([System.IO.Path]::GetDirectoryName($path))
             $inputStream = $entry.Open()
             $output = [System.IO.File]::Open($path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
             try {
@@ -193,6 +214,7 @@ try {
                 if ($written -ne $entry.Length) { throw 'ZIP entry is truncated' }
                 $output.Flush($true)
             } finally { $output.Dispose(); $inputStream.Dispose() }
+            Seal-NewFile $path
         }
     } finally { $zip.Dispose() }
     $source = Join-Path $scratch 'client'
