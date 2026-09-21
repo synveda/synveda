@@ -155,7 +155,6 @@ pub(crate) fn redacted_database_url(value: &str) -> String {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::Duration;
 
     fn scratch(name: &str) -> std::path::PathBuf {
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -256,6 +255,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_fifo_is_refused_without_waiting_for_a_writer() {
+        use std::time::Duration;
+
         let dir = scratch("fifo");
         let path = dir.join("database-url");
         assert!(
