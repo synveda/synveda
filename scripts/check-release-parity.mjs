@@ -158,7 +158,7 @@ export function releaseWorkflowFindings(source) {
       !publishJob.includes("          pattern: release-verification-*\n") ||
       !publishJob.includes("test -s release-images-amd64.json") ||
       !publishJob.includes("test -s release-images-arm64.json") ||
-      !publishJob.includes("sha256sum release-images-*.json release-docker-*.json release-kubernetes-*.json >> SHA256SUMS")) {
+      !publishJob.includes("sha256sum release-images-*.json release-docker-*.json release-consumer-*.json release-kubernetes-*.json >> SHA256SUMS")) {
     findings.push("announcement must carry the assembled assets and both checksummed reports");
   }
   if (!assemblyJob.includes("          path: |\n            assets/SHA256SUMS\n            assets/synveda-*.tar.gz\n            assets/synveda-*.tgz\n            assets/synveda-*.yaml\n            assets/synveda-registry-images-*.json\n") ||
@@ -170,12 +170,20 @@ export function releaseWorkflowFindings(source) {
   const qualification = stepBlock(verificationJob, "Qualify the exact Docker and chart artifacts");
   if (!qualification.includes("if: needs.version.outputs.publish == 'true'") ||
       qualification.includes("continue-on-error") ||
-      !qualification.includes("node scripts/qualify-release.mjs") ||
+      !qualification.includes("node scripts/qualify-release.mjs \\\n") ||
+      !qualification.includes("node scripts/qualify-release.mjs --consumer-candidate \\\n") ||
       !qualification.includes("node scripts/qualify-kubernetes-release.mjs") ||
       !qualification.includes('cmp "assets/synveda-$VERSION.tgz" "anonymous-chart/synveda-$VERSION.tgz"') ||
       !publishJob.includes('test -s "release-docker-$arch.json"') ||
+      !publishJob.includes('test -s "release-consumer-$arch.json"') ||
       !publishJob.includes('test -s "release-kubernetes-$arch.json"')) {
     findings.push("release must require exact Docker/chart qualification and anonymous OCI retrieval");
+  }
+  const packaging = stepBlock(assemblyJob, "Package the digest-bound Docker reference");
+  if (!packaging.includes('SYNVEDA_PACKAGE_CONSUMER_CANDIDATE: "1"') ||
+      !verificationJob.includes("            release-consumer-${{ matrix.arch }}.json\n") ||
+      !publishJob.includes("for report in images docker consumer kubernetes; do")) {
+    findings.push("consumer packaging, native recovery reports and release attachments must stay paired");
   }
   if (
     source.split(untrustedInput).length - 1 !== 1 ||

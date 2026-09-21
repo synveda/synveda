@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // OPS-12: volume initialization only. No network, Docker API or product SQL.
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,7 @@ function privateDirectory(directory, uid) {
   const stat = lstatSync(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o7777) !== 0o700 || stat.uid !== uid) fail("private directory ownership or mode refused");
 }
-function privateBytes(file, uid) {
+export function privateBytes(file, uid) {
   const stat = lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o7777) !== 0o600 || stat.nlink !== 1 || stat.uid !== uid || stat.size > 1024 * 1024) fail("private file ownership, mode or size refused");
   return readFileSync(file);
@@ -28,7 +28,7 @@ function put(file, bytes, uid) {
     renameSync(temporary, file);
   } finally { rmSync(temporary, { force: true }); }
 }
-function inventory(directory, uid, prefix = "") {
+export function inventory(directory, uid, prefix = "") {
   privateDirectory(directory, uid);
   return Object.fromEntries(readdirSync(directory).sort().flatMap((name) => {
     if (!/^[a-zA-Z0-9_.-]+$/.test(name)) fail("private filename refused");
@@ -73,6 +73,13 @@ export function projectSecrets(root, projections, uid) {
       privateDirectory(path.join(target, name), uid);
     }
     for (const [name, source] of Object.entries(files)) {
+      if (name === "kms_key" && source === "test:wrong-kms-key" && service === "recovery-key-refusal") {
+        const file = path.join(target, name);
+        const bytes = existsSync(file) ? privateBytes(file, uid) : Buffer.from(`${randomBytes(32).toString("hex")}\n`);
+        if (!/^[0-9a-f]{64}\n$/.test(bytes.toString()) || bytes.equals(privateBytes(path.join(root, "synveda-evaluation/secrets/synveda_kms_key"), uid))) fail("wrong-key recovery probe refused");
+        put(file, bytes, uid);
+        continue;
+      }
       if (name === "database_roles.json" && source === "config:database-roles") {
         put(path.join(target, name), readFileSync("/bundle/deploy/compose/configs/database/roles.reference.json"), uid);
         continue;
@@ -87,21 +94,30 @@ export function projectSecrets(root, projections, uid) {
   put(path.join(oidc, "issuers.json"), privateBytes(path.join(root, "synveda-evaluation/issuers.json"), uid), uid);
 }
 
-export function initialize() {
-  const uid = 65532, gid = 65532, root = "/state";
-  if (process.getuid() !== 0) fail("initial volume ownership requires the isolated initializer UID");
-  const project = process.env.SYNVEDA_CONSUMER_PROJECT;
-  if (!/^synveda-local(?:-acceptance-[a-z0-9][a-z0-9-]{0,23})?$/.test(project ?? "")) fail("unexpected Compose project; use the bundle default or an isolated acceptance project");
+export function consumerProject(project) {
+  if (!/^synveda-local(?:-acceptance-[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?)?$/.test(project ?? "") || project.includes("--")) fail("unexpected Compose project; use the bundle default or an isolated acceptance project");
+  return project;
+}
+
+export function ownEmptyVolume(root) {
   const entries = readdirSync(root).filter((name) => name !== ".consumer.lock");
   const stat = lstatSync(root);
   if (!stat.isDirectory() || stat.isSymbolicLink()) fail("installation volume refused");
   // Only a new empty named volume gets ownership initialized. Never repair
   // foreign or broadened permissions on retained state implicitly.
   if (!entries.length && stat.uid === 0) {
-    chownSync(root, uid, gid);
+    chownSync(root, 65532, 65532);
     chmodSync(root, 0o700);
   }
-  privateDirectory(root, uid);
+  privateDirectory(root, 65532);
+}
+
+export function initialize() {
+  const uid = 65532, gid = 65532, root = "/state";
+  if (process.getuid() !== 0) fail("initial volume ownership requires the isolated initializer UID");
+  const project = consumerProject(process.env.SYNVEDA_CONSUMER_PROJECT);
+  ownEmptyVolume(root);
+  if (existsSync(path.join(root, ".recovery-operation"))) fail("recovery operation is active or interrupted; inspect it before starting services");
   const retainedDatabase = readdirSync("/retained-postgres").length > 0;
   process.setgroups([]);
   process.setgid(gid);

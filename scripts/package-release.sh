@@ -347,9 +347,18 @@ if grep -R -i -E '\brauthy\b|\btemporal(io|[-_][a-z0-9_]+)?\b' \
 fi
 
 if [ "$consumer_candidate" = 1 ]; then
-  # Local qualification only until OPS-12 adds paired named-volume recovery
-  # and release acceptance. The publishing workflow does not select this flag.
+  # Release CI selects this only with the required native consumer lifecycle
+  # and paired-recovery gates. Local candidates use the same extracted artifact.
   copy_runtime_asset deploy/compose/scripts/initialize-consumer.mjs
+  copy_runtime_asset deploy/compose/scripts/consumer-recovery.mjs
+  copy_runtime_asset deploy/compose/scripts/consumer-recovery.sh
+  cat > "$stage/synveda-recovery" <<'SH'
+#!/bin/sh
+set -eu
+bundle=$(CDPATH= cd "$(dirname "$0")" && pwd -P)
+exec sh "$bundle/deploy/compose/scripts/consumer-recovery.sh" "$@"
+SH
+  chmod 755 "$stage/synveda-recovery"
   cp deploy/compose/CONSUMER.md "$stage/CONSUMER.md"
   node scripts/package-consumer-compose.mjs "$stage"
 fi

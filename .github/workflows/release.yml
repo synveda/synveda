@@ -457,6 +457,7 @@ jobs:
       - name: Package the digest-bound Docker reference
         env:
           VERSION: ${{ needs.version.outputs.version }}
+          SYNVEDA_PACKAGE_CONSUMER_CANDIDATE: "1"
         run: |
           node scripts/release-registries.mjs package \
             "assets/synveda-registry-images-$VERSION.json" assets
@@ -580,6 +581,8 @@ jobs:
           # drills must use those bytes and the packaged chart without builds.
           node scripts/qualify-release.mjs \
             "$RUNNER_TEMP/synveda-reference-$VERSION" "release-docker-${{ matrix.arch }}.json"
+          node scripts/qualify-release.mjs --consumer-candidate \
+            "$RUNNER_TEMP/synveda-reference-$VERSION" "release-consumer-${{ matrix.arch }}.json"
           node scripts/qualify-kubernetes-release.mjs \
             "$RUNNER_TEMP/synveda-reference-$VERSION" "assets/synveda-$VERSION.tgz" \
             "release-kubernetes-${{ matrix.arch }}.json"
@@ -598,6 +601,7 @@ jobs:
           path: |
             release-images-${{ matrix.arch }}.json
             release-docker-${{ matrix.arch }}.json
+            release-consumer-${{ matrix.arch }}.json
             release-kubernetes-${{ matrix.arch }}.json
           if-no-files-found: error
 
@@ -630,9 +634,10 @@ jobs:
           test -s release-images-arm64.json
           for arch in amd64 arm64; do
             test -s "release-docker-$arch.json"
+            test -s "release-consumer-$arch.json"
             test -s "release-kubernetes-$arch.json"
           done
-          sha256sum release-images-*.json release-docker-*.json release-kubernetes-*.json >> SHA256SUMS
+          sha256sum release-images-*.json release-docker-*.json release-consumer-*.json release-kubernetes-*.json >> SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Authenticate the final release inventory
         id: attest
@@ -683,7 +688,9 @@ jobs:
           real OIDC browser/CLI login, sample/recreation and paired recovery drill.
           Both native runners also exercised all four provider ownership modes
           using the same candidate bytes and packaged chart in disposable Kind.
-          The checksummed release-docker and release-kubernetes reports are attached.
+          Both runners also qualified plain Compose and its private named-volume
+          recovery through the extracted archive's CONSUMER.md ceremony.
+          The checksummed release-docker, release-consumer and release-kubernetes reports are attached.
           Docker reference live clean-host acceptance is tracked separately
           in those deployment reports from the isolated image smoke checks.
           macOS Docker Desktop, Windows/WSL2 and real OpenShift remain unqualified.
@@ -751,7 +758,7 @@ jobs:
             "assets/synveda-images-$version.yaml"
           )
           for arch in amd64 arm64; do
-            for report in images docker kubernetes; do
+            for report in images docker consumer kubernetes; do
               release_assets+=("assets/release-$report-$arch.json")
             done
           done

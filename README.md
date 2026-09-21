@@ -111,6 +111,11 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). The
 focused tests, source Docker builds and a code map. Small corrections can go
 straight to a PR; no AI harness or prior agent-session knowledge is required.
 
+The source CLI also includes [candidate consumer commands](docs/CONSUMER_CLI.md)
+for native lifecycle, project setup and managed adapter registration. These are
+unpublished and require matching candidate bundles; v0.4.0 instructions above
+remain unchanged.
+
 <a id="run-with-prebuilt-docker-images"></a>
 <a id="quick-start-from-a-source-checkout"></a>
 Existing installation links remain valid: use [prebuilt Docker](deploy/compose/PREBUILT.md)

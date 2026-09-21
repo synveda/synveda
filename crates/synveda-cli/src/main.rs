@@ -19,10 +19,12 @@
 #[cfg(all(feature = "eval-fixture", not(test), not(debug_assertions)))]
 compile_error!("the CLI release binary cannot include the eval-fixture feature");
 
+mod adapter;
 mod api;
 mod audit;
 mod channel;
 mod configuration;
+mod consumer;
 mod credentials;
 mod database_preflight;
 mod demo;
@@ -32,6 +34,7 @@ mod diff;
 mod directory;
 mod init;
 mod keys;
+mod local_state;
 mod login;
 mod mcp;
 mod okf;
@@ -47,6 +50,7 @@ mod scope;
 mod service;
 mod session;
 mod settings;
+mod setup;
 mod skill;
 mod spool;
 #[cfg(test)]
@@ -72,7 +76,11 @@ use synveda_types::{
 };
 
 #[derive(Parser)]
-#[command(name = "synveda", about = "Synveda admin/dev CLI", version)]
+#[command(
+    name = "synveda",
+    about = "Synveda client and administration CLI",
+    version
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -80,6 +88,26 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Start the matching plain-Compose consumer candidate, retaining private state.
+    Up(consumer::Options),
+    /// Stop the receipt-owned consumer project; keep databases and keys.
+    Down(consumer::Options),
+    /// Show containers in the receipt-owned consumer project.
+    Status(consumer::Options),
+    /// Show a bounded log tail from the receipt-owned consumer project.
+    Logs {
+        #[command(flatten)]
+        options: consumer::Options,
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u16).range(1..=1000))]
+        tail: u16,
+    },
+    /// Check local Docker/Compose prerequisites, candidate files and ownership.
+    Doctor(consumer::Options),
+    /// List visible projects or bind this repository through authenticated public APIs.
+    Setup(setup::Options),
+    /// Manage receipt-owned registrations through the existing harness installers.
+    #[command(subcommand)]
+    Adapter(adapter::Command),
     /// Reserved bootstrap verb; deployment bootstrap is Compose-owned
     /// (ADR-0102).
     ///
@@ -2085,7 +2113,38 @@ fn profile_name(flag: Option<String>) -> Result<String, String> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn run(cli: Cli) -> Result<(), String> {
+    // The same lock covers legacy installers, so they cannot race a managed
+    // receipt's read/compare/write cycle. Dry runs create no local state.
+    let locks = match &cli.command {
+        Command::Up(options) | Command::Down(options) => !options.dry_run,
+        Command::Setup(options) => options.project.is_some() && !options.dry_run,
+        Command::Adapter(command) => command.locks(),
+        Command::Plugin(
+            PluginCommand::Install { dry_run, .. } | PluginCommand::Uninstall { dry_run, .. },
+        ) => !dry_run,
+        Command::Mcp {
+            command: Some(McpCommand::Install { dry_run, print, .. }),
+            ..
+        } => !dry_run && !print,
+        Command::Mcp {
+            command: Some(McpCommand::Uninstall { dry_run, .. }),
+            ..
+        } => !dry_run,
+        _ => false,
+    };
+    let _local_lock = if locks {
+        Some(local_state::lock().await?)
+    } else {
+        None
+    };
     match cli.command {
+        Command::Up(options) => consumer::run(&options, consumer::Action::Up),
+        Command::Down(options) => consumer::run(&options, consumer::Action::Down),
+        Command::Status(options) => consumer::run(&options, consumer::Action::Status),
+        Command::Logs { options, tail } => consumer::run(&options, consumer::Action::Logs(tail)),
+        Command::Doctor(options) => consumer::run(&options, consumer::Action::Doctor),
+        Command::Setup(options) => setup::run(options).await,
+        Command::Adapter(command) => adapter::run(command),
         Command::Init => init::init().await,
         Command::Scope(ScopeCommand::List {
             under,

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // OPS-8/CPR-39/ADPT-9: replay both clients through the extracted archive.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -19,6 +20,11 @@ function run(command, args, cwd, extra = {}) {
 try {
   run("bash", ["scripts/package-plugin.sh", version, scratch], root);
   run("tar", ["-xzf", join(scratch, `synveda-plugin-${version}.tar.gz`), "-C", scratch], scratch);
+  const consumer = JSON.parse(readFileSync(join(scratch, "plugin/synveda/consumer-setup.json"), "utf8"));
+  assert.equal(consumer.contract, "OPS-12/ADR-0116");
+  assert.equal(consumer.version, 1);
+  assert.equal(consumer.config_sha256, createHash("sha256").update(readFileSync(join(scratch, "plugin/synveda/dist/config.mjs"))).digest("hex"));
+  process.stdout.write(run(process.execPath, ["--test", "dist/config.test.mjs"], join(scratch, "plugin/synveda")));
   const runtimes = [];
   for (const client of ["codex", "copilot-cli"]) {
     const runtime = join(scratch, "plugin", client);

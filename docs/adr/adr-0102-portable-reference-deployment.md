@@ -26,6 +26,21 @@ acceptance qualifies it; the published launcher remains the supported path in
 the meantime. Existing external-provider and logical-recovery contracts remain
 authoritative.
 
+OPS-12 extends that same logical recovery ceremony to the consumer volumes.
+The candidate's recovery command stops the entire source graph, dumps the pair
+with the existing PostgreSQL tools, and links the original sealed installation
+configuration through `evaluation-recovery.mjs` and `recovery-set.mjs`. Backups
+live in a separate retained recovery volume; their format and encryption limits
+are unchanged. A restore names source, backup and target in the existing exact
+confirmation, refuses any retained target assets, and explicitly rebinds only
+the project in the recovered installation identity. The source must be down;
+the target uses the same issuer/network options with no published proxy port.
+Before normal tenant convergence, the ordinary recovery verifier checks the
+restored tenant, audit chain and key unwrap, including a wrong-key refusal.
+Recovery holds an installation operation marker; interruption retains it for
+operator inspection. Direct Compose operations must not run concurrently with
+recovery. The host-state launcher continues to address only its own layout.
+
 ADR-0105 replaces the abandoned clean-engine provider planning, receipt,
 reservation and process-effect work, and supersedes ADR-0103 and ADR-0104.
 Synveda now treats a supported Docker engine as an operator-owned prerequisite

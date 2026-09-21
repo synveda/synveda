@@ -48,6 +48,9 @@ impl Gateway {
                 };
                 let (released, send, seen) = (released.clone(), send.clone(), seen.clone());
                 connections.push(thread::spawn(move || {
+                    // macOS can inherit the listener's nonblocking flag. These
+                    // blocking HTTP reads must wait for the child's first bytes.
+                    stream.set_nonblocking(false).unwrap();
                     stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                     stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
                     let mut reader = BufReader::new(&stream);

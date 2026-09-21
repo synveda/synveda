@@ -189,7 +189,8 @@ Environment (highest precedence):
   an identity
 - `SYNVEDA_TIMEOUT_MS` — per-call deadline, default 3000
 
-Per project, optional, at `.synveda/config.json`:
+Per project, optional, at `.synveda/config.json` at the Git root (also used by
+hooks launched from subdirectories):
 
 ```json
 {

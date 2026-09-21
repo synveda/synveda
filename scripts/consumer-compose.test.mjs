@@ -132,6 +132,13 @@ test("the opt-in packaged candidate resolves fresh without any generated host se
   assert.equal(rendered.services.initialize.environment.SYNVEDA_CONSUMER_PROJECT, project);
   assert.equal(rendered.volumes.installation.name, `${project}_installation`);
   assert.equal(rendered.secrets, undefined);
+  for (const name of ["database-backup", "database-restore", "recovery-verify", "recovery-key-refusal", "recovery-state", "recovery-check"]) {
+    assert.equal(rendered.services[name].depends_on, undefined, `${name} must not start writers`);
+  }
+  assert.equal(rendered.services["recovery-check"].volumes.some((v) => ["installation", "postgres-data"].includes(v.source)), false);
+  assert.equal(rendered.services["recovery-check"].volumes.find((v) => v.target === "/recovery").read_only, true);
+  assert.equal(rendered.services["database-backup"].environment.SYNVEDA_BACKUP_PROJECT, project);
+  assert.equal(rendered.services["database-restore"].volumes.find((v) => v.target === "/backup").read_only, true);
   assert.equal(rendered.services.proxy.ports[0].host_ip, "127.0.0.1");
   assert.equal(rendered.services.proxy.ports[0].published, "8080");
   assert.equal(Object.values(rendered.services).filter((service) => service.ports?.length).length, 1);
@@ -153,4 +160,13 @@ test("the opt-in packaged candidate resolves fresh without any generated host se
   assert.match(readFileSync(path.join(bundle, "synveda-compose"), "utf8"), /evaluation.sh/, "existing operator/recovery launcher is preserved");
   const projections = JSON.parse(readFileSync(path.join(bundle, "deploy/compose/consumer-projections.json")));
   assert.equal(projections["browser-acceptance"].keycloak_demo_admin_password, "keycloak_demo_admin_password");
+  assert.deepEqual(Object.values(projections["database-backup"]).sort(), ["keycloak_database_password", "postgres_owner_password"]);
+  assert.equal(projections["recovery-key-refusal"].kms_key, "test:wrong-kms-key");
+  const restored = JSON.parse(execFileSync("docker", ["compose", "--project-directory", bundle, "--env-file", "/dev/null", "--profile", "*", "-f", "deploy/compose/consumer-runtime.yaml", "-f", "deploy/compose/consumer-restore.yaml", "config", "--format", "json"], {
+    cwd: bundle, env: { PATH: process.env.PATH, HOME: process.env.HOME, COMPOSE_PROJECT_NAME: `${project}-r`, SYNVEDA_RECOVERY_SOURCE: project }, encoding: "utf8", timeout: 15_000, stdio: "pipe",
+  }));
+  assert.equal(Object.values(restored.services).some((s) => s.ports?.length), false);
+  assert.equal(restored.volumes.recovery.external, true);
+  assert.equal(restored.volumes.recovery.name, `${project}_recovery`);
+  assert.equal(restored.services["recovery-state"].volumes.find((v) => v.target === "/recovery").read_only, true);
 });

@@ -242,6 +242,7 @@ pub fn install_for(
         None => config_path(&plan.client)?,
     };
 
+    let before = crate::local_state::read(&path)?;
     let mut document = read(&path, client.syntax)?;
 
     let present = existing(&document, key, &path)?;
@@ -257,14 +258,13 @@ pub fn install_for(
         // A differing entry is somebody's decision — an older install, a
         // hand edit, a second checkout — and overwriting it silently is
         // how a user's working setup disappears without a message.
-        Some(existing) if !plan.force => {
+        Some(_) if !plan.force => {
             return Err(format!(
-                "{} already has a `{key}.{SERVER_KEY}` entry, and it is not this one:\n\
-                 \n{}\n\n\
-                 it would become:\n\n{}\n\n\
+                "{} already has a `{key}.{SERVER_KEY}` entry, and it is not this one.\n\
+                 The existing entry is omitted because it may contain credentials.\n\
+                 It would become:\n\n{}\n\n\
                  pass --force to replace it, or --print to see the entry and place it yourself",
                 path.display(),
-                indent(&render(existing)),
                 indent(&render(&entry)),
             ));
         }
@@ -278,7 +278,7 @@ pub fn install_for(
     if plan.dry_run {
         println!("would write {}", path.display());
     } else {
-        write(&path, &document)?;
+        write(&path, &document, before.as_deref())?;
         println!("wrote {}", path.display());
     }
     describe(&entry);
@@ -323,7 +323,8 @@ pub fn uninstall(plan: &RemovePlan) -> Result<(), String> {
         None => config_path(&plan.client)?,
     };
 
-    if !path.exists() {
+    let before = crate::local_state::read(&path)?;
+    if before.is_none() {
         // Not an error. An uninstaller that fails on what is already gone is
         // one nobody runs twice, and the moment somebody runs it twice is
         // the moment the first run went wrong (ADR-0067 decision 5).
@@ -343,7 +344,7 @@ pub fn uninstall(plan: &RemovePlan) -> Result<(), String> {
     if plan.dry_run {
         println!("would rewrite {} without our entry", path.display());
     } else {
-        write(&path, &document)?;
+        write(&path, &document, before.as_deref())?;
         println!("removed the `{SERVER_KEY}` entry from {}", path.display());
     }
     // Said out loud for install's reason, and more so here: this command
@@ -433,6 +434,27 @@ fn entry_for(
         args.push(json!(profile));
     }
     Ok(json!({ "command": exe, "args": args }))
+}
+
+pub(crate) fn managed_entry(
+    profile: &str,
+    workspace: &str,
+    project: &str,
+) -> Result<Value, String> {
+    entry_for(profile, Some(workspace), Some(project), None, None)
+}
+
+pub(crate) fn managed_path(client: &str, config: Option<&Path>) -> Result<PathBuf, String> {
+    lookup(client)?;
+    match config {
+        Some(path) => Ok(path.to_path_buf()),
+        None => config_path(client),
+    }
+}
+
+pub(crate) fn registration(client: &str, path: &Path) -> Result<Option<Value>, String> {
+    let client = lookup(client)?;
+    existing(&read(path, client.syntax)?, &client.key, path)
 }
 
 fn describe(entry: &Value) {
@@ -549,12 +571,11 @@ enum Document {
 /// config unsafe to reformat is who maintains it, which is a fact about the
 /// client and not about today's contents.
 fn read(path: &Path, syntax: Syntax) -> Result<Document, String> {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+    let raw = match crate::local_state::read(path)? {
+        Some(raw) => String::from_utf8(raw).map_err(|_| "client config is not UTF-8".to_owned())?,
+        None => {
             return Ok(Document::Json(json!({})));
         }
-        Err(err) => return Err(format!("read {}: {err}", path.display())),
     };
     // A file with nothing in it has no formatting to keep, and the CST has
     // no root to splice into; both syntaxes start from the same blank.
@@ -738,16 +759,7 @@ fn kind(value: &Value) -> &'static str {
 /// Atomically, because this is somebody else's file: a temporary beside it
 /// and then a rename, so an interrupted write cannot truncate a config the
 /// user's client needs to start.
-fn write(path: &Path, document: &Document) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
-    if !parent.exists() {
-        std::fs::create_dir_all(parent)
-            .map_err(|err| format!("create {}: {err}", parent.display()))?;
-        println!("created {}", parent.display());
-    }
-
+fn write(path: &Path, document: &Document, before: Option<&[u8]>) -> Result<(), String> {
     let body = match document {
         Document::Json(value) => format!("{}\n", render(value)),
         // Already the whole file, byte-for-byte outside the key we
@@ -755,18 +767,7 @@ fn write(path: &Path, document: &Document) -> Result<(), String> {
         // is why this branch adds none.
         Document::Jsonc(root) => root.to_string(),
     };
-    let temporary = path.with_extension("synveda-tmp");
-    std::fs::write(&temporary, &body)
-        .map_err(|err| format!("write {}: {err}", temporary.display()))?;
-    // The client's own permissions, kept: this command has no opinion
-    // about how another application's config should be readable.
-    if let Ok(existing) = std::fs::metadata(path) {
-        let _ = std::fs::set_permissions(&temporary, existing.permissions());
-    }
-    std::fs::rename(&temporary, path).map_err(|err| {
-        let _ = std::fs::remove_file(&temporary);
-        format!("write {}: {err}", path.display())
-    })
+    crate::local_state::replace(path, before, body.as_bytes(), false)
 }
 
 fn render(value: &Value) -> String {
@@ -974,7 +975,7 @@ mod tests {
         let path = scratch("conflict");
         std::fs::write(
             &path,
-            json!({ "mcpServers": { "synveda": { "command": "/elsewhere/synveda", "args": ["mcp"] } } })
+            json!({ "mcpServers": { "synveda": { "command": "/elsewhere/synveda", "args": ["mcp"], "env": {"TOKEN":"private-token-sentinel"} } } })
                 .to_string(),
         )
         .expect("seed");
@@ -982,9 +983,10 @@ mod tests {
         let error = install(&plan(&path)).expect_err("a differing entry must not be overwritten");
         assert!(error.contains("--force"), "{error}");
         assert!(
-            error.contains("/elsewhere/synveda"),
-            "the conflict must show what is there: {error}"
+            error.contains("omitted because it may contain credentials"),
+            "the conflict must explain its content-free diagnostic: {error}"
         );
+        assert!(!error.contains("private-token-sentinel"));
 
         // And the file is untouched until someone says so.
         assert_eq!(

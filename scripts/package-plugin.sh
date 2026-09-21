@@ -76,6 +76,18 @@ cp "$adapter/.mcp.json" "$stage/synveda/.mcp.json"
 cp -R "$adapter/hooks" "$stage/synveda/hooks"
 cp -R "$adapter/dist" "$stage/synveda/dist"
 
+# Native managed registration requires the receipt-aware observation runtime.
+# Hash the shipped module so a historical same-version bundle is refused.
+node --input-type=module - "$stage/synveda" <<'JS'
+import { readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+const root = process.argv[2];
+const config = readFileSync(`${root}/dist/config.mjs`);
+if (!config.includes(Buffer.from("managed_observation"))) throw new Error("rebuild the receipt-aware adapter before packaging");
+writeFileSync(`${root}/consumer-setup.json`, JSON.stringify({ version: 1,
+  contract: "OPS-12/ADR-0116", config_sha256: createHash("sha256").update(config).digest("hex") }) + "\n");
+JS
+
 for client in codex copilot-cli; do
   runtime="$stage/$client"
   shared="$runtime/node_modules/@synveda/claude-code-adapter"

@@ -5,11 +5,13 @@
  * a configuration mistake must not cost the user their session.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import type { Bearer } from "./credentials.mjs";
 import { diagnostic, log } from "./log.mjs";
+import { configDir } from "./paths.mjs";
 
 /** The gateway's own default listen address (`SYNVEDA_LISTEN_ADDR`). */
 const DEFAULT_GATEWAY = "http://127.0.0.1:8120";
@@ -66,6 +68,7 @@ interface ProjectConfig {
   disabled?: unknown;
   inject?: unknown;
   observe?: unknown;
+  managed_observation?: unknown;
   skills?: unknown;
   gateway_url?: unknown;
   workspace_id?: unknown;
@@ -76,11 +79,14 @@ interface ProjectConfig {
 }
 
 export function loadConfig(cwd: string | undefined): AdapterConfig {
-  const project = readProjectConfig(cwd);
+  const root = projectRoot(cwd);
+  const project = readProjectConfig(root);
+  const workspaceId = str(process.env.SYNVEDA_WORKSPACE) ?? str(project.workspace_id);
+  const projectId = str(process.env.SYNVEDA_PROJECT) ?? str(project.project_id);
   return {
     disabled: truthy(process.env.SYNVEDA_DISABLED) || bool(project.disabled) === true,
     inject: bool(project.inject) !== false,
-    observe: bool(project.observe) !== false,
+    observe: observationAllowed(root, project, workspaceId, projectId),
     skills: bool(project.skills) !== false,
     gatewayUrl: trimSlash(
       str(process.env.SYNVEDA_GATEWAY) ?? str(project.gateway_url) ?? DEFAULT_GATEWAY,
@@ -91,8 +97,8 @@ export function loadConfig(cwd: string | undefined): AdapterConfig {
       DEFAULT_TIMEOUT_MS,
     budgetTokens: positive(project.budget_tokens),
     compactBudgetTokens: positive(project.compact_budget_tokens),
-    workspaceId: str(process.env.SYNVEDA_WORKSPACE) ?? str(project.workspace_id),
-    projectId: str(process.env.SYNVEDA_PROJECT) ?? str(project.project_id),
+    workspaceId,
+    projectId,
   };
 }
 
@@ -115,11 +121,50 @@ export function resolveGateway(config: AdapterConfig, bearer: Bearer): AdapterCo
   return { ...config, gatewayUrl };
 }
 
-function readProjectConfig(cwd: string | undefined): ProjectConfig {
-  if (cwd === undefined || cwd.length === 0) return {};
+function projectRoot(cwd: string | undefined): string | undefined {
+  if (cwd === undefined || cwd.length === 0) return undefined;
+  // Native registration and setup select the Git root, including worktrees.
+  // A hook launched below that root must retain the same observation choice.
+  let root = cwd;
+  try {
+    let candidate = realpathSync(cwd);
+    root = candidate;
+    while (true) {
+      if (existsSync(join(candidate, ".git"))) { root = candidate; break; }
+      const parent = dirname(candidate);
+      if (parent === candidate) break;
+      candidate = parent;
+    }
+  } catch { /* A missing working directory has no repository to select. */ }
+  return root;
+}
+
+function observationAllowed(root: string | undefined, project: ProjectConfig,
+  workspace: string | undefined, projectId: string | undefined): boolean {
+  if (root === undefined) return project.managed_observation !== true && bool(project.observe) !== false;
+  const key = createHash("sha256").update(root).digest("hex");
+  const receipt = join(configDir(), "consumer", `setup-${key}.json`);
+  try {
+    const metadata = lstatSync(receipt);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 65536) return false;
+    if (process.platform !== "win32" && ((metadata.mode & 0o777) !== 0o600 || metadata.uid !== process.getuid?.())) return false;
+    const saved = JSON.parse(readFileSync(receipt, "utf8"));
+    return saved?.version === 1 && saved.root === root && project.managed_observation === true
+      && project.observe === true && saved.selection?.observation === "on"
+      && saved.selection.workspace === workspace && saved.selection.project === projectId
+      && saved.selection.profile === (process.env.SYNVEDA_PROFILE || "default");
+  } catch (error) {
+    // Existing manually configured adapters keep their contract. A managed
+    // checkout cannot grant observation by travelling with a shared config.
+    return missing(error) && project.managed_observation !== true && bool(project.observe) !== false;
+  }
+}
+
+function readProjectConfig(root: string | undefined): ProjectConfig {
+  if (root === undefined) return {};
   let raw: string;
   try {
-    raw = readFileSync(join(cwd, ".synveda", "config.json"), "utf8");
+    raw = readFileSync(join(root, ".synveda", "config.json"), "utf8");
   } catch (error) {
     if (!missing(error)) log("config.unreadable", { error: diagnostic(error) });
     return {};

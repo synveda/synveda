@@ -386,7 +386,7 @@ check-chart-images:
 # package/installer, the exact release image plan and the Helm package. It uses
 # no Docker daemon, registry, cluster or network and makes no pullability claim.
 check-release-parity:
-	node --test scripts/check-release-parity.test.mjs scripts/install.test.mjs scripts/build-kind-image.test.mjs scripts/helm-failover.test.mjs scripts/verify-release-images.test.mjs scripts/release-registries.test.mjs scripts/consumer-compose.test.mjs
+	node --test scripts/check-release-parity.test.mjs scripts/install.test.mjs scripts/build-kind-image.test.mjs scripts/helm-failover.test.mjs scripts/verify-release-images.test.mjs scripts/release-registries.test.mjs scripts/consumer-compose.test.mjs scripts/consumer-recovery.test.mjs
 	node scripts/check-release-parity.mjs
 
 # OPS-8/CPR-39/ADPT-9: all three adapters must be built from the frozen lockfile.

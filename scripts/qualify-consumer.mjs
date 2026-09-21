@@ -1,5 +1,4 @@
-// OPS-12: the plain-Compose subset of the existing extracted-release gate.
-// Deliberately not release qualification until paired recovery also passes.
+// OPS-12: plain-Compose lifecycle and paired recovery of extracted artifacts.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -11,14 +10,15 @@ export function qualifyConsumer(input, output) {
   const bundle = resolve(input), reportPath = resolve(output);
   const manifest = JSON.parse(readFileSync(join(bundle, "environment.json"), "utf8"));
   const project = `synveda-local-acceptance-${randomUUID().slice(0, 8)}`;
+  const restoredProject = `${project}-restore`;
   const env = { ...process.env, COMPOSE_PROJECT_NAME: project };
   for (const name of ["COMPOSE_FILE", "COMPOSE_PROFILES", "COMPOSE_ENV_FILES"]) delete env[name];
   const report = {
-    qualification: "consumer-candidate-startup-and-recreation", version: manifest.release_version,
+    qualification: "consumer-candidate-lifecycle-and-paired-recovery", version: manifest.release_version,
     source: manifest.source_sha, sourceDirty: manifest.source_dirty ?? false, images: manifest.images,
-    at: new Date().toISOString(), project, checks: {}, timingsMs: {},
+    at: new Date().toISOString(), project, restoredProject, checks: {}, timingsMs: {},
     imageDownloadBytes: null, imageDownloadMs: null, firstAuthenticatedHarnessCallMs: null,
-    outstanding: ["paired named-volume backup/restore", "anonymous Docker Hub publication", "Docker Desktop and native Windows qualification"],
+    outstanding: ["anonymous Docker Hub publication", "Docker Desktop and native Windows qualification"],
   };
   const result = (args, extra = {}) => spawnSync("docker", args, {
     env, cwd: bundle, encoding: "utf8", timeout: 660_000, maxBuffer: 8 * 1024 * 1024, ...extra,
@@ -33,10 +33,20 @@ export function qualifyConsumer(input, output) {
   const hashes = () => utility("const fs=require('node:fs'),c=require('node:crypto');const p='/state/synveda-evaluation/secrets';console.log(JSON.stringify(fs.readdirSync(p).filter(n=>fs.lstatSync(p+'/'+n).isFile()).sort().map(n=>[n,c.createHash('sha256').update(fs.readFileSync(p+'/'+n)).digest('hex')])));");
   const browser = () => compose("run", "--rm", "--no-deps", "--entrypoint", "node", "browser-acceptance", "evaluation.mjs");
   const sample = () => compose("run", "--rm", "--no-deps", "--entrypoint", "node", "browser-acceptance", "product-demo.mjs", "sample");
+  const restoreEnv = { ...env, COMPOSE_PROJECT_NAME: restoredProject, SYNVEDA_RECOVERY_SOURCE: project, SYNVEDA_CONFIRM_RESTORE: `${project}:qualification:${restoredProject}` };
+  const restoredArgs = ["compose", "--env-file", "/dev/null", "--project-directory", bundle, "-p", restoredProject, "-f", join(bundle, "deploy/compose/consumer-runtime.yaml"), "-f", join(bundle, "deploy/compose/consumer-restore.yaml")];
+  const restored = (...args) => run([...restoredArgs, ...args], { env: restoreEnv });
+  const recoveryResult = (args, extra = {}) => spawnSync("sh", [join(bundle, "synveda-recovery"), ...args], { env, cwd: bundle, encoding: "utf8", timeout: 900_000, maxBuffer: 8 * 1024 * 1024, ...extra });
+  const recover = (args, extra) => {
+    const value = recoveryResult(args, extra);
+    assert.equal(value.status, 0, `consumer recovery ${args[0]} failed: ${value.stderr?.slice(-1800)}`);
+  };
   const missingInstallation = `${project}_missing-installation`;
   let missingVolumeCreated = false;
   assert.equal(run(["ps", "-aq", "--filter", `label=com.docker.compose.project=${project}`]).trim(), "", "candidate project already exists");
   assert.equal(run(["volume", "ls", "-q", "--filter", `name=^${project}_`]).trim(), "", "candidate volumes already exist");
+  assert.equal(run(["ps", "-aq", "--filter", `label=com.docker.compose.project=${restoredProject}`]).trim(), "");
+  assert.equal(run(["volume", "ls", "-q", "--filter", `name=^${restoredProject}_`]).trim(), "");
   let failure;
   try {
     const imageRefs = [...new Set([...Object.entries(manifest.images).filter(([name]) => name !== "helm_postgres").map(([, reference]) => reference), manifest.external_images.otel_collector])];
@@ -75,6 +85,15 @@ export function qualifyConsumer(input, output) {
     assert.match(refused.stderr, /retained PostgreSQL requires its matching installation volume/);
     assert.equal(hashes(), original);
     report.checks.lostInstallationVolumeRefusedBesideRetainedPostgres = true;
+    utility("require('node:fs').mkdirSync('/state/.recovery-operation',{mode:0o700});");
+    try {
+      const refused = result(["compose", "run", "--rm", "--no-deps", "initialize"]);
+      assert.equal(refused.status, 78); assert.match(refused.stderr, /recovery operation is active or interrupted/);
+    } finally {
+      utility("require('node:fs').rmdirSync('/state/.recovery-operation');");
+    }
+    assert.equal(hashes(), original);
+    report.checks.initializationRefusedDuringRecovery = true;
 
     console.log("consumer qualification: real browser and opt-in fictional sample");
     const signingIn = Date.now(); browser();
@@ -97,6 +116,46 @@ export function qualifyConsumer(input, output) {
     assert.equal(hashes(), original);
     browser(); sample();
     report.checks.recreationPreservesKeysIdentityAndSample = true;
+
+    console.log("consumer qualification: paired logical backup and private empty-target restoration");
+    const backingUp = Date.now(); recover(["backup", "qualification"]);
+    report.timingsMs.pairedBackup = Date.now() - backingUp;
+    report.checks.quiescedPairedBackup = true;
+    recover(["verify", "qualification"]);
+    const flipArchiveByte = () => compose("run", "--rm", "--no-deps", "--entrypoint", "node", "recovery-state", "-e",
+      "const fs=require('node:fs');const fd=fs.openSync('/recovery/qualification/database/synveda.dump','r+');const b=Buffer.alloc(1);fs.readSync(fd,b,0,1,0);b[0]^=1;fs.writeSync(fd,b,0,1,0);fs.closeSync(fd);");
+    flipArchiveByte();
+    try {
+      const refused = recoveryResult(["verify", "qualification"]);
+      assert.notEqual(refused.status, 0); assert.match(refused.stderr, /archive digest did not match/);
+    } finally { flipArchiveByte(); }
+    recover(["verify", "qualification"]);
+    report.checks.damagedArchiveRefusedAndOriginalPreserved = true;
+    const repeated = recoveryResult(["backup", "qualification"]);
+    assert.notEqual(repeated.status, 0); assert.match(repeated.stderr, /already exists/);
+    report.checks.backupOverwriteRefused = true;
+    const unconfirmed = recoveryResult(["restore", "qualification", project], { env: { ...restoreEnv, SYNVEDA_CONFIRM_RESTORE: "" } });
+    assert.notEqual(unconfirmed.status, 0); assert.match(unconfirmed.stderr, /requires SYNVEDA_CONFIRM_RESTORE/);
+    report.checks.restoreRequiresExactProjectConfirmation = true;
+    const restoring = Date.now(); recover(["restore", "qualification", project], { env: restoreEnv });
+    report.timingsMs.pairedRestore = Date.now() - restoring;
+    report.checks.restoredTenantAuditKeyAndWrongKeyRefusal = true;
+    assert.equal(restored("run", "--rm", "--no-deps", "--entrypoint", "node", "initialize", "-e",
+      "const fs=require('node:fs'),c=require('node:crypto');const p='/state/synveda-evaluation/secrets';console.log(JSON.stringify(fs.readdirSync(p).filter(n=>fs.lstatSync(p+'/'+n).isFile()).sort().map(n=>[n,c.createHash('sha256').update(fs.readFileSync(p+'/'+n)).digest('hex')])));"), original);
+    const privateGraph = JSON.parse(restored("config", "--format", "json"));
+    assert.equal(Object.values(privateGraph.services).some((service) => service.ports?.length), false);
+    restored("run", "--rm", "--no-deps", "--entrypoint", "node", "browser-acceptance", "evaluation.mjs");
+    // The original fixture receipt identifies the exact pre-backup Session and
+    // Capture. Reuse it to validate those rows, rather than seed a new sample.
+    restored("run", "--rm", "--no-deps", "--volume", `${project}_browser-acceptance-state:/var/lib/synveda-browser`, "--entrypoint", "node", "browser-acceptance", "product-demo.mjs", "sample");
+    report.checks.originalSealedSecretsBrowserIdentityAndSampleRestored = true;
+    report.checks.restoredProxyRemainsPrivate = true;
+    const retained = recoveryResult(["restore", "qualification", project], { env: restoreEnv });
+    assert.notEqual(retained.status, 0); assert.match(retained.stderr, /retained target/);
+    report.checks.retainedRestoreTargetRefused = true;
+    const restoredLogs = restored("logs", "--no-color");
+    for (const value of privateValues) assert.ok(!restoredLogs.includes(value), "private value appeared in restored service logs");
+    report.checks.noSecretsInRestoredLogs = true;
   } catch (error) {
     failure = error;
     report.failure = error.message;
@@ -104,6 +163,9 @@ export function qualifyConsumer(input, output) {
     const stopped = result(["compose", "down"], { timeout: 300_000 });
     report.checks.exactProjectStoppedWithVolumesRetained = stopped.status === 0;
     if (stopped.status !== 0) failure ??= new Error(`candidate cleanup incomplete for ${project}; volumes retained`);
+    const restoredStop = result([...restoredArgs, "down"], { env: restoreEnv, timeout: 300_000 });
+    report.checks.restoredProjectStoppedWithVolumesRetained = restoredStop.status === 0;
+    if (restoredStop.status !== 0) failure ??= new Error(`candidate cleanup incomplete for ${restoredProject}; volumes retained`);
     if (missingVolumeCreated) {
       const label = result(["volume", "inspect", "--format", '{{index .Labels "com.synveda.test"}}', missingInstallation], { timeout: 30_000 });
       if (label.status === 0 && label.stdout.trim() === "ops12-consumer") run(["volume", "rm", missingInstallation], { timeout: 30_000 });
@@ -111,5 +173,5 @@ export function qualifyConsumer(input, output) {
     writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   }
   if (failure) throw failure;
-  console.log(`PASS consumer candidate startup/recreation subset: ${reportPath}. Paired recovery remains unqualified.`);
+  console.log(`PASS consumer candidate lifecycle and paired recovery: ${reportPath}.`);
 }

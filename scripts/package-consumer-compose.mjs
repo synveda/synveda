@@ -19,21 +19,26 @@ function publish(file, bytes) {
 const mount = (subpath, target, read_only = true) => ({ type: "volume", source: "installation", target, read_only, volume: { nocopy: true, subpath } });
 const bind = (source, target) => ({ type: "bind", source, target, read_only: true, bind: { create_host_path: false } });
 const completed = { condition: "service_completed_successfully", required: true };
+const recoveryServices = ["database-backup", "database-restore", "recovery-verify", "recovery-key-refusal"];
 
 export function consumerGraph(graph, bundle, manifest) {
   graph = structuredClone(graph);
   const projections = {};
   for (const [name, service] of Object.entries(graph.services)) {
     if (service.build || !/^[\w./:-]+@sha256:[a-f0-9]{64}$/.test(service.image ?? "")) throw new Error(`consumer ${name} must use an immutable prebuilt image`);
-    service.depends_on = { ...service.depends_on, initialize: completed };
+    if (!recoveryServices.includes(name)) service.depends_on = { ...service.depends_on, initialize: completed };
     const projected = Object.fromEntries((service.secrets ?? []).map(({ source, target }) => {
       const file = path.basename(graph.secrets[source]?.file ?? "");
       if (!/^[a-z][a-z0-9_]+$/.test(file) || !/^[a-z][a-z0-9_]+$/.test(target)) throw new Error("unsupported secret projection");
-      return [target, file];
+      return [target, source === "synveda_wrong_kms_key" ? "test:wrong-kms-key" : file];
     }));
     delete service.secrets;
     service.volumes = (service.volumes ?? []).flatMap((volume) => {
       if (volume.type !== "bind") return [volume];
+      if (volume.target === "/backup" && ["database-backup", "database-restore"].includes(name)) return [{
+        type: "volume", source: "recovery", target: "/backup", read_only: name === "database-restore",
+        volume: { nocopy: true, subpath: "${SYNVEDA_BACKUP_ID:-unselected}/database" },
+      }];
       if (volume.target === "/etc/synveda/oidc/issuers.json") return [mount("synveda-evaluation", "/etc/synveda/oidc")];
       if (volume.target === "/run/synveda/database-authority") return [mount("synveda-evaluation/database-authority", volume.target, volume.read_only === true)];
       if (volume.target === "/run/synveda/keycloak-public-gate") return [mount("synveda-evaluation/keycloak-public-gate", volume.target, volume.read_only === true)];
@@ -62,6 +67,10 @@ export function consumerGraph(graph, bundle, manifest) {
   graph.name = "synveda-local";
   for (const kind of ["networks", "volumes"]) for (const value of Object.values(graph[kind] ?? {})) delete value.name;
   graph.volumes.installation = { labels: { "com.synveda.contract": "cpr-45", "com.synveda.volume": "consumer-installation" } };
+  graph.volumes.recovery = { labels: { "com.synveda.contract": "cpr-45", "com.synveda.volume": "consumer-recovery" } };
+  if (graph.services["database-backup"]) Object.assign(graph.services["database-backup"].environment, {
+    SYNVEDA_BACKUP_PROJECT: "${COMPOSE_PROJECT_NAME}", SYNVEDA_BACKUP_ID: "${SYNVEDA_BACKUP_ID:-unselected}",
+  });
   const closed = Object.fromEntries(["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "FTP_PROXY", "ftp_proxy", "ALL_PROXY", "all_proxy"].map((key) => [key, ""]));
   const utility = {
     image: manifest.images.product, read_only: true, init: true, cap_drop: ["ALL"],
@@ -78,6 +87,18 @@ export function consumerGraph(graph, bundle, manifest) {
       { type: "volume", source: "installation", target: "/state", volume: { nocopy: true } },
       { type: "volume", source: "postgres-data", target: "/retained-postgres", read_only: true, volume: { nocopy: true } },
     ],
+  };
+  graph.services["recovery-state"] = {
+    ...graph.services.initialize, profiles: ["recovery"],
+    entrypoint: graph.services.initialize.entrypoint.map((value) => value.replace("initialize-consumer.mjs", "consumer-recovery.mjs")),
+    environment: { ...closed, SYNVEDA_CONSUMER_PROJECT: "${COMPOSE_PROJECT_NAME}", SYNVEDA_RECOVERY_SOURCE: "${SYNVEDA_RECOVERY_SOURCE:-${COMPOSE_PROJECT_NAME}}", SYNVEDA_CONFIRM_RESTORE: "${SYNVEDA_CONFIRM_RESTORE:-}" },
+    volumes: [...graph.services.initialize.volumes, { type: "volume", source: "recovery", target: "/recovery", volume: { nocopy: true } }],
+  };
+  graph.services["recovery-check"] = {
+    ...utility, user: "65532:65532", profiles: ["recovery"],
+    entrypoint: ["/usr/bin/timeout", "--signal=TERM", "--kill-after=5s", "90s", "/usr/local/bin/node", "/bundle/deploy/compose/scripts/consumer-recovery.mjs"],
+    environment: graph.services["recovery-state"].environment,
+    volumes: [bind(".", "/bundle"), { type: "volume", source: "recovery", target: "/recovery", read_only: true, volume: { nocopy: true } }],
   };
   projections.credentials = { keycloak_demo_admin_password: "keycloak_demo_admin_password" };
   graph.services.credentials = {
@@ -102,9 +123,15 @@ export function packageConsumer(bundle, run = execFileSync) {
   const env = {
     PATH: process.env.PATH, HOME: process.env.HOME, DOCKER_CONFIG: process.env.DOCKER_CONFIG,
     ...Object.fromEntries(Object.entries(evaluationEnvironment(manifest, options, "/state", 65532, 65532, compose)).map(([key, value]) => [key, String(value)])),
+    SYNVEDA_BACKUP_PROJECT: "synveda-local", SYNVEDA_BACKUP_ID: "unselected",
+    SYNVEDA_BACKUP_STAGING_DIR: "/recovery/unselected/database", SYNVEDA_RESTORE_DATABASE_DIR: "/recovery/unselected/database",
+    SYNVEDA_RESTORE_WRONG_KMS_KEY_FILE: "/state/synveda-evaluation/secrets/synveda_wrong_kms_key",
   };
   const files = ["compose.yaml", "compose.postgres.yaml", "compose.keycloak.yaml", "compose.keycloak-postgres.yaml", "compose.evaluation.yaml", "compose.demo.yaml", "compose.browser-acceptance.yaml"];
   const merged = JSON.parse(run("docker", ["compose", "--env-file", "/dev/null", "--profile", "*", ...files.flatMap((file) => ["-f", path.join(compose, file)]), "config", "--format", "json"], { env, cwd: bundle, encoding: "utf8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] }));
+  const recovery = JSON.parse(run("docker", ["compose", "--env-file", "/dev/null", "--profile", "*", ...[...files, "compose.backup.yaml", "compose.restore.yaml"].flatMap((file) => ["-f", path.join(compose, file)]), "config", "--format", "json"], { env, cwd: bundle, encoding: "utf8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] }));
+  for (const name of recoveryServices) merged.services[name] = recovery.services[name];
+  Object.assign(merged.secrets, recovery.secrets);
   const { graph, projections } = consumerGraph(merged, bundle, manifest);
   // JSON is valid YAML. Preserve explicit false values and unresolved project
   // names: older Compose serializers omit create_host_path=false, changing
@@ -112,6 +139,7 @@ export function packageConsumer(bundle, run = execFileSync) {
   publish(path.join(compose, "consumer-runtime.yaml"), `# Generated from the canonical CPR-45 fragments; do not edit.\n${JSON.stringify(graph, null, 2)}\n`);
   publish(path.join(compose, "consumer-projections.json"), `${JSON.stringify(projections, null, 2)}\n`);
   publish(path.join(bundle, "compose.yaml"), "# OPS-12 consumer candidate. See CONSUMER.md for qualification status.\nname: synveda-local\ninclude:\n  - path: ./deploy/compose/consumer-runtime.yaml\n    project_directory: .\n");
+  publish(path.join(compose, "consumer-restore.yaml"), `# Keep the original issuer reachable only inside the restored graph.\nservices:\n  proxy:\n    ports: !reset []\n  recovery-state:\n    volumes:\n      - type: volume\n        source: recovery\n        target: /recovery\n        read_only: true\n        volume:\n          nocopy: true\nvolumes:\n  recovery:\n    name: \${SYNVEDA_RECOVERY_SOURCE:?set the exact source project}_recovery\n    external: true\n    labels: !reset {}\n`);
   return graph;
 }
 

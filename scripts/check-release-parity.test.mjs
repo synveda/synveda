@@ -156,8 +156,13 @@ test("release workflow binds the chart and digest-addressed reference images", (
     current.replace("needs: [version, assemble, verify-images]", "needs: [version, assemble]"),
     current.replace("node scripts/verify-release-images.mjs", "echo skipped"),
     current.replace("node scripts/qualify-release.mjs", "echo skipped"),
+    current.replace("node scripts/qualify-release.mjs --consumer-candidate", "echo skipped"),
+    current.replace('SYNVEDA_PACKAGE_CONSUMER_CANDIDATE: "1"', 'SYNVEDA_PACKAGE_CONSUMER_CANDIDATE: "0"'),
     current.replace("node scripts/qualify-kubernetes-release.mjs", "echo skipped"),
     current.replace('test -s "release-docker-$arch.json"', "true"),
+    current.replace('test -s "release-consumer-$arch.json"', "true"),
+    current.replace("for report in images docker consumer kubernetes; do", "for report in images docker kubernetes; do"),
+    current.replace("            release-consumer-${{ matrix.arch }}.json\n", ""),
     current.replace('test -s "release-kubernetes-$arch.json"', "true"),
     current.replace('cmp "assets/synveda-$VERSION.tgz" "anonymous-chart/synveda-$VERSION.tgz"', "true"),
     current.replace("- name: Qualify the exact Docker and chart artifacts", "- name: Qualify the exact Docker and chart artifacts\n        continue-on-error: true"),
@@ -270,7 +275,7 @@ test("publication uploads exactly the release files despite checkout asset direc
     `synveda-reference-${version}.tar.gz`, `synveda-plugin-${version}.tar.gz`,
     `synveda-${version}.tgz`, `synveda-cnpg-image-${version}.yaml`,
     `synveda-images-${version}.yaml`,
-    ...["amd64", "arm64"].flatMap((arch) => ["images", "docker", "kubernetes"].map((report) => `release-${report}-${arch}.json`)),
+    ...["amd64", "arm64"].flatMap((arch) => ["images", "docker", "consumer", "kubernetes"].map((report) => `release-${report}-${arch}.json`)),
   ];
   try {
     mkdirSync(join(scratch, "bin"));
@@ -296,6 +301,13 @@ test("publication uploads exactly the release files despite checkout asset direc
     ]);
     assert.equal(run({ GH_EXIT_CODE: "55" }).status, 55, "upload failures must propagate");
     rmSync(capture);
+    for (const arch of ["amd64", "arm64"]) {
+      const report = join(scratch, "assets", `release-consumer-${arch}.json`);
+      rmSync(report);
+      assert.equal(run().status, 1, "missing native consumer report must fail before publication");
+      assert.equal(existsSync(capture), false);
+      writeFileSync(report, "fixture");
+    }
     const required = join(scratch, "assets", names[1]);
     rmSync(required);
     assert.equal(run().status, 1, "missing archive must fail before publication");

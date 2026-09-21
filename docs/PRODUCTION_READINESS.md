@@ -88,6 +88,26 @@ unqualified. CPR-45's single-host and Kind drills do not establish production
 custody/rotation, encrypted off-host retention, PITR or recurring measured
 recovery against owned RPO/RTO.
 
+The 2026-09-21 OPS-12 plain-Compose candidate separately passed its 20-check
+local artifact lifecycle and named-volume recovery gate on macOS arm64 with
+OrbStack. It quiesces the source, restores the logical database pair into a
+private empty target, verifies the original sealed keys and audit chain, and
+reuses the original browser identity/sample receipt. An initial empty-directory
+copy defect was fixed and the complete drill rerun from fresh extracted bytes.
+The candidate used cached local images plus a rebuilt PostgreSQL image; native
+Linux anonymous release qualification remains pending. Release CI now requires
+separate consumer reports on both architectures. This adds local recovery
+evidence, not encrypted off-host custody, PITR or a changed readiness verdict.
+
+ADR-0116 adds unpublished native consumer lifecycle, public-API project setup
+and managed Claude/registry-backed MCP registration. Private receipts bind
+deployment ownership and exact adapter entries; managed observation requires
+matching project/profile consent. The source macOS arm64 CLI started the earlier
+extracted candidate on OrbStack, passed real browser login/API/logout and shut
+down with all volumes retained. This does not qualify published native clients,
+Windows, user-wide hook consent, Codex/Copilot automatic hook setup or a supported
+upgrade window.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.

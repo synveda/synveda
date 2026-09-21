@@ -18,11 +18,16 @@ recovery and support gaps. Passing installation checks is not HA or certificatio
 The fresh contributor walkthrough still needs unoccupied Docker/hosts resources;
 [CPR-45 dependencies](CPR-45.md#dependencies) records the blocker and next action.
 Consumer installation is tracked in [OPS-12](OPS-12.md). Registry configuration,
-Claude scope checks and serialized credential refresh are implemented locally;
-the plain-Compose candidate still needs paired named-volume recovery.
-Next, reuse the existing logical
-backup/restore contract for that layout and extend its artifact gate. Publication
-also needs owner registry settings and a separately authorized new release.
+Claude scope checks and serialized credential refresh are implemented locally.
+The plain-Compose candidate now has paired named-volume recovery and a complete
+20-check local artifact drill; release CI requires its native recovery reports.
+Native lifecycle/setup/adapter routes now use the candidate and existing public
+APIs/installers, with private receipts, observation consent and conflict-safe
+removal (ADR-0116). The source CLI has local OrbStack lifecycle and browser evidence;
+manual Codex/Copilot trust/setup and broader native qualification remain separate.
+Next are pinned private Node runtimes and native client-only artifacts/installers.
+Hosted qualification and publication still need owner registry settings and a
+separately authorized new release.
 
 [Client support](../CLIENT_SUPPORT.md) and [SDK compatibility](../../sdks/README.md#compatibility-and-release-boundary)
 own tested versions and limits. [ADPT-4](ADPT-4.md) retains SDK release decisions.

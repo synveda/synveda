@@ -125,6 +125,8 @@ esac
         command
             .current_dir(self.project.join("nested"))
             .env("PATH", self.root.join("bin"))
+            .env("HOME", &self.root)
+            .env("XDG_CONFIG_HOME", self.root.join("config"))
             .env("PLUGIN_FIXTURE", &self.root)
             .args([
                 "plugin",

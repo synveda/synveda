@@ -20,10 +20,18 @@ backup_id=${SYNVEDA_BACKUP_ID:-}
 tenant_id=${SYNVEDA_BACKUP_TENANT_ID:-}
 postgres_image=${SYNVEDA_BACKUP_POSTGRES_IMAGE:-}
 case "$project" in
-    synveda-development|synveda-reference|synveda-evaluation|\
+    synveda-development|synveda-reference|synveda-evaluation|synveda-local|\
     synveda-development-acceptance-[a-z0-9]*|\
-    synveda-reference-acceptance-[a-z0-9]*) ;;
+    synveda-reference-acceptance-[a-z0-9]*|\
+    synveda-local-acceptance-[a-z0-9]*) ;;
     *) echo "logical-backup: source project was refused" >&2; exit 64 ;;
+esac
+case "$project" in
+    synveda-local-acceptance-*)
+        suffix=${project#synveda-local-acceptance-}
+        [ "${#suffix}" -le 24 ] || {
+            echo "logical-backup: source project was refused" >&2; exit 64;
+        } ;;
 esac
 case "$project" in
     *[!a-z0-9-]*|*-|*--*)

@@ -345,6 +345,17 @@ esac
       assert.doesNotMatch(line, /<--password(?:=|>)/);
       assert.doesNotMatch(line, new RegExp(ownerPassword));
     }
+    const psql = join(bin, "psql"), original = readFileSync(psql, "utf8");
+    for (const [label, replacement] of [
+      ["retained table", original.replace("*\"pg_class\"*) printf '0", "*\"pg_class\"*) printf '1")],
+      ["active writer", original.replace("printf '1|1|0", "printf '1|1|1")],
+    ]) {
+      executable(psql, replacement);
+      writeFileSync(log, "");
+      const refused = spawnSync(instrumented, ["restore"], { encoding: "utf8" });
+      assert.equal(refused.status, 78, `${label}: ${refused.stderr}`);
+      assert.doesNotMatch(readFileSync(log, "utf8"), /^pg_restore <--host/m, label);
+    }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

@@ -293,7 +293,7 @@ fn locate(from: Option<&Path>) -> Result<PathBuf, String> {
     ))
 }
 
-fn synveda_home() -> Result<PathBuf, String> {
+pub(crate) fn synveda_home() -> Result<PathBuf, String> {
     synveda_home_from(std::env::var_os("SYNVEDA_HOME"), std::env::var_os("HOME"))
 }
 
@@ -350,7 +350,7 @@ fn validate_scope(scope: &str) -> Result<(), String> {
     }
 }
 
-fn project_root() -> Result<PathBuf, String> {
+pub(crate) fn project_root() -> Result<PathBuf, String> {
     let cwd = std::env::current_dir()
         .and_then(std::fs::canonicalize)
         .map_err(|error| format!("resolve the current repository: {error}"))?;
@@ -536,6 +536,57 @@ fn bundle_version(marketplace: &Path) -> Option<String> {
     let text = std::fs::read_to_string(manifest).ok()?;
     let json: serde_json::Value = serde_json::from_str(&text).ok()?;
     json.get("version")?.as_str().map(str::to_owned)
+}
+
+/// The managed route compares vendor-owned registration, never cache files.
+pub(crate) fn registration(scope: &str) -> Result<Option<serde_json::Value>, String> {
+    validate_scope(scope)?;
+    let root = project_root()?;
+    let claude =
+        which("claude").ok_or("Claude CLI is unavailable; registration cannot be verified")?;
+    let inventory = installed_plugins(&claude, &root)?;
+    Ok(scoped_plugin(&inventory, scope, &root)?.map(|plugin| {
+        serde_json::json!({
+            "version": plugin.version, "scope": plugin.scope, "enabled": plugin.enabled,
+            "root": if scope == "user" { None } else { Some(&root) },
+        })
+    }))
+}
+
+pub(crate) fn managed_bundle(from: Option<&Path>) -> Result<(PathBuf, String), String> {
+    let marketplace = locate(from)?
+        .canonicalize()
+        .map_err(|e| format!("resolve marketplace: {e}"))?;
+    let version = bundle_version(&marketplace).ok_or("plugin bundle has no readable version")?;
+    if version != env!("CARGO_PKG_VERSION") {
+        return Err("managed registration requires matching CLI and plugin versions".to_owned());
+    }
+    let runtime = marketplace.join("synveda");
+    let contract: serde_json::Value = serde_json::from_slice(
+        &crate::local_state::read(&runtime.join("consumer-setup.json"))?
+            .ok_or("managed registration requires the updated OPS-12 plugin bundle; published v0.4.0 does not carry receipt-aware observation")?,
+    ).map_err(|_| "invalid consumer hook contract")?;
+    let config = crate::local_state::read(&runtime.join("dist/config.mjs"))?
+        .ok_or("plugin config runtime is missing")?;
+    if contract["version"] != 1
+        || contract["contract"] != "OPS-12/ADR-0116"
+        || contract["config_sha256"].as_str() != Some(crate::local_state::digest(&config).as_str())
+    {
+        return Err("plugin observation runtime differs from its consumer contract; re-extract the matching bundle".to_owned());
+    }
+    Ok((marketplace, version))
+}
+
+pub(crate) fn verify_managed_source(marketplace: &Path) -> Result<(), String> {
+    let claude =
+        which("claude").ok_or("Claude CLI is unavailable; marketplace cannot be verified")?;
+    if !verify_marketplace_source(&claude, &project_root()?, marketplace)? {
+        return Err(
+            "the receipt's native marketplace is absent; registration source cannot be verified"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 fn run(claude: &Path, root: &Path, args: &[String]) -> Result<(), String> {

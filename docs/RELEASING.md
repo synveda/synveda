@@ -89,7 +89,14 @@ Use the release's immutable overlay when installing the packaged chart.
 Native verification starts with an empty Docker credential store. It checks
 both registries, including descriptor parity, anonymous digest pulls, labels
 and executable assets. The full existing Docker lifecycle/browser login/sample/
-paired-recovery and Kind checks then consume the Docker Hub bundle. These
+paired-recovery and Kind checks then consume the Docker Hub bundle. The archive
+also includes the plain-Compose candidate and `synveda-recovery`. Both native
+jobs must run `qualify-release.mjs --consumer-candidate` against those extracted
+bytes. The required `release-consumer-{amd64,arm64}.json` reports cover stopped
+writers, a private empty-target restore, original sealed keys, audit/key
+verification, real browser access and the original sample receipt. They join
+the checksummed, attested release inventory; a missing or failed report blocks
+publication. The host-state Docker and Kind gates remain required. These
 reports distinguish image smoke from full deployment evidence; they do not
 qualify Windows, Docker Desktop, OpenShift or an N-1 migration.
 
