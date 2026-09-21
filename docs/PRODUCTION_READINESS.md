@@ -111,16 +111,16 @@ upgrade window.
 The next OPS-12 increment packages the existing CLI and three adapters with
 private checksum-pinned Node, retaining its complete licence notices. The
 client installer downloads no server artifacts and uses private ownership and
-content receipts with an atomic current-link switch. A macOS arm64 artifact
+content receipts with an atomic release selection. A macOS arm64 artifact
 passed installation without system Node/Docker on PATH and extracted runtime
-replay. Native release jobs require separate reports for four Unix targets;
-those hosted jobs, real issuer/harness use of these archives and Windows
-ACL/path/bootstrap portability remain unqualified. This does not change the
+replay. Native release jobs require separate reports for four Unix and two
+Windows targets; those hosted jobs, real issuer/harness use of these archives
+and Windows ACL/path/bootstrap portability remain unqualified. This does not change the
 readiness verdict or the published v0.4.0 installation contract.
 
 ADR-0117 isolates the Unix deployment peer witness and shares client path
 fixtures between Rust and Node. Missing HOME no longer selects a repository-local
-spool. Non-Unix receipts and spool operations explicitly refuse. The Windows x64
+spool. The earlier non-Unix receipt/spool boundary refused access. The Windows x64
 build/refusal prerequisite passed on source `5bdf740`. The expanded
 [Windows x64 job](https://github.com/synveda/synveda/actions/runs/35634324225/job/106448482489)
 passed on source `c627375`: native credential ACL/file-identity/replacement,
@@ -133,6 +133,15 @@ version-1 spools plus Windows Node hooks through a bounded local CLI protocol.
 Snapshot comparison refuses stale writes/removals; unsafe or oversized files
 remain held. Native x64/arm64 execution is pending. Local macOS tests do not
 qualify these Windows consumers, PowerShell installation or real harness use.
+
+ADR-0065 amendment 13 adds a Windows ZIP/PowerShell installation candidate with
+protected staging, bounded archive/PE checks and native private-file operations.
+Windows uses an atomic `current.json` selection and a digest-checked PowerShell
+launcher; it retains prior releases and user state. PowerShell syntax passed on
+macOS. Native x64/arm64 installation and refusal checks are configured but have
+not executed; pushing the candidate for hosted qualification currently requires
+explicit user approval after automatic approval review rejected `origin/main`.
+Windows deployment, setup/vendor writers and diagnostic logs still refuse.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a

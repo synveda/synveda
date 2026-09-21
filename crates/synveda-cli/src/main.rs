@@ -34,6 +34,7 @@ mod deployment_database;
 mod diff;
 mod directory;
 mod init;
+mod installer_state;
 mod keys;
 mod local_state;
 mod login;
@@ -58,6 +59,9 @@ mod spool;
 #[cfg(test)]
 mod testing;
 mod whoami;
+#[cfg(all(test, windows))]
+#[path = "../tests/support/windows_private.rs"]
+mod windows_private;
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -93,6 +97,9 @@ enum Command {
     /// Internal Windows hook storage protocol; bounded local pipes only.
     #[command(hide = true)]
     PrivateState,
+    /// Internal native filesystem boundary for the Windows client installer.
+    #[command(hide = true)]
+    InstallerState,
     /// Start the matching plain-Compose consumer candidate, retaining private state.
     Up(consumer::Options),
     /// Stop the receipt-owned consumer project; keep databases and keys.
@@ -2148,6 +2155,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     };
     match cli.command {
         Command::PrivateState => private_state::run(),
+        Command::InstallerState => installer_state::run(),
         Command::Up(options) => consumer::run(&options, consumer::Action::Up),
         Command::Down(options) => consumer::run(&options, consumer::Action::Down),
         Command::Status(options) => consumer::run(&options, consumer::Action::Status),

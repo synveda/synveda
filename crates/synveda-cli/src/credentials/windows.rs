@@ -168,7 +168,7 @@ impl Directory {
     }
 
     pub(crate) fn bounded(path: &Path, create: bool, limit: u64) -> io::Result<Option<Self>> {
-        if limit > 16 * 1024 * 1024 {
+        if limit > 256 * 1024 * 1024 {
             return Err(refused("Windows private file limit exceeds its bound"));
         }
         let path_text = path
@@ -442,6 +442,11 @@ impl Directory {
         names.sort();
         Ok(names)
     }
+
+    pub(crate) fn check_file(&self, name: &str) -> io::Result<()> {
+        validate_name(name)?;
+        self.validate(&options(false, false).open(self.path.join(name))?, name)
+    }
 }
 
 fn check_digest(before: &Option<(Identity, Vec<u8>)>, expected: Option<&str>) -> io::Result<()> {
@@ -469,7 +474,7 @@ fn validate_name(name: &str) -> io::Result<()> {
         || name.ends_with(['.', ' '])
         || !name
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+            .all(|b| b.is_ascii_alphanumeric() || b"@._-".contains(&b))
         || matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || ["COM", "LPT"].iter().any(|prefix| {
             stem.strip_prefix(prefix)

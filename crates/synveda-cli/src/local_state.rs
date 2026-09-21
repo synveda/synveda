@@ -367,8 +367,7 @@ fn validate_file(file: &File, path: &Path, private: bool) -> Result<(), String> 
 }
 
 #[cfg(all(test, windows))]
-#[path = "../tests/support/windows_private.rs"]
-mod windows_fixture;
+use crate::windows_private as windows_fixture;
 
 #[cfg(all(test, windows))]
 mod windows_tests {

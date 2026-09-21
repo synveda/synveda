@@ -113,6 +113,14 @@ export function releaseWorkflowFindings(source) {
   const verificationJob = job("verify-images");
   const publishJob = job("publish");
   const binariesJob = job("binaries");
+  const windowsClients = job("windows-clients");
+  if (!windowsClients.includes("node scripts/windows-client-candidate.mjs") ||
+      !windowsClients.includes("runner: windows-2025") || !windowsClients.includes("runner: windows-11-arm") ||
+      /continue-on-error|^    if:/m.test(windowsClients) ||
+      !assemblyJob.includes("assets/synveda-client-*.zip") ||
+      !publishJob.includes('release_assets+=("assets/synveda-client-$version-$target.zip" "assets/synveda-client-report-$target.json")')) {
+    findings.push("release must qualify and carry both native Windows client archives");
+  }
   const clientGate = stepBlock(binariesJob, "Package and execute the native client archive");
   if (!clientGate.includes("node scripts/package-client.mjs") ||
       !clientGate.includes("node scripts/check-client-package.mjs") ||
@@ -129,7 +137,7 @@ export function releaseWorkflowFindings(source) {
   if (!imagesJob.startsWith("  images:\n    needs: version\n")) {
     findings.push("release image plan does not depend exactly on resolved version");
   }
-  if (!assemblyJob.startsWith("  assemble:\n    needs: [version, binaries, bundles, images]\n")) {
+  if (!assemblyJob.startsWith("  assemble:\n    needs: [version, binaries, windows-clients, bundles, images]\n")) {
     findings.push("release assembly does not await the exact artifact producers");
   }
   if (!publishJob.startsWith("  publish:\n    needs: [version, assemble, verify-images]\n")) {
@@ -175,7 +183,7 @@ export function releaseWorkflowFindings(source) {
       !publishJob.includes("sha256sum release-images-*.json release-docker-*.json release-consumer-*.json release-kubernetes-*.json >> SHA256SUMS")) {
     findings.push("announcement must carry the assembled assets and both checksummed reports");
   }
-  if (!assemblyJob.includes("          path: |\n            assets/SHA256SUMS\n            assets/synveda-*.tar.gz\n            assets/synveda-*.tgz\n            assets/synveda-*.yaml\n            assets/synveda-registry-images-*.json\n") ||
+  if (!assemblyJob.includes("          path: |\n            assets/SHA256SUMS\n            assets/synveda-*.tar.gz\n            assets/synveda-client-*.zip\n            assets/synveda-*.tgz\n            assets/synveda-*.yaml\n            assets/synveda-registry-images-*.json\n") ||
       assemblyJob.includes("path: assets/*") || publishJob.includes("assets/*") ||
       !publishJob.includes('test -f "$asset" && test ! -L "$asset"')) {
     findings.push("release uploads must select only the regular packaged asset inventory");
@@ -385,8 +393,8 @@ export function releaseWorkflowFindings(source) {
   ) {
     findings.push("reference package is not digest-bound after image join and before inventory");
   }
-  if (!source.includes("sha256sum synveda-*.tar.gz synveda-*.tgz synveda-*.yaml synveda-registry-images-*.json > SHA256SUMS")) {
-    findings.push("release checksums omit the Helm chart or immutable image overlays");
+  if (!source.includes("sha256sum synveda-*.tar.gz synveda-client-*.zip synveda-*.tgz synveda-*.yaml synveda-registry-images-*.json > SHA256SUMS")) {
+    findings.push("release checksums omit Windows clients, the Helm chart or immutable image overlays");
   }
   const ociChart = stepBlock(source, "Publish and pull the OCI chart");
   if (!ociChart.includes("        if: needs.version.outputs.publish == 'true'") ||

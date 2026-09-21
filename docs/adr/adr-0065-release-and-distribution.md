@@ -1,10 +1,40 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted; amended twelve times. The current Docker deployment
+- **Status**: Accepted; amended thirteen times. The current Docker deployment
   contract is ADR-0102; the native/client artifact decisions below remain.
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8, CPR-39, ADPT-9, OPS-12
 - **Deciders**: sujitn
+
+## Amendment 13 (2026-09-21): Windows client installation candidate
+
+Extend the same client manifest, packager and JavaScript installer to native
+Windows x64/arm64 archives. `install.ps1` downloads only the exact client ZIP
+and checksum inventory, validates a bounded ordinary-entry archive and native
+PE architecture, then invokes its private pinned Node and existing installer.
+The bootstrap creates a protected temporary directory below a verified private
+local parent. It refuses unsafe ACLs, reparse points and ambiguous paths without
+repair. It needs no system Node, Docker or developer mode, requests no elevation
+and never changes execution policy. The host must permit the inspected script
+under its existing PowerShell policy.
+
+The JavaScript install state machine reuses the CLI's Windows filesystem
+boundary through a separate hidden installer protocol. That protocol admits
+only private local directories/files, validates complete staged trees and
+performs bounded reads and flushed compare-and-replace writes. It has no network
+or product authority and is separate from the hook's fixed-root protocol.
+Content-addressed releases and ownership receipts retain the existing installer
+layout. Windows uses an atomically replaced `current.json` selection and a
+stable `synveda.ps1` launcher, avoiding symlink privileges. The launcher verifies
+the selected manifest and CLI digest before execution and exports the exact
+native executable as `SYNVEDA_CLI`. Earlier releases and user state are retained.
+An interrupted installer lock still requires inspection; no automatic cleanup
+of client installations is introduced.
+
+Require native architecture, private-storage and extracted installation reports
+for each Windows candidate. Checksums alone remain integrity evidence; publisher
+attestation enforcement and OS signing are separate. These candidate files do
+not change published v0.4.0 or establish native vendor trust/loading.
 
 ## Amendment 12 (2026-09-21): private runtimes and Unix client archives
 

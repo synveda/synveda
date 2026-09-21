@@ -397,9 +397,53 @@ hooks retire only after successfully persisting their completed state.
 The local CLI suite (219 tests) and shared adapter suite (109 tests) passed;
 local loopback fixtures required socket access. Native receipt, spool, protocol
 and Rust/Node interoperability tests have been added to x64/arm64 CI, but their
-execution is pending. Next action: resolve native failures, then implement and
-qualify PowerShell installation from exact native archives. The local host has
-no native Windows or PowerShell; real issuer/harness acceptance stays separate.
+execution is pending. The local host has no native Windows; real issuer/harness
+acceptance stays separate.
+
+### Windows installation candidate (2026-09-21)
+
+ADR-0065 amendment 13 extends the existing packager and JavaScript installer
+with native Windows x64/arm64 ZIPs and a PowerShell 5.1+ bootstrap. The pinned
+Node 24.21.0 Windows archives retain upstream SHA-256 and complete licences.
+Bootstrap validates private local ancestry, checksum uniqueness, bounded ZIP
+entries and native PE architecture before executing extracted code. It never
+requests elevation or changes execution policy.
+
+The installer uses the Rust ACL/identity backend through a separate hidden
+filesystem protocol. A private ownership receipt, retained immutable releases,
+digest-checked PowerShell launcher and atomic `current.json` selection preserve
+the existing upgrade contract without symlink privileges. The fixed-root hook
+storage protocol remains separate. Setup/vendor writers, deployment and
+diagnostic logs remain refused on Windows.
+
+CI and release jobs now build each Windows architecture natively and require
+restricted-PATH install/reinstall, private Node/CLI/hook startup, Rust/Node
+storage interoperability and checksum/ZIP/drift/interruption refusals. Release
+assembly requires all six platform reports tied to their archive bytes and
+source; adding a matrix row does not establish qualification. The source
+PowerShell script passes the PowerShell 7.6.6 parser on macOS. Windows execution
+and Windows PowerShell 5.1 behavior remain unverified.
+
+Local validation: formatting and strict CLI Clippy passed, as did all 219 CLI
+tests and `make check-fast check-release-parity` (70 Node tests). An isolated
+MSVC compile/Clippy probe of the actual credential, receipt, spool and installer
+modules/tests passed for x86_64 and aarch64 after consolidating a duplicate test
+helper import. That probe uses pure BLAKE3 to avoid the absent MSVC assembler;
+it is not a full native build or execution report. A fresh macOS arm64 archive
+passed restricted-PATH installation/reinstallation and all 31 extracted
+Codex/Copilot replay tests. Its source identity is `c63eb95` plus the recorded
+dirty worktree; this local candidate is not publication evidence.
+The required `make check-deploy chart-lint` gate also passed, including its
+404 Node tests, workflow checks and all chart contract renders.
+
+The receipt/spool checkpoint is committed locally as `c63eb95`. Automatic
+approval review rejected its push to `origin/main` because the current request
+did not explicitly authorize updating the shared default branch. A request for
+that approval is pending. This blocks hosted Windows qualification, not local
+implementation or checks. Next action: push the reviewed OPS-12 commits only
+after approval, run both native CI jobs, fix any failures and record their exact
+source/run/report identities here before claiming native installation or arm64
+qualification. No new release or version is authorized.
 
 ## Rollout and rollback
 
@@ -457,11 +501,11 @@ Docker Hub namespace/public repositories, expiring push credential, GitHub
 variables/secret and protected environment, plus authorization of a new version
 and release trigger. These do not block local implementation and tests.
 
-Next task: qualify the receipt/spool candidate on native Windows, then add the
-PowerShell installer and native Windows x86_64/arm64 artifact acceptance.
-Unported private-state operations still refuse on non-Unix hosts. Native
-Windows/MSVC and PowerShell remain unavailable on the local macOS host. In
-parallel with that platform work, the four Unix candidate jobs and artifact-based
+Next task: obtain the pending `origin/main` push approval, then qualify the
+receipt/spool and PowerShell installer candidates from exact Windows
+x86_64/arm64 archives. Unported private-state operations still refuse on
+non-Unix hosts. Native Windows/MSVC remains unavailable locally; the macOS
+PowerShell runtime provides syntax checks only. The four Unix candidate jobs and artifact-based
 real issuer/harness acceptance still need their own execution reports.
 Keep Codex/Copilot registration and hook trust manual until their native installer
 contracts have their own reviewed implementation and execution evidence. Installer

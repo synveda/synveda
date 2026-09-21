@@ -4,20 +4,24 @@ These commands are in the current source CLI and matching plugin candidate.
 **They are not in published v0.4.0.** Keep using the
 [published installation guide](../deploy/compose/PREBUILT.md) for that release.
 Build the current CLI with `SQLX_OFFLINE=true cargo build -p synveda-cli`, or use
-the client archive candidate below. Windows installation remains open work.
+the client archive candidate below. Native Windows qualification remains open.
 
 ## Client archive candidate
 
-`synveda-client-VERSION-TARGET.tar.gz` contains the CLI, Claude marketplace,
+`synveda-client-VERSION-TARGET.tar.gz` (Unix) or `.zip` (Windows) contains the CLI, Claude marketplace,
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
-console or Compose bundle. Supported build targets are `darwin-arm64`,
-`darwin-x86_64`, `linux-arm64` and `linux-x86_64` (glibc). These are candidate
+console or Compose bundle. Build targets are `darwin-arm64`,
+`darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
+`windows-x86_64`. These are candidate
 targets; only macOS arm64 has local artifact execution evidence so far.
 The CLI's Unix peer-witness code is isolated, and CLI/hooks share a tested
 platform path contract. Windows credential storage now has a native candidate
 for ACL, file-identity, bounded reads, locking and replacement checks, with native
-x64 storage and process-refresh evidence in [OPS-12](backlog/OPS-12.md). Windows
-receipts, logs, spools and setup still refuse; PowerShell installation remains unavailable.
+x64 storage and process-refresh evidence in [OPS-12](backlog/OPS-12.md). Private
+receipt/spool storage, the Rust/Node bridge and PowerShell installation are now
+implemented candidates; their native x64/arm64 checks have not run yet.
+Windows setup/vendor configuration writers, deployment and diagnostic logs
+still refuse. The commands in later sections require Unix unless stated otherwise.
 
 On Unix, config uses absolute `XDG_CONFIG_HOME` or `HOME/.config`; state uses
 absolute `XDG_STATE_HOME` or `HOME/.local/state`, each with a `synveda` child.
@@ -30,7 +34,12 @@ junctions, hard links, alternate streams and ambiguous components are refused.
 Missing directories are created only below an already private parent. Existing
 ACLs are never repaired automatically; preserve refused files for inspection.
 Credentials remain in the existing profile format, with no automatic migration.
-These rules do not enable the other Windows storage paths; see
+Receipts and version-1 spools reuse this private storage boundary. Windows hooks
+require `SYNVEDA_CLI` to name the absolute native `.exe` and use bounded local
+pipes for state; no credential or gateway operation is exposed by that protocol.
+Spool reads/writes are limited to 16 MiB and scans to 4096 entries. A stable lock
+and digest comparison refuse stale replacement/removal. Unsafe files remain
+held for inspection; see
 [ADR-0117](adr/adr-0117-client-platform-boundaries.md).
 
 The existing installer has an explicit client mode. For **locally built**
@@ -51,8 +60,28 @@ Checksums detect corruption; this installer does not yet enforce publisher
 attestations. Published v0.4.0 has no client archive, so do not run this mode
 against its public downloads.
 
+On native Windows x64 or arm64, use the source PowerShell installer with
+**locally built** ZIPs and `SHA256SUMS`. Inspect the script and use a host whose
+existing PowerShell policy permits it; the installer never changes that policy:
+
+```powershell
+& ./scripts/install.ps1 -Version 0.4.0 -BaseUrl 'file:///C:/candidate-assets'
+```
+
+PowerShell 5.1+ and a private local fixed-drive parent are required. The default
+root is `$env:LOCALAPPDATA\SynvedaClient`; `-InstallRoot` and `-BinDirectory`
+select explicit absolute directories. It downloads the ZIP and checksums,
+validates the bounded archive and native PE identities, then runs private Node.
+It creates `bin/synveda.ps1` and atomically selects an immutable release with
+`client/current.json`. The launcher checks the selected manifest/CLI digests.
+Run that launcher directly or add its printed directory to PATH. Set
+`SYNVEDA_CLI` to the printed absolute `.exe` for separately launched hooks and
+use the printed private `node.exe` and hook paths for manual registration.
+No harness files or credentials are changed by installation.
+
 Immutable client releases live under `$SYNVEDA_HOME/client/releases/`, selected
-by an atomic `client/current` link. The installer verifies the content inventory,
+by an atomic `client/current` link on Unix or `client/current.json` on Windows.
+The installer verifies the content inventory,
 native executable identity and private ownership receipt before switching.
 Reinstallation retains earlier releases and all deployment state, credentials
 and spools. Unowned launchers, modified releases and conflicting current links
@@ -62,7 +91,7 @@ Do not modify files in an installed release. Automatic artifact removal remains
 unimplemented; retain releases referenced by a vendor marketplace or manual hook
 configuration. Adapter removal below remains separately available.
 
-`synveda plugin install` and `synveda adapter install --client claude-code`
+On Unix, `synveda plugin install` and `synveda adapter install --client claude-code`
 discover the installed client marketplace. Its copied Claude plugin includes
 private Node and names it in both hooks and MCP. Codex/Copilot still require
 manual registration and vendor trust: in their existing recipes replace the
@@ -94,6 +123,20 @@ existing Codex/Copilot lifecycle fixtures with the extracted private runtime.
 Reports include archive bytes, local install/reinstall timings, source identity
 and dirty-tree state. Local file-copy timing is not network-download timing;
 replay is not real issuer login or native vendor loading.
+
+On each native Windows host, build the same adapters and CLI, then run:
+
+```powershell
+node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.0 windows-arm64 C:/candidate-assets (git rev-parse HEAD)
+```
+
+Use `windows-x86_64` on x64. This downloads the pinned Node ZIP, packages the
+native candidate and runs `check-windows-client-package.mjs`. That check uses
+Windows PowerShell, a restricted PATH, extracted private Node/CLI, Rust/Node
+storage interoperability and malformed ZIP/reinstall refusals. CI carries both
+native architectures and their exact archive/report bytes; configuration alone
+does not qualify installation. The local macOS PowerShell parser check is syntax
+evidence only.
 
 ## Local deployment
 

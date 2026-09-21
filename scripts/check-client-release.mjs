@@ -6,7 +6,8 @@ import { sha256 } from "./client-artifact.mjs";
 
 export function checkClientRelease(directory, version, source, publish, lock) {
   for (const [target, pin] of Object.entries(lock.targets)) {
-    const archive = join(directory, `synveda-client-${version}-${target}.tar.gz`);
+    const windows = pin.platform === "win32";
+    const archive = join(directory, `synveda-client-${version}-${target}.${windows ? "zip" : "tar.gz"}`);
     const reportFile = join(directory, `synveda-client-report-${target}.json`);
     if (![archive, reportFile].every((path) => lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink())) throw new Error("client release inputs must be regular files");
     const report = JSON.parse(readFileSync(reportFile));
@@ -19,7 +20,9 @@ export function checkClientRelease(directory, version, source, publish, lock) {
     }
     for (const check of ["native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
       "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
-      "codex-extracted-lifecycle-replay", "copilot-cli-extracted-lifecycle-replay"]) {
+      ...(windows ? ["native-windows-private-storage-interoperability", "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
+        "unsafe-zip-and-overlapping-install-root-refusal"]
+        : ["codex-extracted-lifecycle-replay", "copilot-cli-extracted-lifecycle-replay"])]) {
       if (!report.checks?.includes(check)) throw new Error(`missing native client check ${check}: ${target}`);
     }
   }
@@ -30,5 +33,5 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   if (process.argv.length !== 6 || !["true", "false"].includes(publish)) throw new Error("usage: check-client-release.mjs DIRECTORY VERSION SOURCE_SHA true|false");
   const lock = JSON.parse(readFileSync(new URL("./node-runtimes.json", import.meta.url)));
   checkClientRelease(directory, version, source, publish === "true", lock);
-  console.log("four native client archives and their execution reports agree");
+  console.log("six native client archives and their execution reports agree");
 }

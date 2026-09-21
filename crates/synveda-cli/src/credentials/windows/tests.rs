@@ -1,7 +1,6 @@
 use super::*;
 
-#[path = "../../../tests/support/windows_private.rs"]
-mod fixture;
+use crate::windows_private as fixture;
 
 struct Scratch(PathBuf);
 impl Scratch {

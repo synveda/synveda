@@ -55,8 +55,7 @@ use sha2::{Digest as _, Sha256};
 pub const SPOOL_VERSION: u32 = 1;
 
 #[cfg(all(test, windows))]
-#[path = "../tests/support/windows_private.rs"]
-mod windows_private;
+use crate::windows_private;
 
 /// One spooled event.
 ///

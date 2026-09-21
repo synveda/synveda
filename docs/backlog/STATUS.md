@@ -30,13 +30,18 @@ macOS arm64 artifact evidence and required native release-report gates. Windows
 credentials now have candidate ACL/file-identity/replacement enforcement with
 passing native Windows x64 storage and process-refresh tests. Private Rust
 receipt/spool consumers and the bounded Node storage protocol are now candidates
-with native x64/arm64 execution pending. Next are those checks, PowerShell
-installation and artifact qualification, then real issuer/harness acceptance.
+with native x64/arm64 execution pending. PowerShell installation and Windows
+ZIP packaging now have a local implementation and required native archive
+checks (ADR-0065 amendment 13); PowerShell syntax passed locally. Native
+qualification is blocked on explicit approval to push the reviewed commits to
+`origin/main`: automatic approval review rejected that shared-branch update.
+Next: obtain that approval, run both native jobs and resolve their failures,
+then retain real issuer/harness acceptance as a separate requirement.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures
 (ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier
 Windows x64 compilation/refusal job and expanded credential job passed. Exact
 evidence and the next action are in [OPS-12](OPS-12.md).
-Hosted qualification and publication still need owner registry settings and a
+Hosted deployment qualification and publication still need owner registry settings and a
 separately authorized new release.
 
 [Client support](../CLIENT_SUPPORT.md) and [SDK compatibility](../../sdks/README.md#compatibility-and-release-boundary)

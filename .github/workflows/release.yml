@@ -16,8 +16,8 @@
 #   fixture    browser-acceptance in both registries for the opt-in sample/tests
 #   SHA256SUMS over every asset above
 #
-# Client archives add private Node on four native Unix targets (OPS-12,
-# ADR-0065 amendment 12). The two historical server archives remain separate.
+# Client archives add private Node on four Unix and two Windows targets (OPS-12,
+# ADR-0065 amendments 12/13). The two historical server archives remain separate.
 name: Release
 
 on:
@@ -206,6 +206,52 @@ jobs:
           name: binaries-${{ matrix.target }}
           path: |
             synveda-*.tar.gz
+            synveda-client-report-*.json
+          if-no-files-found: error
+
+  windows-clients:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            target: windows-x86_64
+            arch: x64
+            rust-host: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: windows-arm64
+            arch: arm64
+            rust-host: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      SQLX_OFFLINE: "true"
+      RUSTUP_TOOLCHAIN: 1.96.0-${{ matrix.rust-host }}
+      SYNVEDA_CLIENT_VERSION: ${{ needs.version.outputs.version }}
+      SYNVEDA_CLIENT_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install $env:RUSTUP_TOOLCHAIN --component clippy,rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: release-${{ matrix.target }}
+      - run: cargo build --release --locked -p synveda-cli
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.21.0
+          architecture: ${{ matrix.arch }}
+      - run: pnpm install --frozen-lockfile --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter...
+      - run: pnpm --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter... build
+      - run: node scripts/windows-client-candidate.mjs target/release/synveda.exe $env:SYNVEDA_CLIENT_VERSION $env:SYNVEDA_CLIENT_TARGET . $env:GITHUB_SHA
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: |
+            synveda-client-*.zip
             synveda-client-report-*.json
           if-no-files-found: error
 
@@ -464,7 +510,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=product-${{ matrix.arch }}
 
   assemble:
-    needs: [version, binaries, bundles, images]
+    needs: [version, binaries, windows-clients, bundles, images]
     environment: ${{ needs.version.outputs.publish == 'true' && 'release' || 'release-dry-run' }}
     permissions:
       contents: read
@@ -536,7 +582,7 @@ jobs:
           set -euo pipefail
           cd assets
           ls -lh
-          sha256sum synveda-*.tar.gz synveda-*.tgz synveda-*.yaml synveda-registry-images-*.json > SHA256SUMS
+          sha256sum synveda-*.tar.gz synveda-client-*.zip synveda-*.tgz synveda-*.yaml synveda-registry-images-*.json > SHA256SUMS
           sha256sum synveda-client-report-*.json >> SHA256SUMS
           cat SHA256SUMS
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
@@ -562,6 +608,7 @@ jobs:
           path: |
             assets/SHA256SUMS
             assets/synveda-*.tar.gz
+            assets/synveda-client-*.zip
             assets/synveda-*.tgz
             assets/synveda-*.yaml
             assets/synveda-registry-images-*.json
@@ -772,7 +819,19 @@ jobs:
           checksummed \`synveda-client-report-*.json\` files record restricted-PATH
           installation and extracted hook replay. These checks do not establish
           native vendor loading or real issuer login from the client archives.
-          Windows client installation remains unavailable.
+          The two native Windows ZIPs include private Node and PowerShell
+          installation. Their reports require native Rust/Node private storage,
+          retained-state reinstallation and unsafe ZIP/installer refusals.
+          On Windows, download and inspect the matching PowerShell installer:
+
+          \`\`\`powershell
+          Invoke-WebRequest https://raw.githubusercontent.com/${{ github.repository }}/${GITHUB_REF_NAME}/scripts/install.ps1 -OutFile synveda-install.ps1
+          # Inspect this script; the installer does not change execution policy.
+          & ./synveda-install.ps1 -Version $version
+          \`\`\`
+
+          Windows vendor registration remains manual. Windows deployment,
+          setup/vendor configuration writers and diagnostic logs remain unavailable.
 
           Then give an AI client your team's governed memory:
 
@@ -829,6 +888,9 @@ jobs:
           done
           for target in darwin-arm64 darwin-x86_64 linux-arm64 linux-x86_64; do
             release_assets+=("assets/synveda-client-$version-$target.tar.gz" "assets/synveda-client-report-$target.json")
+          done
+          for target in windows-arm64 windows-x86_64; do
+            release_assets+=("assets/synveda-client-$version-$target.zip" "assets/synveda-client-report-$target.json")
           done
           for asset in "${release_assets[@]}"; do
             test -f "$asset" && test ! -L "$asset" || {

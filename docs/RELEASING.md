@@ -16,20 +16,23 @@ and recovered release are verified. v0.3.0 also remains immutable.
 ## Native client candidates
 
 OPS-12 adds `synveda-client-VERSION-TARGET.tar.gz` for native macOS/Linux x86_64
-and arm64. Each contains the existing CLI and adapters plus private Node pinned
+and arm64, plus `.zip` for Windows x86_64/arm64. Each contains the existing CLI and adapters plus private Node pinned
 by upstream SHA-256 in [the runtime inventory](../scripts/node-runtimes.json),
 with Synveda and complete Node licence notices. It contains no server binaries
 or deployment bundle. The [candidate guide](CONSUMER_CLI.md#client-archive-candidate)
-owns its explicit `SYNVEDA_INSTALL_MODE=client` installation instructions.
+owns its explicit `SYNVEDA_INSTALL_MODE=client` and PowerShell instructions.
 
-Each native binary job executes its extracted archive with no Node/Docker on
-the installer PATH and replays the existing Codex/Copilot fixtures using private
-Node. Assembly requires all four `synveda-client-report-TARGET.json` reports
+Each native job executes its extracted archive with no Node/Docker on the
+installer PATH. Unix jobs replay existing Codex/Copilot fixtures using private
+Node. Windows jobs require native Rust/Node storage interoperability, PowerShell
+install/reinstall, hook entry-point smoke and unsafe ZIP/installer refusals.
+Assembly requires all six `synveda-client-report-TARGET.json` reports
 to match archive digests, source, target and runtime pin. Tagged builds also
 require a clean source tree and matching CLI version. Reports enter SHA256SUMS
 before attestation and accompany the release assets. A configured job is not
 hosted execution evidence: only macOS arm64 has been exercised locally.
-Windows, real issuer/harness execution from these archives and cold network
+The Windows candidate has only local parser/static checks so far. Its native
+execution, real issuer/harness use of these archives and cold network
 download measurements remain open. The two historical server binary archives
 and system-Node plugin archive retain their existing contract.
 

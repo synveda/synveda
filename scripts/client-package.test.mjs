@@ -206,11 +206,11 @@ test("shell rejects traversal, foreign roots and duplicate tar entries before ex
   }
 });
 
-test("native runtime pins cover exactly four Unix candidates with immutable checksums", () => {
+test("native runtime pins cover four Unix and two Windows candidates with immutable checksums", () => {
   const lock = JSON.parse(readFileSync(join(root, "scripts/node-runtimes.json")));
-  assert.deepEqual(Object.keys(lock.targets).sort(), ["darwin-arm64", "darwin-x86_64", "linux-arm64", "linux-x86_64"]);
+  assert.deepEqual(Object.keys(lock.targets).sort(), ["darwin-arm64", "darwin-x86_64", "linux-arm64", "linux-x86_64", "windows-arm64", "windows-x86_64"]);
   for (const pin of Object.values(lock.targets)) {
-    assert.equal(pin.archive, `node-v${lock.version}-${pin.platform}-${pin.arch}.tar.gz`);
+    assert.equal(pin.archive, `node-v${lock.version}-${pin.platform === "win32" ? "win" : pin.platform}-${pin.arch}.${pin.platform === "win32" ? "zip" : "tar.gz"}`);
     assert.match(pin.sha256, /^[0-9a-f]{64}$/);
   }
 });
@@ -240,4 +240,36 @@ test("release verification rejects missing checks, changed archives and stale id
   writeFileSync(path, JSON.stringify(report));
   writeFileSync(archive, "changed");
   assert.throws(check, /mismatch/);
+});
+
+test("Windows release evidence requires both native ZIP reports and installer refusals", (t) => {
+  const f = fixture(t);
+  const lock = { version: "24.21.0", targets: {} };
+  const reports = [];
+  for (const target of ["windows-x86_64", "windows-arm64"]) {
+    const bytes = Buffer.from(`fixture ${target}`);
+    const node = { version: lock.version, archive: `node-${target}.zip`, archive_sha256: "2".repeat(64) };
+    lock.targets[target] = { platform: "win32", archive: node.archive, sha256: node.archive_sha256 };
+    writeFileSync(join(f.scratch, `synveda-client-${version}-${target}.zip`), bytes);
+    const report = { schema_version: 1, evidence: "native-client-archive", target, version, source_sha: "1".repeat(40),
+      source_tree_dirty: false, cli_version: `synveda ${version}`, node, archive_sha256: sha256(bytes), archive_bytes: bytes.length,
+      checks: ["native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
+        "native-windows-private-storage-interoperability", "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
+        "unsafe-zip-and-overlapping-install-root-refusal"] };
+    const path = join(f.scratch, `synveda-client-report-${target}.json`);
+    writeFileSync(path, JSON.stringify(report));
+    reports.push({ path, report });
+  }
+  const check = () => checkClientRelease(f.scratch, version, "1".repeat(40), true, lock);
+  check();
+  for (const { path, report } of reports) {
+    for (const omitted of report.checks) {
+      writeFileSync(path, JSON.stringify({ ...report, checks: report.checks.filter((item) => item !== omitted) }));
+      assert.throws(check, /missing native client check/);
+    }
+    rmSync(path);
+    assert.throws(check, /ENOENT/);
+    writeFileSync(path, JSON.stringify(report));
+  }
 });

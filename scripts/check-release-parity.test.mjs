@@ -158,6 +158,9 @@ test("release workflow binds the chart and digest-addressed reference images", (
     current.replace("node scripts/package-client.mjs", "echo skipped"),
     current.replace("node scripts/check-client-package.mjs", "echo skipped"),
     current.replace("node scripts/check-client-release.mjs", "echo skipped"),
+    current.replace("node scripts/windows-client-candidate.mjs", "echo skipped"),
+    current.replace("runner: windows-11-arm", "runner: windows-2025"),
+    current.replace("  windows-clients:\n", "  windows-clients:\n    continue-on-error: true\n"),
     current.replace("sha256sum synveda-client-report-*.json >> SHA256SUMS", "true"),
     current.replace("- name: Package and execute the native client archive", "- name: Package and execute the native client archive\n        continue-on-error: true"),
     current.replace("- target: linux-arm64", "- target: linux-unsupported"),
@@ -178,7 +181,7 @@ test("release workflow binds the chart and digest-addressed reference images", (
     current.replace("GH_REPO: ${{ github.repository }}", "GH_REPO: another/repository"),
     current.replace('"${release_assets[@]}"\n', 'assets/*\n'),
     current.replace('test -f "$asset" && test ! -L "$asset"', "true"),
-    current.replace("          path: |\n            assets/SHA256SUMS\n            assets/synveda-*.tar.gz\n            assets/synveda-*.tgz\n            assets/synveda-*.yaml\n", "          path: assets/*\n"),
+    current.replace("          path: |\n            assets/SHA256SUMS\n            assets/synveda-*.tar.gz\n            assets/synveda-client-*.zip\n            assets/synveda-*.tgz\n            assets/synveda-*.yaml\n", "          path: assets/*\n"),
     current.replace('version="$INPUT_VERSION"', 'version="${{ inputs.version }}"'),
     current.replace('sh scripts/release-version.sh "$version"', "true"),
     current.replace("permissions:\n  contents: read\n\nconcurrency:", "permissions:\n  contents: write\n\nconcurrency:"),
@@ -224,12 +227,12 @@ test("release workflow binds the chart and digest-addressed reference images", (
       "  images:\n    needs: version\n    if: false\n",
     ),
     current.replace(
-      "    needs: [version, binaries, bundles, images]",
+      "    needs: [version, binaries, windows-clients, bundles, images]",
       "    needs: [version, binaries, bundles]",
     ),
     current.replace(
-      "  assemble:\n    needs: [version, binaries, bundles, images]\n",
-      "  assemble:\n    needs: [version, binaries, bundles, images]\n    if: always()\n",
+      "  assemble:\n    needs: [version, binaries, windows-clients, bundles, images]\n",
+      "  assemble:\n    needs: [version, binaries, windows-clients, bundles, images]\n    if: always()\n",
     ),
     current.replace('node scripts/release-registries.mjs assemble', 'echo assembly-skipped'),
     current.replace('"$VERSION" "$SOURCE_SHA" "$PUBLISH"', '"$VERSION" "$SOURCE_SHA" "true"'),
@@ -244,7 +247,7 @@ test("release workflow binds the chart and digest-addressed reference images", (
       "      - name: Package the digest-bound Docker reference\n",
       "      - name: Package the Docker reference too early\n",
     ),
-    current.replace("sha256sum synveda-*.tar.gz synveda-*.tgz", "sha256sum synveda-*.tar.gz"),
+    current.replace("sha256sum synveda-*.tar.gz synveda-client-*.zip synveda-*.tgz", "sha256sum synveda-*.tar.gz"),
     current.replace("installed \\`synveda-compose\\` launcher", "installed `synveda-compose` launcher"),
     current.replace(
       "SYNVEDA_VERSION=${GITHUB_REF_NAME} sh synveda-install.sh",
@@ -284,6 +287,9 @@ test("publication uploads exactly the release files despite checkout asset direc
     ...["amd64", "arm64"].flatMap((arch) => ["images", "docker", "consumer", "kubernetes"].map((report) => `release-${report}-${arch}.json`)),
     ...["darwin-arm64", "darwin-x86_64", "linux-arm64", "linux-x86_64"].flatMap((target) => [
       `synveda-client-${version}-${target}.tar.gz`, `synveda-client-report-${target}.json`,
+    ]),
+    ...["windows-arm64", "windows-x86_64"].flatMap((target) => [
+      `synveda-client-${version}-${target}.zip`, `synveda-client-report-${target}.json`,
     ]),
   ];
   try {

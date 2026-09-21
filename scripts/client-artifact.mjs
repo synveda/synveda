@@ -3,9 +3,10 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-export const nodePath = "plugin/synveda/runtime/node";
+export const nodePath = `plugin/synveda/runtime/node${process.platform === "win32" ? ".exe" : ""}`;
+export const cliPath = `bin/synveda${process.platform === "win32" ? ".exe" : ""}`;
 export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-export const targetName = () => `${process.platform}-${process.arch === "x64" ? "x86_64" : process.arch}`;
+export const targetName = () => `${process.platform === "win32" ? "windows" : process.platform}-${process.arch === "x64" ? "x86_64" : process.arch}`;
 
 export function inventory(root) {
   const files = Object.create(null);
@@ -45,15 +46,15 @@ export function validateClient(root, expectedTarget = targetName()) {
       !/^[0-9a-f]{64}$/.test(manifest.node?.archive_sha256)) throw new Error("client identity or native target mismatch");
   const files = inventory(root);
   if (JSON.stringify(files) !== JSON.stringify(manifest.files)) throw new Error("client content inventory mismatch");
-  for (const path of ["bin/synveda", nodePath, "LICENSE", "NOTICE", "plugin/synveda/runtime/LICENSE",
+  for (const path of [cliPath, nodePath, "LICENSE", "NOTICE", "plugin/synveda/runtime/LICENSE",
     "lib/client-install.mjs", "lib/client-artifact.mjs", "plugin/synveda/consumer-setup.json",
     "plugin/synveda/dist/hook.mjs", "plugin/synveda/dist/mcp-server.mjs",
     "plugin/.claude-plugin/marketplace.json", "plugin/synveda/.mcp.json", "plugin/synveda/hooks/hooks.json",
     "plugin/codex/dist/hook.mjs", "plugin/copilot-cli/dist/hook.mjs"]) {
     if (!files[path]) throw new Error(`client archive lacks ${path}`);
   }
-  if (!files[nodePath].executable || !files["bin/synveda"].executable) throw new Error("client executables lack execute permission");
-  const command = "${CLAUDE_PLUGIN_ROOT}/runtime/node";
+  if (process.platform !== "win32" && (!files[nodePath].executable || !files[cliPath].executable)) throw new Error("client executables lack execute permission");
+  const command = `\${CLAUDE_PLUGIN_ROOT}/runtime/node${process.platform === "win32" ? ".exe" : ""}`;
   const mcp = JSON.parse(readFileSync(join(root, "plugin/synveda/.mcp.json")));
   const hooks = JSON.parse(readFileSync(join(root, "plugin/synveda/hooks/hooks.json")));
   if (mcp.synveda?.command !== command ||
