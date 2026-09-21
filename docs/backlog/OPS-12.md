@@ -345,8 +345,6 @@ prerequisite results. `git diff --check` passes. Native Windows execution,
 credential/spool/receipt ACLs and replacement, PowerShell installation and real
 issuer/harness qualification remain outstanding.
 
-## Rollout and rollback
-
 ### Windows credential increment (2026-09-21)
 
 The preceding [Windows x64 build/refusal job](https://github.com/synveda/synveda/actions/runs/35625234551/job/106418315769)
@@ -364,14 +362,23 @@ fixtures and the existing five real-process rotating-refresh tests. Native
 execution of this increment is pending. The isolated storage module and its
 tests compile for both Windows MSVC architectures from macOS; this is not native
 execution or full-CLI cross-compilation. Local strict CLI Clippy and all 217 CLI
-tests pass, including two new ACL admission tests. Initial loopback sandbox
+tests passed, followed by the additional ancestor-ACL admission test. Initial loopback sandbox
 refusals were resolved with local socket access. Dependency licence/source/bans
-checks and release parity (69 Node tests) pass. Deployment checks are in progress.
+and advisory checks, release parity (69 Node tests), deployment convergence and
+Helm checks pass. Deployment checks needed local socket access for the evaluation
+fixture; no test was skipped. The first native credential run at `983a0c8`
+passed Clippy and the existing path/peer checks, then stopped in the independent
+ACL fixture: Windows PowerShell inherited PowerShell 7's incompatible module
+path through Cargo. The fixture now clears that inherited module path before
+launch, and the product checks ancestor ownership and ACL-changing authority
+as well as the private leaf. The corrected native run remains pending.
 
 Next action: execute the expanded Windows credential job, fix any native
 failures, then apply the same boundary to receipt/spool consumers before adding
 PowerShell installation. Native arm64, real issuer and harness qualification
 remain separate. The local host still has no native Windows or PowerShell.
+
+## Rollout and rollback
 
 Keep existing v0.4.0 instructions until a new authorized release qualifies.
 Retain immutable bytes and data/keys on failure; never overwrite release tags,

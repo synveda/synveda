@@ -24,6 +24,10 @@ handle ACLs and file identity, and `winsafe` for local fixed-drive admission.
 These MIT dependencies do not relax the product's unsafe-code prohibition.
 
 Walk local drive paths with no-follow directory handles held against deletion.
+Ancestors must have trusted owners and refuse unprivileged data/attribute,
+delete or ACL mutation; public traversal and creating a new subdirectory are
+allowed. This prevents inherited ACL changes from another account above the
+private directory. Standard root ownership by TrustedInstaller is admitted.
 Refuse reparse points, alternate streams, device names, ambiguous components,
 non-disk objects and multiply linked credential files. Existing private
 directories/files must belong to the process user and grant access only to that

@@ -33,6 +33,9 @@ pub fn powershell(path: &Path, target: Option<&Path>, script: &str) {
     command
         .args(["-NoProfile", "-NonInteractive", "-Command"])
         .arg(format!("$ErrorActionPreference = 'Stop'; {script}"))
+        // A PowerShell 7 runner passes its incompatible module paths through
+        // Cargo. Let Windows PowerShell rebuild its own built-in module path.
+        .env_remove("PSModulePath")
         .env("SYNVEDA_TEST_ACL_PATH", path);
     if let Some(target) = target {
         command.env("SYNVEDA_TEST_ACL_TARGET", target);

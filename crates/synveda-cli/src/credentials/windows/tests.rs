@@ -134,6 +134,9 @@ Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
     let absent = scratch.0.join("must-stay-absent");
     assert!(Directory::open(&absent, true).is_err());
     assert!(!absent.exists());
+    // The final directory remains protected. A public ancestor must still
+    // prevent access instead of relying only on the leaf's private permissions.
+    assert!(Directory::open(&scratch.0.join("config/synveda"), false).is_err());
 }
 
 #[test]

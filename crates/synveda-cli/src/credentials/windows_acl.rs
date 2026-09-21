@@ -5,6 +5,56 @@
 //! forms are refused before any private bytes are accessed.
 
 pub(super) fn validate(sddl: &str, user: &str, directory: bool) -> Result<(), &'static str> {
+    validate_kind(sddl, user, directory, false)
+}
+
+pub(super) fn validate_ancestor(sddl: &str, user: &str) -> Result<(), &'static str> {
+    validate_kind(sddl, user, true, true)
+}
+
+// The Windows Modules Installer service owns standard Windows volume roots.
+const TRUSTED_INSTALLER: &str = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+
+fn privileged(sid: &str) -> bool {
+    matches!(sid, "SY" | "S-1-5-18" | "BA" | "S-1-5-32-544")
+}
+
+fn mask(value: &str) -> Option<u32> {
+    if let Some(hex) = value.strip_prefix("0x") {
+        return (hex.len() <= 8)
+            .then(|| u32::from_str_radix(hex, 16).ok())
+            .flatten();
+    }
+    let mut mask = 0;
+    let mut rest = value;
+    while !rest.is_empty() {
+        let (code, tail) = rest.get(..2).zip(rest.get(2..))?;
+        mask |= match code {
+            "FA" => 0x001f_01ff,
+            "FR" => 0x0012_0089,
+            "FW" => 0x0012_0116,
+            "FX" => 0x0012_00a0,
+            "GA" => 0x1000_0000,
+            "GR" => 0x8000_0000,
+            "GW" => 0x4000_0000,
+            "GX" => 0x2000_0000,
+            "SD" => 0x0001_0000,
+            "RC" => 0x0002_0000,
+            "WD" => 0x0004_0000,
+            "WO" => 0x0008_0000,
+            _ => return None,
+        };
+        rest = tail;
+    }
+    (!value.is_empty()).then_some(mask)
+}
+
+fn validate_kind(
+    sddl: &str,
+    user: &str,
+    directory: bool,
+    ancestor: bool,
+) -> Result<(), &'static str> {
     let refused = "Windows private ownership or ACL was refused";
     if sddl.len() > 65_536 {
         return Err(refused);
@@ -13,7 +63,7 @@ pub(super) fn validate(sddl: &str, user: &str, directory: bool) -> Result<(), &'
         .strip_prefix("O:")
         .and_then(|s| s.split_once("D:"))
         .ok_or(refused)?;
-    if owner != user {
+    if owner != user && !(ancestor && (privileged(owner) || owner == TRUSTED_INSTALLER)) {
         return Err(refused);
     }
     let (mut control, mut entries) = dacl.split_at(dacl.find('(').ok_or(refused)?);
@@ -63,28 +113,24 @@ pub(super) fn validate(sddl: &str, user: &str, directory: bool) -> Result<(), &'
                 return Err(refused);
             }
         }
-        let full = matches!(fields[2], "FA" | "GA" | "0x1f01ff" | "0x10000000");
-        // Only the OS generates this input, but bound the grammar rather than
-        // treating an unknown mask or conditional ACE as an ordinary allow.
-        if !full
-            && !matches!(fields[2], "FR" | "FW" | "FX" | "GR" | "GW" | "GX")
-            && !fields[2].strip_prefix("0x").is_some_and(|hex| {
-                !hex.is_empty() && hex.len() <= 8 && hex.bytes().all(|b| b.is_ascii_hexdigit())
-            })
-        {
-            return Err(refused);
-        }
+        let mask = mask(fields[2]).ok_or(refused)?;
+        let full = mask & 0x001f_01ff == 0x001f_01ff || mask & 0x1000_0000 != 0;
         match fields[5] {
             sid if sid == user => {
                 access |= full && !inherit_only;
                 inheritance |= full && object && container && !no_propagate;
             }
-            "SY" | "S-1-5-18" | "BA" | "S-1-5-32-544" => {}
+            sid if privileged(sid) || (ancestor && sid == TRUSTED_INSTALLER) => {}
+            // Public traversal/read and creating a new subdirectory on a drive
+            // root do not allow replacing our held paths or rewriting ACLs.
+            // Inherit-only entries do not affect this ancestor; private child
+            // admission independently rejects unsafe inherited access.
+            _ if ancestor && (inherit_only || mask & !0xa012_00ad == 0) => {}
             "CO" | "S-1-3-0" if directory && inherit_only && (object || container) => {}
             _ => return Err(refused),
         }
     }
-    if !access || (directory && !inheritance) {
+    if !ancestor && (!access || (directory && !inheritance)) {
         return Err(refused);
     }
     Ok(())
@@ -94,6 +140,23 @@ pub(super) fn validate(sddl: &str, user: &str, directory: bool) -> Result<(), &'
 mod tests {
     use super::*;
     const USER: &str = "S-1-5-21-1-2-3-1001";
+
+    #[test]
+    fn ancestor_acl_allows_traversal_but_refuses_other_account_mutation() {
+        let root = format!(
+            "O:{TRUSTED_INSTALLER}D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;BU)(A;;0x4;;;AU)(A;OICIIO;GA;;;CO)"
+        );
+        assert!(validate_ancestor(&root, USER).is_ok());
+        for rights in ["FA", "GW", "SD", "WD", "WO", "0x2", "0x10", "0x40", "0x100"] {
+            assert!(
+                validate_ancestor(&format!("{root}(A;;{rights};;;WD)"), USER).is_err(),
+                "{rights}"
+            );
+        }
+        assert!(
+            validate_ancestor(&format!("O:S-1-5-21-9-8-7-1001D:P(A;;FA;;;{USER})"), USER).is_err()
+        );
+    }
 
     #[test]
     fn private_acl_accepts_only_the_user_and_privileged_host_principals() {

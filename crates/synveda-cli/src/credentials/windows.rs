@@ -168,7 +168,9 @@ impl Directory {
         }
         let user = user_sid()?;
         let mut current = PathBuf::from(root);
-        let mut ancestors = vec![open_directory(&current, false)?];
+        let root_file = open_directory(&current, false)?;
+        super::windows_acl::validate_ancestor(&acl(&root_file)?, &user).map_err(refused)?;
+        let mut ancestors = vec![root_file];
         for component in components {
             current.push(component);
             let file = match open_directory(&current, false) {
@@ -199,6 +201,9 @@ impl Directory {
                 }
                 Err(error) => return Err(error),
             };
+            // Holding a directory against deletion does not stop someone with
+            // WRITE_DAC from propagating a broader ACL into unprotected children.
+            super::windows_acl::validate_ancestor(&acl(&file)?, &user).map_err(refused)?;
             ancestors.push(file);
         }
         validate_acl(
