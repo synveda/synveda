@@ -18,6 +18,7 @@ const READ_CONTROL: u32 = 0x0002_0000;
 const WRITE_DAC: u32 = 0x0004_0000;
 const WRITE_OWNER: u32 = 0x0008_0000;
 const READ_ATTRIBUTES: u32 = 0x80;
+const LIST_DIRECTORY: u32 = 1;
 const BACKUP_SEMANTICS: u32 = 0x0200_0000;
 const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 const REPARSE_POINT: u64 = 0x400;
@@ -101,7 +102,13 @@ fn seal(file: &mut File, user: &str, directory: bool) -> io::Result<()> {
 
 fn open_directory(path: &Path, new: bool) -> io::Result<File> {
     let file = OpenOptions::new()
-        .access_mode(READ_CONTROL | READ_ATTRIBUTES | if new { WRITE_DAC | WRITE_OWNER } else { 0 })
+        // Metadata-only handles do not engage Windows delete-sharing checks.
+        .access_mode(
+            LIST_DIRECTORY
+                | READ_CONTROL
+                | READ_ATTRIBUTES
+                | if new { WRITE_DAC | WRITE_OWNER } else { 0 },
+        )
         .share_mode(SHARE_READ_WRITE)
         .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT)
         .open(path)?;
