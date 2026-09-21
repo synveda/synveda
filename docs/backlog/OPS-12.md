@@ -436,14 +436,12 @@ dirty worktree; this local candidate is not publication evidence.
 The required `make check-deploy chart-lint` gate also passed, including its
 404 Node tests, workflow checks and all chart contract renders.
 
-The receipt/spool checkpoint is committed locally as `c63eb95`. Automatic
-approval review rejected its push to `origin/main` because the current request
-did not explicitly authorize updating the shared default branch. A request for
-that approval is pending. This blocks hosted Windows qualification, not local
-implementation or checks. Next action: push the reviewed OPS-12 commits only
-after approval, run both native CI jobs, fix any failures and record their exact
-source/run/report identities here before claiming native installation or arm64
-qualification. No new release or version is authorized.
+The receipt/spool checkpoint `c63eb95` and installer checkpoint `a6f3f30` are
+pushed to `main`; native hosted qualification is running. The archive gate now
+requires the five named private-storage checks, replacing an incorrect numeric
+count of six. Next action: complete both native jobs, fix any failures and
+record exact source/run/report identities here before claiming native
+installation or arm64 qualification. No new release or version is authorized.
 
 ## Rollout and rollback
 
@@ -501,7 +499,7 @@ Docker Hub namespace/public repositories, expiring push credential, GitHub
 variables/secret and protected environment, plus authorization of a new version
 and release trigger. These do not block local implementation and tests.
 
-Next task: obtain the pending `origin/main` push approval, then qualify the
+Next task: finish native CI and qualify the
 receipt/spool and PowerShell installer candidates from exact Windows
 x86_64/arm64 archives. Unported private-state operations still refuse on
 non-Unix hosts. Native Windows/MSVC remains unavailable locally; the macOS

@@ -73,7 +73,13 @@ Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
   run(nativeNode, [join(root, "scripts/check-windows-state.mjs"), nativeCli, join(scratch, "storage.json"), join(destination, "plugin/synveda/dist")], { env: { ...env, NODE_OPTIONS: "", NODE_PATH: "" } });
   const storage = JSON.parse(readFileSync(join(scratch, "storage.json")));
   assert.equal(storage.arch, process.arch);
-  assert.equal(storage.checks.length, 6);
+  assert.deepEqual(storage.checks, [
+    "private-installation-identity-and-single-disclosure",
+    "node-write-rust-status-purge-node-read-format-preservation",
+    "stale-write-and-retirement-refusal-owed-close-retention",
+    "hardlink-broad-acl-oversize-and-junction-refusal",
+    "private-receipt-read-and-protocol-confinement",
+  ]);
   checks.push("native-windows-private-storage-interoperability");
 
   function refuse(commandArgs = args, diagnostic) {

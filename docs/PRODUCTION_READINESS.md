@@ -139,8 +139,7 @@ protected staging, bounded archive/PE checks and native private-file operations.
 Windows uses an atomic `current.json` selection and a digest-checked PowerShell
 launcher; it retains prior releases and user state. PowerShell syntax passed on
 macOS. Native x64/arm64 installation and refusal checks are configured but have
-not executed; pushing the candidate for hosted qualification currently requires
-explicit user approval after automatic approval review rejected `origin/main`.
+not passed; hosted qualification is now running from the pushed candidate.
 Windows deployment, setup/vendor writers and diagnostic logs still refuse.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
