@@ -10,7 +10,7 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use windows_permissions::constants::{SeObjectType, SecurityInformation};
-use windows_permissions::{LocalBox, SecurityDescriptor, WindowsSecure, wrappers};
+use windows_permissions::{LocalBox, SecurityDescriptor, wrappers};
 
 const MAX_BYTES: u64 = 2 * 1024 * 1024;
 // Win32 file access/attribute constants; safe std OpenOptions consumes these.
@@ -34,7 +34,7 @@ fn user_sid() -> io::Result<String> {
 
 fn acl(file: &File) -> io::Result<String> {
     let information = SecurityInformation::Owner | SecurityInformation::Dacl;
-    let descriptor = file.security_descriptor(information)?;
+    let descriptor = wrappers::GetSecurityInfo(file, SeObjectType::SE_FILE_OBJECT, information)?;
     wrappers::ConvertSecurityDescriptorToStringSecurityDescriptor(&descriptor, information)?
         .into_string()
         .map_err(|_| refused("Windows security descriptor is not valid Unicode"))

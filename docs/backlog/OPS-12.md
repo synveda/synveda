@@ -371,7 +371,9 @@ passed Clippy and the existing path/peer checks, then stopped in the independent
 ACL fixture: Windows PowerShell inherited PowerShell 7's incompatible module
 path through Cargo. The fixture now clears that inherited module path before
 launch, and the product checks ancestor ownership and ACL-changing authority
-as well as the private leaf. The corrected native run remains pending.
+as well as the private leaf. The next native run exposed the wrapper trait's
+unknown-object ACL query; the file query now explicitly supplies `SE_FILE_OBJECT`.
+Execution with that correction remains pending.
 
 Next action: execute the expanded Windows credential job, fix any native
 failures, then apply the same boundary to receipt/spool consumers before adding
