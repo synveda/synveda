@@ -443,13 +443,18 @@ spool rewrites, stale mutation/retirement refusal, owed-close retention,
 hardlink/ACL/size/junction refusal and confined receipt access. They do not
 establish real issuer or native harness execution.
 
-Both jobs then failed plugin packaging because GNU tar interpreted the drive
-prefix as a remote host. The packager now creates the archive by basename from
-its output directory. A fresh macOS arm64 candidate under a colon/space/Unicode
-path passed installation/reinstallation and all 31 extracted adapter replays;
-`make check-fast check-release-parity` passed its 70 tests. The 405-test
-deployment/chart gate also passed for the preceding checkpoint. Native Windows
-archive execution remains incomplete. Next: rerun both native archive jobs,
+The [native run on `bb72786`](https://github.com/synveda/synveda/actions/runs/35649495270)
+repeated those storage checks and successfully packaged both Windows ZIPs.
+Creating the plugin archive by basename avoids GNU tar's interpretation of
+drive prefixes as remote hosts. A fresh macOS arm64 candidate under a
+colon/space/Unicode path also passed installation/reinstallation and all 31
+extracted adapter replays. Both Windows jobs then stopped in the extraction
+fixture because system tar lost its Unicode destination character. The fixture
+now uses .NET extraction with environment-carried Unicode paths, preserving the
+same path assertions. Local .NET extraction into an existing Unicode directory
+and `make check-fast check-release-parity` (70 tests) pass. The 405-test
+deployment/chart gate passed for the preceding checkpoint. Native Windows
+installation remains incomplete. Next: rerun both native archive jobs,
 resolve any remaining failures and record exact source/run/report identities
 before claiming PowerShell installation qualification. No new release or version
 is authorized.

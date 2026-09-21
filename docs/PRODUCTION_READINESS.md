@@ -133,8 +133,8 @@ protected staging, bounded archive/PE checks and native private-file operations.
 Windows uses an atomic `current.json` selection and a digest-checked PowerShell
 launcher; it retains prior releases and user state. PowerShell syntax passed on
 macOS. Native x64/arm64 installation and refusal checks are configured but have
-not passed: both jobs stopped at plugin packaging's GNU tar drive-prefix handling.
-Its portable basename fix awaits the next native archive run.
+not passed: both ZIPs package on `bb72786`, but the extraction fixture stopped
+at system tar's Unicode path handling. Its .NET fixture fix awaits native execution.
 Windows deployment, setup/vendor writers and diagnostic logs still refuse.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and

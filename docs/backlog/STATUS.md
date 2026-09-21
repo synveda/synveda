@@ -34,9 +34,9 @@ native checks on both architectures at `c0710cc`.
 PowerShell installation and Windows
 ZIP packaging now have a local implementation and required native archive
 checks (ADR-0065 amendment 13); PowerShell syntax passed locally. Native
-qualification then stopped at GNU tar's drive-prefix interpretation on both
-architectures. The follow-up creates the plugin archive by basename and passed
-a fresh macOS archive installation/replay check under a colon/space/Unicode path.
+qualification now packages both ZIPs on `bb72786`, but the extraction fixture
+stopped when system tar lost the Unicode destination character. A follow-up
+uses .NET's Unicode path API while preserving the same path assertions.
 Next: rerun both native archive jobs and qualify PowerShell installation,
 then retain real issuer/harness acceptance as a separate requirement.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures

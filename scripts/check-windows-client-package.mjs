@@ -18,7 +18,7 @@ const ps = join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powersh
 const run = (command, args, options = {}) => execFileSync(command, args, { encoding: "utf8", timeout: 120000, maxBuffer: 8 * 1024 * 1024, ...options });
 const checks = [];
 try {
-  const env = { ...process.env, SYNVEDA_TEST_ACL_PATH: scratch };
+  const env = { ...process.env, SYNVEDA_TEST_ACL_PATH: scratch, SYNVEDA_TEST_ARCHIVE: archive };
   delete env.PSModulePath;
   run(ps, ["-NoProfile", "-NonInteractive", "-Command", `
 $ErrorActionPreference = 'Stop'
@@ -29,8 +29,10 @@ foreach ($who in @($sid, [System.Security.Principal.SecurityIdentifier]::new('S-
   $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($who, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
 }
 Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
+# Keep the Unicode fixture path out of legacy tar's ANSI argv handling.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::ExtractToDirectory($env:SYNVEDA_TEST_ARCHIVE, $env:SYNVEDA_TEST_ACL_PATH)
 `], { env });
-  run("tar", ["-xf", archive, "-C", scratch]);
   const { manifest, digest } = validateClient(join(scratch, "client"));
   assert.equal(manifest.version, version);
   assert.equal(manifest.target, targetName());
@@ -92,18 +94,18 @@ Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
   }
   const selection = readFileSync(join(home, "client/current.json"));
   writeFileSync(join(assets, "SHA256SUMS"), checksum + checksum);
-  refuse();
+  refuse(args, /Client archive checksum missing, duplicate or mismatched/);
   assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
   writeFileSync(join(assets, "SHA256SUMS"), checksum);
   const launcher = join(home, "bin/synveda.ps1");
   const originalLauncher = readFileSync(launcher);
   writeFileSync(launcher, "# user-owned change\n");
-  refuse();
+  refuse(args, /installed launcher changed; refusing replacement/);
   assert.equal(readFileSync(launcher, "utf8"), "# user-owned change\n");
   assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
   writeFileSync(launcher, originalLauncher);
   mkdirSync(join(home, ".client-install.lock"));
-  refuse();
+  refuse(args, /client installer is busy or interrupted/);
   assert.equal(existsSync(join(home, ".client-install.lock")), true);
   rmSync(join(home, ".client-install.lock"), { recursive: true });
   checks.push("duplicate-checksum-launcher-drift-and-interrupted-lock-refusal");
