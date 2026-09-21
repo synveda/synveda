@@ -170,21 +170,18 @@ test("release workflow binds the chart and digest-addressed reference images", (
     current.replace("          path: |\n            assets/SHA256SUMS\n            assets/synveda-*.tar.gz\n            assets/synveda-*.tgz\n            assets/synveda-*.yaml\n", "          path: assets/*\n"),
     current.replace('version="$INPUT_VERSION"', 'version="${{ inputs.version }}"'),
     current.replace('sh scripts/release-version.sh "$version"', "true"),
-    current.replace("permissions:\n  contents: read\n\njobs:", "permissions:\n  contents: write\n\njobs:"),
+    current.replace("permissions:\n  contents: read\n\nconcurrency:", "permissions:\n  contents: write\n\nconcurrency:"),
     current.replace("file: deploy/helm/postgres/Dockerfile", "file: deploy/compose/postgres/Dockerfile"),
     current.replace(
       "file: deploy/compose/keycloak/Dockerfile",
       "file: deploy/compose/product/Dockerfile",
     ),
     current.replace(
-      "tags: ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}",
-      "tags: ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}-${{ matrix.arch }}",
+      "ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}",
+      "ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}-${{ matrix.arch }}",
     ),
     current.replace("- name: Bundled Keycloak", "- name: Omitted Keycloak"),
-    current.replace(
-      "for image in product postgres keycloak proxy browser-acceptance; do",
-      "for image in product postgres keycloak proxy; do",
-    ),
+    current.replace('node scripts/release-registries.mjs preflight', 'echo preflight-skipped'),
     current.replace(
       "          - arch: arm64\n            platform: linux/arm64\n            runs-on: ubuntu-24.04-arm\n",
       "",
@@ -223,36 +220,15 @@ test("release workflow binds the chart and digest-addressed reference images", (
       "  assemble:\n    needs: [version, binaries, bundles, images]\n",
       "  assemble:\n    needs: [version, binaries, bundles, images]\n    if: always()\n",
     ),
-    current.replace(
-      "      - name: Join the per-architecture image tags\n        if: needs.version.outputs.publish == 'true'\n",
-      "      - name: Join the per-architecture image tags\n",
-    ),
-    current.replace(
-      '          version="${{ needs.version.outputs.version }}"\n          for image in product postgres keycloak proxy browser-acceptance; do',
-      "          version=latest\n          for image in product postgres keycloak proxy browser-acceptance; do",
-    ),
-    current.replace(
-      '          version="${{ needs.version.outputs.version }}"\n          for image in product postgres keycloak proxy browser-acceptance; do',
-      '          version="${{ needs.version.outputs.version }}"\n          version=latest\n          for image in product postgres keycloak proxy browser-acceptance; do',
-    ),
-    current.replace(
-      '--tag "ghcr.io/synveda/$image:$version"',
-      '--tag "ghcr.io/synveda/$image:latest"',
-    ),
-    current.replace(
-      '"ghcr.io/synveda/$image:$version-arm64"',
-      '"ghcr.io/synveda/$image:$version-amd64"',
-    ),
-    current.replace('cnpg_tag="17.11-synveda-$version"', 'cnpg_tag="$version"'),
-    current.replace(
-      'scripts/package-release.sh "$version" assets "$SOURCE_SHA"',
-      'scripts/package-release.sh "$version" assets "0000000000000000000000000000000000000000"',
-    ),
-    current.replace(
-      'if ! docker buildx imagetools inspect --raw "$image" > "$output"; then',
-      'if docker buildx imagetools inspect --raw "$image" > "$output"; then',
-    ),
-    current.replace('if [ ! -s "$output" ]; then', 'if [ -s "$output" ]; then'),
+    current.replace('node scripts/release-registries.mjs assemble', 'echo assembly-skipped'),
+    current.replace('"$VERSION" "$SOURCE_SHA" "$PUBLISH"', '"$VERSION" "$SOURCE_SHA" "true"'),
+    current.replace('node scripts/release-registries.mjs package', 'echo packaging-skipped'),
+    current.replace('docker.io/${{ needs.version.outputs.dockerhub_namespace }}/product:', 'docker.io/assumed-owner/product:'),
+    current.replace('"assets/synveda-registry-images-$VERSION.json" assets', '"unverified.json" assets'),
+    current.replace('subject-path: assets/SHA256SUMS', 'subject-path: assets/unrelated'),
+    current.replace('--source-ref "$GITHUB_REF" --source-digest "$SOURCE_SHA"', '--source-ref refs/heads/main'),
+    current.replace('password: ${{ secrets.DOCKERHUB_TOKEN }}', 'password: hardcoded'),
+    current.replace("environment: ${{ needs.version.outputs.publish == 'true' && 'release' || 'release-dry-run' }}", 'environment: unprotected'),
     current.replace(
       "      - name: Package the digest-bound Docker reference\n",
       "      - name: Package the Docker reference too early\n",
@@ -280,6 +256,7 @@ test("release workflow binds the chart and digest-addressed reference images", (
       "          true ",
     ),
   ].entries()) {
+    assert.notEqual(mutant, current, `mutation ${index} did not apply`);
     assert.ok(releaseWorkflowFindings(mutant).length > 0, `mutant ${index}`);
   }
 });
@@ -288,7 +265,7 @@ test("publication uploads exactly the release files despite checkout asset direc
   const scratch = mkdtempSync(join(tmpdir(), "synveda-release-publication-"));
   const version = "0.4.0";
   const names = [
-    "SHA256SUMS", `synveda-${version}-darwin-arm64.tar.gz`,
+    "SHA256SUMS", "SHA256SUMS.sigstore.json", `synveda-registry-images-${version}.json`, `synveda-${version}-darwin-arm64.tar.gz`,
     `synveda-${version}-linux-x86_64.tar.gz`, `synveda-console-${version}.tar.gz`,
     `synveda-reference-${version}.tar.gz`, `synveda-plugin-${version}.tar.gz`,
     `synveda-${version}.tgz`, `synveda-cnpg-image-${version}.yaml`,

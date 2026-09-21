@@ -10,7 +10,9 @@
 //! It never enters `settings.json`, the environment, or a transcript.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::fs::{File, OpenOptions, TryLockError};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -106,8 +108,11 @@ pub fn path() -> Result<PathBuf, String> {
 /// Reads the file. A missing file is an empty set, not an error — that is
 /// the state of a machine that has never logged in.
 pub fn load() -> Result<Credentials, String> {
-    let path = path()?;
-    let raw = match std::fs::read_to_string(&path) {
+    load_at(&path()?)
+}
+
+fn load_at(path: &Path) -> Result<Credentials, String> {
+    let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Ok(Credentials {
@@ -119,9 +124,11 @@ pub fn load() -> Result<Credentials, String> {
     };
     serde_json::from_str(&raw).map_err(|err| {
         format!(
-            "{} is not a valid credentials file ({err}); \
-             remove it and run `synveda login`",
-            path.display()
+            "{} is not a valid credentials file (line {}, column {}); \
+             preserve it for repair or restore a private backup before `synveda login`",
+            path.display(),
+            err.line(),
+            err.column()
         )
     })
 }
@@ -135,62 +142,167 @@ pub fn profile(name: &str) -> Result<Profile, String> {
 }
 
 /// Writes one profile, leaving every other profile as it was.
-pub fn store(name: &str, profile: Profile) -> Result<(), String> {
-    let mut credentials = load()?;
-    credentials.profiles.insert(name.to_owned(), profile);
-    save(&credentials)
+pub async fn store(name: &str, profile: Profile) -> Result<(), String> {
+    lock().await?.store(name, profile)
+}
+
+/// OPS-12: one stable lock for the whole profile file, including the refresh
+/// request. Locking credentials.json itself would lose exclusion on rename.
+pub(crate) struct LockedCredentials {
+    _lock: File,
+    path: PathBuf,
+}
+
+pub(crate) async fn lock() -> Result<LockedCredentials, String> {
+    lock_with_timeout(Duration::from_secs(20)).await
+}
+
+async fn lock_with_timeout(timeout: Duration) -> Result<LockedCredentials, String> {
+    let dir = config_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
+    let metadata = std::fs::symlink_metadata(&dir)
+        .map_err(|err| format!("inspect credential directory: {err}"))?;
+    if !metadata.is_dir() || metadata.is_symlink() {
+        return Err("credential directory must be a private directory, not a symlink".to_owned());
+    }
+    restrict_dir(&dir)?;
+    let lock_path = dir.join("credentials.lock");
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(&lock_path)
+        .map_err(|err| format!("open credential lock: {err}"))?;
+    validate_lock(&file, &lock_path)?;
+    let started = Instant::now();
+    loop {
+        match file.try_lock() {
+            Ok(()) => break,
+            Err(TryLockError::WouldBlock) if started.elapsed() < timeout => {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            Err(TryLockError::WouldBlock) => {
+                return Err("credentials are in use by another Synveda process; retry after it finishes; do not remove credentials.lock".to_owned());
+            }
+            Err(TryLockError::Error(err)) => return Err(format!("lock credentials: {err}")),
+        }
+    }
+    validate_lock(&file, &lock_path)?;
+    Ok(LockedCredentials {
+        _lock: file,
+        path: dir.join("credentials.json"),
+    })
+}
+
+fn validate_lock(file: &File, path: &Path) -> Result<(), String> {
+    let opened = file
+        .metadata()
+        .map_err(|err| format!("inspect credential lock: {err}"))?;
+    let named = std::fs::symlink_metadata(path)
+        .map_err(|err| format!("inspect credential lock path: {err}"))?;
+    if !opened.is_file() || !named.is_file() || named.is_symlink() || opened.len() != 0 {
+        return Err("credential lock must be an empty regular file".to_owned());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if opened.uid() != rustix::process::geteuid().as_raw()
+            || opened.mode() & 0o7777 != 0o600
+            || opened.nlink() != 1
+            || opened.dev() != named.dev()
+            || opened.ino() != named.ino()
+        {
+            return Err(
+                "credential lock ownership, privacy or file identity was refused".to_owned(),
+            );
+        }
+    }
+    Ok(())
+}
+
+impl LockedCredentials {
+    pub(crate) fn profile(&self, name: &str) -> Result<Profile, String> {
+        load_at(&self.path)?.profiles.remove(name).ok_or_else(|| {
+            format!("no credentials for profile `{name}`; run `synveda login` first")
+        })
+    }
+
+    pub(crate) fn store(&self, name: &str, profile: Profile) -> Result<(), String> {
+        let mut credentials = load_at(&self.path)?;
+        credentials.profiles.insert(name.to_owned(), profile);
+        save_at(&self.path, &credentials)
+    }
+
+    pub(crate) fn forget(&self, name: Option<&str>) -> Result<usize, String> {
+        let mut credentials = load_at(&self.path)?;
+        let count = if let Some(name) = name {
+            credentials
+                .profiles
+                .remove(name)
+                .ok_or_else(|| format!("no credentials for profile `{name}`"))?;
+            1
+        } else {
+            let count = credentials.profiles.len();
+            credentials.profiles.clear();
+            count
+        };
+        save_at(&self.path, &credentials)?;
+        Ok(count)
+    }
 }
 
 /// Writes the whole file. It goes to a 0600 temporary alongside the real
 /// path and is renamed into place, so a crash mid-write cannot leave a
 /// half-written credentials file — and so the secret is never briefly
 /// world-readable.
-pub fn save(credentials: &Credentials) -> Result<(), String> {
+fn save_at(path: &Path, credentials: &Credentials) -> Result<(), String> {
     let credentials = Credentials {
         version: 1,
         profiles: credentials.profiles.clone(),
     };
-    let dir = config_dir()?;
-    std::fs::create_dir_all(&dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
-    restrict_dir(&dir)?;
-
     let body = serde_json::to_string_pretty(&credentials)
         .map_err(|err| format!("serialize credentials: {err}"))?;
 
-    let path = path()?;
-    let temporary = path.with_extension("json.tmp");
+    let mut nonce = [0_u8; 16];
+    getrandom::fill(&mut nonce).map_err(|err| format!("credential temporary name: {err}"))?;
+    let nonce = u128::from_be_bytes(nonce);
+    let temporary = path.with_extension(format!("json.{nonce:032x}.tmp"));
     write_private(&temporary, &body)?;
-    std::fs::rename(&temporary, &path).map_err(|err| {
+    std::fs::rename(&temporary, path).map_err(|err| {
         // Leave nothing behind holding a token if the rename failed.
         let _ = std::fs::remove_file(&temporary);
         format!("write {}: {err}", path.display())
     })
 }
 
-#[cfg(unix)]
 fn write_private(path: &std::path::Path, body: &str) -> Result<(), String> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
 
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
         .open(path)
         .map_err(|err| format!("open {}: {err}", path.display()))?;
-    file.write_all(body.as_bytes())
-        .map_err(|err| format!("write {}: {err}", path.display()))?;
-    file.sync_all()
-        .map_err(|err| format!("sync {}: {err}", path.display()))
-}
-
-/// Windows has no mode bits; the file inherits the user profile
-/// directory's ACL, which is already user-only. Called out rather than
-/// silently skipped: "0600" is a promise this platform keeps differently.
-#[cfg(not(unix))]
-fn write_private(path: &std::path::Path, body: &str) -> Result<(), String> {
-    std::fs::write(path, body).map_err(|err| format!("write {}: {err}", path.display()))
+    let result = file
+        .write_all(body.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|err| format!("write private credentials: {err}"));
+    drop(file);
+    if result.is_err() {
+        let _ = std::fs::remove_file(path);
+    }
+    result
 }
 
 #[cfg(unix)]
@@ -203,12 +315,25 @@ fn restrict_dir(dir: &std::path::Path) -> Result<(), String> {
 
 #[cfg(not(unix))]
 fn restrict_dir(_dir: &std::path::Path) -> Result<(), String> {
+    // Native Windows privacy requires explicit ACL enforcement and execution
+    // qualification (OPS-12); inherited ACLs are not a verified 0600 promise.
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("credential test runtime")
+    }
+
+    fn store(name: &str, profile: Profile) -> Result<(), String> {
+        runtime().block_on(super::store(name, profile))
+    }
 
     /// Points HOME and XDG_CONFIG_HOME at a scratch directory for one
     /// test. Serialised, because the environment is process-global.
@@ -352,9 +477,68 @@ mod tests {
         assert_eq!(dir.permissions().mode() & 0o777, 0o700);
         // And no temporary is left holding the same secret.
         assert!(
-            !path().expect("path").with_extension("json.tmp").exists(),
-            "the temporary must not survive the rename"
+            std::fs::read_dir(config_dir().expect("dir"))
+                .expect("entries")
+                .all(|entry| !entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp"))
         );
+        let lock = std::fs::metadata(config_dir().expect("dir").join("credentials.lock"))
+            .expect("lock file survives credential replacement");
+        assert_eq!(lock.permissions().mode() & 0o777, 0o600);
+        assert_eq!(lock.len(), 0, "lock contains no private material");
+    }
+
+    #[test]
+    fn credential_lock_wait_is_bounded_and_cancellation_releases_it() {
+        let _scratch = Scratch::new("bounded-lock");
+        runtime().block_on(async {
+            let held = lock().await.expect("first lock");
+            let error = match lock_with_timeout(Duration::from_millis(10)).await {
+                Ok(_) => panic!("second handle acquired the held lock"),
+                Err(error) => error,
+            };
+            assert!(error.contains("do not remove credentials.lock"));
+            assert!(config_dir().unwrap().join("credentials.lock").exists());
+            drop(held);
+            lock().await.expect("release after cancellation/drop");
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_links_and_broadened_permissions_refuse_without_changing_credentials() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let _scratch = Scratch::new("unsafe-lock");
+        store(DEFAULT_PROFILE, sample("http://127.0.0.1:8120")).unwrap();
+        let before = std::fs::read(path().unwrap()).unwrap();
+        let lock_path = config_dir().unwrap().join("credentials.lock");
+        std::fs::remove_file(&lock_path).unwrap();
+        symlink(path().unwrap(), &lock_path).unwrap();
+        assert!(store("work", sample("http://127.0.0.1:8121")).is_err());
+        std::fs::remove_file(&lock_path).unwrap();
+        let other = config_dir().unwrap().join("other-empty-file");
+        std::fs::write(&other, "").unwrap();
+        std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::hard_link(other, &lock_path).unwrap();
+        assert!(store("work", sample("http://127.0.0.1:8121")).is_err());
+        std::fs::remove_file(&lock_path).unwrap();
+        std::fs::write(&lock_path, "").unwrap();
+        std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(store("work", sample("http://127.0.0.1:8121")).is_err());
+        assert_eq!(std::fs::read(path().unwrap()).unwrap(), before);
+    }
+
+    #[test]
+    fn private_writes_never_truncate_existing_paths() {
+        let scratch = Scratch::new("exclusive-write");
+        let target = scratch.dir.join("unrelated");
+        std::fs::write(&target, "keep these bytes").unwrap();
+        assert!(write_private(&target, "new private material").is_err());
+        assert_eq!(std::fs::read_to_string(target).unwrap(), "keep these bytes");
     }
 
     #[test]
@@ -364,6 +548,12 @@ mod tests {
         std::fs::write(path().expect("path"), "{ not json").expect("write");
         let err = load().expect_err("corrupt file must not parse");
         assert!(err.contains("synveda login"), "unhelpful message: {err}");
+        std::fs::write(
+            path().expect("path"),
+            r#"{"version":"secret-fixture-value"}"#,
+        )
+        .expect("write invalid field");
+        assert!(!load().unwrap_err().contains("secret-fixture-value"));
     }
 
     #[test]

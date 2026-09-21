@@ -1,14 +1,38 @@
 # ADR-0027: Claude Code adapter — hook seams, the CLI as credential authority, cursor-and-idempotency observe
 
-- **Status**: Accepted, **amended three times** — 2026-08-11 by OPS-8
+- **Status**: Accepted, **amended four times** — 2026-08-11 by OPS-8
   (decision 1's manifest was wrong in two places and the plugin never loaded
   in Claude Code), 2026-08-13 by the first headless session (the hooks load
   and fire, and only the *read* one completes), and 2026-08-24 by CPR-14
   (the real client closed the remaining ambiguity and moved the write hooks'
-  synchronous boundary to the local durable spool, never the gateway).
+  synchronous boundary to the local durable spool, never the gateway), and
+  2026-09-21 by OPS-12 (serialize local credential mutations and refresh).
 - **Date**: 2026-07-24
-- **Feature(s)**: ADPT-1, ADPT-8, CPR-14
+- **Feature(s)**: ADPT-1, ADPT-8, CPR-14, OPS-12
 - **Deciders**: sujitn
+
+## Amendment 4 (2026-09-21): serialize credential refresh and mutation
+
+The CLI retains the single gateway-mediated login/refresh implementation.
+Login persistence, local logout and refresh share one operating-system lock
+beside the credential file. The lock file is stable across atomic credential
+replacement and is never deleted to resolve contention. Process exit releases
+the lock; bounded asynchronous acquisition reports contention without deleting
+another process's state. No token or refresh material enters that lock file.
+
+After acquiring the lock, refresh rereads the selected profile and checks its
+expiry again. It holds the lock through the gateway request and atomic private
+replacement, so parallel hooks/MCP processes cannot spend the same rotating
+refresh token, erase another profile or resurrect a completed logout. Temporary
+credential files are unique and exclusively created. A failed refresh retains
+the existing pre-emptive-refresh fallback and never modifies the saved profile.
+This does not change issuer, tenant, authorization or observation consent.
+All processes sharing that directory must use the updated CLI; historical
+releases and manual file editors do not participate in this advisory lock.
+
+The current Unix file privacy and native platform evidence remain the support
+boundary. Using the standard library's portable lock API does not establish
+Windows ACL, path, atomic replacement or native execution qualification.
 
 ## Amendment 3 (2026-08-24): synchronous means the local durability boundary
 

@@ -1,11 +1,11 @@
 # Feature inventory
 
-146 features in this index. This file owns feature identity and delivered/open
+147 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices, not a claim that every
 original implementation remains. Code, generated contracts and current ADRs
 own today's behavior; open entries link to implementation briefs.
 
-114 delivered; 32 open. CI checks counts, IDs and the open-brief contract.
+114 delivered; 33 open. CI checks counts, IDs and the open-brief contract.
 
 The published [v0.4.0 installation increment](https://github.com/synveda/synveda/releases/tag/v0.4.0)
 uses source `e59284619567d6a13b70ce3f3b3e81121b7621e6`. Native Linux AMD64/ARM64
@@ -17,6 +17,12 @@ are in [CPR-45](CPR-45.md#installation-mission-2026-09-20) and [OPS-11](OPS-11.m
 recovery and support gaps. Passing installation checks is not HA or certification.
 The fresh contributor walkthrough still needs unoccupied Docker/hosts resources;
 [CPR-45 dependencies](CPR-45.md#dependencies) records the blocker and next action.
+Consumer installation is tracked in [OPS-12](OPS-12.md). Registry configuration,
+Claude scope checks and serialized credential refresh are implemented locally;
+the plain-Compose candidate still needs paired named-volume recovery.
+Next, reuse the existing logical
+backup/restore contract for that layout and extend its artifact gate. Publication
+also needs owner registry settings and a separately authorized new release.
 
 [Client support](../CLIENT_SUPPORT.md) and [SDK compatibility](../../sdks/README.md#compatibility-and-release-boundary)
 own tested versions and limits. [ADPT-4](ADPT-4.md) retains SDK release decisions.
@@ -131,6 +137,7 @@ than in this inventory.
 - [ ] [OPS-6: Upgrade and rollback discipline](OPS-6.md) — open
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
+- [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered 2026-08-24; ADR-0082
 - [x] CNSL-5: Console theme and everyday usability — delivered 2026-09-20; ADR-0114

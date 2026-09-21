@@ -116,11 +116,15 @@ export function helmComputedImageReferences(source) {
 }
 
 export function releaseWorkflowImageReferences(source) {
-  return [
+  const ghcr = [
     ...source.matchAll(
-      /^\s*tags:\s+(ghcr\.io\/synveda\/[a-z0-9]+(?:[._-][a-z0-9]+)*):((?:[A-Za-z0-9_][A-Za-z0-9_.-]*)?)\$\{\{ needs\.version\.outputs\.version \}\}-\$\{\{ matrix\.arch \}\}\s*$/gm,
+      /^\s*(?:tags:\s+)?(ghcr\.io\/synveda\/[a-z0-9]+(?:[._-][a-z0-9]+)*):((?:[A-Za-z0-9_][A-Za-z0-9_.-]*)?)\$\{\{ needs\.version\.outputs\.version \}\}-\$\{\{ matrix\.arch \}\}\s*$/gm,
     ),
   ].map(([, repository, tagPrefix]) => `${repository}:${tagPrefix}<version>`);
+  const hub = [...source.matchAll(
+    /^\s*docker\.io\/\$\{\{ needs\.version\.outputs\.dockerhub_namespace \}\}\/([a-z0-9-]+):([A-Za-z0-9_.-]*)\$\{\{ needs\.version\.outputs\.version \}\}-\$\{\{ matrix\.arch \}\}\s*$/gm,
+  )].map(([, repository, tagPrefix]) => `docker.io/<dockerhub-namespace>/${repository}:${tagPrefix}<version>`);
+  return [...ghcr, ...hub];
 }
 
 export function isDigestPinnedExternalImage(reference) {

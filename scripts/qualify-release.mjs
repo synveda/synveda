@@ -7,6 +7,12 @@ import { mkdtempSync, readFileSync, readdirSync, renameSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { evaluationFailureChecks } from "./evaluation-failure-checks.mjs";
+import { qualifyConsumer } from "./qualify-consumer.mjs";
+
+if (process.argv[2] === "--consumer-candidate") {
+  qualifyConsumer(...process.argv.slice(3));
+  process.exit(0);
+}
 
 const [input, output] = process.argv.slice(2);
 assert.ok(input && output, "usage: qualify-release.mjs <extracted-bundle> <report.json>");

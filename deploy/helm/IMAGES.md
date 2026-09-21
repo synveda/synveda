@@ -68,6 +68,21 @@ wiring is not evidence that a tag has actually been published or pull-tested.
 | `ghcr.io/synveda/proxy:<version>` | reference reverse proxy | ours over Apache-2.0 Caddy | The Caddy image built from `deploy/compose/proxy/Dockerfile` with its inherited file capability removed before non-root runtime. |
 | `ghcr.io/synveda/browser-acceptance:<version>` | release acceptance fixture | Synveda's licence is not yet selected; fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Digest-bound one-shot needed by reference acceptance, restore and upgrade smoke. It is not a product service. |
 
+Docker Hub is the pending consumer destination configured by the owner through
+`DOCKERHUB_NAMESPACE`; GHCR retains the same built artifacts. No ownership of
+`docker.io/synveda` is assumed. Each registry's index digest is recorded
+independently in the release inventory. These are configured targets, not
+publication claims; see [release setup](../../docs/RELEASING.md).
+
+| Image | Where | Licence | Why it is here |
+|---|---|---|---|
+| `docker.io/<dockerhub-namespace>/product:<version>` | consumer bundle and release qualification | same as the GHCR image above | Same native build, SBOM and provenance; separately resolved destination digest. |
+| `docker.io/<dockerhub-namespace>/postgres:<version>` | consumer bundle and release qualification | same as the GHCR image above | Same native build, SBOM and provenance; separately resolved destination digest. |
+| `docker.io/<dockerhub-namespace>/cnpg-postgres:17.11-synveda-<version>` | consumer bundle and release qualification | same as the GHCR image above | Same native build, SBOM and provenance; separately resolved destination digest. |
+| `docker.io/<dockerhub-namespace>/keycloak:<version>` | consumer bundle and release qualification | same as the GHCR image above | Same native build, SBOM and provenance; separately resolved destination digest. |
+| `docker.io/<dockerhub-namespace>/proxy:<version>` | consumer bundle and release qualification | same as the GHCR image above | Same native build, SBOM and provenance; separately resolved destination digest. |
+| `docker.io/<dockerhub-namespace>/browser-acceptance:<version>` | consumer bundle and release qualification | same as the GHCR image above | Same native build, SBOM and provenance; separately resolved destination digest. |
+
 ## The per-architecture embedder pins
 
 Upstream publishes two TEI builds and versions only one of them. These pins

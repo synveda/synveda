@@ -1,8 +1,8 @@
 # ADR-0115: Verify prebuilt containers before announcing a release
 
-- **Status**: Accepted
+- **Status**: Accepted; amended twice
 - **Date**: 2026-09-20
-- **Feature(s)**: OPS-8, CPR-45; coordinates OPS-11
+- **Feature(s)**: OPS-8, CPR-45, OPS-12; coordinates OPS-11
 - **Deciders**: Owner's request for precompiled Docker deployment and release CI
 
 ## Context
@@ -100,3 +100,29 @@ neither bundling nor Kubernetes establishes HA or production readiness.
 Keep the approved static site and brand. A small checked publication manifest
 distinguishes published artifacts from pending instructions. Release and
 platform claims require native runtime evidence, not chart renders or builds.
+
+## Amendment — two registries, one build (2026-09-21)
+
+Accepted for OPS-12 / OPS-8 at the owner's consumer installation request.
+Extend this workflow rather than creating another publisher. Each existing
+native architecture build exports the same result, including BuildKit SBOM and
+provenance descriptors, to Docker Hub and GHCR. Docker Hub's namespace and login
+are owner settings, never assumed to be `synveda`. Join and inspect both
+registries independently; compare the complete child descriptor sets and record
+each destination's own index digest. Consumer Compose and Helm overlays use
+Docker Hub digests; GHCR remains the verified mirror. Upstream pins do not change.
+
+Version and architecture tags are write-once: preflight refuses existing tags
+and ambiguous lookup failures. Owners restrict publishing and enable registry
+immutability where available. A partial publication requires owner investigation,
+not an automatic rebuild/overwrite. Dispatch remains nonpublishing and its
+synthetic manifest explicitly states that it cannot be installed. No rolling
+alias is introduced. Published v0.4.0 and its instructions remain unchanged.
+
+The native anonymous pull gate verifies both registries from empty credentials.
+The existing complete Docker and Kind gates consume the Docker Hub bundle.
+Publisher credentials are available only in protected publishing jobs. Final
+checksums and their image inventory are authenticated by an identity-bound
+GitHub build attestation, with a pinned action and explicit workflow/tag/source
+verification instructions. Checksums alone remain corruption detection. This
+does not claim binary code signing, notarization or completed hosted verification.

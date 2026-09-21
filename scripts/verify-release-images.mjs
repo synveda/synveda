@@ -6,17 +6,12 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  digestPattern, imageNamespace, indexDescriptors, platforms,
+  releaseImages as repositories, validateIndex, validateRegistryManifest,
+} from "./release-registries.mjs";
 
-const repositories = {
-  product: "product",
-  postgres: "postgres",
-  keycloak: "keycloak",
-  proxy: "proxy",
-  browser_acceptance: "browser-acceptance",
-  helm_postgres: "cnpg-postgres",
-};
-const platforms = ["linux/amd64", "linux/arm64"];
-const digestPattern = /^sha256:[0-9a-f]{64}$/;
+export { validateIndex } from "./release-registries.mjs";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 const execute = (args, timeout = 60_000) =>
   execFileSync("docker", args, {
@@ -45,8 +40,9 @@ export function validateEnvironment(manifest, version, sourceSha) {
   ) {
     throw new Error("release must contain exactly six first-party images");
   }
+  const namespace = imageNamespace(manifest.image_namespace ?? "ghcr.io/synveda");
   for (const [name, repository] of Object.entries(repositories)) {
-    const prefix = `ghcr.io/synveda/${repository}@`;
+    const prefix = `${namespace}/${repository}@`;
     const image = manifest.images[name];
     if (
       typeof image !== "string" ||
@@ -75,24 +71,6 @@ export function validateEnvironment(manifest, version, sourceSha) {
       throw new Error("upstream image must be digest pinned");
     }
   }
-}
-
-export function validateIndex(index, image) {
-  if (!Array.isArray(index.manifests))
-    throw new Error(`${image}: missing multi-platform index`);
-  const result = {};
-  for (const platform of platforms) {
-    const matches = index.manifests.filter(
-      (entry) =>
-        `${entry.platform?.os}/${entry.platform?.architecture}` === platform,
-    );
-    if (matches.length !== 1 || !digestPattern.test(matches[0].digest)) {
-      throw new Error(`${image}: expected exactly one ${platform} manifest`);
-    }
-    result[platform] = matches[0].digest;
-  }
-  // BuildKit attestation descriptors are unknown/unknown, not runnable images.
-  return result;
 }
 
 export function requireAnonymousConfig(directory) {
@@ -264,16 +242,42 @@ export function verifyImages(
   };
 }
 
+export function verifyRegistrySet(manifest, inventory, platform, version, sourceSha, run = execute) {
+  validateEnvironment(manifest, version, sourceSha);
+  validateRegistryManifest(inventory, version, sourceSha);
+  if (!inventory.published) throw new Error("dry-run registry inventory is not installable");
+  const primary = inventory.registries.dockerhub;
+  if (manifest.image_namespace !== primary.namespace || Object.keys(repositories).some(
+    (name) => manifest.images[name] !== primary.images[name].reference,
+  )) throw new Error("consumer bundle must use the inspected Docker Hub destination digests");
+  const registries = {};
+  for (const [registry, target] of Object.entries(inventory.registries)) {
+    const images = Object.fromEntries(Object.entries(target.images).map(([name, entry]) => [name, entry.reference]));
+    const inspect = (args, timeout) => {
+      const raw = run(args, timeout);
+      if (args[0] === "buildx") {
+        const expected = Object.values(target.images).find((entry) => entry.reference === args.at(-1));
+        if (expected && JSON.stringify(indexDescriptors(JSON.parse(raw))) !== JSON.stringify(expected.descriptors)) {
+          throw new Error("anonymous registry descriptors disagree with the assembled inventory");
+        }
+      }
+      return raw;
+    };
+    registries[registry] = verifyImages({ ...manifest, image_namespace: target.namespace, images }, platform, version, sourceSha, inspect);
+  }
+  return { ...registries.dockerhub, registries };
+}
+
 if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
   try {
-    const [bundle, platform, version, sourceSha, report, ...extra] =
+    const [bundle, platform, version, sourceSha, report, inventoryPath, ...extra] =
       process.argv.slice(2);
     if (!report || extra.length)
       throw new Error(
-        "usage: verify-release-images.mjs BUNDLE PLATFORM VERSION SOURCE_SHA REPORT",
+        "usage: verify-release-images.mjs BUNDLE PLATFORM VERSION SOURCE_SHA REPORT [REGISTRY_INVENTORY]",
       );
     requireAnonymousConfig(process.env.DOCKER_CONFIG);
     if (
@@ -282,15 +286,13 @@ if (
     ) {
       throw new Error("archive identity does not match the workflow");
     }
-    const result = verifyImages(
-      readJson(join(bundle, "environment.json")),
-      platform,
-      version,
-      sourceSha,
-    );
+    const manifest = readJson(join(bundle, "environment.json"));
+    const result = inventoryPath
+      ? verifyRegistrySet(manifest, readJson(inventoryPath), platform, version, sourceSha)
+      : verifyImages(manifest, platform, version, sourceSha);
     writeFileSync(report, `${JSON.stringify(result, null, 2)}\n`);
     console.log(
-      `Verified ${result.images.length} anonymous digest pulls on ${platform}; report: ${report}`,
+      `Verified ${result.images.length} anonymous digest pulls per registry on ${platform}; report: ${report}`,
     );
   } catch (error) {
     console.error(`release-images: ${error.message}`);

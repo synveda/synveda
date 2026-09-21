@@ -1,121 +1,134 @@
-# Publish a container release
+# Publishing a consumer release
 
-The [Release workflow](../.github/workflows/release.yml) builds the existing
-native clients, client hooks, console, Helm chart and Docker reference from
-one source revision. A version tag publishes images to GHCR; a manual workflow
-dispatch builds and packages a dry run without publishing anything.
+OPS-8 / OPS-12; [ADR-0115](adr/adr-0115-prebuilt-container-release-verification.md).
+The two-registry and attestation changes are configured, **not published or
+qualified**. The published v0.4.0 remains unchanged and uses GHCR, its original
+installer and its original checksum-only trust boundary. Never rerun publication
+against that version. The [installation guide](../deploy/compose/PREBUILT.md)
+continues to describe those existing downloads.
 
-The **v0.3.0** workflow passed its builds and isolated image checks, but its
-publication failed because the release page already existed. Keep that release
-immutable. The additive Docker/Kubernetes installation
-increment is published as **[v0.4.0](https://github.com/synveda/synveda/releases/tag/v0.4.0)**
-from `e59284619567d6a13b70ce3f3b3e81121b7621e6`. Both native installation suites
-passed. All 15 public assets matched the qualified bytes on anonymous download;
-the OCI chart matched the downloadable archive. A tag's existence alone does
-not establish that its complete artifact set is installable.
+Published v0.4.0 uses `e59284619567d6a13b70ce3f3b3e81121b7621e6`.
+Its original 15 public assets and OCI chart matched the qualified bytes on
+anonymous download. Its upload-only failure was recovered from the original
+workflow artifacts; that workflow remains failed while its installation jobs
+and recovered release are verified. v0.3.0 also remains immutable.
 
-## Before the first current release
+## Owner setup
 
-1. Keep the workspace, console/adapters, chart and starter image versions
-   aligned with the intended unused release tag. Regenerate OpenAPI, the console
-   client and SDK contract metadata after changing the workspace version.
-   `make check-release-parity` checks workspace/chart agreement. Commit the
-   intended source, including required brand assets, and require the normal CI
-   gates for that revision. The release workflow is not a replacement for CI.
-2. Confirm the repository's Actions token may publish packages and releases.
-   Existing packages must grant this repository Actions access. The workflow
-   sets the source, revision and version OCI labels on every first-party image.
-3. In the Synveda organisation's package settings, make the six image packages
-   below public. On first creation GitHub may make a package private even when
-   the repository is public. New packages may need this change after the first
-   push; the anonymous verification job will fail until it is done. Inspect the
-   failure, change visibility, then rerun the failed jobs. CI deliberately does
-   not change organisation visibility settings. See
-   [GitHub's Container registry guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
-4. Configure equivalent access/visibility for the OCI chart at
-   `ghcr.io/synveda/charts/synveda` if distributing it publicly. The workflow
-   verifies identical chart bytes first with its publishing identity and then
-   with an empty registry configuration on each qualification runner.
-5. Run a manual **Release** dispatch against the intended revision. Its workflow
-   artifacts contain **synthetic image digests**. They exercise packaging and
-   checksums and cannot be installed. They are not published as a GitHub Release.
+1. Select a Docker Hub namespace you own. Do not assume `synveda` is available.
+   Create public repositories named `product`, `postgres`, `cnpg-postgres`,
+   `keycloak`, `proxy` and `browser-acceptance`. The last image is required by
+   the opt-in sample and acceptance/recovery tour. Keep the upstream Collector
+   and Prometheus at their existing reviewed digest pins.
+2. Enable immutable version tags on Docker Hub where available. Treat all
+   version and architecture tags on both registries as write-once even where
+   the registry does not enforce that policy. Restrict writers and protect
+   GitHub `v*` tags. There is no `latest` or rolling alias in this release plan.
+3. Create an expiring push credential with only read/write access to those six
+   repositories. Prefer an organization token when the account supports it;
+   otherwise use a dedicated publisher's personal access token, without delete
+   permission. Set an owner and rotation reminder outside this repository.
+   Never paste the credential into an issue, shell argument or committed file.
+4. In GitHub repository variables set `DOCKERHUB_NAMESPACE` and
+   `DOCKERHUB_USERNAME`. Create the protected environment named `release`,
+   require an owner reviewer, restrict its deployment tags, and store
+   `DOCKERHUB_TOKEN` as an environment secret. Make GHCR packages public and
+   grant this repository write access. `release-dry-run` requires no secret and
+   must not hold publisher credentials. Namespace is a repository variable
+   because the read-only version job resolves it before publishing jobs begin.
+5. Review the pinned `actions/attest` revision and approve GitHub OIDC as the
+   publisher identity for `.github/workflows/release.yml` on protected tags.
+   The final publishing job alone has attestation and OIDC permissions. No
+   signing private key is stored in GitHub. This authenticates the checksum
+   inventory; it is not macOS notarization, Authenticode or a complete archive
+   SBOM. Those native distribution requirements remain OPS-12 work.
+6. Authorize a new unused coordinated version and update the existing versioned
+   product/chart/package contracts, including console/adapters and starter image
+   versions. Regenerate OpenAPI, console client and SDK contract metadata after
+   changing the workspace version. Require normal CI on the intended committed
+   source; release qualification does not replace it. Run the nonpublishing `workflow_dispatch`
+   first. It can use a synthetic version and namespace; it builds artifacts
+   but never logs in, pushes, signs or creates a Release. Its inventory has
+   `published: false` and cannot pass anonymous release verification.
+7. After reviewing local and hosted results, separately authorize the new tag
+   push. The existing `v*` workflow is the only publisher. Confirm the protected
+   environment approvals, both native image reports, Docker and all four Kind
+   ownership-mode reports, and final attestation verification. Only then update
+   the publication manifest, README, site and UI to name the new release.
 
-## What a tag does
+The workflow checks every existing image tag before writing. A missing secret,
+private pull, authentication/rate-limit/network error, incomplete architecture,
+lost BuildKit attestation or different mirror descriptor fails the release.
+An interrupted publication can leave unannounced artifacts. Inspect and retain
+those bytes; do not delete/rebuild/overwrite them automatically. Recover using
+the original verified artifacts under an explicitly reviewed owner procedure,
+or authorize a new version. Do not move a published Git tag.
+For upload-only recovery, use the original `release-assets` and both
+`release-verification-*` artifacts, verify all checksums/source/image identities,
+and retain the authenticated final checksum inventory. The old checksum-only
+v0.4.0 recovery is not a signing bypass for a new release.
 
-Push the approved `v<version>` tag after the source version matches it. Image
-builds run natively on Linux AMD64 and ARM64, with separate architecture cache
-scopes. There is no `latest` tag or automatic deployment to a running server.
+Docker documents [multiple registry exports](https://docs.docker.com/build/ci/github-actions/push-multi-registries/),
+[personal tokens](https://docs.docker.com/security/access-tokens/personal-access-tokens/)
+and [organization tokens](https://docs.docker.com/security/access-tokens/organization-access-tokens/).
+The workflow retains the existing reviewed Docker action pins rather than
+upgrading them as part of this change.
 
-| Package | Purpose |
-| --- | --- |
-| `ghcr.io/synveda/product:<version>` | Gateway, worker, CLI, compiled console and one-shot preparation utility |
-| `ghcr.io/synveda/postgres:<version>` | Compose/bundled-chart PostgreSQL with pgvector and bootstrap/recovery tools |
-| `ghcr.io/synveda/keycloak:<version>` | Bundled OIDC provider and reviewed convergence helpers |
-| `ghcr.io/synveda/proxy:<version>` | Reference reverse proxy |
-| `ghcr.io/synveda/cnpg-postgres:17.11-synveda-<version>` | Optional Kubernetes PostgreSQL image |
-| `ghcr.io/synveda/browser-acceptance:<version>` | Optional sample preparation and real-browser acceptance |
+## Artifacts and verification
 
-The `assemble` job joins the architecture tags and packages immutable image
-digests in `environment.json` and the Helm image overlays. It checks archive
-presence, writes SHA256SUMS, and pushes/pulls the OCI chart for byte comparison.
+Each native AMD64/ARM64 image is built once from the same source and lockfiles
+and exported to both registries with source/revision/version labels, SBOM and
+provenance. Each registry's final multi-platform index is independently
+assembled, inspected and hashed. The versioned `synveda-registry-images-*.json`
+records both destinations and their complete child descriptors. The consumer
+reference archive, its `environment.json`, launcher and Helm overlays use
+the **Docker Hub destination digests**. The chart's unconfigured source defaults
+remain GHCR because the owner namespace is unknown until release assembly.
+Use the release's immutable overlay when installing the packaged chart.
 
-Two fresh `verify-images` runners use empty Docker credential directories. Each
-checks archive checksums, resolves both platform descriptors, pulls all six
-first-party and both pinned upstream images by digest, checks the native
-architecture and release labels, and executes the relevant packaged tools.
-Product checks include the compiled console and its font licence. These initial
-smoke containers have no network, host mounts or deployment credentials.
+Native verification starts with an empty Docker credential store. It checks
+both registries, including descriptor parity, anonymous digest pulls, labels
+and executable assets. The full existing Docker lifecycle/browser login/sample/
+paired-recovery and Kind checks then consume the Docker Hub bundle. These
+reports distinguish image smoke from full deployment evidence; they do not
+qualify Windows, Docker Desktop, OpenShift or an N-1 migration.
 
-The same runners then execute `scripts/qualify-release.mjs` against the extracted
-archive: private preparation, real loopback console login/logout, governed
-opt-in sample and repeat, retained-volume recreation, paired database/key backup,
-explicit reset and fresh restore. `scripts/qualify-kubernetes-release.mjs` loads
-the already-pulled native image bytes into disposable Kind, uses the packaged
-chart for all four dependency combinations, drills migration serialization and
-joint recovery for bundled/external ownership, and tests the documented
-loopback port-forward with a real browser. Neither qualifier builds images.
-Anonymous OCI chart retrieval must match the downloadable archive exactly.
-Any failure prevents the GitHub Release announcement; no required test is
-silently skipped. The commands need Docker, Helm 4.2.3, Kind 0.32.0, kubectl 1.36.1,
-Node, Ruby, Python and OpenSSL on the **qualification runner**, not on a Docker
-installer's host.
+The full drills are `scripts/qualify-release.mjs` and
+`scripts/qualify-kubernetes-release.mjs`. They require Docker, Helm 4.2.3,
+Kind 0.32.0, kubectl 1.36.1, Node, Ruby, Python and OpenSSL on the qualification
+runner. They do not build images. Configure public visibility and repository
+Actions access for `ghcr.io/synveda/charts/synveda` too: anonymous OCI retrieval
+must be byte-identical to the downloadable chart. The source checkout's
+`assets/brand` and `assets/product` directories are never upload candidates.
 
-`publish` runs only after both jobs succeed. It attaches the complete archive
-set, Helm overlays and checksummed `release-images-<arch>.json`,
-`release-docker-<arch>.json` and `release-kubernetes-<arch>.json` reports.
-Assembly selects packaged files explicitly; publication validates all 15 regular
-files before creating the release. Repository `assets/brand` and `assets/product`
-directories are not release downloads.
-BuildKit generates image SBOM/provenance
-attestations; identity-bound signature verification remains unimplemented.
+After those gates, GitHub attests the final `SHA256SUMS`, which covers all
+archives, overlays, destination digests and native reports. The downloadable
+`SHA256SUMS.sigstore.json` carries that attestation. For a future approved
+release, verify it with a current trusted GitHub CLI before trusting its
+checksums. Supply the exact approved tag and source commit from the release:
 
-If a workflow fails after pushing images, registry artifacts may exist without
-an announced release. Inspect the run before retrying. Never retag a released
-version to different source, or suggest a partially published set to users.
-If only upload fails after qualification, recover the original `release-assets`
-and both `release-verification-*` artifacts from that run. Verify their original
-checksums, source and image identities, append the six report checksums, then
-publish only the validated inventory against the existing tag. Do not rebuild
-or retag qualified artifacts. The v0.4.0 publication used this recovery after
-the original upload glob included a checkout directory; the original workflow
-run remains failed, while its qualification jobs and recovered release are verified.
+```sh
+gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+  --repo synveda/synveda \
+  --signer-workflow synveda/synveda/.github/workflows/release.yml \
+  --source-ref "refs/tags/$RELEASE_TAG" --source-digest "$SOURCE_SHA" \
+  --deny-self-hosted-runners
+```
 
-## After publication
+Then verify the desired downloaded archive against exactly its checksum entry
+before extracting it. A checksum from an unauthenticated download does not
+establish publisher identity. Failed or absent attestation is not permission to
+skip verification. GitHub documents [attestation verification](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
-Download the release from an empty target using the
-[prebuilt Docker guide](../deploy/compose/PREBUILT.md), check the manifest and
-reports, and run the default loopback evaluation. Use the explicit reference
-configuration for public DNS/TLS or existing services. Record
-real PKCE login, a governed Session/Knowledge/Context flow, persistence,
-recovery and compatibility evidence in [CPR-45](backlog/CPR-45.md). Qualify the
-packaged chart separately under [OPS-11](backlog/OPS-11.md).
+The current installer does not yet enforce this new attestation boundary;
+integrating verification without imposing GitHub CLI or Docker on client-only
+installation remains open. Do not advertise this source installer as an
+authenticated consumer installer. Artifact authentication also does not prove
+OS code signing, absence of vulnerabilities or safe data migration. An owner
+incident response must revoke publishing access, identify affected immutable
+digests/tags and publish a reviewed replacement; never silently replace bytes.
 
-Image reports prove pullability and isolated executable/asset checks; Docker
-and Kubernetes reports separately prove their executed installation scenarios.
-None establishes macOS Docker Desktop, Windows/WSL2, OpenShift, a supported
-published N-1 upgrade, or production readiness. Do not remove
-the [readiness gaps](PRODUCTION_READINESS.md) on the strength of a green image
-job alone. Change `docs/installation.json` to `published`, update the checked
-README/guide markers and publish matching Pages copy only once the complete
-compatible public release and its evidence exist. The 0.4.0 manifest and current
-installation guides now record that verified publication.
+Homebrew and WinGet publication remain blocked until the native direct artifact
+flow is qualified. Owners must supply signing/notarization identities where
+needed and authorize package-manager submissions separately. No package-manager
+install command or Docker Hub release is advertised before it exists.

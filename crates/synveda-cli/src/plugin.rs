@@ -87,6 +87,8 @@ pub fn install(plan: &Plan) -> Result<(), String> {
         ));
     }
 
+    validate_scope(&plan.scope)?;
+    let root = project_root()?;
     let marketplace = locate(plan.from.as_deref())?;
     // Looked up before the dry run rather than inside it: `--dry-run` is
     // what somebody runs *before* they have decided anything, including on
@@ -122,11 +124,7 @@ pub fn install(plan: &Plan) -> Result<(), String> {
         "--scope".to_owned(),
         plan.scope.clone(),
     ];
-    let remove = vec![
-        "plugin".to_owned(),
-        "uninstall".to_owned(),
-        PLUGIN_ID.to_owned(),
-    ];
+    let remove = removal_args(&plan.scope);
 
     if plan.dry_run {
         println!("synveda plugin install --dry-run");
@@ -168,81 +166,58 @@ pub fn install(plan: &Plan) -> Result<(), String> {
         )
     })?;
 
-    // Adding a marketplace that is already known re-points it at this path,
-    // which is what a reinstall from a new release should do.
-    run(&claude, &add)?;
-    run(&claude, &refresh)?;
-
-    // "Already installed" is not "installed at this version", and the
-    // difference is the whole upgrade story. Claude Code copies a plugin
-    // into a cache it owns at install time, so replacing
-    // `$SYNVEDA_HOME/plugin` leaves the *running* plugin on whatever
-    // release installed it. Measured after upgrading a machine 0.1.0 →
-    // 0.1.2: the bundle on disk said 0.1.2 and `claude plugin list` said
-    // **0.1.0**, two releases behind, reported healthy and enabled.
-    //
-    // This is the same fault `binary_stamp` fixed for the gateway one
-    // release earlier (ADR-0065 amendment 5): a convergence check that
-    // compares identity when it has to compare the artefact.
-    let want = bundle_version(&marketplace);
-    match installed_version(&claude) {
-        Some(have) if !plan.force && Some(&have) == want.as_ref() => {
-            println!("    {PLUGIN_ID} {have} is already installed — leaving it alone");
-            return Ok(());
-        }
-        Some(have) => {
-            match &want {
-                Some(want) => println!("    installed {have}, bundle {want} — replacing"),
-                None => println!("    installed {have} — replacing"),
-            }
-            // Claude Code has no update verb, and `install` on an installed
-            // plugin reports success while changing nothing — which is how
-            // this stayed invisible.
-            run(&claude, &remove)?;
-        }
-        None => {}
+    // Inventory errors must fail before mutating native registration.
+    let before = installed_plugins(&claude, &root)?;
+    let have = scoped_plugin(&before, &plan.scope, &root)?;
+    require_scoped_removal(&claude)?;
+    let want = bundle_version(&marketplace)
+        .ok_or_else(|| "the Synveda bundle has no readable version".to_owned())?;
+    let marketplace_exists = verify_marketplace_source(&claude, &root, &marketplace)?;
+    if let Some(have) = have.filter(|have| !plan.force && have.version == want) {
+        report_registration(have);
+        return Ok(());
     }
-    run(&claude, &install)?;
+    if !marketplace_exists {
+        run(&claude, &root, &add)?;
+    }
+    run(&claude, &root, &refresh)?;
+
+    if let Some(have) = have {
+        println!(
+            "    installed {}, bundle {want} — replacing scope {}",
+            have.version, plan.scope
+        );
+        run(&claude, &root, &remove)?;
+    }
+    run(&claude, &root, &install).map_err(|error| format!(
+        "{error}; setup may be partial in scope {}. Persistent data and marketplace are retained; rerun the same install command to repair it",
+        plan.scope,
+    ))?;
+    let after = installed_plugins(&claude, &root)?;
+    verify_other_scopes(&before, &after, &plan.scope, &root)?;
+    let registered = scoped_plugin(&after, &plan.scope, &root)?
+        .filter(|plugin| plugin.version == want)
+        .ok_or_else(|| "Claude did not confirm the requested plugin version and scope; inspect `claude plugin list --json`".to_owned())?;
+    report_registration(registered);
 
     println!();
-    println!("    {PLUGIN_ID} installed, scope {}", plan.scope);
-    println!("    start a new Claude Code session to pick it up.");
+    println!("    start a new Claude Code session and review hook/MCP trust to load it.");
     println!();
     println!("    It needs a login to do anything: `synveda login` stores the");
-    println!("    bearer, and the plugin reads it per call. Check it loaded with");
+    println!("    bearer, and the plugin reads it per call. Check registration with");
     println!("    `claude plugin list`.");
     Ok(())
 }
 
-/// The marketplace directory to install from.
-///
-/// `--from` wins. Otherwise an installed release's `$SYNVEDA_HOME/plugin`,
-/// then a checkout — and a checkout has to be *wrapped* at package time, so
-/// what is named there is the packaged bundle rather than
-/// `adapters/claude-code` itself. Saying so is the whole point: a plugin
-/// directory is not a marketplace, and pointing Claude Code at one installs
-/// nothing.
-/// What one `uninstall` asks for. No `from` and no `scope`: removal names
-/// the plugin Claude Code already has, and where its bundle came from is
-/// not a question that has an answer any more.
+/// Removal names one native registration, never every scope of a plugin.
 pub struct RemovePlan {
     pub client: String,
     pub dry_run: bool,
+    pub scope: String,
 }
 
-/// `synveda plugin uninstall` — the mirror of [`install`] (OPS-10,
-/// ADR-0067 decision 4).
-///
-/// Two steps, in this order, and the order is the finding ADR-0065
-/// amendment 8 paid for: Claude Code copies a plugin into a **versioned
-/// cache it owns** at install time, so removing our marketplace does not
-/// remove the running plugin. `plugin uninstall` takes the plugin out;
-/// `marketplace remove` takes out the source it came from. Doing only the
-/// second leaves a plugin loaded from a marketplace that no longer exists.
-///
-/// It asserts against `claude plugin list` rather than the filesystem for
-/// that amendment's other half: installing and *loading* are different
-/// events, and so are removing and unloading.
+/// Remove one native registration, preserving persistent data and the shared
+/// marketplace. Native inventory is configuration evidence, not live unloading.
 pub fn uninstall(plan: &RemovePlan) -> Result<(), String> {
     if !CLIENTS.contains(&plan.client.as_str()) {
         return Err(format!(
@@ -251,72 +226,51 @@ pub fn uninstall(plan: &RemovePlan) -> Result<(), String> {
             CLIENTS.join(", ")
         ));
     }
+    validate_scope(&plan.scope)?;
+    let root = project_root()?;
     let claude = which("claude");
-
-    let remove_plugin = vec![
-        "plugin".to_owned(),
-        "uninstall".to_owned(),
-        PLUGIN_ID.to_owned(),
-    ];
-    let remove_marketplace = vec![
-        "plugin".to_owned(),
-        "marketplace".to_owned(),
-        "remove".to_owned(),
-        MARKETPLACE.to_owned(),
-    ];
-
+    let remove_plugin = removal_args(&plan.scope);
     if plan.dry_run {
         println!("synveda plugin uninstall --dry-run");
-        println!();
-        println!(
-            "  claude       {}",
-            match &claude {
-                Some(path) => path.display().to_string(),
-                None => "not on PATH".to_owned(),
-            }
-        );
+        println!("  repository   {}", root.display());
         println!("  would run    claude {}", remove_plugin.join(" "));
-        println!("               claude {}", remove_marketplace.join(" "));
+        println!("  retain the shared marketplace and persistent plugin data");
         return Ok(());
     }
-
-    let Some(claude) = claude else {
-        // Not an error. Claude Code being absent is the ordinary state of a
-        // machine somebody is cleaning up, and failing here would stop an
-        // uninstall over a tool the user has already removed.
-        println!("claude is not on PATH; nothing to remove from Claude Code");
+    let claude = claude.ok_or_else(||
+        "Claude CLI is unavailable; native installation state cannot be verified. No plugin assets or registration were removed".to_owned()
+    )?;
+    let before = installed_plugins(&claude, &root)?;
+    let Some(plugin) = scoped_plugin(&before, &plan.scope, &root)? else {
+        println!(
+            "Claude lists no {PLUGIN_ID} registration in scope {} for this repository",
+            plan.scope
+        );
         return Ok(());
     };
-
-    match installed_version(&claude) {
-        None => {
-            println!("Claude Code does not have {PLUGIN_ID} installed; nothing to do");
-            return Ok(());
-        }
-        Some(version) => println!("removing {PLUGIN_ID} {version} from Claude Code"),
-    }
-
-    run(&claude, &remove_plugin)?;
-    // The marketplace may already be gone, or never added by us; either way
-    // the plugin is out, which is the thing that mattered. Reported rather
-    // than fatal.
-    if let Err(error) = run(&claude, &remove_marketplace) {
-        println!("    (leaving the marketplace: {error})");
-    }
-
-    // Ask the vendor, not the filesystem.
-    if let Some(still) = installed_version(&claude) {
+    require_scoped_removal(&claude)?;
+    println!(
+        "removing {PLUGIN_ID} {} in scope {}",
+        plugin.version, plan.scope
+    );
+    run(&claude, &root, &remove_plugin)?;
+    let after = installed_plugins(&claude, &root)?;
+    verify_other_scopes(&before, &after, &plan.scope, &root)?;
+    if scoped_plugin(&after, &plan.scope, &root)?.is_some() {
         return Err(format!(
-            "claude still lists {PLUGIN_ID} at {still} after uninstalling it.\n  \
-             `claude plugin list` is the authority here, so this is a real \
-             failure rather than\n  a stale cache — remove it by hand with \
-             `claude plugin uninstall {PLUGIN_ID}`."
+            "Claude still lists {PLUGIN_ID} in scope {} after uninstall; inspect `claude plugin list --json`",
+            plan.scope
         ));
     }
-    println!("claude plugin list no longer names it");
+    println!(
+        "Removed the {} registration; retained marketplace and persistent data. Restart Claude to unload active sessions.",
+        plan.scope
+    );
     Ok(())
 }
 
+/// `--from` selects a packaged marketplace; the installed default is
+/// `$SYNVEDA_HOME/plugin`. A bare plugin directory cannot be registered.
 fn locate(from: Option<&Path>) -> Result<PathBuf, String> {
     if let Some(path) = from {
         return validate(path).map(Path::to_path_buf);
@@ -377,38 +331,200 @@ fn validate(path: &Path) -> Result<&Path, String> {
     ))
 }
 
-/// The version Claude Code has installed, if it has this plugin at all.
-///
-/// Parsed from `claude plugin list`, which prints an id line followed by
-/// indented `Key: value` lines:
-///
-/// ```text
-///   ❯ synveda@synveda
-///     Version: 0.1.2
-///     Scope: user
-/// ```
-///
-/// The presence of the id was all this used to look at, and presence is the
-/// wrong question after an upgrade — see the call site.
-fn installed_version(claude: &Path) -> Option<String> {
-    let out = Command::new(claude)
-        .args(["plugin", "list"])
+/// Native registration evidence, distinct from a running session's load state.
+#[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+struct InstalledPlugin {
+    id: String,
+    version: String,
+    scope: String,
+    enabled: bool,
+    #[serde(rename = "projectPath")]
+    project_path: Option<PathBuf>,
+}
+
+fn validate_scope(scope: &str) -> Result<(), String> {
+    if ["user", "project", "local"].contains(&scope) {
+        Ok(())
+    } else {
+        Err("plugin scope must be user, project or local".to_owned())
+    }
+}
+
+fn project_root() -> Result<PathBuf, String> {
+    let cwd = std::env::current_dir()
+        .and_then(std::fs::canonicalize)
+        .map_err(|error| format!("resolve the current repository: {error}"))?;
+    Ok(cwd
+        .ancestors()
+        .find(|directory| directory.join(".git").exists())
+        .unwrap_or(&cwd)
+        .to_path_buf())
+}
+
+fn is_scope(plugin: &InstalledPlugin, scope: &str, root: &Path) -> bool {
+    plugin.id == PLUGIN_ID
+        && plugin.scope == scope
+        && (scope == "user"
+            || plugin
+                .project_path
+                .as_ref()
+                .and_then(|path| path.canonicalize().ok())
+                .as_deref()
+                == Some(root))
+}
+
+fn scoped_plugin<'a>(
+    plugins: &'a [InstalledPlugin],
+    scope: &str,
+    root: &Path,
+) -> Result<Option<&'a InstalledPlugin>, String> {
+    // A project/local record without a usable path is not proof of absence in this
+    // repository. Refuse unknown native schema rather than guessing its owner.
+    if plugins.iter().any(|plugin| {
+        plugin.id == PLUGIN_ID
+            && plugin.scope == scope
+            && scope != "user"
+            && plugin
+                .project_path
+                .as_ref()
+                .is_none_or(|path| !path.is_absolute() || path.canonicalize().is_err())
+    }) {
+        return Err(
+            "Claude inventory omits project ownership; cannot safely select a scope".to_owned(),
+        );
+    }
+    let mut matches = plugins
+        .iter()
+        .filter(|plugin| is_scope(plugin, scope, root));
+    let selected = matches.next();
+    if matches.next().is_some() {
+        return Err("ambiguous Claude registration in the selected scope".to_owned());
+    }
+    Ok(selected)
+}
+
+fn installed_plugins(claude: &Path, root: &Path) -> Result<Vec<InstalledPlugin>, String> {
+    let output = Command::new(claude)
+        .current_dir(root)
+        .args(["plugin", "list", "--json"])
         .output()
-        .ok()
-        .filter(|out| out.status.success())?;
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
-    let mut lines = text.lines().skip_while(|line| !line.contains(PLUGIN_ID));
-    // The id line itself, so the search starts at this plugin's own fields.
-    lines.next()?;
-    lines
-        // `@` starts the next plugin's id line, and stopping there keeps a
-        // plugin with no version from borrowing the following one's.
-        .take_while(|line| !line.contains('@'))
-        .find_map(|line| {
-            line.trim()
-                .strip_prefix("Version:")
-                .map(|version| version.trim().to_owned())
-        })
+        .map_err(|error| format!("read Claude plugin inventory: {error}"))?;
+    if !output.status.success() {
+        return Err(
+            "Claude plugin inventory failed; no successful installation/removal can be inferred"
+                .to_owned(),
+        );
+    }
+    serde_json::from_slice(&output.stdout).map_err(|_| {
+        "Claude plugin inventory is not the supported JSON shape; no registration was selected"
+            .to_owned()
+    })
+}
+
+fn verify_marketplace_source(
+    claude: &Path,
+    root: &Path,
+    marketplace: &Path,
+) -> Result<bool, String> {
+    #[derive(serde::Deserialize)]
+    struct Marketplace {
+        name: String,
+        source: String,
+        path: Option<PathBuf>,
+    }
+    let output = Command::new(claude)
+        .current_dir(root)
+        .args(["plugin", "marketplace", "list", "--json"])
+        .output()
+        .map_err(|error| format!("read Claude marketplace inventory: {error}"))?;
+    if !output.status.success() {
+        return Err(
+            "Claude marketplace inventory failed; its source cannot be safely replaced".to_owned(),
+        );
+    }
+    let entries: Vec<Marketplace> = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "Claude marketplace inventory is not the supported JSON shape".to_owned())?;
+    let matches: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.name == MARKETPLACE)
+        .collect();
+    if matches.is_empty() {
+        return Ok(false);
+    }
+    let expected = marketplace
+        .canonicalize()
+        .map_err(|error| format!("resolve marketplace: {error}"))?;
+    if matches.len() != 1
+        || matches[0].source != "directory"
+        || matches[0]
+            .path
+            .as_ref()
+            .and_then(|path| path.canonicalize().ok())
+            .as_ref()
+            != Some(&expected)
+    {
+        return Err("the Synveda marketplace name belongs to another source; inspect it in Claude before changing registration".to_owned());
+    }
+    Ok(true)
+}
+
+fn verify_other_scopes(
+    before: &[InstalledPlugin],
+    after: &[InstalledPlugin],
+    scope: &str,
+    root: &Path,
+) -> Result<(), String> {
+    let before: Vec<_> = before
+        .iter()
+        .filter(|plugin| !is_scope(plugin, scope, root))
+        .collect();
+    let after: Vec<_> = after
+        .iter()
+        .filter(|plugin| !is_scope(plugin, scope, root))
+        .collect();
+    if before.len() != after.len() || before.iter().any(|entry| !after.contains(entry)) {
+        return Err("Claude changed another registration during setup; inspect native plugin state before retrying. Synveda did not edit the cache".to_owned());
+    }
+    Ok(())
+}
+
+fn removal_args(scope: &str) -> Vec<String> {
+    [
+        "plugin",
+        "uninstall",
+        PLUGIN_ID,
+        "--scope",
+        scope,
+        "--keep-data",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+fn require_scoped_removal(claude: &Path) -> Result<(), String> {
+    let output = Command::new(claude)
+        .args(["plugin", "uninstall", "--help"])
+        .output()
+        .map_err(|error| format!("inspect Claude removal capabilities: {error}"))?;
+    let help = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() || !help.contains("--scope") || !help.contains("--keep-data") {
+        return Err("this Claude version cannot preserve scope and persistent data; use a supported Claude Code CLI (verified with 2.1.241)".to_owned());
+    }
+    Ok(())
+}
+
+fn report_registration(plugin: &InstalledPlugin) {
+    println!(
+        "{PLUGIN_ID} {} configured in scope {}; {}",
+        plugin.version,
+        plugin.scope,
+        if plugin.enabled {
+            "enabled; review required to verify hook/MCP loading"
+        } else {
+            "disabled; enable it in Claude when ready"
+        }
+    );
 }
 
 /// The version the bundle on disk carries, from the plugin manifest the
@@ -422,9 +538,10 @@ fn bundle_version(marketplace: &Path) -> Option<String> {
     json.get("version")?.as_str().map(str::to_owned)
 }
 
-fn run(claude: &Path, args: &[String]) -> Result<(), String> {
+fn run(claude: &Path, root: &Path, args: &[String]) -> Result<(), String> {
     println!("    claude {}", args.join(" "));
     let status = Command::new(claude)
+        .current_dir(root)
         .args(args)
         .status()
         .map_err(|err| format!("run claude {}: {err}", args.join(" ")))?;

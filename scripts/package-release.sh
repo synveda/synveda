@@ -7,9 +7,11 @@
 #     BROWSER_DIGEST HELM_POSTGRES_DIGEST
 #
 # Digests are bare `sha256:<64 lowercase hex>` values. The script constructs
-# the fixed GHCR references, writes the source/image environment manifest and
+# the selected registry references, writes the source/image environment manifest and
 # copies only the runtime closure needed by the reference deployment. It never
 # copies ignored local `.env`, runtime, secret or backup paths.
+# SYNVEDA_PACKAGE_CONSUMER_CANDIDATE=1 additionally renders the unpublished
+# OPS-12 plain-Compose candidate using the Compose CLI (no daemon required).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -28,9 +30,19 @@ keycloak_digest=$6
 proxy_digest=$7
 browser_digest=$8
 helm_postgres_digest=$9
+image_namespace=${SYNVEDA_IMAGE_NAMESPACE:-ghcr.io/synveda}
+consumer_candidate=${SYNVEDA_PACKAGE_CONSUMER_CANDIDATE:-0}
+case "$consumer_candidate" in
+  0|1) ;;
+  *) echo "package-release: SYNVEDA_PACKAGE_CONSUMER_CANDIDATE must be 0 or 1" >&2; exit 64 ;;
+esac
 
 # Validate every value before deriving or replacing a path.
 sh scripts/release-version.sh "$version"
+node --input-type=module - "$image_namespace" <<'JS'
+import { imageNamespace } from "./scripts/release-registries.mjs";
+imageNamespace(process.argv[2]);
+JS
 printf '%s\n' "$source_sha" | grep -Eq '^[0-9a-f]{40}$' || {
   echo "package-release: SOURCE_SHA must be a full lowercase 40-hex Git commit" >&2
   exit 64
@@ -154,19 +166,19 @@ writeFileSync(output, guide);
 JS
 cp LICENSE NOTICE "$stage/"
 
-product_image="ghcr.io/synveda/product@$product_digest"
-postgres_image="ghcr.io/synveda/postgres@$postgres_digest"
-keycloak_image="ghcr.io/synveda/keycloak@$keycloak_digest"
-proxy_image="ghcr.io/synveda/proxy@$proxy_digest"
-browser_image="ghcr.io/synveda/browser-acceptance@$browser_digest"
-helm_postgres_image="ghcr.io/synveda/cnpg-postgres@$helm_postgres_digest"
+product_image="$image_namespace/product@$product_digest"
+postgres_image="$image_namespace/postgres@$postgres_digest"
+keycloak_image="$image_namespace/keycloak@$keycloak_digest"
+proxy_image="$image_namespace/proxy@$proxy_digest"
+browser_image="$image_namespace/browser-acceptance@$browser_digest"
+helm_postgres_image="$image_namespace/cnpg-postgres@$helm_postgres_digest"
 
 # OPS-11: use the same immutable images in Helm. Separate overlays preserve
 # the chart's refusal of unused CNPG settings in external-database mode.
 cat > "$outdir/synveda-images-$version.yaml" <<EOF
 # Generated from release $version, source $source_sha. Contains no credentials.
 image:
-  repository: ghcr.io/synveda/product
+  repository: $image_namespace/product
   tag: ""
   digest: $product_digest
 postgres:
@@ -174,14 +186,14 @@ postgres:
     image: $postgres_image
 keycloak:
   image:
-    repository: ghcr.io/synveda/keycloak
+    repository: $image_namespace/keycloak
     tag: ""
     digest: $keycloak_digest
 EOF
 cat > "$outdir/synveda-cnpg-image-$version.yaml" <<EOF
 # Apply only with postgres.mode=cnpg; keep the PostgreSQL version in the tag.
 postgres:
-  image: ghcr.io/synveda/cnpg-postgres:17.11-synveda-$version@$helm_postgres_digest
+  image: $image_namespace/cnpg-postgres:17.11-synveda-$version@$helm_postgres_digest
 EOF
 
 cat > "$stage/environment.json" <<EOF
@@ -189,6 +201,7 @@ cat > "$stage/environment.json" <<EOF
   "schema_version": 1,
   "release_version": "$version",
   "source_sha": "$source_sha",
+  "image_namespace": "$image_namespace",
   "deployment_contract": "CPR-45/ADR-0102",
   "images": {
     "product": "$product_image",
@@ -331,6 +344,14 @@ if grep -R -i -E '\brauthy\b|\btemporal(io|[-_][a-z0-9_]+)?\b' \
   "$stage/deploy/compose" >/dev/null; then
   echo "package-release: retired runtime marker entered the reference archive" >&2
   exit 1
+fi
+
+if [ "$consumer_candidate" = 1 ]; then
+  # Local qualification only until OPS-12 adds paired named-volume recovery
+  # and release acceptance. The publishing workflow does not select this flag.
+  copy_runtime_asset deploy/compose/scripts/initialize-consumer.mjs
+  cp deploy/compose/CONSUMER.md "$stage/CONSUMER.md"
+  node scripts/package-consumer-compose.mjs "$stage"
 fi
 
 tar -czf "$archive" -C "$outdir" "synveda-reference-$version"

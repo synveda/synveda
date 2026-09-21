@@ -161,8 +161,8 @@ for (const path of DOCKERFILES) {
 }
 
 const releaseWorkflowImages = releaseWorkflowImageReferences(read(RELEASE_WORKFLOW));
-if (releaseWorkflowImages.length !== 6) {
-  fail(`${RELEASE_WORKFLOW}: expected five product/deployment images and one acceptance fixture`);
+if (releaseWorkflowImages.length !== 12 || new Set(releaseWorkflowImages).size !== 12) {
+  fail(`${RELEASE_WORKFLOW}: expected five deployment images and one acceptance fixture in each registry`);
 }
 for (const ref of releaseWorkflowImages) {
   found.set(ref, `${RELEASE_WORKFLOW} (tags:)`);

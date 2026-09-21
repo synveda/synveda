@@ -1,10 +1,22 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted; amended ten times. The current Docker deployment
+- **Status**: Accepted; amended eleven times. The current Docker deployment
   contract is ADR-0102; the native/client artifact decisions below remain.
 - **Date**: 2026-08-11
-- **Feature(s)**: OPS-8, CPR-39, ADPT-9
+- **Feature(s)**: OPS-8, CPR-39, ADPT-9, OPS-12
 - **Deciders**: sujitn
+
+## Amendment 11 (2026-09-21): preserve native plugin scope
+
+OPS-12 uses Claude Code 2.1.241's native JSON inventory to select the exact
+plugin, scope and project root. Installation, replacement and removal propagate
+the same scope. A missing vendor CLI, failed inventory or ambiguous registration
+cannot establish removal. Preserve persistent plugin data on replacement and
+removal. Retain the marketplace until a future receipt can prove it is safe to
+remove; another project or scope may still reference it. Never edit vendor cache
+or cross-referenced state files. Enabled native registration is configuration
+evidence, not proof that hooks or MCP loaded. Existing lifecycle evidence remains
+governed by ADR-0098.
 
 ## Amendment 10 (2026-09-19): carry the qualified Copilot hook runtime
 

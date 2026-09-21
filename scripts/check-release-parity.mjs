@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // CPR-45 / PR-01: deterministic release-to-Helm artifact parity. This gate
-// packages and renders the chart locally, but never contacts Docker, a
+// packages and renders the chart locally, but never contacts a Docker daemon,
 // registry, Kubernetes or GitHub. Pullability and provenance remain live
 // release evidence, not conclusions of this check.
 
@@ -98,7 +98,7 @@ export function releaseWorkflowFindings(source) {
   for (const [ref, sha] of Object.entries(pins)) {
     source = source.replaceAll(`${ref.split("@")[0]}@${sha} # ${ref.split("@")[1]}`, ref);
   }
-  if (!source.includes("permissions:\n  contents: read\n\njobs:")) {
+  if (!source.includes("permissions:\n  contents: read\n\nconcurrency:\n  group: release-${{ github.ref }}\n  cancel-in-progress: false\n\njobs:")) {
     findings.push("workflow default permissions are not read-only");
   }
   const job = (name) => {
@@ -132,7 +132,7 @@ export function releaseWorkflowFindings(source) {
     }
   }
   if (!publishJob.includes("    permissions:\n      contents: write\n") || publishJob.includes("packages: write")) {
-    findings.push("publish job must have only scoped release-write permission");
+    findings.push("publish job must have scoped release-write permission and no registry write access");
   }
   if (!verificationJob.includes("    permissions:\n      contents: read\n") ||
       verificationJob.includes("packages: write") || verificationJob.includes("docker/login-action") ||
@@ -161,7 +161,7 @@ export function releaseWorkflowFindings(source) {
       !publishJob.includes("sha256sum release-images-*.json release-docker-*.json release-kubernetes-*.json >> SHA256SUMS")) {
     findings.push("announcement must carry the assembled assets and both checksummed reports");
   }
-  if (!assemblyJob.includes("          path: |\n            assets/SHA256SUMS\n            assets/synveda-*.tar.gz\n            assets/synveda-*.tgz\n            assets/synveda-*.yaml\n") ||
+  if (!assemblyJob.includes("          path: |\n            assets/SHA256SUMS\n            assets/synveda-*.tar.gz\n            assets/synveda-*.tgz\n            assets/synveda-*.yaml\n            assets/synveda-registry-images-*.json\n") ||
       assemblyJob.includes("path: assets/*") || publishJob.includes("assets/*") ||
       !publishJob.includes('test -f "$asset" && test ! -L "$asset"')) {
     findings.push("release uploads must select only the regular packaged asset inventory");
@@ -269,11 +269,14 @@ export function releaseWorkflowFindings(source) {
       ["provenance", "mode=max"],
       ["sbom", "true"],
       ["labels", "|"],
-      [
-        "tags",
-        `ghcr.io/synveda/${repository}:${tagPrefix}\${{ needs.version.outputs.version }}-\${{ matrix.arch }}`,
-      ],
+      ["tags", "|"],
     ]);
+    const tags = [...block.matchAll(/^            ((?:docker\.io|ghcr\.io)\/[^\n]+)$/gm)].map((match) => match[1]);
+    const coordinate = `${repository}:${tagPrefix}\${{ needs.version.outputs.version }}-\${{ matrix.arch }}`;
+    if (JSON.stringify(tags) !== JSON.stringify([
+      `docker.io/\${{ needs.version.outputs.dockerhub_namespace }}/${coordinate}`,
+      `ghcr.io/synveda/${coordinate}`,
+    ])) findings.push(`${name}: both registries must receive the same native build result`);
     for (const label of [
       "org.opencontainers.image.source=https://github.com/${{ github.repository }}",
       "org.opencontainers.image.revision=${{ github.sha }}",
@@ -303,39 +306,49 @@ export function releaseWorkflowFindings(source) {
       }
     }
   }
-  const join = stepBlock(source, "Join the per-architecture image tags");
-  const expectedJoin = [
-    "      - name: Join the per-architecture image tags",
-    "        if: needs.version.outputs.publish == 'true'",
-    "        run: |",
-    "          set -euo pipefail",
-    '          version="${{ needs.version.outputs.version }}"',
-    "          for image in product postgres keycloak proxy browser-acceptance; do",
-    "            docker buildx imagetools create \\",
-    '              --tag "ghcr.io/synveda/$image:$version" \\',
-    '              "ghcr.io/synveda/$image:$version-amd64" \\',
-    '              "ghcr.io/synveda/$image:$version-arm64"',
-    '            docker buildx imagetools inspect "ghcr.io/synveda/$image:$version"',
-    "          done",
-    '          cnpg_tag="17.11-synveda-$version"',
-    "          docker buildx imagetools create \\",
-    '            --tag "ghcr.io/synveda/cnpg-postgres:$cnpg_tag" \\',
-    '            "ghcr.io/synveda/cnpg-postgres:$cnpg_tag-amd64" \\',
-    '            "ghcr.io/synveda/cnpg-postgres:$cnpg_tag-arm64"',
-    '          docker buildx imagetools inspect "ghcr.io/synveda/cnpg-postgres:$cnpg_tag"',
-  ].join("\n");
-  if (
-    assemblyJob.split("      - name: Join the per-architecture image tags\n").length - 1 !== 1 ||
-    join !== expectedJoin
-  ) {
-    findings.push("multi-architecture manifest join is not the exact publish-bound plan");
+  const join = stepBlock(source, "Join and inspect both registry destinations");
+  for (const marker of [
+    'PUBLISH: ${{ needs.version.outputs.publish }}',
+    'SOURCE_SHA: ${{ github.sha }}',
+    'VERSION: ${{ needs.version.outputs.version }}',
+    'DOCKERHUB_NAMESPACE: ${{ needs.version.outputs.dockerhub_namespace }}',
+    'node scripts/release-registries.mjs assemble "$VERSION" "$SOURCE_SHA" "$PUBLISH"',
+    '"assets/synveda-registry-images-$VERSION.json"',
+  ]) if (!join.includes(marker)) findings.push("registry assembly lost its version/source/dry-run boundary");
+  if (join.includes("continue-on-error") || join.includes("if:")) findings.push("registry assembly cannot be skipped or ignored");
+  const preflight = stepBlock(imagesJob, "Refuse existing release coordinates");
+  if (!preflight.includes("if: needs.version.outputs.publish == 'true'") ||
+      !preflight.includes('node scripts/release-registries.mjs preflight "$VERSION" "$SOURCE_SHA" "$ARCH"') ||
+      preflight.includes("continue-on-error")) findings.push("native publication must refuse existing release coordinates");
+  for (const block of [imagesJob, assemblyJob, publishJob]) {
+    if (!block.includes("environment: ${{ needs.version.outputs.publish == 'true' && 'release' || 'release-dry-run' }}")) findings.push("publication must use the protected release environment");
   }
+  for (const block of [imagesJob, assemblyJob]) {
+    const login = stepBlock(block, "Log in to Docker Hub");
+    for (const marker of ["if: needs.version.outputs.publish == 'true'", "registry: docker.io", "username: ${{ vars.DOCKERHUB_USERNAME }}", "password: ${{ secrets.DOCKERHUB_TOKEN }}"])
+      if (!login.includes(marker)) findings.push("Docker Hub credentials must be confined to explicit publication");
+  }
+  if (!verify.includes('"assets/synveda-registry-images-$VERSION.json"')) findings.push("anonymous verification must cover both destinations");
+  const attest = stepBlock(publishJob, "Authenticate the final release inventory");
+  if (!publishJob.includes("      id-token: write\n      attestations: write") ||
+      !attest.includes("uses: actions/attest@v4") ||
+      !attest.includes("if: needs.version.outputs.publish == 'true'") ||
+      !attest.includes("subject-path: assets/SHA256SUMS") || attest.includes("continue-on-error")) findings.push("final checksums must have publisher authentication");
+  const verifyAttestation = stepBlock(publishJob, "Verify and retain the publisher attestation");
+  for (const marker of [
+    "if: needs.version.outputs.publish == 'true'",
+    'gh attestation verify assets/SHA256SUMS --bundle assets/SHA256SUMS.sigstore.json',
+    '--repo "$GH_REPO" --signer-workflow "$GH_REPO/.github/workflows/release.yml"',
+    '--source-ref "$GITHUB_REF" --source-digest "$SOURCE_SHA" --deny-self-hosted-runners',
+    'GH_REPO: ${{ github.repository }}',
+  ]) if (!verifyAttestation.includes(marker)) findings.push("publisher attestation must be verified against workflow, tag and source");
+  if (verifyAttestation.includes("continue-on-error")) findings.push("failed publisher verification must block announcement");
   const packageReference = stepBlock(source, "Package the digest-bound Docker reference");
   const packagePosition = assemblyJob.indexOf(
     "      - name: Package the digest-bound Docker reference\n",
   );
   const joinPosition = assemblyJob.indexOf(
-    "      - name: Join the per-architecture image tags\n",
+    "      - name: Join and inspect both registry destinations\n",
   );
   const inventoryPosition = assemblyJob.indexOf("      - name: Every release asset is present\n");
   const checksumPosition = assemblyJob.indexOf("      - name: Checksums\n");
@@ -344,19 +357,13 @@ export function releaseWorkflowFindings(source) {
       1 ||
     !(joinPosition >= 0 && packagePosition > joinPosition && inventoryPosition > packagePosition) ||
     checksumPosition <= inventoryPosition ||
-    !packageReference.includes('SOURCE_SHA: ${{ github.sha }}') ||
-    !packageReference.includes(
-      'scripts/package-release.sh "$version" assets "$SOURCE_SHA"',
-    ) ||
-    !packageReference.includes(
-      'if ! docker buildx imagetools inspect --raw "$image" > "$output"; then',
-    ) ||
-    !packageReference.includes('if [ ! -s "$output" ]; then') ||
-    !packageReference.includes('digest=$(sha256sum "$output" | awk')
+    !packageReference.includes('VERSION: ${{ needs.version.outputs.version }}') ||
+    !packageReference.includes('node scripts/release-registries.mjs package') ||
+    !packageReference.includes('"assets/synveda-registry-images-$VERSION.json" assets')
   ) {
     findings.push("reference package is not digest-bound after image join and before inventory");
   }
-  if (!source.includes("sha256sum synveda-*.tar.gz synveda-*.tgz synveda-*.yaml > SHA256SUMS")) {
+  if (!source.includes("sha256sum synveda-*.tar.gz synveda-*.tgz synveda-*.yaml synveda-registry-images-*.json > SHA256SUMS")) {
     findings.push("release checksums omit the Helm chart or immutable image overlays");
   }
   const ociChart = stepBlock(source, "Publish and pull the OCI chart");
@@ -397,6 +404,8 @@ export function releaseWorkflowFindings(source) {
     releaseKeys[2][2] !== "|" ||
     !release.includes("          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n") ||
     !release.includes("          GH_REPO: ${{ github.repository }}\n") ||
+    !release.includes("            assets/SHA256SUMS.sigstore.json\n") ||
+    !release.includes('"assets/synveda-registry-images-$version.json"') ||
     !release.includes("installed \\`synveda-compose\\` launcher") ||
     release.includes("installed `synveda-compose` launcher") ||
     !release.includes("SYNVEDA_VERSION=${GITHUB_REF_NAME} sh synveda-install.sh") ||

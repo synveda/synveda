@@ -1,11 +1,30 @@
 # ADR-0102: Portable reference deployment contract
 
-- **Status**: Accepted; amended by ADR-0105 and 2026-09-19
+- **Status**: Accepted; amended by ADR-0105, 2026-09-19 and 2026-09-21
 - **Date**: 2026-08-27
-- **Feature(s)**: CPR-45
+- **Feature(s)**: CPR-45, OPS-12
 - **Deciders**: Synveda maintainers
 
 ## Amendment
+
+The 2026-09-21 consumer increment renders the existing evaluation fragments at
+package time with Docker Compose itself. It does not maintain another service
+graph. The generated root Compose file includes that rendered graph. A bounded,
+networkless initialization service owns one private named installation volume;
+services receive only their existing secret subset through read-only volume
+subpaths. The initializer drops to the runtime UID before invoking the existing
+secret and issuer preparation. No Docker socket is mounted.
+
+The consumer project uses `synveda-local`, separating its named-volume layout
+from the existing launcher's host state. No implicit transition of retained
+state between those layouts is supported. Initialization refuses missing keys
+beside retained PostgreSQL data and binds its state to the release, project and
+issuer options. It preserves existing secrets and compares projected bytes on
+retry. Normal Compose shutdown keeps both named volumes. This path remains a
+local candidate until fresh-start, browser, recreation and paired-recovery
+acceptance qualifies it; the published launcher remains the supported path in
+the meantime. Existing external-provider and logical-recovery contracts remain
+authoritative.
 
 ADR-0105 replaces the abandoned clean-engine provider planning, receipt,
 reservation and process-effect work, and supersedes ADR-0103 and ADR-0104.

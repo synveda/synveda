@@ -246,7 +246,8 @@ pub async fn login(
             expires_at,
             refresh_token: session.refresh_token,
         },
-    )?;
+    )
+    .await?;
 
     eprintln!(
         "synveda: logged in as {} in tenant {} at {}",
@@ -276,6 +277,16 @@ pub async fn resolve(profile_name: &str) -> Result<Profile, String> {
         return Ok(profile);
     }
 
+    // Another hook/MCP process may have refreshed or logged out while this
+    // process waited. Reread under the shared mutation lock before using a
+    // rotating refresh token, and hold it until the replacement is durable.
+    let locked = credentials::lock().await?;
+    let mut profile = locked.profile(profile_name)?;
+    profile.gateway_url =
+        validate_gateway_origin(&profile.gateway_url, insecure_development_http_enabled()?)?;
+    if profile.valid_for(skew) {
+        return Ok(profile);
+    }
     let Some(refresh_token) = profile.refresh_token.clone() else {
         return Err(format!(
             "the credentials for profile `{profile_name}` have expired and this \
@@ -294,7 +305,7 @@ pub async fn resolve(profile_name: &str) -> Result<Profile, String> {
             if refreshed.refresh_token.is_some() {
                 profile.refresh_token = refreshed.refresh_token.clone();
             }
-            credentials::store(profile_name, profile.clone())?;
+            locked.store(profile_name, profile.clone())?;
         }
         Err(error) => match recover(&profile, &error) {
             Recovery::UseStored => eprintln!("synveda: {error}; using the stored token"),

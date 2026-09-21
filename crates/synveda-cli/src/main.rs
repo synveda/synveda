@@ -1332,16 +1332,14 @@ enum PluginCommand {
         #[arg(long)]
         force: bool,
         /// Claude Code's installation scope.
-        #[arg(long, default_value = "user")]
+        #[arg(long, default_value = "user", value_parser = ["user", "project", "local"])]
         scope: String,
     },
-    /// Remove the plugin from Claude Code (OPS-10, ADR-0067 decision 4).
+    /// Remove one Claude Code plugin registration (OPS-12, ADR-0065 amendment 11).
     ///
-    /// Drives `claude plugin uninstall` and then `marketplace remove`, in
-    /// that order: Claude Code copies a plugin into a versioned cache it
-    /// owns, so removing the marketplace alone leaves the plugin running.
-    /// Verified against `claude plugin list` rather than the filesystem —
-    /// removing and *unloading* are different events.
+    /// Removes the exact scope using Claude's native CLI. Persistent plugin
+    /// data and the shared marketplace are retained. Restart the harness to
+    /// unload an already-running plugin.
     Uninstall {
         /// Which client to remove it from.
         #[arg(long, default_value = "claude-code")]
@@ -1349,6 +1347,9 @@ enum PluginCommand {
         /// Report what would run and change nothing.
         #[arg(long)]
         dry_run: bool,
+        /// Claude Code's installation scope; project/local use the current repository.
+        #[arg(long, default_value = "user", value_parser = ["user", "project", "local"])]
+        scope: String,
     },
 }
 
@@ -2300,22 +2301,23 @@ async fn run(cli: Cli) -> Result<(), String> {
             force,
             scope,
         }),
-        Command::Plugin(PluginCommand::Uninstall { client, dry_run }) => {
-            plugin::uninstall(&plugin::RemovePlan { client, dry_run })
-        }
+        Command::Plugin(PluginCommand::Uninstall {
+            client,
+            dry_run,
+            scope,
+        }) => plugin::uninstall(&plugin::RemovePlan {
+            client,
+            dry_run,
+            scope,
+        }),
         Command::Auth(AuthCommand::Logout { profile, all }) => {
-            let mut stored = credentials::load()?;
+            let stored = credentials::lock().await?;
             if all {
-                let count = stored.profiles.len();
-                stored.profiles.clear();
-                credentials::save(&stored)?;
+                let count = stored.forget(None)?;
                 eprintln!("synveda: forgot {count} profile(s)");
             } else {
                 let name = profile_name(profile)?;
-                if stored.profiles.remove(&name).is_none() {
-                    return Err(format!("no credentials for profile `{name}`"));
-                }
-                credentials::save(&stored)?;
+                stored.forget(Some(&name))?;
                 eprintln!("synveda: forgot profile `{name}`");
             }
             // The gateway is not told: the IdP owns revocation, and a

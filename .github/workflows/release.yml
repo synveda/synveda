@@ -11,9 +11,9 @@
 #   console    the CNSL-1 bundle carried by product artifacts
 #   reference  canonical Compose runtime files bound to published image digests
 #   chart      version-matched Helm chart archive
-#   images     ghcr.io/synveda/{product,postgres,cnpg-postgres,keycloak,
-#              proxy}, multi-architecture publication targets
-#   fixture    ghcr.io/synveda/browser-acceptance for release acceptance only
+#   images     Docker Hub (owner-configured namespace), mirrored to GHCR;
+#              product, postgres, cnpg-postgres, keycloak and proxy
+#   fixture    browser-acceptance in both registries for the opt-in sample/tests
 #   SHA256SUMS over every asset above
 #
 # Two targets rather than four: ADR-0065 decision 7. Adding one is a matrix
@@ -38,6 +38,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   version:
     runs-on: ubuntu-latest
@@ -45,6 +49,7 @@ jobs:
     outputs:
       version: ${{ steps.pick.outputs.version }}
       publish: ${{ steps.pick.outputs.publish }}
+      dockerhub_namespace: ${{ steps.pick.outputs.dockerhub_namespace }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Resolve the version, and refuse a tag the crates disagree with
@@ -53,6 +58,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_VERSION: ${{ inputs.version }}
           TRIGGER_SHA: ${{ github.sha }}
+          DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TRIGGER_SHA" || {
@@ -80,6 +86,8 @@ jobs:
             echo "The binaries and reference artifact must use one workspace version." >&2
             exit 1
           fi
+          namespace=$(node scripts/release-registries.mjs namespace "$publish")
+          echo "dockerhub_namespace=$namespace" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "building $version (publish=$publish)"
@@ -228,6 +236,7 @@ jobs:
   # budget and avoid forcing Apple Silicon reference installs through QEMU.
   images:
     needs: version
+    environment: ${{ needs.version.outputs.publish == 'true' && 'release' || 'release-dry-run' }}
     permissions:
       contents: read
       packages: write
@@ -259,7 +268,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Per-architecture tags. A dry run builds and pushes nothing; a tagged
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: needs.version.outputs.publish == 'true'
+        with:
+          registry: docker.io
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Refuse existing release coordinates
+        if: needs.version.outputs.publish == 'true'
+        env:
+          DOCKERHUB_NAMESPACE: ${{ needs.version.outputs.dockerhub_namespace }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+          ARCH: ${{ matrix.arch }}
+        run: node scripts/release-registries.mjs preflight "$VERSION" "$SOURCE_SHA" "$ARCH"
+      # Per-architecture tags. A dry run builds without pushing; a tagged
       # release joins them into the digest identities in environment.json.
       # Cache scopes are per-arch because two architectures sharing one scope
       # evict each other on every run.
@@ -276,7 +302,9 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: ghcr.io/synveda/product:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          tags: |
+            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/product:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+            ghcr.io/synveda/product:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=product-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=product-${{ matrix.arch }}
       - name: Postgres
@@ -295,7 +323,9 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          tags: |
+            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+            ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=postgres-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=postgres-${{ matrix.arch }}
       - name: CloudNativePG PostgreSQL
@@ -314,7 +344,9 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: ghcr.io/synveda/cnpg-postgres:17.11-synveda-${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          tags: |
+            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/cnpg-postgres:17.11-synveda-${{ needs.version.outputs.version }}-${{ matrix.arch }}
+            ghcr.io/synveda/cnpg-postgres:17.11-synveda-${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=cnpg-postgres-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=cnpg-postgres-${{ matrix.arch }}
       - name: Bundled Keycloak
@@ -333,7 +365,9 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          tags: |
+            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/keycloak:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+            ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=keycloak-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=keycloak-${{ matrix.arch }}
       - name: Reference proxy
@@ -351,7 +385,9 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          tags: |
+            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+            ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=proxy-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=proxy-${{ matrix.arch }}
       - name: Browser acceptance fixture
@@ -368,12 +404,15 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
           push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: ghcr.io/synveda/browser-acceptance:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          tags: |
+            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/browser-acceptance:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+            ghcr.io/synveda/browser-acceptance:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=product-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=product-${{ matrix.arch }}
 
   assemble:
     needs: [version, binaries, bundles, images]
+    environment: ${{ needs.version.outputs.publish == 'true' && 'release' || 'release-dry-run' }}
     permissions:
       contents: read
       packages: write
@@ -399,67 +438,28 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Join the per-architecture image tags
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: needs.version.outputs.publish == 'true'
-        run: |
-          set -euo pipefail
-          version="${{ needs.version.outputs.version }}"
-          for image in product postgres keycloak proxy browser-acceptance; do
-            docker buildx imagetools create \
-              --tag "ghcr.io/synveda/$image:$version" \
-              "ghcr.io/synveda/$image:$version-amd64" \
-              "ghcr.io/synveda/$image:$version-arm64"
-            docker buildx imagetools inspect "ghcr.io/synveda/$image:$version"
-          done
-          cnpg_tag="17.11-synveda-$version"
-          docker buildx imagetools create \
-            --tag "ghcr.io/synveda/cnpg-postgres:$cnpg_tag" \
-            "ghcr.io/synveda/cnpg-postgres:$cnpg_tag-amd64" \
-            "ghcr.io/synveda/cnpg-postgres:$cnpg_tag-arm64"
-          docker buildx imagetools inspect "ghcr.io/synveda/cnpg-postgres:$cnpg_tag"
-      - name: Package the digest-bound Docker reference
+        with:
+          registry: docker.io
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Join and inspect both registry destinations
         env:
           PUBLISH: ${{ needs.version.outputs.publish }}
           SOURCE_SHA: ${{ github.sha }}
+          VERSION: ${{ needs.version.outputs.version }}
+          DOCKERHUB_NAMESPACE: ${{ needs.version.outputs.dockerhub_namespace }}
         run: |
-          set -euo pipefail
-          version="${{ needs.version.outputs.version }}"
-          if [ "$PUBLISH" = true ]; then
-            digest_of() {
-              image=$1
-              output=$2
-              if ! docker buildx imagetools inspect --raw "$image" > "$output"; then
-                rm -f "$output"
-                return 1
-              fi
-              if [ ! -s "$output" ]; then
-                rm -f "$output"
-                return 1
-              fi
-              digest=$(sha256sum "$output" | awk '{print $1}') || return 1
-              printf 'sha256:%s\n' "$digest"
-            }
-            product_digest=$(digest_of "ghcr.io/synveda/product:$version" product-manifest.json)
-            postgres_digest=$(digest_of "ghcr.io/synveda/postgres:$version" postgres-manifest.json)
-            keycloak_digest=$(digest_of "ghcr.io/synveda/keycloak:$version" keycloak-manifest.json)
-            proxy_digest=$(digest_of "ghcr.io/synveda/proxy:$version" proxy-manifest.json)
-            browser_digest=$(digest_of "ghcr.io/synveda/browser-acceptance:$version" browser-manifest.json)
-            helm_postgres_digest=$(digest_of \
-              "ghcr.io/synveda/cnpg-postgres:17.11-synveda-$version" \
-              helm-postgres-manifest.json)
-          else
-            # workflow_dispatch publishes nothing. Synthetic, well-formed
-            # identities exercise packaging but are never uploaded as a release.
-            product_digest=sha256:1111111111111111111111111111111111111111111111111111111111111111
-            postgres_digest=sha256:2222222222222222222222222222222222222222222222222222222222222222
-            keycloak_digest=sha256:3333333333333333333333333333333333333333333333333333333333333333
-            proxy_digest=sha256:4444444444444444444444444444444444444444444444444444444444444444
-            browser_digest=sha256:5555555555555555555555555555555555555555555555555555555555555555
-            helm_postgres_digest=sha256:6666666666666666666666666666666666666666666666666666666666666666
-          fi
-          scripts/package-release.sh "$version" assets "$SOURCE_SHA" \
-            "$product_digest" "$postgres_digest" "$keycloak_digest" \
-            "$proxy_digest" "$browser_digest" "$helm_postgres_digest"
+          node scripts/release-registries.mjs assemble "$VERSION" "$SOURCE_SHA" "$PUBLISH" \
+            "assets/synveda-registry-images-$VERSION.json"
+      - name: Package the digest-bound Docker reference
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          node scripts/release-registries.mjs package \
+            "assets/synveda-registry-images-$VERSION.json" assets
       - name: Every release asset is present
         run: |
           set -euo pipefail
@@ -475,13 +475,13 @@ jobs:
           done
           echo "all six release archives are present"
       - name: Checksums
-        # Unsigned (ADR-0065 decision 8): this proves a download arrived
-        # intact, not who built it. install.sh says so in those words.
+        # The final inventory (including native acceptance) is attested in
+        # publish. Checksums alone only detect transfer corruption.
         run: |
           set -euo pipefail
           cd assets
           ls -lh
-          sha256sum synveda-*.tar.gz synveda-*.tgz synveda-*.yaml > SHA256SUMS
+          sha256sum synveda-*.tar.gz synveda-*.tgz synveda-*.yaml synveda-registry-images-*.json > SHA256SUMS
           cat SHA256SUMS
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
         with:
@@ -508,6 +508,7 @@ jobs:
             assets/synveda-*.tar.gz
             assets/synveda-*.tgz
             assets/synveda-*.yaml
+            assets/synveda-registry-images-*.json
           if-no-files-found: error
 
   # Fresh runners and an empty Docker credential directory prove the images
@@ -557,7 +558,8 @@ jobs:
           tar -xzf "assets/synveda-reference-$VERSION.tar.gz" -C "$RUNNER_TEMP"
           node scripts/verify-release-images.mjs \
             "$RUNNER_TEMP/synveda-reference-$VERSION" "$PLATFORM" \
-            "$VERSION" "$SOURCE_SHA" "release-images-${{ matrix.arch }}.json"
+            "$VERSION" "$SOURCE_SHA" "release-images-${{ matrix.arch }}.json" \
+            "assets/synveda-registry-images-$VERSION.json"
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
         if: needs.version.outputs.publish == 'true'
         with:
@@ -601,8 +603,11 @@ jobs:
 
   publish:
     needs: [version, assemble, verify-images]
+    environment: ${{ needs.version.outputs.publish == 'true' && 'release' || 'release-dry-run' }}
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -629,11 +634,31 @@ jobs:
           done
           sha256sum release-images-*.json release-docker-*.json release-kubernetes-*.json >> SHA256SUMS
           sha256sum --check SHA256SUMS
+      - name: Authenticate the final release inventory
+        id: attest
+        if: needs.version.outputs.publish == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: assets/SHA256SUMS
+      - name: Verify and retain the publisher attestation
+        if: needs.version.outputs.publish == 'true'
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cp "$ATTESTATION_BUNDLE" assets/SHA256SUMS.sigstore.json
+          gh attestation verify assets/SHA256SUMS --bundle assets/SHA256SUMS.sigstore.json \
+            --repo "$GH_REPO" --signer-workflow "$GH_REPO/.github/workflows/release.yml" \
+            --source-ref "$GITHUB_REF" --source-digest "$SOURCE_SHA" --deny-self-hosted-runners
       - name: Publish
         if: needs.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          DOCKERHUB_NAMESPACE: ${{ needs.version.outputs.dockerhub_namespace }}
         run: |
           set -euo pipefail
           version="${{ needs.version.outputs.version }}"
@@ -684,10 +709,17 @@ jobs:
           synveda mcp install --client claude-desktop   # or cursor, or zed
           \`\`\`
 
-          The binaries are **unsigned and not notarized** — the checksums prove
-          a download arrived intact, not who built it (ADR-0065 decision 8).
+          Verify \`SHA256SUMS\` with its \`SHA256SUMS.sigstore.json\` publisher
+          attestation before verifying/extracting downloads. See the versioned
+          [verification guide](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/docs/RELEASING.md).
+          Native binaries have no OS code signature or notarization. The attested
+          checksum inventory authenticates these release bytes and registry digests.
 
-          Images: \`ghcr.io/synveda/product:${{ needs.version.outputs.version }}\`,
+          Consumer images: \`docker.io/$DOCKERHUB_NAMESPACE/product:$version\`
+          and the other five images recorded in the attested registry inventory.
+          Both registries passed anonymous native pulls; full deployment checks
+          used the Docker Hub destination digests. GHCR mirrors include
+          \`ghcr.io/synveda/product:${{ needs.version.outputs.version }}\`,
           \`ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}\`, and
           \`ghcr.io/synveda/cnpg-postgres:17.11-synveda-${{ needs.version.outputs.version }}\`.
           The bundled reference dependencies are
@@ -707,6 +739,8 @@ jobs:
           # unrelated checkout directories must never become upload arguments.
           release_assets=(
             assets/SHA256SUMS
+            assets/SHA256SUMS.sigstore.json
+            "assets/synveda-registry-images-$version.json"
             "assets/synveda-$version-darwin-arm64.tar.gz"
             "assets/synveda-$version-linux-x86_64.tar.gz"
             "assets/synveda-console-$version.tar.gz"

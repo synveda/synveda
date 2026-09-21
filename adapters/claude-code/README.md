@@ -41,6 +41,20 @@ From an installed release, one command — it carries this plugin already:
 synveda plugin install          # --dry-run to see what it would run
 ```
 
+In the unreleased OPS-12 CLI candidate, select Claude's native scope explicitly
+when working with a repository (v0.4.0 does not yet have scoped removal):
+
+```sh
+synveda plugin install --scope project
+synveda plugin uninstall --scope project
+```
+
+The CLI defaults to `user`; `project` and `local` use the current repository
+root. Replacement and removal pass the same scope to Claude and preserve
+persistent plugin data, other scopes and the shared marketplace. A missing
+Claude executable or unreadable native inventory is an error, not successful
+removal. This registration contract was checked with Claude Code `2.1.241`.
+
 From a checkout, build it, wrap it as a marketplace, and install that:
 
 ```sh
@@ -66,12 +80,15 @@ from a marketplace carrying `.claude-plugin/marketplace.json` into its own
 cache. `package-plugin.sh` builds that wrapper; `synveda plugin install` hands
 it to `claude plugin`.
 
-Check it actually loaded, because installing and loading are different things:
+Check native registration and enabled state:
 
 ```sh
-claude plugin list                  # Status: ✔ enabled
-claude plugin details synveda@synveda   # Hooks (4) … MCP servers (1)
+claude plugin list --json
 ```
+
+Registration does not prove a running session loaded hooks or MCP. Start a new
+Claude session, review its trust prompts and inspect the loaded integration.
+Uninstalling likewise requires a restart to unload an existing session.
 
 Two manifest keys are why that check matters. `hooks` must **not** name
 `./hooks/hooks.json` — the file is read automatically and declaring it too is
