@@ -106,13 +106,10 @@ export function packageConsumer(bundle, run = execFileSync) {
   const files = ["compose.yaml", "compose.postgres.yaml", "compose.keycloak.yaml", "compose.keycloak-postgres.yaml", "compose.evaluation.yaml", "compose.demo.yaml", "compose.browser-acceptance.yaml"];
   const merged = JSON.parse(run("docker", ["compose", "--env-file", "/dev/null", "--profile", "*", ...files.flatMap((file) => ["-f", path.join(compose, file)]), "config", "--format", "json"], { env, cwd: bundle, encoding: "utf8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] }));
   const { graph, projections } = consumerGraph(merged, bundle, manifest);
-  const rendered = run("docker", ["compose", "--env-file", "/dev/null", "--profile", "*", "-f", "-", "config", "--no-interpolate", "--no-path-resolution"], {
-    input: JSON.stringify(graph), env: { PATH: process.env.PATH, HOME: process.env.HOME }, cwd: bundle, encoding: "utf8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"],
-  });
-  // Compose normalizes names during rendering; leave resource names project
-  // scoped when the extracted artifact is used with an explicit test project.
-  const yaml = rendered.replace(/^    name: synveda-local_[^\n]+\n/gm, "");
-  publish(path.join(compose, "consumer-runtime.yaml"), `# Generated from the canonical CPR-45 fragments; do not edit.\n${yaml}`);
+  // JSON is valid YAML. Preserve explicit false values and unresolved project
+  // names: older Compose serializers omit create_host_path=false, changing
+  // the bind contract when the resulting artifact is read by newer versions.
+  publish(path.join(compose, "consumer-runtime.yaml"), `# Generated from the canonical CPR-45 fragments; do not edit.\n${JSON.stringify(graph, null, 2)}\n`);
   publish(path.join(compose, "consumer-projections.json"), `${JSON.stringify(projections, null, 2)}\n`);
   publish(path.join(bundle, "compose.yaml"), "# OPS-12 consumer candidate. See CONSUMER.md for qualification status.\nname: synveda-local\ninclude:\n  - path: ./deploy/compose/consumer-runtime.yaml\n    project_directory: .\n");
   return graph;

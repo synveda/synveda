@@ -457,6 +457,7 @@ echo "    login|inherit|superuser|createdb|createrole|replication|bypassrls|synv
 echo "==> the test client: a real login, and everything downstream of it"
 kubectl create configmap install-test-scripts -n "$NS" \
   --from-file="$FIXTURES/client.sh" --from-file="$FIXTURES/browser.mjs" \
+  --from-file="$FIXTURES/failover.sh" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl delete pod synveda-install-test -n "$NS" --ignore-not-found >/dev/null
 # `__IMAGE_TAG__` rather than a literal, for the reason IMAGE_TAG is
@@ -530,23 +531,8 @@ echo "==> the same context run, on the other side of the failover"
 # from the file it wrote. Opening a fresh one here would test that the
 # gateway can still create a session — a weaker claim than that a run which
 # existed before the failover still composes after it.
-kubectl exec -n "$NS" synveda-install-test -c client -- sh -ec '
-  bearer=$(synveda auth token)
-  run=$(cat /work/session-id)
-  for i in $(seq 1 120); do
-    code=$(curl -sS -o /work/failover-body -w "%{http_code}" \
-      -X POST "$SYNVEDA_GATEWAY/v1/sessions/$run/context-runs" \
-      -H "Authorization: Bearer $bearer" -H "Content-Type: application/json" \
-      -H "Idempotency-Key: ops2-failover-$i" \
-      -d "{\"query\":\"when does the release train leave\"}")
-    if [ "${code%${code#2}}" = "2" ] && grep -q '"id"' /work/failover-body; then
-      echo "    the context run succeeded after the failover (attempt $i)"
-      exit 0
-    fi
-    sleep 2
-  done
-  echo "the context run never recovered:"; cat /work/failover-body; exit 1
-' || fail "the deployment did not survive losing its primary" \
+kubectl exec -n "$NS" synveda-install-test -c client -- sh /scripts/failover.sh ||
+  fail "the deployment did not survive losing its primary" \
   "$(kubectl get cluster -n "$NS" synveda-pg -o wide 2>&1 || true)"
 
 echo "==> the private worker is ready after the same failover"

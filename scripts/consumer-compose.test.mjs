@@ -118,6 +118,12 @@ test("the opt-in packaged candidate resolves fresh without any generated host se
   });
   execFileSync("tar", ["-xzf", path.join(root, `synveda-reference-${version}.tar.gz`), "-C", root]);
   const bundle = path.join(root, `synveda-reference-${version}`);
+  const packaged = JSON.parse(readFileSync(path.join(bundle, "deploy/compose/consumer-runtime.yaml"), "utf8").replace(/^#.*\n/, ""));
+  for (const service of Object.values(packaged.services)) {
+    for (const volume of service.volumes ?? []) {
+      if (volume.type === "bind") assert.equal(volume.bind.create_host_path, false);
+    }
+  }
   const project = "synveda-local-acceptance-render";
   const rendered = JSON.parse(execFileSync("docker", ["compose", "--profile", "*", "config", "--format", "json"], {
     cwd: bundle, env: { PATH: process.env.PATH, HOME: process.env.HOME, COMPOSE_PROJECT_NAME: project }, encoding: "utf8", timeout: 15_000, stdio: "pipe",
@@ -137,7 +143,9 @@ test("the opt-in packaged candidate resolves fresh without any generated host se
         const mounted = realpathSync(volume.source), expected = realpathSync(bundle);
         assert.ok(mounted === expected || mounted.startsWith(`${expected}/deploy/compose/`), `${name} has a non-bundle host path`);
         assert.equal(volume.read_only, true);
-        assert.equal(volume.bind.create_host_path, false);
+        // Compose 2.x omits false from normalized JSON. The artifact above
+        // must still carry it explicitly for consumers with other defaults.
+        assert.equal(volume.bind?.create_host_path ?? false, false);
       }
     }
   }

@@ -96,7 +96,7 @@ Required local checks: `make check-fast`, focused Node packaging/release tests,
 Rust increments also require formatting, strict CLI Clippy and focused tests.
 Report services, credentials and native platforms separately from test failures.
 
-Current results: `make check-fast check-release-parity` passes (45 Node tests
+Current results: `make check-fast check-release-parity` passes (48 Node tests
 plus deterministic packaging/Helm parity). `cargo fmt --all --check`,
 `SQLX_OFFLINE=true cargo clippy -p synveda-cli --all-targets -- -D warnings` and
 `SQLX_OFFLINE=true cargo test -p synveda-cli -- --test-threads=1` pass; the latter
@@ -108,10 +108,22 @@ lock without rewriting credentials, and failed refresh preserves private bytes
 and the existing pre-emptive fallback. These use a loopback mock gateway, not a
 live issuer or harness. Lock timeout, symlink/hardlink refusal, private modes,
 exclusive temporary creation and diagnostic redaction also pass.
-`make check-deploy chart-lint` passes (379 Node tests, zero skipped,
+`make check-deploy chart-lint` passes (382 Node tests, zero skipped,
 plus deployment/Helm/static portability gates); `git diff --check` passes.
 The first full CLI/deployment runs could not bind sandboxed loopback listeners;
 rerunning with local socket access resolved that environment restriction.
+
+Candidate packaging and all 48 release-parity tests also pass with Compose
+2.38.2, the hosted runner's version. The generated graph preserves explicit
+`create_host_path: false` in the archive; a live missing-source check with both
+2.38.2 and 5.1.2 refuses without creating a host directory. OPS-2 failover
+fixtures cover transport errors, bounded retry exhaustion and authorization
+refusal while retaining the pre-existing session and one idempotency key.
+`make claude-acceptance` passes on fresh isolated PostgreSQL fixtures locally.
+The [hosted replay rerun](https://github.com/synveda/synveda/actions/runs/35587876306/job/106311668496)
+also passes without a database change; the original bootstrap refusal has not
+reproduced in either run. `make check-demos` passes all seven fixture tests and
+validates 91 executable demos against the generated public contracts.
 
 Claude Code 2.1.241 was exercised through the built native CLI in a private
 `CLAUDE_CONFIG_DIR`, using an inert test marketplace outside the user's config.
