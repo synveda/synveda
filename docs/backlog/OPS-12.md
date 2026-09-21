@@ -383,7 +383,10 @@ test exposed `MoveFileEx` returning access denied as well as sharing violation;
 both now receive the same bounded delay with destination revalidation. The
 retry passes at `3efece4`; its remaining directory-rename assertion exposed that
 metadata-only handles do not enforce delete sharing. Directory handles now also
-request list access. Native storage and process-refresh execution remains pending.
+request list access. All eight native storage tests pass at `8ec246e`. Four
+process-refresh fixtures time out before contacting their gateway; their clean
+environment now retains Windows `SystemRoot`, and early CLI exits are reported
+with the timeout. The corrected native process run remains pending.
 
 Next action: execute the expanded Windows credential job, fix any native
 failures, then apply the same boundary to receipt/spool consumers before adding

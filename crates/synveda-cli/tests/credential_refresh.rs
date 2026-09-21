@@ -116,6 +116,26 @@ impl Gateway {
             .expect("refresh request")
     }
 
+    fn requested_from(&self, child: &mut Child) -> String {
+        self.requests
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|error| {
+                let status = child.try_wait().unwrap();
+                if status.is_none() {
+                    child.kill().unwrap();
+                    child.wait().unwrap();
+                }
+                let mut stderr = String::new();
+                child
+                    .stderr
+                    .as_mut()
+                    .unwrap()
+                    .read_to_string(&mut stderr)
+                    .unwrap();
+                panic!("refresh request: {error}; CLI status {status:?}: {stderr}");
+            })
+    }
+
     fn release(&self) {
         *self.release.0.lock().unwrap() = true;
         self.release.1.notify_all();
@@ -192,6 +212,13 @@ impl Fixture {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // Windows runtime/provider loading needs its system directory even
+        // when the fixture excludes all ambient credential/proxy settings.
+        #[cfg(windows)]
+        command.env(
+            "SystemRoot",
+            std::env::var_os("SystemRoot").expect("Windows SystemRoot"),
+        );
         command
     }
     fn token(&self, profile: &str) -> Child {
@@ -231,8 +258,8 @@ fn refused(output: &Output) {
 fn concurrent_processes_refresh_once_and_recheck_expiry_after_waiting() {
     let gateway = Gateway::new(false);
     let fixture = Fixture::new("parallel", &gateway, -60);
-    let first = fixture.token("default");
-    assert_eq!(gateway.requested(), "refresh-default");
+    let mut first = fixture.token("default");
+    assert_eq!(gateway.requested_from(&mut first), "refresh-default");
     let followers: Vec<_> = (0..7).map(|_| fixture.token("default")).collect();
     assert!(
         gateway
@@ -261,8 +288,8 @@ fn concurrent_processes_refresh_once_and_recheck_expiry_after_waiting() {
 fn concurrent_profiles_keep_both_rotated_tokens() {
     let gateway = Gateway::new(false);
     let fixture = Fixture::new("profiles", &gateway, -60);
-    let first = fixture.token("default");
-    assert_eq!(gateway.requested(), "refresh-default");
+    let mut first = fixture.token("default");
+    assert_eq!(gateway.requested_from(&mut first), "refresh-default");
     let second = fixture.token("work");
     gateway.release();
     success(first);
@@ -282,8 +309,8 @@ fn concurrent_profiles_keep_both_rotated_tokens() {
 fn logout_waits_for_refresh_and_cannot_be_undone_by_its_completion() {
     let gateway = Gateway::new(false);
     let fixture = Fixture::new("logout", &gateway, -60);
-    let first = fixture.token("default");
-    gateway.requested();
+    let mut first = fixture.token("default");
+    gateway.requested_from(&mut first);
     let mut logout = fixture
         .command(&["auth", "logout", "--all"])
         .spawn()
@@ -309,7 +336,7 @@ fn killed_refresher_releases_lock_without_rewriting_credentials() {
     let fixture = Fixture::new("killed", &gateway, -60);
     let before = fixture.bytes();
     let mut first = fixture.token("default");
-    gateway.requested();
+    gateway.requested_from(&mut first);
     first.kill().unwrap();
     first.wait_with_output().unwrap();
     assert_eq!(fixture.bytes(), before);
@@ -328,10 +355,12 @@ fn failed_refresh_preserves_bytes_and_existing_preemptive_fallback() {
     let expired = Fixture::new("expired", &gateway, -60);
     let before = expired.bytes();
     refused(&expired.token("default").wait_with_output().unwrap());
+    assert_eq!(gateway.requested(), "refresh-default");
     assert_eq!(expired.bytes(), before);
     let valid = Fixture::new("preemptive", &gateway, 30);
     let before = valid.bytes();
     let output = valid.token("default").wait_with_output().unwrap();
+    assert_eq!(gateway.requested(), "refresh-default");
     assert!(output.status.success());
     assert_eq!(
         serde_json::from_slice::<Value>(&output.stdout).unwrap()["access_token"],
