@@ -33,8 +33,8 @@ non-disk objects and multiply linked credential files. Existing private
 directories/files must belong to the process user and grant access only to that
 user, LocalSystem and Administrators. Compare numeric SIDs from the native
 descriptor; do not infer machine/domain identity from SDDL abbreviations.
-Inheritable creator-owner entries are
-allowed only when they cannot grant access on the parent. Unknown ACL forms
+Inheritable creator-owner entries are allowed only when they cannot grant
+access on the parent. Unknown ACL forms
 fail closed; no repair or silent adoption of existing permissions occurs.
 
 Create missing directories only below an already private parent with private
@@ -44,8 +44,9 @@ cross-process credential transaction; handle identity and ACLs are checked
 before and after lock acquisition. Reads are bounded. Replacement writes and
 flushes an exclusively created sibling, checks the current destination, closes
 handles and renames in the same directory without a delete/truncate fallback.
-Rename sharing/access refusals receive at most 20 retries with 25 ms delay, rechecking the
-destination before each attempt, so brief readers do not prevent refresh commit.
+Rename sharing/access refusals receive at most 20 retries with 25 ms delay,
+rechecking the destination before each attempt, so brief readers do not prevent
+refresh commit.
 Failure retains the original credential file. This is interruption resistance,
 not a power-loss recovery or hostile same-account/administrator guarantee.
 
@@ -89,7 +90,7 @@ and compilation are separate from permission enforcement and support claims.
 ## Consequences
 
 The path contract is testable on any development host. Native Windows build and
-refusal checks can run without deployment services; they do not qualify login,
+refusal checks alone can run without deployment services; they do not qualify login,
 refresh, spooling, vendor loading or an installer. PowerShell installation and
 Windows artifact publication remain gated on private storage and native
 acceptance for each claimed architecture. Replace the explicit refusal only

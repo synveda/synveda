@@ -15,9 +15,9 @@ console or Compose bundle. Supported build targets are `darwin-arm64`,
 targets; only macOS arm64 has local artifact execution evidence so far.
 The CLI's Unix peer-witness code is isolated, and CLI/hooks share a tested
 platform path contract. Windows credential storage now has a native candidate
-for ACL, file-identity, bounded reads, locking and replacement checks. Its native
-qualification is tracked in [OPS-12](backlog/OPS-12.md). Windows receipts, logs,
-spools and setup still refuse; PowerShell installation remains unavailable.
+for ACL, file-identity, bounded reads, locking and replacement checks, with native
+x64 storage and process-refresh evidence in [OPS-12](backlog/OPS-12.md). Windows
+receipts, logs, spools and setup still refuse; PowerShell installation remains unavailable.
 
 On Unix, config uses absolute `XDG_CONFIG_HOME` or `HOME/.config`; state uses
 absolute `XDG_STATE_HOME` or `HOME/.local/state`, each with a `synveda` child.

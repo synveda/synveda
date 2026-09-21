@@ -27,13 +27,14 @@ removal (ADR-0116). The source CLI has local OrbStack lifecycle and browser evid
 manual Codex/Copilot trust/setup and broader native qualification remain separate.
 Private pinned Node and Unix client-only archives/installation now have local
 macOS arm64 artifact evidence and required native release-report gates. Windows
-credentials now have candidate ACL/file-identity/replacement enforcement and
-native tests. Next are its hosted execution, receipt/spool consumers and
-PowerShell installation, then real issuer/harness qualification of the artifacts.
+credentials now have candidate ACL/file-identity/replacement enforcement with
+passing native Windows x64 storage and process-refresh tests. Next are private
+receipt/spool consumers in Rust and Node, PowerShell installation and native
+arm64/artifact qualification, then real issuer/harness acceptance.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures
 (ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier
-Windows x64 compilation/refusal job passed; the expanded credential job remains
-pending. Exact evidence and the next action are in [OPS-12](OPS-12.md).
+Windows x64 compilation/refusal job and expanded credential job passed. Exact
+evidence and the next action are in [OPS-12](OPS-12.md).
 Hosted qualification and publication still need owner registry settings and a
 separately authorized new release.
 

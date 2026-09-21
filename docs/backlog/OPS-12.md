@@ -330,7 +330,8 @@ not report successful recording or remove retained spool files. This is a
 prerequisite, not implemented Windows ACLs or a working Windows installation.
 The added Windows x64 CI job requires native strict CLI Clippy, path-contract,
 peer-witness and built-executable refusal tests, plus the hook contract checks.
-That hosted job has not run yet. Local cross-checking stopped in native
+Its passing hosted execution and subsequent credential evidence are recorded
+below. Local cross-checking stopped in native
 dependencies because this Mac lacks the MSVC assembler and Windows SDK; even a
 temporary BLAKE3 pure-backend check stopped at stacker's missing `windows.h`.
 No product dependency, feature or lockfile was changed to bypass that limit.
@@ -341,57 +342,47 @@ resolved by granting local socket access. `make check-fast` and release parity
 (69 Node tests plus packaging/Helm checks) pass. All deployment/Helm stages pass
 (403 Node tests, zero skips); the final stages were rerun with socket access
 after the evaluation fixture's sandbox refusal, retaining the already-passing
-prerequisite results. `git diff --check` passes. Native Windows execution,
-credential/spool/receipt ACLs and replacement, PowerShell installation and real
+prerequisite results. `git diff --check` passes. The native credential evidence follows below.
+Spool/receipt ACLs and replacement, PowerShell installation and real
 issuer/harness qualification remain outstanding.
 
 ### Windows credential increment (2026-09-21)
 
-The preceding [Windows x64 build/refusal job](https://github.com/synveda/synveda/actions/runs/35625234551/job/106418315769)
-passed at `5bdf740dd793dcc862bf2c345c7e254040d52e6d`. It establishes the
-prerequisite only. ADR-0117 amendment 1 now adds native credential storage:
-process-user ACL checks, fixed local-drive admission, held no-follow ancestor
-handles, file identity/hard-link refusal, bounded reads, protected new ACLs,
-the existing stable process lock and flushed sibling replacement. Unsafe
-existing ACLs are refused without repair. Safe Windows-only MIT wrappers
-preserve the product unsafe-code prohibition. Receipts, spools and hooks keep
-their refusal; no Windows installer or server port is introduced.
+ADR-0117 amendment 1 adds native credential storage: process-user ACL checks,
+fixed local-drive admission, no-follow ancestor handles held against rename,
+file identity/hard-link refusal, bounded reads, protected new ACLs, the stable
+process lock and flushed sibling replacement. Native numeric SIDs preserve
+account identity when Windows abbreviates SDDL. Rename retries are bounded and
+revalidate the destination; failure keeps the original file. Existing unsafe
+ACLs are refused without repair. Windows-only MIT wrappers preserve the product
+unsafe-code prohibition.
 
-The Windows job now runs filesystem/refusal tests with independent .NET ACL
-fixtures and the existing five real-process rotating-refresh tests. Native
-execution of this increment is pending. The isolated storage module and its
-tests compile for both Windows MSVC architectures from macOS; this is not native
-execution or full-CLI cross-compilation. Local strict CLI Clippy and all 217 CLI
-tests passed, followed by the additional ancestor-ACL admission test. Initial loopback sandbox
-refusals were resolved with local socket access. Dependency licence/source/bans
-and advisory checks, release parity (69 Node tests), deployment convergence and
-Helm checks pass. Deployment checks needed local socket access for the evaluation
-fixture; no test was skipped. The first native credential run at `983a0c8`
-passed Clippy and the existing path/peer checks, then stopped in the independent
-ACL fixture: Windows PowerShell inherited PowerShell 7's incompatible module
-path through Cargo. The fixture now clears that inherited module path before
-launch, and the product checks ancestor ownership and ACL-changing authority
-as well as the private leaf. The next native run exposed the wrapper trait's
-unknown-object ACL query; the file query now explicitly supplies `SE_FILE_OBJECT`.
-Native diagnostics at `f42b7df` identify valid standard ACLs rendered with `LA`
-account and `LC` permission abbreviations. Numeric owner/ACE SIDs now come from
-the original native descriptor, and the documented `LC` bit maps to the existing
-create-subdirectory allowance. No account or permission allowance is broadened.
-Native execution at `a52f47a` passes seven of eight storage tests, including ACL,
-replacement, locking, hard-link/junction and bound checks. The short-reader retry
-test exposed `MoveFileEx` returning access denied as well as sharing violation;
-both now receive the same bounded delay with destination revalidation. The
-retry passes at `3efece4`; its remaining directory-rename assertion exposed that
-metadata-only handles do not enforce delete sharing. Directory handles now also
-request list access. All eight native storage tests pass at `8ec246e`. Four
-process-refresh fixtures time out before contacting their gateway; their clean
-environment now retains Windows `SystemRoot`, and early CLI exits are reported
-with the timeout. The corrected native process run remains pending.
+The [native Windows x64 job](https://github.com/synveda/synveda/actions/runs/35634324225/job/106448482489)
+passed at `c627375`. Strict CLI Clippy, all eight storage/admission tests, all
+five rotating-refresh process tests, three executable platform tests, the path
+and peer-witness checks, and the selected hook contract tests pass. The 18 Rust
+tests cover independent .NET ACL verification, spaces/Unicode, private creation
+and replacement, brief and held readers, directory rename refusal, broad ACLs,
+hard links, junctions, oversized files and ambiguous paths. Eight concurrent CLI
+processes spend one refresh token; separate profiles retain updates, logout
+waits, termination releases the lock, and issuer refusal preserves credentials.
+These use a loopback mock gateway, not a real issuer or harness.
 
-Next action: execute the expanded Windows credential job, fix any native
-failures, then apply the same boundary to receipt/spool consumers before adding
-PowerShell installation. Native arm64, real issuer and harness qualification
-remain separate. The local host still has no native Windows or PowerShell.
+Local strict CLI Clippy and the 217-test CLI suite passed, followed by all three
+focused ACL tests (including the added ancestor case) and the five strengthened
+refresh tests. Formatting, dependency direction, licence/source/bans/advisory
+checks, `make check-fast`, release parity, deployment convergence, Helm and
+`git diff --check` pass. Local socket fixtures required sandbox permission; no
+test was skipped to avoid that restriction. The isolated storage module and its
+tests compile for both Windows MSVC architectures from macOS; this is not full
+CLI cross-compilation or native arm64 execution.
+
+Next action: extend private storage to Rust receipt/spool consumers and Node
+hook writers together, preserving the shared spool format and existing refusal
+until their native tests pass. Then add PowerShell installation and qualify
+native x86_64/arm64 artifacts. Windows receipts, logs, spools and setup still
+refuse. Real issuer/harness acceptance remains separate. The local host has no
+native Windows or PowerShell; the x64 evidence above comes from hosted CI.
 
 ## Rollout and rollback
 
@@ -419,7 +410,8 @@ Implemented locally:
   to 20 seconds; cancellation releases the OS lock without deleting its file.
   Temporary files are uniquely/exclusively created, and parse diagnostics omit
   credential values. Mixed historical CLI versions do not participate in this
-  lock. Native Windows ACL/path/replacement qualification remains open.
+  lock. Native Windows x64 credential evidence is recorded above; arm64 and
+  installation qualification remain open.
 - The existing packager accepts `SYNVEDA_PACKAGE_CONSUMER_CANDIDATE=1` for local
   qualification. `package-consumer-compose.mjs` renders canonical fragments;
   `initialize-consumer.mjs` prepares named state without network/socket access,
@@ -448,9 +440,9 @@ Docker Hub namespace/public repositories, expiring push credential, GitHub
 variables/secret and protected environment, plus authorization of a new version
 and release trigger. These do not block local implementation and tests.
 
-Next task: qualify the Windows-native credential increment above, then extend
-its ACL/file-identity/replacement boundary to receipts and spools before adding
-the PowerShell installer and native Windows x86_64/arm64 artifact acceptance.
+Next task: extend the qualified Windows x64 credential storage boundary to
+Rust receipt/spool consumers and Node hook writers, then add the PowerShell
+installer and native Windows x86_64/arm64 artifact acceptance.
 Other private-state operations still refuse on non-Unix hosts. Native
 Windows/MSVC and PowerShell remain unavailable on the local macOS host. In
 parallel with that platform work, the four Unix candidate jobs and artifact-based

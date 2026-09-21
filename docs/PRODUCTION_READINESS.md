@@ -121,10 +121,12 @@ readiness verdict or the published v0.4.0 installation contract.
 ADR-0117 isolates the Unix deployment peer witness and shares client path
 fixtures between Rust and Node. Missing HOME no longer selects a repository-local
 spool. Non-Unix receipts and spool operations explicitly refuse. The Windows x64
-build/refusal prerequisite passed on source `5bdf740`; its successor adds native
-credential ACL/file-identity/replacement and mock-gateway refresh tests, with
-execution pending. This candidate does not qualify Windows installation, real
-issuer authentication, observation or harness execution.
+build/refusal prerequisite passed on source `5bdf740`. The expanded
+[Windows x64 job](https://github.com/synveda/synveda/actions/runs/35634324225/job/106448482489)
+passed on source `c627375`: native credential ACL/file-identity/replacement,
+mock-gateway process refresh, command refusals and hook path checks. Native
+arm64 execution remains open. This candidate does not qualify Windows
+installation, real issuer authentication, observation or harness execution.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
