@@ -30,15 +30,15 @@ macOS arm64 artifact evidence and required native release-report gates. Windows
 credentials now have candidate ACL/file-identity/replacement enforcement with
 passing native Windows x64/arm64 storage and process-refresh tests. Private Rust
 receipt/spool consumers and the bounded Node storage protocol passed all five
-native checks on both architectures at `c0710cc`.
-PowerShell installation and Windows
-ZIP packaging now have a local implementation and required native archive
-checks (ADR-0065 amendment 13); PowerShell syntax passed locally. Native
-qualification now packages both ZIPs on `bb72786`, but the extraction fixture
-stopped when system tar lost the Unicode destination character. A follow-up
-uses .NET's Unicode path API while preserving the same path assertions.
-Next: rerun both native archive jobs and qualify PowerShell installation,
-then retain real issuer/harness acceptance as a separate requirement.
+native checks on both architectures at `418669f`.
+PowerShell installation and Windows ZIP packaging now have native archive
+checks (ADR-0065 amendment 13). X64 and arm64 passed all seven checks on clean source
+`418669f`, including install/reinstall, storage interoperability, retained state
+and unsafe archive/installer refusals. The x64 archive/report hashes and native
+identities were also checked locally; OPS-12 records both native job identities
+and the arm64 evidence bundle digest.
+Next: obtain the four Unix hosted archive reports and artifact-based
+real issuer/harness acceptance evidence.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures
 (ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier
 Windows x64 compilation/refusal job and expanded credential job passed. Exact

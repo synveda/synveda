@@ -114,27 +114,30 @@ client installer downloads no server artifacts and uses private ownership and
 content receipts with an atomic release selection. A macOS arm64 artifact
 passed installation without system Node/Docker on PATH and extracted runtime
 replay. Native release jobs require separate reports for four Unix and two
-Windows targets; native archive jobs and real issuer/harness use of these
-archives remain unqualified. This does not change the
-readiness verdict or the published v0.4.0 installation contract.
+Windows targets. Windows x64 and arm64 now have native archive evidence; the
+four Unix hosted archive jobs and real issuer/harness use remain unqualified.
+This does not change the readiness verdict or the published v0.4.0
+installation contract.
 
 ADR-0117 isolates the Unix deployment peer witness and shares client path
 fixtures between Rust and Node. Missing HOME no longer selects a repository-local
 spool. The ADR-0117 candidate extends private storage to Rust receipts and
 version-1 spools plus Windows Node hooks through a bounded local CLI protocol.
 Snapshot comparison refuses stale writes/removals; unsafe or oversized files
-remain held. On source `c0710cc`, both native architectures passed strict Clippy,
+remain held. On source `418669f`, both native architectures passed strict Clippy,
 Rust storage and mock-gateway refresh checks, and all five Rust/Node private-state
 checks. [OPS-12](backlog/OPS-12.md) records the exact hosted job identities.
-This does not qualify PowerShell installation, real issuer login or harness use.
+Real issuer login and harness use remain unqualified.
 
 ADR-0065 amendment 13 adds a Windows ZIP/PowerShell installation candidate with
 protected staging, bounded archive/PE checks and native private-file operations.
 Windows uses an atomic `current.json` selection and a digest-checked PowerShell
-launcher; it retains prior releases and user state. PowerShell syntax passed on
-macOS. Native x64/arm64 installation and refusal checks are configured but have
-not passed: both ZIPs package on `bb72786`, but the extraction fixture stopped
-at system tar's Unicode path handling. Its .NET fixture fix awaits native execution.
+launcher; it retains prior releases and user state. Native Windows x64 and arm64
+passed all seven archive checks on clean source `418669f`, including PowerShell
+install/reinstall, restricted-PATH execution, storage interoperability and
+archive/installer refusals. The downloaded x64 archive hashes and native identities
+match its report. Exact source, native job and arm64 evidence-bundle identities,
+plus x64 local-file timings, are in [OPS-12](backlog/OPS-12.md).
 Windows deployment, setup/vendor writers and diagnostic logs still refuse.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and

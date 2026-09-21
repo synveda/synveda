@@ -418,8 +418,8 @@ restricted-PATH install/reinstall, private Node/CLI/hook startup, Rust/Node
 storage interoperability and checksum/ZIP/drift/interruption refusals. Release
 assembly requires all six platform reports tied to their archive bytes and
 source; adding a matrix row does not establish qualification. The source
-PowerShell script passes the PowerShell 7.6.6 parser on macOS. Windows execution
-and Windows PowerShell 5.1 behavior remain unverified.
+PowerShell script passes the PowerShell 7.6.6 parser on macOS; the native
+execution results below separately establish Windows PowerShell behavior.
 
 Local validation: formatting and strict CLI Clippy passed, as did all 219 CLI
 tests and `make check-fast check-release-parity` (70 Node tests). An isolated
@@ -431,33 +431,49 @@ passed restricted-PATH installation/reinstallation and all 31 extracted
 Codex/Copilot replay tests. Its source identity is `c63eb95` plus the recorded
 dirty worktree; this local candidate is not publication evidence.
 The required `make check-deploy chart-lint` gate also passed, including its
-404 Node tests, workflow checks and all chart contract renders.
+405 Node tests, workflow checks and all chart contract renders.
 
-On source `c0710cccea025587fdcdcf8ae3811dd1603a1cbd`, the native
-[Windows x64 job](https://github.com/synveda/synveda/actions/runs/35647177593/job/106490783896)
-and [Windows arm64 job](https://github.com/synveda/synveda/actions/runs/35647177593/job/106490783419)
+On clean source `418669f20fcfbadf693ebc52de384b71667fa0af`, the native
+[Windows x64 job](https://github.com/synveda/synveda/actions/runs/35651936985/job/106506431543)
+and [Windows arm64 job](https://github.com/synveda/synveda/actions/runs/35651936985/job/106506431555)
 passed strict Clippy, Rust path/credential/receipt/spool/protocol checks,
 mock-gateway process refresh and all five Rust/Node private-state checks.
 Those checks prove shared installation identity/disclosure, format-preserving
 spool rewrites, stale mutation/retirement refusal, owed-close retention,
 hardlink/ACL/size/junction refusal and confined receipt access. They do not
 establish real issuer or native harness execution.
+The [full CI run](https://github.com/synveda/synveda/actions/runs/35651936985)
+also passed for this clean source.
 
-The [native run on `bb72786`](https://github.com/synveda/synveda/actions/runs/35649495270)
-repeated those storage checks and successfully packaged both Windows ZIPs.
-Creating the plugin archive by basename avoids GNU tar's interpretation of
-drive prefixes as remote hosts. A fresh macOS arm64 candidate under a
-colon/space/Unicode path also passed installation/reinstallation and all 31
-extracted adapter replays. Both Windows jobs then stopped in the extraction
-fixture because system tar lost its Unicode destination character. The fixture
-now uses .NET extraction with environment-carried Unicode paths, preserving the
-same path assertions. Local .NET extraction into an existing Unicode directory
-and `make check-fast check-release-parity` (70 tests) pass. The 405-test
-deployment/chart gate passed for the preceding checkpoint. Native Windows
-installation remains incomplete. Next: rerun both native archive jobs,
-resolve any remaining failures and record exact source/run/report identities
-before claiming PowerShell installation qualification. No new release or version
-is authorized.
+Both jobs also passed all seven exact-archive checks with private Node 24.21.0.
+These cover native identity, client-only inventory, PowerShell install/reinstall under a
+restricted PATH, all three hook entry points, retained state, Rust/Node storage
+interoperability, duplicate checksums, changed launchers, interrupted locks,
+malformed ZIPs and overlapping roots. Paths contain spaces, apostrophes and
+Unicode. The downloaded x64 ZIP's 67 content hashes, source identity, runtime pin
+and CLI/Node PE architecture match its report.
+
+| Target | Archive bytes | Local install | Reinstall |
+|---|---:|---:|---:|
+| Windows x86_64 | 45,597,184 | 9.220s | 6.564s |
+
+The x64 ZIP SHA-256 is
+`244ed4dc0a2d94023518207e7d4d48acdb4c5a59580f3525a8f9ff927aa184e7`;
+its report SHA-256 is
+`84340e9a759f9958a60109ba0368fbca5ce2ab338b3baefbe89117228279a6ac`.
+The arm64 job uploaded `synveda-client-report-windows-arm64.json`, its exact
+`synveda-client-0.4.0-windows-arm64.zip` and native storage report in
+[windows-state-arm64](https://github.com/synveda/synveda/actions/runs/35651936985/artifacts/10663822207).
+GitHub records evidence-bundle SHA-256
+`ada67a92d627c494e14d10ae642d3cc1bedda3e34b1376db7340f9986c118e5c`.
+Its native assertions passed; the arm64 bundle was not downloaded for a second
+local inspection. This bundle digest is distinct from its contained client ZIP
+and report digests.
+
+Timings use local candidate files; network download, real issuer login and
+native vendor harness execution remain unqualified. Next: obtain the four Unix
+hosted archive reports and artifact-based real issuer/harness evidence.
+No new release or version is authorized.
 
 ## Rollout and rollback
 
@@ -485,8 +501,8 @@ Implemented locally:
   to 20 seconds; cancellation releases the OS lock without deleting its file.
   Temporary files are uniquely/exclusively created, and parse diagnostics omit
   credential values. Mixed historical CLI versions do not participate in this
-  lock. Native Windows x64 credential evidence is recorded above; arm64 and
-  installation qualification remain open.
+  lock. Native Windows x64/arm64 credential, storage and installation evidence
+  is recorded above; real issuer/harness acceptance remains open.
 - The existing packager accepts `SYNVEDA_PACKAGE_CONSUMER_CANDIDATE=1` for local
   qualification. `package-consumer-compose.mjs` renders canonical fragments;
   `initialize-consumer.mjs` prepares named state without network/socket access,
@@ -515,12 +531,12 @@ Docker Hub namespace/public repositories, expiring push credential, GitHub
 variables/secret and protected environment, plus authorization of a new version
 and release trigger. These do not block local implementation and tests.
 
-Next task: finish native CI and qualify the
-receipt/spool and PowerShell installer candidates from exact Windows
-x86_64/arm64 archives. Unported private-state operations still refuse on
-non-Unix hosts. Native Windows/MSVC remains unavailable locally; the macOS
-PowerShell runtime provides syntax checks only. The four Unix candidate jobs and artifact-based
-real issuer/harness acceptance still need their own execution reports.
+Next task: execute the four Unix hosted candidate jobs and artifact-based
+real issuer/harness acceptance, retaining their exact source/archive/report
+identities. Windows x86_64/arm64 receipt/spool and PowerShell archive checks
+passed in native CI as recorded above. Unported private-state operations still
+refuse on non-Unix hosts. Native Windows/MSVC remains unavailable locally; the
+macOS PowerShell runtime provides syntax checks only.
 Keep Codex/Copilot registration and hook trust manual until their native installer
 contracts have their own reviewed implementation and execution evidence. Installer
 attestation enforcement and Homebrew/WinGet remain unimplemented; configuration
