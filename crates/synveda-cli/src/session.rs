@@ -61,7 +61,8 @@ struct AppendResponse {
 /// left exactly as it was, with its attempt count incremented, so the next
 /// flush — or the next `SessionStart` — picks it up.
 pub async fn flush(profile: &str, dir: Option<PathBuf>, verbose: bool) -> Result<(), String> {
-    let dir = dir.unwrap_or_else(spool::spool_dir);
+    crate::client_paths::require_private_state()?;
+    let dir = dir.map_or_else(spool::spool_dir, Ok)?;
     let scanned = spool::scan(&dir);
     report_unreadable(&scanned);
     if scanned.spools.is_empty() {
@@ -246,7 +247,8 @@ async fn close_run(api: &Api, session_id: &str, reason: Option<&str>) -> Result<
 
 /// `synveda session spool status` — what is held, per session.
 pub fn status(dir: Option<PathBuf>, as_json: bool) -> Result<(), String> {
-    let dir = dir.unwrap_or_else(spool::spool_dir);
+    crate::client_paths::require_private_state()?;
+    let dir = dir.map_or_else(spool::spool_dir, Ok)?;
     let scanned = spool::scan(&dir);
 
     if as_json {
@@ -371,6 +373,7 @@ pub fn status(dir: Option<PathBuf>, as_json: bool) -> Result<(), String> {
 /// it is the difference between a command that can only reclaim disk and a
 /// command that can destroy an observation nobody has delivered yet.
 pub fn purge(dir: Option<PathBuf>, acknowledged: bool) -> Result<(), String> {
+    crate::client_paths::require_private_state()?;
     if !acknowledged {
         return Err(
             "`synveda session spool purge` deletes only acknowledged events, and says so: \
@@ -378,7 +381,7 @@ pub fn purge(dir: Option<PathBuf>, acknowledged: bool) -> Result<(), String> {
                 .to_owned(),
         );
     }
-    let dir = dir.unwrap_or_else(spool::spool_dir);
+    let dir = dir.map_or_else(spool::spool_dir, Ok)?;
     let scanned = spool::scan(&dir);
     report_unreadable(&scanned);
     if scanned.spools.is_empty() {

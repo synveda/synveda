@@ -9,6 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+#[cfg(unix)]
 use std::io::Write as _;
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
@@ -1548,14 +1549,7 @@ fn render_status(receipt: &Receipt, live: &BTreeMap<String, Value>) -> Result<()
 }
 
 fn receipt_path() -> Result<PathBuf, String> {
-    let base = match std::env::var("XDG_STATE_HOME") {
-        Ok(value) if value.starts_with('/') => PathBuf::from(value),
-        _ => {
-            let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_owned())?;
-            PathBuf::from(home).join(".local").join("state")
-        }
-    };
-    Ok(base.join("synveda").join(RECEIPT_NAME))
+    Ok(crate::client_paths::directory(crate::client_paths::Directory::State)?.join(RECEIPT_NAME))
 }
 
 fn load_receipt() -> Result<Option<Receipt>, String> {
@@ -1612,8 +1606,8 @@ fn write_private(path: &Path, body: &[u8]) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
-fn write_private(path: &Path, body: &[u8]) -> Result<(), String> {
-    fs::write(path, body).map_err(|error| format!("write {}: {error}", path.display()))
+fn write_private(_path: &Path, _body: &[u8]) -> Result<(), String> {
+    crate::client_paths::require_private_state()
 }
 
 fn random_hex(bytes: usize) -> Result<String, String> {

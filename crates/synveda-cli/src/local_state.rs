@@ -104,6 +104,7 @@ pub(crate) fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {
 }
 
 fn read_checked(path: &Path, private: bool) -> Result<Option<Vec<u8>>, String> {
+    crate::client_paths::require_private_state()?;
     let mut options = OpenOptions::new();
     options.read(true);
     secure_options(&mut options);
@@ -157,6 +158,7 @@ pub(crate) fn replace(
     bytes: &[u8],
     private: bool,
 ) -> Result<(), String> {
+    crate::client_paths::require_private_state()?;
     let parent = path.parent().ok_or("configuration has no parent")?;
     std::fs::create_dir_all(parent).map_err(|e| format!("create configuration directory: {e}"))?;
     let temporary = parent.join(format!(".synveda-{}.tmp", synveda_types::TenantId::new()));
@@ -189,6 +191,7 @@ pub(crate) fn replace(
 }
 
 pub(crate) fn private_directory(path: &Path) -> Result<(), String> {
+    crate::client_paths::require_private_state()?;
     if let Ok(metadata) = std::fs::symlink_metadata(path)
         && (!metadata.is_dir() || metadata.is_symlink())
     {

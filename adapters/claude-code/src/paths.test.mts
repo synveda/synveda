@@ -1,16 +1,58 @@
 /**
- * The path helpers are arithmetic on strings and need no test of their
- * own. `ensureDir` has one property that does: it comes back.
+ * CLI and hooks must resolve the same private state, refuse unsupported
+ * storage, and return even when a filesystem will never create a directory.
  */
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { ensureDir } from "./paths.mjs";
+import { ensureDir, resolveClientDirectory } from "./paths.mjs";
+
+test("CLI and hooks share the platform path contract", () => {
+  const cases = JSON.parse(readFileSync(new URL("../../fixtures/client-paths.json", import.meta.url), "utf8")) as {
+    name: string; platform: string; env: NodeJS.ProcessEnv; config?: string; state?: string; error?: string;
+  }[];
+  for (const fixture of cases) {
+    for (const kind of ["config", "state"] as const) {
+      if (fixture.error !== undefined) {
+        assert.throws(() => resolveClientDirectory(kind, fixture.platform, fixture.env),
+          { message: new RegExp(fixture.error) }, fixture.name);
+      } else {
+        assert.equal(resolveClientDirectory(kind, fixture.platform, fixture.env), fixture[kind], fixture.name);
+      }
+    }
+  }
+});
+
+test("Windows hooks refuse private state before reading, writing or removing files", () => {
+  const root = scratch();
+  const target = join(root, "must-not-exist");
+  const retained = join(root, "retained.json");
+  writeFileSync(retained, "retained private state");
+  try {
+    const script = `
+      Object.defineProperty(process, "platform", { value: "win32" });
+      const { ensureDir, configDir, stateDir } = await import(${JSON.stringify(new URL("./paths.mjs", import.meta.url).href)});
+      for (const action of [() => ensureDir(process.argv[1]), configDir, stateDir]) {
+        try { action(); process.exit(1); } catch (error) {
+          if (!String(error).includes("native Windows ACL")) throw error;
+        }
+      }
+      const { readSpool, saveSpool, newSpool, retireIfComplete } = await import(${JSON.stringify(new URL("./spool.mjs", import.meta.url).href)});
+      const spool = newSpool("windows-refusal", "claude-code", "fixture");
+      if (readSpool(process.argv[2]) !== undefined || saveSpool(spool, process.argv[2]) || retireIfComplete(spool, process.argv[2])) process.exit(1);
+    `;
+    execFileSync(process.execPath, ["--input-type=module", "-e", script, target, retained], { timeout: 5000 });
+    assert.equal(existsSync(target), false);
+    assert.equal(readFileSync(retained, "utf8"), "retained private state");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "synveda-paths-"));

@@ -155,6 +155,7 @@ pub async fn login(
     profile_name: String,
     open_browser: bool,
 ) -> Result<(), String> {
+    crate::client_paths::require_private_state()?;
     // Bind before opening anything: the port is part of the URL, and a
     // browser that arrives before the listener exists gets a refusal.
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))

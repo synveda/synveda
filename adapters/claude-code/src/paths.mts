@@ -6,27 +6,56 @@
  */
 
 import { chmodSync, mkdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, parse, resolve, sep } from "node:path";
 
-function xdg(variable: string, fallback: string[]): string {
-  const configured = process.env[variable];
-  // A relative XDG path is undefined behaviour per the spec; ignore it
-  // rather than scatter directories through the user's project.
-  if (configured !== undefined && configured.startsWith("/")) {
-    return join(configured, "synveda");
+/** Pure path contract shared with the CLI's client_paths.rs and fixture. */
+export function resolveClientDirectory(
+  kind: "config" | "state",
+  platform: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  const windows = platform === "win32";
+  const variable = kind === "config" ? "XDG_CONFIG_HOME" : "XDG_STATE_HOME";
+  const absolute = (value: string): boolean => windows
+    ? /^[A-Za-z]:[\\/]/.test(value) && !value.slice(2).includes(":")
+    : value.startsWith("/");
+  const append = (base: string, suffix: string): string =>
+    `${(windows ? base.replaceAll("\\", "/") : base).replace(/\/+$/, "")}/${suffix}`;
+  const configured = env[variable];
+  if (configured !== undefined) {
+    if (absolute(configured)) return append(configured, "synveda");
+    if (windows && (/^[\\/]/.test(configured) || configured.includes(":"))) {
+      throw new Error(`${variable} must be a fully qualified local drive path`);
+    }
   }
-  return join(homedir(), ...fallback, "synveda");
+  // Ignore relative XDG overrides; never fall back to the hook's working tree.
+  const fallback = windows ? "LOCALAPPDATA" : "HOME";
+  const base = env[fallback];
+  if (base === undefined) throw new Error(`${fallback} is not set`);
+  if (!absolute(base)) {
+    throw new Error(`${fallback} must be an absolute ${windows ? "local drive " : ""}path`);
+  }
+  const suffix = windows ? `synveda/${kind}`
+    : kind === "config" ? ".config/synveda" : ".local/state/synveda";
+  return append(base, suffix);
+}
+
+export function requirePrivateState(): void {
+  if (process.platform === "win32") {
+    throw new Error("private client state is unavailable until native Windows ACL and atomic replacement support is qualified (OPS-12)");
+  }
 }
 
 /** `$XDG_CONFIG_HOME/synveda`, else `~/.config/synveda`. */
 export function configDir(): string {
-  return xdg("XDG_CONFIG_HOME", [".config"]);
+  requirePrivateState();
+  return resolveClientDirectory("config", process.platform, process.env);
 }
 
 /** `$XDG_STATE_HOME/synveda`, else `~/.local/state/synveda`. */
 export function stateDir(): string {
-  return xdg("XDG_STATE_HOME", [".local", "state"]);
+  requirePrivateState();
+  return resolveClientDirectory("state", process.platform, process.env);
 }
 
 /**
@@ -74,6 +103,7 @@ export function credentialsFile(): string {
  * refuses is thrown to the caller who was always ready to catch it.
  */
 export function ensureDir(dir: string): void {
+  requirePrivateState();
   try {
     // These directories hold credentials-adjacent state, raw transcript
     // events and diagnostic identifiers. Do not delegate their privacy to a

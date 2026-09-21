@@ -2,15 +2,20 @@
 //! writable database generation with the authority assigned to that process.
 
 use std::ffi::OsString;
+#[cfg(unix)]
 use std::fs::{File, Metadata};
 use std::future::Future;
+#[cfg(unix)]
 use std::io::Read;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+#[cfg(unix)]
 use rustix::fs::{Mode, OFlags};
+#[cfg(unix)]
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 use synveda_store::runtime_role::DatabaseIdentity;
@@ -26,6 +31,7 @@ const EXPECTED_DATABASE_SETTING: &str = "SYNVEDA_DATABASE_EXPECTED_NAME";
 const EXPECTED_ROOT_CERT_SETTING: &str = "SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE";
 const REQUIRED_PEER_SETTING: &str = "SYNVEDA_DATABASE_REQUIRED_PEER";
 const PEER_WITNESS_SETTING: &str = "SYNVEDA_DATABASE_PEER_WITNESS_FILE";
+#[cfg(unix)]
 const PEER_WITNESS_MAX_BYTES: u64 = 256;
 
 #[derive(Clone, Copy)]
@@ -63,6 +69,7 @@ struct ExpectedEndpoint {
     database: String,
 }
 
+#[cfg(unix)]
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct RawPeerWitness {
@@ -248,6 +255,12 @@ fn parse_expected_root_cert(value: OsString) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+#[cfg(not(unix))]
+fn read_peer_witness(_path: OsString) -> Result<PeerWitness, String> {
+    Err("database peer-witness verification requires the Unix deployment environment; run database preflight in the supplied Linux container".to_owned())
+}
+
+#[cfg(unix)]
 fn read_peer_witness(path: OsString) -> Result<PeerWitness, String> {
     let path = Path::new(&path);
     if !path.is_absolute() {
@@ -372,6 +385,7 @@ fn read_peer_witness(path: OsString) -> Result<PeerWitness, String> {
     })
 }
 
+#[cfg(unix)]
 #[derive(Debug, PartialEq, Eq)]
 struct MetadataSnapshot {
     device: u64,
@@ -387,6 +401,7 @@ struct MetadataSnapshot {
     changed_nanoseconds: i64,
 }
 
+#[cfg(unix)]
 fn metadata_snapshot(metadata: &Metadata) -> MetadataSnapshot {
     MetadataSnapshot {
         device: metadata.dev(),
@@ -580,6 +595,14 @@ fn require_one_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(unix))]
+    #[test]
+    fn peer_witness_refuses_before_opening_an_unsupported_host_path() {
+        let error = read_peer_witness(OsString::from("unavailable-witness"))
+            .expect_err("a native Windows client cannot verify a Unix deployment witness");
+        assert!(error.contains("requires the Unix deployment environment"));
+    }
 
     #[test]
     fn direct_database_credentials_are_refused_without_rendering_values() {
@@ -832,6 +855,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn peer_witness_is_private_bounded_and_byte_canonical() {
         use std::os::unix::fs::symlink;

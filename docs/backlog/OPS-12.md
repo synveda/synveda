@@ -308,11 +308,42 @@ passes. No schema, generated API, SQLx metadata or dependency lockfile changed.
 Release assembly now requires four native client reports matching the archive
 hash/size, source, platform and Node pin. Tagged publication additionally requires
 clean source and matching CLI version; the reports enter the attested checksum
-inventory. None of those hosted jobs has run for this increment. Windows is
-blocked by unconditional Unix bootstrap code (`database_preflight.rs`, `demo.rs`)
-and missing explicit ACL/path/replacement support in credentials and spools.
-PowerShell installation follows that port and native execution evidence; a
-Windows matrix row alone would not be a working or private client.
+inventory. None of those hosted jobs has run for this increment. The following
+portability prerequisite addresses the Unix code boundary; explicit Windows
+ACL/identity/replacement support remains missing. PowerShell installation
+follows that port and native execution evidence; a Windows matrix row alone
+would not be a working or private client.
+
+### Client platform boundary prerequisite (2026-09-21)
+
+[ADR-0117](../adr/adr-0117-client-platform-boundaries.md) isolates the Unix
+deployment peer-witness reader while preserving its original ownership,
+no-follow and bounded-read checks. Other platforms explicitly refuse that
+witness. Unix-only direct dependencies and imports are conditional. One shared
+14-case fixture defines CLI/hook config and state roots, including Windows
+LOCALAPPDATA, drive-qualified XDG overrides and UNC/device/relative-path refusal.
+On Unix, missing or relative HOME no longer selects a repository-local spool.
+
+Non-Unix private-state operations deliberately refuse before login, credential
+access or local mutations. Hooks refuse private directory/spool access and do
+not report successful recording or remove retained spool files. This is a
+prerequisite, not implemented Windows ACLs or a working Windows installation.
+The added Windows x64 CI job requires native strict CLI Clippy, path-contract,
+peer-witness and built-executable refusal tests, plus the hook contract checks.
+That hosted job has not run yet. Local cross-checking stopped in native
+dependencies because this Mac lacks the MSVC assembler and Windows SDK; even a
+temporary BLAKE3 pure-backend check stopped at stacker's missing `windows.h`.
+No product dependency, feature or lockfile was changed to bypass that limit.
+
+Local formatting, strict CLI Clippy, all 215 CLI tests, all 109 shared adapter
+tests and 35 extracted-plugin tests pass. Initial loopback fixture refusals were
+resolved by granting local socket access. `make check-fast` and release parity
+(69 Node tests plus packaging/Helm checks) pass. All deployment/Helm stages pass
+(403 Node tests, zero skips); the final stages were rerun with socket access
+after the evaluation fixture's sandbox refusal, retaining the already-passing
+prerequisite results. `git diff --check` passes. Native Windows execution,
+credential/spool/receipt ACLs and replacement, PowerShell installation and real
+issuer/harness qualification remain outstanding.
 
 ## Rollout and rollback
 
@@ -369,9 +400,14 @@ Docker Hub namespace/public repositories, expiring push credential, GitHub
 variables/secret and protected environment, plus authorization of a new version
 and release trigger. These do not block local implementation and tests.
 
-Next task: port the CLI's Unix bootstrap boundaries and implement Windows-native
-private credential/spool/receipt paths, ACLs and atomic replacement, then add the
-PowerShell installer and execute native Windows x86_64/arm64 acceptance. In
+Next task: implement Windows-native private credential/spool/receipt ACLs, file
+identity and atomic replacement under ADR-0117, then add the PowerShell installer
+and execute native Windows x86_64/arm64 acceptance. The Unix peer-witness code is
+isolated and the shared path contract is implemented; private-state operations
+deliberately refuse on non-Unix hosts until the privacy boundary is implemented.
+Run the new native Windows CI build/refusal job before treating the port as
+compiled or executable on Windows. Native Windows/MSVC and PowerShell remain
+unavailable on the local macOS host. In
 parallel with that platform work, the four Unix candidate jobs and artifact-based
 real issuer/harness acceptance still need their own execution reports.
 Keep Codex/Copilot registration and hook trust manual until their native installer

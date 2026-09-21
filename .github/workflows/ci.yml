@@ -14,6 +14,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # OPS-12 / ADR-0117: native compilation and deliberate privacy refusal only.
+  # This is not Windows installation, login, spooling or harness qualification.
+  windows-client-boundary:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - run: cargo clippy -p synveda-cli --all-targets --locked -- -D warnings
+      - run: cargo test -p synveda-cli --locked --bin synveda client_paths::tests
+      - run: cargo test -p synveda-cli --locked --bin synveda peer_witness_refuses_before_opening
+      - run: cargo test -p synveda-cli --locked --test client_platform
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @synveda/claude-code-adapter...
+      - run: pnpm --filter @synveda/claude-code-adapter build
+      - run: node --test --test-name-pattern="CLI and hooks|Windows hooks" adapters/claude-code/dist/paths.test.mjs
+
   sdk-interop:
     runs-on: ubuntu-latest
     timeout-minutes: 30

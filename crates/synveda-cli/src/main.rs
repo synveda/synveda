@@ -23,6 +23,7 @@ mod adapter;
 mod api;
 mod audit;
 mod channel;
+mod client_paths;
 mod configuration;
 mod consumer;
 mod credentials;

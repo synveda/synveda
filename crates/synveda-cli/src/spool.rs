@@ -264,19 +264,11 @@ pub fn payload_hash(payload: &serde_json::Value) -> String {
 /// The same resolution the adapter performs, and it must stay that way: two
 /// programs that disagree about where the spool lives is a spool that silently
 /// never drains.
-#[must_use]
-pub fn spool_dir() -> PathBuf {
-    let base = match std::env::var("XDG_STATE_HOME") {
-        // A relative XDG path is undefined behaviour per the spec; ignored
-        // rather than resolved against whatever directory happens to be
-        // current.
-        Ok(value) if value.starts_with('/') => PathBuf::from(value),
-        _ => match std::env::var("HOME") {
-            Ok(home) => PathBuf::from(home).join(".local").join("state"),
-            Err(_) => PathBuf::from(".local").join("state"),
-        },
-    };
-    base.join("synveda").join("spool")
+///
+/// Missing or invalid private roots are errors, never a repository-relative
+/// backlog that can be mistaken for the user's real spool.
+pub fn spool_dir() -> Result<PathBuf, String> {
+    Ok(crate::client_paths::directory(crate::client_paths::Directory::State)?.join("spool"))
 }
 
 /// What a directory scan found.
@@ -322,6 +314,7 @@ pub fn scan(dir: &Path) -> Scan {
 /// The file is unreadable, is not JSON, or carries a `spool_version` this
 /// build does not know.
 pub fn read(path: &Path) -> Result<Spool, String> {
+    crate::client_paths::require_private_state()?;
     let raw = fs::read_to_string(path).map_err(|err| format!("read: {err}"))?;
     let spool: Spool = serde_json::from_str(&raw).map_err(|err| format!("parse: {err}"))?;
     if spool.spool_version != SPOOL_VERSION {
@@ -345,6 +338,7 @@ pub fn read(path: &Path) -> Result<Spool, String> {
 ///
 /// The directory cannot be created, or the write, sync or rename fails.
 pub fn write(path: &Path, spool: &Spool) -> Result<(), String> {
+    crate::client_paths::require_private_state()?;
     let dir = path
         .parent()
         .ok_or_else(|| "spool path has no directory".to_owned())?;

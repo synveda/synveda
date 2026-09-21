@@ -86,7 +86,7 @@ renumbered. The template is excluded.
 | [ADR-0066](adr-0066-beta-demo-profile.md) | Operator-seeded beta demo | Proposed; amended once | Current (partially superseded by ADR-0100) | OPS-9 | ADR-0100 provides the resumable public-API PulseBoard demo; externally dependent beta evidence remains open. |
 | [ADR-0067](adr-0067-uninstall-and-cleanup.md) | Uninstall and cleanup | Proposed | Current (partially superseded by ADR-0102) | OPS-10 | Canonical Compose owns lifecycle and reset. Automatic artifact removal remains fail-closed until the installer persists a strict ownership receipt. |
 
-## ADR-0068 through ADR-0116
+## ADR-0068 through ADR-0117
 
 | ADR | Concise title | Header status | Current classification | Features | Replacement/removal |
 | --- | --- | --- | --- | --- | --- |
@@ -139,3 +139,4 @@ renumbered. The template is excluded.
 | [ADR-0114](adr-0114-console-brand-and-navigation.md) | Console branding and task navigation | Accepted | Current | CNSL-5, FND-7 | Shared canonical assets, responsive navigation and existing-project onboarding retain the public API and authority model. |
 | [ADR-0115](adr-0115-prebuilt-container-release-verification.md) | Prebuilt container release verification | Accepted; amended twice | Current (hosted verification pending) | OPS-8, CPR-45, OPS-11, OPS-12 | Native anonymous pulls gate release announcements; the two-registry increment retains one build and records destination-specific digests. |
 | [ADR-0116](adr-0116-native-consumer-commands.md) | Native consumer lifecycle and setup | Accepted | Current (candidate only) | OPS-12 | Native commands retain Compose/API/installer authority with private ownership receipts, project observation consent and conflict-safe removal. |
+| [ADR-0117](adr-0117-client-platform-boundaries.md) | Client platform and private-state boundaries | Accepted | Current (portability prerequisite) | OPS-12 | CLI/hooks share path fixtures; Unix deployment witnesses retain their checks, and non-Unix private state refuses until native ACL/replacement qualification. |

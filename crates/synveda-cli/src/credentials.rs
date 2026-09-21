@@ -77,27 +77,7 @@ impl Profile {
 /// `$XDG_CONFIG_HOME/synveda`, else `~/.config/synveda` — the same rule
 /// the adapter's `paths.mts` applies, so both agree on where the file is.
 pub fn config_dir() -> Result<PathBuf, String> {
-    match std::env::var("XDG_CONFIG_HOME") {
-        Ok(configured) if configured.starts_with('/') => {
-            return Ok(PathBuf::from(configured).join("synveda"));
-        }
-        Ok(_) | Err(std::env::VarError::NotPresent) => {}
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err("XDG_CONFIG_HOME must be valid UTF-8".to_owned());
-        }
-    }
-    let home = match std::env::var("HOME") {
-        Ok(home) => home,
-        Err(std::env::VarError::NotPresent) => return Err("HOME is not set".to_owned()),
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err("HOME must be valid UTF-8".to_owned());
-        }
-    };
-    let home = PathBuf::from(home);
-    if !home.is_absolute() {
-        return Err("HOME must be an absolute path".to_owned());
-    }
-    Ok(home.join(".config").join("synveda"))
+    crate::client_paths::directory(crate::client_paths::Directory::Config)
 }
 
 /// The credentials file path.
@@ -112,6 +92,7 @@ pub fn load() -> Result<Credentials, String> {
 }
 
 fn load_at(path: &Path) -> Result<Credentials, String> {
+    crate::client_paths::require_private_state()?;
     let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -284,6 +265,7 @@ fn save_at(path: &Path, credentials: &Credentials) -> Result<(), String> {
 fn write_private(path: &std::path::Path, body: &str) -> Result<(), String> {
     use std::io::Write;
 
+    crate::client_paths::require_private_state()?;
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -315,9 +297,7 @@ fn restrict_dir(dir: &std::path::Path) -> Result<(), String> {
 
 #[cfg(not(unix))]
 fn restrict_dir(_dir: &std::path::Path) -> Result<(), String> {
-    // Native Windows privacy requires explicit ACL enforcement and execution
-    // qualification (OPS-12); inherited ACLs are not a verified 0600 promise.
-    Ok(())
+    crate::client_paths::require_private_state()
 }
 
 #[cfg(test)]

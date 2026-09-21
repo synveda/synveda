@@ -49,7 +49,7 @@ import {
 import { join } from "node:path";
 
 import { diagnostic, log } from "./log.mjs";
-import { ensureDir, spoolDir } from "./paths.mjs";
+import { ensureDir, requirePrivateState, spoolDir } from "./paths.mjs";
 import type { SessionEventType } from "./types.mjs";
 
 /** The format version this build writes and reads. */
@@ -224,6 +224,7 @@ export function readSpool(path: string): Spool | undefined {
 function inspectSpool(path: string): SpoolRead {
   let raw: string;
   try {
+    requirePrivateState();
     raw = readFileSync(path, "utf8");
   } catch (error) {
     if (
@@ -357,7 +358,12 @@ export function newSpool(
  * reports success.
  */
 export function saveSpool(spool: Spool, path?: string): boolean {
-  const target = path ?? spoolFile(spool.external_session_id);
+  // Refuse before deriving a temporary or attempting cleanup of private state.
+  let target: string;
+  try {
+    requirePrivateState();
+    target = path ?? spoolFile(spool.external_session_id);
+  } catch { return false; }
   spool.updated_at = new Date().toISOString();
   const temporary = `${target}.${process.pid}.tmp`;
   try {
@@ -496,6 +502,7 @@ export function retireIfComplete(spool: Spool, path?: string): boolean {
   if (spool.close_requested) return false;
   if (spool.entries.some((entry) => !entry.acknowledged)) return false;
   try {
+    requirePrivateState();
     rmSync(path ?? spoolFile(spool.external_session_id), { force: true });
     return true;
   } catch {

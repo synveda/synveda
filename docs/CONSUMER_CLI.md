@@ -13,8 +13,19 @@ Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Supported build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64` and `linux-x86_64` (glibc). These are candidate
 targets; only macOS arm64 has local artifact execution evidence so far.
-Windows needs a CLI bootstrap port plus explicit credential/spool ACLs, native
-paths and replacement tests before a PowerShell installer can be qualified.
+The CLI's Unix peer-witness code is isolated, and CLI/hooks share a tested
+platform path contract. Native Windows private state deliberately refuses until
+explicit credential/spool/receipt ACLs, file identity and replacement handling
+are implemented and qualified. PowerShell installation remains unavailable.
+
+On Unix, config uses absolute `XDG_CONFIG_HOME` or `HOME/.config`; state uses
+absolute `XDG_STATE_HOME` or `HOME/.local/state`, each with a `synveda` child.
+Relative XDG values are ignored. Missing or relative HOME refuses access; the
+spool never falls back to the current repository. The reserved Windows contract
+uses `LOCALAPPDATA/synveda/config` and `LOCALAPPDATA/synveda/state`, or explicit
+fully qualified local-drive XDG roots. UNC/device paths are refused. These path
+rules do not enable Windows storage or migrate existing files; see
+[ADR-0117](adr/adr-0117-client-platform-boundaries.md).
 
 The existing installer has an explicit client mode. For **locally built**
 candidate assets and their `SHA256SUMS` in an absolute directory:

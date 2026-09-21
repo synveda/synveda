@@ -27,8 +27,11 @@ removal (ADR-0116). The source CLI has local OrbStack lifecycle and browser evid
 manual Codex/Copilot trust/setup and broader native qualification remain separate.
 Private pinned Node and Unix client-only archives/installation now have local
 macOS arm64 artifact evidence and required native release-report gates. Next are
-Windows CLI portability, private ACL/path handling and PowerShell installation,
+Windows private ACL/file-identity/replacement handling and PowerShell installation,
 then hosted native and real issuer/harness qualification of the client artifacts.
+The Unix witness code is now isolated and CLI/hooks share platform path fixtures
+(ADR-0117); non-Unix private-state operations explicitly refuse. A Windows CI job
+checks compilation and refusal only; native execution evidence remains pending.
 Hosted qualification and publication still need owner registry settings and a
 separately authorized new release.
 

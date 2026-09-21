@@ -1,0 +1,16 @@
+[
+  {"name":"Unix home","platform":"linux","env":{"HOME":"/home/Alice's work 文"},"config":"/home/Alice's work 文/.config/synveda","state":"/home/Alice's work 文/.local/state/synveda"},
+  {"name":"Unix XDG","platform":"darwin","env":{"XDG_CONFIG_HOME":"/private/config/","XDG_STATE_HOME":"/private/state/"},"config":"/private/config/synveda","state":"/private/state/synveda"},
+  {"name":"Unix relative XDG ignored","platform":"linux","env":{"HOME":"/home/alice","XDG_CONFIG_HOME":"relative","XDG_STATE_HOME":"relative"},"config":"/home/alice/.config/synveda","state":"/home/alice/.local/state/synveda"},
+  {"name":"Unix missing home","platform":"linux","env":{},"error":"HOME is not set"},
+  {"name":"Unix relative home","platform":"linux","env":{"HOME":"relative"},"error":"HOME must be an absolute path"},
+  {"name":"Windows local data","platform":"win32","env":{"LOCALAPPDATA":"C:\\Users\\Alice's work 文\\AppData\\Local","HOME":"/inherited/git/home"},"config":"C:/Users/Alice's work 文/AppData/Local/synveda/config","state":"C:/Users/Alice's work 文/AppData/Local/synveda/state"},
+  {"name":"Windows XDG","platform":"win32","env":{"XDG_CONFIG_HOME":"D:\\private config\\","XDG_STATE_HOME":"D:/private state/"},"config":"D:/private config/synveda","state":"D:/private state/synveda"},
+  {"name":"Windows relative XDG ignored","platform":"win32","env":{"LOCALAPPDATA":"C:/Local","XDG_CONFIG_HOME":"relative","XDG_STATE_HOME":"relative"},"config":"C:/Local/synveda/config","state":"C:/Local/synveda/state"},
+  {"name":"Windows missing local data","platform":"win32","env":{"HOME":"/git/home","USERPROFILE":"C:/Users/Alice"},"error":"LOCALAPPDATA is not set"},
+  {"name":"Windows relative local data","platform":"win32","env":{"LOCALAPPDATA":"C:Local"},"error":"LOCALAPPDATA must be an absolute local drive path"},
+  {"name":"Windows UNC refused","platform":"win32","env":{"XDG_CONFIG_HOME":"\\\\server\\config","XDG_STATE_HOME":"//server/state"},"error":"must be a fully qualified local drive path"},
+  {"name":"Windows device namespace refused","platform":"win32","env":{"XDG_CONFIG_HOME":"\\\\?\\C:\\config","XDG_STATE_HOME":"\\\\.\\C:\\state"},"error":"must be a fully qualified local drive path"},
+  {"name":"Windows drive relative refused","platform":"win32","env":{"XDG_CONFIG_HOME":"C:config","XDG_STATE_HOME":"C:state"},"error":"must be a fully qualified local drive path"},
+  {"name":"Windows root relative refused","platform":"win32","env":{"XDG_CONFIG_HOME":"\\config","XDG_STATE_HOME":"/state"},"error":"must be a fully qualified local drive path"}
+]
