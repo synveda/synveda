@@ -377,8 +377,11 @@ Native diagnostics at `f42b7df` identify valid standard ACLs rendered with `LA`
 account and `LC` permission abbreviations. Numeric owner/ACE SIDs now come from
 the original native descriptor, and the documented `LC` bit maps to the existing
 create-subdirectory allowance. No account or permission allowance is broadened.
-Bounded sharing-violation retries also protect refresh replacement from brief
-concurrent readers. Native execution with these corrections remains pending.
+Native execution at `a52f47a` passes seven of eight storage tests, including ACL,
+replacement, locking, hard-link/junction and bound checks. The short-reader retry
+test exposed `MoveFileEx` returning access denied as well as sharing violation;
+both now receive the same bounded delay with destination revalidation. The
+remaining native storage and process-refresh execution is pending.
 
 Next action: execute the expanded Windows credential job, fix any native
 failures, then apply the same boundary to receipt/spool consumers before adding

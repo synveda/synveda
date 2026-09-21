@@ -330,7 +330,8 @@ impl Directory {
         let result = result.and_then(|()| {
             // Readers deny delete sharing while validating a snapshot. A brief
             // read must not discard a newly rotated token. Retry only Windows
-            // sharing violations, with at most 500 ms total retry delay.
+            // sharing/access refusals (MoveFileEx can report either), with at
+            // most 500 ms total retry delay. Never delete/truncate the target.
             for attempt in 0..=20 {
                 if self.read(name)? != before {
                     return Err(refused(
@@ -338,7 +339,7 @@ impl Directory {
                     ));
                 }
                 match std::fs::rename(&temporary_path, self.path.join(name)) {
-                    Err(error) if error.raw_os_error() == Some(32) && attempt < 20 => {
+                    Err(error) if matches!(error.raw_os_error(), Some(5 | 32)) && attempt < 20 => {
                         std::thread::sleep(std::time::Duration::from_millis(25));
                     }
                     result => return result,

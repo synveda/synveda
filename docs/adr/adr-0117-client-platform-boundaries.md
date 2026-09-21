@@ -44,7 +44,7 @@ cross-process credential transaction; handle identity and ACLs are checked
 before and after lock acquisition. Reads are bounded. Replacement writes and
 flushes an exclusively created sibling, checks the current destination, closes
 handles and renames in the same directory without a delete/truncate fallback.
-Sharing violations receive at most 20 retries with 25 ms delay, rechecking the
+Rename sharing/access refusals receive at most 20 retries with 25 ms delay, rechecking the
 destination before each attempt, so brief readers do not prevent refresh commit.
 Failure retains the original credential file. This is interruption resistance,
 not a power-loss recovery or hostile same-account/administrator guarantee.
