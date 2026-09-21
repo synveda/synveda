@@ -28,7 +28,7 @@ test("CLI and hooks share the platform path contract", () => {
   }
 });
 
-test("Windows hooks refuse private state before reading, writing or removing files", () => {
+test("Windows hooks without the native bridge refuse private state without mutation", () => {
   const root = scratch();
   const target = join(root, "must-not-exist");
   const retained = join(root, "retained.json");
@@ -36,8 +36,9 @@ test("Windows hooks refuse private state before reading, writing or removing fil
   try {
     const script = `
       Object.defineProperty(process, "platform", { value: "win32" });
-      const { ensureDir, configDir, stateDir } = await import(${JSON.stringify(new URL("./paths.mjs", import.meta.url).href)});
-      for (const action of [() => ensureDir(process.argv[1]), configDir, stateDir]) {
+      delete process.env.SYNVEDA_CLI;
+      const { ensureDir } = await import(${JSON.stringify(new URL("./paths.mjs", import.meta.url).href)});
+      for (const action of [() => ensureDir(process.argv[1])]) {
         try { action(); process.exit(1); } catch (error) {
           if (!String(error).includes("native Windows ACL")) throw error;
         }

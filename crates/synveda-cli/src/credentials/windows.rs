@@ -1,4 +1,4 @@
-//! Native Windows private credential files (OPS-12 / ADR-0117).
+//! Native Windows private files (OPS-12 / ADR-0117).
 //!
 //! Directory handles deny delete sharing through the complete operation. New
 //! children inherit a checked private ACL, then receive a protected DACL before
@@ -139,14 +139,13 @@ fn options(write: bool, create: bool) -> OpenOptions {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct Identity(u64, u64);
+pub(crate) struct Identity(u64, u64);
 
 fn identity(file: &File) -> io::Result<Identity> {
     let info = winapi_util::file::information(file)?;
     if !winapi_util::file::typ(file)?.is_disk()
         || info.file_attributes() & (DIRECTORY | REPARSE_POINT) != 0
         || info.number_of_links() != 1
-        || info.file_size() > MAX_BYTES
     {
         return Err(refused(
             "Windows private file must be bounded, ordinary and singly linked",
@@ -155,15 +154,23 @@ fn identity(file: &File) -> io::Result<Identity> {
     Ok(Identity(info.volume_serial_number(), info.file_index()))
 }
 
-pub(super) struct Directory {
+pub(crate) struct Directory {
     path: PathBuf,
     user: String,
+    limit: u64,
     // These handles prevent ancestors from being renamed or replaced by a junction.
     _ancestors: Vec<File>,
 }
 
 impl Directory {
-    pub(super) fn open(path: &Path, create: bool) -> io::Result<Option<Self>> {
+    pub(crate) fn open(path: &Path, create: bool) -> io::Result<Option<Self>> {
+        Self::bounded(path, create, MAX_BYTES)
+    }
+
+    pub(crate) fn bounded(path: &Path, create: bool, limit: u64) -> io::Result<Option<Self>> {
+        if limit > 16 * 1024 * 1024 {
+            return Err(refused("Windows private file limit exceeds its bound"));
+        }
         let path_text = path
             .to_str()
             .ok_or_else(|| refused("Windows private path must be Unicode"))?;
@@ -261,12 +268,17 @@ impl Directory {
         Ok(Some(Self {
             path: current,
             user,
+            limit,
             _ancestors: ancestors,
         }))
     }
 
-    pub(super) fn validate(&self, file: &File, name: &str) -> io::Result<()> {
+    pub(crate) fn validate(&self, file: &File, name: &str) -> io::Result<()> {
+        validate_name(name)?;
         let opened = identity(file)?;
+        if file.metadata()?.len() > self.limit {
+            return Err(refused("Windows private file exceeds its bound"));
+        }
         validate_acl(file, &self.user, false)?;
         let named = options(false, false).open(self.path.join(name))?;
         if opened != identity(&named)? {
@@ -275,7 +287,8 @@ impl Directory {
         Ok(())
     }
 
-    fn read(&self, name: &str) -> io::Result<Option<(Identity, Vec<u8>)>> {
+    pub(crate) fn read(&self, name: &str) -> io::Result<Option<(Identity, Vec<u8>)>> {
+        validate_name(name)?;
         let mut file = match options(false, false).open(self.path.join(name)) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -284,9 +297,9 @@ impl Directory {
         self.validate(&file, name)?;
         let before = identity(&file)?;
         let mut bytes = Vec::new();
-        (&mut file).take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
+        (&mut file).take(self.limit + 1).read_to_end(&mut bytes)?;
         self.validate(&file, name)?;
-        if bytes.len() as u64 > MAX_BYTES || identity(&file)? != before {
+        if bytes.len() as u64 > self.limit || identity(&file)? != before {
             return Err(refused(
                 "Windows private file changed or exceeded its bound",
             ));
@@ -294,8 +307,12 @@ impl Directory {
         Ok(Some((before, bytes)))
     }
 
-    pub(super) fn lock_file(&self) -> io::Result<File> {
-        let name = "credentials.lock";
+    pub(crate) fn lock_file(&self) -> io::Result<File> {
+        self.named_lock("credentials.lock")
+    }
+
+    pub(crate) fn named_lock(&self, name: &str) -> io::Result<File> {
+        validate_name(name)?;
         let path = self.path.join(name);
         let file = match options(true, true).open(&path) {
             Ok(mut file) => {
@@ -309,20 +326,40 @@ impl Directory {
         };
         self.validate(&file, name)?;
         if file.metadata()?.len() != 0 {
-            return Err(refused("credential lock must be an empty regular file"));
+            return Err(refused("private lock must be an empty regular file"));
         }
         Ok(file)
     }
 
-    fn replace(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
-        if bytes.len() as u64 > MAX_BYTES {
-            return Err(refused("credentials exceed the local file bound"));
-        }
+    pub(crate) fn replace(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
         let before = self.read(name)?;
+        self.replace_snapshot(name, bytes, before)
+    }
+
+    pub(crate) fn replace_if(
+        &self,
+        name: &str,
+        bytes: &[u8],
+        expected: Option<&str>,
+    ) -> io::Result<()> {
+        let before = self.read(name)?;
+        check_digest(&before, expected)?;
+        self.replace_snapshot(name, bytes, before)
+    }
+
+    fn replace_snapshot(
+        &self,
+        name: &str,
+        bytes: &[u8],
+        before: Option<(Identity, Vec<u8>)>,
+    ) -> io::Result<()> {
+        if bytes.len() as u64 > self.limit {
+            return Err(refused("private bytes exceed the local file bound"));
+        }
         let mut nonce = [0; 16];
         getrandom::fill(&mut nonce)
             .map_err(|_| io::Error::other("credential temporary name failed"))?;
-        let temporary = format!(".credentials-{:032x}.tmp", u128::from_be_bytes(nonce));
+        let temporary = format!(".synveda-{:032x}.tmp", u128::from_be_bytes(nonce));
         let temporary_path = self.path.join(&temporary);
         let mut file = options(true, true).open(&temporary_path)?;
         let created = identity(&file)?;
@@ -342,7 +379,7 @@ impl Directory {
             for attempt in 0..=20 {
                 if self.read(name)? != before {
                     return Err(refused(
-                        "credentials changed during replacement; nothing was replaced",
+                        "private file changed during replacement; nothing was replaced",
                     ));
                 }
                 match std::fs::rename(&temporary_path, self.path.join(name)) {
@@ -367,6 +404,81 @@ impl Directory {
         }
         result
     }
+
+    /// The caller holds the stable mutation lock. Never retire a newer snapshot.
+    pub(crate) fn remove_if(&self, name: &str, expected: Option<&str>) -> io::Result<()> {
+        let before = self.read(name)?;
+        check_digest(&before, expected)?;
+        if before.is_none() {
+            return Ok(());
+        }
+        for attempt in 0..=20 {
+            if self.read(name)? != before {
+                return Err(refused("private file changed; nothing was removed"));
+            }
+            match std::fs::remove_file(self.path.join(name)) {
+                Err(error) if matches!(error.raw_os_error(), Some(5 | 32)) && attempt < 20 => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                result => return result,
+            }
+        }
+        Err(refused("private removal retry bound exceeded"))
+    }
+
+    pub(crate) fn names(&self) -> io::Result<Vec<String>> {
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(&self.path)? {
+            if names.len() == 4096 {
+                return Err(refused("private directory exceeds its entry bound"));
+            }
+            let name = entry?
+                .file_name()
+                .into_string()
+                .map_err(|_| refused("private filename is not Unicode"))?;
+            validate_name(&name)?;
+            names.push(name);
+        }
+        names.sort();
+        Ok(names)
+    }
+}
+
+fn check_digest(before: &Option<(Identity, Vec<u8>)>, expected: Option<&str>) -> io::Result<()> {
+    if before
+        .as_ref()
+        .map(|(_, bytes)| crate::local_state::digest(bytes))
+        .as_deref()
+        != expected
+    {
+        return Err(refused("private file changed; stale operation refused"));
+    }
+    Ok(())
+}
+
+/// Every operation is relative to an already admitted directory, never a path.
+fn validate_name(name: &str) -> io::Result<()> {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    if name.is_empty()
+        || name.len() > 200
+        || matches!(name, "." | "..")
+        || name.ends_with(['.', ' '])
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        || matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| {
+            stem.strip_prefix(prefix)
+                .is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"))
+        })
+    {
+        return Err(refused("private filename is not an ordinary leaf name"));
+    }
+    Ok(())
 }
 
 pub(super) fn read(path: &Path) -> io::Result<Option<Vec<u8>>> {

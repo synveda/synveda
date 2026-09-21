@@ -1,6 +1,6 @@
 # ADR-0117: Explicit client platform and private-state boundaries
 
-- **Status**: Accepted; amended once
+- **Status**: Accepted; amended twice
 - **Date**: 2026-09-21
 - **Feature(s)**: OPS-12
 - **Deciders**: Synveda maintainers
@@ -14,6 +14,33 @@ disagree on state paths or fall back to a repository-relative spool. Compiling
 those fallbacks would not establish a private Windows client.
 
 ## Decision
+
+### Amendment 2 (2026-09-21): shared Windows receipt and spool storage
+
+Reuse the credential directory/ACL/identity implementation for private receipts
+and the unchanged version-1 spool. A hidden, versioned `private-state` CLI
+protocol gives Windows Node hooks bounded stdin/stdout access to spool files,
+setup-receipt reads, installation identity and disclosure markers. It accepts
+closed operations and leaf names below the existing config/state roots, never
+arbitrary paths, credentials, shell commands or gateway requests. Payload bytes
+travel as base64 on pipes, never process arguments or diagnostics. Unix hooks
+keep their existing filesystem implementation.
+
+Windows spool snapshots are limited to 16 MiB and directory scans to 4096
+entries. Oversized, unsafe or unreadable state is held, never treated as absent.
+Writers and removers share a stable OS lock and compare the digest of the bytes
+they read before replacing or retiring them. A concurrent change refuses the
+stale write or deletion and retains the newer queue. The native CLI uses this
+same storage boundary for flush/purge. Exclusive random temporaries retain the
+protected ACL and flushed sibling-rename behavior of amendment 1. Receipt
+operations retain their separate consumer-operation lock. Existing unsafe ACLs
+are not repaired. No format migration, same-account adversary guarantee or
+power-loss durability claim is added.
+
+Keep unported repository/vendor edits, deployment witnesses and diagnostic-log
+writers behind their existing Windows refusal. Native receipt/spool tests and
+Rust/Node interoperability are required before claiming this candidate on a
+platform; installer and real issuer/harness qualification remain separate.
 
 ### Amendment 1 (2026-09-21): native Windows credential storage
 

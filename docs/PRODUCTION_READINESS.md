@@ -128,6 +128,12 @@ mock-gateway process refresh, command refusals and hook path checks. Native
 arm64 execution remains open. This candidate does not qualify Windows
 installation, real issuer authentication, observation or harness execution.
 
+The next ADR-0117 candidate extends private storage to Rust receipts and
+version-1 spools plus Windows Node hooks through a bounded local CLI protocol.
+Snapshot comparison refuses stale writes/removals; unsafe or oversized files
+remain held. Native x64/arm64 execution is pending. Local macOS tests do not
+qualify these Windows consumers, PowerShell installation or real harness use.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.

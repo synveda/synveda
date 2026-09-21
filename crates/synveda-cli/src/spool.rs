@@ -35,7 +35,9 @@
 //! canonical payload, computed on append, and nothing about that changes.
 
 use std::collections::BTreeMap;
+#[cfg(any(not(windows), test))]
 use std::fs;
+#[cfg(not(windows))]
 use std::io::Write as _;
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
@@ -51,6 +53,10 @@ use sha2::{Digest as _, Sha256};
 /// undelivered data, and a reader that guessed at an unknown layout could
 /// silently drop it.
 pub const SPOOL_VERSION: u32 = 1;
+
+#[cfg(all(test, windows))]
+#[path = "../tests/support/windows_private.rs"]
+mod windows_private;
 
 /// One spooled event.
 ///
@@ -80,7 +86,7 @@ pub struct SpoolEntry {
     #[serde(default)]
     pub delivery_attempts: u32,
     /// When the last attempt was.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_attempt_at: Option<DateTime<Utc>>,
     /// Whether the gateway has resolved this event.
     ///
@@ -106,6 +112,10 @@ impl SpoolEntry {
 /// One session's spool file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Spool {
+    /// Local compare-and-replace witness; never part of the shared spool format.
+    #[cfg(windows)]
+    #[serde(skip)]
+    snapshot: Option<String>,
     /// The format's version.
     pub spool_version: u32,
     /// A stable id for this installation of the client — what tells two
@@ -159,6 +169,10 @@ pub struct Spool {
     /// Why the client stopped, carried to the close it could not perform.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// When the file was created.
     pub created_at: DateTime<Utc>,
     /// When it was last written.
@@ -268,7 +282,19 @@ pub fn payload_hash(payload: &serde_json::Value) -> String {
 /// Missing or invalid private roots are errors, never a repository-relative
 /// backlog that can be mistaken for the user's real spool.
 pub fn spool_dir() -> Result<PathBuf, String> {
-    Ok(crate::client_paths::directory(crate::client_paths::Directory::State)?.join("spool"))
+    require_storage()?;
+    Ok(
+        crate::client_paths::resolve_directory(crate::client_paths::Directory::State)?
+            .join("spool"),
+    )
+}
+
+pub(crate) fn require_storage() -> Result<(), String> {
+    if cfg!(windows) {
+        Ok(())
+    } else {
+        crate::client_paths::require_private_state()
+    }
 }
 
 /// What a directory scan found.
@@ -286,17 +312,33 @@ pub struct Scan {
 /// A missing directory is an empty scan and not an error: a machine that has
 /// never run an agent has no spool, and that is the ordinary case for anybody
 /// running `spool status` to find out what the command does.
-pub fn scan(dir: &Path) -> Scan {
+pub fn scan(dir: &Path) -> Result<Scan, String> {
+    require_storage()?;
     let mut spools = Vec::new();
     let mut unreadable = Vec::new();
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Scan { spools, unreadable };
-    };
-    let mut paths: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+    #[cfg(windows)]
+    let mut paths: Vec<PathBuf> = crate::private_state::native::names(dir)?
+        .into_iter()
+        .filter(|n| n.ends_with(".json"))
+        .map(|n| dir.join(n))
         .collect();
+    #[cfg(not(windows))]
+    let mut paths: Vec<PathBuf> = {
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Scan { spools, unreadable });
+            }
+            Err(e) => return Err(format!("read spool directory: {e}")),
+        };
+        entries
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("read spool directory entry: {e}"))?
+            .into_iter()
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .collect()
+    };
     paths.sort();
     for path in paths {
         match read(&path) {
@@ -304,7 +346,7 @@ pub fn scan(dir: &Path) -> Scan {
             Err(message) => unreadable.push((path, message)),
         }
     }
-    Scan { spools, unreadable }
+    Ok(Scan { spools, unreadable })
 }
 
 /// Reads one spool file.
@@ -314,15 +356,24 @@ pub fn scan(dir: &Path) -> Scan {
 /// The file is unreadable, is not JSON, or carries a `spool_version` this
 /// build does not know.
 pub fn read(path: &Path) -> Result<Spool, String> {
-    crate::client_paths::require_private_state()?;
-    let raw = fs::read_to_string(path).map_err(|err| format!("read: {err}"))?;
-    let spool: Spool = serde_json::from_str(&raw).map_err(|err| format!("parse: {err}"))?;
+    require_storage()?;
+    #[cfg(windows)]
+    let raw = crate::private_state::native::read(path)?.ok_or("spool file is absent")?;
+    #[cfg(not(windows))]
+    let raw = fs::read(path).map_err(|err| format!("read: {err}"))?;
+    let spool: Spool = serde_json::from_slice(&raw)
+        .map_err(|_| "invalid spool document; retained for inspection")?;
     if spool.spool_version != SPOOL_VERSION {
         return Err(format!(
             "spool_version {} (this build reads {SPOOL_VERSION})",
             spool.spool_version
         ));
     }
+    #[cfg(windows)]
+    let spool = Spool {
+        snapshot: Some(crate::local_state::digest(&raw)),
+        ..spool
+    };
     Ok(spool)
 }
 
@@ -338,6 +389,32 @@ pub fn read(path: &Path) -> Result<Spool, String> {
 ///
 /// The directory cannot be created, or the write, sync or rename fails.
 pub fn write(path: &Path, spool: &Spool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let encoded = serde_json::to_vec(spool).map_err(|_| "spool could not be encoded")?;
+        crate::private_state::native::write(path, &encoded, spool.snapshot.as_deref())
+    }
+    #[cfg(not(windows))]
+    {
+        write_unix(path, spool)
+    }
+}
+
+pub(crate) fn remove(path: &Path, spool: &Spool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        crate::private_state::native::remove(path, spool.snapshot.as_deref())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = spool;
+        crate::client_paths::require_private_state()?;
+        fs::remove_file(path).map_err(|e| format!("remove spool: {e}"))
+    }
+}
+
+#[cfg(not(windows))]
+fn write_unix(path: &Path, spool: &Spool) -> Result<(), String> {
     crate::client_paths::require_private_state()?;
     let dir = path
         .parent()
@@ -377,6 +454,7 @@ pub fn write(path: &Path, spool: &Spool) -> Result<(), String> {
 }
 
 /// Creates a private directory tree for payload-bearing spool state.
+#[cfg(not(windows))]
 fn private_dir_all(path: &Path) -> std::io::Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);
@@ -394,6 +472,17 @@ fn private_dir_all(path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "synveda-spool-{label}-{}",
+            synveda_types::TenantId::new()
+        ));
+        fs::create_dir(&dir).unwrap();
+        #[cfg(windows)]
+        windows_private::private(&dir);
+        dir
+    }
 
     fn entry(id: &str, sequence: u64) -> SpoolEntry {
         let payload = serde_json::json!({"text": id});
@@ -413,6 +502,10 @@ mod tests {
 
     fn spool(entries: Vec<SpoolEntry>) -> Spool {
         Spool {
+            #[cfg(windows)]
+            snapshot: None,
+            transcript_path: None,
+            model: None,
             spool_version: SPOOL_VERSION,
             client_installation_id: "install-1".to_owned(),
             client_name: "claude-code".to_owned(),
@@ -509,24 +602,32 @@ mod tests {
 
     #[test]
     fn a_spool_round_trips_through_an_atomic_write() {
-        let dir = std::env::temp_dir().join(format!("synveda-spool-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("pre-existing spool dir");
+        let dir = scratch("round-trip");
         #[cfg(unix)]
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o755))
             .expect("make the prior mode permissive");
         let path = dir.join("session.json");
-        let temporary = dir.join(format!(".session.json.{}.tmp", std::process::id()));
-        fs::write(&temporary, b"abandoned").expect("pre-existing temporary");
         #[cfg(unix)]
-        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o666))
-            .expect("make the prior temporary mode permissive");
-        let original = spool(vec![entry("e1", 1)]);
+        {
+            let temporary = dir.join(format!(".session.json.{}.tmp", std::process::id()));
+            fs::write(&temporary, b"abandoned").expect("pre-existing temporary");
+            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o666)).unwrap();
+        }
+        let mut original = spool(vec![entry("e1", 1)]);
+        original.transcript_path = Some("C:/project/transcript.jsonl".to_owned());
+        original.model = Some("model-fixture".to_owned());
         write(&path, &original).expect("write");
         let read_back = read(&path).expect("read");
         assert_eq!(read_back.entries.len(), 1);
         assert_eq!(read_back.external_session_id, "harness-1");
         assert!(read_back.entries[0].intact());
+        assert_eq!(read_back.transcript_path, original.transcript_path);
+        assert_eq!(read_back.model, original.model);
+        let encoded = serde_json::to_value(&read_back).unwrap();
+        assert!(
+            encoded["entries"][0].get("last_attempt_at").is_none(),
+            "Node rejects null optional strings"
+        );
         // The temporary is gone: a directory littered with `.tmp` files is a
         // rename that did not happen.
         let leftovers: Vec<_> = fs::read_dir(&dir)
@@ -555,13 +656,12 @@ mod tests {
     /// case, and ADR-0078 decision 6 says nothing reads it.
     #[test]
     fn an_unknown_spool_version_is_refused_rather_than_guessed_at() {
-        let dir = std::env::temp_dir().join(format!("synveda-spool-v-{}", std::process::id()));
-        fs::create_dir_all(&dir).expect("create");
+        let dir = scratch("version");
         let path = dir.join("old.json");
         fs::write(&path, br#"{"spool_version":99,"client_installation_id":"i","client_name":"c","external_session_id":"x","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","entries":[]}"#).expect("write");
         let error = read(&path).expect_err("an unknown version is refused");
         assert!(error.contains("spool_version 99"), "{error}");
-        let scanned = scan(&dir);
+        let scanned = scan(&dir).unwrap();
         assert!(scanned.spools.is_empty());
         assert_eq!(scanned.unreadable.len(), 1);
         let _ = fs::remove_dir_all(&dir);
@@ -572,8 +672,7 @@ mod tests {
     /// on the version field would have produced — a silent "nothing to flush".
     #[test]
     fn the_previous_cursor_format_does_not_parse_as_this_one() {
-        let dir = std::env::temp_dir().join(format!("synveda-spool-old-{}", std::process::id()));
-        fs::create_dir_all(&dir).expect("create");
+        let dir = scratch("legacy");
         let path = dir.join("legacy.json");
         fs::write(
             &path,
@@ -589,8 +688,10 @@ mod tests {
     /// failure.
     #[test]
     fn scanning_a_directory_that_does_not_exist_is_empty_and_not_an_error() {
-        let scanned = scan(Path::new("/nonexistent/synveda/spool"));
+        let dir = scratch("missing");
+        let scanned = scan(&dir.join("absent")).unwrap();
         assert!(scanned.spools.is_empty());
         assert!(scanned.unreadable.is_empty());
+        fs::remove_dir_all(dir).unwrap();
     }
 }

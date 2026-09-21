@@ -50,7 +50,7 @@ adapter="adapters/claude-code"
 
 # Keep the existing shared runtime's artifact closure explicit. Extracted
 # lifecycle tests catch missing modules; no workspace symlink reaches users.
-shared_modules="client config credentials deliver events install-id log paths session-runtime session-start spool transcript turn"
+shared_modules="client config credentials deliver events install-id log paths private-state session-runtime session-start spool transcript turn"
 for module in $shared_modules; do
   [ -f "$adapter/dist/$module.mjs" ] && [ ! -L "$adapter/dist/$module.mjs" ] || {
     echo "package-plugin: shared runtime module $module is not built as a regular file" >&2

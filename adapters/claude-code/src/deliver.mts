@@ -238,10 +238,10 @@ export async function retryBacklog(
     if (spool.close_requested && result.pending === 0) {
       await closeRun(spool, config, bearer, spool.end_reason);
     }
-    saveSpool(spool, path);
+    const saved = saveSpool(spool, path);
     // Codex/Copilot task owners end explicitly. Retain acknowledged bindings
     // across another conversation's start and native runtime exits.
-    if (spool.client_name === CLIENT_NAME) retireIfComplete(spool, path);
+    if (saved && spool.client_name === CLIENT_NAME) retireIfComplete(spool, path);
   }
   if (delivered > 0) log("backlog.delivered", { events: delivered });
   return delivered;

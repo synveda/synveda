@@ -19,6 +19,7 @@ import { join } from "node:path";
 
 import { configDir, ensureDir } from "./paths.mjs";
 import { diagnostic, log } from "./log.mjs";
+import { privateState } from "./private-state.mjs";
 
 /** The file holding it. */
 function installationFile(): string {
@@ -34,6 +35,13 @@ function installationFile(): string {
  * somebody their session.
  */
 export function installationId(): string {
+  if (process.platform === "win32") {
+    try {
+      const id = privateState({ operation: "installation_id" }).id;
+      if (typeof id === "string" && id.length > 0 && id.length <= 200) return id;
+    } catch { /* Private storage refused; never fall back to an unchecked file. */ }
+    return randomUUID();
+  }
   const path = installationFile();
   try {
     const existing = readFileSync(path, "utf8").trim();

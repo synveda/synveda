@@ -41,6 +41,7 @@ mod mcp;
 mod okf;
 mod pack;
 mod plugin;
+mod private_state;
 mod prompt;
 mod proposal;
 mod recall;
@@ -89,6 +90,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Internal Windows hook storage protocol; bounded local pipes only.
+    #[command(hide = true)]
+    PrivateState,
     /// Start the matching plain-Compose consumer candidate, retaining private state.
     Up(consumer::Options),
     /// Stop the receipt-owned consumer project; keep databases and keys.
@@ -2134,11 +2138,16 @@ async fn run(cli: Cli) -> Result<(), String> {
         _ => false,
     };
     let _local_lock = if locks {
+        // Private receipts are portable; repository/vendor/deployment mutations
+        // still require their own Windows implementation and qualification.
+        #[cfg(windows)]
+        client_paths::require_private_state()?;
         Some(local_state::lock().await?)
     } else {
         None
     };
     match cli.command {
+        Command::PrivateState => private_state::run(),
         Command::Up(options) => consumer::run(&options, consumer::Action::Up),
         Command::Down(options) => consumer::run(&options, consumer::Action::Down),
         Command::Status(options) => consumer::run(&options, consumer::Action::Status),

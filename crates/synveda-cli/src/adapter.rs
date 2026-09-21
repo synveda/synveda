@@ -252,7 +252,7 @@ pub(crate) fn run(command: Command) -> Result<(), String> {
     if registration(&identity)?.is_some() {
         return Err("registration remains; receipt retained".to_owned());
     }
-    std::fs::remove_file(path).map_err(|e| format!("remove completed adapter receipt: {e}"))?;
+    local_state::remove_receipt(&path)?;
     println!(
         "Removed the owned registration; project configuration, credentials and spool data are retained."
     );

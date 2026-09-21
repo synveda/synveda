@@ -15,7 +15,17 @@ pub(crate) fn digest(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn directory() -> Result<PathBuf, String> {
-    Ok(crate::credentials::config_dir()?.join("consumer"))
+    #[cfg(windows)]
+    {
+        Ok(
+            crate::client_paths::resolve_directory(crate::client_paths::Directory::Config)?
+                .join("consumer"),
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(crate::credentials::config_dir()?.join("consumer"))
+    }
 }
 
 pub(crate) fn receipt(kind: &str, identity: &str) -> Result<PathBuf, String> {
@@ -68,7 +78,40 @@ pub(crate) fn absolute(path: &Path) -> Result<PathBuf, String> {
 }
 
 /// Do not unlink an OS lock: a waiting process must acquire the same inode.
-pub(crate) async fn lock() -> Result<File, String> {
+pub(crate) struct Lock {
+    _file: File,
+    #[cfg(windows)]
+    _directory: crate::credentials::windows::Directory,
+}
+
+pub(crate) async fn lock() -> Result<Lock, String> {
+    #[cfg(windows)]
+    {
+        let directory = crate::credentials::windows::Directory::open(&directory()?, true)
+            .map_err(|e| format!("private receipts: {e}"))?
+            .ok_or("receipt directory is absent")?;
+        let file = directory
+            .named_lock("operations.lock")
+            .map_err(|e| e.to_string())?;
+        wait_for_lock(&file).await?;
+        directory
+            .validate(&file, "operations.lock")
+            .map_err(|e| e.to_string())?;
+        Ok(Lock {
+            _file: file,
+            _directory: directory,
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(Lock {
+            _file: lock_unix().await?,
+        })
+    }
+}
+
+#[cfg(not(windows))]
+async fn lock_unix() -> Result<File, String> {
     let dir = directory()?;
     private_directory(&dir)?;
     let path = dir.join("operations.lock");
@@ -82,6 +125,12 @@ pub(crate) async fn lock() -> Result<File, String> {
     if file.metadata().map_err(|e| e.to_string())?.len() != 0 {
         return Err("consumer lock must be empty".to_owned());
     }
+    wait_for_lock(&file).await?;
+    validate_file(&file, &path, true)?;
+    Ok(file)
+}
+
+async fn wait_for_lock(file: &File) -> Result<(), String> {
     let started = Instant::now();
     loop {
         match file.try_lock() {
@@ -95,8 +144,7 @@ pub(crate) async fn lock() -> Result<File, String> {
             Err(TryLockError::Error(e)) => return Err(format!("lock consumer state: {e}")),
         }
     }
-    validate_file(&file, &path, true)?;
-    Ok(file)
+    Ok(())
 }
 
 pub(crate) fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {
@@ -104,6 +152,21 @@ pub(crate) fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {
 }
 
 fn read_checked(path: &Path, private: bool) -> Result<Option<Vec<u8>>, String> {
+    #[cfg(windows)]
+    if private {
+        let Some(dir) = crate::credentials::windows::Directory::open(
+            path.parent().ok_or("receipt has no parent")?,
+            false,
+        )
+        .map_err(|e| format!("private receipts: {e}"))?
+        else {
+            return Ok(None);
+        };
+        return Ok(dir
+            .read(leaf(path)?)
+            .map_err(|e| format!("private receipts: {e}"))?
+            .map(|(_, bytes)| bytes));
+    }
     crate::client_paths::require_private_state()?;
     let mut options = OpenOptions::new();
     options.read(true);
@@ -144,7 +207,7 @@ pub(crate) fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, S
 }
 
 pub(crate) fn save<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let before = read(path)?;
+    let before = read_checked(path, true)?;
     let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     private_directory(path.parent().ok_or("receipt has no parent")?)?;
     replace(path, before.as_deref(), &bytes, true)
@@ -158,6 +221,18 @@ pub(crate) fn replace(
     bytes: &[u8],
     private: bool,
 ) -> Result<(), String> {
+    #[cfg(windows)]
+    if private {
+        let dir = crate::credentials::windows::Directory::open(
+            path.parent().ok_or("receipt has no parent")?,
+            true,
+        )
+        .map_err(|e| format!("private receipts: {e}"))?
+        .ok_or("receipt directory is absent")?;
+        return dir
+            .replace_if(leaf(path)?, bytes, before.map(digest).as_deref())
+            .map_err(|e| format!("private receipts: {e}"));
+    }
     crate::client_paths::require_private_state()?;
     let parent = path.parent().ok_or("configuration has no parent")?;
     std::fs::create_dir_all(parent).map_err(|e| format!("create configuration directory: {e}"))?;
@@ -191,6 +266,21 @@ pub(crate) fn replace(
 }
 
 pub(crate) fn private_directory(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        crate::credentials::windows::Directory::open(path, true)
+            .map_err(|e| format!("private receipts: {e}"))?
+            .ok_or("receipt directory is absent")?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        private_directory_unix(path)
+    }
+}
+
+#[cfg(not(windows))]
+fn private_directory_unix(path: &Path) -> Result<(), String> {
     crate::client_paths::require_private_state()?;
     if let Ok(metadata) = std::fs::symlink_metadata(path)
         && (!metadata.is_dir() || metadata.is_symlink())
@@ -209,6 +299,35 @@ pub(crate) fn private_directory(path: &Path) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+pub(crate) fn remove_receipt(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let dir = crate::credentials::windows::Directory::open(
+            path.parent().ok_or("receipt has no parent")?,
+            false,
+        )
+        .map_err(|e| e.to_string())?
+        .ok_or("receipt directory is absent")?;
+        let before = dir.read(leaf(path)?).map_err(|e| e.to_string())?;
+        dir.remove_if(
+            leaf(path)?,
+            before.as_ref().map(|(_, b)| digest(b)).as_deref(),
+        )
+        .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::remove_file(path).map_err(|e| format!("remove completed receipt: {e}"))
+    }
+}
+
+#[cfg(windows)]
+fn leaf(path: &Path) -> Result<&str, String> {
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "invalid receipt filename".to_owned())
 }
 
 fn secure_options(options: &mut OpenOptions) {
@@ -245,4 +364,44 @@ fn validate_file(file: &File, path: &Path, private: bool) -> Result<(), String> 
     #[cfg(not(unix))]
     let _ = private;
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+#[path = "../tests/support/windows_private.rs"]
+mod windows_fixture;
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn receipts_use_native_private_creation_replacement_and_conflict_refusal() {
+        let root = std::env::temp_dir().join(format!(
+            "synveda receipts '文' {}",
+            synveda_types::TenantId::new()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        windows_fixture::private(&root);
+        let path = root.join("consumer/setup-fixture.json");
+        let first = serde_json::json!({ "version": 1, "selection": "first" });
+        let second = serde_json::json!({ "version": 1, "selection": "second" });
+        save(&path, &first).unwrap();
+        let before = read_checked(&path, true).unwrap().unwrap();
+        save(&path, &second).unwrap();
+        assert_eq!(
+            read_json::<serde_json::Value>(&path).unwrap(),
+            Some(second.clone())
+        );
+        assert!(replace(&path, Some(&before), b"stale", true).is_err());
+        assert_eq!(read_json::<serde_json::Value>(&path).unwrap(), Some(second));
+        let alias = root.join("consumer/alias.json");
+        std::fs::hard_link(&path, &alias).unwrap();
+        assert!(read_json::<serde_json::Value>(&path).is_err());
+        assert!(save(&path, &first).is_err());
+        assert!(remove_receipt(&path).is_err());
+        std::fs::remove_file(alias).unwrap();
+        remove_receipt(&path).unwrap();
+        assert!(!path.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

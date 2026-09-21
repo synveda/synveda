@@ -46,14 +46,25 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { diagnostic, log } from "./log.mjs";
 import { ensureDir, requirePrivateState, spoolDir } from "./paths.mjs";
+import { privateBytes, privateState } from "./private-state.mjs";
 import type { SessionEventType } from "./types.mjs";
 
 /** The format version this build writes and reads. */
 export const SPOOL_VERSION = 1;
+
+// This witness is process-local and never changes the shared on-disk format.
+const snapshots = new WeakMap<Spool, { name: string; digest: string | null }>();
+
+function windowsName(path: string): string {
+  if (resolve(dirname(path)).toLowerCase() !== resolve(spoolDir()).toLowerCase()) {
+    throw new Error("private spool must remain under its configured root");
+  }
+  return basename(path);
+}
 
 /** One recorded event. */
 export interface SpoolEntry {
@@ -223,9 +234,19 @@ export function readSpool(path: string): Spool | undefined {
 
 function inspectSpool(path: string): SpoolRead {
   let raw: string;
+  let snapshot: { name: string; digest: string | null } | undefined;
   try {
-    requirePrivateState();
-    raw = readFileSync(path, "utf8");
+    if (process.platform === "win32") {
+      const name = windowsName(path);
+      const result = privateState({ operation: "read_spool", name });
+      const bytes = privateBytes(result);
+      if (bytes === undefined) return { status: "missing" };
+      snapshot = { name, digest: result.digest ?? null };
+      raw = bytes.toString("utf8");
+    } else {
+      requirePrivateState();
+      raw = readFileSync(path, "utf8");
+    }
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -257,6 +278,7 @@ function inspectSpool(path: string): SpoolRead {
   }
   const corrupt = spool.entries.filter((entry) => !entryIntact(entry)).length;
   if (corrupt > 0) return { status: "held", reason: "payload_hash", corrupt };
+  if (snapshot) snapshots.set(spool, snapshot);
   return { status: "ready", spool };
 }
 
@@ -358,6 +380,22 @@ export function newSpool(
  * reports success.
  */
 export function saveSpool(spool: Spool, path?: string): boolean {
+  if (process.platform === "win32") {
+    try {
+      const name = windowsName(path ?? spoolFile(spool.external_session_id));
+      const previous = snapshots.get(spool);
+      if (previous && previous.name !== name) return false;
+      spool.updated_at = new Date().toISOString();
+      const bytes = Buffer.from(JSON.stringify(spool));
+      if (bytes.length > 16 * 1024 * 1024 || !validSpool(spool)) return false;
+      const result = privateState({ operation: "write_spool", name,
+        expected: previous?.digest ?? null, bytes: bytes.toString("base64") });
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      if (result.digest !== digest) return false;
+      snapshots.set(spool, { name, digest });
+      return true;
+    } catch { return false; }
+  }
   // Refuse before deriving a temporary or attempting cleanup of private state.
   let target: string;
   try {
@@ -376,7 +414,7 @@ export function saveSpool(spool: Spool, path?: string): boolean {
       // `mode` applies only when this call creates the file. Tighten an
       // abandoned temporary from a killed process too: pids are reusable, so
       // such a name can exist before this writer opens it.
-      if (process.platform !== "win32") fchmodSync(handle, 0o600);
+      fchmodSync(handle, 0o600);
       writeSync(handle, JSON.stringify(spool));
       fsyncSync(handle);
     } finally {
@@ -402,7 +440,8 @@ export function saveSpool(spool: Spool, path?: string): boolean {
 export function allSpools(): { path: string; spool: Spool }[] {
   let names: string[];
   try {
-    names = readdirSync(spoolDir());
+    names = process.platform === "win32"
+      ? privateState({ operation: "list_spools" }).names ?? [] : readdirSync(spoolDir());
   } catch {
     return [];
   }
@@ -502,6 +541,14 @@ export function retireIfComplete(spool: Spool, path?: string): boolean {
   if (spool.close_requested) return false;
   if (spool.entries.some((entry) => !entry.acknowledged)) return false;
   try {
+    if (process.platform === "win32") {
+      const name = windowsName(path ?? spoolFile(spool.external_session_id));
+      const previous = snapshots.get(spool);
+      if (!previous || previous.name !== name) return false;
+      privateState({ operation: "remove_spool", name, expected: previous.digest });
+      snapshots.delete(spool);
+      return true;
+    }
     requirePrivateState();
     rmSync(path ?? spoolFile(spool.external_session_id), { force: true });
     return true;
@@ -518,6 +565,10 @@ export function retireIfComplete(spool: Spool, path?: string): boolean {
 export function claimDisclosure(cwd: string | undefined): boolean {
   if (cwd === undefined || cwd.length === 0) return false;
   try {
+    if (process.platform === "win32") {
+      const key = createHash("sha256").update(cwd).digest("hex").slice(0, 16);
+      return privateState({ operation: "disclose", key }).created === true;
+    }
     const dir = join(spoolDir(), "..", "disclosed");
     ensureDir(dir);
     const name = createHash("sha256").update(cwd).digest("hex").slice(0, 16);

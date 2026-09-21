@@ -48,13 +48,11 @@ export function requirePrivateState(): void {
 
 /** `$XDG_CONFIG_HOME/synveda`, else `~/.config/synveda`. */
 export function configDir(): string {
-  requirePrivateState();
   return resolveClientDirectory("config", process.platform, process.env);
 }
 
 /** `$XDG_STATE_HOME/synveda`, else `~/.local/state/synveda`. */
 export function stateDir(): string {
-  requirePrivateState();
   return resolveClientDirectory("state", process.platform, process.env);
 }
 

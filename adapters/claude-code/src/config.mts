@@ -6,6 +6,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { privateBytes, privateState } from "./private-state.mjs";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -145,10 +146,19 @@ function observationAllowed(root: string | undefined, project: ProjectConfig,
   const key = createHash("sha256").update(root).digest("hex");
   const receipt = join(configDir(), "consumer", `setup-${key}.json`);
   try {
-    const metadata = lstatSync(receipt);
-    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 65536) return false;
-    if (process.platform !== "win32" && ((metadata.mode & 0o777) !== 0o600 || metadata.uid !== process.getuid?.())) return false;
-    const saved = JSON.parse(readFileSync(receipt, "utf8"));
+    let raw: string;
+    if (process.platform === "win32") {
+      const bytes = privateBytes(privateState({ operation: "read_receipt", key }));
+      if (bytes === undefined) return project.managed_observation !== true && bool(project.observe) !== false;
+      if (bytes.length > 65536) return false;
+      raw = bytes.toString("utf8");
+    } else {
+      const metadata = lstatSync(receipt);
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 65536) return false;
+      if ((metadata.mode & 0o777) !== 0o600 || metadata.uid !== process.getuid?.()) return false;
+      raw = readFileSync(receipt, "utf8");
+    }
+    const saved = JSON.parse(raw);
     return saved?.version === 1 && saved.root === root && project.managed_observation === true
       && project.observe === true && saved.selection?.observation === "on"
       && saved.selection.workspace === workspace && saved.selection.project === projectId

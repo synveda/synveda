@@ -82,9 +82,6 @@ fn private_commands_refuse_before_issuer_access_or_filesystem_mutation() {
     let retained = scratch.0.join("retained.json");
     std::fs::write(&retained, b"retained private state").unwrap();
     let commands = [
-        vec!["session", "spool", "status", "--json"],
-        vec!["session", "flush"],
-        vec!["session", "spool", "purge", "--acknowledged"],
         vec!["demo", "status"],
         vec!["mcp", "install", "--client", "cursor"],
     ];
@@ -110,6 +107,18 @@ fn private_commands_refuse_before_issuer_access_or_filesystem_mutation() {
         assert_eq!(std::fs::read_dir(&scratch.0).unwrap().count(), 1);
         assert_eq!(std::fs::read(&retained).unwrap(), b"retained private state");
     }
+    // A broad ACL still refuses the now-implemented spool read before bytes
+    // reach status/flush/purge, including an explicit --dir override.
+    windows_private::private(&scratch.0);
+    windows_private::powershell(
+        &scratch.0,
+        None,
+        r#"
+$acl = Get-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH
+$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new([System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'), 'Read', 'Allow'))
+Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
+"#,
+    );
     let output = scratch
         .command()
         .args(["session", "spool", "status", "--dir"])
@@ -117,7 +126,7 @@ fn private_commands_refuse_before_issuer_access_or_filesystem_mutation() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("native ACL"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ACL"));
     assert_eq!(std::fs::read(&retained).unwrap(), b"retained private state");
 }
 

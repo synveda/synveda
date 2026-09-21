@@ -61,9 +61,9 @@ struct AppendResponse {
 /// left exactly as it was, with its attempt count incremented, so the next
 /// flush — or the next `SessionStart` — picks it up.
 pub async fn flush(profile: &str, dir: Option<PathBuf>, verbose: bool) -> Result<(), String> {
-    crate::client_paths::require_private_state()?;
+    spool::require_storage()?;
     let dir = dir.map_or_else(spool::spool_dir, Ok)?;
-    let scanned = spool::scan(&dir);
+    let scanned = spool::scan(&dir)?;
     report_unreadable(&scanned);
     if scanned.spools.is_empty() {
         println!("Nothing spooled in {}.", dir.display());
@@ -247,9 +247,9 @@ async fn close_run(api: &Api, session_id: &str, reason: Option<&str>) -> Result<
 
 /// `synveda session spool status` — what is held, per session.
 pub fn status(dir: Option<PathBuf>, as_json: bool) -> Result<(), String> {
-    crate::client_paths::require_private_state()?;
+    spool::require_storage()?;
     let dir = dir.map_or_else(spool::spool_dir, Ok)?;
-    let scanned = spool::scan(&dir);
+    let scanned = spool::scan(&dir)?;
 
     if as_json {
         let rows: Vec<_> = scanned
@@ -373,7 +373,7 @@ pub fn status(dir: Option<PathBuf>, as_json: bool) -> Result<(), String> {
 /// it is the difference between a command that can only reclaim disk and a
 /// command that can destroy an observation nobody has delivered yet.
 pub fn purge(dir: Option<PathBuf>, acknowledged: bool) -> Result<(), String> {
-    crate::client_paths::require_private_state()?;
+    spool::require_storage()?;
     if !acknowledged {
         return Err(
             "`synveda session spool purge` deletes only acknowledged events, and says so: \
@@ -382,7 +382,7 @@ pub fn purge(dir: Option<PathBuf>, acknowledged: bool) -> Result<(), String> {
         );
     }
     let dir = dir.map_or_else(spool::spool_dir, Ok)?;
-    let scanned = spool::scan(&dir);
+    let scanned = spool::scan(&dir)?;
     report_unreadable(&scanned);
     if scanned.spools.is_empty() {
         println!("Nothing spooled in {}.", dir.display());
@@ -395,11 +395,10 @@ pub fn purge(dir: Option<PathBuf>, acknowledged: bool) -> Result<(), String> {
     for (path, mut spool) in scanned.spools {
         let removed = spool.purge_acknowledged();
         removed_events += removed;
-        if spool.entries.is_empty() {
+        if spool.entries.is_empty() && !spool.close_requested {
             // Nothing left to deliver and nothing left to read: the file is
             // the last thing holding the directory open.
-            std::fs::remove_file(&path)
-                .map_err(|err| format!("remove {}: {err}", path.display()))?;
+            spool::remove(&path, &spool)?;
             removed_files += 1;
             continue;
         }

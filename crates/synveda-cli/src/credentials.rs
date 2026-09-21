@@ -20,7 +20,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 #[cfg(any(windows, test))]
 mod windows_acl;
 

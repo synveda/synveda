@@ -127,8 +127,8 @@ export async function turn(
   if (closesTask) {
     await closeRun(spool, config, bearer.token, endReason(input, result.complete));
   }
-  saveSpool(spool);
-  if (closesTask) retireIfComplete(spool);
+  const saved = saveSpool(spool);
+  if (saved && closesTask) retireIfComplete(spool);
 
   log("turn.done", {
     session: externalId,

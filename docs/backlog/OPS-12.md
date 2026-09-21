@@ -377,12 +377,29 @@ test was skipped to avoid that restriction. The isolated storage module and its
 tests compile for both Windows MSVC architectures from macOS; this is not full
 CLI cross-compilation or native arm64 execution.
 
-Next action: extend private storage to Rust receipt/spool consumers and Node
-hook writers together, preserving the shared spool format and existing refusal
-until their native tests pass. Then add PowerShell installation and qualify
-native x86_64/arm64 artifacts. Windows receipts, logs, spools and setup still
-refuse. Real issuer/harness acceptance remains separate. The local host has no
-native Windows or PowerShell; the x64 evidence above comes from hosted CI.
+The following candidate extends that boundary; the earlier credential evidence
+does not qualify its new consumers.
+
+### Windows receipt/spool candidate (2026-09-21)
+
+ADR-0117 amendment 2 reuses native ACL/identity/storage checks for private Rust
+receipts and spools. Windows Node hooks use the hidden version-1 `private-state`
+pipe protocol for spool access, setup-receipt reads, stable installation identity
+and disclosure markers. An absolute `SYNVEDA_CLI` executable is required; no shell,
+credentials or gateway requests participate. Unsafe state remains held without
+repair. A stable spool lock and snapshot digest prevent stale replacement or
+retirement. Windows files/scans have 16-MiB/4096-entry limits. Repository/vendor
+edits, deployment witnesses and Windows diagnostic-log writers still refuse.
+
+Rust rewrites now retain transcript/model fields and omit absent optional event
+timestamps so Node can read them. Purge retains an empty spool that owes a close;
+hooks retire only after successfully persisting their completed state.
+The local CLI suite (219 tests) and shared adapter suite (109 tests) passed;
+local loopback fixtures required socket access. Native receipt, spool, protocol
+and Rust/Node interoperability tests have been added to x64/arm64 CI, but their
+execution is pending. Next action: resolve native failures, then implement and
+qualify PowerShell installation from exact native archives. The local host has
+no native Windows or PowerShell; real issuer/harness acceptance stays separate.
 
 ## Rollout and rollback
 
@@ -440,10 +457,9 @@ Docker Hub namespace/public repositories, expiring push credential, GitHub
 variables/secret and protected environment, plus authorization of a new version
 and release trigger. These do not block local implementation and tests.
 
-Next task: extend the qualified Windows x64 credential storage boundary to
-Rust receipt/spool consumers and Node hook writers, then add the PowerShell
-installer and native Windows x86_64/arm64 artifact acceptance.
-Other private-state operations still refuse on non-Unix hosts. Native
+Next task: qualify the receipt/spool candidate on native Windows, then add the
+PowerShell installer and native Windows x86_64/arm64 artifact acceptance.
+Unported private-state operations still refuse on non-Unix hosts. Native
 Windows/MSVC and PowerShell remain unavailable on the local macOS host. In
 parallel with that platform work, the four Unix candidate jobs and artifact-based
 real issuer/harness acceptance still need their own execution reports.
