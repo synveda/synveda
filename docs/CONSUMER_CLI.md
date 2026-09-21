@@ -14,17 +14,23 @@ console or Compose bundle. Supported build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64` and `linux-x86_64` (glibc). These are candidate
 targets; only macOS arm64 has local artifact execution evidence so far.
 The CLI's Unix peer-witness code is isolated, and CLI/hooks share a tested
-platform path contract. Native Windows private state deliberately refuses until
-explicit credential/spool/receipt ACLs, file identity and replacement handling
-are implemented and qualified. PowerShell installation remains unavailable.
+platform path contract. Windows credential storage now has a native candidate
+for ACL, file-identity, bounded reads, locking and replacement checks. Its native
+qualification is tracked in [OPS-12](backlog/OPS-12.md). Windows receipts, logs,
+spools and setup still refuse; PowerShell installation remains unavailable.
 
 On Unix, config uses absolute `XDG_CONFIG_HOME` or `HOME/.config`; state uses
 absolute `XDG_STATE_HOME` or `HOME/.local/state`, each with a `synveda` child.
 Relative XDG values are ignored. Missing or relative HOME refuses access; the
-spool never falls back to the current repository. The reserved Windows contract
+spool never falls back to the current repository. The Windows contract
 uses `LOCALAPPDATA/synveda/config` and `LOCALAPPDATA/synveda/state`, or explicit
-fully qualified local-drive XDG roots. UNC/device paths are refused. These path
-rules do not enable Windows storage or migrate existing files; see
+fully qualified local-drive XDG roots. Credentials require a fixed local drive,
+ordinary directories/files and user-owned private ACLs; UNC/device paths,
+junctions, hard links, alternate streams and ambiguous components are refused.
+Missing directories are created only below an already private parent. Existing
+ACLs are never repaired automatically; preserve refused files for inspection.
+Credentials remain in the existing profile format, with no automatic migration.
+These rules do not enable the other Windows storage paths; see
 [ADR-0117](adr/adr-0117-client-platform-boundaries.md).
 
 The existing installer has an explicit client mode. For **locally built**

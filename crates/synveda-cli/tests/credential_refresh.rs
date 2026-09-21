@@ -1,11 +1,12 @@
 //! OPS-12: multiple native CLI processes share one rotating credential file.
 //! This exercises real process locks and HTTP, not an issuer/live-account claim.
 
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
@@ -16,6 +17,10 @@ use std::time::Duration;
 
 use chrono::{TimeDelta, Utc};
 use serde_json::{Value, json};
+
+#[cfg(windows)]
+#[path = "support/windows_private.rs"]
+mod windows_private;
 
 struct Gateway {
     url: String,
@@ -137,6 +142,12 @@ impl Fixture {
         ));
         std::fs::remove_dir_all(&root).ok();
         std::fs::create_dir_all(root.join("synveda")).unwrap();
+        #[cfg(windows)]
+        {
+            windows_private::private(&root);
+            windows_private::private(&root.join("synveda"));
+        }
+        #[cfg(unix)]
         std::fs::set_permissions(root.join("synveda"), std::fs::Permissions::from_mode(0o700))
             .unwrap();
         let profile = |name| {
@@ -154,7 +165,10 @@ impl Fixture {
                 .to_string(),
         )
         .unwrap();
+        #[cfg(unix)]
         std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o600)).unwrap();
+        #[cfg(windows)]
+        windows_private::private(&fixture.path());
         fixture
     }
 

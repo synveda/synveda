@@ -10,6 +10,11 @@ pub(crate) enum Directory {
 
 pub(crate) fn directory(kind: Directory) -> Result<PathBuf, String> {
     require_private_state()?;
+    resolve_directory(kind)
+}
+
+// Only credential storage has native Windows privacy enforcement so far.
+pub(crate) fn resolve_directory(kind: Directory) -> Result<PathBuf, String> {
     resolve(kind, cfg!(windows), |name| match std::env::var(name) {
         Ok(value) => Ok(Some(value)),
         Err(std::env::VarError::NotPresent) => Ok(None),

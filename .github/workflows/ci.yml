@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # OPS-12 / ADR-0117: native compilation and deliberate privacy refusal only.
-  # This is not Windows installation, login, spooling or harness qualification.
+  # OPS-12 / ADR-0117: native credential ACL/identity/replacement and refresh.
+  # Other private state still refuses; no installer, real issuer or harness claim.
   windows-client-boundary:
     runs-on: windows-2025
     timeout-minutes: 45
@@ -32,6 +32,8 @@ jobs:
       - run: cargo clippy -p synveda-cli --all-targets --locked -- -D warnings
       - run: cargo test -p synveda-cli --locked --bin synveda client_paths::tests
       - run: cargo test -p synveda-cli --locked --bin synveda peer_witness_refuses_before_opening
+      - run: cargo test -p synveda-cli --locked --bin synveda credentials::windows
+      - run: cargo test -p synveda-cli --locked --test credential_refresh
       - run: cargo test -p synveda-cli --locked --test client_platform
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

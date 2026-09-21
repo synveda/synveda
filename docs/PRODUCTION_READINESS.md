@@ -120,10 +120,11 @@ readiness verdict or the published v0.4.0 installation contract.
 
 ADR-0117 isolates the Unix deployment peer witness and shares client path
 fixtures between Rust and Node. Missing HOME no longer selects a repository-local
-spool. Non-Unix credentials, receipts and spool operations explicitly refuse
-until native ACL/file-identity/replacement support exists. The new Windows CI
-job checks build/refusal boundaries only and has no recorded native run yet;
-it does not qualify Windows installation, authentication or harness execution.
+spool. Non-Unix receipts and spool operations explicitly refuse. The Windows x64
+build/refusal prerequisite passed on source `5bdf740`; its successor adds native
+credential ACL/file-identity/replacement and mock-gateway refresh tests, with
+execution pending. This candidate does not qualify Windows installation, real
+issuer authentication, observation or harness execution.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a

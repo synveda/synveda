@@ -10,12 +10,19 @@
 //! It never enters `settings.json`, the environment, or a transcript.
 
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions, TryLockError};
+#[cfg(not(windows))]
+use std::fs::OpenOptions;
+use std::fs::{File, TryLockError};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+#[cfg(windows)]
+mod windows;
+#[cfg(any(windows, test))]
+mod windows_acl;
 
 /// The default profile name, for the overwhelmingly common case of one
 /// user against one gateway.
@@ -82,7 +89,30 @@ pub fn config_dir() -> Result<PathBuf, String> {
 
 /// The credentials file path.
 pub fn path() -> Result<PathBuf, String> {
-    Ok(config_dir()?.join("credentials.json"))
+    Ok(storage_dir()?.join("credentials.json"))
+}
+
+fn storage_dir() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        crate::client_paths::resolve_directory(crate::client_paths::Directory::Config)
+    }
+    #[cfg(not(windows))]
+    {
+        config_dir()
+    }
+}
+
+/// Refuse unsafe storage before starting an issuer/browser round trip.
+pub(crate) fn preflight() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        load().map(|_| ())
+    }
+    #[cfg(not(windows))]
+    {
+        crate::client_paths::require_private_state()
+    }
 }
 
 /// Reads the file. A missing file is an empty set, not an error — that is
@@ -92,8 +122,20 @@ pub fn load() -> Result<Credentials, String> {
 }
 
 fn load_at(path: &Path) -> Result<Credentials, String> {
+    #[cfg(windows)]
+    let raw = match windows::read(path).map_err(|err| format!("read private credentials: {err}"))? {
+        Some(raw) => raw,
+        None => {
+            return Ok(Credentials {
+                version: 1,
+                profiles: BTreeMap::new(),
+            });
+        }
+    };
+    #[cfg(not(windows))]
     crate::client_paths::require_private_state()?;
-    let raw = match std::fs::read_to_string(path) {
+    #[cfg(not(windows))]
+    let raw = match std::fs::read(path) {
         Ok(raw) => raw,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Ok(Credentials {
@@ -103,7 +145,7 @@ fn load_at(path: &Path) -> Result<Credentials, String> {
         }
         Err(err) => return Err(format!("read {}: {err}", path.display())),
     };
-    serde_json::from_str(&raw).map_err(|err| {
+    serde_json::from_slice(&raw).map_err(|err| {
         format!(
             "{} is not a valid credentials file (line {}, column {}); \
              preserve it for repair or restore a private backup before `synveda login`",
@@ -132,6 +174,8 @@ pub async fn store(name: &str, profile: Profile) -> Result<(), String> {
 pub(crate) struct LockedCredentials {
     _lock: File,
     path: PathBuf,
+    #[cfg(windows)]
+    _directory: windows::Directory,
 }
 
 pub(crate) async fn lock() -> Result<LockedCredentials, String> {
@@ -139,27 +183,40 @@ pub(crate) async fn lock() -> Result<LockedCredentials, String> {
 }
 
 async fn lock_with_timeout(timeout: Duration) -> Result<LockedCredentials, String> {
-    let dir = config_dir()?;
-    std::fs::create_dir_all(&dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
-    let metadata = std::fs::symlink_metadata(&dir)
-        .map_err(|err| format!("inspect credential directory: {err}"))?;
-    if !metadata.is_dir() || metadata.is_symlink() {
-        return Err("credential directory must be a private directory, not a symlink".to_owned());
-    }
-    restrict_dir(&dir)?;
-    let lock_path = dir.join("credentials.lock");
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    let file = options
-        .open(&lock_path)
+    let dir = storage_dir()?;
+    #[cfg(windows)]
+    let directory = windows::Directory::open(&dir, true)
+        .map_err(|err| format!("prepare private credentials: {err}"))?
+        .ok_or("private credential directory is absent")?;
+    #[cfg(windows)]
+    let file = directory
+        .lock_file()
         .map_err(|err| format!("open credential lock: {err}"))?;
+    let lock_path = dir.join("credentials.lock");
+    #[cfg(not(windows))]
+    let file = {
+        std::fs::create_dir_all(&dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
+        let metadata = std::fs::symlink_metadata(&dir)
+            .map_err(|err| format!("inspect credential directory: {err}"))?;
+        if !metadata.is_dir() || metadata.is_symlink() {
+            return Err(
+                "credential directory must be a private directory, not a symlink".to_owned(),
+            );
+        }
+        restrict_dir(&dir)?;
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        options
+            .open(&lock_path)
+            .map_err(|err| format!("open credential lock: {err}"))?
+    };
     validate_lock(&file, &lock_path)?;
     let started = Instant::now();
     loop {
@@ -178,10 +235,22 @@ async fn lock_with_timeout(timeout: Duration) -> Result<LockedCredentials, Strin
     Ok(LockedCredentials {
         _lock: file,
         path: dir.join("credentials.json"),
+        #[cfg(windows)]
+        _directory: directory,
     })
 }
 
 fn validate_lock(file: &File, path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let parent = path.parent().ok_or("credential lock has no parent")?;
+        let directory = windows::Directory::open(parent, false)
+            .map_err(|err| format!("inspect credential directory: {err}"))?
+            .ok_or("credential directory disappeared")?;
+        directory
+            .validate(file, "credentials.lock")
+            .map_err(|err| format!("inspect credential lock: {err}"))?;
+    }
     let opened = file
         .metadata()
         .map_err(|err| format!("inspect credential lock: {err}"))?;
@@ -250,11 +319,25 @@ fn save_at(path: &Path, credentials: &Credentials) -> Result<(), String> {
     let body = serde_json::to_string_pretty(&credentials)
         .map_err(|err| format!("serialize credentials: {err}"))?;
 
+    #[cfg(windows)]
+    {
+        windows::write(path, body.as_bytes())
+            .map_err(|err| format!("write private credentials: {err}"))
+    }
+
+    #[cfg(not(windows))]
+    {
+        save_private(path, &body)
+    }
+}
+
+#[cfg(not(windows))]
+fn save_private(path: &Path, body: &str) -> Result<(), String> {
     let mut nonce = [0_u8; 16];
     getrandom::fill(&mut nonce).map_err(|err| format!("credential temporary name: {err}"))?;
     let nonce = u128::from_be_bytes(nonce);
     let temporary = path.with_extension(format!("json.{nonce:032x}.tmp"));
-    write_private(&temporary, &body)?;
+    write_private(&temporary, body)?;
     std::fs::rename(&temporary, path).map_err(|err| {
         // Leave nothing behind holding a token if the rename failed.
         let _ = std::fs::remove_file(&temporary);
@@ -262,6 +345,7 @@ fn save_at(path: &Path, credentials: &Credentials) -> Result<(), String> {
     })
 }
 
+#[cfg(not(windows))]
 fn write_private(path: &std::path::Path, body: &str) -> Result<(), String> {
     use std::io::Write;
 
@@ -295,12 +379,12 @@ fn restrict_dir(dir: &std::path::Path) -> Result<(), String> {
         .map_err(|err| format!("chmod {}: {err}", dir.display()))
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn restrict_dir(_dir: &std::path::Path) -> Result<(), String> {
     crate::client_paths::require_private_state()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

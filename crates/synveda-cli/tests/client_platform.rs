@@ -3,6 +3,10 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+#[cfg(windows)]
+#[path = "support/windows_private.rs"]
+mod windows_private;
+
 struct Scratch(PathBuf);
 
 impl Scratch {
@@ -78,9 +82,6 @@ fn private_commands_refuse_before_issuer_access_or_filesystem_mutation() {
     let retained = scratch.0.join("retained.json");
     std::fs::write(&retained, b"retained private state").unwrap();
     let commands = [
-        vec!["login", "--gateway", "http://127.0.0.1:1", "--no-browser"],
-        vec!["auth", "token", "--json"],
-        vec!["auth", "logout", "--all"],
         vec!["session", "spool", "status", "--json"],
         vec!["session", "flush"],
         vec!["session", "spool", "purge", "--acknowledged"],
@@ -118,4 +119,48 @@ fn private_commands_refuse_before_issuer_access_or_filesystem_mutation() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("native ACL"));
     assert_eq!(std::fs::read(&retained).unwrap(), b"retained private state");
+}
+
+#[cfg(windows)]
+#[test]
+fn unsafe_credentials_refuse_before_issuer_access_without_repair_or_disclosure() {
+    let scratch = Scratch::new();
+    let config = scratch.0.join("config/synveda");
+    std::fs::create_dir_all(&config).unwrap();
+    windows_private::private(&config);
+    let path = config.join("credentials.json");
+    std::fs::write(&path, b"retained private credential").unwrap();
+    windows_private::powershell(
+        &path,
+        None,
+        r#"
+$acl = Get-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH
+$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new([System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'), 'Read', 'Allow'))
+Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
+"#,
+    );
+    for args in [
+        vec!["login", "--gateway", "http://127.0.0.1:1", "--no-browser"],
+        vec!["auth", "token", "--json"],
+        vec!["auth", "logout", "--all"],
+    ] {
+        let output = scratch
+            .command()
+            .args(&args)
+            .env("XDG_CONFIG_HOME", scratch.0.join("config"))
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("ACL"),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("retained private credential"));
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"retained private credential"
+        );
+    }
 }

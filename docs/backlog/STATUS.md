@@ -26,12 +26,14 @@ APIs/installers, with private receipts, observation consent and conflict-safe
 removal (ADR-0116). The source CLI has local OrbStack lifecycle and browser evidence;
 manual Codex/Copilot trust/setup and broader native qualification remain separate.
 Private pinned Node and Unix client-only archives/installation now have local
-macOS arm64 artifact evidence and required native release-report gates. Next are
-Windows private ACL/file-identity/replacement handling and PowerShell installation,
-then hosted native and real issuer/harness qualification of the client artifacts.
+macOS arm64 artifact evidence and required native release-report gates. Windows
+credentials now have candidate ACL/file-identity/replacement enforcement and
+native tests. Next are its hosted execution, receipt/spool consumers and
+PowerShell installation, then real issuer/harness qualification of the artifacts.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures
-(ADR-0117); non-Unix private-state operations explicitly refuse. A Windows CI job
-checks compilation and refusal only; native execution evidence remains pending.
+(ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier
+Windows x64 compilation/refusal job passed; the expanded credential job remains
+pending. Exact evidence and the next action are in [OPS-12](OPS-12.md).
 Hosted qualification and publication still need owner registry settings and a
 separately authorized new release.
 

@@ -347,6 +347,32 @@ issuer/harness qualification remain outstanding.
 
 ## Rollout and rollback
 
+### Windows credential increment (2026-09-21)
+
+The preceding [Windows x64 build/refusal job](https://github.com/synveda/synveda/actions/runs/35625234551/job/106418315769)
+passed at `5bdf740dd793dcc862bf2c345c7e254040d52e6d`. It establishes the
+prerequisite only. ADR-0117 amendment 1 now adds native credential storage:
+process-user ACL checks, fixed local-drive admission, held no-follow ancestor
+handles, file identity/hard-link refusal, bounded reads, protected new ACLs,
+the existing stable process lock and flushed sibling replacement. Unsafe
+existing ACLs are refused without repair. Safe Windows-only MIT wrappers
+preserve the product unsafe-code prohibition. Receipts, spools and hooks keep
+their refusal; no Windows installer or server port is introduced.
+
+The Windows job now runs filesystem/refusal tests with independent .NET ACL
+fixtures and the existing five real-process rotating-refresh tests. Native
+execution of this increment is pending. The isolated storage module and its
+tests compile for both Windows MSVC architectures from macOS; this is not native
+execution or full-CLI cross-compilation. Local strict CLI Clippy and all 217 CLI
+tests pass, including two new ACL admission tests. Initial loopback sandbox
+refusals were resolved with local socket access. Dependency licence/source/bans
+checks and release parity (69 Node tests) pass. Deployment checks are in progress.
+
+Next action: execute the expanded Windows credential job, fix any native
+failures, then apply the same boundary to receipt/spool consumers before adding
+PowerShell installation. Native arm64, real issuer and harness qualification
+remain separate. The local host still has no native Windows or PowerShell.
+
 Keep existing v0.4.0 instructions until a new authorized release qualifies.
 Retain immutable bytes and data/keys on failure; never overwrite release tags,
 reset an unrelated deployment or promise an untested downgrade.
@@ -400,14 +426,11 @@ Docker Hub namespace/public repositories, expiring push credential, GitHub
 variables/secret and protected environment, plus authorization of a new version
 and release trigger. These do not block local implementation and tests.
 
-Next task: implement Windows-native private credential/spool/receipt ACLs, file
-identity and atomic replacement under ADR-0117, then add the PowerShell installer
-and execute native Windows x86_64/arm64 acceptance. The Unix peer-witness code is
-isolated and the shared path contract is implemented; private-state operations
-deliberately refuse on non-Unix hosts until the privacy boundary is implemented.
-Run the new native Windows CI build/refusal job before treating the port as
-compiled or executable on Windows. Native Windows/MSVC and PowerShell remain
-unavailable on the local macOS host. In
+Next task: qualify the Windows-native credential increment above, then extend
+its ACL/file-identity/replacement boundary to receipts and spools before adding
+the PowerShell installer and native Windows x86_64/arm64 artifact acceptance.
+Other private-state operations still refuse on non-Unix hosts. Native
+Windows/MSVC and PowerShell remain unavailable on the local macOS host. In
 parallel with that platform work, the four Unix candidate jobs and artifact-based
 real issuer/harness acceptance still need their own execution reports.
 Keep Codex/Copilot registration and hook trust manual until their native installer
