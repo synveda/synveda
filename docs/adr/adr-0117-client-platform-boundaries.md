@@ -31,7 +31,9 @@ private directory. Standard root ownership by TrustedInstaller is admitted.
 Refuse reparse points, alternate streams, device names, ambiguous components,
 non-disk objects and multiply linked credential files. Existing private
 directories/files must belong to the process user and grant access only to that
-user, LocalSystem and Administrators. Inheritable creator-owner entries are
+user, LocalSystem and Administrators. Compare numeric SIDs from the native
+descriptor; do not infer machine/domain identity from SDDL abbreviations.
+Inheritable creator-owner entries are
 allowed only when they cannot grant access on the parent. Unknown ACL forms
 fail closed; no repair or silent adoption of existing permissions occurs.
 

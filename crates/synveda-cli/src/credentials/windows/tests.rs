@@ -52,6 +52,11 @@ fn windows_private_create_read_replace_and_lock_preserve_private_identity() {
     let second = directory.read("credentials.json").unwrap().unwrap();
     assert_ne!(first.0, second.0);
     assert_eq!(second.1, b"second private value");
+    let descriptor = acl(&options(false, false)
+        .open(directory.path.join("credentials.json"))
+        .unwrap())
+    .unwrap();
+    assert!(descriptor.starts_with(&format!("O:{}D:", user_sid().unwrap())));
     let lock = directory.lock_file().unwrap();
     lock.try_lock().unwrap();
     assert!(matches!(

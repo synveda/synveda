@@ -35,9 +35,47 @@ fn user_sid() -> io::Result<String> {
 fn acl(file: &File) -> io::Result<String> {
     let information = SecurityInformation::Owner | SecurityInformation::Dacl;
     let descriptor = wrappers::GetSecurityInfo(file, SeObjectType::SE_FILE_OBJECT, information)?;
-    wrappers::ConvertSecurityDescriptorToStringSecurityDescriptor(&descriptor, information)?
-        .into_string()
-        .map_err(|_| refused("Windows security descriptor is not valid Unicode"))
+    let rendered =
+        wrappers::ConvertSecurityDescriptorToStringSecurityDescriptor(&descriptor, information)?
+            .into_string()
+            .map_err(|_| refused("Windows security descriptor is not valid Unicode"))?;
+    let owner = descriptor
+        .owner()
+        .ok_or_else(|| refused("Windows private ACL has no owner"))?;
+    let dacl = descriptor
+        .dacl()
+        .ok_or_else(|| refused("Windows private ACL is absent"))?;
+    let count = wrappers::GetAclInformationSize(dacl)?.AceCount;
+    if count > 128 || rendered.len() > 65_536 {
+        return Err(refused("Windows private ACL exceeds its bound"));
+    }
+    let text = rendered
+        .split_once("D:")
+        .ok_or_else(|| refused("Windows private ACL is absent"))?
+        .1;
+    let (control, mut entries) = text.split_at(text.find('(').unwrap_or(text.len()));
+    // SDDL may abbreviate a machine/domain account (for example LA). Preserve
+    // the actual descriptor's numeric SIDs instead of guessing an alias domain.
+    let mut canonical = format!("O:{owner}D:{control}");
+    for index in 0..count {
+        let (entry, rest) = entries
+            .strip_prefix('(')
+            .and_then(|s| s.split_once(')'))
+            .ok_or_else(|| refused("Windows private ACL entry is unsupported"))?;
+        entries = rest;
+        let fields: Vec<_> = entry.split(';').collect();
+        if fields.len() != 6 || fields[0] != "A" || !fields[3].is_empty() || !fields[4].is_empty() {
+            return Err(refused("Windows private ACL entry is unsupported"));
+        }
+        let sid = wrappers::GetAce(dacl, index)?
+            .sid()
+            .ok_or_else(|| refused("Windows private ACL entry has no identity"))?;
+        canonical.push_str(&format!("(A;{};{};;;{sid})", fields[1], fields[2]));
+    }
+    if !entries.is_empty() {
+        return Err(refused("Windows private ACL entry count changed"));
+    }
+    Ok(canonical)
 }
 
 fn validate_acl(file: &File, user: &str, directory: bool) -> io::Result<()> {

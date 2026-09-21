@@ -42,6 +42,9 @@ fn mask(value: &str) -> Option<u32> {
             "RC" => 0x0002_0000,
             "WD" => 0x0004_0000,
             "WO" => 0x0008_0000,
+            // SDDL renders the directory create-subdirectory bit as LC even
+            // for file-object descriptors (the same numeric bit as DS list).
+            "LC" => 0x0000_0004,
             _ => return None,
         };
         rest = tail;
@@ -144,7 +147,7 @@ mod tests {
     #[test]
     fn ancestor_acl_allows_traversal_but_refuses_other_account_mutation() {
         let root = format!(
-            "O:{TRUSTED_INSTALLER}D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;BU)(A;;0x4;;;AU)(A;OICIIO;GA;;;CO)"
+            "O:{TRUSTED_INSTALLER}D:AI(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;BU)(A;;LC;;;AU)(A;OICIIO;SDGXGWGR;;;AU)(A;OICIIO;GA;;;CO)"
         );
         assert!(validate_ancestor(&root, USER).is_ok());
         for rights in ["FA", "GW", "SD", "WD", "WO", "0x2", "0x10", "0x40", "0x100"] {
