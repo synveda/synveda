@@ -18,7 +18,16 @@ impl Scratch {
     }
     fn directory(&self) -> Directory {
         Directory::open(&self.0.join("config/synveda"), true)
-            .unwrap()
+            .unwrap_or_else(|error| {
+                // Test-owned ancestry only; no credential content is read.
+                for path in self.0.ancestors() {
+                    eprintln!(
+                        "{path:?}: {:?}",
+                        open_directory(path, false).and_then(|file| acl(&file))
+                    );
+                }
+                panic!("private fixture directory: {error}");
+            })
             .unwrap()
     }
 }
@@ -85,9 +94,16 @@ fn windows_private_rename_failure_preserves_original_and_cleans_only_its_tempora
     assert_eq!(std::fs::read(&path).unwrap(), b"keep original");
     assert_eq!(std::fs::read_dir(&directory.path).unwrap().count(), 1);
     drop(reader);
+    // A short-lived reader must not lose a rotated token by preventing commit.
+    let reader = options(false, false).open(&path).unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(reader);
+    });
     directory
         .replace("credentials.json", b"retry succeeds")
         .unwrap();
+    release.join().unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), b"retry succeeds");
     assert!(std::fs::rename(&directory.path, scratch.0.join("moved")).is_err());
 }

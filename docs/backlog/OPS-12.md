@@ -373,7 +373,11 @@ path through Cargo. The fixture now clears that inherited module path before
 launch, and the product checks ancestor ownership and ACL-changing authority
 as well as the private leaf. The next native run exposed the wrapper trait's
 unknown-object ACL query; the file query now explicitly supplies `SE_FILE_OBJECT`.
-Execution with that correction remains pending.
+At `bd4c1f0` Windows reaches the admission checks but refuses the test directory
+ancestry. Test-only owner/DACL diagnostics are being added to identify the
+refused ancestor without relaxing admission. Bounded sharing-violation retries
+also protect refresh replacement from brief concurrent readers. Native
+execution with those changes remains pending.
 
 Next action: execute the expanded Windows credential job, fix any native
 failures, then apply the same boundary to receipt/spool consumers before adding
