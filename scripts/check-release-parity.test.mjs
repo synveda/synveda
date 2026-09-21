@@ -155,6 +155,12 @@ test("release workflow binds the chart and digest-addressed reference images", (
   for (const [index, mutant] of [
     current.replace("needs: [version, assemble, verify-images]", "needs: [version, assemble]"),
     current.replace("node scripts/verify-release-images.mjs", "echo skipped"),
+    current.replace("node scripts/package-client.mjs", "echo skipped"),
+    current.replace("node scripts/check-client-package.mjs", "echo skipped"),
+    current.replace("node scripts/check-client-release.mjs", "echo skipped"),
+    current.replace("sha256sum synveda-client-report-*.json >> SHA256SUMS", "true"),
+    current.replace("- name: Package and execute the native client archive", "- name: Package and execute the native client archive\n        continue-on-error: true"),
+    current.replace("- target: linux-arm64", "- target: linux-unsupported"),
     current.replace("node scripts/qualify-release.mjs", "echo skipped"),
     current.replace("node scripts/qualify-release.mjs --consumer-candidate", "echo skipped"),
     current.replace('SYNVEDA_PACKAGE_CONSUMER_CANDIDATE: "1"', 'SYNVEDA_PACKAGE_CONSUMER_CANDIDATE: "0"'),
@@ -276,6 +282,9 @@ test("publication uploads exactly the release files despite checkout asset direc
     `synveda-${version}.tgz`, `synveda-cnpg-image-${version}.yaml`,
     `synveda-images-${version}.yaml`,
     ...["amd64", "arm64"].flatMap((arch) => ["images", "docker", "consumer", "kubernetes"].map((report) => `release-${report}-${arch}.json`)),
+    ...["darwin-arm64", "darwin-x86_64", "linux-arm64", "linux-x86_64"].flatMap((target) => [
+      `synveda-client-${version}-${target}.tar.gz`, `synveda-client-report-${target}.json`,
+    ]),
   ];
   try {
     mkdirSync(join(scratch, "bin"));
@@ -305,6 +314,13 @@ test("publication uploads exactly the release files despite checkout asset direc
       const report = join(scratch, "assets", `release-consumer-${arch}.json`);
       rmSync(report);
       assert.equal(run().status, 1, "missing native consumer report must fail before publication");
+      assert.equal(existsSync(capture), false);
+      writeFileSync(report, "fixture");
+    }
+    for (const target of ["darwin-arm64", "darwin-x86_64", "linux-arm64", "linux-x86_64"]) {
+      const report = join(scratch, "assets", `synveda-client-report-${target}.json`);
+      rmSync(report);
+      assert.equal(run().status, 1, "missing native client report must fail before publication");
       assert.equal(existsSync(capture), false);
       writeFileSync(report, "fixture");
     }

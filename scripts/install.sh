@@ -31,6 +31,9 @@
 # from a pipe.
 #
 # Environment:
+#   SYNVEDA_INSTALL_MODE  reference (default), or client for the OPS-12 candidate.
+#                     Client mode fetches one native archive and uses its private
+#                     Node; no Docker, server bundles or system Node are needed.
 #   SYNVEDA_VERSION   compatible release tag. Omitting it queries the
 #                     repository's latest release; do so only when that
 #                     release's instructions declare this installer compatible.
@@ -47,11 +50,21 @@ set -eu
 REPO="${SYNVEDA_REPO:-synveda/synveda}"
 HOME_DIR="${SYNVEDA_HOME:-$HOME/.synveda}"
 BIN_DIR="${SYNVEDA_BIN:-/usr/local/bin}"
+INSTALL_MODE="${SYNVEDA_INSTALL_MODE:-reference}"
 bin_dir_explicit=no
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '==> %s\n' "$*"; }
 die()  { printf 'install: %s\n' "$*" >&2; exit 1; }
+
+case "$INSTALL_MODE" in
+  reference) ;;
+  client)
+    BIN_DIR="${SYNVEDA_BIN:-$HOME_DIR/bin}"
+    [ -n "${SYNVEDA_VERSION:-}" ] || die "client mode requires an explicit SYNVEDA_VERSION; published v0.4.0 has no client archive"
+    ;;
+  *) die "SYNVEDA_INSTALL_MODE must be reference or client" ;;
+esac
 
 if [ -n "${SYNVEDA_BIN:-}" ]; then
   bin_dir_explicit=yes
@@ -86,7 +99,7 @@ fi
 # The withdrawn Rauthy/profile installation is not a compatible input to the
 # Keycloak reference deployment. Refuse it before downloads or mutation rather
 # than carrying its configuration or silently orphaning its containers.
-if [ -e "$HOME_DIR/profile" ] || [ -L "$HOME_DIR/profile" ]; then
+if [ "$INSTALL_MODE" = reference ] && { [ -e "$HOME_DIR/profile" ] || [ -L "$HOME_DIR/profile" ]; }; then
   die "legacy $HOME_DIR/profile exists.
   Stop the retired deployment, move or remove that directory explicitly, then
   rerun this installer. It does not migrate Rauthy-era state."
@@ -134,7 +147,16 @@ arch="$(uname -m)"
 case "$os/$arch" in
   Darwin/arm64)        target="darwin-arm64" ;;
   Linux/x86_64|Linux/amd64) target="linux-x86_64" ;;
+  Darwin/x86_64)
+    [ "$INSTALL_MODE" = client ] || die "Darwin/x86_64 requires client mode"
+    target="darwin-x86_64" ;;
+  Linux/aarch64|Linux/arm64)
+    [ "$INSTALL_MODE" = client ] || die "Linux/arm64 requires client mode"
+    target="linux-arm64" ;;
   *)
+    if [ "$INSTALL_MODE" = client ]; then
+      die "no native client archive for $os/$arch; candidates cover macOS/Linux x86_64 and arm64 (glibc). Windows portability and qualification remain open."
+    fi
     die "no release build for $os/$arch.
 
   This release ships macOS arm64 (Apple Silicon) and Linux x86_64.
@@ -151,7 +173,7 @@ esac
 # are built against glibc. Catching it here is the difference between a
 # refusal that names the cause and a "not found" from the dynamic loader.
 if [ "$os" = "Linux" ] && [ ! -e /lib/x86_64-linux-gnu/libc.so.6 ] \
-   && [ ! -e /lib64/ld-linux-x86-64.so.2 ]; then
+   && [ ! -e /lib64/ld-linux-x86-64.so.2 ] && [ ! -e /lib/ld-linux-aarch64.so.1 ]; then
   die "this looks like a musl system (Alpine?), and the Linux build is glibc.
   Build from source, or run the product image and point a CLI at its gateway."
 fi
@@ -186,6 +208,46 @@ base="${SYNVEDA_BASE_URL:-https://github.com/$REPO/releases/download/$version}"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
+
+if [ "$INSTALL_MODE" = client ]; then
+  archive="synveda-client-$plain-$target.tar.gz"
+  step "downloading client $version ($target)"
+  fetch "$base/$archive" "$work/$archive" || die "no client asset $archive in release $version"
+  fetch "$base/SHA256SUMS" "$work/SHA256SUMS" || die "release has no readable SHA256SUMS"
+  want="$(awk -v asset="$archive" '$2 == asset { count += 1; digest = $1 } END { if (count != 1) exit 1; print digest }' "$work/SHA256SUMS")" ||
+    die "$archive must appear exactly once in SHA256SUMS"
+  printf '%s\n' "$want" | grep -Eq '^[0-9a-f]{64}$' || die "invalid client checksum"
+  if command -v sha256sum >/dev/null 2>&1; then
+    got="$(sha256sum "$work/$archive" | cut -d' ' -f1)"
+  elif command -v shasum >/dev/null 2>&1; then
+    got="$(shasum -a 256 "$work/$archive" | cut -d' ' -f1)"
+  else die "sha256sum or shasum is required"; fi
+  [ "$want" = "$got" ] || die "client archive failed its checksum"
+  # Inspect before extraction. All client paths are closed package filenames;
+  # links, special entries, traversal and duplicates are never needed.
+  tar -tzf "$work/$archive" > "$work/entries" || die "invalid client archive"
+  awk '
+    !/^client(\/[A-Za-z0-9@_.-]+)*\/?$/ { exit 1 }
+    /(^|\/)\.\.?($|\/)/ { exit 1 }
+    { sub(/\/$/, ""); if (seen[$0]++) exit 1; count++ }
+    END { if (count < 2 || count > 1024) exit 1 }
+  ' "$work/entries" || die "unsafe client archive path inventory"
+  tar --numeric-owner -tvzf "$work/$archive" > "$work/types" || die "invalid client archive entries"
+  awk '
+    substr($0, 1, 1) != "-" && substr($0, 1, 1) != "d" { exit 1 }
+    # GNU tar prints uid/gid; BSD tar prints link-count, uid, gid.
+    $2 ~ /^[0-9]+\/[0-9]+$/ { size = $3; matched = 1 }
+    $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ { size = $5; matched = 1 }
+    { if (!matched || size !~ /^[0-9]+$/) exit 1; total += size; if (total > 536870912) exit 1; matched = 0 }
+  ' "$work/types" || die "client archive contains links or special entries, or exceeds its size bound"
+  tar -xzf "$work/$archive" -C "$work" || die "could not extract client archive"
+  [ -x "$work/client/plugin/synveda/runtime/node" ] && [ -f "$work/client/lib/client-install.mjs" ] ||
+    die "client archive lacks its private runtime or installer"
+  # Avoid ambient Node preload/module flags when executing the installer.
+  unset NODE_OPTIONS NODE_PATH
+  "$work/client/plugin/synveda/runtime/node" "$work/client/lib/client-install.mjs" "$HOME_DIR" "$BIN_DIR" "$plain" "$target"
+  exit $?
+fi
 
 step "downloading synveda $version ($target)"
 archive="synveda-$plain-$target.tar.gz"

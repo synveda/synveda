@@ -36,6 +36,11 @@ dependency is included. Client configuration and hook trust are separate
 setup steps. Local archive replay is covered by `make plugin-package-check`;
 native qualification still refers to the source-build setup above.
 
+The unpublished [OPS-12 client candidate](../CONSUMER_CLI.md#client-archive-candidate)
+prints a bundled private Node executable and hook path under
+`client/current/plugin/`. Use those paths in the same manual configuration;
+normal repository trust and the existing qualification limits still apply.
+
 For a source checkout, build with the locked workspace dependencies:
 
 ```sh

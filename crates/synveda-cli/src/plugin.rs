@@ -270,12 +270,25 @@ pub fn uninstall(plan: &RemovePlan) -> Result<(), String> {
 }
 
 /// `--from` selects a packaged marketplace; the installed default is
-/// `$SYNVEDA_HOME/plugin`. A bare plugin directory cannot be registered.
+/// the client archive, then `$SYNVEDA_HOME/plugin`. A bare plugin directory
+/// cannot be registered.
 fn locate(from: Option<&Path>) -> Result<PathBuf, String> {
     if let Some(path) = from {
         return validate(path).map(Path::to_path_buf);
     }
     let home = synveda_home()?;
+    locate_installed(&home)
+}
+
+fn locate_installed(home: &Path) -> Result<PathBuf, String> {
+    let client = home.join("client/current/plugin");
+    match home.join("client").symlink_metadata() {
+        // An incomplete or unreadable client install must not silently select
+        // an older plugin whose hooks depend on a different runtime.
+        Ok(_) => return validate(&client).map(Path::to_path_buf),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("inspect installed client marketplace: {error}")),
+    }
     let installed = home.join("plugin");
     if installed.join(".claude-plugin/marketplace.json").is_file() {
         return Ok(installed);
@@ -668,6 +681,29 @@ mod tests {
         assert!(validate(&neither).is_err());
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn installed_client_takes_precedence_and_damage_never_selects_the_old_bundle() {
+        let root = scratch("client-bundle");
+        let legacy = root.join("plugin/.claude-plugin");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("marketplace.json"), "{}").unwrap();
+        assert_eq!(locate_installed(&root).unwrap(), root.join("plugin"));
+        let client = root.join("client/releases/fixture/plugin/.claude-plugin");
+        std::fs::create_dir_all(&client).unwrap();
+        std::fs::write(client.join("marketplace.json"), "{}").unwrap();
+        std::os::unix::fs::symlink("releases/fixture", root.join("client/current")).unwrap();
+        assert_eq!(
+            locate_installed(&root).unwrap(),
+            root.join("client/current/plugin")
+        );
+        std::fs::remove_dir_all(root.join("client/releases/fixture")).unwrap();
+        assert!(locate_installed(&root).is_err());
+        std::fs::remove_file(root.join("client/current")).unwrap();
+        assert!(locate_installed(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

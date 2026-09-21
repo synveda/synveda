@@ -55,6 +55,11 @@ upgrade; it does not configure Codex. Use that absolute hook path in the
 trusted-hook configuration below, and `synveda login` for ordinary credentials.
 Keep MCP/task ownership exactly as documented below.
 
+The unpublished [OPS-12 client candidate](../CONSUMER_CLI.md#client-archive-candidate)
+instead prints a private Node executable and an installed hook path under
+`client/current/plugin/`. Use those two paths in the same manual recipe. Its
+local archive replay does not extend the native qualification claims below.
+
 To build and validate the archive locally:
 
 ```sh

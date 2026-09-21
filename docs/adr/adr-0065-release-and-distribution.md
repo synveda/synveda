@@ -1,10 +1,45 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted; amended eleven times. The current Docker deployment
+- **Status**: Accepted; amended twelve times. The current Docker deployment
   contract is ADR-0102; the native/client artifact decisions below remain.
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8, CPR-39, ADPT-9, OPS-12
 - **Deciders**: sujitn
+
+## Amendment 12 (2026-09-21): private runtimes and Unix client archives
+
+Extend the existing release and `install.sh` with an explicit client mode. One
+target-specific archive carries the existing CLI, the three compiled adapters,
+a private Node executable and all licence notices. It carries no gateway,
+worker, console or deployment archive. This changes distribution, not the CLI's
+documented local-bootstrap exceptions or its public-API authority boundary.
+
+Pin Node's upstream archive URL and SHA-256 per target in a reviewed inventory.
+Package only its executable and complete upstream licence, without npm or
+Corepack. Claude's copied plugin must carry its own runtime and use that exact
+path for both hooks and MCP. Codex/Copilot manual recipes use the same private
+executable; no system Node lookup or runtime download occurs in a hook.
+
+Client installation uses a private versioned directory, content inventory,
+ownership receipt and atomic current-link replacement. Retain earlier releases,
+credentials, spools, deployment state and vendor configuration. Refuse unowned
+or modified destinations; serialize installer mutations with an exclusive lock
+directory, retaining an interrupted lock for explicit inspection. A user-local
+CLI launcher is the default; installation never requires sudo or edits PATH.
+Checksums establish integrity; publisher-attestation enforcement remains open.
+
+Native release jobs build and exercise macOS/Linux x86_64 and arm64 candidates.
+Their extracted-artifact checks must execute the pinned runtime and installed
+CLI, with lifecycle replay reported separately from native vendor loading and
+real issuer acceptance. Windows remains blocked by Unix-only CLI bootstrap
+modules and absent Windows ACL/path/replacement handling; neither cross-builds
+nor WSL can qualify that platform. PowerShell installation follows that port.
+
+This retains one CLI, one plugin packager and one download entry point. A
+separate client product or downloading Node on first hook execution would add
+another lifecycle and failure boundary. Revisit the bundled runtime version
+for upstream security updates; changing its pin requires native archive checks.
+No policy, tenancy, VedaFlow or audit behavior changes.
 
 ## Amendment 11 (2026-09-21): preserve native plugin scope
 

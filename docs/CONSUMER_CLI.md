@@ -3,8 +3,80 @@
 These commands are in the current source CLI and matching plugin candidate.
 **They are not in published v0.4.0.** Keep using the
 [published installation guide](../deploy/compose/PREBUILT.md) for that release.
-Build the current CLI with `SQLX_OFFLINE=true cargo build -p synveda-cli`.
-Native client-only archives and private Node runtimes remain open work.
+Build the current CLI with `SQLX_OFFLINE=true cargo build -p synveda-cli`, or use
+the client archive candidate below. Windows installation remains open work.
+
+## Client archive candidate
+
+`synveda-client-VERSION-TARGET.tar.gz` contains the CLI, Claude marketplace,
+Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
+console or Compose bundle. Supported build targets are `darwin-arm64`,
+`darwin-x86_64`, `linux-arm64` and `linux-x86_64` (glibc). These are candidate
+targets; only macOS arm64 has local artifact execution evidence so far.
+Windows needs a CLI bootstrap port plus explicit credential/spool ACLs, native
+paths and replacement tests before a PowerShell installer can be qualified.
+
+The existing installer has an explicit client mode. For **locally built**
+candidate assets and their `SHA256SUMS` in an absolute directory:
+
+```sh
+SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.0 \
+  SYNVEDA_BASE_URL=file:///absolute/path/to/candidate-assets \
+  sh scripts/install.sh
+```
+
+No Docker, system Node or compiler is needed at installation time. The default
+CLI launcher is `~/.synveda/bin/synveda`; add the printed directory to PATH.
+`SYNVEDA_HOME` selects another installation root and `SYNVEDA_BIN` an explicit
+CLI directory. No sudo, shell-profile edit or harness configuration happens.
+Paths must be absolute, normalized and free of symbolic-link ancestors.
+Checksums detect corruption; this installer does not yet enforce publisher
+attestations. Published v0.4.0 has no client archive, so do not run this mode
+against its public downloads.
+
+Immutable client releases live under `$SYNVEDA_HOME/client/releases/`, selected
+by an atomic `client/current` link. The installer verifies the content inventory,
+native executable identity and private ownership receipt before switching.
+Reinstallation retains earlier releases and all deployment state, credentials
+and spools. Unowned launchers, modified releases and conflicting current links
+are refused. An interrupted `.client-install.lock` is retained for inspection;
+verify no installer is running before deliberately removing that empty lock.
+Do not modify files in an installed release. Automatic artifact removal remains
+unimplemented; retain releases referenced by a vendor marketplace or manual hook
+configuration. Adapter removal below remains separately available.
+
+`synveda plugin install` and `synveda adapter install --client claude-code`
+discover the installed client marketplace. Its copied Claude plugin includes
+private Node and names it in both hooks and MCP. Codex/Copilot still require
+manual registration and vendor trust: in their existing recipes replace the
+Node executable with the printed `client/current/plugin/synveda/runtime/node`
+and use the printed client hook path. Keep the entire installed client tree.
+A runtime update does not update a vendor-owned cached plugin until its native
+registration is deliberately reconciled. Managed receipts can still name an
+earlier immutable release; retain those bytes. Cross-release adapter upgrades
+and removal of old marketplace artifacts need separate qualification.
+
+For maintainers, `scripts/node-runtimes.json` pins each
+[upstream archive](https://nodejs.org/dist/v24.21.0/SHASUMS256.txt) by SHA-256.
+The packager retains Node's complete licence and bundled notices, omitting npm
+and Corepack. Build the existing adapters first, download the selected pinned
+archive, then run on that target's native host:
+
+```sh
+node scripts/package-client.mjs 0.4.0 darwin-arm64 target/debug/synveda \
+  /absolute/path/to/node-v24.21.0-darwin-arm64.tar.gz \
+  /absolute/path/to/candidate-assets "$(git rev-parse HEAD)"
+node scripts/check-client-package.mjs 0.4.0 \
+  /absolute/path/to/candidate-assets/synveda-client-0.4.0-darwin-arm64.tar.gz \
+  /absolute/path/to/client-report.json
+```
+
+Generate `SHA256SUMS` over the candidate archive before using the shell installer.
+The artifact check uses an isolated home and restricted PATH, then replays the
+existing Codex/Copilot lifecycle fixtures with the extracted private runtime.
+Reports include archive bytes, local install/reinstall timings, source identity
+and dirty-tree state. Local file-copy timing is not network-download timing;
+replay is not real issuer login or native vendor loading.
 
 ## Local deployment
 

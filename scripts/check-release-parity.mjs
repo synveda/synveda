@@ -112,6 +112,20 @@ export function releaseWorkflowFindings(source) {
   const assemblyJob = job("assemble");
   const verificationJob = job("verify-images");
   const publishJob = job("publish");
+  const binariesJob = job("binaries");
+  const clientGate = stepBlock(binariesJob, "Package and execute the native client archive");
+  if (!clientGate.includes("node scripts/package-client.mjs") ||
+      !clientGate.includes("node scripts/check-client-package.mjs") ||
+      /continue-on-error|^        if:/m.test(clientGate) ||
+      !assemblyJob.includes("node scripts/check-client-release.mjs") ||
+      !assemblyJob.includes("sha256sum synveda-client-report-*.json >> SHA256SUMS") ||
+      !assemblyJob.includes("            assets/synveda-client-report-*.json\n") ||
+      !publishJob.includes('release_assets+=("assets/synveda-client-$version-$target.tar.gz" "assets/synveda-client-report-$target.json")')) {
+    findings.push("release must require and carry native client archive execution reports");
+  }
+  for (const target of ["darwin-arm64", "darwin-x86_64", "linux-arm64", "linux-x86_64"]) {
+    if (!binariesJob.includes(`- target: ${target}\n`)) findings.push(`missing native client target: ${target}`);
+  }
   if (!imagesJob.startsWith("  images:\n    needs: version\n")) {
     findings.push("release image plan does not depend exactly on resolved version");
   }
@@ -121,7 +135,7 @@ export function releaseWorkflowFindings(source) {
   if (!publishJob.startsWith("  publish:\n    needs: [version, assemble, verify-images]\n")) {
     findings.push("release announcement does not await native anonymous verification");
   }
-  for (const block of [imagesJob, assemblyJob, verificationJob, publishJob]) {
+  for (const block of [binariesJob, imagesJob, assemblyJob, verificationJob, publishJob]) {
     if (/^    (continue-on-error|if):/m.test(block)) {
       findings.push("release job may mask a failed prerequisite");
     }
@@ -416,7 +430,7 @@ export function releaseWorkflowFindings(source) {
     !release.includes('"assets/synveda-registry-images-$version.json"') ||
     !release.includes("installed \\`synveda-compose\\` launcher") ||
     release.includes("installed `synveda-compose` launcher") ||
-    !release.includes("SYNVEDA_VERSION=${GITHUB_REF_NAME} sh synveda-install.sh") ||
+    !release.includes("\n          SYNVEDA_VERSION=${GITHUB_REF_NAME} sh synveda-install.sh\n") ||
     !release.trimEnd().endsWith(releaseCommand)
   ) {
     findings.push("GitHub Release publication is not the exact failure-propagating boundary");

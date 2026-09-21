@@ -108,6 +108,16 @@ down with all volumes retained. This does not qualify published native clients,
 Windows, user-wide hook consent, Codex/Copilot automatic hook setup or a supported
 upgrade window.
 
+The next OPS-12 increment packages the existing CLI and three adapters with
+private checksum-pinned Node, retaining its complete licence notices. The
+client installer downloads no server artifacts and uses private ownership and
+content receipts with an atomic current-link switch. A macOS arm64 artifact
+passed installation without system Node/Docker on PATH and extracted runtime
+replay. Native release jobs require separate reports for four Unix targets;
+those hosted jobs, real issuer/harness use of these archives and Windows
+ACL/path/bootstrap portability remain unqualified. This does not change the
+readiness verdict or the published v0.4.0 installation contract.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.

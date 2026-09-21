@@ -258,6 +258,62 @@ could not retrieve its package-manager signature in that environment; adapter
 compilation and tests used the already installed locked TypeScript compiler and
 Node directly, without changing dependencies or disabling signature checks.
 
+### Private runtime and Unix client increment (2026-09-21)
+
+ADR-0065 amendment 12 extends the existing release pipeline and shell installer
+with a client mode. Four native Unix build targets package the existing CLI,
+three adapters and private Node 24.21.0, pinned to upstream archive SHA-256s.
+The Node executable and complete upstream licence are retained; npm, Corepack,
+server binaries, console and Compose artifacts are absent from the client
+archive. Claude's copied plugin carries the private runtime and names it in
+both hook and MCP manifests. Codex/Copilot keep their manual registration and
+trust steps, using the printed private Node and hook paths.
+
+Installation requires only shell/download/archive/checksum tools. It verifies
+the archive, rejects links/traversal before extraction, checks a bounded content
+inventory and executes the native CLI/runtime identity probes before mutation.
+Private ownership receipts and an exclusive installer lock protect versioned
+releases, a stable user-local launcher and an atomic current link. Reinstall
+preserves earlier releases, deployment data, credentials, spools and vendor
+configuration. Unowned or modified files fail closed. The CLI discovers the
+client marketplace first and refuses a damaged client link instead of selecting
+a historical plugin. An interrupted installer lock requires inspection; automatic
+client artifact removal and publisher-attestation enforcement remain open.
+
+The extracted candidate passed on macOS arm64 using a source debug CLI and the
+official pinned Node archive. It used a private home containing spaces,
+apostrophes and Unicode and a PATH without Node, Docker, compilers or package
+managers. Installation, CLI/runtime execution, all three hook entry points,
+repeat installation with retained deployment bytes and Codex/Copilot lifecycle
+replays passed. These are mock-gateway replay and native executable checks, not
+real issuer or native harness qualification. The local report records source
+`b861fa708e8bd83cd9777bdb5a14e969a8c68ded` with dirty-tree evidence. Cold network
+download size/time and first authenticated harness call remain unmeasured.
+
+The final debug-CLI archive is 54,258,566 bytes, SHA-256
+`84ca08cb2a46cfeb828c435fb42f087292ae1525a4f0c8d44729f23c111f521b`.
+Local file-backed installation took 2.061s and repeat installation 2.128s;
+all six artifact checks and 31 extracted Codex/Copilot replay tests passed.
+Claude Code 2.1.241 also accepted the extracted plugin manifest in an isolated
+configuration directory; that proves manifest acceptance, not loading.
+The source CLI's seven plugin unit tests and five native scope fixtures pass,
+as do formatting and strict CLI Clippy. The artifact replays and the existing
+deployment evaluation fixture need local socket access; sandbox socket refusals
+are environment restrictions, not passing behavior checks.
+`make check-fast`, `make check-release-parity` (69 Node tests) and
+`make check-deploy chart-lint` pass; the latter includes 403 Node tests with
+zero skips plus deployment, Helm and portability contracts. `git diff --check`
+passes. No schema, generated API, SQLx metadata or dependency lockfile changed.
+
+Release assembly now requires four native client reports matching the archive
+hash/size, source, platform and Node pin. Tagged publication additionally requires
+clean source and matching CLI version; the reports enter the attested checksum
+inventory. None of those hosted jobs has run for this increment. Windows is
+blocked by unconditional Unix bootstrap code (`database_preflight.rs`, `demo.rs`)
+and missing explicit ACL/path/replacement support in credentials and spools.
+PowerShell installation follows that port and native execution evidence; a
+Windows matrix row alone would not be a working or private client.
+
 ## Rollout and rollback
 
 Keep existing v0.4.0 instructions until a new authorized release qualifies.
@@ -313,8 +369,11 @@ Docker Hub namespace/public repositories, expiring push credential, GitHub
 variables/secret and protected environment, plus authorization of a new version
 and release trigger. These do not block local implementation and tests.
 
-Next task: package pinned private Node runtimes and native client-only
-artifacts/installers, then qualify each supported platform and live harness.
+Next task: port the CLI's Unix bootstrap boundaries and implement Windows-native
+private credential/spool/receipt paths, ACLs and atomic replacement, then add the
+PowerShell installer and execute native Windows x86_64/arm64 acceptance. In
+parallel with that platform work, the four Unix candidate jobs and artifact-based
+real issuer/harness acceptance still need their own execution reports.
 Keep Codex/Copilot registration and hook trust manual until their native installer
 contracts have their own reviewed implementation and execution evidence. Installer
 attestation enforcement and Homebrew/WinGet remain unimplemented; configuration

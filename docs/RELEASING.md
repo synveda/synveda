@@ -13,6 +13,26 @@ anonymous download. Its upload-only failure was recovered from the original
 workflow artifacts; that workflow remains failed while its installation jobs
 and recovered release are verified. v0.3.0 also remains immutable.
 
+## Native client candidates
+
+OPS-12 adds `synveda-client-VERSION-TARGET.tar.gz` for native macOS/Linux x86_64
+and arm64. Each contains the existing CLI and adapters plus private Node pinned
+by upstream SHA-256 in [the runtime inventory](../scripts/node-runtimes.json),
+with Synveda and complete Node licence notices. It contains no server binaries
+or deployment bundle. The [candidate guide](CONSUMER_CLI.md#client-archive-candidate)
+owns its explicit `SYNVEDA_INSTALL_MODE=client` installation instructions.
+
+Each native binary job executes its extracted archive with no Node/Docker on
+the installer PATH and replays the existing Codex/Copilot fixtures using private
+Node. Assembly requires all four `synveda-client-report-TARGET.json` reports
+to match archive digests, source, target and runtime pin. Tagged builds also
+require a clean source tree and matching CLI version. Reports enter SHA256SUMS
+before attestation and accompany the release assets. A configured job is not
+hosted execution evidence: only macOS arm64 has been exercised locally.
+Windows, real issuer/harness execution from these archives and cold network
+download measurements remain open. The two historical server binary archives
+and system-Node plugin archive retain their existing contract.
+
 ## Owner setup
 
 1. Select a Docker Hub namespace you own. Do not assume `synveda` is available.

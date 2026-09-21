@@ -25,7 +25,10 @@ Native lifecycle/setup/adapter routes now use the candidate and existing public
 APIs/installers, with private receipts, observation consent and conflict-safe
 removal (ADR-0116). The source CLI has local OrbStack lifecycle and browser evidence;
 manual Codex/Copilot trust/setup and broader native qualification remain separate.
-Next are pinned private Node runtimes and native client-only artifacts/installers.
+Private pinned Node and Unix client-only archives/installation now have local
+macOS arm64 artifact evidence and required native release-report gates. Next are
+Windows CLI portability, private ACL/path handling and PowerShell installation,
+then hosted native and real issuer/harness qualification of the client artifacts.
 Hosted qualification and publication still need owner registry settings and a
 separately authorized new release.
 
