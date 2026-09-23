@@ -274,7 +274,7 @@ keycloak:
   databaseCaSecretKey: ca.crt
   image:
     repository: ghcr.io/synveda/keycloak
-    tag: "0.4.0"
+    tag: "0.4.1"
     digest: ""
   replicas: 1
   updateStrategy: OnDelete

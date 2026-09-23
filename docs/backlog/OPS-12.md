@@ -580,12 +580,18 @@ archives through this dry run.
 
 The owner has configured both Docker Hub variables and the protected release
 environment secret; tag protection, required CI Result and GHCR access still
-need review under [CI](../CI.md#manual-owner-settings). Do not tag or publish
-as part of this validation. Publication still needs separate authorization
-and a successful exact-commit main CI Result.
+need review under [CI](../CI.md#manual-owner-settings). The owner has now
+authorized a follow-up release. No tag should be pushed until version 0.4.1
+is merged, its exact commit passes full main CI and the nonpublishing release
+drill, and the repository settings are complete.
+Local 0.4.1 version parity, chart lint, generated contracts, SDKs, TypeScript,
+formatting, strict Clippy and focused native CLI tests passed. The broader
+Compose fixture run in the `/private/tmp` worktree hit its repository-root
+ownership assertion for `recovery-secrets`; rerun that gate from a normal
+owned checkout or use the hosted candidate jobs before tagging.
 
-Continue from this OPS-12 checkpoint and retain version `0.4.0` until an owner
-authorizes a coordinated new version. For another local candidate, use the
+Continue from this OPS-12 checkpoint with version `0.4.1` as an unreleased
+candidate; the published v0.4.0 bytes remain immutable. For another local candidate, use the
 existing `package-release.sh` arguments with the explicit candidate flag, extract
 the archive, then run `node scripts/qualify-release.mjs --consumer-candidate
 EXTRACTED_BUNDLE REPORT.json`. It creates an absent random acceptance project,

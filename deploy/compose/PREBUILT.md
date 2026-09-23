@@ -5,7 +5,9 @@ evaluation, or select the reference HTTPS configuration for infrastructure you
 operate. Both use the same Compose services, database authority checks,
 Cedar, forced RLS, VedaFlow and audit.
 
-<!-- installation-version: 0.4.0; publication: published -->
+<!-- installation-version: 0.4.1; publication: unreleased -->
+Source version 0.4.1 is a release candidate. This page continues to document
+the last published v0.4.0 bundle until its successor qualifies.
 **[v0.4.0 is published](https://github.com/synveda/synveda/releases/tag/v0.4.0).**
 Use the matching archive, image manifest and checksummed installation reports.
 The [release manifest](../../docs/installation.json) owns this status.

@@ -6,7 +6,9 @@ or existing OIDC. Bundled PostgreSQL is a persistent namespaced StatefulSet;
 CNPG is an explicit alternative requiring an operator you already manage.
 All modes preserve Cedar, forced RLS, VedaFlow, audit and the migration contract.
 
-<!-- installation-version: 0.4.0; publication: published -->
+<!-- installation-version: 0.4.1; publication: unreleased -->
+Source version 0.4.1 is a release candidate. This page continues to document
+the last published v0.4.0 chart until its successor qualifies.
 **[v0.4.0 is published](https://github.com/synveda/synveda/releases/tag/v0.4.0).**
 The OCI chart and downloadable archive are identical. Both native Linux
 architectures passed the four ownership modes using the published image digests.

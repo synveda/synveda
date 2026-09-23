@@ -20,7 +20,7 @@ appear on the GitHub Release only after a new version is approved and published.
 The existing v0.4.0 release has only the historical macOS ARM64 and Linux x64
 server/CLI archives. It has no `synveda-client-*` assets or Windows packages.
 Do not point the client installer at v0.4.0 public downloads. The source examples
-below use locally built candidates with that workspace version.
+below use locally built candidates matching the 0.4.1 workspace version.
 
 For a future published client release, download your platform's archive,
 `SHA256SUMS` and `SHA256SUMS.sigstore.json` into a private directory. Follow the
@@ -84,7 +84,7 @@ The existing installer has an explicit client mode. For **locally built**
 candidate assets and their `SHA256SUMS` in an absolute directory:
 
 ```sh
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.0 \
+SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.1 \
   SYNVEDA_BASE_URL=file:///absolute/path/to/candidate-assets \
   sh scripts/install.sh
 ```
@@ -104,7 +104,7 @@ On native Windows x64 or arm64, use the source PowerShell installer with
 existing PowerShell policy permits it; the installer never changes that policy:
 
 ```powershell
-& ./scripts/install.ps1 -Version 0.4.0 -BaseUrl 'file:///C:/candidate-assets'
+& ./scripts/install.ps1 -Version 0.4.1 -BaseUrl 'file:///C:/candidate-assets'
 ```
 
 PowerShell 5.1+ and a private local fixed-drive parent are required. The default
@@ -148,11 +148,11 @@ and Corepack. Build the existing adapters first, download the selected pinned
 archive, then run on that target's native host:
 
 ```sh
-node scripts/package-client.mjs 0.4.0 darwin-arm64 target/debug/synveda \
+node scripts/package-client.mjs 0.4.1 darwin-arm64 target/debug/synveda \
   /absolute/path/to/node-v24.21.0-darwin-arm64.tar.gz \
   /absolute/path/to/candidate-assets "$(git rev-parse HEAD)"
-node scripts/check-client-package.mjs 0.4.0 \
-  /absolute/path/to/candidate-assets/synveda-client-0.4.0-darwin-arm64.tar.gz \
+node scripts/check-client-package.mjs 0.4.1 \
+  /absolute/path/to/candidate-assets/synveda-client-0.4.1-darwin-arm64.tar.gz \
   /absolute/path/to/client-report.json
 ```
 
@@ -169,7 +169,7 @@ replay is not real issuer login or native vendor loading.
 On each native Windows host, build the same adapters and CLI, then run:
 
 ```powershell
-node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.0 windows-arm64 C:/candidate-assets (git rev-parse HEAD)
+node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.1 windows-arm64 C:/candidate-assets (git rev-parse HEAD)
 ```
 
 Use `windows-x86_64` on x64. This downloads the pinned Node ZIP, packages the
@@ -189,11 +189,11 @@ when absent; the CLI does not build images.
 From a terminal, using the built CLI on PATH:
 
 ```sh
-synveda doctor --bundle /absolute/path/to/synveda-reference-0.4.0
-synveda up --bundle /absolute/path/to/synveda-reference-0.4.0
-synveda status --bundle /absolute/path/to/synveda-reference-0.4.0
-synveda logs --bundle /absolute/path/to/synveda-reference-0.4.0 --tail 100
-synveda down --bundle /absolute/path/to/synveda-reference-0.4.0
+synveda doctor --bundle /absolute/path/to/synveda-reference-0.4.1
+synveda up --bundle /absolute/path/to/synveda-reference-0.4.1
+synveda status --bundle /absolute/path/to/synveda-reference-0.4.1
+synveda logs --bundle /absolute/path/to/synveda-reference-0.4.1 --tail 100
+synveda down --bundle /absolute/path/to/synveda-reference-0.4.1
 ```
 
 Without `--bundle`, the commands look in `$SYNVEDA_HOME/reference/current`

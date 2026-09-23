@@ -55,8 +55,11 @@ input, restricted-PATH `gzip` and AMD64 realm-startup timing issues. The final
 on `47fb126` passed all six native CLI packages and both Docker/Helm candidates.
 The dry-run bundle's 21 payload checksums passed, but its images are unpublished;
 the existing public v0.4.0 release still lacks native client-only archives.
-Next: real issuer/harness acceptance, signing/notarization and a separately
-approved release from a full exact-source main CI run.
+Version 0.4.1 is now an unreleased candidate for the owner-authorized follow-up.
+Next: complete its main CI and nonpublishing drill, then public release only
+after required repository settings; real issuer/harness acceptance and
+signing/notarization remain separate gaps. The temporary-worktree Compose
+fixture hit a repository-root ownership assertion; OPS-12 records the rerun.
 The Docker Hub variables and release environment secret are configured;
 required-check, tag-protection and GHCR settings remain in [the CI guide](../CI.md).
 

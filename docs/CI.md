@@ -2,8 +2,10 @@
 
 FND-1 / OPS-8 / OPS-12; [ADR-0108](adr/adr-0108-ci-gate-ownership-and-build-caching.md).
 The refactor starts from clean commit `e3cb694e88710eb971d2e3676b82a82982924064`.
-Product versions, lockfiles, generated APIs, test baselines and published releases
-are unchanged. CI, Release and Extended Tests are the entry points; Pages remains
+The pipeline refactor initially left product versions, lockfiles, generated APIs,
+test baselines and published releases unchanged. A subsequent 0.4.1 release
+candidate coordinates those versioned contracts; published v0.4.0 remains
+immutable. CI, Release and Extended Tests are the entry points; Pages remains
 independent. Only CLI and Docker share reusable jobs between CI and Release.
 
 ## Before / after coverage

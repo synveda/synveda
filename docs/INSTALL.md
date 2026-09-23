@@ -6,7 +6,9 @@ and exposure do not select a different product edition or confer readiness.
 
 ## Choose an installation workflow
 
-<!-- installation-version: 0.4.0; publication: published -->
+<!-- installation-version: 0.4.1; publication: unreleased -->
+Source version 0.4.1 is a release candidate. The instructions below continue
+to name the last published version, v0.4.0, until its successor qualifies.
 **[v0.4.0 is published](https://github.com/synveda/synveda/releases/tag/v0.4.0).**
 Its checksummed artifacts and native Linux AMD64/ARM64 installation reports are
 publicly downloadable without a registry account.
