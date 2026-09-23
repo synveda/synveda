@@ -3,9 +3,9 @@
 FND-1 / OPS-8 / OPS-12; [ADR-0108](adr/adr-0108-ci-gate-ownership-and-build-caching.md).
 The refactor starts from clean commit `e3cb694e88710eb971d2e3676b82a82982924064`.
 The pipeline refactor initially left product versions, lockfiles, generated APIs,
-test baselines and published releases unchanged. A subsequent 0.4.1 release
-candidate coordinates those versioned contracts; published v0.4.0 remains
-immutable. CI, Release and Extended Tests are the entry points; Pages remains
+test baselines and published releases unchanged. The v0.4.1 release then
+coordinated those versioned contracts; published v0.4.0 remains immutable.
+CI, Release and Extended Tests are the entry points; Pages remains
 independent. Only CLI and Docker share reusable jobs between CI and Release.
 
 ## Before / after coverage
@@ -107,7 +107,8 @@ Follow [RELEASING](RELEASING.md) for reviewed recovery and immutable-tag rules.
 ## Evidence and remaining qualification
 
 Read-only Actions inspection on 2026-09-22 found no merge queue or required status
-checks: the active `main` ruleset only prevents deletion and force pushes.
+checks. On 2026-09-23 the active `main` ruleset gained `CI Result` as its required
+GitHub Actions check. There is still no merge queue.
 
 | Before evidence | Observed duration / result |
 | --- | --- |
@@ -181,30 +182,47 @@ fresh launcher took 574s and 538s. Runner load, source and candidate scope
 differ, so these data do not establish a performance saving. The prior 19-minute
 dry run skipped installation; it is not comparable with the new 2h27m full
 candidate drill. No cold-cache, fork-PR or real registry-write performance
-claim is made. A tagged publication and fresh anonymous public pulls remain
-unexercised by instruction; local retained evaluation volumes were untouched.
+claim is made. Local retained evaluation volumes were untouched.
 
-No new release, tag, registry write or protection change was performed. The
-existing v0.4.0 public release does not contain the six new native client-only
-archives; download the validated dry-run packages from Actions until a new
-release is separately approved.
+The v0.4.1 follow-up merged as `d74e75b8991f22d8f4dd07034b3cd91db1ffb867`.
+Its [full main-push CI](https://github.com/synveda/synveda/actions/runs/35884349132)
+passed every required job, including both native Docker/Helm candidates and
+`CI Result`. Its [nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/35884456435)
+passed all six CLI archives and both native Docker/Helm candidates; only the
+publishing job was intentionally skipped. [PR #55 CI](https://github.com/synveda/synveda/actions/runs/35875955340)
+passed with the heavy Docker jobs deliberately skipped on a PR. The tagged
+[v0.4.1 Release run](https://github.com/synveda/synveda/actions/runs/35900269117)
+uses that exact source SHA. Record its publication and anonymous pull results
+here after it completes; the earlier v0.4.0 asset set stays immutable.
+
+The last full [refactor PR run](https://github.com/synveda/synveda/actions/runs/35860525470)
+took 2h12m24s. The [lightweight PR #55 run](https://github.com/synveda/synveda/actions/runs/35875955340)
+took 1h07m21s with native Docker deliberately skipped. The exact-source
+[main run](https://github.com/synveda/synveda/actions/runs/35884349132)
+still ran Docker and took 2h15m18s; the nonpublishing Release drill took
+2h04m56s. These are observed wall times on different commits and runners,
+not a controlled speedup measurement.
 
 ## Manual owner settings
 
-1. After a successful hosted run, add required status check **CI Result** (GitHub
-   Actions) to the main ruleset/branch protection. Require branches up to date,
-   or deliberately enable merge queue; `merge_group` already selects all stages.
-   Do not require individual matrix job names. No required checks currently exist.
+1. **CI Result** (GitHub Actions) is now required in the active main ruleset.
+   The rule currently uses loose status checks: branches need not be up to date
+   before merging. An owner may require branches up to date or deliberately
+   enable merge queue; `merge_group` already selects all stages. Do not require
+   individual matrix job names.
 2. Repository variables: `DOCKERHUB_NAMESPACE` (owned namespace) and
    `DOCKERHUB_USERNAME` (publisher). Both variables were configured on
    2026-09-23. Create or verify the six public Docker Hub repositories named in
    [RELEASING](RELEASING.md#owner-setup). Follow the exact
    [Docker Hub token setup](RELEASING.md#docker-hub-token-setup) for an expiring
    read/write token without delete permission and the correct publisher username.
-3. Environment **release** now has an owner reviewer, a `v*` tag rule and the
-   **DOCKERHUB_TOKEN** secret. Protect creation/update/deletion of release tags
-   with an owner-controlled tag ruleset before publication. **release-dry-run**
-   needs no secrets or approval and was exercised separately.
+3. Environment **release** has an owner reviewer, a `v*` deployment tag rule and
+   the **DOCKERHUB_TOKEN** secret. An active Git tag ruleset blocks updates and
+   deletion of `v*` tags; creation is still unrestricted for repository writers.
+   Add a separate creation-only `v*` ruleset with bypass for the release
+   operator's team or role. Keep the update/deletion ruleset without bypass.
+   **release-dry-run** needs no secrets or approval and passed on the exact
+   v0.4.1 source commit.
 4. Give this repository's Actions token write access to the six GHCR packages
    and `ghcr.io/synveda/charts/synveda`; make all public for anonymous verification.
    Permit pinned Actions and workflow-scoped `packages: write`, `contents: write`,
@@ -217,5 +235,5 @@ release is separately approved.
 
 The [native CLI asset table](RELEASING.md#native-cli-release-artifacts) names
 every required public package. The existing v0.4.0 release has neither those
-six client-only archives nor the new authenticated checksum inventory; the next
-approved publication must satisfy the complete asset gate.
+six client-only archives nor the new authenticated checksum inventory; v0.4.1
+must satisfy the complete asset gate before it appears as a stable release.
