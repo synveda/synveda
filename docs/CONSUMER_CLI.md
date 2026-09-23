@@ -1,10 +1,11 @@
-# Native consumer commands (OPS-12 candidate)
+# Native consumer commands
 
-These commands are in the current source CLI and matching plugin candidate.
+These commands are in the 0.4.1 source CLI and matching plugin. The client
+archives become public only after the v0.4.1 release is stable.
 **They are not in published v0.4.0.** Keep using the
 [published installation guide](../deploy/compose/PREBUILT.md) for that release.
 Build the current CLI with `SQLX_OFFLINE=true cargo build -p synveda-cli`, or use
-the client archive candidate below. [OPS-12](backlog/OPS-12.md) records native
+the matching release archive after publication. [OPS-12](backlog/OPS-12.md) records native
 execution reports and the remaining qualification gaps.
 
 ## Release downloads

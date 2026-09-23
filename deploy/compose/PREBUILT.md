@@ -18,6 +18,44 @@ Hub distribution, attested checksums and six native CLI packages for a future
 approved release. It does not change these immutable downloads. No Docker Hub
 token or native CLI is needed to install this public server bundle.
 
+## Version 0.4.1 release bundle
+
+Use this procedure only after the [v0.4.1 release](https://github.com/synveda/synveda/releases/tag/v0.4.1)
+has completed publication with its reference archive, `SHA256SUMS` and
+`SHA256SUMS.sigstore.json`. It downloads tested images by digest and never
+builds from a consumer source checkout. Verify the publisher before trusting
+the checksums; the GitHub CLI is a verification tool, not an installation
+dependency of the bundle.
+
+```sh
+version=0.4.1
+release_url="https://github.com/synveda/synveda/releases/download/v$version"
+mkdir "synveda-$version" && cd "synveda-$version"
+for file in "synveda-reference-$version.tar.gz" SHA256SUMS SHA256SUMS.sigstore.json; do
+  curl -fLO "$release_url/$file"
+done
+source_sha="$(gh api "repos/synveda/synveda/commits/v$version" --jq .sha)"
+gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+  --repo synveda/synveda \
+  --signer-workflow synveda/synveda/.github/workflows/release.yml \
+  --source-ref "refs/tags/v$version" --source-digest "$source_sha" \
+  --deny-self-hosted-runners
+awk -v file="synveda-reference-$version.tar.gz" \
+  '$2 == file { count++; print } END { if (count != 1) exit 1 }' \
+  SHA256SUMS > reference.sha256
+if command -v shasum >/dev/null 2>&1; then
+  shasum -a 256 --check reference.sha256
+else
+  sha256sum --check reference.sha256
+fi
+tar -xzf "synveda-reference-$version.tar.gz"
+cd "synveda-reference-$version"
+./synveda-compose up
+```
+
+The remaining lifecycle and first-sign-in guidance applies to this bundle;
+the v0.4.0 download example below remains for the previous public release.
+
 ## Requirements
 
 An ordinary account with access to a **local Docker daemon**, Compose 2.33.1+
