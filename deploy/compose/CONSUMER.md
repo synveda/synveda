@@ -26,7 +26,7 @@ For a disposable evaluation on a local Linux-container Docker engine, extract
 the verified candidate archive into a directory and run:
 
 ```sh
-docker compose up -d --wait --wait-timeout 600
+docker compose up -d --wait --wait-timeout 900
 docker compose run --rm --no-deps credentials
 ```
 
@@ -45,7 +45,7 @@ docker compose run --rm --no-deps --entrypoint node browser-acceptance product-d
 docker compose ps --all
 docker compose logs --tail 100
 docker compose down
-docker compose up -d --wait --wait-timeout 600
+docker compose up -d --wait --wait-timeout 900
 ```
 
 `node` in the sample command is inside the pinned optional browser image; it is
@@ -87,7 +87,7 @@ new immutable ID. It stops all profiles, runs only PostgreSQL for the native
 logical dumps, and validates both databases against the linked key set and
 original private configuration. Success leaves the source **down**, with all
 volumes retained. Restart it with `docker compose up -d --wait --wait-timeout
-600` when a restore drill is not in progress. An existing backup ID is refused.
+900` when a restore drill is not in progress. An existing backup ID is refused.
 
 The separate `synveda-local_recovery` volume contains
 `checkpoint-1/database/{manifest.json,synveda.dump,keycloak.dump}`, the existing

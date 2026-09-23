@@ -55,8 +55,11 @@ unlinked packaging input and captures bounded AMD64 diagnostics. Next: rerun
 both workflows for the follow-up commit and inspect any remaining failure.
 The second hosted attempt passed Linux archive packaging but found missing
 `gzip` in the restricted installer test PATH; that fixture is corrected.
-AMD64 Compose reproduced its unhealthy realm gate with a silent supervisor;
-bounded gate/network/process probes are added for the next hosted diagnosis.
+Both Linux archive jobs passed the third PR run. AMD64 Compose reproduced its
+unhealthy realm gate around ten minutes, while generation capture and Keycloak
+management network probes passed at failure. Evaluation, plain Compose and
+recovery now wait up to 900 seconds while preserving the same generation
+readiness gate. A complete green hosted rerun is pending.
 The Docker Hub variables and release environment secret are configured;
 required-check, tag-protection and GHCR settings remain in [the CI guide](../CI.md).
 

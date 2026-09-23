@@ -133,7 +133,7 @@ test("consumer restore validates before copying, reconverges authority, verifies
   const r = f.run(["restore", id, source], { SYNVEDA_CONFIRM_RESTORE: `${source}:${id}:${project}` });
   assert.equal(r.status, 0, r.stderr);
   const calls = f.calls().map((args) => args.join(" "));
-  const steps = ["recovery-check verify", "recovery-state restore", "--wait-timeout 180 postgres", "run --rm --no-deps database-restore", "run --rm --no-deps recovery-verify", "run --rm --no-deps recovery-key-refusal", "recovery-state unlock", "--wait-timeout 600"];
+  const steps = ["recovery-check verify", "recovery-state restore", "--wait-timeout 180 postgres", "run --rm --no-deps database-restore", "run --rm --no-deps recovery-verify", "run --rm --no-deps recovery-key-refusal", "recovery-state unlock", "--wait-timeout 900"];
   let previous = -1;
   for (const step of steps) {
     const index = calls.findIndex((line) => line.includes(step));

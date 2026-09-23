@@ -23,7 +23,9 @@ const env = { ...process.env, SYNVEDA_HOME: home };
 delete env.SYNVEDA_COMPOSE_RUNTIME;
 const report = { version: manifest.release_version, source: manifest.source_sha, sourceDirty: manifest.source_dirty ?? false, images: manifest.images, at: new Date().toISOString(), checks: {}, imageDownloadMs: null };
 function run(command, args, extra = {}) {
-  const result = spawnSync(command, args, { env, cwd: bundle, encoding: "utf8", timeout: 900_000, maxBuffer: 4 * 1024 * 1024, ...extra });
+  // The documented Compose launcher waits at most 900s; leave a small margin
+  // for its own timeout and cleanup so failures retain their diagnostics.
+  const result = spawnSync(command, args, { env, cwd: bundle, encoding: "utf8", timeout: 1_020_000, maxBuffer: 4 * 1024 * 1024, ...extra });
   if (result.status !== 0) throw new Error(`${command} ${args[0]} failed (${result.status ?? "timeout"}); ${result.stderr?.slice(-1800) ?? ""}`);
   return result.stdout;
 }
@@ -73,6 +75,14 @@ function reportFailedRealmConvergence() {
     const processes = spawnSync("docker", ["top", id, "-eo", "comm,etime"],
       { env, encoding: "utf8", timeout: 15_000 });
     if (processes.status === 0) console.error(`qualification realm-convergence processes: ${processes.stdout.trim().split("\n").slice(0,18).join(" | ").slice(0,1000)}`);
+    else {
+      // Some Docker hosts reject ps formatting. /proc/comm exposes process
+      // names without the command-line arguments that may contain secrets.
+      const fallback = spawnSync("docker", ["exec", id, "sh", "-c",
+        'for entry in /proc/[0-9]*/comm; do read -r name < "$entry" || continue; printf "%s\\n" "$name"; done'],
+      { env, encoding: "utf8", timeout: 15_000 });
+      console.error(`qualification realm-convergence process probe: docker_top=${processes.status ?? "timeout"} proc=${fallback.status ?? "timeout"} names=${fallback.status === 0 ? fallback.stdout.trim().split("\n").slice(0,18).join(",").slice(0,300) : "unavailable"}`);
+    }
   } catch {
     console.error("qualification realm-convergence diagnostics unavailable");
   }

@@ -141,11 +141,19 @@ to be assessed from successful runs.
 The second hosted attempt on `3a4da43` passed Linux archive packaging but
 found that the restricted installer test PATH omitted `gzip`, which GNU tar
 invokes for `.tar.gz`. That standard decompressor is now included while system
-Node, Docker and build tools remain excluded. AMD64 Compose diagnosis and
-complete results are pending; neither attempt qualifies a release. AMD64
-reproduced the unhealthy realm gate with its supervisor still running and no
-log output. The next diagnostic probes the gate selector, network management
-health and bounded process names before cleanup.
+Node, Docker and build tools remain excluded. The third
+[PR CI run](https://github.com/synveda/synveda/actions/runs/35840850084)
+passed both Linux client archive checks but again reached an unhealthy AMD64
+realm gate after roughly ten minutes. At failure, generation capture and the
+Keycloak management network probe both passed; the supervisor had no logs.
+The evaluation healthcheck's five-minute start period plus retries ended around
+the old 600-second launcher limit. The launcher and derived plain-Compose
+candidate now use a 900-second wait; their evaluation healthcheck remains in
+`starting` through that bound. This extends time for CPU-constrained first-run
+identity reconciliation without changing the complete generation readiness
+gate. The documented direct-Compose and recovery commands use the same bound.
+The fixture retains bounded process-name diagnostics if it still fails. A
+complete hosted rerun is required; none of these attempts qualifies a release.
 
 The local Docker host has retained evaluation volumes; full qualification refuses
 them and they must not be reset for this task. No new release, tag, registry write

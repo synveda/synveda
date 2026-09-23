@@ -110,7 +110,7 @@ while IFS= read -r fragment; do
   set -- "$@" -f "$bundle/deploy/compose/$fragment"
 done < "$state/evaluation-files"
 case "$action" in
-  up) docker compose "$@" up --detach --no-build --wait --wait-timeout 600
+  up) docker compose "$@" up --detach --no-build --wait --wait-timeout 900
       echo 'Open the console URL printed by preparation. Run ./synveda-compose credential for deliberate first-login retrieval.' ;;
   config) docker compose "$@" config --quiet ;;
   status) docker compose "$@" ps --all ;;
@@ -136,18 +136,18 @@ case "$action" in
     else
       echo 'backup failed; incomplete set retained for inspection; resume with up after resolving the error' >&2; exit 78
     fi
-    docker compose "$@" up --detach --no-build --wait --wait-timeout 600 ;;
+    docker compose "$@" up --detach --no-build --wait --wait-timeout 900 ;;
   restore)
     export SYNVEDA_RESTORE_DATABASE_DIR=$state/backups/$backup_id/database
     export SYNVEDA_RESTORE_WRONG_KMS_KEY_FILE=$state/synveda-evaluation/secrets/synveda_kms_key
-    docker compose "$@" up --detach --no-build --wait --wait-timeout 600 postgres
+    docker compose "$@" up --detach --no-build --wait --wait-timeout 900 postgres
     docker compose "$@" run --rm --no-deps database-bootstrap
     docker compose "$@" run --rm --no-deps keycloak-database-bootstrap
     docker compose "$@" -f "$bundle/deploy/compose/compose.restore.yaml" run --rm --no-deps database-restore
     docker compose "$@" run --rm --no-deps database-bootstrap
     docker compose "$@" run --rm --no-deps keycloak-database-bootstrap
     docker compose "$@" -f "$bundle/deploy/compose/compose.restore.yaml" run --rm --no-deps recovery-verify
-    docker compose "$@" up --detach --no-build --wait --wait-timeout 600
+    docker compose "$@" up --detach --no-build --wait --wait-timeout 900
     echo 'Restored database pair with matching keys. Sign in and verify the expected workspace before resuming use.' ;;
   credential)
     [ -t 1 ] || { echo 'credential retrieval requires an interactive terminal; read the private password file directly for automation' >&2; exit 78; }

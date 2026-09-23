@@ -560,10 +560,16 @@ and both candidate reports. Local retained evaluation volumes remain untouched.
 
 The second hosted attempt on `3a4da43` passed Linux archive packaging but
 found that the restricted installer test PATH omitted GNU tar's `gzip` helper.
-That helper is now allowed; AMD64 Compose diagnosis and a complete hosted
-rerun remain pending. AMD64 reproduced the unhealthy realm gate with a running,
-silent supervisor; the next diagnostic checks gate capture, network management
-health and process names before exact-project cleanup.
+That helper is now allowed; both Linux targets passed the third PR run on
+`4c91fcc`. AMD64 Compose again reached an unhealthy realm gate after about ten
+minutes, though generation capture and the Keycloak management network probe
+both passed at failure. The evaluation healthcheck had exhausted its retries
+around the old 600-second Compose wait. Evaluation, plain Compose and recovery
+now use a 900-second wait with a matching health start period, without relaxing
+the generation gate. Failure diagnostics fall back to content-free process
+names when Docker rejects `top` formatting. Next action: obtain a complete
+green hosted PR CI and nonpublishing Release run, retaining both native
+candidate reports.
 
 The owner has configured both Docker Hub variables and the protected release
 environment secret; tag protection, required CI Result and GHCR access still
