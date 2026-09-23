@@ -53,6 +53,10 @@ Linux client packaging and AMD64 realm convergence failed, so CI Result blocked
 the PR. The workflow now copies Cargo's Linux hard-linked binary into an
 unlinked packaging input and captures bounded AMD64 diagnostics. Next: rerun
 both workflows for the follow-up commit and inspect any remaining failure.
+The second hosted attempt passed Linux archive packaging but found missing
+`gzip` in the restricted installer test PATH; that fixture is corrected.
+AMD64 Compose reproduced its unhealthy realm gate with a silent supervisor;
+bounded gate/network/process probes are added for the next hosted diagnosis.
 The Docker Hub variables and release environment secret are configured;
 required-check, tag-protection and GHCR settings remain in [the CI guide](../CI.md).
 

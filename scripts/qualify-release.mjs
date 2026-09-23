@@ -65,6 +65,14 @@ function reportFailedRealmConvergence() {
     }
     console.error(`qualification realm-convergence state: ${health.slice(-800)}`);
     console.error(`qualification realm-convergence recent logs: ${recentLogs.slice(-2200)}`);
+    const gate = spawnSync("docker", ["exec", id, "/opt/keycloak/bin/synveda-generation-gate", "capture"],
+      { env, encoding: "utf8", timeout: 15_000 });
+    const management = spawnSync("docker", ["exec", id, "/opt/keycloak/bin/synveda-keycloak-health", "network"],
+      { env, encoding: "utf8", timeout: 15_000 });
+    console.error(`qualification realm-convergence probes: gate_capture=${gate.status ?? "timeout"} management_network=${management.status ?? "timeout"}`);
+    const processes = spawnSync("docker", ["top", id, "-eo", "comm,etime"],
+      { env, encoding: "utf8", timeout: 15_000 });
+    if (processes.status === 0) console.error(`qualification realm-convergence processes: ${processes.stdout.trim().split("\n").slice(0,18).join(" | ").slice(0,1000)}`);
   } catch {
     console.error("qualification realm-convergence diagnostics unavailable");
   }

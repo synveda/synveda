@@ -27,7 +27,8 @@ try {
   checks.push("native-identity-and-client-only-inventory");
   const tools = join(scratch, "tools");
   mkdirSync(tools);
-  for (const tool of ["sh", "uname", "curl", "tar", "awk", "grep", "cut", "mktemp", "rm", "shasum"]) {
+  // GNU tar invokes gzip as a separate program when extracting .tar.gz files.
+  for (const tool of ["sh", "uname", "curl", "tar", "gzip", "awk", "grep", "cut", "mktemp", "rm", "shasum"]) {
     const executable = run("/bin/sh", ["-c", `command -v ${tool}`]).trim();
     symlinkSync(executable, join(tools, tool));
   }

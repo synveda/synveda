@@ -91,6 +91,7 @@ SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.0 \
 
 No Docker, system Node or compiler is needed at installation time. The default
 CLI launcher is `~/.synveda/bin/synveda`; add the printed directory to PATH.
+On Linux, GNU tar also needs the host `gzip` utility to extract the archive.
 `SYNVEDA_HOME` selects another installation root and `SYNVEDA_BIN` an explicit
 CLI directory. No sudo, shell-profile edit or harness configuration happens.
 Paths must be absolute, normalized and free of symbolic-link ancestors.

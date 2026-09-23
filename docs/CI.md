@@ -137,6 +137,16 @@ publication jobs skipped as designed. A hosted rerun of both workflows is
 required before claiming full candidate qualification. Cold caches, fork PRs,
 OCI archive transfer/storage and fresh native Docker/Kind qualification remain
 to be assessed from successful runs.
+
+The second hosted attempt on `3a4da43` passed Linux archive packaging but
+found that the restricted installer test PATH omitted `gzip`, which GNU tar
+invokes for `.tar.gz`. That standard decompressor is now included while system
+Node, Docker and build tools remain excluded. AMD64 Compose diagnosis and
+complete results are pending; neither attempt qualifies a release. AMD64
+reproduced the unhealthy realm gate with its supervisor still running and no
+log output. The next diagnostic probes the gate selector, network management
+health and bounded process names before cleanup.
+
 The local Docker host has retained evaluation volumes; full qualification refuses
 them and they must not be reset for this task. No new release, tag, registry write
 or protection change was performed. There is **no measured after timing**; extra

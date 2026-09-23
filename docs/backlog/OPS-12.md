@@ -557,6 +557,14 @@ captures bounded, redacted diagnostics before cleanup. CI Result rejected the
 run. Next action: rerun PR CI and nonpublishing Release for the follow-up
 commit, inspect the AMD64 diagnostic if it recurs, and retain all six client
 and both candidate reports. Local retained evaluation volumes remain untouched.
+
+The second hosted attempt on `3a4da43` passed Linux archive packaging but
+found that the restricted installer test PATH omitted GNU tar's `gzip` helper.
+That helper is now allowed; AMD64 Compose diagnosis and a complete hosted
+rerun remain pending. AMD64 reproduced the unhealthy realm gate with a running,
+silent supervisor; the next diagnostic checks gate capture, network management
+health and process names before exact-project cleanup.
+
 The owner has configured both Docker Hub variables and the protected release
 environment secret; tag protection, required CI Result and GHCR access still
 need review under [CI](../CI.md#manual-owner-settings). Do not tag or publish
