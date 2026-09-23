@@ -51,6 +51,14 @@ export function selectChanges(paths, full = false) {
   return selected;
 }
 
+export function selectForEvent(paths, eventName) {
+  const selected = selectChanges(paths, eventName !== "pull_request");
+  // Native Docker/Compose qualification is required on main, merge queues and
+  // release runs. PRs retain static deployment checks and live Helm tests.
+  if (eventName === "pull_request") selected.docker = false;
+  return selected;
+}
+
 export function changedPaths(base, head, run = execFileSync) {
   if (![base, head].every((sha) => /^[a-f0-9]{40}$/.test(sha ?? "")))
     throw new Error("missing exact PR commits");
@@ -74,10 +82,10 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
     try {
       paths = changedPaths(process.env.BASE_SHA, process.env.HEAD_SHA);
     } catch {
-      console.log("Change comparison unavailable; selecting every stage.");
+      console.log("Change comparison unavailable; selecting every PR-eligible stage.");
     }
   }
-  const selected = selectChanges(paths, full);
+  const selected = selectForEvent(paths, process.env.GITHUB_EVENT_NAME);
   console.log(JSON.stringify({ paths: paths ?? "all", selected }, null, 2));
   if (process.env.GITHUB_OUTPUT)
     appendFileSync(

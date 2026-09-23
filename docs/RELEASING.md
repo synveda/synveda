@@ -3,8 +3,11 @@
 OPS-8 / OPS-12; [ADR-0115](adr/adr-0115-prebuilt-container-release-verification.md).
 The [CI/release guide](CI.md) owns the workflow map, source gate, local checks
 and current manual repository settings.
-The two-registry and attestation changes are configured, **not published or
-qualified**. The published v0.4.0 remains unchanged and uses GHCR, its original
+The two-registry and attestation changes are configured. Their 0.4.0-source
+candidate path passed a nonpublishing dry run; public distribution and the
+0.4.1 candidate still require their own qualification. Source version 0.4.1
+is a release candidate. The published v0.4.0 remains
+unchanged and uses GHCR, its original
 installer and its original checksum-only trust boundary. Never rerun publication
 against that version. The [installation guide](../deploy/compose/PREBUILT.md)
 continues to describe those existing downloads.

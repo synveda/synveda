@@ -27,7 +27,9 @@ to Docker. No compiler, hostname edit, cloud account or model subscription is
 needed. Linux AMD64/ARM64 release installation is verified; macOS/OrbStack has
 local candidate evidence. Docker Desktop and Windows/WSL2 remain unqualified.
 
-<!-- installation-version: 0.4.0; publication: published -->
+<!-- installation-version: 0.4.1; publication: unreleased -->
+Source version 0.4.1 is a release candidate. Until it is published, the
+following commands install the last published version, v0.4.0.
 [Release downloads and installation reports](https://github.com/synveda/synveda/releases/tag/v0.4.0).
 Use a new directory and stop if checksum verification fails:
 

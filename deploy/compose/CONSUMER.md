@@ -1,10 +1,10 @@
-# Plain Compose candidate
+# Plain Compose consumer bundle
 
-This is an unpublished OPS-12 qualification artifact. The released v0.4.0
-launcher remains the supported installation path. This candidate uses the
+This 0.4.1 bundle is a qualification artifact until the matching GitHub Release
+is stable; the released v0.4.0 launcher remains available. This bundle uses the
 existing evaluation services with named private state; it cannot adopt the
 launcher's retained host state. Its artifact gate includes paired backup/restore;
-native Docker Desktop and release qualification remain separate requirements.
+native Docker Desktop qualification remains separate.
 
 The refactored CI and Release workflows test this extracted bundle against
 the exact native AMD64/ARM64 OCI candidates. A tagged release also verifies
@@ -19,7 +19,7 @@ source checkout). Start that route
 with a fresh project; it cannot adopt an existing direct-Compose installation.
 For a published client release, use its matching native `synveda-client-*`
 archive from the GitHub Release; all six OS/architecture packages are required
-by the pipeline. Until that release exists, use the locally qualified candidate
+by the pipeline. Until v0.4.1 is published, use the locally qualified candidate
 instructions in `docs/CONSUMER_CLI.md`.
 
 For a disposable evaluation on a local Linux-container Docker engine, extract

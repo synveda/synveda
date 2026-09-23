@@ -156,7 +156,9 @@ test("the opt-in packaged candidate resolves fresh without any generated host se
       }
     }
   }
-  assert.match(readFileSync(path.join(bundle, "CONSUMER.md"), "utf8"), /unpublished OPS-12/);
+  const consumerGuide = readFileSync(path.join(bundle, "CONSUMER.md"), "utf8");
+  assert.match(consumerGuide, /qualification artifact until the matching GitHub Release\s+is stable/);
+  assert.match(consumerGuide, /released v0\.4\.0 launcher remains available/);
   assert.match(readFileSync(path.join(bundle, "synveda-compose"), "utf8"), /evaluation.sh/, "existing operator/recovery launcher is preserved");
   const projections = JSON.parse(readFileSync(path.join(bundle, "deploy/compose/consumer-projections.json")));
   assert.equal(projections["browser-acceptance"].keycloak_demo_admin_password, "keycloak_demo_admin_password");

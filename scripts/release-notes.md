@@ -12,7 +12,7 @@ checksum inventory authenticates these release bytes and registry digests.
 
 For a server, download only `synveda-reference-{{version}}.tar.gz`
 plus `SHA256SUMS` and `SHA256SUMS.sigstore.json`: no source checkout or compiler is needed. Follow
-the [prebuilt Docker guide](https://github.com/{{repository}}/blob/{{tag}}/deploy/compose/PREBUILT.md)
+the [prebuilt Docker guide](https://github.com/{{repository}}/blob/{{tag}}/deploy/compose/PREBUILT.md#version-041-release-bundle)
 for download verification, localhost first sign-in and lifecycle operations.
 
 Both Linux AMD64 and ARM64 jobs anonymously pulled the manifest-bound

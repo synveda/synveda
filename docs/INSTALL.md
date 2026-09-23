@@ -6,7 +6,9 @@ and exposure do not select a different product edition or confer readiness.
 
 ## Choose an installation workflow
 
-<!-- installation-version: 0.4.0; publication: published -->
+<!-- installation-version: 0.4.1; publication: unreleased -->
+Source version 0.4.1 is a release candidate. The instructions below continue
+to name the last published version, v0.4.0, until its successor qualifies.
 **[v0.4.0 is published](https://github.com/synveda/synveda/releases/tag/v0.4.0).**
 Its checksummed artifacts and native Linux AMD64/ARM64 installation reports are
 publicly downloadable without a registry account.
@@ -39,9 +41,10 @@ loopback evaluation, reference HTTPS, first workspace and lifecycle commands.
 
 The remaining sections describe product use after authenticated startup.
 
-The current source CLI's [native consumer commands](CONSUMER_CLI.md) are an
-unpublished OPS-12 candidate. They add receipt-bound Compose lifecycle and
-project/adapter setup; published v0.4.0 does not contain them.
+The current source CLI's [native consumer commands](CONSUMER_CLI.md) become
+public with the matching 0.4.1 release; until then they are an OPS-12
+candidate. They add receipt-bound Compose lifecycle and project/adapter setup;
+published v0.4.0 does not contain them.
 
 ## Bootstrap policy
 
