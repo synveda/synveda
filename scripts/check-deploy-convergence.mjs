@@ -131,10 +131,8 @@ export function initCutoverFindings(source) {
   return findings;
 }
 
-export function releaseNoteFindings(source) {
-  const block = source.match(/cat > notes\.md <<NOTES\r?\n([\s\S]*?)^[ \t]*NOTES[ \t]*$/mu);
-  if (!block) return ["release-note block is missing"];
-  const notes = block[1];
+export function releaseNoteFindings(notes) {
+  if (!notes.trim()) return ["release notes are missing"];
   const findings = [];
   if (notes.includes("synveda init --demo")) {
     findings.push("retired synveda init --demo command");
@@ -2186,10 +2184,9 @@ function checkPublicContract() {
 }
 
 function checkReleaseNotes() {
-  const workflow = read(".github/workflows/release.yml");
   const findings = [
-    ...releaseNoteFindings(workflow),
-    ...releasePostgresBuildFindings(workflow),
+    ...releaseNoteFindings(read("scripts/release-notes.md")),
+    ...releasePostgresBuildFindings(read(".github/workflows/docker.yml")),
   ];
   if (findings.length > 0) {
     fail(`release workflow contains ${findings.join(", ")}`);

@@ -41,7 +41,9 @@ esac
 sh scripts/release-version.sh "$version"
 node --input-type=module - "$image_namespace" <<'JS'
 import { imageNamespace } from "./scripts/release-registries.mjs";
-imageNamespace(process.argv[2]);
+// Only the isolated validation registry is admitted outside release namespaces.
+// Published inventory validation never accepts this address.
+if (!(process.env.SYNVEDA_LOCAL_CANDIDATE === "1" && process.argv[2] === "localhost:5000/synveda")) imageNamespace(process.argv[2]);
 JS
 printf '%s\n' "$source_sha" | grep -Eq '^[0-9a-f]{40}$' || {
   echo "package-release: SOURCE_SHA must be a full lowercase 40-hex Git commit" >&2

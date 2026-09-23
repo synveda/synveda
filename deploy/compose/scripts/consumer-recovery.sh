@@ -103,7 +103,7 @@ case "$action" in
     compose run --rm --no-deps recovery-verify
     compose run --rm --no-deps recovery-key-refusal
     state unlock
-    compose up -d --no-build --wait --wait-timeout 600
+    compose up -d --no-build --wait --wait-timeout 900
     trap - EXIT
     echo "Restored $source/$backup_id into private $project with the original keys. Verify browser/API access before resuming use."
     ;;

@@ -10,6 +10,12 @@ Cedar, forced RLS, VedaFlow and audit.
 Use the matching archive, image manifest and checksummed installation reports.
 The [release manifest](../../docs/installation.json) owns this status.
 
+These instructions describe v0.4.0's existing GHCR images and checksum-only
+downloads. The [refactored release contract](../../docs/RELEASING.md) adds Docker
+Hub distribution, attested checksums and six native CLI packages for a future
+approved release. It does not change these immutable downloads. No Docker Hub
+token or native CLI is needed to install this public server bundle.
+
 ## Requirements
 
 An ordinary account with access to a **local Docker daemon**, Compose 2.33.1+
@@ -50,7 +56,7 @@ cat environment.json
 ./synveda-compose up
 ```
 
-Stop on a checksum failure. Checksums detect corruption; unsigned assets do
+Stop on a checksum failure. v0.4.0's unsigned checksums detect corruption but do
 not authenticate their own download channel. `environment.json` binds source,
 version, image digests and dependencies. The launcher never builds source or
 selects `latest`. No registry login should be required for a published bundle;

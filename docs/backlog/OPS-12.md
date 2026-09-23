@@ -542,12 +542,58 @@ contracts have their own reviewed implementation and execution evidence. Install
 attestation enforcement and Homebrew/WinGet remain unimplemented; configuration
 of GitHub attestations alone does not authenticate the current shell installer.
 
-Continue from this OPS-12 checkpoint on `main` and retain version `0.4.0` until an owner
+The FND-1 / OPS-8 pipeline refactor now shares all six native archive jobs between
+CI and Release and executes the credential-refresh/platform tests against each
+installed binary. Its local macOS ARM64 debug archive passed restricted-PATH
+install/reinstall, Codex/Copilot replay and seven auth/platform process tests;
+the dirty source report is not publication evidence. Exact OCI candidates must
+pass native Compose and four-mode Helm qualification before copying to public
+registries. The first hosted PR CI and nonpublishing Release runs on `34355d7`
+passed macOS/Windows client packaging and the ARM64 Docker/Helm candidate.
+Linux x64/ARM64 packaging refused Cargo's hard-linked executable; an isolated
+copy now retains the packager's single-link rule. AMD64 Docker failed when the
+bundled Keycloak realm convergence service became unhealthy; the fixture now
+captures bounded, redacted diagnostics before cleanup. CI Result rejected the
+run. Next action: rerun PR CI and nonpublishing Release for the follow-up
+commit, inspect the AMD64 diagnostic if it recurs, and retain all six client
+and both candidate reports. Local retained evaluation volumes remain untouched.
+
+The second hosted attempt on `3a4da43` passed Linux archive packaging but
+found that the restricted installer test PATH omitted GNU tar's `gzip` helper.
+That helper is now allowed; both Linux targets passed the third PR run on
+`4c91fcc`. AMD64 Compose again reached an unhealthy realm gate after about ten
+minutes, though generation capture and the Keycloak management network probe
+both passed at failure. The evaluation healthcheck had exhausted its retries
+around the old 600-second Compose wait. Evaluation, plain Compose and recovery
+now use a 900-second wait with a matching health start period, without relaxing
+the generation gate. Failure diagnostics fall back to content-free process
+names when Docker rejects `top` formatting. The final hosted [PR CI run](https://github.com/synveda/synveda/actions/runs/35844879556)
+on `47fb126` passed CI Result, all six native packages and both Docker/Helm
+candidates. The [nonpublishing Release run](https://github.com/synveda/synveda/actions/runs/35845344195)
+on that exact clean source commit passed the same required native qualification.
+Both candidate reports record seven launcher Compose checks, 20 direct-consumer
+and recovery checks, and four independent Helm modes per architecture. The
+dry-run asset bundle has 21 checksum-verified payloads plus `SHA256SUMS`; its
+registry inventory marks the outputs unpublished. No tag or public release
+was created. The existing v0.4.0 release cannot gain these native client-only
+archives through this dry run.
+
+The owner has configured both Docker Hub variables and the protected release
+environment secret; tag protection, required CI Result and GHCR access still
+need review under [CI](../CI.md#manual-owner-settings). Do not tag or publish
+as part of this validation. Publication still needs separate authorization
+and a successful exact-commit main CI Result.
+
+Continue from this OPS-12 checkpoint and retain version `0.4.0` until an owner
 authorizes a coordinated new version. For another local candidate, use the
 existing `package-release.sh` arguments with the explicit candidate flag, extract
 the archive, then run `node scripts/qualify-release.mjs --consumer-candidate
 EXTRACTED_BUNDLE REPORT.json`. It creates an absent random acceptance project,
 leaves source/restore databases, installation state and the paired recovery set
 retained. Release CI runs the same gate on both native architectures and requires
-its checksummed reports, but those hosted runs remain pending a separately
-authorized release. Do not reuse an unrelated deployment or replace published artifacts.
+its checksummed reports. The first hosted dry run stopped before consumer
+qualification because AMD64 Docker failed; the final hosted run completed it
+on both native architectures. Next OPS-12 work is artifact-based real
+issuer/harness acceptance, signing/notarization and separately approved
+publication after exact-source main CI, owner settings and version coordination.
+Do not reuse an unrelated deployment or replace published artifacts.

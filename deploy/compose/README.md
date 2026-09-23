@@ -16,13 +16,20 @@ To run a server without a checkout or compiler, use the
 release-pinned launcher. The published v0.4.0 bundle includes the reference
 archive; earlier pre-epoch-3 databases are deliberately refused.
 
+The [CI/release guide](../../docs/CI.md) describes candidate validation and
+publication. Shared Docker jobs build each native AMD64/ARM64 image once, then
+test the extracted bundle against those exact OCI candidates. Release copies
+qualified bytes to Docker Hub and GHCR and repeats public installation checks.
+Published consumers need no source build or publisher token. The existing
+v0.4.0 downloads retain their original GHCR/checksum contract.
+
 It supports development and reference configuration. A clean development
 acceptance passed on macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0 and
-Compose 5.1.2 on 2026-09-12. Linux and Docker Desktop development runs,
-reference HTTPS, recovery, upgrade and Apalis live evidence are still required
-before this implementation can be called validated for controlled single-host
-use. It is not an HA, disaster-recovery, hosted-SaaS or
-enterprise-certification claim.
+Compose 5.1.2 on 2026-09-12. The published bundle separately passed native Linux
+AMD64/ARM64 lifecycle, browser login and paired recovery. Docker Desktop,
+Windows/WSL2, a supported cross-release upgrade window and Apalis live evidence
+remain open. The source and release evidence do not establish HA,
+disaster-recovery, hosted-SaaS or enterprise certification.
 
 Use deploy/compose/scripts/compose.sh through the Make targets. Do not assemble
 Compose fragments manually.

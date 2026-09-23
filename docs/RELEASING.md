@@ -1,6 +1,8 @@
 # Publishing a consumer release
 
 OPS-8 / OPS-12; [ADR-0115](adr/adr-0115-prebuilt-container-release-verification.md).
+The [CI/release guide](CI.md) owns the workflow map, source gate, local checks
+and current manual repository settings.
 The two-registry and attestation changes are configured, **not published or
 qualified**. The published v0.4.0 remains unchanged and uses GHCR, its original
 installer and its original checksum-only trust boundary. Never rerun publication
@@ -13,7 +15,26 @@ anonymous download. Its upload-only failure was recovered from the original
 workflow artifacts; that workflow remains failed while its installation jobs
 and recovered release are verified. v0.3.0 also remains immutable.
 
-## Native client candidates
+## Native CLI release artifacts
+
+The refactored Release workflow requires every archive below and its native
+execution report before it can publish a stable release. `VERSION` is the
+workspace version without the `v` prefix. None of these client-only archives is
+present in the existing v0.4.0 release; they become public assets only after a
+new version completes qualification and owner-authorized publication.
+
+| Operating system | CPU | Required GitHub Release asset |
+|---|---|---|
+| Linux (glibc) | x64 | `synveda-client-VERSION-linux-x86_64.tar.gz` |
+| Linux (glibc) | ARM64 | `synveda-client-VERSION-linux-arm64.tar.gz` |
+| macOS | x64 | `synveda-client-VERSION-darwin-x86_64.tar.gz` |
+| macOS | ARM64 | `synveda-client-VERSION-darwin-arm64.tar.gz` |
+| Windows | x64 | `synveda-client-VERSION-windows-x86_64.zip` |
+| Windows | ARM64 | `synveda-client-VERSION-windows-arm64.zip` |
+
+CI and Release dry runs also retain these packages as Actions artifacts named
+`binaries-TARGET`; those are validation outputs, not public releases. A missing
+runner, archive or successful report blocks publication; no target is optional.
 
 OPS-12 adds `synveda-client-VERSION-TARGET.tar.gz` for native macOS/Linux x86_64
 and arm64, plus `.zip` for Windows x86_64/arm64. Each contains the existing CLI and adapters plus private Node pinned
@@ -26,6 +47,8 @@ Each native job executes its extracted archive with no Node/Docker on the
 installer PATH. Unix jobs replay existing Codex/Copilot fixtures using private
 Node. Windows jobs require native Rust/Node storage interoperability, PowerShell
 install/reinstall, hook entry-point smoke and unsafe ZIP/installer refusals.
+Every platform also reruns the credential-refresh and platform process tests
+against the installed executable, using the same tests as source validation.
 Assembly requires all six `synveda-client-report-TARGET.json` reports
 to match archive digests, source, target and runtime pin. Tagged builds also
 require a clean source tree and matching CLI version. Reports enter SHA256SUMS
@@ -47,10 +70,13 @@ and system-Node plugin archive retain their existing contract.
    version and architecture tags on both registries as write-once even where
    the registry does not enforce that policy. Restrict writers and protect
    GitHub `v*` tags. There is no `latest` or rolling alias in this release plan.
-3. Create an expiring push credential with only read/write access to those six
-   repositories. Prefer an organization token when the account supports it;
-   otherwise use a dedicated publisher's personal access token, without delete
-   permission. Set an owner and rotation reminder outside this repository.
+3. Create an expiring Docker Hub read/write credential without delete permission.
+   Use a dedicated publisher with access to the six repositories, or an
+   organization access token restricted to those repositories when available.
+   A personal access token inherits its user's repository access; its permission
+   selector does not scope it to six named repositories. Follow the
+   [token setup steps](#docker-hub-token-setup) below and record its owner and
+   rotation reminder outside this repository.
    Never paste the credential into an issue, shell argument or committed file.
 4. In GitHub repository variables set `DOCKERHUB_NAMESPACE` and
    `DOCKERHUB_USERNAME`. Create the protected environment named `release`,
@@ -69,10 +95,13 @@ and system-Node plugin archive retain their existing contract.
    product/chart/package contracts, including console/adapters and starter image
    versions. Regenerate OpenAPI, console client and SDK contract metadata after
    changing the workspace version. Require normal CI on the intended committed
-   source; release qualification does not replace it. Run the nonpublishing `workflow_dispatch`
-   first. It can use a synthetic version and namespace; it builds artifacts
-   but never logs in, pushes, signs or creates a Release. Its inventory has
-   `published: false` and cannot pass anonymous release verification.
+   source; release qualification does not replace it. The tagged commit must
+   have a successful full main-push CI run, including CI Result and no skipped
+   jobs. Run the nonpublishing `workflow_dispatch` first. Its optional version
+   must match the workspace; it tests native client archives and exact OCI
+   candidates through a loopback registry, Compose and Helm. It never logs in,
+   publishes to an external registry, signs or creates a Release. Its public
+   inventory has `published: false` and cannot pass anonymous release verification.
 7. After reviewing local and hosted results, separately authorize the new tag
    push. The existing `v*` workflow is the only publisher. Confirm the protected
    environment approvals, both native image reports, Docker and all four Kind
@@ -86,9 +115,12 @@ An interrupted publication can leave unannounced artifacts. Inspect and retain
 those bytes; do not delete/rebuild/overwrite them automatically. Recover using
 the original verified artifacts under an explicitly reviewed owner procedure,
 or authorize a new version. Do not move a published Git tag.
-For upload-only recovery, use the original `release-assets` and both
-`release-verification-*` artifacts, verify all checksums/source/image identities,
-and retain the authenticated final checksum inventory. The old checksum-only
+Stable announcement now follows a draft upload and verification of all 31
+expected asset names, sizes and completed upload states. An upload failure
+leaves the draft unpublished. For upload-only recovery, use the original
+`verified-release-assets` artifact (30-day retention), which includes the
+qualified reports and authenticated final checksum inventory, and verify all
+checksums/source/image identities. The old checksum-only
 v0.4.0 recovery is not a signing bypass for a new release.
 
 Docker documents [multiple registry exports](https://docs.docker.com/build/ci/github-actions/push-multi-registries/),
@@ -97,11 +129,78 @@ and [organization tokens](https://docs.docker.com/security/access-tokens/organiz
 The workflow retains the existing reviewed Docker action pins rather than
 upgrading them as part of this change.
 
+## Docker Hub token setup
+
+**A Docker Hub token is required for tagged publication.** CI and Release's
+nonpublishing manual dry run need no publishing credentials. Consumers pull
+public images anonymously and must not receive this token. A successful dry
+run does not prove Docker Hub write access.
+
+1. In [Docker Home](https://app.docker.com/), sign in as the publishing Docker
+   user. Open your avatar → **Account settings** → **Personal access tokens** →
+   **Generate new token**. Give it a description such as `synveda-release`, set
+   an expiration date, and select **Read & Write**, without Delete. Generate and
+   copy the token once. The user must have push access to the public `product`,
+   `postgres`, `cnpg-postgres`, `keycloak`, `proxy` and `browser-acceptance`
+   repositories in your selected namespace. See Docker's
+   [personal token instructions](https://docs.docker.com/security/access-tokens/personal-access-tokens/).
+2. In [Synveda's Actions variables](https://github.com/synveda/synveda/settings/variables/actions),
+   use **New repository variable** to add:
+
+   | Variable | Value |
+   |---|---|
+   | `DOCKERHUB_NAMESPACE` | The Docker Hub user or organization owning the six repositories; no `docker.io/` prefix |
+   | `DOCKERHUB_USERNAME` | The Docker ID of the user who created the personal token; this can differ from the namespace |
+
+   Keep these at repository scope: the source/version job reads the namespace
+   before any protected publishing job starts. If you instead use an
+   [organization access token](https://docs.docker.com/security/access-tokens/organization-access-tokens/),
+   set `DOCKERHUB_USERNAME` to the organization name and grant that token
+   read/write access to the six repositories.
+3. In [repository Settings → Environments](https://github.com/synveda/synveda/settings/environments),
+   create **release**. Add an owner as a required reviewer. Under deployment
+   branches and tags, select **Selected branches and tags**, add a **Tag** rule
+   matching `v*`, and save it. Under **Environment secrets**, choose **Add
+   secret**, name it **DOCKERHUB_TOKEN**, and paste the token directly there.
+   Do not put it in a variable, repository file, command argument or chat.
+   GitHub documents [environment protection](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
+   and [environment secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets).
+4. Make the six GHCR image packages and `ghcr.io/synveda/charts/synveda` public,
+   and grant this repository Actions write access. GHCR and GitHub Release
+   publication use the automatic `GITHUB_TOKEN`; no additional GitHub PAT is
+   needed. Complete the tag protection, CI Result and permissions settings in
+   [the CI guide](CI.md#manual-owner-settings).
+
+After the environment exists, the equivalent CLI commands for the variables
+and secret are below. Replace the two nonsecret placeholders. The last command
+prompts privately for the token; it does not configure environment protection:
+
+```sh
+gh variable set DOCKERHUB_NAMESPACE --repo synveda/synveda --body YOUR_NAMESPACE
+gh variable set DOCKERHUB_USERNAME --repo synveda/synveda --body YOUR_DOCKER_ID
+gh secret set DOCKERHUB_TOKEN --repo synveda/synveda --env release
+```
+
+Rotate the token before expiry by replacing this environment secret. Keep
+`release-dry-run` free of publishing credentials. Authorize a new coordinated
+version and tag only after the source CI and dry-run results have been reviewed;
+never use a real release to test whether the secret was added correctly.
+
 ## Artifacts and verification
 
-Each native AMD64/ARM64 image is built once from the same source and lockfiles
-and exported to both registries with source/revision/version labels, SBOM and
-provenance. Each registry's final multi-platform index is independently
+The complete stable inventory is 31 assets: six native client archives and six
+matching reports; the two historical server archives; console, plugin and
+reference archives; the Helm chart and two image overlays; the two-registry
+inventory; eight native image/Compose/consumer/Helm qualification reports; and
+`SHA256SUMS` plus `SHA256SUMS.sigstore.json`. The executable inventory is
+[`scripts/check-release-assets.mjs`](../scripts/check-release-assets.mjs).
+
+Each native AMD64/ARM64 image is built once per run from the same source and
+lockfiles into an OCI archive with source/revision/version labels, SBOM and
+provenance. Read-only jobs test those exact archives before publishing jobs
+copy them with preserved digests to both registries. Artifacts must come from
+the same release run; PR artifacts and cross-run promotion are not accepted.
+Each registry's final multi-platform index is independently
 assembled, inspected and hashed. The versioned `synveda-registry-images-*.json`
 records both destinations and their complete child descriptors. The consumer
 reference archive, its `environment.json`, launcher and Helm overlays use

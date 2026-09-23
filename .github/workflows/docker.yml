@@ -1,0 +1,180 @@
+name: Docker candidate validation
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    name: ${{ matrix.arch }} — Docker and Helm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runs-on: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 150
+    services:
+      registry:
+        image: registry:3@sha256:325b4b29b041e82803abeb703e201655e4e23ab83264ec1a7c9ddb0a5b14a6e0
+        ports:
+          - 127.0.0.1:5000:5000
+    env:
+      DOCKER_BUILD_SUMMARY: 'false'
+      DOCKER_BUILD_RECORD_UPLOAD: 'false'
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Prepare OCI archive tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
+          mkdir -p "$RUNNER_TEMP/images"
+          echo "IMAGES=$RUNNER_TEMP/images" >> "$GITHUB_ENV"
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v4.2.3
+      - name: The product image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          outputs: type=oci,dest=${{ runner.temp }}/images/product.tar
+          file: deploy/compose/product/Dockerfile
+          platforms: ${{ matrix.platform }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.version }}
+          cache-from: type=gha,scope=candidate-product-${{ matrix.arch }}
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,mode=max,ignore-error=true,scope=candidate-product-{0}', matrix.arch) || '' }}
+      - name: Postgres
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          outputs: type=oci,dest=${{ runner.temp }}/images/postgres.tar
+          file: deploy/compose/postgres/Dockerfile
+          target: reference
+          platforms: ${{ matrix.platform }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.version }}
+          cache-from: type=gha,scope=candidate-postgres-${{ matrix.arch }}
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,mode=max,ignore-error=true,scope=candidate-postgres-{0}', matrix.arch) || '' }}
+      - name: CloudNativePG PostgreSQL
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          outputs: type=oci,dest=${{ runner.temp }}/images/cnpg-postgres.tar
+          file: deploy/helm/postgres/Dockerfile
+          platforms: ${{ matrix.platform }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.version }}
+          cache-from: type=gha,scope=candidate-cnpg-postgres-${{ matrix.arch }}
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,mode=max,ignore-error=true,scope=candidate-cnpg-postgres-{0}', matrix.arch) || '' }}
+      - name: Bundled Keycloak
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          outputs: type=oci,dest=${{ runner.temp }}/images/keycloak.tar
+          file: deploy/compose/keycloak/Dockerfile
+          platforms: ${{ matrix.platform }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.version }}
+          cache-from: type=gha,scope=candidate-keycloak-${{ matrix.arch }}
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,mode=max,ignore-error=true,scope=candidate-keycloak-{0}', matrix.arch) || '' }}
+      - name: Reference proxy
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          outputs: type=oci,dest=${{ runner.temp }}/images/proxy.tar
+          file: deploy/compose/proxy/Dockerfile
+          platforms: ${{ matrix.platform }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.version }}
+          cache-from: type=gha,scope=candidate-proxy-${{ matrix.arch }}
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,mode=max,ignore-error=true,scope=candidate-proxy-{0}', matrix.arch) || '' }}
+      - name: Browser acceptance fixture
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          outputs: type=oci,dest=${{ runner.temp }}/images/browser-acceptance.tar
+          file: deploy/compose/product/Dockerfile
+          target: browser-acceptance
+          platforms: ${{ matrix.platform }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.version }}
+          cache-from: type=gha,scope=candidate-product-${{ matrix.arch }}
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,mode=max,ignore-error=true,scope=candidate-product-{0}', matrix.arch) || '' }}
+      - name: Reclaim build layers before installation tests
+        # Exports (including optional remote cache) are complete. Keep the OCI
+        # archives while freeing this job's dedicated builder storage.
+        run: docker buildx prune --all --force
+      - name: Test exact native image candidates
+        run: node scripts/docker-candidate.mjs "$IMAGES" "$VERSION" "$GITHUB_SHA" "${{ matrix.arch }}"
+      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+        with:
+          install_only: true
+          version: v0.32.0
+          kubectl_version: v1.36.1
+      - name: Test documented Compose installation and recovery
+        run: |
+          node scripts/qualify-release.mjs "$IMAGES/bundle/synveda-reference-$VERSION" "$IMAGES/docker-checks.json"
+          node scripts/qualify-release.mjs --consumer-candidate "$IMAGES/bundle/synveda-reference-$VERSION" "$IMAGES/consumer-checks.json"
+      - name: Test Helm dependency combinations, install, upgrade and recovery
+        run: node scripts/qualify-kubernetes-release.mjs "$IMAGES/bundle/synveda-reference-$VERSION" "$IMAGES/bundle/synveda-$VERSION.tgz" "$IMAGES/helm-checks.json"
+      - name: Retain tested OCI candidates
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: docker-candidate-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/images/*.tar
+            ${{ runner.temp }}/images/*.json
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - name: Retain available qualification reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: docker-checks-${{ matrix.arch }}
+          path: ${{ runner.temp }}/images/*checks.json
+          retention-days: 14
+          if-no-files-found: warn

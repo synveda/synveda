@@ -75,8 +75,8 @@ const DOCKERIGNORE = fileURLToPath(new URL("../.dockerignore", import.meta.url))
 const INIT_SOURCE = fileURLToPath(
   new URL("../crates/synveda-cli/src/init.rs", import.meta.url),
 );
-const RELEASE_WORKFLOW = fileURLToPath(
-  new URL("../.github/workflows/release.yml", import.meta.url),
+const DOCKER_WORKFLOW = fileURLToPath(
+  new URL("../.github/workflows/docker.yml", import.meta.url),
 );
 const DB_TEST = fileURLToPath(new URL("./db-test.sh", import.meta.url));
 const DB_TEST_COMPOSE = fileURLToPath(
@@ -796,20 +796,16 @@ test("the reserved init entrypoint is a bounded literal-only refusal", () => {
 });
 
 test("release notes do not advertise an unaccepted turnkey deployment", () => {
-  const notes = (body) => `cat > notes.md <<NOTES
-${body}
-NOTES
-`;
-  const current = notes(
-    "Docker reference live clean-host acceptance is tracked separately; this is not a production claim.",
-  );
+  const current = "Docker reference live clean-host acceptance is tracked separately; this is not a production claim.";
   assert.deepEqual(releaseNoteFindings(current), []);
+  assert.deepEqual(releaseNoteFindings(""), ["release notes are missing"]);
+  assert.deepEqual(releaseNoteFindings(readFileSync(new URL("./release-notes.md", import.meta.url), "utf8")), []);
   assert.deepEqual(
     releaseNoteFindings(
-      notes(`Docker reference live clean-host acceptance is tracked separately.
+      `Docker reference live clean-host acceptance is tracked separately.
 synveda init --demo
 synveda login
-synveda demo start --profile personal`),
+synveda demo start --profile personal`,
     ),
     [
     "retired synveda init --demo command",
@@ -818,18 +814,18 @@ synveda demo start --profile personal`),
       "unaccepted turnkey command synveda demo start",
     ],
   );
-  assert.deepEqual(releaseNoteFindings(notes("Artifacts only.")), [
+  assert.deepEqual(releaseNoteFindings("Artifacts only."), [
     "Docker reference live-acceptance boundary is missing",
   ]);
 });
 
 test("the release PostgreSQL build uses the repository-root context", () => {
-  const current = readFileSync(RELEASE_WORKFLOW, "utf8");
+  const current = readFileSync(DOCKER_WORKFLOW, "utf8");
   assert.deepEqual(releasePostgresBuildFindings(current), []);
   assert.deepEqual(
     releasePostgresBuildFindings(
       current.replace(
-        "          context: .\n          file: deploy/compose/postgres/Dockerfile\n          target: reference\n          platforms:",
+        "          context: .\n          outputs: type=oci,dest=${{ runner.temp }}/images/postgres.tar\n          file: deploy/compose/postgres/Dockerfile\n          target: reference\n          platforms:",
         "          context: deploy/compose/postgres\n          platforms:",
       ),
     ),

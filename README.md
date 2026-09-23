@@ -116,6 +116,11 @@ for native lifecycle, project setup and managed adapter registration. These are
 unpublished and require matching candidate bundles; v0.4.0 instructions above
 remain unchanged.
 
+The refactored Release pipeline requires [native CLI archives](docs/RELEASING.md#native-cli-release-artifacts)
+for Linux, macOS and Windows on both x64 and ARM64. These become public GitHub
+Release assets only after the next version passes qualification and is
+published; v0.4.0 does not contain the new client-only packages.
+
 <a id="run-with-prebuilt-docker-images"></a>
 <a id="quick-start-from-a-source-checkout"></a>
 Existing installation links remain valid: use [prebuilt Docker](deploy/compose/PREBUILT.md)
@@ -125,6 +130,7 @@ for evaluation or [source development](docs/DEVELOPMENT.md) for changes.
 
 - [Product guide](docs/INSTALL.md) — console, CLI and integration operations.
 - [Source development and code map](docs/DEVELOPMENT.md) — where to change and test.
+- [CI and release guide](docs/CI.md) — workflow map, validation and publisher settings.
 - [Deployment overview](deploy/README.md) — Compose, Helm and operational guides.
 - [Technical architecture](docs/SYNVEDA_TECH_PLAN.md) and [decisions](docs/adr/README.md).
 - [API reference](docs/api/openapi.json) — generated public contract.

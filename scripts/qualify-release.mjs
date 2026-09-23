@@ -23,7 +23,9 @@ const env = { ...process.env, SYNVEDA_HOME: home };
 delete env.SYNVEDA_COMPOSE_RUNTIME;
 const report = { version: manifest.release_version, source: manifest.source_sha, sourceDirty: manifest.source_dirty ?? false, images: manifest.images, at: new Date().toISOString(), checks: {}, imageDownloadMs: null };
 function run(command, args, extra = {}) {
-  const result = spawnSync(command, args, { env, cwd: bundle, encoding: "utf8", timeout: 900_000, maxBuffer: 4 * 1024 * 1024, ...extra });
+  // The documented Compose launcher waits at most 900s; leave a small margin
+  // for its own timeout and cleanup so failures retain their diagnostics.
+  const result = spawnSync(command, args, { env, cwd: bundle, encoding: "utf8", timeout: 1_020_000, maxBuffer: 4 * 1024 * 1024, ...extra });
   if (result.status !== 0) throw new Error(`${command} ${args[0]} failed (${result.status ?? "timeout"}); ${result.stderr?.slice(-1800) ?? ""}`);
   return result.stdout;
 }
@@ -36,6 +38,54 @@ const browser = () => run("docker", [...compose(), "-f", join(bundle, "deploy/co
 function secretHashes() {
   const root = join(home, "state/synveda-evaluation/secrets");
   return readdirSync(root, { withFileTypes: true }).filter((file) => file.isFile()).map((file) => [file.name, createHash("sha256").update(readFileSync(join(root, file.name))).digest("hex")]);
+}
+function reportFailedRealmConvergence() {
+  // Read diagnostics before the exact-project cleanup removes the container.
+  // The supervisor's ordinary logs are bounded and private file values are
+  // redacted before anything reaches the Actions log.
+  try {
+    const ids = spawnSync("docker", ["ps", "-aq", "--filter", "label=com.docker.compose.project=synveda-evaluation",
+      "--filter", "label=com.docker.compose.service=keycloak-realm-convergence"],
+    { env, encoding: "utf8", timeout: 15_000 });
+    const id = ids.status === 0 ? ids.stdout.trim().split("\n")[0] : "";
+    if (!id) return;
+    const inspected = spawnSync("docker", ["inspect", "--format", "{{json .State}}", id],
+      { env, encoding: "utf8", timeout: 15_000 });
+    const state = inspected.status === 0 ? JSON.parse(inspected.stdout) : {};
+    const logs = spawnSync("docker", ["logs", "--tail", "50", id],
+      { env, encoding: "utf8", timeout: 15_000, maxBuffer: 1024 * 1024 });
+    let health = JSON.stringify({ status: state.Status, exitCode: state.ExitCode,
+      health: state.Health?.Status, recentHealth: state.Health?.Log?.slice(-3).map((entry) => entry.Output?.slice(-400)) });
+    let recentLogs = (logs.stdout ?? "") + (logs.stderr ?? "");
+    const secrets = join(home, "state/synveda-evaluation/secrets");
+    for (const file of readdirSync(secrets, { withFileTypes: true }).filter((entry) => entry.isFile())) {
+      const value = readFileSync(join(secrets, file.name), "utf8").trim();
+      if (value.length >= 8) {
+        health = health.replaceAll(value, "[REDACTED]");
+        recentLogs = recentLogs.replaceAll(value, "[REDACTED]");
+      }
+    }
+    console.error(`qualification realm-convergence state: ${health.slice(-800)}`);
+    console.error(`qualification realm-convergence recent logs: ${recentLogs.slice(-2200)}`);
+    const gate = spawnSync("docker", ["exec", id, "/opt/keycloak/bin/synveda-generation-gate", "capture"],
+      { env, encoding: "utf8", timeout: 15_000 });
+    const management = spawnSync("docker", ["exec", id, "/opt/keycloak/bin/synveda-keycloak-health", "network"],
+      { env, encoding: "utf8", timeout: 15_000 });
+    console.error(`qualification realm-convergence probes: gate_capture=${gate.status ?? "timeout"} management_network=${management.status ?? "timeout"}`);
+    const processes = spawnSync("docker", ["top", id, "-eo", "comm,etime"],
+      { env, encoding: "utf8", timeout: 15_000 });
+    if (processes.status === 0) console.error(`qualification realm-convergence processes: ${processes.stdout.trim().split("\n").slice(0,18).join(" | ").slice(0,1000)}`);
+    else {
+      // Some Docker hosts reject ps formatting. /proc/comm exposes process
+      // names without the command-line arguments that may contain secrets.
+      const fallback = spawnSync("docker", ["exec", id, "sh", "-c",
+        'for entry in /proc/[0-9]*/comm; do read -r name < "$entry" || continue; printf "%s\\n" "$name"; done'],
+      { env, encoding: "utf8", timeout: 15_000 });
+      console.error(`qualification realm-convergence process probe: docker_top=${processes.status ?? "timeout"} proc=${fallback.status ?? "timeout"} names=${fallback.status === 0 ? fallback.stdout.trim().split("\n").slice(0,18).join(",").slice(0,300) : "unavailable"}`);
+    }
+  } catch {
+    console.error("qualification realm-convergence diagnostics unavailable");
+  }
 }
 // Never reuse an operator's deployment or quietly clean up its data.
 assert.equal(run("docker", ["ps", "-aq", "--filter", "label=com.docker.compose.project=synveda-evaluation"]).trim(), "", "evaluation project already exists");
@@ -96,6 +146,9 @@ try {
   report.failures = evaluationFailureChecks(bundle, home);
   writeFileSync(resolve(output), `${JSON.stringify(report, null, 2)}\n`);
   console.log(`PASS candidate Docker installation and recovery: ${resolve(output)}`);
+} catch (error) {
+  reportFailedRealmConvergence();
+  throw error;
 } finally {
   // Only the exact project proved absent above was created by this fixture.
   // Keep private backups for diagnosis; no global prune or unrelated cleanup.

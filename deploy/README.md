@@ -1,7 +1,11 @@
 # Deployment
 
 Public entry points: [Run with Docker](compose/PREBUILT.md) and
-[Deploy to Kubernetes](helm/synveda/README.md). Candidate 0.4.0 is unpublished.
+[Deploy to Kubernetes](helm/synveda/README.md). The published v0.4.0 remains
+immutable. The refactored [CI and Release workflows](../docs/CI.md) prepare the
+next release; Docker Hub distribution, attested checksums and six native
+[CLI packages](../docs/RELEASING.md#native-cli-release-artifacts) require a new
+qualified publication.
 
 This file is the infrastructure-shape overview. Source-checkout operator steps
 live in the [canonical Compose guide](compose/README.md); the normative mapping
@@ -34,9 +38,10 @@ freshness or Skill/Tool advertisement.
   paired logical `backup`/fresh private `restore-smoke`, `down` and
   exact-confirmation `reset` lifecycle, plus optional observability and Apalis
   canary profiles.
-  Deterministic lifecycle tests are implementation evidence, not a validated
-  reference claim. One macOS/OrbStack clean-volume development run passed;
-  Linux, Docker Desktop, reference HTTPS and recovery acceptance remain open.
+  Published v0.4.0 passed native Linux AMD64/ARM64 installation and recovery.
+  Separate source-development evidence includes a macOS/OrbStack clean-volume
+  run; Docker Desktop and Windows/WSL2 remain unqualified. The new plain-Compose
+  candidate and refactored pipeline still require their own hosted qualification.
   This is also the only source-development product topology. Evaluation-only
   dependencies use isolated fixtures and do not define another Synveda stack.
 - `helm/` is the Kubernetes infrastructure: separate gateway and worker
@@ -45,8 +50,11 @@ freshness or Skill/Tool advertisement.
   Only CNPG mode requires a separately installed operator. The release workflow packages this
   chart and a digest-bound reference bundle using one versioned six-image plan:
   product, single-host and CloudNativePG PostgreSQL, optimized Keycloak,
-  reference proxy and browser acceptance. No tagged candidate has yet proved
-  publication, authenticated pulls or installation from those artifacts.
+  reference proxy and browser acceptance. Published v0.4.0 passed anonymous
+  pulls and installation in all four bundled/external database and identity
+  combinations. The next release additionally requires exact OCI candidate
+  testing before publication to Docker Hub and GHCR, followed by public pulls
+  and installation using the final destination digests.
 
 ## Bootstrap boundary
 
@@ -86,7 +94,9 @@ same explicit role contract; runtime Deployments receive no database owner or
 superuser credential. Helm also mounts issuer/KMS/extractor Secrets. External
 PostgreSQL mode provisions no administrative objects, requires verify-full,
 and uses the same bounded preflight and migration implementation. Full
-production promotion, starter identity, recovery and OpenShift remain open.
+production promotion, real OpenShift execution and provider-specific recovery
+remain open; the bounded native Kind installation/recovery evidence does not
+establish those claims.
 
 Direct-binary database commands require explicit `DATABASE_URL` or
 `DATABASE_URL_FILE`; there is no implicit development credential. Compose
@@ -110,7 +120,9 @@ upgrade-shaped replacement. The CPR-36 database acceptance test also proves a
 runtime login with no tenant GUC cannot read tenant data. Current live Kind
 acceptance proves Keycloak login, a governed product round trip and worker
 readiness after CloudNativePG primary failover. That is Kubernetes source-image
-evidence, not a published Helm or Docker-reference release claim.
+evidence. Published v0.4.0 has separate native Linux reports for Docker and the
+four operator-free Helm ownership modes; its optional CNPG path still needs
+qualification with the published images.
 
 ## Embeddings
 
@@ -141,12 +153,12 @@ profile remains pending.
 - The chart has no Qdrant, workflow scheduler, backup promise, external HSM or
   customer-managed-key implementation. Provider credentials are Secret
   references; rendered diagnostics must not contain values.
-- Release binaries are unsigned and un-notarized; shipped binaries are macOS
-  arm64 and Linux x86_64 only. There is no Windows build, zero-downtime gateway
-  upgrade guarantee or old-schema translator. The release workflow has no
-  completed tagged run for the aligned chart/image set, captured OCI
-  descriptors, signatures or provenance. The generated environment manifest
-  has deterministic static coverage but no published-registry evidence.
+- Native binaries have no OS code signature or notarization. Public v0.4.0
+  contains macOS ARM64 and Linux x64 archives; the next release requires all
+  six native client packages, including Windows x64/ARM64. Configured jobs do
+  not establish hosted qualification. The new checksum attestation and dual
+  registry publication have not yet shipped. There is no zero-downtime gateway
+  upgrade guarantee or old-schema translator.
 
 <a id="small-team-kubernetes-release-contract"></a>
 
@@ -166,10 +178,12 @@ by ADR-0109 through ADR-0112 and the deployment contract above.
 | Runtime | One product image, gateway-served console, separate worker and existing PostgreSQL jobs; mandatory authority readiness separate from optional provider diagnostics |
 | Portability | Restricted-ID Kind simulation and Kubernetes/OpenShift structural schemas; real SCC/router/CNI/CSI/cloud execution remains unqualified |
 | Recovery | Writer-quiesced native PostgreSQL archives, original key/issuer custody and clean-namespace functional verification; actual measurements are recorded in OPS-11, not inferred from retained PVCs |
-| Upgrade | Same-epoch migration reruns/locking and retained reinstall; public v0.2.0 predates epoch 3, so no supported published N-1 pair exists |
-| Distribution | Existing native/image/chart workflow, digest-bound Helm overlays, checksums and prepared BuildKit provenance/SBOM; no new artifacts published in this work |
+| Upgrade | Same-epoch migration reruns/locking and retained reinstall; no general N-1 release window is qualified, and the retired v0.2.0 schema is refused |
+| Distribution | v0.4.0 chart/images and digest overlays have anonymous retrieval evidence; the refactored workflow requires six native CLI packages, qualified OCI candidates, Docker Hub/GHCR parity and attested checksums before a new stable release |
 
-The release remains blocked on a pull-verified candidate, supported upgrade
-baseline and real target-platform qualification. External administrators own
-provider compatibility and backup custody. No operator, workflow engine,
-service mesh, schema translator or application replica knob is introduced.
+The next release needs hosted qualification of this refactor and the owner
+settings in the [release guide](../docs/RELEASING.md#owner-setup). A general
+supported N-1 upgrade window and real target-platform qualification remain
+separate readiness work. External administrators own provider compatibility
+and backup custody. No operator, workflow engine, service mesh, schema
+translator or application replica knob is introduced.

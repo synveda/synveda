@@ -6,16 +6,27 @@ existing evaluation services with named private state; it cannot adopt the
 launcher's retained host state. Its artifact gate includes paired backup/restore;
 native Docker Desktop and release qualification remain separate requirements.
 
+The refactored CI and Release workflows test this extracted bundle against
+the exact native AMD64/ARM64 OCI candidates. A tagged release also verifies
+anonymous pulls and recovery using the final Docker Hub destination digests,
+with GHCR copies retained. These are required gates for the next publication,
+not new claims about v0.4.0. Public installation needs no publisher token and
+never builds images from source.
+
 The matching source CLI offers native lifecycle commands over this graph,
 with engine/project/bundle ownership receipts (`docs/CONSUMER_CLI.md` in the
 source checkout). Start that route
 with a fresh project; it cannot adopt an existing direct-Compose installation.
+For a published client release, use its matching native `synveda-client-*`
+archive from the GitHub Release; all six OS/architecture packages are required
+by the pipeline. Until that release exists, use the locally qualified candidate
+instructions in `docs/CONSUMER_CLI.md`.
 
 For a disposable evaluation on a local Linux-container Docker engine, extract
 the verified candidate archive into a directory and run:
 
 ```sh
-docker compose up -d --wait --wait-timeout 600
+docker compose up -d --wait --wait-timeout 900
 docker compose run --rm --no-deps credentials
 ```
 
@@ -34,7 +45,7 @@ docker compose run --rm --no-deps --entrypoint node browser-acceptance product-d
 docker compose ps --all
 docker compose logs --tail 100
 docker compose down
-docker compose up -d --wait --wait-timeout 600
+docker compose up -d --wait --wait-timeout 900
 ```
 
 `node` in the sample command is inside the pinned optional browser image; it is
@@ -76,7 +87,7 @@ new immutable ID. It stops all profiles, runs only PostgreSQL for the native
 logical dumps, and validates both databases against the linked key set and
 original private configuration. Success leaves the source **down**, with all
 volumes retained. Restart it with `docker compose up -d --wait --wait-timeout
-600` when a restore drill is not in progress. An existing backup ID is refused.
+900` when a restore drill is not in progress. An existing backup ID is refused.
 
 The separate `synveda-local_recovery` volume contains
 `checkpoint-1/database/{manifest.json,synveda.dump,keycloak.dump}`, the existing

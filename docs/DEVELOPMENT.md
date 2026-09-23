@@ -109,6 +109,7 @@ or database behavior.
 | Public website / brand | `pnpm --filter @synveda/website check` ([preview and asset workflow](../website/README.md)) |
 | SDKs | `make sdk-check sdk-package-check` after [SDK prerequisites](../sdks/README.md#check-local-package-archives) |
 | Deployment / packaging | `make check-deploy chart-lint` (Docker Compose and Helm installed; no live application implied) |
+| CI / release automation | `make check-ci`; `actionlint -shellcheck=` with actionlint 1.7.7; then the affected packaging checks in the [CI/release guide](CI.md) |
 
 The following checks need real local services, but no proprietary client or
 model credential:
@@ -131,8 +132,10 @@ print recovery locations. It never targets your deployment database.
 `SQLX_OFFLINE=true make ci` is the broad **local aggregate**, after installing
 Rust, the pnpm workspace, cargo-deny, Helm, Docker Compose and the SDK development
 requirements. It does not reproduce all hosted CI: `.github/workflows/ci.yml`
-also runs database-backed evaluation, SDK interoperability, Claude replay and
-Kind installation/operations. Avoid `--all-features`: the normal build and
+also runs database-backed evaluation, SDK interoperability, Claude replay,
+native client archives and exact Docker/Helm candidate qualification. The
+[CI/release guide](CI.md) maps every job and the stable CI Result gate.
+Avoid `--all-features`: the normal build and
 test-support feature configurations have separate purposes.
 
 Live `make claude-acceptance-live` needs an installed authenticated Claude client;

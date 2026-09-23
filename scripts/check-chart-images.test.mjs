@@ -10,7 +10,7 @@ import {
   helmComputedImageReferences,
   isDigestPinnedExternalImage,
   parseComposeDefaults,
-  releaseWorkflowImageReferences,
+  releaseImageReferences,
   resolveComposeImage,
 } from "./chart-image-discovery.mjs";
 
@@ -195,36 +195,15 @@ test("external Dockerfile bases require a readable tag and full digest", () => {
   }
 });
 
-test("release workflow image discovery sees the closed versioned set", () => {
-  const source = [
-    ["product", ""],
-    ["postgres", ""],
-    ["cnpg-postgres", "17.11-synveda-"],
-    ["keycloak", ""],
-    ["proxy", ""],
-    ["browser-acceptance", ""],
-  ]
-    .map(
-      ([name, prefix]) =>
-        `          tags: ghcr.io/synveda/${name}:${prefix}\${{ needs.version.outputs.version }}-\${{ matrix.arch }}`,
-    )
-    .join("\n");
-  assert.deepEqual(releaseWorkflowImageReferences(source), [
-    "ghcr.io/synveda/product:<version>",
-    "ghcr.io/synveda/postgres:<version>",
-    "ghcr.io/synveda/cnpg-postgres:17.11-synveda-<version>",
-    "ghcr.io/synveda/keycloak:<version>",
-    "ghcr.io/synveda/proxy:<version>",
-    "ghcr.io/synveda/browser-acceptance:<version>",
-  ]);
-  assert.deepEqual(
-    releaseWorkflowImageReferences(source.replace("matrix.arch", "matrix.platform")),
-    [
-      "ghcr.io/synveda/postgres:<version>",
-      "ghcr.io/synveda/cnpg-postgres:17.11-synveda-<version>",
-      "ghcr.io/synveda/keycloak:<version>",
-      "ghcr.io/synveda/proxy:<version>",
-      "ghcr.io/synveda/browser-acceptance:<version>",
-    ],
+test("the publishing copy plan inventories all six images in both registries", () => {
+  assert.deepEqual(releaseImageReferences().sort(),
+    ["docker.io/<dockerhub-namespace>", "ghcr.io/synveda"].flatMap((registry) => [
+      `${registry}/product:<version>`,
+      `${registry}/postgres:<version>`,
+      `${registry}/cnpg-postgres:17.11-synveda-<version>`,
+      `${registry}/keycloak:<version>`,
+      `${registry}/proxy:<version>`,
+      `${registry}/browser-acceptance:<version>`,
+    ]).sort(),
   );
 });

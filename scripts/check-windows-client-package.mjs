@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cliPath, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
+import { checkPackagedAuth } from "./check-packaged-auth.mjs";
 
 if (process.platform !== "win32") throw new Error("native Windows execution required");
 const [version, argument, report] = process.argv.slice(2);
@@ -72,6 +73,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
   const warmMs = performance.now() - warm;
   assert.equal(readFileSync(join(home, "state/retained"), "utf8"), "retain deployment state");
   checks.push("repeat-install-preserves-deployment-state");
+  checkPackagedAuth(nativeCli);
+  checks.push("packaged-authentication-lifecycle");
   // Includes several independent PowerShell ACL setup/inspection processes.
   run(nativeNode, [join(root, "scripts/check-windows-state.mjs"), nativeCli, join(scratch, "storage.json"), join(destination, "plugin/synveda/dist")],
     { timeout: 480000, env: { ...env, NODE_OPTIONS: "", NODE_PATH: "" } });

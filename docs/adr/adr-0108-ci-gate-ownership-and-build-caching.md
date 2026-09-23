@@ -99,3 +99,41 @@ is needed for a first contribution.
 Contributor instructions live in CONTRIBUTING and the source-development
 guide. Small fixes use an existing feature ID and need neither an advance issue
 nor an ADR unless they change an architectural decision.
+
+## Amendment: readable validation and isolated publication (2026-09-22)
+
+Accepted for FND-1 / OPS-8 at the owner's pipeline refactor request. Supersedes
+the original decision to preserve job names and defer change selection.
+
+CI, Release and Extended Tests are the core entry points; Pages remains separate.
+CI always reports one `CI Result`. A checked, conservative dependency map permits
+only expected skips; unknown paths and unavailable diffs select everything. Main,
+manual and merge-group runs validate everything. Only PR runs cancel older PR
+revisions. The gate rejects failure, cancellation and unexpected skips.
+
+Keep production Rust builds and tests together, retaining their distinct feature
+configurations. Preserve the SDK runtime pairs, deterministic evaluation, replay,
+beta demo, CNPG failover and operations tests. Remove only verified repeated
+static checks. Share native CLI packaging and Docker candidate jobs between CI
+and Release. Six native CLI targets remain mandatory, with extracted archive
+tests; no failing platform becomes optional. The nightly semantic and 10,000
+variant security suites remain separate measurements.
+
+Build Docker candidates without publisher credentials and retain OCI archives
+including BuildKit provenance/SBOM descriptors. Test the exact bytes through a
+loopback registry and the existing extracted Compose and Helm qualification
+commands. A local candidate is never anonymous public-distribution evidence.
+Tag-only publishing jobs copy those same OCI bytes to Docker Hub and GHCR;
+fresh native anonymous qualification still gates the release announcement.
+Copies must preserve digests. No PR or cross-run artifact enters publication.
+
+Before granting publishing access, require a successful full CI main-push run
+for the exact tagged commit, including `CI Result`, and verify main ancestry.
+Dispatch builds the actual workspace version without publishing. Assemble and
+verify the complete asset inventory before creating a draft Release; upload
+failure leaves a draft, and stable publication follows successful upload.
+Release runs never cancel one another. Existing immutable tags remain untouched.
+
+OCI transfer and additional native tests may cost time; measure hosted runs
+before claiming savings. Caches remain optional and cannot supply acceptance.
+This changes no Cedar, RLS, VedaFlow, audit, product schema or support claim.

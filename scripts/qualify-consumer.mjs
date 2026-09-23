@@ -21,7 +21,7 @@ export function qualifyConsumer(input, output) {
     outstanding: ["anonymous Docker Hub publication", "Docker Desktop and native Windows qualification"],
   };
   const result = (args, extra = {}) => spawnSync("docker", args, {
-    env, cwd: bundle, encoding: "utf8", timeout: 660_000, maxBuffer: 8 * 1024 * 1024, ...extra,
+    env, cwd: bundle, encoding: "utf8", timeout: 1_020_000, maxBuffer: 8 * 1024 * 1024, ...extra,
   });
   const run = (args, extra) => {
     const value = result(args, extra);
@@ -36,7 +36,7 @@ export function qualifyConsumer(input, output) {
   const restoreEnv = { ...env, COMPOSE_PROJECT_NAME: restoredProject, SYNVEDA_RECOVERY_SOURCE: project, SYNVEDA_CONFIRM_RESTORE: `${project}:qualification:${restoredProject}` };
   const restoredArgs = ["compose", "--env-file", "/dev/null", "--project-directory", bundle, "-p", restoredProject, "-f", join(bundle, "deploy/compose/consumer-runtime.yaml"), "-f", join(bundle, "deploy/compose/consumer-restore.yaml")];
   const restored = (...args) => run([...restoredArgs, ...args], { env: restoreEnv });
-  const recoveryResult = (args, extra = {}) => spawnSync("sh", [join(bundle, "synveda-recovery"), ...args], { env, cwd: bundle, encoding: "utf8", timeout: 900_000, maxBuffer: 8 * 1024 * 1024, ...extra });
+  const recoveryResult = (args, extra = {}) => spawnSync("sh", [join(bundle, "synveda-recovery"), ...args], { env, cwd: bundle, encoding: "utf8", timeout: 1_020_000, maxBuffer: 8 * 1024 * 1024, ...extra });
   const recover = (args, extra) => {
     const value = recoveryResult(args, extra);
     assert.equal(value.status, 0, `consumer recovery ${args[0]} failed: ${value.stderr?.slice(-1800)}`);
@@ -59,7 +59,7 @@ export function qualifyConsumer(input, output) {
     };
     console.log("consumer qualification: fresh ordinary Compose startup");
     const starting = Date.now();
-    compose("up", "-d", "--wait", "--wait-timeout", "600");
+    compose("up", "-d", "--wait", "--wait-timeout", "900");
     report.timingsMs.freshStateStartup = Date.now() - starting;
     report.checks.freshOrdinaryComposeStartup = true;
     const original = hashes();
@@ -111,7 +111,7 @@ export function qualifyConsumer(input, output) {
 
     console.log("consumer qualification: ordinary down/up with retained data and keys");
     compose("down");
-    const recreating = Date.now(); compose("up", "-d", "--wait", "--wait-timeout", "600");
+    const recreating = Date.now(); compose("up", "-d", "--wait", "--wait-timeout", "900");
     report.timingsMs.retainedStateStartup = Date.now() - recreating;
     assert.equal(hashes(), original);
     browser(); sample();

@@ -1,37 +1,14 @@
-# Release (OPS-8, ADR-0065) — turns a tag into something somebody else can
-# install. `make check-release-parity` validates its version, chart and image
-# plan without a daemon. Tagged releases additionally pull the final images
-# anonymously and run native executable checks before announcing the release.
-#
-# On `v*`:
-#
-#   binaries   synveda + synveda-gateway + synveda-worker for darwin-arm64 and
-#              linux-x86_64,
-#              built SQLX_OFFLINE=true against the committed query cache
-#   console    the CNSL-1 bundle carried by product artifacts
-#   reference  canonical Compose runtime files bound to published image digests
-#   chart      version-matched Helm chart archive
-#   images     Docker Hub (owner-configured namespace), mirrored to GHCR;
-#              product, postgres, cnpg-postgres, keycloak and proxy
-#   fixture    browser-acceptance in both registries for the opt-in sample/tests
-#   SHA256SUMS over every asset above
-#
-# Client archives add private Node on four Unix and two Windows targets (OPS-12,
-# ADR-0065 amendments 12/13). The two historical server archives remain separate.
 name: Release
 
 on:
   push:
     tags: ["v*"]
-  # A dry run against a branch: builds and packages everything, publishes
-  # nothing. This is how the workflow gets tested without minting a tag,
-  # since nothing in `make ci` exercises it.
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to build (no leading v). Publishes nothing."
-        required: true
-        default: "0.0.0-dev"
+        description: "Optional assertion of the workspace version. Publishes nothing."
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -42,6 +19,10 @@ concurrency:
 
 jobs:
   version:
+    name: Check release source
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -50,6 +31,12 @@ jobs:
       dockerhub_namespace: ${{ steps.pick.outputs.dockerhub_namespace }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
       - name: Resolve the version, and refuse a tag the crates disagree with
         id: pick
         env:
@@ -67,19 +54,12 @@ jobs:
             version="${GITHUB_REF_NAME#v}"
             publish=true
           else
-            version="$INPUT_VERSION"
+            version="${INPUT_VERSION:-$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)}"
             publish=false
           fi
           sh scripts/release-version.sh "$version"
-          # Binaries and deployment artifacts are one versioned release
-          # contract. A tag that disagrees with the workspace would make the
-          # artifact set internally inconsistent, so it fails here instead.
-          # awk rather than `sed | head`, for the reason the console step
-          # above now carries: under `pipefail`, a reader that closes early
-          # fails the writer. This one survived only because its output fits
-          # the pipe buffer, which is luck rather than design.
           crate="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
-          if [ "$publish" = "true" ] && [ "$version" != "$crate" ]; then
+          if [ "$version" != "$crate" ]; then
             echo "tag v$version does not match the workspace version $crate." >&2
             echo "The binaries and reference artifact must use one workspace version." >&2
             exit 1
@@ -89,178 +69,36 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "building $version (publish=$publish)"
-
-  binaries:
-    needs: version
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: darwin-arm64
-            runs-on: macos-14        # Apple Silicon
-            rust-target: aarch64-apple-darwin
-            servers: true
-          - target: linux-x86_64
-            runs-on: ubuntu-latest
-            rust-target: x86_64-unknown-linux-gnu
-            servers: true
-          - target: darwin-x86_64
-            runs-on: macos-15-intel
-            rust-target: x86_64-apple-darwin
-            servers: false
-          - target: linux-arm64
-            runs-on: ubuntu-24.04-arm
-            rust-target: aarch64-unknown-linux-gnu
-            servers: false
-    runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 60
-    env:
-      SQLX_OFFLINE: "true"
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - run: rustup toolchain install
-      - run: rustup target add ${{ matrix.rust-target }}
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: release-${{ matrix.target }}
-      - name: Build
-        run: |
-          cargo build --release --locked \
-            --target ${{ matrix.rust-target }} \
-            -p synveda-cli
-      - name: Build historical server archive
-        if: matrix.servers
-        run: cargo build --release --locked --target ${{ matrix.rust-target }} -p synveda-gateway
-      - name: Package
-        if: matrix.servers
-        run: |
-          set -euo pipefail
-          version="${{ needs.version.outputs.version }}"
-          out="target/${{ matrix.rust-target }}/release"
-          stage="$(mktemp -d)"
-          cp "$out/synveda" "$out/synveda-gateway" "$out/synveda-worker" "$stage/"
-          # Stripped: these are release binaries a tester downloads, and the
-          # debug info is tens of megabytes of a download nobody symbolises.
-          strip "$stage/synveda" "$stage/synveda-gateway" "$stage/synveda-worker" || true
-          tar -czf "synveda-$version-${{ matrix.target }}.tar.gz" -C "$stage" \
-            synveda synveda-gateway synveda-worker
-          ls -lh "synveda-$version-${{ matrix.target }}.tar.gz"
-      - name: It runs, and it is the version it claims
-        run: |
-          set -euo pipefail
-          out="target/${{ matrix.rust-target }}/release"
-          # Both targets are native to their runner, so a smoke test is free
-          # and catches a binary that will not dynamically link.
-          "$out/synveda" --version
-          if [ "${{ matrix.servers }}" = "true" ]; then
-            test -x "$out/synveda-worker"
-          fi
-          # Only on a tag. A `workflow_dispatch` dry run names its own
-          # version and the binary still reports CARGO_PKG_VERSION, so
-          # asserting agreement there would fail every dry run — and the
-          # tag/crate agreement is the `version` job's, which refuses the
-          # mismatch before anything is built.
-          if [ "${{ needs.version.outputs.publish }}" = "true" ]; then
-            "$out/synveda" --version | grep -q "${{ needs.version.outputs.version }}" \
-              || { echo "the binary does not report ${{ needs.version.outputs.version }}" >&2; exit 1; }
-          fi
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24.21.0
-      - run: corepack enable
-      - name: Build the existing hook runtimes
-        run: |
-          pnpm install --frozen-lockfile --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter...
-          pnpm --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter... build
-      - name: Package and execute the native client archive
+      - name: Require full CI for the exact tagged commit
+        if: steps.pick.outputs.publish == 'true'
+        run: node scripts/require-release-ci.mjs
         env:
-          CLIENT_TARGET: ${{ matrix.target }}
-          VERSION: ${{ needs.version.outputs.version }}
-          SOURCE_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          node --input-type=module <<'JS'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          import { createHash } from 'node:crypto';
-          const lock = JSON.parse(readFileSync('scripts/node-runtimes.json'));
-          const pin = lock.targets[process.env.CLIENT_TARGET];
-          const response = await fetch(`https://nodejs.org/dist/v${lock.version}/${pin.archive}`, { signal: AbortSignal.timeout(120000) });
-          if (!response.ok) throw new Error('private Node download failed');
-          const chunks = [];
-          let size = 0;
-          for await (const chunk of response.body) {
-            size += chunk.length;
-            if (size > 128 * 1024 * 1024) throw new Error('private Node download exceeds its size bound');
-            chunks.push(chunk);
-          }
-          const bytes = Buffer.concat(chunks);
-          if (createHash('sha256').update(bytes).digest('hex') !== pin.sha256) throw new Error('private Node checksum mismatch');
-          writeFileSync('private-node.tar.gz', bytes, { flag: 'wx' });
-          JS
-          node scripts/package-client.mjs "$VERSION" "$CLIENT_TARGET" \
-            "target/${{ matrix.rust-target }}/release/synveda" private-node.tar.gz . "$SOURCE_SHA"
-          node scripts/check-client-package.mjs "$VERSION" \
-            "synveda-client-$VERSION-$CLIENT_TARGET.tar.gz" "synveda-client-report-$CLIENT_TARGET.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: binaries-${{ matrix.target }}
-          path: |
-            synveda-*.tar.gz
-            synveda-client-report-*.json
-          if-no-files-found: error
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  windows-clients:
+  cli:
+    name: Build and Test native CLI
     needs: version
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: windows-2025
-            target: windows-x86_64
-            arch: x64
-            rust-host: x86_64-pc-windows-msvc
-          - runner: windows-11-arm
-            target: windows-arm64
-            arch: arm64
-            rust-host: aarch64-pc-windows-msvc
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    env:
-      SQLX_OFFLINE: "true"
-      RUSTUP_TOOLCHAIN: 1.96.0-${{ matrix.rust-host }}
-      SYNVEDA_CLIENT_VERSION: ${{ needs.version.outputs.version }}
-      SYNVEDA_CLIENT_TARGET: ${{ matrix.target }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - run: rustup toolchain install $env:RUSTUP_TOOLCHAIN --component clippy,rustfmt
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: release-${{ matrix.target }}
-      - run: cargo build --release --locked -p synveda-cli
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24.21.0
-          architecture: ${{ matrix.arch }}
-      - run: pnpm install --frozen-lockfile --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter...
-      - run: pnpm --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter... build
-      - run: node scripts/windows-client-candidate.mjs target/release/synveda.exe $env:SYNVEDA_CLIENT_VERSION $env:SYNVEDA_CLIENT_TARGET . $env:GITHUB_SHA
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: binaries-${{ matrix.target }}
-          path: |
-            synveda-client-*.zip
-            synveda-client-report-*.json
-          if-no-files-found: error
+    uses: ./.github/workflows/cli.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      servers: true
+
+  docker:
+    name: Build and Test Docker and Helm candidates
+    needs: version
+    uses: ./.github/workflows/docker.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
 
   bundles:
+    name: Build release bundles
     needs: version
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
@@ -269,36 +107,21 @@ jobs:
           version: v4.2.3
       - run: corepack enable
       - name: The console bundle
-        # CNSL-1's static assets. The image has carried them since ADR-0056;
-        # this copy is also packaged for direct-binary evaluation.
         run: |
           set -euo pipefail
           version="${{ needs.version.outputs.version }}"
           pnpm install --frozen-lockfile --filter @synveda/console...
           pnpm --filter @synveda/console build
           test -f console/dist/index.html
-          # Staged rather than renamed inside the archive: install.sh copies
-          # a top-level `console/` out of it, and one layout that is obvious
-          # beats two that depend on which tar built it.
           stage="$(mktemp -d)"
           mkdir -p "$stage/console"
           cp -R console/dist/. "$stage/console/"
           test -f "$stage/console/index.html"
           tar -czf "synveda-console-$version.tar.gz" -C "$stage" console
-          # `sed -n '1,3p'` rather than `head -n 3`: head closes the pipe
-          # after three lines, tar takes EPIPE, and `pipefail` promotes that
-          # to a failed job — which is exactly how this step died on its
-          # first dispatch, after building the bundle perfectly. sed reads
-          # to EOF, so tar always finishes writing.
           tar -tzf "synveda-console-$version.tar.gz" | sed -n '1,3p'
       - name: The Helm chart
         run: sh scripts/package-chart.sh "${{ needs.version.outputs.version }}" .
       - name: The Claude Code marketplace and Codex/Copilot hook runtimes
-        # A marketplace, not a plugin directory — that is the unit Claude
-        # Code installs, and dropping a plugin under `~/.claude/plugins/`
-        # (which is what this repository's docs said to do) installs
-        # nothing. `synveda plugin install` adds this and asks Claude Code's
-        # own CLI to install from it.
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter...
@@ -306,12 +129,6 @@ jobs:
           make plugin-package-check
           scripts/package-plugin.sh "${{ needs.version.outputs.version }}" .
       - name: The plugin manifest is one Claude Code accepts
-        # `claude plugin validate` is the vendor's own check. It is advisory
-        # here rather than required: the runner may not have the CLI, and a
-        # release must not fail because a linter was unavailable. What it
-        # cannot catch is a manifest that validates and still fails to load
-        # — which is exactly what shipped — so `package-plugin.sh` asserts
-        # the two keys responsible, and the OPS-8 demo installs it for real.
         run: |
           set -uo pipefail
           if command -v claude >/dev/null 2>&1; then
@@ -329,12 +146,10 @@ jobs:
             synveda-*.tgz
           if-no-files-found: error
 
-  # One architecture per **native** runner, never QEMU.
-  #
-  # Native amd64 and arm64 runners keep release builds inside the workflow
-  # budget and avoid forcing Apple Silicon reference installs through QEMU.
+
   images:
-    needs: version
+    name: Publish Docker candidates
+    needs: [version, cli, bundles, docker]
     environment: ${{ needs.version.outputs.publish == 'true' && 'release' || 'release-dry-run' }}
     permissions:
       contents: read
@@ -342,26 +157,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: amd64
-            platform: linux/amd64
-            runs-on: ubuntu-latest
-          - arch: arm64
-            platform: linux/arm64
-            runs-on: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 60
-    env:
-      # `docker/build-push-action` uploads a `.dockerbuild` build record as a
-      # workflow artifact per build — twelve of them across this matrix. They
-      # are for the Actions build summary UI and nothing here reads them,
-      # but `publish` downloads artifacts and one of these is what failed
-      # its first run. Not produced at all is better than filtered later.
-      DOCKER_BUILD_SUMMARY: "false"
+        arch: [amd64, arm64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Install OCI copy tool
+        if: needs.version.outputs.publish == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: needs.version.outputs.publish == 'true'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.version.outputs.publish == 'true'
+        with:
+          name: docker-candidate-${{ matrix.arch }}
+          path: candidate
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: needs.version.outputs.publish == 'true'
         with:
           registry: ghcr.io
@@ -374,143 +193,17 @@ jobs:
           registry: docker.io
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Refuse existing release coordinates
+      - name: Copy qualified images without rebuilding or replacing tags
         if: needs.version.outputs.publish == 'true'
+        run: REGISTRY_AUTH_FILE="${DOCKER_CONFIG:-$HOME/.docker}/config.json" node scripts/publish-images.mjs candidate "$VERSION" "$GITHUB_SHA" "$ARCH"
         env:
-          DOCKERHUB_NAMESPACE: ${{ needs.version.outputs.dockerhub_namespace }}
-          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
-          SOURCE_SHA: ${{ github.sha }}
           ARCH: ${{ matrix.arch }}
-        run: node scripts/release-registries.mjs preflight "$VERSION" "$SOURCE_SHA" "$ARCH"
-      # Per-architecture tags. A dry run builds without pushing; a tagged
-      # release joins them into the digest identities in environment.json.
-      # Cache scopes are per-arch because two architectures sharing one scope
-      # evict each other on every run.
-      - name: The product image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: deploy/compose/product/Dockerfile
-          platforms: ${{ matrix.platform }}
-          provenance: mode=max
-          sbom: true
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.version.outputs.version }}
-          push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: |
-            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/product:${{ needs.version.outputs.version }}-${{ matrix.arch }}
-            ghcr.io/synveda/product:${{ needs.version.outputs.version }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=product-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=product-${{ matrix.arch }}
-      - name: Postgres
-        # Same Dockerfile the dev compose builds, published under a name that
-        # is not "dev-" because this one is what a customer installs.
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: deploy/compose/postgres/Dockerfile
-          target: reference
-          platforms: ${{ matrix.platform }}
-          provenance: mode=max
-          sbom: true
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.version.outputs.version }}
-          push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: |
-            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
-            ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=postgres-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=postgres-${{ matrix.arch }}
-      - name: CloudNativePG PostgreSQL
-        # The chart data plane is a distinct image contract: CloudNativePG's
-        # base plus the same pgvector/bootstrap surface. It shares the release
-        # version, never the single-host image implementation.
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: deploy/helm/postgres/Dockerfile
-          platforms: ${{ matrix.platform }}
-          provenance: mode=max
-          sbom: true
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.version.outputs.version }}
-          push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: |
-            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/cnpg-postgres:17.11-synveda-${{ needs.version.outputs.version }}-${{ matrix.arch }}
-            ghcr.io/synveda/cnpg-postgres:17.11-synveda-${{ needs.version.outputs.version }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=cnpg-postgres-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=cnpg-postgres-${{ matrix.arch }}
-      - name: Bundled Keycloak
-        # The canonical bundled provider is the optimized production-mode
-        # image, including only the reviewed Synveda projection/convergence
-        # helpers. Provider identity remains generic OIDC at the product seam.
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: deploy/compose/keycloak/Dockerfile
-          platforms: ${{ matrix.platform }}
-          provenance: mode=max
-          sbom: true
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.version.outputs.version }}
-          push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: |
-            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/keycloak:${{ needs.version.outputs.version }}-${{ matrix.arch }}
-            ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=keycloak-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=keycloak-${{ matrix.arch }}
-      - name: Reference proxy
-        # This is not a cosmetic wrapper around Caddy: its Dockerfile removes
-        # the upstream file capability before switching to the reference UID.
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: deploy/compose/proxy/Dockerfile
-          platforms: ${{ matrix.platform }}
-          provenance: mode=max
-          sbom: true
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.version.outputs.version }}
-          push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: |
-            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}
-            ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=proxy-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=proxy-${{ matrix.arch }}
-      - name: Browser acceptance fixture
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: deploy/compose/product/Dockerfile
-          target: browser-acceptance
-          platforms: ${{ matrix.platform }}
-          provenance: mode=max
-          sbom: true
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.version.outputs.version }}
-          push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: |
-            docker.io/${{ needs.version.outputs.dockerhub_namespace }}/browser-acceptance:${{ needs.version.outputs.version }}-${{ matrix.arch }}
-            ghcr.io/synveda/browser-acceptance:${{ needs.version.outputs.version }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=product-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=product-${{ matrix.arch }}
+          DOCKERHUB_NAMESPACE: ${{ needs.version.outputs.dockerhub_namespace }}
 
   assemble:
-    needs: [version, binaries, windows-clients, bundles, images]
+    name: Assemble release assets
+    needs: [version, cli, bundles, images]
     environment: ${{ needs.version.outputs.publish == 'true' && 'release' || 'release-dry-run' }}
     permissions:
       contents: read
@@ -519,18 +212,17 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: assets
-          # Named rather than "everything this run produced". Belt to the
-          # `DOCKER_BUILD_SUMMARY: false` braces above: a future action that
-          # uploads an artifact of its own must not land in the directory
-          # this job checksums and publishes.
           pattern: "{binaries-*,bundles}"
           merge-multiple: true
-      # Join only tagged builds. Dry runs still assemble and checksum archives
-      # with explicitly synthetic digests; registry verification needs a tag.
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: needs.version.outputs.publish == 'true'
         with:
@@ -560,31 +252,11 @@ jobs:
         run: |
           node scripts/release-registries.mjs package \
             "assets/synveda-registry-images-$VERSION.json" assets
-      - name: Every release asset is present
-        run: |
-          set -euo pipefail
-          version="${{ needs.version.outputs.version }}"
-          for asset in \
-            "synveda-$version-darwin-arm64.tar.gz" \
-            "synveda-$version-linux-x86_64.tar.gz" \
-            "synveda-console-$version.tar.gz" \
-            "synveda-reference-$version.tar.gz" \
-            "synveda-plugin-$version.tar.gz" \
-            "synveda-$version.tgz"; do
-            test -f "assets/$asset" || { echo "missing asset: $asset" >&2; exit 1; }
-          done
-          echo "all six release archives are present"
-          node scripts/check-client-release.mjs assets "$version" "${{ github.sha }}" "${{ needs.version.outputs.publish }}"
-      - name: Checksums
-        # The final inventory (including native acceptance) is attested in
-        # publish. Checksums alone only detect transfer corruption.
-        run: |
-          set -euo pipefail
-          cd assets
-          ls -lh
-          sha256sum synveda-*.tar.gz synveda-client-*.zip synveda-*.tgz synveda-*.yaml synveda-registry-images-*.json > SHA256SUMS
-          sha256sum synveda-client-report-*.json >> SHA256SUMS
-          cat SHA256SUMS
+      - name: Verify the complete assembled inventory and checksums
+        run: node scripts/check-release-assets.mjs assets "$VERSION" "$GITHUB_SHA" "$PUBLISH" assembled
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          PUBLISH: ${{ needs.version.outputs.publish }}
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
         with:
           version: v4.2.3
@@ -603,8 +275,6 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-assets
-          # The checkout also contains assets/brand and assets/product. Only
-          # packaged downloads belong in the release artifact.
           path: |
             assets/SHA256SUMS
             assets/synveda-*.tar.gz
@@ -615,9 +285,9 @@ jobs:
             assets/synveda-client-report-*.json
           if-no-files-found: error
 
-  # Fresh runners and an empty Docker credential directory prove the images
-  # can be downloaded by an installer with no registry publishing credentials.
+
   verify-images:
+    name: Test published Docker and Helm artifacts
     needs: [version, assemble]
     permissions:
       contents: read
@@ -635,6 +305,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
@@ -680,8 +352,6 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          # The preceding job steps pulled immutable bytes anonymously; these
-          # drills must use those bytes and the packaged chart without builds.
           node scripts/qualify-release.mjs \
             "$RUNNER_TEMP/synveda-reference-$VERSION" "release-docker-${{ matrix.arch }}.json"
           node scripts/qualify-release.mjs --consumer-candidate \
@@ -689,14 +359,14 @@ jobs:
           node scripts/qualify-kubernetes-release.mjs \
             "$RUNNER_TEMP/synveda-reference-$VERSION" "assets/synveda-$VERSION.tgz" \
             "release-kubernetes-${{ matrix.arch }}.json"
-          # Empty registry configuration also applies to Helm's OCI client.
           export HELM_REGISTRY_CONFIG="$RUNNER_TEMP/anonymous-helm.json"
           mkdir anonymous-chart
           helm pull oci://ghcr.io/synveda/charts/synveda --version "$VERSION" --destination anonymous-chart
           cmp "assets/synveda-$VERSION.tgz" "anonymous-chart/synveda-$VERSION.tgz"
       - name: Explain the dry-run boundary
         if: needs.version.outputs.publish != 'true'
-        run: echo "Dry run only. Synthetic image digests are not pullable; no registry verification or publication ran."
+        run: |
+          echo "Dry run: native OCI candidates, Compose and Helm were tested by Docker. The synthetic public inventory is not installable; no public registry verification or publication ran."
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: needs.version.outputs.publish == 'true'
         with:
@@ -709,6 +379,8 @@ jobs:
           if-no-files-found: error
 
   publish:
+    name: Publish verified release
+    if: needs.version.outputs.publish == 'true'
     needs: [version, assemble, verify-images]
     environment: ${{ needs.version.outputs.publish == 'true' && 'release' || 'release-dry-run' }}
     permissions:
@@ -718,6 +390,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-assets
@@ -728,20 +406,10 @@ jobs:
           pattern: release-verification-*
           path: assets
           merge-multiple: true
-      - name: Include both native verification reports
-        if: needs.version.outputs.publish == 'true'
-        run: |
-          set -euo pipefail
-          cd assets
-          test -s release-images-amd64.json
-          test -s release-images-arm64.json
-          for arch in amd64 arm64; do
-            test -s "release-docker-$arch.json"
-            test -s "release-consumer-$arch.json"
-            test -s "release-kubernetes-$arch.json"
-          done
-          sha256sum release-images-*.json release-docker-*.json release-consumer-*.json release-kubernetes-*.json >> SHA256SUMS
-          sha256sum --check SHA256SUMS
+      - name: Verify all native reports and the final asset set
+        run: node scripts/check-release-assets.mjs assets "$VERSION" "$GITHUB_SHA" true qualified
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
       - name: Authenticate the final release inventory
         id: attest
         if: needs.version.outputs.publish == 'true'
@@ -761,144 +429,26 @@ jobs:
           gh attestation verify assets/SHA256SUMS --bundle assets/SHA256SUMS.sigstore.json \
             --repo "$GH_REPO" --signer-workflow "$GH_REPO/.github/workflows/release.yml" \
             --source-ref "$GITHUB_REF" --source-digest "$SOURCE_SHA" --deny-self-hosted-runners
-      - name: Publish
-        if: needs.version.outputs.publish == 'true'
+      - name: Retain the signed inventory for upload recovery
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-release-assets
+          path: |
+            assets/SHA256SUMS
+            assets/SHA256SUMS.sigstore.json
+            assets/synveda-*.tar.gz
+            assets/synveda-client-*.zip
+            assets/synveda-*.tgz
+            assets/synveda-*.yaml
+            assets/synveda-registry-images-*.json
+            assets/synveda-client-report-*.json
+            assets/release-*.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publish after draft uploads are complete
+        run: node scripts/publish-release.mjs assets "$VERSION"
         env:
+          VERSION: ${{ needs.version.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           DOCKERHUB_NAMESPACE: ${{ needs.version.outputs.dockerhub_namespace }}
-        run: |
-          set -euo pipefail
-          version="${{ needs.version.outputs.version }}"
-          # Notes in a file rather than an argument: the body is markdown
-          # with fenced code in it, and quoting that through a shell is the
-          # kind of cleverness that ships a release note full of backslashes.
-          cat > notes.md <<NOTES
-          Native client artifacts for macOS arm64 and Linux x86_64 plus the
-          digest-bound Docker reference deployment. The installer does not
-          start containers; use the loopback evaluation or documented HTTPS
-          configuration, then use the installed \`synveda-compose\` launcher.
-
-          For a server, download only \`synveda-reference-$version.tar.gz\`
-          and \`SHA256SUMS\`: no source checkout or compiler is needed. Follow
-          the [prebuilt Docker guide](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/deploy/compose/PREBUILT.md)
-          for download verification, localhost first sign-in and lifecycle operations.
-
-          Both Linux AMD64 and ARM64 jobs anonymously pulled the manifest-bound
-          image set and passed isolated executable/asset smoke checks. Their
-          checksummed \`release-images-*.json\` reports are attached. These
-          reports distinguish executable checks from the required Docker startup,
-          real OIDC browser/CLI login, sample/recreation and paired recovery drill.
-          Both native runners also exercised all four provider ownership modes
-          using the same candidate bytes and packaged chart in disposable Kind.
-          Both runners also qualified plain Compose and its private named-volume
-          recovery through the extracted archive's CONSUMER.md ceremony.
-          The checksummed release-docker, release-consumer and release-kubernetes reports are attached.
-          Docker reference live clean-host acceptance is tracked separately
-          in those deployment reports from the isolated image smoke checks.
-          macOS Docker Desktop, Windows/WSL2 and real OpenShift remain unqualified.
-          This is a controlled single-host reference, not HA, production SaaS
-          or enterprise certification.
-
-          The database baseline is schema epoch 3; earlier epochs are refused
-          and no published N-1 data upgrade is qualified by these checks.
-          Keep the same runtime selection when updating an existing deployment.
-          Back up both databases and matching keys first. Application/Helm
-          rollback does not reverse database migrations.
-
-          \`\`\`sh
-          curl -fL https://raw.githubusercontent.com/${{ github.repository }}/${GITHUB_REF_NAME}/scripts/install.sh -o synveda-install.sh
-          # Inspect synveda-install.sh before running it on a client machine.
-          SYNVEDA_VERSION=${GITHUB_REF_NAME} sh synveda-install.sh
-          \`\`\`
-
-          To connect a client to an existing gateway without downloading server
-          artifacts, use the inspected installer with
-          \`SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=${GITHUB_REF_NAME} sh synveda-install.sh\`.
-          The four native Unix client archives include private Node; their
-          checksummed \`synveda-client-report-*.json\` files record restricted-PATH
-          installation and extracted hook replay. These checks do not establish
-          native vendor loading or real issuer login from the client archives.
-          The two native Windows ZIPs include private Node and PowerShell
-          installation. Their reports require native Rust/Node private storage,
-          retained-state reinstallation and unsafe ZIP/installer refusals.
-          On Windows, download and inspect the matching PowerShell installer:
-
-          \`\`\`powershell
-          Invoke-WebRequest https://raw.githubusercontent.com/${{ github.repository }}/${GITHUB_REF_NAME}/scripts/install.ps1 -OutFile synveda-install.ps1
-          # Inspect this script; the installer does not change execution policy.
-          & ./synveda-install.ps1 -Version $version
-          \`\`\`
-
-          Windows vendor registration remains manual. Windows deployment,
-          setup/vendor configuration writers and diagnostic logs remain unavailable.
-
-          Then give an AI client your team's governed memory:
-
-          \`\`\`sh
-          synveda plugin install                        # Claude Code
-          synveda mcp install --client claude-desktop   # or cursor, or zed
-          \`\`\`
-
-          Verify \`SHA256SUMS\` with its \`SHA256SUMS.sigstore.json\` publisher
-          attestation before verifying/extracting downloads. See the versioned
-          [verification guide](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/docs/RELEASING.md).
-          Native binaries have no OS code signature or notarization. The attested
-          checksum inventory authenticates these release bytes and registry digests.
-
-          Consumer images: \`docker.io/$DOCKERHUB_NAMESPACE/product:$version\`
-          and the other five images recorded in the attested registry inventory.
-          Both registries passed anonymous native pulls; full deployment checks
-          used the Docker Hub destination digests. GHCR mirrors include
-          \`ghcr.io/synveda/product:${{ needs.version.outputs.version }}\`,
-          \`ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}\`, and
-          \`ghcr.io/synveda/cnpg-postgres:17.11-synveda-${{ needs.version.outputs.version }}\`.
-          The bundled reference dependencies are
-          \`ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}\` and
-          \`ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}\`.
-          Helm chart: \`synveda-${{ needs.version.outputs.version }}.tgz\`.
-
-          Kubernetes uses the checksummed \`synveda-images-$version.yaml\`
-          overlay; CNPG additionally uses \`synveda-cnpg-image-$version.yaml\`.
-          Follow the versioned [Kubernetes guide](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/deploy/helm/synveda/README.md).
-          BuildKit emits image provenance and SBOM attestations. These do not
-          constitute signature verification or a completed deployment drill.
-
-          See [docs/INSTALL.md](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/docs/INSTALL.md).
-          NOTES
-          # Validate the complete flat inventory before creating a release;
-          # unrelated checkout directories must never become upload arguments.
-          release_assets=(
-            assets/SHA256SUMS
-            assets/SHA256SUMS.sigstore.json
-            "assets/synveda-registry-images-$version.json"
-            "assets/synveda-$version-darwin-arm64.tar.gz"
-            "assets/synveda-$version-linux-x86_64.tar.gz"
-            "assets/synveda-console-$version.tar.gz"
-            "assets/synveda-reference-$version.tar.gz"
-            "assets/synveda-plugin-$version.tar.gz"
-            "assets/synveda-$version.tgz"
-            "assets/synveda-cnpg-image-$version.yaml"
-            "assets/synveda-images-$version.yaml"
-          )
-          for arch in amd64 arm64; do
-            for report in images docker consumer kubernetes; do
-              release_assets+=("assets/release-$report-$arch.json")
-            done
-          done
-          for target in darwin-arm64 darwin-x86_64 linux-arm64 linux-x86_64; do
-            release_assets+=("assets/synveda-client-$version-$target.tar.gz" "assets/synveda-client-report-$target.json")
-          done
-          for target in windows-arm64 windows-x86_64; do
-            release_assets+=("assets/synveda-client-$version-$target.zip" "assets/synveda-client-report-$target.json")
-          done
-          for asset in "${release_assets[@]}"; do
-            test -f "$asset" && test ! -L "$asset" || {
-              echo "missing or non-regular release asset: $asset" >&2
-              exit 1
-            }
-          done
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "Synveda ${GITHUB_REF_NAME}" \
-            --notes-file notes.md \
-            "${release_assets[@]}"

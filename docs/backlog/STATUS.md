@@ -37,14 +37,28 @@ checks (ADR-0065 amendment 13). X64 and arm64 passed all seven checks on clean s
 and unsafe archive/installer refusals. The x64 archive/report hashes and native
 identities were also checked locally; OPS-12 records both native job identities
 and the arm64 evidence bundle digest.
-Next: obtain the four Unix hosted archive reports and artifact-based
+Next: obtain passing Linux x64/ARM64 native archive reports and artifact-based
 real issuer/harness acceptance evidence.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures
 (ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier
 Windows x64 compilation/refusal job and expanded credential job passed. Exact
 evidence and the next action are in [OPS-12](OPS-12.md).
-Hosted deployment qualification and publication still need owner registry settings and a
-separately authorized new release.
+Complete hosted deployment qualification and publication still need GHCR access,
+repository protection and a separately authorized new release.
+The pipeline refactor adds conservative selection, CI Result, shared native
+CLI/Docker candidate validation and exact-source/draft publication gates
+(ADR-0108). Local gates and packaging checks passed. Initial hosted attempts
+proved CI Result blocks required failures, then exposed Linux hard-link archive
+input, restricted-PATH `gzip` and AMD64 realm-startup timing issues. The final
+[PR CI](https://github.com/synveda/synveda/actions/runs/35844879556) and
+[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/35845344195)
+on `47fb126` passed all six native CLI packages and both Docker/Helm candidates.
+The dry-run bundle's 21 payload checksums passed, but its images are unpublished;
+the existing public v0.4.0 release still lacks native client-only archives.
+Next: real issuer/harness acceptance, signing/notarization and a separately
+approved release from a full exact-source main CI run.
+The Docker Hub variables and release environment secret are configured;
+required-check, tag-protection and GHCR settings remain in [the CI guide](../CI.md).
 
 [Client support](../CLIENT_SUPPORT.md) and [SDK compatibility](../../sdks/README.md#compatibility-and-release-boundary)
 own tested versions and limits. [ADPT-4](ADPT-4.md) retains SDK release decisions.
@@ -55,7 +69,7 @@ than in this inventory.
 
 ## Phase 0 — Foundation (wk 1)
 
-- [x] FND-1: Workspace scaffold — delivered 2026-07-16; contributor setup, fast validation and fork-safe CI: ADR-0108
+- [x] FND-1: Workspace scaffold — delivered 2026-07-16; contributor setup, CI Result and candidate validation/publication boundaries: ADR-0108
 - [x] FND-2: Dev environment — delivered 2026-07-17
 - [x] FND-3: synveda-types + error model — delivered 2026-07-18
 - [x] FND-4: Migrations & bitemporal base tables — delivered 2026-07-18

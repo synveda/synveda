@@ -106,6 +106,32 @@ test("a native pull check covers all six artifacts, upstream pulls and isolated 
   );
 });
 
+test("loopback OCI candidates remain separate from public release verification", () => {
+  const candidate = manifest();
+  candidate.image_namespace = "localhost:5000/synveda";
+  candidate.images = Object.fromEntries(Object.entries(candidate.images).map(([name, image]) => [name, image.replace("ghcr.io/synveda", candidate.image_namespace)]));
+  assert.throws(() => validateEnvironment(candidate, version, source), /image namespace/);
+  validateEnvironment(candidate, version, source, true);
+  const single = index();
+  single.manifests = single.manifests.filter((entry) => entry.platform.architecture !== "amd64");
+  single.manifests.find((entry) => entry.platform.os === "unknown").annotations = {
+    "vnd.docker.reference.type": "attestation-manifest",
+    "vnd.docker.reference.digest": digest,
+  };
+  const f = fixture((args) => args[0] === "buildx" && args.at(-1).startsWith("localhost:") ? JSON.stringify(single) : undefined);
+  const report = verifyImages(candidate, "linux/arm64", version, source, f.run, true);
+  assert.equal(report.local_candidate, true);
+  assert.equal(report.anonymous_pull, false);
+  const unattested = fixture((args) => args[0] === "buildx" ? JSON.stringify({ manifests: [single.manifests[0]] }) : undefined);
+  assert.throws(() => verifyImages(candidate, "linux/arm64", version, source, unattested.run, true), /attestation descriptor/);
+  for (const manifests of [[], index().manifests, [{ digest, platform: { os: "linux", architecture: "amd64" } }]]) {
+    const broken = fixture((args) => args[0] === "buildx" ? JSON.stringify({ manifests }) : undefined);
+    assert.throws(() => verifyImages(candidate, "linux/arm64", version, source, broken.run, true), /exactly the native image/);
+  }
+  candidate.image_namespace = "untrusted.example/team";
+  assert.throws(() => validateEnvironment(candidate, version, source, true), /image namespace/);
+});
+
 test("missing artifacts, mutable tags and mismatched release identity fail before Docker", () => {
   const mutants = [
     (m) => {

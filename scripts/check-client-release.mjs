@@ -18,7 +18,7 @@ export function checkClientRelease(directory, version, source, publish, lock) {
         (publish && (report.cli_version !== `synveda ${version}` || report.source_tree_dirty !== false))) {
       throw new Error(`native client identity, pin or archive evidence mismatch: ${target}`);
     }
-    for (const check of ["native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
+    for (const check of ["packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
       "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
       ...(windows ? ["native-windows-private-storage-interoperability", "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
         "unsafe-zip-and-overlapping-install-root-refusal"]

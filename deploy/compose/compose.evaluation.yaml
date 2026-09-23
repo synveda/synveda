@@ -12,10 +12,10 @@ services:
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
   keycloak-realm-convergence:
     # First-run identity reconciliation performs bounded credential/authority
-    # proofs. Allow CPU-constrained hosts time inside the launcher's 600s bound;
-    # successful health still requires the unchanged complete generation gate.
+    # proofs. Keep health in "starting" through the launcher's 900s limit on
+    # CPU-constrained hosts; readiness still requires the complete generation gate.
     healthcheck:
-      start_period: 5m
+      start_period: 15m
   issuer-diagnostic:
     networks:
       identity-backend: {}
