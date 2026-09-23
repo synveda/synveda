@@ -113,6 +113,9 @@ foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.S
   const complete = spool.loadSpool("interop");
   complete.close_requested = false;
   assert.equal(spool.saveSpool(complete), true);
+  assert.equal(spool.retireIfComplete(complete), false, "an active native binding is retained");
+  complete.closed = true;
+  assert.equal(spool.saveSpool(complete), true);
   assert.equal(spool.retireIfComplete(complete), true);
   assert.equal(existsSync(path), false);
   checks.push("stale-write-and-retirement-refusal-owed-close-retention");
