@@ -6,26 +6,20 @@ or existing OIDC. Bundled PostgreSQL is a persistent namespaced StatefulSet;
 CNPG is an explicit alternative requiring an operator you already manage.
 All modes preserve Cedar, forced RLS, VedaFlow, audit and the migration contract.
 
-<!-- installation-version: 0.4.1; publication: unreleased -->
-Source version 0.4.1 is a release candidate. This page continues to document
-the last published v0.4.0 chart until its successor qualifies.
-**[v0.4.0 is published](https://github.com/synveda/synveda/releases/tag/v0.4.0).**
+<!-- installation-version: 0.4.1; publication: published -->
+**[v0.4.1 is published](https://github.com/synveda/synveda/releases/tag/v0.4.1).**
 The OCI chart and downloadable archive are identical. Both native Linux
 architectures passed the four ownership modes using the published image digests.
 
-The refactored [release pipeline](../../../docs/CI.md) retains all four modes,
-locked chart dependencies, install/upgrade/reinstall and recovery checks. Its
-next release adds Docker Hub/GHCR parity and attested checksums after testing
-the exact native OCI candidates. Those changes have not been published as
-v0.4.0. Server installation needs no native CLI package or publisher token.
+The [release pipeline](../../../docs/CI.md) retains all four modes, locked chart
+dependencies, install/upgrade/reinstall and recovery checks. It publishes
+Docker Hub/GHCR images and attested checksums after testing exact native OCI
+candidates. Server installation needs no native CLI package or publisher token.
 
-## Version 0.4.1 chart candidate
+## Version 0.4.1 chart
 
-After the [v0.4.1 release](https://github.com/synveda/synveda/releases/tag/v0.4.1)
-is stable, set `RELEASE_VERSION=0.4.1` before the download procedure below.
-Download its `SHA256SUMS.sigstore.json` as well and verify `SHA256SUMS` with
-the [publisher verification command](../../../docs/RELEASING.md#artifacts-and-verification)
-before trusting chart or overlay checksums. The package and its two image
+Use `RELEASE_VERSION=0.4.1` in the download procedure below. Verify `SHA256SUMS`
+with its attestation before trusting chart or overlay checksums. The package and its two image
 overlays come from that same release; no source build or registry login is
 needed. The release checks the archive against the anonymously retrievable
 GHCR OCI chart and tests all four PostgreSQL/Keycloak ownership combinations.
@@ -97,7 +91,8 @@ initial reservations, not throughput or capacity guarantees; see the measured
 [starter](../../../demos/evidence/ops11-operations-cnpg-packaged.json) and
 [external](../../../demos/evidence/ops11-operations-external-external.json) reports.
 
-Use Helm 4.2.3 and a namespace-scoped kubeconfig supplied by the administrator.
+Use Helm 4.2.3, GitHub CLI for publisher attestation verification, and a
+namespace-scoped kubeconfig supplied by the administrator.
 These checks print capability/status information, not credentials:
 
 ```sh
@@ -110,29 +105,36 @@ kubectl -n "$NAMESPACE" get resourcequota,limitrange
 kubectl get storageclass
 ```
 
-Download the published chart, its image overlays and checksum inventory into a
-new directory. Verify only these downloaded entries before unpacking; v0.4.0's
-unsigned checksums establish byte integrity, not publisher authenticity.
-For v0.4.1, verify its attested checksum inventory first as described above. Stop
+Download the published chart, its image overlays and attested checksum inventory
+into a new directory. Verify the publisher and downloaded entries before
+unpacking. Stop
 on any download or checksum failure. No Rust compiler, native CLI, Dockerfile
 inspection or source edit is part of chart installation.
 
 ```sh
-RELEASE_VERSION=${RELEASE_VERSION:-0.4.0}
+RELEASE_VERSION=${RELEASE_VERSION:-0.4.1}
 release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
 mkdir "synveda-chart-$RELEASE_VERSION"
 cd "synveda-chart-$RELEASE_VERSION"
 for file in "synveda-$RELEASE_VERSION.tgz" "synveda-images-$RELEASE_VERSION.yaml" \
-  "synveda-cnpg-image-$RELEASE_VERSION.yaml" SHA256SUMS; do
+  "synveda-cnpg-image-$RELEASE_VERSION.yaml" SHA256SUMS SHA256SUMS.sigstore.json; do
   curl -fLO "$release_url/$file"
 done
+gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+  --repo synveda/synveda \
+  --signer-workflow synveda/synveda/.github/workflows/release.yml \
+  --source-ref "refs/tags/v$RELEASE_VERSION" --deny-self-hosted-runners
 awk -v chart="synveda-$RELEASE_VERSION.tgz" \
   -v images="synveda-images-$RELEASE_VERSION.yaml" \
   -v cnpg="synveda-cnpg-image-$RELEASE_VERSION.yaml" \
   '$2 == chart || $2 == images || $2 == cnpg { seen[$2]++; print }
    END { if (seen[chart] != 1 || seen[images] != 1 || seen[cnpg] != 1) exit 1 }' \
   SHA256SUMS > chart.sha256
-sha256sum --check chart.sha256
+if command -v shasum >/dev/null 2>&1; then
+  shasum -a 256 --check chart.sha256
+else
+  sha256sum --check chart.sha256
+fi
 mkdir chart
 # The archive contains synveda/ and its unchanged locked Keycloak dependency.
 tar -xzf "synveda-$RELEASE_VERSION.tgz" -C chart
@@ -140,15 +142,12 @@ export CHART="$PWD/chart/synveda"
 cp "synveda-images-$RELEASE_VERSION.yaml" release-images.yaml
 ```
 
-On macOS, use `shasum -a 256 --check chart.sha256`. Save the verified archive,
-overlays, checksums and source revision with operator configuration. The public
-OCI chart at `oci://ghcr.io/synveda/charts/synveda`, version `0.4.0`, is
-byte-identical to the downloadable archive and requires no registry token.
-The v0.4.1 OCI chart must pass the same public byte comparison before stable
-publication. Verify the v0.4.1 checksum publisher identity as described in
-[RELEASING](../../../docs/RELEASING.md#artifacts-and-verification).
-An unpublished candidate must instead come from its reviewed qualification
-artifacts; never substitute an arbitrary PR build for a trusted release.
+Save the verified archive, overlays, checksums and source revision with operator
+configuration. The public OCI chart at
+`oci://ghcr.io/synveda/charts/synveda`, version `0.4.1`, is byte-identical to
+the downloadable archive and requires no registry token. An unpublished
+candidate must instead come from its reviewed qualification artifacts; never
+substitute an arbitrary PR build for a trusted release.
 
 Private image mirrors need existing namespace-local pull
 Secrets in `imagePullSecrets` and, for packaged identity,

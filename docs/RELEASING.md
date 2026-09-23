@@ -3,14 +3,12 @@
 OPS-8 / OPS-12; [ADR-0115](adr/adr-0115-prebuilt-container-release-verification.md).
 The [CI/release guide](CI.md) owns the workflow map, source gate, local checks
 and current manual repository settings.
-The two-registry and attestation changes are configured. Their 0.4.0-source
-candidate path passed a nonpublishing dry run; public distribution and the
-0.4.1 candidate still require their own qualification. Source version 0.4.1
-is a release candidate. The published v0.4.0 remains
-unchanged and uses GHCR, its original
+The [v0.4.1 release](https://github.com/synveda/synveda/releases/tag/v0.4.1)
+uses Docker Hub and GHCR, an attested checksum inventory and six native client
+packages. The published v0.4.0 remains unchanged and uses GHCR, its original
 installer and its original checksum-only trust boundary. Never rerun publication
 against that version. The [installation guide](../deploy/compose/PREBUILT.md)
-continues to describe those existing downloads.
+keeps its earlier download procedure for existing v0.4.0 installations.
 
 Published v0.4.0 uses `e59284619567d6a13b70ce3f3b3e81121b7621e6`.
 Its original 15 public assets and OCI chart matched the qualified bytes on
@@ -20,11 +18,11 @@ and recovered release are verified. v0.3.0 also remains immutable.
 
 ## Native CLI release artifacts
 
-The refactored Release workflow requires every archive below and its native
-execution report before it can publish a stable release. `VERSION` is the
-workspace version without the `v` prefix. None of these client-only archives is
-present in the existing v0.4.0 release; they become public assets only after a
-new version completes qualification and owner-authorized publication.
+The Release workflow requires every archive below and its native execution
+report before it can publish a stable release. `VERSION` is the workspace
+version without the `v` prefix. All six client-only archives and their reports
+are [v0.4.1 release assets](https://github.com/synveda/synveda/releases/tag/v0.4.1);
+none is present in v0.4.0.
 
 | Operating system | CPU | Required GitHub Release asset |
 |---|---|---|
@@ -39,7 +37,7 @@ CI and Release dry runs also retain these packages as Actions artifacts named
 `binaries-TARGET`; those are validation outputs, not public releases. A missing
 runner, archive or successful report blocks publication; no target is optional.
 
-OPS-12 adds `synveda-client-VERSION-TARGET.tar.gz` for native macOS/Linux x86_64
+v0.4.1 adds `synveda-client-VERSION-TARGET.tar.gz` for native macOS/Linux x86_64
 and arm64, plus `.zip` for Windows x86_64/arm64. Each contains the existing CLI and adapters plus private Node pinned
 by upstream SHA-256 in [the runtime inventory](../scripts/node-runtimes.json),
 with Synveda and complete Node licence notices. It contains no server binaries
@@ -110,6 +108,37 @@ and system-Node plugin archive retain their existing contract.
    environment approvals, both native image reports, Docker and all four Kind
    ownership-mode reports, and final attestation verification. Only then update
    the publication manifest, README, site and UI to name the new release.
+
+To protect new release tags without allowing a publisher to move an existing
+one, use two active tag rulesets targeting `v*`. The creation ruleset restricts
+creations and grants the release operator's team or role bypass. The second
+ruleset restricts updates and deletions with no bypass. The main branch ruleset
+requires the single GitHub Actions check `CI Result`. Repository owners must
+configure these rules; deployment-environment tag filters do not protect Git
+tags from creation.
+
+After the exact main-push CI and nonpublishing Release drill pass for the same
+commit, create a lightweight tag from a clean, current main checkout. Replace
+`VERSION` with the already coordinated workspace version:
+
+```sh
+git switch main
+git fetch origin main --tags
+git pull --ff-only origin main
+test -z "$(git status --porcelain)"
+VERSION=0.4.1
+sh scripts/release-version.sh "$VERSION"
+SOURCE_SHA=$(git rev-parse HEAD)
+git ls-remote origin "refs/tags/v$VERSION" # must print nothing
+git tag "v$VERSION" "$SOURCE_SHA"
+git push origin "refs/tags/v$VERSION"
+```
+
+The tag push starts `.github/workflows/release.yml`; do not create or upload a
+GitHub Release manually. The `release` environment requires an owner review
+after candidate validation. Publication stays a draft until the workflow
+verifies every expected asset. A failed publication never justifies moving the
+tag or rebuilding images under an existing version.
 
 The workflow checks every existing image tag before writing. A missing secret,
 private pull, authentication/rate-limit/network error, incomplete architecture,
