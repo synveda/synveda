@@ -20,7 +20,10 @@ impl Scratch {
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_synveda"));
+        // Keep native private-state refusals identical for source and packaged CLIs.
+        let binary = std::env::var_os("SYNVEDA_PACKAGED_CLI")
+            .unwrap_or_else(|| env!("CARGO_BIN_EXE_synveda").into());
+        let mut command = Command::new(binary);
         command
             .current_dir(&self.0)
             .env_remove("HOME")

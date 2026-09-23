@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// OPS-8 / CPR-45: run only after publication, on a fresh native runner.
-// No login, builds, application state or secrets belong in this check.
+// OPS-8 / CPR-45: immutable image smoke on a native runner. Public verification
+// stays anonymous; only the internal candidate path admits the loopback registry.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -21,7 +21,7 @@ const execute = (args, timeout = 60_000) =>
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 
-export function validateEnvironment(manifest, version, sourceSha) {
+export function validateEnvironment(manifest, version, sourceSha, local = false) {
   if (
     manifest.schema_version !== 1 ||
     manifest.deployment_contract !== "CPR-45/ADR-0102" ||
@@ -40,7 +40,8 @@ export function validateEnvironment(manifest, version, sourceSha) {
   ) {
     throw new Error("release must contain exactly six first-party images");
   }
-  const namespace = imageNamespace(manifest.image_namespace ?? "ghcr.io/synveda");
+  const namespace = local && manifest.image_namespace === "localhost:5000/synveda"
+    ? manifest.image_namespace : imageNamespace(manifest.image_namespace ?? "ghcr.io/synveda");
   for (const [name, repository] of Object.entries(repositories)) {
     const prefix = `${namespace}/${repository}@`;
     const image = manifest.images[name];
@@ -134,8 +135,9 @@ export function verifyImages(
   version,
   sourceSha,
   run = execute,
+  localCandidate = false,
 ) {
-  validateEnvironment(manifest, version, sourceSha);
+  validateEnvironment(manifest, version, sourceSha, localCandidate);
   if (!platforms.includes(platform))
     throw new Error("expected linux/amd64 or linux/arm64");
   const native = run(["info", "--format", "{{.OSType}}/{{.Architecture}}"])
@@ -149,10 +151,17 @@ export function verifyImages(
     ...manifest.external_images,
   })) {
     const firstParty = Object.hasOwn(repositories, name);
-    const descriptors = validateIndex(
-      JSON.parse(run(["buildx", "imagetools", "inspect", "--raw", image])),
-      image,
-    );
+    const index = JSON.parse(run(["buildx", "imagetools", "inspect", "--raw", image]));
+    let descriptors;
+    if (localCandidate && firstParty) {
+      const native = index.manifests?.filter((entry) => entry.platform?.os === "linux");
+      if (native?.length !== 1 || `${native[0].platform.os}/${native[0].platform.architecture}` !== platform || !digestPattern.test(native[0].digest)) throw new Error("candidate must contain exactly the native image");
+      const attestations = index.manifests.filter((entry) => entry.platform?.os === "unknown" &&
+        entry.annotations?.["vnd.docker.reference.type"] === "attestation-manifest" &&
+        entry.annotations?.["vnd.docker.reference.digest"] === native[0].digest && digestPattern.test(entry.digest));
+      if (attestations.length !== 1) throw new Error("candidate lost its BuildKit attestation descriptor");
+      descriptors = { [platform]: native[0].digest };
+    } else descriptors = validateIndex(index, image);
     run(["pull", "--platform", platform, image], 600_000);
     const [local] = JSON.parse(run(["image", "inspect", image]));
     if (
@@ -234,7 +243,8 @@ export function verifyImages(
     release_version: version,
     source_sha: sourceSha,
     platform,
-    anonymous_pull: true,
+    anonymous_pull: !localCandidate,
+    ...(localCandidate ? { local_candidate: true } : {}),
     checked_at: new Date().toISOString(),
     scope:
       "Image pull and isolated executable/asset smoke; no deployment or OIDC acceptance.",

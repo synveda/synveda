@@ -16,6 +16,7 @@ publicly downloadable without a registry account.
 | Run with Docker | [Prebuilt bundle](../deploy/compose/PREBUILT.md) | Docker Compose; loopback bundled evaluation; native Linux AMD64/ARM64 release evidence and local macOS/OrbStack candidate evidence |
 | Deploy to Kubernetes | [Application chart](../deploy/helm/synveda/README.md) | Namespaced permissions, supplied Secrets/storage; packaged-chart Kind 1.36.1 evidence on native Linux AMD64/ARM64 |
 | Use existing infrastructure | [Provider contract](../deploy/helm/synveda/CONFIGURATION.md) | Supplied database/identity endpoints and trusted CA inputs; no provider takeover |
+| Install a native CLI | [Client downloads](CONSUMER_CLI.md#release-downloads) | Six native client packages required by the next release pipeline; v0.4.0 has only the two historical macOS ARM64/Linux x64 archives |
 | Build from source | [Source development](DEVELOPMENT.md#running-your-changes) | Contributor tools and source-only hostname setup |
 
 Database and identity ownership are independent on both platforms. Bundled
@@ -824,17 +825,29 @@ Client cleanup stays explicit: `synveda mcp uninstall --client cursor` or
 ## Install a release artifact
 
 Use the [prebuilt download and checksum instructions](../deploy/compose/PREBUILT.md#download-and-verify).
-The optional native client installer is tag-bound, verifies the release checksum
-inventory and never starts containers or edits an AI client. Inspect it before
-execution; never mix an old release with a mutable main-branch installer.
+For CLI-only use, follow [native client downloads](CONSUMER_CLI.md#release-downloads)
+and the [six-platform asset table](RELEASING.md#native-cli-release-artifacts).
+Those new client archives are not present in v0.4.0. The native installers are
+tag-bound, verify checksums and never start containers or edit an AI client.
+Inspect the matching installer before execution. For future attested releases,
+verify publisher identity separately as described in the release guide; the
+installer does not enforce that verification itself.
 
 ## What the artifact installer places
 
-The native installer places its CLI, console and client hooks below
+The shell installer's historical default `reference` mode places its CLI,
+console and client hooks below
 `SYNVEDA_HOME` (default `~/.synveda`), plus the immutable version/source-bound
 reference archive and a validated `reference/current` selection. `SYNVEDA_BIN`
 chooses the CLI directory; user-owned paths avoid privilege elevation. Server-only
 Docker installation does not require the native installer.
+
+The new explicit `SYNVEDA_INSTALL_MODE=client` mode installs only the CLI,
+adapters and private Node under `client/releases`, with an atomic current
+selection. It contains no server, console or deployment bundle. The Windows
+PowerShell installer uses this client-only layout under
+`$env:LOCALAPPDATA\SynvedaClient`. See the client guide for paths and retained
+state. Download the matching reference archive separately to operate Compose.
 
 ## Current verification boundary
 
@@ -846,3 +859,8 @@ published retrieval are distinct evidence. All 15 release assets were downloaded
 anonymously and matched the qualified bytes; all 14 SHA256SUMS entries passed.
 The OCI and downloadable chart archives are identical. Broader platform,
 N-1 upgrade and production recovery claims remain unqualified.
+
+The refactored workflow requires all six native client archives and the complete
+31-asset inventory before stable publication, with authenticated checksums and
+Docker Hub/GHCR distribution. That is the next release contract; it does not
+change v0.4.0's assets or establish hosted qualification of this refactor.

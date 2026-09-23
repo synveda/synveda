@@ -225,7 +225,7 @@ test("release verification rejects missing checks, changed archives and stale id
   const path = join(f.scratch, `synveda-client-report-${target}.json`);
   const report = { schema_version: 1, evidence: "native-client-archive", target, version, source_sha: "1".repeat(40),
     source_tree_dirty: false, cli_version: `synveda ${version}`, node, archive_sha256: sha256(bytes), archive_bytes: bytes.length,
-    checks: ["native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
+    checks: ["packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
       "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
       "codex-extracted-lifecycle-replay", "copilot-cli-extracted-lifecycle-replay"] };
   const check = () => checkClientRelease(f.scratch, version, "1".repeat(40), true, lock);
@@ -253,7 +253,7 @@ test("Windows release evidence requires both native ZIP reports and installer re
     writeFileSync(join(f.scratch, `synveda-client-${version}-${target}.zip`), bytes);
     const report = { schema_version: 1, evidence: "native-client-archive", target, version, source_sha: "1".repeat(40),
       source_tree_dirty: false, cli_version: `synveda ${version}`, node, archive_sha256: sha256(bytes), archive_bytes: bytes.length,
-      checks: ["native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
+      checks: ["packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
         "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
         "native-windows-private-storage-interoperability", "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
         "unsafe-zip-and-overlapping-install-root-refusal"] };

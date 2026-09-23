@@ -6,6 +6,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
+import { checkPackagedAuth } from "./check-packaged-auth.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const [version, archiveArgument, report] = process.argv.slice(2);
@@ -63,6 +64,8 @@ try {
   assert.equal(readFileSync(join(installed, "state/retain"), "utf8"), "retained deployment bytes");
   assert.equal(validateClient(realpathSync(current)).digest, digest);
   checks.push("repeat-install-preserves-deployment-state");
+  checkPackagedAuth(join(current, "bin/synveda"));
+  checks.push("packaged-authentication-lifecycle");
   // Add test-only inputs to a separate extracted copy, after validating the
   // shipped inventory. Hooks and their dependencies remain the packaged bytes.
   const replay = join(scratch, "replay");

@@ -29,7 +29,7 @@ import {
   helmComputedImageReferences,
   isDigestPinnedExternalImage,
   parseComposeDefaults,
-  releaseWorkflowImageReferences,
+  releaseImageReferences,
 } from "./chart-image-discovery.mjs";
 
 const INVENTORY = "deploy/helm/IMAGES.md";
@@ -160,12 +160,19 @@ for (const path of DOCKERFILES) {
   }
 }
 
-const releaseWorkflowImages = releaseWorkflowImageReferences(read(RELEASE_WORKFLOW));
+const releaseWorkflowImages = releaseImageReferences();
 if (releaseWorkflowImages.length !== 12 || new Set(releaseWorkflowImages).size !== 12) {
   fail(`${RELEASE_WORKFLOW}: expected five deployment images and one acceptance fixture in each registry`);
 }
 for (const ref of releaseWorkflowImages) {
-  found.set(ref, `${RELEASE_WORKFLOW} (tags:)`);
+  found.set(ref, "scripts/publish-images.mjs (OCI destinations)");
+}
+
+for (const file of readdirSync(".github/workflows").filter((file) => file.endsWith(".yml"))) {
+  for (const [, ref] of read(`.github/workflows/${file}`).matchAll(/^\s+image:\s+(\S+)\s*$/gm)) {
+    if (!isDigestPinnedExternalImage(ref)) fail(`${file}: CI service image must be digest pinned`);
+    found.set(ref, `${file} (service image)`);
+  }
 }
 
 // ── The check ────────────────────────────────────────────────────────────

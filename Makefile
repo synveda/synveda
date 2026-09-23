@@ -272,6 +272,11 @@ fmt:
 .PHONY: check-fast
 check-fast: check-docs check-backlog check-adr-status check-api-types check-adapters check-context-security check-context-hard-cut check-product-eval check-corpus-licences check-benchmarks
 
+.PHONY: check-ci
+check-ci:
+	node --test scripts/ci.test.mjs scripts/release-pipeline.test.mjs
+	node scripts/check-workflows.mjs
+
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings
 
@@ -437,4 +442,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check sdk-check ts-build plugin-package-check check-npm-licences ts-test
+ci: fmt lint test build deny check-ci check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check sdk-check ts-build plugin-package-check check-npm-licences ts-test

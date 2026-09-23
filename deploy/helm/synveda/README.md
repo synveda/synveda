@@ -11,6 +11,12 @@ All modes preserve Cedar, forced RLS, VedaFlow, audit and the migration contract
 The OCI chart and downloadable archive are identical. Both native Linux
 architectures passed the four ownership modes using the published image digests.
 
+The refactored [release pipeline](../../../docs/CI.md) retains all four modes,
+locked chart dependencies, install/upgrade/reinstall and recovery checks. Its
+next release adds Docker Hub/GHCR parity and attested checksums after testing
+the exact native OCI candidates. Those changes have not been published as
+v0.4.0. Server installation needs no native CLI package or publisher token.
+
 Start with the [complete loopback evaluation recipe](examples/README.md).
 It prepares private Secrets in a short-lived container, installs no cluster-wide
 infrastructure, and exposes the console through explicit loopback port-forwards.
@@ -91,19 +97,28 @@ kubectl -n "$NAMESPACE" get resourcequota,limitrange
 kubectl get storageclass
 ```
 
-Obtain the **candidate's** chart archive, SHA256SUMS, image overlays and CLI/
-plugin archives from the release owner. Verify their checksums before unpacking;
-checksums establish byte integrity, not publisher authenticity. BuildKit image
-provenance/SBOM generation is prepared, not a verified signing service. No Rust
-compiler, Dockerfile inspection or source edits are part of installation.
-
-The following commands require those files in the current directory and an
-owner-selected candidate version. They are not a claim that such a public tag
-exists today:
+Download the published chart, its image overlays and checksum inventory into a
+new directory. Verify only these downloaded entries before unpacking; v0.4.0's
+unsigned checksums establish byte integrity, not publisher authenticity. Stop
+on any download or checksum failure. No Rust compiler, native CLI, Dockerfile
+inspection or source edit is part of chart installation.
 
 ```sh
-: "${RELEASE_VERSION:?set the candidate version supplied by the release owner}"
-sha256sum --check SHA256SUMS
+RELEASE_VERSION=0.4.0
+release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
+mkdir "synveda-chart-$RELEASE_VERSION"
+cd "synveda-chart-$RELEASE_VERSION"
+for file in "synveda-$RELEASE_VERSION.tgz" "synveda-images-$RELEASE_VERSION.yaml" \
+  "synveda-cnpg-image-$RELEASE_VERSION.yaml" SHA256SUMS; do
+  curl -fLO "$release_url/$file"
+done
+awk -v chart="synveda-$RELEASE_VERSION.tgz" \
+  -v images="synveda-images-$RELEASE_VERSION.yaml" \
+  -v cnpg="synveda-cnpg-image-$RELEASE_VERSION.yaml" \
+  '$2 == chart || $2 == images || $2 == cnpg { seen[$2]++; print }
+   END { if (seen[chart] != 1 || seen[images] != 1 || seen[cnpg] != 1) exit 1 }' \
+  SHA256SUMS > chart.sha256
+sha256sum --check chart.sha256
 mkdir chart
 # The archive contains synveda/ and its unchanged locked Keycloak dependency.
 tar -xzf "synveda-$RELEASE_VERSION.tgz" -C chart
@@ -111,11 +126,16 @@ export CHART="$PWD/chart/synveda"
 cp "synveda-images-$RELEASE_VERSION.yaml" release-images.yaml
 ```
 
-On macOS, use `shasum -a 256 -c SHA256SUMS`. Save the verified archive, overlays,
-checksums and source revision with operator configuration. The publishing
-workflow additionally pushes/pulls the chart at
-`oci://ghcr.io/synveda/charts/synveda`; use that address only after a verified
-publication. Private image registries need existing namespace-local pull
+On macOS, use `shasum -a 256 --check chart.sha256`. Save the verified archive,
+overlays, checksums and source revision with operator configuration. The public
+OCI chart at `oci://ghcr.io/synveda/charts/synveda`, version `0.4.0`, is
+byte-identical to the downloadable archive and requires no registry token.
+For a future attested release, first verify its checksum publisher identity as
+described in [RELEASING](../../../docs/RELEASING.md#artifacts-and-verification).
+An unpublished candidate must instead come from its reviewed qualification
+artifacts; never substitute an arbitrary PR build for a trusted release.
+
+Private image mirrors need existing namespace-local pull
 Secrets in `imagePullSecrets` and, for packaged identity,
 `keycloak.imagePullSecrets`. Create them through your secret manager or
 `kubectl create secret generic registry-access --type=kubernetes.io/dockerconfigjson

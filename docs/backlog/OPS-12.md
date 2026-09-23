@@ -542,6 +542,21 @@ contracts have their own reviewed implementation and execution evidence. Install
 attestation enforcement and Homebrew/WinGet remain unimplemented; configuration
 of GitHub attestations alone does not authenticate the current shell installer.
 
+The FND-1 / OPS-8 pipeline refactor now shares all six native archive jobs between
+CI and Release and executes the credential-refresh/platform tests against each
+installed binary. Its local macOS ARM64 debug archive passed restricted-PATH
+install/reinstall, Codex/Copilot replay and seven auth/platform process tests;
+the dirty source report is not publication evidence. Exact OCI candidates must
+pass native Compose and four-mode Helm qualification before copying to public
+registries. The new workflow has not run on hosted runners. Blocker: native
+Windows/Intel Linux/macOS execution and a clean full Docker/Kind host are not
+available in this checkout; retained local evaluation volumes are deliberately
+untouched. Next action: run full CI and nonpublishing Release dispatch for the
+committed refactor, retain all six client and both candidate reports, then apply
+the owner settings in [CI](../CI.md#manual-owner-settings). Do not tag or publish
+as part of that validation. Registry publication still requires separate owner
+authorization and a successful exact-commit main CI Result.
+
 Continue from this OPS-12 checkpoint on `main` and retain version `0.4.0` until an owner
 authorizes a coordinated new version. For another local candidate, use the
 existing `package-release.sh` arguments with the explicit candidate flag, extract

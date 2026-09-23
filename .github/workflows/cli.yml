@@ -1,0 +1,173 @@
+name: Native CLI validation
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      servers:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  binaries:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runs-on: macos-14        # Apple Silicon
+            rust-target: aarch64-apple-darwin
+            servers: true
+          - target: linux-x86_64
+            runs-on: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            servers: true
+          - target: darwin-x86_64
+            runs-on: macos-15-intel
+            rust-target: x86_64-apple-darwin
+            servers: false
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+            rust-target: aarch64-unknown-linux-gnu
+            servers: false
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 75
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - run: rustup target add ${{ matrix.rust-target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: cli-${{ matrix.target }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Test native CLI and authentication lifecycle
+        run: cargo test --locked -p synveda-cli
+      - name: Build native CLI
+        run: |
+          cargo build --release --locked \
+            --target ${{ matrix.rust-target }} \
+            -p synveda-cli
+      - name: Build historical server archive
+        if: matrix.servers && inputs.servers
+        run: cargo build --release --locked --target ${{ matrix.rust-target }} -p synveda-gateway
+      - name: Package
+        if: matrix.servers && inputs.servers
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          out="target/${{ matrix.rust-target }}/release"
+          stage="$(mktemp -d)"
+          cp "$out/synveda" "$out/synveda-gateway" "$out/synveda-worker" "$stage/"
+          strip "$stage/synveda" "$stage/synveda-gateway" "$stage/synveda-worker" || true
+          tar -czf "synveda-$version-${{ matrix.target }}.tar.gz" -C "$stage" \
+            synveda synveda-gateway synveda-worker
+          ls -lh "synveda-$version-${{ matrix.target }}.tar.gz"
+      - name: Check the native executable and version
+        run: |
+          set -euo pipefail
+          out="target/${{ matrix.rust-target }}/release"
+          "$out/synveda" --version
+          if [ "${{ matrix.servers && inputs.servers }}" = "true" ]; then
+            test -x "$out/synveda-worker"
+          fi
+          test "$("$out/synveda" --version)" = "synveda ${{ inputs.version }}"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.21.0
+      - run: corepack enable
+      - name: Build the existing hook runtimes
+        run: |
+          pnpm install --frozen-lockfile --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter...
+          pnpm --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter... build
+      - name: Package and execute the native client archive
+        env:
+          CLIENT_TARGET: ${{ matrix.target }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/download-client-node.mjs "$CLIENT_TARGET" private-node.tar.gz
+          node scripts/package-client.mjs "$VERSION" "$CLIENT_TARGET" \
+            "target/${{ matrix.rust-target }}/release/synveda" private-node.tar.gz . "$SOURCE_SHA"
+          node scripts/check-client-package.mjs "$VERSION" \
+            "synveda-client-$VERSION-$CLIENT_TARGET.tar.gz" "synveda-client-report-$CLIENT_TARGET.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: |
+            synveda-*.tar.gz
+            synveda-client-report-*.json
+          if-no-files-found: error
+
+  windows-clients:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            target: windows-x86_64
+            arch: x64
+            rust-host: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: windows-arm64
+            arch: arm64
+            rust-host: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    env:
+      SQLX_OFFLINE: "true"
+      RUSTUP_TOOLCHAIN: 1.96.0-${{ matrix.rust-host }}
+      SYNVEDA_CLIENT_VERSION: ${{ inputs.version }}
+      SYNVEDA_CLIENT_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install $env:RUSTUP_TOOLCHAIN --component clippy,rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: cli-${{ matrix.target }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - run: cargo clippy -p synveda-cli --all-targets --locked -- -D warnings
+      - run: cargo test -p synveda-cli --locked --bin synveda client_paths::tests
+      - run: cargo test -p synveda-cli --locked --bin synveda peer_witness_refuses_before_opening
+      - run: cargo test -p synveda-cli --locked --bin synveda credentials::windows
+      - run: cargo test -p synveda-cli --locked --bin synveda private_state::tests
+      - run: cargo test -p synveda-cli --locked --bin synveda local_state::windows_tests
+      - run: cargo test -p synveda-cli --locked --bin synveda spool::tests
+      - run: cargo test -p synveda-cli --locked --test credential_refresh
+      - run: cargo test -p synveda-cli --locked --test client_platform
+      - run: cargo build --release --locked -p synveda-cli
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.21.0
+          architecture: ${{ matrix.arch }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter...
+      - run: pnpm --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter... build
+      - name: Check native Rust and Node storage
+        run: |
+          node --test --test-name-pattern="CLI and hooks|Windows hooks" adapters/claude-code/dist/paths.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-windows-state.mjs target/debug/synveda.exe windows-state-${{ matrix.arch }}.json
+      - run: node scripts/windows-client-candidate.mjs target/release/synveda.exe $env:SYNVEDA_CLIENT_VERSION $env:SYNVEDA_CLIENT_TARGET . $env:GITHUB_SHA
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: |
+            synveda-client-*.zip
+            synveda-client-report-*.json
+            windows-state-*.json
+          if-no-files-found: error

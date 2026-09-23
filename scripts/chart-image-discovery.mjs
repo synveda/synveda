@@ -1,3 +1,6 @@
+import { copyPlan } from "./publish-images.mjs";
+import { releaseImages } from "./release-registries.mjs";
+
 function refuse(code) {
   const error = new Error(code);
   error.code = code;
@@ -115,16 +118,12 @@ export function helmComputedImageReferences(source) {
   return references;
 }
 
-export function releaseWorkflowImageReferences(source) {
-  const ghcr = [
-    ...source.matchAll(
-      /^\s*(?:tags:\s+)?(ghcr\.io\/synveda\/[a-z0-9]+(?:[._-][a-z0-9]+)*):((?:[A-Za-z0-9_][A-Za-z0-9_.-]*)?)\$\{\{ needs\.version\.outputs\.version \}\}-\$\{\{ matrix\.arch \}\}\s*$/gm,
-    ),
-  ].map(([, repository, tagPrefix]) => `${repository}:${tagPrefix}<version>`);
-  const hub = [...source.matchAll(
-    /^\s*docker\.io\/\$\{\{ needs\.version\.outputs\.dockerhub_namespace \}\}\/([a-z0-9-]+):([A-Za-z0-9_.-]*)\$\{\{ needs\.version\.outputs\.version \}\}-\$\{\{ matrix\.arch \}\}\s*$/gm,
-  )].map(([, repository, tagPrefix]) => `docker.io/<dockerhub-namespace>/${repository}:${tagPrefix}<version>`);
-  return [...ghcr, ...hub];
+export function releaseImageReferences() {
+  // The publisher now copies OCI archives; inventory its actual destination plan.
+  const candidate = { version: "0.0.0", arch: "amd64", images: Object.fromEntries(Object.entries(releaseImages).map(([name, repository]) => [name, { archive: `${repository}.tar` }])) };
+  return copyPlan(candidate, "dockerhub-namespace").map(({ reference }) => reference
+    .replace("docker.io/dockerhub-namespace/", "docker.io/<dockerhub-namespace>/")
+    .replace(/0\.0\.0-amd64$/, "<version>"));
 }
 
 export function isDigestPinnedExternalImage(reference) {

@@ -216,11 +216,14 @@ and [restore](https://www.postgresql.org/docs/17/app-pgrestore.html) semantics.
 
 ## Upgrade and failure recovery
 
-There is **no supported published N-1 to this candidate**. Public v0.2.0 has the
+There is **no general supported N-1 release window**. Public v0.2.0 has the
 retired schema and deployment graph; epoch-3 startup refuses it. Do not reset a
 team database to make an upgrade pass. Same-source Helm migration reruns and
 retained reinstall are continuity evidence only. OPS-6 owns a future declared
 release compatibility window; no baseline/down-migration is invented here.
+CI and Release retain four-mode install/upgrade/reinstall checks and the two
+end-to-end recovery drills. Passing those checks does not establish migration
+compatibility between two different published versions.
 
 For a candidate pair whose compatibility has been demonstrated: take and
 restore-test the joint backup first, retain the complete previous artifacts,

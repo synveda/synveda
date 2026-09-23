@@ -4,72 +4,126 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# FND-1 / ADR-0108: only the newest revision of a PR or branch needs CI.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # OPS-12 / ADR-0117: native credential, receipt and Rust/Node spool storage.
-  # Repository/vendor mutation, real issuer and harness qualification are separate.
-  windows-client-boundary:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: windows-2025
-            arch: x64
-            rust-host: x86_64-pc-windows-msvc
-          - runner: windows-11-arm
-            arch: arm64
-            rust-host: aarch64-pc-windows-msvc
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
-    env:
-      SQLX_OFFLINE: "true"
-      RUSTUP_TOOLCHAIN: 1.96.0-${{ matrix.rust-host }}
+  changes:
+    name: Select checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.select.outputs.rust }}
+      typescript: ${{ steps.select.outputs.typescript }}
+      sdk: ${{ steps.select.outputs.sdk }}
+      replay: ${{ steps.select.outputs.replay }}
+      eval: ${{ steps.select.outputs.eval }}
+      demo: ${{ steps.select.outputs.demo }}
+      deploy: ${{ steps.select.outputs.deploy }}
+      docker: ${{ steps.select.outputs.docker }}
+      helm: ${{ steps.select.outputs.helm }}
+      cli: ${{ steps.select.outputs.cli }}
+      version: ${{ steps.select.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - run: rustup toolchain install $env:RUSTUP_TOOLCHAIN --component clippy,rustfmt
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Select affected stages
+        id: select
+        run: node scripts/ci-select.mjs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Check documentation, generated contracts and security boundaries
+        run: make check-fast check-deps check-ci
+      - name: Install pinned workflow linter
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Lint workflows and expressions
+        run: '"$(go env GOPATH)/bin/actionlint" -shellcheck='
+
+  licences:
+    name: Check — dependency policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        with:
+          command: check
+
+  build-test:
+    name: Build and Test — Rust
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-      - run: cargo clippy -p synveda-cli --all-targets --locked -- -D warnings
-      - run: cargo test -p synveda-cli --locked --bin synveda client_paths::tests
-      - run: cargo test -p synveda-cli --locked --bin synveda peer_witness_refuses_before_opening
-      - run: cargo test -p synveda-cli --locked --bin synveda credentials::windows
-      - run: cargo test -p synveda-cli --locked --bin synveda private_state::tests
-      - run: cargo test -p synveda-cli --locked --bin synveda local_state::windows_tests
-      - run: cargo test -p synveda-cli --locked --bin synveda spool::tests
-      - run: cargo test -p synveda-cli --locked --test credential_refresh
-      - run: cargo test -p synveda-cli --locked --test client_platform
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo build --workspace --locked
+      - name: Check executable documentation
+        run: make check-demos
+
+  typescript:
+    name: Build and Test — TypeScript
+    needs: changes
+    if: needs.changes.outputs.typescript == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24
-          architecture: ${{ matrix.arch }}
+          node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter...
-      - run: pnpm --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter... build
-      - run: node --test --test-name-pattern="CLI and hooks|Windows hooks" adapters/claude-code/dist/paths.test.mjs
-      - run: node scripts/check-windows-state.mjs target/debug/synveda.exe windows-state-${{ matrix.arch }}.json
-      - run: node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.0 windows-${{ matrix.arch == 'x64' && 'x86_64' || 'arm64' }} . $env:GITHUB_SHA
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: windows-state-${{ matrix.arch }}
-          path: |
-            windows-state-${{ matrix.arch }}.json
-            synveda-client-report-*.json
-            synveda-client-*.zip
-          if-no-files-found: error
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter '!@synveda/sdk' -r test
+      - run: pnpm --filter @synveda/console build
+      - run: make plugin-package-check
+      - run: node scripts/check-npm-licences.mjs
 
-  sdk-interop:
+  sdk:
+    name: Test — SDKs
+    needs: changes
+    if: needs.changes.outputs.sdk == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -114,11 +168,11 @@ jobs:
       - run: make interop-acceptance
         if: matrix.interop
 
-  # CPR-14 tier 2: captured real-client frames, but no Claude credential,
-  # through the public session API and a real current-epoch database. This is
-  # labelled replay in both the test and its output; only the separately run
-  # make claude-acceptance-live target may claim a real client execution.
-  claude-replay:
+
+  replay:
+    name: Test — Claude replay
+    needs: changes
+    if: needs.changes.outputs.replay == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -137,117 +191,10 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter @synveda/claude-code-adapter...
       - run: make claude-acceptance
 
-  rust:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      # sqlx macros compile against the committed .sqlx query cache; CI has no
-      # database. Regenerate and immediately verify through the fresh exact-role
-      # fixture with `SYNVEDA_DB_TEST_TASK=sqlx-prepare bash scripts/db-test.sh`.
-      SQLX_OFFLINE: "true"
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      # Installs the toolchain pinned in rust-toolchain.toml
-      - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
-      # Tests enable gateway test-support; also compile the production features.
-      - run: cargo build --workspace
-
-  licences:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
-        with:
-          command: check
-
-  layering:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - run: rustup toolchain install
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-      - run: node scripts/check-crate-deps.mjs
-      # The frontend's types are generated from the OpenAPI document, which is
-      # generated from the gateway's own handlers (CPR-4, ADR-0071 decision 7).
-      # The Rust half of that chain is
-      # crates/synveda-gateway/tests/openapi.rs, in the `rust` job above; this
-      # is the TypeScript half, and it lives here because it needs node and
-      # nothing else.
-      - run: node scripts/generate-api-types.mjs --check
-      # STATUS is the feature inventory. Open work must have one
-      # implementation-ready brief; delivered history stays in git.
-      - run: make check-backlog
-      # check-backlog does not read ADR headers. This closes the useful half
-      # of that gap: a delivered feature must not retain a Proposed ADR. The
-      # reverse is intentionally allowed because AGENTS.md requires the ADR
-      # before implementation.
-      - run: node scripts/check-adr-status.mjs
-      # Current documents/open briefs must resolve internal links and paths;
-      # historical ADR/spike prose remains link-checked without becoming a
-      # current product claim.
-      - run: make check-docs
-      # The repository licence rule on the corpus side (EVAL-3, ADR-0061).
-      # cargo-deny governs crates and check-npm-licences governs packages;
-      # a corpus is data, which is how a CC BY-NC one reached a feature
-      # specification and the phase demo goal before anybody read its
-      # LICENSE.txt. Here rather than in the eval job because it needs
-      # nothing but node — and because a licence failure should not wait
-      # behind a database.
-      - run: node scripts/check-corpus-licences.mjs
-      # The chart renders in both shapes CI covers — the minimum a real
-      # install must state, and every optional path at once. Here rather
-      # than in a job of its own because it needs one binary and no
-      # cluster; the kind-cluster install test is the separate, slow one.
-      # Pinned to the version the chart was authored and verified against,
-      # so `make chart-lint` here is the run that happened there.
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
-        with:
-          version: v4.2.3
-      - run: make chart-lint
-      # docs/BENCHMARKS.md's table is generated from evals/scores/*.json
-      # (EVAL-3, ADR-0061 decision 11). This asserts they still agree, so
-      # a hand-typed cell in the published artefact fails a build rather
-      # than becoming a claim.
-      - run: node scripts/publish-benchmark.mjs
-
-  # The gate that can block a merge (EVAL-4, ADR-0047 decision 7), which is
-  # ADR-0028 option 5's own reversal trigger fired by name: it declined this
-  # toll for EVAL-1's thin suite and recorded "EVAL-4 lands with
-  # composition-quality scenarios" as the condition for paying it. EVAL-4's
-  # AC — "composition changes show measurable quality effect before merge" —
-  # is a request for it in as many words.
-  #
-  # The whole deterministic suite runs here: EVAL-1's scenarios, EVAL-2's
-  # extraction corpus, EVAL-4's Q&A corpus and EVAL-5's security corpus,
-  # against the one baseline that covers that path. It runs independently
-  # of the frontend and static checks. The retrieval half stays
-  # nightly — TEI is a ~2.3 GB model download, and that cost is exactly
-  # what makes a per-PR job the wrong place for it.
-  #
-  # EVAL-5 (ADR-0048 decision 14) runs its corpus here at a deterministic
-  # 400-variant slice — every hand-written probe plus an even spread of the
-  # combinatorial tail — rather than at the nightly's 10,000. The leak
-  # counts are gated at zero on both paths, because zero is zero; only the
-  # coverage floors differ. A product that blocks a merge on
-  # `tokens_per_answer` rising and not on `restricted` material reaching a
-  # reader has recorded its priorities backwards.
   eval:
+    name: Test — deterministic evaluation
+    needs: changes
+    if: needs.changes.outputs.eval == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -263,14 +210,10 @@ jobs:
           node-version: 22
 
       - name: Run the suite against the gate
-        # `make eval` owns one fresh exact-role PostgreSQL fixture. No legacy
-        # owner database, IdP or model server participates in this job.
         run: mkdir -p eval-report && make eval
         env:
           EVAL_REPORT: eval-report/report.json
 
-      # A failed gate still uploads it: that is the run someone needs to
-      # read, axis by axis and scope tier by scope tier.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -278,37 +221,11 @@ jobs:
           path: eval-report/
           if-no-files-found: warn
 
-  # OPS-8/CPR-45 release contract. It executes the real installer against a
-  # freshly packaged digest-bound reference, proves repeat installation keeps
-  # mutable state, and checks the current reference/Helm boundaries. It
-  # does not publish or pull release images and therefore is not live install
-  # evidence.
-  release-install:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
-        with:
-          version: v4.2.3
-      # This target owns deployment/installer/image checks once per CI run.
-      # OpenAPI is tested by `rust`; lifecycle epoch tests need `make db-test`.
-      - run: make check-deploy
 
-  # OPS-9's acceptance demo (ADR-0066). Separate from `release-install`
-  # rather than appended to it, because the two answer different questions
-  # and a job that answered both would report neither: OPS-8 asks whether a
-  # stranger can install this, and OPS-9 asks what they see once they have.
-  #
-  # It runs against the same fresh exact-role database fixture as current
-  # feature demos. The release-install gate separately owns packaged-reference
-  # acceptance; this job measures only the authenticated product experience.
-  beta-demo:
+  demo:
+    name: Test — product walkthrough
+    needs: changes
+    if: needs.changes.outputs.demo == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -324,17 +241,40 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      # The demo builds its debug-profile test through the exact-role fixture.
       - run: demos/ops-9-beta-demo.sh
       - name: What the deployment looked like
         if: failure()
         run: docker ps -a || true
 
-  # OPS-2: real Dockerfile builds, issuer login, governed round trip, CNPG
-  # failover and forced RLS. Caching never substitutes for this acceptance.
-  kind:
+
+  deploy:
+    name: Check — deployment and packaging
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
-    # Includes cold compilation plus exporting all intermediate build layers.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v4.2.3
+      - run: make check-deploy chart-lint
+
+      - name: Install pinned Kubernetes schema checker
+        run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+      - name: Check Kubernetes and OpenShift schemas
+        run: KUBECONFORM="$(go env GOPATH)/bin/kubeconform" make chart-schema
+
+  helm:
+    name: Helm — CNPG install and failover
+    needs: changes
+    if: needs.changes.outputs.helm == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -350,7 +290,6 @@ jobs:
         with:
           install_only: true
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      # Shell-invoked Buildx needs the cache runtime environment explicitly.
       - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3
       - run: demos/ops-2-helm-install.sh
         env:
@@ -363,9 +302,11 @@ jobs:
           kubectl logs -n synveda-test deployment/synveda --all-containers --tail=200 || true
           kubectl logs -n synveda-test synveda-install-test --all-containers --tail=200 || true
 
-  # OPS-11: clean namespaces and native recovery tools; no cloud credentials.
-  # Keep the existing CNPG failover and Compose smoke gates independent.
-  kind-operations:
+
+  helm-operations:
+    name: Helm — operations
+    needs: changes
+    if: needs.changes.outputs.helm == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -388,13 +329,6 @@ jobs:
           version: v0.32.0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124
-      - run: make chart-lint
-      - name: Install the pinned structural schema checker
-        if: matrix.profile == 'cnpg-packaged'
-        run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
-      - name: Validate Kubernetes and OpenShift structural schemas
-        if: matrix.profile == 'cnpg-packaged'
-        run: KUBECONFORM="$(go env GOPATH)/bin/kubeconform" make chart-schema
       - run: demos/ops-2-helm-install.sh
         env:
           STARTER_MATRIX: "1"
@@ -410,26 +344,36 @@ jobs:
           path: demos/evidence/ops11-operations-${{ matrix.profile }}.json
           if-no-files-found: error
 
-  typescript:
+  docker:
+    name: Docker
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    uses: ./.github/workflows/docker.yml
+    with:
+      version: ${{ needs.changes.outputs.version }}
+
+  cli:
+    name: CLI
+    needs: changes
+    if: needs.changes.outputs.cli == 'true'
+    uses: ./.github/workflows/cli.yml
+    with:
+      version: ${{ needs.changes.outputs.version }}
+
+  result:
+    name: CI Result
+    if: always()
+    needs: [changes, check, licences, build-test, typescript, sdk, replay, eval, demo, deploy, docker, helm, helm-operations, cli]
     runs-on: ubuntu-latest
-    # Keep a job bound in addition to each package's test timeout so a wedged
-    # runtime reports promptly instead of consuming the runner indefinitely.
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # Test scripts compile the adapters before archive replay. SDK source
-      # and installed-package tests belong to both `sdk-interop` matrix rows.
-      - run: pnpm --filter '!@synveda/sdk' -r test
-      # Vite's production bundle is distinct from the console test build.
-      - run: pnpm --filter @synveda/console build
-      - run: make plugin-package-check
-      # The npm counterpart to cargo-deny; it reads the resolved install.
-      - run: node scripts/check-npm-licences.mjs
+      - name: Require every selected job to succeed
+        run: node scripts/ci-result.mjs
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}

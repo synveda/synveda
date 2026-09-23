@@ -45,6 +45,12 @@ Windows x64 compilation/refusal job and expanded credential job passed. Exact
 evidence and the next action are in [OPS-12](OPS-12.md).
 Hosted deployment qualification and publication still need owner registry settings and a
 separately authorized new release.
+The pipeline refactor adds conservative selection, CI Result, shared native
+CLI/Docker candidate validation and exact-source/draft publication gates
+(ADR-0108). Local gate and packaging checks are implemented; hosted matrix,
+fork, cold-cache and clean-host qualification remain pending. Next: run CI and
+a nonpublishing Release dispatch for the committed refactor, then configure
+the required check and registry environment as listed in [the CI guide](../CI.md).
 
 [Client support](../CLIENT_SUPPORT.md) and [SDK compatibility](../../sdks/README.md#compatibility-and-release-boundary)
 own tested versions and limits. [ADPT-4](ADPT-4.md) retains SDK release decisions.
@@ -55,7 +61,7 @@ than in this inventory.
 
 ## Phase 0 — Foundation (wk 1)
 
-- [x] FND-1: Workspace scaffold — delivered 2026-07-16; contributor setup, fast validation and fork-safe CI: ADR-0108
+- [x] FND-1: Workspace scaffold — delivered 2026-07-16; contributor setup, CI Result and candidate validation/publication boundaries: ADR-0108
 - [x] FND-2: Dev environment — delivered 2026-07-17
 - [x] FND-3: synveda-types + error model — delivered 2026-07-18
 - [x] FND-4: Migrations & bitemporal base tables — delivered 2026-07-18

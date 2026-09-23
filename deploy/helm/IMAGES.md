@@ -49,15 +49,18 @@ runtime dependency and is pinned here exactly.
 | `synveda/proxy:2.11.4-dev` | canonical reverse proxy | ours over Apache-2.0 Caddy | Development output of `deploy/compose/proxy/Dockerfile`. |
 | `otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc` | private core Collector | Apache-2.0 | Exact official Collector Contrib runtime; the application emits only OTLP to this private seam. |
 | `prom/prometheus:v3.13.3-distroless@sha256:2e9a8ad75536755572d703e645fcc39c8104d9f0215d49d613db35194b0d8bc2` | optional private Compose metrics backend | Apache-2.0 | Exact official multi-platform distroless image. It receives only the Collector's private metrics fan-in, applies 72-hour/1-GB TSDB block-retention thresholds (not a disk quota), and publishes its operator UI on host loopback only. |
-| `synveda/browser-acceptance:1.62.1-dev` | Compose acceptance fixture with the exact Synveda CLI and Playwright | Synveda's licence is not yet selected; fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Locally built no-capture one-shot used by reference acceptance, not a release product service. The CLI is copied from the same source build as the gateway/worker. Playwright's licence, upstream NOTICE and the seccomp provenance notice are retained in the image. |
+| `synveda/browser-acceptance:1.62.1-dev` | Compose acceptance fixture with the exact Synveda CLI and Playwright | Synveda, fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Locally built no-capture one-shot used by reference acceptance, not a release product service. The CLI is copied from the same source build as the gateway/worker. Playwright's licence, upstream NOTICE and the seccomp provenance notice are retained in the image. |
 | `synveda-db-test-postgres:local` | isolated database acceptance fixture | ours over PostgreSQL-licensed PostgreSQL | Local-only database-test build; never an operator topology. |
 
 ## Release image set
 
-The release workflow builds native amd64 and arm64 images, joins their indexes
-and records the resolved index digests in the packaged reference deployment's
-`environment.json`. `<version>` represents that release input; this source
-wiring is not evidence that a tag has actually been published or pull-tested.
+The shared Docker workflow builds native amd64 and arm64 OCI archives and tests
+those exact candidates. Release copies the qualified same-run bytes to Docker
+Hub and GHCR, joins each registry's indexes, and records both destinations in
+the release inventory. The packaged reference deployment's `environment.json`
+uses Docker Hub digests. `<version>` represents the release input. Published
+v0.4.0 retains its original GHCR digests; the dual-registry path is configured
+for the next release and still requires hosted qualification.
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
@@ -66,7 +69,7 @@ wiring is not evidence that a tag has actually been published or pull-tested.
 | `ghcr.io/synveda/cnpg-postgres:17.11-synveda-<version>` | Helm/CloudNativePG release input | ours (see bases) | The CloudNativePG data-plane image built from `deploy/helm/postgres/Dockerfile`; its tag begins with the real PostgreSQL version required for direct `imageName` validation and retains the Synveda release version as its suffix. |
 | `ghcr.io/synveda/keycloak:<version>` | bundled reference identity provider | ours over Apache-2.0 Keycloak | The optimized production-mode Keycloak image built from `deploy/compose/keycloak/Dockerfile`; it adds no provider-specific product authority. |
 | `ghcr.io/synveda/proxy:<version>` | reference reverse proxy | ours over Apache-2.0 Caddy | The Caddy image built from `deploy/compose/proxy/Dockerfile` with its inherited file capability removed before non-root runtime. |
-| `ghcr.io/synveda/browser-acceptance:<version>` | release acceptance fixture | Synveda's licence is not yet selected; fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Digest-bound one-shot needed by reference acceptance, restore and upgrade smoke. It is not a product service. |
+| `ghcr.io/synveda/browser-acceptance:<version>` | release acceptance fixture | Synveda, fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Digest-bound one-shot needed by reference acceptance, restore and upgrade smoke. It is not a product service. |
 
 Docker Hub is the pending consumer destination configured by the owner through
 `DOCKERHUB_NAMESPACE`; GHCR retains the same built artifacts. No ownership of
@@ -134,6 +137,7 @@ bar, not none.
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
+| `registry:3@sha256:325b4b29b041e82803abeb703e201655e4e23ab83264ec1a7c9ddb0a5b14a6e0` | `.github/workflows/docker.yml` | Apache-2.0 (Distribution) over Alpine packages | Loopback-only disposable registry for testing the exact OCI candidates before any public registry write. |
 | `ghcr.io/synveda/keycloak:<appVersion>` | `demos/fixtures/ops-2/keycloak.yaml` | ours over Apache-2.0 Keycloak | The same optimized production-mode image as the reference deployment, at a private Service DNS name. |
 | `postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0` | `demos/fixtures/ops-2/keycloak.yaml` | PostgreSQL | Disposable physically separate database proving the Helm fixture does not place Keycloak tables or authority in Synveda's CloudNativePG cluster. |
 | `node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5` | `demos/fixtures/ops-2/client-pod.yaml` | MIT | Plays the browser half of `synveda login`. |

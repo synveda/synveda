@@ -202,7 +202,10 @@ impl Fixture {
         serde_json::from_slice::<Value>(&self.bytes()).unwrap()["profiles"].clone()
     }
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_synveda"));
+        // Release qualification points this same lifecycle suite at extracted bytes.
+        let binary = std::env::var_os("SYNVEDA_PACKAGED_CLI")
+            .unwrap_or_else(|| env!("CARGO_BIN_EXE_synveda").into());
+        let mut command = Command::new(binary);
         command
             .args(args)
             .env_clear()

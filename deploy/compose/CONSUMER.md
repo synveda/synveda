@@ -6,10 +6,21 @@ existing evaluation services with named private state; it cannot adopt the
 launcher's retained host state. Its artifact gate includes paired backup/restore;
 native Docker Desktop and release qualification remain separate requirements.
 
+The refactored CI and Release workflows test this extracted bundle against
+the exact native AMD64/ARM64 OCI candidates. A tagged release also verifies
+anonymous pulls and recovery using the final Docker Hub destination digests,
+with GHCR copies retained. These are required gates for the next publication,
+not new claims about v0.4.0. Public installation needs no publisher token and
+never builds images from source.
+
 The matching source CLI offers native lifecycle commands over this graph,
 with engine/project/bundle ownership receipts (`docs/CONSUMER_CLI.md` in the
 source checkout). Start that route
 with a fresh project; it cannot adopt an existing direct-Compose installation.
+For a published client release, use its matching native `synveda-client-*`
+archive from the GitHub Release; all six OS/architecture packages are required
+by the pipeline. Until that release exists, use the locally qualified candidate
+instructions in `docs/CONSUMER_CLI.md`.
 
 For a disposable evaluation on a local Linux-container Docker engine, extract
 the verified candidate archive into a directory and run:

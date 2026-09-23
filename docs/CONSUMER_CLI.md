@@ -7,6 +7,43 @@ Build the current CLI with `SQLX_OFFLINE=true cargo build -p synveda-cli`, or us
 the client archive candidate below. [OPS-12](backlog/OPS-12.md) records native
 execution reports and the remaining qualification gaps.
 
+## Release downloads
+
+The refactored CI and Release workflows build and test client packages natively
+on Linux, macOS and Windows, each on x64 and ARM64. The
+[release asset table](RELEASING.md#native-cli-release-artifacts) gives their exact
+names. Every package and successful native report is required for stable
+publication; a failing target cannot be omitted. Actions artifacts named
+`binaries-TARGET` are available from successful validation runs. Public downloads
+appear on the GitHub Release only after a new version is approved and published.
+
+The existing v0.4.0 release has only the historical macOS ARM64 and Linux x64
+server/CLI archives. It has no `synveda-client-*` assets or Windows packages.
+Do not point the client installer at v0.4.0 public downloads. The source examples
+below use locally built candidates with that workspace version.
+
+For a future published client release, download your platform's archive,
+`SHA256SUMS` and `SHA256SUMS.sigstore.json` into a private directory. Follow the
+[publisher and checksum verification steps](RELEASING.md#artifacts-and-verification)
+before installation. Use the installer from that exact tag and inspect it.
+From the directory containing the verified downloads on Unix:
+
+```sh
+: "${RELEASE_VERSION:?set the published client version without its v prefix}"
+curl -fL "https://raw.githubusercontent.com/synveda/synveda/v$RELEASE_VERSION/scripts/install.sh" \
+  -o synveda-install.sh
+# Inspect synveda-install.sh before executing it.
+SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION="$RELEASE_VERSION" \
+  SYNVEDA_BASE_URL="file://$PWD" sh synveda-install.sh
+```
+
+On Windows, place the verified ZIP and checksum inventory in a private local
+directory, download `scripts/install.ps1` from the same tag, inspect it, then
+run it with `-Version` and `-BaseUrl 'file:///C:/verified-synveda-assets'` pointing
+to those files. Follow the Windows ownership and PowerShell requirements below.
+Neither route requires a compiler, Docker, system Node or registry credentials.
+The installer checks checksums; it does not perform the attestation step for you.
+
 ## Client archive candidate
 
 `synveda-client-VERSION-TARGET.tar.gz` (Unix) or `.zip` (Windows) contains the CLI, Claude marketplace,
@@ -121,6 +158,9 @@ node scripts/check-client-package.mjs 0.4.0 \
 Generate `SHA256SUMS` over the candidate archive before using the shell installer.
 The artifact check uses an isolated home and restricted PATH, then replays the
 existing Codex/Copilot lifecycle fixtures with the extracted private runtime.
+It also reruns the credential-refresh and platform process tests against the
+installed CLI. CI and Release package release-profile binaries on each native
+runner; the debug binary above is only a local packaging example.
 Reports include archive bytes, local install/reinstall timings, source identity
 and dirty-tree state. Local file-copy timing is not network-download timing;
 replay is not real issuer login or native vendor loading.
