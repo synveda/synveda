@@ -188,6 +188,13 @@ export async function closeRun(
     status: drained ? "ended" : "ending",
     ...(reason === undefined ? {} : { end_reason: reason }),
   });
+  // A terminal transition can only conflict with another terminal state.
+  // An `ending` conflict may mean it is still accepting buffered events.
+  if (drained && !result.ok && result.status === 409) {
+    spool.close_requested = false;
+    spool.closed = true;
+    return;
+  }
   if (!result.ok) {
     log("close.failed", {
       session: spool.external_session_id,

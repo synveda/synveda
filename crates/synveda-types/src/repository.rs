@@ -533,7 +533,8 @@ fn normalise_host(authority: &str, transport: Option<&str>) -> Result<String> {
         .rsplit_once('@')
         .map_or(authority, |(_, host)| host);
     let host = match host_port.rsplit_once(':') {
-        Some((host, port)) if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => {
+        Some((host, "")) => host,
+        Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => {
             let default = match transport {
                 Some("https") => "443",
                 Some("http") => "80",
@@ -541,7 +542,7 @@ fn normalise_host(authority: &str, transport: Option<&str>) -> Result<String> {
                 Some("git") => "9418",
                 _ => "",
             };
-            if port != default {
+            if port.trim_start_matches('0') != default {
                 return Err(invalid(
                     "a non-default repository port cannot be represented safely".to_owned(),
                 ));
@@ -610,7 +611,7 @@ fn normalise_fingerprint(fingerprint: &str) -> Result<String> {
         return Err(invalid(format!(
             "a local fingerprint is {MIN_FINGERPRINT_CHARS}–{MAX_FINGERPRINT_CHARS} hex \
              characters — a stable content id such as a git root-commit object id, never \
-             a path. Got {fingerprint:?}."
+             a path."
         )));
     }
     Ok(lowered)
@@ -665,6 +666,9 @@ mod tests {
             "git@github.com:Acme/payments.git",
             "git@GitHub.com:Acme/payments",
             "https://github.com:443/Acme/payments.git",
+            "https://github.com:/Acme/payments.git",
+            "https://github.com:00443/Acme/payments.git",
+            "ssh://git@github.com:00022/Acme/payments.git",
         ] {
             assert_eq!(remote(uri).canonical_uri, canonical, "{uri}");
         }
@@ -681,6 +685,15 @@ mod tests {
                 None,
                 None,
                 None,
+            )
+            .is_err()
+        );
+        assert!(
+            identify(
+                Some("https://github.com:00444/Acme/payments.git"),
+                None,
+                None,
+                None
             )
             .is_err()
         );
@@ -845,6 +858,11 @@ mod tests {
                 "{bad:?} should be refused as a fingerprint"
             );
         }
+        let path = "/Users/sam/src/payments";
+        let message = identify(None, Some(path), Some("payments"), None)
+            .expect_err("a path is not a fingerprint")
+            .to_string();
+        assert!(!message.contains(path), "{message}");
     }
 
     #[test]

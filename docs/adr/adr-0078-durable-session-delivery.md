@@ -5,6 +5,16 @@
 - **Feature(s)**: CPR-12, CPR-42
 - **Deciders**: Prompt 12 of the CPR programme
 
+## Amendment (2026-09-23): compare source event identity before redaction
+
+The gateway computes a canonical BLAKE3 hash of each submitted payload before
+scanning it. The store persists that hash separately from the redacted payload
+and its existing `payload_hash`. A retry with the same `client_event_id` must
+match the original source hash, even when distinct secrets produce the same
+redacted placeholder or the effective redaction policy changes. Raw payloads
+still never reach the store, and the source hash is not returned as event
+content or included in the audit chain.
+
 ## Amendment (2026-09-23): retain resumable native bindings
 
 Claude Code 2.1.241 can emit `SessionEnd` on an ordinary exit and later resume

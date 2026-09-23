@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, session_id, event_type, event_schema_version,\n               client_event_id, sequence, occurred_at, received_at, payload,\n               payload_hash, redactions\n        from session_events\n        where tenant_id = $1 and session_id = $2 and sequence > $3\n        order by sequence\n        limit $4\n        ",
+  "query": "\n        select id, tenant_id, session_id, event_type, event_schema_version,\n               client_event_id, sequence, occurred_at, received_at, payload,\n               payload_hash, source_payload_hash, redactions\n        from session_events\n        where tenant_id = $1 and session_id = $2 and id = $3\n        ",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,11 @@
       },
       {
         "ordinal": 11,
+        "name": "source_payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
         "name": "redactions",
         "type_info": "Jsonb"
       }
@@ -68,8 +73,7 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "Int8",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -84,8 +88,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "cdd2a63136d95b59629c10335896b19e889e9b8eaacf92a3cf61a4b44a8f96b8"
+  "hash": "f633e7fc1301f7605f5ea9ac89fa57961fa715b8275a3d742a8a1b29a41a44b9"
 }

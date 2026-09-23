@@ -42,7 +42,7 @@ use synveda_audit::ChainVerification;
 use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::{OidcVerifier, parse_issuers};
-use synveda_store::{access, identities, policy_packs, rls, scopes};
+use synveda_store::{access, identities, policy_packs, rls, scopes, sessions};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
@@ -543,19 +543,15 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
     let mut tx = rls::begin_tenant_tx(&pool, tenant).await.expect("tx");
     configuration_support::bind_pack(&mut tx, tenant, org.id, "standard").await;
     tx.commit().await.expect("commit assignment");
+    let redacted_event = event("r-secret", &format!("token {SEEDED_GITHUB_TOKEN} pasted"));
+    let redacted_batch = batch("redact-session", vec![redacted_event.clone()]);
     let (status, body) = send(
         &app,
         request(
             Method::POST,
             &events_uri(run),
             &alice,
-            Some(batch(
-                "redact-session",
-                vec![event(
-                    "r-secret",
-                    &format!("token {SEEDED_GITHUB_TOKEN} pasted"),
-                )],
-            )),
+            Some(redacted_batch.clone()),
         ),
     )
     .await;
@@ -570,6 +566,43 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         3,
         "the redacted event remains capture-eligible"
     );
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
+    let source_hash = sqlx::query_scalar!(
+        r#"select source_payload_hash from session_events
+           where tenant_id = $1 and client_event_id = 'r-secret'"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("read source hash");
+    tx.commit().await.expect("commit source-hash read");
+    assert_eq!(
+        source_hash,
+        sessions::payload_hash(&redacted_event["payload"])
+    );
+    let (status, retry) = send(
+        &app,
+        request(Method::POST, &events_uri(run), &alice, Some(redacted_batch)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{retry}");
+    assert_eq!(retry["events"][0]["outcome"], "duplicate", "{retry}");
+    let mut changed_event = redacted_event;
+    changed_event["payload"]["text"] = json!(format!(
+        "token {} pasted",
+        SEEDED_GITHUB_TOKEN.replacen("Ab", "Cd", 1)
+    ));
+    let (status, conflict) = send(
+        &app,
+        request(
+            Method::POST,
+            &events_uri(run),
+            &alice,
+            Some(batch("redact-session", vec![changed_event])),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
 
     // ── Deny mode: a stored custom pack, hot-installed like the
     //    refresher would, assigned at the org root. ──
@@ -682,7 +715,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         .iter()
         .filter(|event| event.action == "session.events.appended")
         .collect();
-    assert_eq!(observed.len(), 4, "one chained event per batch");
+    assert_eq!(observed.len(), 5, "one chained event per successful batch");
     let quarantine_batch = observed
         .iter()
         .find(|event| event.payload["quarantined"] == 1)

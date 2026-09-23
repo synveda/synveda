@@ -299,6 +299,9 @@ fn all_source_shapes_are_real_and_disclosed_by_their_own_scope() {
                 client_event_id: "knowledge-source-event".to_owned(),
                 occurred_at: Utc::now(),
                 payload: serde_json::json!({"text": "Use provider event IDs"}),
+                source_payload_hash: sessions::payload_hash(
+                    &serde_json::json!({"text": "Use provider event IDs"}),
+                ),
                 redactions: None,
                 quarantine: false,
             }],

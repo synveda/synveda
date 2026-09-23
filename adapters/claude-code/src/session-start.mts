@@ -84,7 +84,7 @@ export async function sessionStart(
     // Record anyway. A conversation that starts before anybody has logged in
     // still happened, and the events are worth keeping for the session that
     // follows the login.
-    recordDelta(spool, input.transcript_path, readEntries, currentCheckout ?? spool.checkout);
+    recordDelta(spool, input.transcript_path, readEntries, spool.checkout);
     saveSpool(spool);
     return { systemMessage: SIGN_IN_MESSAGE };
   }
@@ -102,13 +102,13 @@ export async function sessionStart(
   if (!opened) {
     // No run and therefore nowhere to compose from. Events keep accumulating
     // locally and the next start tries again.
-    recordDelta(spool, input.transcript_path, readEntries, currentCheckout ?? spool.checkout);
+    recordDelta(spool, input.transcript_path, readEntries, spool.checkout);
     saveSpool(spool);
     return {};
   }
 
   // 2. The backlog — this conversation's, then everything else's.
-  recordDelta(spool, input.transcript_path, readEntries, currentCheckout ?? spool.checkout);
+  recordDelta(spool, input.transcript_path, readEntries, spool.checkout);
   if (!saveSpool(spool)) return {};
   await deliver(spool, config, bearer.token, Date.now() + BACKLOG_BUDGET_MS);
   saveSpool(spool);

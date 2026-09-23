@@ -35,6 +35,7 @@ process.env.SYNVEDA_CLI = join(stateHome, "no-cli-here");
 
 const { turn: turnHook } = await import("./turn.mjs");
 const { sessionStart } = await import("./session-start.mjs");
+const { closeRun, retryBacklog } = await import("./deliver.mjs");
 const { loadSpool, newSpool, pending, record, saveSpool, spoolFile } = await import("./spool.mjs");
 type AdapterConfig = (typeof import("./config.mjs"))["loadConfig"] extends (
   cwd: string | undefined,
@@ -240,7 +241,10 @@ test("offline events replay with the checkout observation recorded before a bran
   git("add", "README");
   git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "initial");
   const mock = await gateway(ok);
-  const path = transcript([entry("original-branch", "the ask")]);
+  const first = entry("original-branch", "the ask");
+  const second = entry("later-turn", "the follow-up");
+  const third = entry("resumed-turn", "the next ask");
+  const path = transcript([first]);
   try {
     await sessionStart(
       { hook_event_name: "SessionStart", session_id: "replay-branch", source: "startup", cwd: root, transcript_path: path },
@@ -253,7 +257,15 @@ test("offline events replay with the checkout observation recorded before a bran
     const recorded = loadSpool("replay-branch");
     const recordedPayload = recorded?.entries[0]?.payload as { context?: { checkout?: { branch?: string } } } | undefined;
     assert.equal(recordedPayload?.context?.checkout?.branch, "main");
+    const originalCheckout = recorded?.checkout;
+    assert.ok(originalCheckout);
     git("checkout", "-b", "later");
+    writeFileSync(path, [first, second].map((item) => JSON.stringify(item)).join("\n"));
+    await turnHook(
+      { hook_event_name: "Stop", session_id: "replay-branch", cwd: root, transcript_path: path },
+      config(mock.url),
+    );
+    writeFileSync(path, [first, second, third].map((item) => JSON.stringify(item)).join("\n"));
     await sessionStart(
       { hook_event_name: "SessionStart", session_id: "replay-branch", source: "resume", cwd: root, transcript_path: path },
       config(mock.url, { inject: false }),
@@ -261,6 +273,12 @@ test("offline events replay with the checkout observation recorded before a bran
     const append = mock.requests.find((request) => request.path.endsWith("/events"));
     const events = append?.body.events as { payload?: { context?: { checkout?: { branch?: string } } } }[] | undefined;
     assert.equal(events?.[0]?.payload?.context?.checkout?.branch, "main");
+    const spool = loadSpool("replay-branch");
+    for (const saved of spool?.entries ?? []) {
+      const payload = saved.payload as { context?: { checkout?: typeof originalCheckout } };
+      assert.deepEqual(payload.context?.checkout, originalCheckout);
+    }
+    assert.equal(spool?.entries.length, 3);
     assert.equal(loadSpool("replay-branch")?.checkout?.branch, "main");
   } finally {
     await mock.close();
@@ -858,6 +876,52 @@ test("a session end that cannot drain says ending and owes a close", async () =>
     const spool = loadSpool("f6");
     assert.ok(spool);
     assert.equal(spool.close_requested, true);
+    assert.equal(pending(spool).length, 1);
+  } finally {
+    await mock.close();
+  }
+});
+
+test("a repeated close conflict completes the local close", async () => {
+  const mock = await gateway(script((request) =>
+    request.path.endsWith("/end") ? { status: 409, body: {} } : undefined,
+  ));
+  try {
+    const spool = newSpool("close-conflict", "claude-code", "test-installation");
+    spool.session_id = "22222222-2222-2222-2222-222222222222";
+    spool.gateway_url = mock.url;
+    spool.close_requested = true;
+    await closeRun(spool, config(mock.url), "dev-bearer", "clear");
+    assert.equal(spool.close_requested, false);
+    assert.equal(spool.closed, true);
+    assert.equal(saveSpool(spool), true);
+    await retryBacklog(config(mock.url), "dev-bearer", "other-session", "test-installation", Date.now() + 1000);
+    assert.equal(mock.requests.filter((request) => request.path.endsWith("/end")).length, 1);
+    assert.equal(mock.requests.filter((request) => request.path.endsWith("/events")).length, 0);
+  } finally {
+    await mock.close();
+    rmSync(spoolFile("close-conflict"), { force: true });
+  }
+});
+
+test("an ending conflict retains the close and pending events", async () => {
+  const mock = await gateway(script((request) =>
+    request.path.endsWith("/end") ? { status: 409, body: {} } : undefined,
+  ));
+  try {
+    const spool = newSpool("ending-conflict", "claude-code", "test-installation");
+    spool.session_id = "22222222-2222-2222-2222-222222222222";
+    spool.close_requested = true;
+    record(spool, [{
+      event_type: "message.user",
+      client_event_id: "ending-conflict-event",
+      occurred_at: "2026-08-25T10:00:00.000Z",
+      payload: { text: "buffered" },
+    }]);
+    await closeRun(spool, config(mock.url), "dev-bearer", "clear");
+    assert.equal(mock.requests.find((request) => request.path.endsWith("/end"))?.body.status, "ending");
+    assert.equal(spool.close_requested, true);
+    assert.equal(spool.closed, false);
     assert.equal(pending(spool).length, 1);
   } finally {
     await mock.close();

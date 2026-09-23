@@ -139,7 +139,8 @@ different server at the same host and path. Because the epoch-3 URI constraint
 cannot store ports, identity resolution refuses such a remote instead of
 discarding its port. URL queries and fragments are also refused: they can
 contain credentials and are not repository paths. Diagnostics never echo a
-submitted remote or filesystem path. Supporting distinct non-default ports
+submitted remote or filesystem path, including one supplied as a local
+fingerprint. Supporting distinct non-default ports
 requires a separately reviewed, data-preserving schema change. Existing
 default-port identities and stored rows keep their spelling.
 

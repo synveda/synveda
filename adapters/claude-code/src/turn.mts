@@ -101,7 +101,7 @@ export async function turn(
 
   // Record first, always, and persist before anything touches the network.
   // This is the step the previous design did not have.
-  const recorded = recordDelta(spool, input.transcript_path, readEntries, currentCheckout ?? spool.checkout);
+  const recorded = recordDelta(spool, input.transcript_path, readEntries, spool.checkout);
   const durable = saveSpool(spool);
   if (!durable) {
     // The spool did not land. Delivering anyway would risk sending events

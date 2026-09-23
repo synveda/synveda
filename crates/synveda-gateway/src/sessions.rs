@@ -1556,9 +1556,15 @@ pub(crate) async fn append_events(
         // CPU work, O(payload bytes): off the reactor. The request span travels
         // along so the scan spans nest under it.
         let span = tracing::Span::current();
-        let scans: Vec<ScanOutcome> = tokio::task::spawn_blocking(move || {
+        let scans: Vec<(String, ScanOutcome)> = tokio::task::spawn_blocking(move || {
             let _entered = span.enter();
-            payloads.into_iter().map(synveda_ingest::scan).collect()
+            payloads
+                .into_iter()
+                .map(|payload| {
+                    let hash = sessions::payload_hash(&payload);
+                    (hash, synveda_ingest::scan(payload))
+                })
+                .collect()
         })
         .await
         .map_err(|err| Error::Internal {
@@ -1576,7 +1582,7 @@ pub(crate) async fn append_events(
         let mut events: Vec<NewSessionEvent> = Vec::with_capacity(body.events.len());
         let mut submitted_order: Vec<Option<usize>> = Vec::with_capacity(body.events.len());
         let mut rule_summary: BTreeMap<&'static str, u64> = BTreeMap::new();
-        for (event, scan) in body.events.iter().zip(scans) {
+        for (event, (source_payload_hash, scan)) in body.events.iter().zip(scans) {
             for finding in &scan.findings {
                 metrics::counter!(
                     REDACTION_FINDINGS_TOTAL,
@@ -1613,6 +1619,7 @@ pub(crate) async fn append_events(
                 client_event_id: event.client_event_id.clone(),
                 occurred_at: event.occurred_at,
                 payload: scan.payload,
+                source_payload_hash,
                 redactions,
                 quarantine: disposition == Some(RedactionMode::Quarantine),
             });

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select source_payload_hash from session_events\n           where tenant_id = $1 and client_event_id = 'r-secret'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "source_payload_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c2981ffd6e5b71ebe8ceb7bea607d28dfb376738eadc9223a3cc053acfcde6e6"
+}

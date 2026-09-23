@@ -885,6 +885,18 @@ async fn two_sessions_share_approved_project_knowledge_without_sharing_private_c
                 .contains("test-fast-secret"),
             "{run}"
         );
+        let detail = detail(
+            &world,
+            &world.bob_token,
+            run["id"].as_str().expect("Bob run id"),
+        )
+        .await;
+        let disclosure = detail.to_string();
+        assert!(!disclosure.contains(&corpus.private_id), "{disclosure}");
+        assert!(
+            !disclosure.contains(&corpus.private_revision),
+            "{disclosure}"
+        );
     }
 }
 

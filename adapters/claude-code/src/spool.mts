@@ -111,7 +111,7 @@ export interface Spool {
   recorded_through?: string;
   /** Whether a close is owed once the backlog drains. */
   close_requested: boolean;
-  /** True only after the gateway accepted a terminal close. */
+  /** True after the gateway accepts or confirms a terminal close. */
   closed?: boolean;
   end_reason?: string;
   /** Carried across hooks: only `SessionStart` payloads name them. */
