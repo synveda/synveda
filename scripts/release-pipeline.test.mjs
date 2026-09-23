@@ -166,6 +166,8 @@ test("workflow refactor retains release, native platform and security boundaries
     ["helm-operations, cli]", "helm-operations]"],
     ["CI_NEEDS: ${{ toJSON(needs) }}", "CI_NEEDS: '{}'"],
     ["if: needs.changes.outputs.cli == 'true'", "if: false"],
+    ["node scripts/verify-starter-image-reuse.mjs", "echo unchecked images"],
+    ["PRODUCT_IMAGE: synveda/product:ops11", "PRODUCT_IMAGE: unrelated/image:old"],
   ])
     assert.ok(ciWorkflowFindings(current.ci.replace(from, to)).length);
 });

@@ -329,15 +329,22 @@ jobs:
           version: v0.32.0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124
-      - run: demos/ops-2-helm-install.sh
+      - name: Source-built starter acceptance
+        run: demos/ops-2-helm-install.sh
         env:
           STARTER_MATRIX: "1"
           OPERATIONS: "1"
           STARTER_CASE: ${{ matrix.profile }}
+          PRODUCT_IMAGE: synveda/product:ops11
           SYNVEDA_KIND_GHA_CACHE: "1"
       - name: External TLS and OIDC negative acceptance
         if: matrix.profile == 'external-external'
-        run: POSTGRES_MODE=external demos/ops-2-helm-install.sh
+        run: |
+          node scripts/verify-starter-image-reuse.mjs
+          demos/ops-2-helm-install.sh
+        env:
+          POSTGRES_MODE: external
+          SKIP_BUILD: "1"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ops11-${{ matrix.profile }}

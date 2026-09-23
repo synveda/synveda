@@ -274,7 +274,7 @@ check-fast: check-docs check-backlog check-adr-status check-api-types check-adap
 
 .PHONY: check-ci
 check-ci:
-	node --test scripts/ci.test.mjs scripts/release-pipeline.test.mjs
+	node --test scripts/ci.test.mjs scripts/release-pipeline.test.mjs scripts/verify-starter-image-reuse.test.mjs
 	node scripts/check-workflows.mjs
 
 lint:
