@@ -670,6 +670,231 @@ async fn a_retry_creates_nothing_twice_and_a_partial_redelivery_appends_the_rest
     assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
 }
 
+#[tokio::test]
+async fn an_open_replay_cannot_change_installation_or_repository_binding() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state);
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, project_id) = seed_place(&app, &token, "binding-replay").await;
+    let body = json!({
+        "workspace_id": workspace_id,
+        "project_id": project_id,
+        "client_name": "claude-code",
+        "external_session_id": "native-1",
+        "client_installation_id": "install-a",
+    });
+    let (status, original) = open_session(&app, &token, "binding-key", body.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "{original}");
+
+    for (field, changed) in [
+        ("client_installation_id", json!("install-b")),
+        (
+            "repository_id",
+            json!(synveda_types::RepositoryId::new().to_string()),
+        ),
+    ] {
+        let mut different = body.clone();
+        different[field] = changed;
+        let (status, answer) = open_session(&app, &token, "binding-key", different).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{field}: {answer}");
+    }
+}
+
+#[tokio::test]
+async fn one_native_id_is_distinct_across_principal_harness_and_tenant_namespaces() {
+    let _guard = serial().await;
+    let Some((gateway_state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(gateway_state.clone());
+    let admin = issue(ADMIN, tenant_id);
+    let member = issue(MEMBER, tenant_id);
+    let (workspace_id, _) = seed_place(&app, &admin, "external-namespace").await;
+    let mut tx = tenant_fixture::begin(&gateway_state.pool, tenant_id).await;
+    let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant_id)
+        .await
+        .expect("tenant root");
+    grant(&mut tx, tenant_id, root.id, MEMBER, RoleKey::Administrator).await;
+    tx.commit().await.expect("member grant");
+
+    let body = json!({
+        "workspace_id": workspace_id,
+        "client_name": "claude-code",
+        "external_session_id": "same-native-id",
+    });
+    let (status, first) = open_session(&app, &admin, "namespace-admin", body.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    let (status, second) = open_session(&app, &member, "namespace-member", body.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "{second}");
+    let mut codex_body = body;
+    codex_body["client_name"] = json!("codex");
+    let (status, third) = open_session(&app, &admin, "namespace-codex", codex_body).await;
+    assert_eq!(status, StatusCode::CREATED, "{third}");
+
+    let Some((second_state, second_tenant)) = admitted_tenant().await else {
+        return;
+    };
+    let second_app = router(second_state);
+    let second_admin = issue(ADMIN, second_tenant);
+    let (second_workspace, _) =
+        seed_place(&second_app, &second_admin, "external-namespace-two").await;
+    let (status, fourth) = open_session(
+        &second_app,
+        &second_admin,
+        "namespace-other-tenant",
+        json!({
+            "workspace_id": second_workspace,
+            "client_name": "claude-code",
+            "external_session_id": "same-native-id",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{fourth}");
+    let ids = [
+        first["id"].as_str(),
+        second["id"].as_str(),
+        third["id"].as_str(),
+        fourth["id"].as_str(),
+    ];
+    assert_eq!(
+        ids.iter()
+            .copied()
+            .flatten()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        4
+    );
+}
+
+#[tokio::test]
+async fn a_reused_event_id_with_different_content_is_refused_without_changing_history() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state);
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, _) = seed_place(&app, &token, "event-conflict").await;
+    let (_, session) = open_session(
+        &app,
+        &token,
+        "event-conflict-open",
+        json!({"workspace_id": workspace_id, "client_name": "claude-code"}),
+    )
+    .await;
+    let session_id = session["id"].as_str().expect("id");
+    let path = format!("/v1/sessions/{session_id}/events");
+    let original = event("same-id", "message.user", json!({"text": "first"}));
+    let (status, first) = call(
+        &app,
+        "POST",
+        &path,
+        Some(&token),
+        None,
+        Some(json!({"events": [original]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+
+    let (status, error) = call(
+        &app,
+        "POST",
+        &path,
+        Some(&token),
+        None,
+        Some(json!({"events": [event("same-id", "message.user", json!({"text": "changed"}))]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+
+    let (_, timeline) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{session_id}/timeline"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    let entries = timeline["entries"].as_array().expect("entries");
+    assert_eq!(entries.len(), 1);
+    let event_id = first["events"][0]["event"]["id"]
+        .as_str()
+        .expect("event id");
+    let (status, stored) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{session_id}/events/{event_id}"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{stored}");
+    assert_eq!(stored["payload"]["text"], "first");
+}
+
+#[tokio::test]
+async fn simultaneous_retries_from_independent_gateway_pools_append_once() {
+    let _guard = serial().await;
+    let Some((gateway_state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(gateway_state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, _) = seed_place(&app, &token, "concurrent-retry").await;
+    let (_, session) = open_session(
+        &app,
+        &token,
+        "concurrent-open",
+        json!({"workspace_id": workspace_id, "client_name": "claude-code"}),
+    )
+    .await;
+    let session_id = session["id"].as_str().expect("id");
+    let path = format!("/v1/sessions/{session_id}/events");
+    let mut restarted = gateway_state;
+    restarted.pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_lazy(&std::env::var("DATABASE_URL").expect("database URL"))
+        .expect("second gateway pool");
+    let other = router(restarted);
+    let payload = json!({"events": [event("raced-id", "message.user", json!({"text": "once"}))]});
+    let (first, second) = tokio::join!(
+        call(
+            &app,
+            "POST",
+            &path,
+            Some(&token),
+            None,
+            Some(payload.clone())
+        ),
+        call(&other, "POST", &path, Some(&token), None, Some(payload)),
+    );
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+    assert_eq!(
+        first.1["appended"].as_u64().unwrap_or(0) + second.1["appended"].as_u64().unwrap_or(0),
+        1
+    );
+    assert_eq!(
+        first.1["duplicates"].as_u64().unwrap_or(0) + second.1["duplicates"].as_u64().unwrap_or(0),
+        1
+    );
+    let (_, timeline) = call(
+        &other,
+        "GET",
+        &format!("/v1/sessions/{session_id}/timeline"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(timeline["entries"].as_array().expect("entries").len(), 1);
+}
+
 // ── The PDP, on every route ──────────────────────────────────────────────────
 
 /// Every route on this plane refuses a caller who holds nothing, and the

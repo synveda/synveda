@@ -133,6 +133,36 @@ export function runTitle(session: SessionView): string {
   return session.task_summary ?? `${session.client_name} run`;
 }
 
+/** A compact discriminator for simultaneous runs in the same project. */
+export function shortSessionRef(id: string): string {
+  return id.slice(0, 8);
+}
+
+export interface CheckoutView {
+  ref: string;
+  observedAt: string;
+  branch?: string;
+  commit?: string;
+  dirty?: boolean;
+}
+
+/** Only the adapter's bounded safe checkout fields are rendered. */
+export function checkoutOf(session: SessionView): CheckoutView | null {
+  const value = session.metadata.checkout;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const checkout = value as Record<string, unknown>;
+  if (typeof checkout.ref !== "string" || !/^[0-9a-f]{24}$/u.test(checkout.ref)
+    || typeof checkout.observed_at !== "string") return null;
+  return {
+    ref: checkout.ref,
+    observedAt: checkout.observed_at,
+    ...(typeof checkout.branch === "string" ? { branch: checkout.branch } : {}),
+    ...(typeof checkout.commit === "string" && /^[0-9a-f]{40,64}$/u.test(checkout.commit)
+      ? { commit: checkout.commit } : {}),
+    ...(typeof checkout.dirty === "boolean" ? { dirty: checkout.dirty } : {}),
+  };
+}
+
 /**
  * What a run was working on: the repository's canonical URI and the branch.
  *

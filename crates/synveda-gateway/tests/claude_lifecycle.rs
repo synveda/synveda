@@ -1001,7 +1001,7 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
         "the new event took the next position"
     );
 
-    // ── 4 and 8. A headless completion flushes, and SessionEnd ends the run ──
+    // ── 4 and 8. An ordinary exit flushes; an explicit clear ends the run ──
     //
     // The `SessionEnd` frame is the one a `claude -p` completion actually
     // emits — `reason: "other"`, which is not `clear` and not `logout`.
@@ -1010,19 +1010,38 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
     assert_eq!(ended.status, Some(0));
 
     let (_, status, end_reason, event_count) = h.session_row().await.expect("the run survives");
+    assert_eq!(status, "active", "an ordinary exit remains resumable");
+    assert!(
+        end_reason.is_none(),
+        "an ordinary exit does not set a terminal reason"
+    );
+    assert_eq!(event_count, 6, "the exit flushed the complete transcript");
+    assert!(
+        h.spool().is_some(),
+        "the native binding survives an ordinary exit"
+    );
+
+    // Both frames were captured from 2.1.241. Their pairing here exercises
+    // the two semantics; it does not claim the host emitted this sequence live.
+    let clear = h.frame("session-end");
+    let cleared = h.hook("turn", &clear, &live).await;
+    assert_eq!(cleared.status, Some(0));
+
+    let (_, status, end_reason, event_count) = h.session_row().await.expect("the run survives");
     assert_eq!(
         status, "ended",
         "a drained close ends rather than lingering"
     );
     assert_eq!(
         end_reason.as_deref(),
-        Some("other"),
+        Some("clear"),
         "the client's own reason is carried, not a reason this product invented"
     );
     assert_eq!(event_count, 6, "nothing arrived late and nothing was lost");
     let (code, view) = h.get(&format!("/v1/sessions/{session_id}")).await;
     assert_eq!(code, 200, "{view}");
     assert!(view["ended_at"].is_string(), "{view}");
+    assert!(h.spool().is_none(), "terminally closed binding is retired");
 
     // ── 9. The console timeline displays it ──────────────────────────────────
     let (code, timeline) = h.get(&format!("/v1/sessions/{session_id}/timeline")).await;
@@ -1195,6 +1214,11 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
         ended.elapsed < Duration::from_secs(8),
         "SessionEnd: {:?}",
         ended.elapsed
+    );
+    assert!(
+        cleared.elapsed < Duration::from_secs(8),
+        "clear SessionEnd: {:?}",
+        cleared.elapsed
     );
     assert!(
         recovered.elapsed < Duration::from_secs(8),
@@ -1414,7 +1438,11 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
     let deadline = Instant::now() + Duration::from_secs(8);
     let (session_id, status, end_reason, event_count) = loop {
         if let Some(row) = h.session_row().await
-            && row.1 == "ended"
+            && row.1 == "active"
+            && row.3 >= 4
+            && h.logged("turn.done")
+                .iter()
+                .any(|entry| entry["hook"] == "SessionEnd" && entry["complete"] == json!(true))
         {
             break row;
         }
@@ -1424,18 +1452,17 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
                 .await
                 .map(|(_, status, end_reason, events)| (status, end_reason.is_some(), events));
             panic!(
-                "SessionEnd did not leave an ended session (observed={observed:?}, captured_hooks={:?}, adapter_log_events={:?})",
+                "SessionEnd did not flush a resumable session (observed={observed:?}, captured_hooks={:?}, adapter_log_events={:?})",
                 h.captured_hook_names(),
                 h.adapter_log_event_names(),
             );
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
-    assert_eq!(status, "ended");
-    assert_eq!(
-        end_reason.as_deref(),
-        Some("other"),
-        "normal headless completion has Claude Code's stable exit reason"
+    assert_eq!(status, "active");
+    assert!(
+        end_reason.is_none(),
+        "headless exit leaves no terminal reason"
     );
     assert!(
         event_count >= 4,
@@ -1501,7 +1528,6 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
         "session.opened",
         "session.context.composed",
         "session.events.appended",
-        "session.ended",
     ] {
         assert!(actions.iter().any(|stored| stored == action), "{action}");
     }
@@ -1548,8 +1574,8 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
         "SessionEnd did not acknowledge and complete its spool: {completion_logs:?}"
     );
     assert!(
-        h.spool().is_none(),
-        "a fully acknowledged, closed live spool is retired"
+        h.spool().is_some(),
+        "a resumable native binding remains durable"
     );
     let hook_durations = h.logged("hook.done");
     let hook_ms = |hook: &str, mode: &str| {
@@ -1610,6 +1636,7 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
                 "synveda": env!("CARGO_PKG_VERSION"),
                 "os": host_version(),
                 "session_id": session_id,
+                "session_status": status,
                 "events": event_count,
                 "context_runs": context_runs,
                 "captured_hook_frames": captures,

@@ -39,7 +39,7 @@ renumbered. The template is excluded.
 | [ADR-0024](adr-0024-hybrid-retrieval.md) | Authorised lexical/vector fusion | Accepted | Current (partially superseded by ADR-0084) | CTX-1 | Knowledge retrieval keeps authorised fusion; the Record corpus and Tantivy sidecar were removed. |
 | [ADR-0025](adr-0025-composition-engine.md) | Record-era context composition | Accepted; decisions 2 and 7 superseded by ADR-0031 | Superseded by ADR-0084 | CTX-2 | ADR-0084 owns immutable Knowledge planning and trace disclosure. |
 | [ADR-0026](adr-0026-inject-api.md) | Injection degradation ladder | Accepted; partially superseded by ADR-0078 | Current (partially superseded by ADR-0078) | CTX-3 | `/v1/inject` was removed; bounded context-run degradation remains. |
-| [ADR-0027](adr-0027-claude-code-adapter.md) | Claude Code adapter | Accepted; amended four times | Current | ADPT-1, ADPT-8, CPR-14, OPS-12 | Lifecycle evidence is ADR-0079; support claims are governed by ADR-0098. CLI credential mutations and refresh share a bounded process lock. |
+| [ADR-0027](adr-0027-claude-code-adapter.md) | Claude Code adapter | Accepted; amended five times | Current | ADPT-1, ADPT-8, CPR-14, OPS-12 | Lifecycle evidence is ADR-0079; support claims are governed by ADR-0098. Ordinary exit retains native resume. |
 | [ADR-0028](adr-0028-eval-harness.md) | Unprivileged evaluation harness | Accepted | Current | EVAL-1 | Product outcome methodology is extended by ADR-0099. |
 | ADR-0029 → [replacement](adr-0097-bounded-knowledge-graph-retrieval.md) | Apache AGE adoption gate | Accepted | Removed; budget and fallback in ADR-0097 | GRPH-4, GRPH-1..3, MEM-5, CTX-5 | ADR-0097 carries the surviving explicit-bound and fallback requirements. |
 | [ADR-0030](adr-0030-vedaflow-object-store.md) | VedaFlow content-addressed object store | Accepted | Current | FLOW-1 | — |
@@ -93,14 +93,14 @@ renumbered. The template is excluded.
 | [ADR-0068](adr-0068-context-platform-domain-and-epoch.md) | Context-platform domain and epoch | Accepted | Current | CPR-1 | — |
 | [ADR-0069](adr-0069-schema-epoch-and-local-reset.md) | Authoritative schema epoch and reset | Accepted | Current | CPR-2, CPR-43 | — |
 | [ADR-0070](adr-0070-generic-governed-scopes.md) | Generic governed scopes | Accepted | Current | CPR-3 | — |
-| [ADR-0071](adr-0071-workspaces-projects-and-repository-identity.md) | Workspaces, projects and repositories | Accepted | Current | CPR-4 | — |
+| [ADR-0071](adr-0071-workspaces-projects-and-repository-identity.md) | Workspaces, projects and repositories | Accepted; URI safety amended | Current | CPR-4 | Non-default ports are refused until a data-preserving schema change can represent them. |
 | [ADR-0072](adr-0072-groups-grants-and-invitations.md) | Groups, grants and invitations | Accepted | Current | CPR-5 | — |
 | [ADR-0073](adr-0073-governed-scope-anchors.md) | Governed scope anchors | Accepted | Current | CPR-6 | — |
 | [ADR-0074](adr-0074-hierarchy-cutover.md) | One scope tree and grant bootstrap | Accepted | Current | CPR-7 | Replaces ADR-0011, ADR-0015 and ADR-0016. |
 | [ADR-0075](adr-0075-console-product-shell.md) | Routed console product shell | Accepted | Current | CPR-8 | — |
 | [ADR-0076](adr-0076-sessions-as-runtime-aggregate.md) | Sessions as runtime aggregate | Accepted | Current | CPR-10 | — |
 | [ADR-0077](adr-0077-session-product-surface.md) | Session product surface | Accepted | Current | CPR-11 | — |
-| [ADR-0078](adr-0078-durable-session-delivery.md) | Durable session delivery and route cutover | Accepted; amended by CPR-14 and CPR-42 | Current | CPR-12, CPR-42 | Replaces the observe/inject/recall transport surfaces while retaining bounded delivery doctrine. |
+| [ADR-0078](adr-0078-durable-session-delivery.md) | Durable session delivery and route cutover | Accepted; amended by CPR-14, CPR-42 and CPR-12 | Current | CPR-12, CPR-42 | Replaces the observe/inject/recall transport surfaces while retaining bounded delivery and resumable native bindings. |
 | [ADR-0079](adr-0079-live-claude-session-acceptance.md) | Claude lifecycle evidence tiers | Accepted | Current | CPR-14 | — |
 | [ADR-0080](adr-0080-versioned-knowledge-aggregate.md) | Immutable versioned Knowledge | Accepted | Current | CPR-15 | Replaces the Record aggregate as the learned-context domain. |
 | [ADR-0081](adr-0081-governed-knowledge-lifecycle.md) | VedaFlow-governed Knowledge changes | Accepted | Current | CPR-16 | — |

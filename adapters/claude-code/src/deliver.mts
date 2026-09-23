@@ -37,6 +37,7 @@ import {
   type Spool,
 } from "./spool.mjs";
 import { entriesAfter, readTranscript } from "./transcript.mjs";
+import type { CheckoutObservation } from "./git.mjs";
 
 /** What one delivery attempt did. */
 export interface Delivered {
@@ -59,6 +60,7 @@ export function recordDelta(
   spool: Spool,
   transcriptPath: string | undefined,
   readEntries: typeof readTranscript = readTranscript,
+  checkout?: CheckoutObservation,
 ): number {
   const path = transcriptPath ?? spool.transcript_path;
   if (path === undefined) {
@@ -77,7 +79,7 @@ export function recordDelta(
       entries: delta.entries.length,
     });
   }
-  const events = toSessionEvents(delta.entries, spool.model);
+  const events = toSessionEvents(delta.entries, spool.model, checkout);
   const added = record(spool, events);
   const last = delta.entries[delta.entries.length - 1];
   if (last !== undefined) spool.recorded_through = last.uuid;
@@ -192,9 +194,13 @@ export async function closeRun(
       status: result.status,
       reason: result.reason,
     });
+    spool.close_requested = true;
+    spool.end_reason = reason;
+    return;
   }
   if (drained) {
     spool.close_requested = false;
+    spool.closed = true;
   } else {
     spool.close_requested = true;
     spool.end_reason = reason;
@@ -214,6 +220,7 @@ export async function retryBacklog(
   config: AdapterConfig,
   bearer: string,
   exceptExternalId: string,
+  installationId: string,
   deadlineAt: number,
 ): Promise<number> {
   let delivered = 0;
@@ -223,6 +230,7 @@ export async function retryBacklog(
     // Never send a saved conversation to the gateway selected by a later login.
     if (
       spool.client_name !== (config.clientName ?? CLIENT_NAME) ||
+      spool.client_installation_id !== installationId ||
       spool.gateway_url !== config.gatewayUrl
     ) continue;
     if (pending(spool).length === 0 && !spool.close_requested) {

@@ -1052,7 +1052,7 @@ pub(crate) async fn open(
             }
         };
         let id = SessionId::from_uuid(replayed.expect("replay id"));
-        let session = replay_open(&state, tenant_id, id, &claim).await?;
+        let session = replay_open(&state, tenant_id, id, &claim, &body).await?;
         Ok((StatusCode::OK, Json(SessionView::from(session))))
     }
     .await;
@@ -1134,6 +1134,7 @@ async fn replay_open(
     tenant_id: TenantId,
     id: SessionId,
     claim: &Claim,
+    body: &OpenSessionBody,
 ) -> Result<Session> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let session = sessions::get(&mut *tx, tenant_id, id)
@@ -1147,6 +1148,20 @@ async fn replay_open(
         Subject::Session(&session),
     )
     .await?;
+    // The idempotency digest predates checkout/repository observations. A
+    // replay still has to agree with the stored immutable identity, after
+    // authorisation so the comparison cannot disclose a foreign binding.
+    if session.workspace_id != body.workspace_id
+        || session.project_id != body.project_id
+        || session.client_name != body.client_name
+        || session.external_session_id != body.external_session_id
+        || session.client_installation_id != body.client_installation_id
+        || session.repository_id != body.repository_id
+    {
+        return Err(Error::Conflict {
+            message: "session open replay differs from the stored binding".to_owned(),
+        });
+    }
     read_event(
         &mut tx,
         tenant_id,

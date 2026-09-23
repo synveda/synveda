@@ -56,6 +56,12 @@ against one Session. This is not an OIDC or live vendor-client qualification.
 Missing prerequisites fail this explicit target; the SDK test is explicitly
 ignored in ordinary Rust runs that do not install language dependencies.
 
+The 2026-09-23 source suites have ten tests per language. Each reuses one client
+for simultaneous reads of two explicit Session IDs and a denied ID; paths and
+outcomes remain separate. The shared Claude-fixture, Python, and TypeScript
+workflow also passed again against an isolated real gateway/database. These
+clients do not infer a task from the HTTP connection or retain a current Session.
+
 Regenerate after an intentional public contract change:
 
 ```sh

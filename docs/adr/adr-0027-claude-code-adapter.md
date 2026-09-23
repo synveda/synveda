@@ -1,15 +1,25 @@
 # ADR-0027: Claude Code adapter — hook seams, the CLI as credential authority, cursor-and-idempotency observe
 
-- **Status**: Accepted, **amended four times** — 2026-08-11 by OPS-8
+- **Status**: Accepted, **amended five times** — 2026-08-11 by OPS-8
   (decision 1's manifest was wrong in two places and the plugin never loaded
   in Claude Code), 2026-08-13 by the first headless session (the hooks load
   and fire, and only the *read* one completes), and 2026-08-24 by CPR-14
   (the real client closed the remaining ambiguity and moved the write hooks'
   synchronous boundary to the local durable spool, never the gateway), and
-  2026-09-21 by OPS-12 (serialize local credential mutations and refresh).
+  2026-09-21 by OPS-12 (serialize local credential mutations and refresh), and
+  2026-09-23 by CPR-12 (ordinary SessionEnd preserves native resume).
 - **Date**: 2026-07-24
 - **Feature(s)**: ADPT-1, ADPT-8, CPR-14, OPS-12
 - **Deciders**: sujitn
+
+## Amendment 5 (2026-09-23): ordinary exit preserves native resume
+
+Claude Code can emit `SessionEnd` with reason `other` and later resume the
+same native conversation. The earlier live run ended because the adapter
+treated every SessionEnd as terminal; that was adapter behavior, not a host
+requirement. The hook now flushes on an ordinary exit and closes only on
+`clear`. ADR-0078 records the durable binding rule. This revision has local
+captured-frame and gateway replay evidence; a new paid native run remains open.
 
 ## Amendment 4 (2026-09-21): serialize credential refresh and mutation
 

@@ -1005,6 +1005,26 @@ pub async fn append_events(
         }
     }
 
+    for event in events {
+        if !existing.contains(&event.client_event_id) {
+            continue;
+        }
+        let stored = held
+            .get(&event.client_event_id)
+            .ok_or_else(|| Error::Internal {
+                message: "a previously appended event could not be read back".to_owned(),
+            })?;
+        if stored.event_type != event.event_type
+            || stored.event_schema_version != event.event_schema_version
+            || stored.occurred_at.timestamp_micros() != event.occurred_at.timestamp_micros()
+            || stored.payload_hash != payload_hash(&event.payload)
+        {
+            return Err(Error::Conflict {
+                message: "client_event_id already names a different event".to_owned(),
+            });
+        }
+    }
+
     let mut written = 0usize;
     let mut newest: Option<DateTime<Utc>> = None;
     let mut review_ids: Vec<Uuid> = Vec::new();

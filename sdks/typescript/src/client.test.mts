@@ -42,6 +42,33 @@ test("shared Python/TypeScript wire fixtures: encoding, auth, idempotency and co
   }
 });
 
+test("one client interleaves explicit Session paths without inheriting another task", async (t) => {
+  const seen: string[] = [];
+  const base = await server(t, (req, res) => {
+    const path = req.url ?? "";
+    seen.push(path);
+    const id = path.split("/").at(-1);
+    if (id === "denied") {
+      reply(res, 404, { kind: "not_found" });
+    } else {
+      setTimeout(() => reply(res, 200, { id }), id === "first" ? 20 : 0);
+    }
+  });
+  const client = new Client(base, async () => "synthetic-token");
+  const [first, second, denied] = await Promise.allSettled([
+    client.request("get_session", { path: { session_id: "first" } }),
+    client.request("get_session", { path: { session_id: "second" } }),
+    client.request("get_session", { path: { session_id: "denied" } }),
+  ]);
+  if (first.status !== "fulfilled" || second.status !== "fulfilled" || denied.status !== "rejected") {
+    assert.fail("Session responses crossed task boundaries");
+  }
+  assert.equal(first.value.data.id, "first");
+  assert.equal(second.value.data.id, "second");
+  assert.ok(denied.reason instanceof ApiError && denied.reason.status === 404);
+  assert.deepEqual(new Set(seen), new Set(["/v1/sessions/first", "/v1/sessions/second", "/v1/sessions/denied"]));
+});
+
 test("refresh once for replay-safe requests; never retry an event append automatically", async (t) => {
   let calls = 0;
   const base = await server(t, (req, res) => {

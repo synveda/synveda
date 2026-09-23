@@ -140,6 +140,15 @@ describe("the spool", () => {
     assert.equal(loadSpool("native-id-collision")?.client_name, "claude-code");
   });
 
+  test("a different installation cannot adopt an existing native binding", () => {
+    const spool = fresh("installation-pin");
+    spool.session_id = "22222222-2222-2222-2222-222222222222";
+    assert.ok(saveSpool(spool));
+    const before = readFileSync(spoolFile("installation-pin"));
+    assert.equal(loadOrCreateSpool("installation-pin", "claude-code", "install-2"), undefined);
+    assert.deepEqual(readFileSync(spoolFile("installation-pin")), before);
+  });
+
   /**
    * Acknowledgement is keyed by the client's own id, so a batch whose answers
    * come back in a different order still marks the right rows.
@@ -295,12 +304,16 @@ describe("the spool", () => {
     assert.ok(ids.includes("backlog-2"));
   });
 
-  test("a finished spool is retired and one still owing a close is not", () => {
+  test("only a terminally closed spool is retired; an active binding survives", () => {
     const done = fresh("retire-1");
     record(done, [
       { event_type: "message.user", client_event_id: "a", occurred_at: "2026-08-25T10:00:00Z", payload: {} },
     ]);
     acknowledge(done, new Map([["a", "appended"]]));
+    saveSpool(done);
+    assert.equal(retireIfComplete(done), false);
+    assert.ok(loadSpool("retire-1"));
+    done.closed = true;
     saveSpool(done);
     assert.equal(retireIfComplete(done), true);
     assert.equal(loadSpool("retire-1"), undefined);

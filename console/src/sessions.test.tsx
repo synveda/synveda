@@ -185,6 +185,54 @@ test("an active run reads as running, and is a link to its own address", async (
   assert.doesNotMatch(rendered, /No reason was recorded/);
 });
 
+test("concurrent rows expose the project, repository reference, and distinct short session references", async () => {
+  await seed(listKey(), ok({
+    sessions: [
+      session({ id: "aaaaaaaa-1111-1111-1111-111111111111", repository_id: "rrrrrrrr-1111-1111-1111-111111111111" }),
+      session({ id: "bbbbbbbb-2222-2222-2222-222222222222", repository_id: "rrrrrrrr-1111-1111-1111-111111111111" }),
+    ],
+    next_cursor: null,
+  }));
+  const rendered = renderList(me());
+  assert.match(rendered, /Ledger/);
+  assert.match(rendered, /repo rrrrrrrr/);
+  assert.match(rendered, /session aaaaaaaa/);
+  assert.match(rendered, /session bbbbbbbb/);
+});
+
+test("details expose native identity and safe checkout facts, with honest unknowns", async () => {
+  await seed("sessions/one/s-1", ok(session({
+    external_session_id: "native-42",
+    client_installation_id: "install-1",
+    metadata: { checkout: {
+      ref: "abcdef0123456789abcdef01",
+      observed_at: "2026-08-23T10:00:00Z",
+      branch: "main",
+      commit: "a".repeat(40),
+      dirty: true,
+    } },
+  })));
+  await seed("sessions/timeline/s-1", ok(timeline()));
+  await seed("projects/p-1/repositories", ok({ repositories: [] }));
+  const rendered = renderDetail(me());
+  assert.match(rendered, /Native conversation/);
+  assert.match(rendered, /native-42/);
+  assert.match(rendered, /Checkout/);
+  assert.match(rendered, /abcdef0123456789abcdef01/);
+  assert.match(rendered, /uncommitted changes/);
+  assert.match(rendered, /Lineage/);
+  assert.match(rendered, /not reported/);
+
+  cache.clear();
+  await seed("sessions/one/s-1", ok(session()));
+  await seed("sessions/timeline/s-1", ok(timeline()));
+  await seed("projects/p-1/repositories", ok({ repositories: [] }));
+  const unknown = renderDetail(me());
+  assert.match(unknown, /Native conversation.*not reported/s);
+  assert.match(unknown, /Working on.*not reported/s);
+  assert.match(unknown, /Checkout.*not reported/s);
+});
+
 test("a completed run shows how it ended, and a failed one shows why", async () => {
   await seed(
     "sessions/one/s-1",

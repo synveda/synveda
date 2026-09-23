@@ -75,7 +75,7 @@ pub async fn flush(profile: &str, dir: Option<PathBuf>, verbose: bool) -> Result
     let mut failed = 0usize;
     let mut skipped = 0usize;
     for (path, mut spool) in scanned.spools {
-        if spool.pending_count() == 0 {
+        if spool.pending_count() == 0 && !spool.close_requested {
             continue;
         }
         if let Err(message) = pin_gateway(&mut spool.gateway_url, api.gateway()) {
@@ -115,6 +115,7 @@ pub async fn flush(profile: &str, dir: Option<PathBuf>, verbose: bool) -> Result
                     match close_run(&api, &session_id, spool.end_reason.as_deref()).await {
                         Ok(()) => {
                             spool.close_requested = false;
+                            spool.closed = true;
                             if verbose {
                                 println!("  {}: closed the run", name(&path));
                             }
@@ -265,6 +266,8 @@ pub fn status(dir: Option<PathBuf>, as_json: bool) -> Result<(), String> {
                     "events": spool.entries.len(),
                     "pending": spool.pending_count(),
                     "acknowledged": spool.entries.len() - spool.pending_count(),
+                    "close_requested": spool.close_requested,
+                    "closed": spool.closed,
                     "corrupt": spool.entries.iter().filter(|e| !e.intact()).count(),
                     "attempts": spool.pending().map(|e| e.delivery_attempts).max().unwrap_or(0),
                     "oldest_pending": spool.pending().map(|e| e.occurred_at).min(),
@@ -312,6 +315,9 @@ pub fn status(dir: Option<PathBuf>, as_json: bool) -> Result<(), String> {
             spool.client_name, spool.client_installation_id
         );
         println!("  run      {run}");
+        if spool.close_requested {
+            println!("  close    waiting for an authenticated flush");
+        }
         println!("  harness  {}", spool.external_session_id);
         println!(
             "  events   {} total, {} pending, {} acknowledged{}",
@@ -395,9 +401,9 @@ pub fn purge(dir: Option<PathBuf>, acknowledged: bool) -> Result<(), String> {
     for (path, mut spool) in scanned.spools {
         let removed = spool.purge_acknowledged();
         removed_events += removed;
-        if spool.entries.is_empty() && !spool.close_requested {
-            // Nothing left to deliver and nothing left to read: the file is
-            // the last thing holding the directory open.
+        if spool.entries.is_empty() && spool.closed && !spool.close_requested {
+            // The closed run has no work left; an active empty file still
+            // carries the native-to-Synveda binding across restarts.
             spool::remove(&path, &spool)?;
             removed_files += 1;
             continue;
@@ -434,6 +440,10 @@ fn name(path: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(windows))]
+    use chrono::Utc;
+    #[cfg(not(windows))]
+    use std::fs;
 
     #[test]
     fn a_spool_is_pinned_to_one_gateway() {
@@ -455,5 +465,41 @@ mod tests {
             error.contains("no flag that deletes undelivered"),
             "the refusal should close the door it is asked about: {error}"
         );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn purge_keeps_an_empty_active_binding_and_removes_it_after_close() {
+        let dir = std::env::temp_dir().join(format!(
+            "synveda-session-purge-{}",
+            synveda_types::TenantId::new()
+        ));
+        let path = dir.join("session.json");
+        let now = Utc::now();
+        let mut binding: spool::Spool = serde_json::from_value(serde_json::json!({
+            "spool_version": spool::SPOOL_VERSION,
+            "client_installation_id": "installation-1",
+            "client_name": "claude-code",
+            "session_id": "11111111-1111-1111-1111-111111111111",
+            "external_session_id": "native-1",
+            "created_at": now,
+            "updated_at": now,
+            "entries": []
+        }))
+        .expect("valid binding");
+        spool::write(&path, &binding).expect("write active binding");
+        purge(Some(dir.clone()), true).expect("purge active spool");
+        assert_eq!(
+            spool::read(&path)
+                .expect("active binding remains")
+                .session_id,
+            binding.session_id
+        );
+
+        binding.closed = true;
+        spool::write(&path, &binding).expect("write closed binding");
+        purge(Some(dir.clone()), true).expect("purge closed spool");
+        assert!(!path.exists(), "closed empty spool should be retired");
+        fs::remove_dir_all(dir).expect("remove private fixture");
     }
 }

@@ -1,9 +1,21 @@
 # ADR-0078: Durable session delivery and the observe/inject/recall cutover
 
-- **Status**: Accepted, amended 2026-08-24 by CPR-14 and 2026-08-26 by CPR-42
+- **Status**: Accepted, amended 2026-08-24 by CPR-14, 2026-08-26 by CPR-42, and 2026-09-23 by CPR-12
 - **Date**: 2026-08-25
 - **Feature(s)**: CPR-12, CPR-42
 - **Deciders**: Prompt 12 of the CPR programme
+
+## Amendment (2026-09-23): retain resumable native bindings
+
+Claude Code 2.1.241 can emit `SessionEnd` on an ordinary exit and later resume
+the same native session ID. Such an exit flushes within the existing deadline;
+it does not close the Synveda run. An explicit `clear` ends that run. An empty,
+fully acknowledged spool remains until the run is closed because it is the
+durable native-to-Synveda binding across process restarts. The CLI purge obeys
+the same rule. Terminal close intent is saved before credential resolution, so
+an offline `clear` of an opened run can be completed on a later authenticated
+start or explicit CLI flush. Codex and
+Copilot wrappers keep their explicit task closure.
 
 ## Amendment (2026-08-26): refused spool state is not absence
 
@@ -194,6 +206,12 @@ acceptance names:
 | `delivery_attempts` | entry | How many times delivery was tried. |
 | `last_attempt_at` | entry | When the last one was. |
 | `acknowledged` | entry | Whether the gateway has it. |
+
+Automatic hook lookup and background retry require the same client installation
+ID recorded in the spool. A changed installation holds the old file for explicit
+operator recovery instead of silently continuing its native conversation.
+If private storage cannot keep an installation ID, hooks do not invent a
+temporary identity for automatic binding.
 
 The three header fields are constant per file and are written once rather than
 repeated on every entry. Everything else is per entry, because everything else

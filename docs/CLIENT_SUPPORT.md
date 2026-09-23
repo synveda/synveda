@@ -6,7 +6,7 @@ A connection recipe is not a support claim. `captured` means authentic frames re
 
 | Client | Level | Tested versions | Lifecycle | Principal limit |
 | --- | --- | --- | --- | --- |
-| Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. |
+| Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. Ordinary Claude exit preserves a resumable run; /clear closes it. The revised close rule has local fixture evidence, not a new paid native run. |
 | GitHub Copilot CLI | `verified` | 1.0.83 | Captured sessionStart context, agentStop recording and sessionEnd flush; native MCP configuration | Verified source-build lifecycle only for Copilot CLI 1.0.83 / gpt-5.6-luna on macOS arm64 with the documented Docker/Keycloak setup. Native execution from a published installation and other versions/platforms remain unqualified. |
 | Cursor | `experimental` | none | Cursor Hooks v1 plus MCP | No Cursor executable or authenticated client was available on 2026-08-25. |
 | Visual Studio Code | `configured` | none | VS Code agent hooks Preview plus MCP | The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive. |
@@ -41,9 +41,12 @@ Conformance:
 
 Known limits:
 
-- Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them.
+- Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. Ordinary Claude exit preserves a resumable run; /clear closes it. The revised close rule has local fixture evidence, not a new paid native run.
+- Native session ID and durable installation ID are required for automatic hook binding. Git checkout facts are optional local observations; repository attachment is explicit. Cross-installation automatic continuation and child-agent content attribution are not qualified.
 - A host killed before any hook cannot be observed.
+- An offline observation before the first Synveda Session open needs a later SessionStart for that same native ID; another conversation cannot guess its placement.
 - A spool is pinned to its first authenticated gateway origin; a profile switch to another deployment holds the run instead of sending it.
+- Reusing one native conversation ID after changing authenticated principals on the same gateway is not qualified. Stop and PreCompact intentionally resolve no credential; start a new native conversation for a different principal.
 - Payload hashes detect accidental corruption but do not authenticate local state against an attacker with arbitrary write access to the same account.
 - Skill execution evidence remains host-observed at the sync/advertisement seam; a model statement alone never counts.
 
@@ -87,6 +90,7 @@ Known limits:
 - Earlier marker, denied-result parser and misplaced-hook failures remain pinned as failed evidence. Exact retry IDs were exercised through the public API; native outage recovery, compaction/reinjection and unknown/non-text result formats remain unqualified.
 - The release archive includes the compiled hook and its private shared runtime. All 23 hook/reader tests pass from the extracted archive on Node 24/macOS arm64 and pinned Docker Node 22/Linux arm64 and emulated x86_64. This is archive replay, not native execution from a published installation.
 - The existing approved Skill root override, native MCP configuration and trusted-hook setup are manual. Copilot CLI support makes no VS Code or cloud-agent claim.
+- Checkout observations are optional local metadata and repository attachment is explicit. Automatic binding requires a durable installation ID; a changed installation holds old spools. Reusing one native ID after changing authenticated principals on the same gateway is not qualified; start a new native conversation.
 
 ### Cursor — `experimental`
 
@@ -183,6 +187,7 @@ Known limits:
 - Native hook capture requires normal project/hook trust loading. --ignore-user-config did not emit hooks in the probe.
 - Native recovery delivered four pending outage events once. Manual and automatic compaction preserve the task and reinject allowed context. A companion Python/public-API probe verified live revoke/re-authorisation with an unchanged bearer and client.
 - The 1000-token threshold is a qualification override only: a second interactive turn repeatedly compacted and was interrupted; normal-settings resume succeeded. The reader holds transcripts over 8 MiB/20,000 records; host death before a hook can lose an unfinished turn.
+- Checkout observations are optional local metadata and repository attachment is explicit. Automatic binding requires a durable installation ID; a changed installation holds old spools. Reusing one native ID after changing authenticated principals on the same gateway is not qualified; start a new native conversation.
 
 ### Claude Desktop — `captured`
 

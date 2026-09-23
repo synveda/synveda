@@ -38,7 +38,9 @@ and unsafe archive/installer refusals. The x64 archive/report hashes and native
 identities were also checked locally; OPS-12 records both native job identities
 and the arm64 evidence bundle digest.
 Next: obtain passing Linux x64/ARM64 native archive reports and artifact-based
-real issuer/harness acceptance evidence.
+real issuer/harness acceptance evidence. The 2026-09-23 concurrent-session
+replay is local fixture evidence; OPS-12 records the missing authenticated
+two-conversation and child/fork run and its next action.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures
 (ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier
 Windows x64 compilation/refusal job and expanded credential job passed. Exact
@@ -66,6 +68,10 @@ required-check, tag-protection and GHCR settings remain in [the CI guide](../CI.
 
 [Client support](../CLIENT_SUPPORT.md) and [SDK compatibility](../../sdks/README.md#compatibility-and-release-boundary)
 own tested versions and limits. [ADPT-4](ADPT-4.md) retains SDK release decisions.
+The 2026-09-23 cross-client replay restored Codex/Copilot runtime-exit identity,
+kept origin-mismatched Copilot spools unchanged, and passed concurrent Python/TS
+Session calls plus fresh shared gateway interoperability. Native multi-conversation
+qualification and SDK release decisions remain open in OPS-12 and ADPT-4.
 The [public site](https://synveda.github.io/synveda/) and console share the
 canonical brand under ADR-0113/0114; [website maintenance](../../website/README.md)
 owns asset generation. Session-specific execution diaries stay in Git rather

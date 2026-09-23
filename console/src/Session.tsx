@@ -36,6 +36,7 @@ import { whenOf } from "./people.mjs";
 import { hrefOf } from "./routes.mjs";
 import {
   countSummary,
+  checkoutOf,
   deliveryNote,
   durationOf,
   endLine,
@@ -44,6 +45,7 @@ import {
   repositoryLine,
   runDescription,
   runTitle,
+  shortSessionRef,
   statusLabel,
   statusTone,
   warningCount,
@@ -117,8 +119,11 @@ export function offersSessionWrite(me: MeView, session: SessionView): boolean {
 
 /** The header block: what this run was, who ran it, and how it ended. */
 function Summary({ session }: { session: SessionView }) {
+  const { me } = useApp();
   const duration = durationOf(session, Date.now());
   const ended = endLine(session);
+  const checkout = checkoutOf(session);
+  const project = me.projects.find((candidate) => candidate.id === session.project_id);
   return (
     <section className="run-summary">
       <h2>
@@ -131,8 +136,16 @@ function Summary({ session }: { session: SessionView }) {
         </div>
       ) : null}
       <dl className="facts">
+        <dt>Session ref</dt>
+        <dd>{shortSessionRef(session.id)}</dd>
         <dt>Client</dt>
         <dd>{runDescription(session)}</dd>
+        <dt>Native conversation</dt>
+        <dd>{session.external_session_id ?? "not reported"}</dd>
+        <dt>Installation</dt>
+        <dd>{session.client_installation_id ?? "not reported"}</dd>
+        <dt>Project</dt>
+        <dd>{project?.display_name ?? (session.project_id ? "project unavailable" : "not reported")}</dd>
         <dt>Opened by</dt>
         <dd>{session.principal_id}</dd>
         <dt>Started</dt>
@@ -148,7 +161,19 @@ function Summary({ session }: { session: SessionView }) {
             <dd>{whenOf(session.last_observed_at)}</dd>
           </>
         ) : null}
-        {session.project_id ? <Repository session={session} /> : null}
+        {session.project_id ? <Repository session={session} /> : (
+          <><dt>Working on</dt><dd>not reported</dd></>
+        )}
+        <dt>Checkout</dt>
+        <dd>{checkout ? `ref ${checkout.ref} · observed ${whenOf(checkout.observedAt)}` : "not reported"}</dd>
+        <dt>Branch</dt>
+        <dd>{checkout?.branch ?? session.branch ?? "not reported"}</dd>
+        <dt>Commit</dt>
+        <dd>{checkout?.commit ?? "not reported"}</dd>
+        <dt>Working files</dt>
+        <dd>{checkout?.dirty === true ? "uncommitted changes" : checkout?.dirty === false ? "clean at observation" : "not reported"}</dd>
+        <dt>Lineage</dt>
+        <dd>not reported by this integration</dd>
       </dl>
     </section>
   );
@@ -175,11 +200,10 @@ function Repository({ session }: { session: SessionView }) {
       ? (entry.outcome.body as RepositoryList).repositories
       : [];
   const line = repositoryLine(session, repositories);
-  if (!line) return null;
   return (
     <>
       <dt>Working on</dt>
-      <dd>{line}</dd>
+      <dd>{line ?? "not reported"}</dd>
     </>
   );
 }

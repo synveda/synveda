@@ -139,6 +139,12 @@ pub struct Spool {
     /// The project, when the run is against one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    /// Explicit repository attachment selected at capture time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_id: Option<String>,
+    /// First opaque local checkout observation, preserved across CLI flushes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<serde_json::Value>,
     /// The gateway this spool is bound to. A file written against one
     /// deployment must never be flushed into another.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -159,12 +165,15 @@ pub struct Spool {
     pub recorded_through: Option<String>,
     /// Whether the client has asked for this run to be closed.
     ///
-    /// Set by the `SessionEnd` hook when its bounded flush could not drain the
-    /// spool. Whoever finishes the delivery closes the run — which is why the
+    /// Set by an explicit terminal close when its bounded flush could not
+    /// drain the spool. Whoever finishes the delivery closes the run — which is why the
     /// two-phase close exists: the run sits in `ending`, still accepting the
     /// events it is waiting for, rather than closing over a backlog.
     #[serde(default)]
     pub close_requested: bool,
+    /// The gateway acknowledged the final close. Active mappings stay on disk.
+    #[serde(default)]
+    pub closed: bool,
     /// Why the client stopped, carried to the close it could not perform.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_reason: Option<String>,
@@ -512,8 +521,11 @@ mod tests {
             external_session_id: "harness-1".to_owned(),
             workspace_id: None,
             project_id: None,
+            repository_id: None,
+            checkout: None,
             recorded_through: None,
             close_requested: false,
+            closed: false,
             end_reason: None,
             gateway_url: Some("http://127.0.0.1:8120".to_owned()),
             created_at: Utc::now(),
@@ -615,6 +627,13 @@ mod tests {
         let mut original = spool(vec![entry("e1", 1)]);
         original.transcript_path = Some("C:/project/transcript.jsonl".to_owned());
         original.model = Some("model-fixture".to_owned());
+        original.repository_id = Some("repository-1".to_owned());
+        original.checkout = Some(serde_json::json!({
+            "ref": "abcdef0123456789abcdef01",
+            "observed_at": "2026-09-23T10:00:00Z",
+            "branch": "main",
+            "dirty": true
+        }));
         write(&path, &original).expect("write");
         let read_back = read(&path).expect("read");
         assert_eq!(read_back.entries.len(), 1);
@@ -622,6 +641,10 @@ mod tests {
         assert!(read_back.entries[0].intact());
         assert_eq!(read_back.transcript_path, original.transcript_path);
         assert_eq!(read_back.model, original.model);
+        assert_eq!(read_back.repository_id, original.repository_id);
+        assert_eq!(read_back.checkout, original.checkout);
+        write(&path, &read_back).expect("CLI rewrite");
+        assert_eq!(read(&path).expect("reread").checkout, original.checkout);
         let encoded = serde_json::to_value(&read_back).unwrap();
         assert!(
             encoded["entries"][0].get("last_attempt_at").is_none(),
