@@ -567,9 +567,16 @@ both passed at failure. The evaluation healthcheck had exhausted its retries
 around the old 600-second Compose wait. Evaluation, plain Compose and recovery
 now use a 900-second wait with a matching health start period, without relaxing
 the generation gate. Failure diagnostics fall back to content-free process
-names when Docker rejects `top` formatting. Next action: obtain a complete
-green hosted PR CI and nonpublishing Release run, retaining both native
-candidate reports.
+names when Docker rejects `top` formatting. The final hosted [PR CI run](https://github.com/synveda/synveda/actions/runs/35844879556)
+on `47fb126` passed CI Result, all six native packages and both Docker/Helm
+candidates. The [nonpublishing Release run](https://github.com/synveda/synveda/actions/runs/35845344195)
+on that exact clean source commit passed the same required native qualification.
+Both candidate reports record seven launcher Compose checks, 20 direct-consumer
+and recovery checks, and four independent Helm modes per architecture. The
+dry-run asset bundle has 21 checksum-verified payloads plus `SHA256SUMS`; its
+registry inventory marks the outputs unpublished. No tag or public release
+was created. The existing v0.4.0 release cannot gain these native client-only
+archives through this dry run.
 
 The owner has configured both Docker Hub variables and the protected release
 environment secret; tag protection, required CI Result and GHCR access still
@@ -585,5 +592,8 @@ EXTRACTED_BUNDLE REPORT.json`. It creates an absent random acceptance project,
 leaves source/restore databases, installation state and the paired recovery set
 retained. Release CI runs the same gate on both native architectures and requires
 its checksummed reports. The first hosted dry run stopped before consumer
-qualification because AMD64 Docker failed; a tagged release remains separately
-authorized. Do not reuse an unrelated deployment or replace published artifacts.
+qualification because AMD64 Docker failed; the final hosted run completed it
+on both native architectures. Next OPS-12 work is artifact-based real
+issuer/harness acceptance, signing/notarization and separately approved
+publication after exact-source main CI, owner settings and version coordination.
+Do not reuse an unrelated deployment or replace published artifacts.

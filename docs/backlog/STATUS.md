@@ -47,19 +47,16 @@ Complete hosted deployment qualification and publication still need GHCR access,
 repository protection and a separately authorized new release.
 The pipeline refactor adds conservative selection, CI Result, shared native
 CLI/Docker candidate validation and exact-source/draft publication gates
-(ADR-0108). Local gate and packaging checks passed. First hosted PR CI and
-nonpublishing Release runs passed macOS/Windows clients and ARM64 Docker/Helm;
-Linux client packaging and AMD64 realm convergence failed, so CI Result blocked
-the PR. The workflow now copies Cargo's Linux hard-linked binary into an
-unlinked packaging input and captures bounded AMD64 diagnostics. Next: rerun
-both workflows for the follow-up commit and inspect any remaining failure.
-The second hosted attempt passed Linux archive packaging but found missing
-`gzip` in the restricted installer test PATH; that fixture is corrected.
-Both Linux archive jobs passed the third PR run. AMD64 Compose reproduced its
-unhealthy realm gate around ten minutes, while generation capture and Keycloak
-management network probes passed at failure. Evaluation, plain Compose and
-recovery now wait up to 900 seconds while preserving the same generation
-readiness gate. A complete green hosted rerun is pending.
+(ADR-0108). Local gates and packaging checks passed. Initial hosted attempts
+proved CI Result blocks required failures, then exposed Linux hard-link archive
+input, restricted-PATH `gzip` and AMD64 realm-startup timing issues. The final
+[PR CI](https://github.com/synveda/synveda/actions/runs/35844879556) and
+[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/35845344195)
+on `47fb126` passed all six native CLI packages and both Docker/Helm candidates.
+The dry-run bundle's 21 payload checksums passed, but its images are unpublished;
+the existing public v0.4.0 release still lacks native client-only archives.
+Next: real issuer/harness acceptance, signing/notarization and a separately
+approved release from a full exact-source main CI run.
 The Docker Hub variables and release environment secret are configured;
 required-check, tag-protection and GHCR settings remain in [the CI guide](../CI.md).
 

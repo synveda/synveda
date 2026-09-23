@@ -133,10 +133,7 @@ hard-linked executable input; the workflow now packages a detached copy without
 relaxing that check. AMD64 Docker reached Compose installation, where bundled
 Keycloak realm convergence became unhealthy; bounded, redacted diagnostics were
 added before exact-project cleanup. CI Result failed and Release's downstream
-publication jobs skipped as designed. A hosted rerun of both workflows is
-required before claiming full candidate qualification. Cold caches, fork PRs,
-OCI archive transfer/storage and fresh native Docker/Kind qualification remain
-to be assessed from successful runs.
+publication jobs skipped as designed.
 
 The second hosted attempt on `3a4da43` passed Linux archive packaging but
 found that the restricted installer test PATH omitted `gzip`, which GNU tar
@@ -152,14 +149,37 @@ candidate now use a 900-second wait; their evaluation healthcheck remains in
 `starting` through that bound. This extends time for CPU-constrained first-run
 identity reconciliation without changing the complete generation readiness
 gate. The documented direct-Compose and recovery commands use the same bound.
-The fixture retains bounded process-name diagnostics if it still fails. A
-complete hosted rerun is required; none of these attempts qualifies a release.
+The fixture retains bounded process-name diagnostics if it still fails.
 
-The local Docker host has retained evaluation volumes; full qualification refuses
-them and they must not be reset for this task. No new release, tag, registry write
-or protection change was performed. There is **no measured after timing**; extra
-native candidate coverage and OCI transfers can increase full CI duration.
-Compare equivalent hosted runs and cache states before claiming savings.
+The final [PR CI run](https://github.com/synveda/synveda/actions/runs/35844879556)
+on `47fb126` passed **CI Result**, all six native CLI packages, both Docker
+Compose and four-mode Helm candidates, Rust, TypeScript, SDKs, replay, evaluation,
+walkthrough and deployment checks. It ran 09:46–11:53 UTC (2h07m). PR artifacts
+were built from GitHub's synthetic merge commit and cannot be released. The
+[nonpublishing Release dispatch](https://github.com/synveda/synveda/actions/runs/35845344195)
+on the exact clean source commit `47fb1262d616cb417774ff9d9cc988a535e48b39`
+also passed all six packages and both Docker/Helm candidate jobs (09:50–12:18
+UTC, 2h27m). Each native candidate report records seven launcher Compose checks,
+20 plain-consumer/recovery checks and all four Helm modes. The dry-run
+`release-assets` artifact contains 21 payloads plus `SHA256SUMS`; all 21
+checksums were verified after download. Its registry inventory explicitly says
+`published: false`. The eight public-distribution verification reports and
+checksum attestation only exist on a successful tagged publication path; that
+path must verify all 31 assets before making the draft stable.
+
+The final PR ARM64 fresh launcher took 577s, and AMD64 took 769s; the exact-source
+Release dry run took 588s and 769s respectively. An older published run's
+fresh launcher took 574s and 538s. Runner load, source and candidate scope
+differ, so these data do not establish a performance saving. The prior 19-minute
+dry run skipped installation; it is not comparable with the new 2h27m full
+candidate drill. No cold-cache, fork-PR or real registry-write performance
+claim is made. A tagged publication and fresh anonymous public pulls remain
+unexercised by instruction; local retained evaluation volumes were untouched.
+
+No new release, tag, registry write or protection change was performed. The
+existing v0.4.0 public release does not contain the six new native client-only
+archives; download the validated dry-run packages from Actions until a new
+release is separately approved.
 
 ## Manual owner settings
 
