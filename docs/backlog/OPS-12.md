@@ -608,21 +608,24 @@ registry inventory marks the outputs unpublished. No tag or public release
 was created. The existing v0.4.0 release cannot gain these native client-only
 archives through this dry run.
 
-The owner has configured both Docker Hub variables and the protected release
-environment secret; tag protection, required CI Result and GHCR access still
-need review under [CI](../CI.md#manual-owner-settings). The owner has now
-authorized a follow-up release. No tag should be pushed until version 0.4.1
-is merged, its exact commit passes full main CI and the nonpublishing release
-drill, and the repository settings are complete.
+The owner configured both Docker Hub variables and the protected release
+environment secret. `CI Result` is now required on main; a `v*` ruleset blocks
+updates and deletions. Creation restriction for future version tags remains an
+owner setting under [CI](../CI.md#manual-owner-settings). The owner authorized
+the v0.4.1 follow-up release.
 Local 0.4.1 version parity, chart lint, generated contracts, SDKs, TypeScript,
 website, formatting, strict Clippy and focused native CLI tests passed. The
 temporary worktree's root group and sandbox loopback permission initially
 blocked two fixtures; after correcting those environment inputs, the complete
 `make check-deploy chart-lint` gate passed, including all 171 Compose contract
-tests. Hosted native candidate jobs remain required before tagging.
+tests. The exact merged source `d74e75b8991f22d8f4dd07034b3cd91db1ffb867`
+then passed [full main CI](https://github.com/synveda/synveda/actions/runs/35884349132)
+and the [nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/35884456435),
+including all six native CLI packages and both Docker/Helm candidates. The
+immutable `v0.4.1` tag triggered [publication](https://github.com/synveda/synveda/actions/runs/35900269117).
 
-Continue from this OPS-12 checkpoint with version `0.4.1` as an unreleased
-candidate; the published v0.4.0 bytes remain immutable. For another local candidate, use the
+Continue OPS-12 from published v0.4.1; the earlier v0.4.0 bytes remain
+immutable. For another local candidate, use the
 existing `package-release.sh` arguments with the explicit candidate flag, extract
 the archive, then run `node scripts/qualify-release.mjs --consumer-candidate
 EXTRACTED_BUNDLE REPORT.json`. It creates an absent random acceptance project,
@@ -631,6 +634,7 @@ retained. Release CI runs the same gate on both native architectures and require
 its checksummed reports. The first hosted dry run stopped before consumer
 qualification because AMD64 Docker failed; the final hosted run completed it
 on both native architectures. Next OPS-12 work is artifact-based real
-issuer/harness acceptance, signing/notarization and separately approved
-publication after exact-source main CI, owner settings and version coordination.
+issuer/harness acceptance, installer attestation enforcement, OS
+signing/notarization and a supported platform/version policy. Future releases
+still require exact-source main CI, owner settings and version coordination.
 Do not reuse an unrelated deployment or replace published artifacts.

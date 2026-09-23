@@ -1,11 +1,9 @@
 # Native consumer commands
 
-These commands are in the 0.4.1 source CLI and matching plugin. The client
-archives become public only after the v0.4.1 release is stable.
-**They are not in published v0.4.0.** Keep using the
-[published installation guide](../deploy/compose/PREBUILT.md) for that release.
-Build the current CLI with `SQLX_OFFLINE=true cargo build -p synveda-cli`, or use
-the matching release archive after publication. [OPS-12](backlog/OPS-12.md) records native
+These commands are in the [v0.4.1 native client archives](https://github.com/synveda/synveda/releases/tag/v0.4.1)
+and matching plugin. Build the current CLI with
+`SQLX_OFFLINE=true cargo build -p synveda-cli`, or install the matching release
+archive below. [OPS-12](backlog/OPS-12.md) records native
 execution reports and the remaining qualification gaps.
 
 ## Release downloads
@@ -15,22 +13,23 @@ on Linux, macOS and Windows, each on x64 and ARM64. The
 [release asset table](RELEASING.md#native-cli-release-artifacts) gives their exact
 names. Every package and successful native report is required for stable
 publication; a failing target cannot be omitted. Actions artifacts named
-`binaries-TARGET` are available from successful validation runs. Public downloads
-appear on the GitHub Release only after a new version is approved and published.
+`binaries-TARGET` are available from successful validation runs. The v0.4.1
+archives and reports are public on its GitHub Release.
 
 The existing v0.4.0 release has only the historical macOS ARM64 and Linux x64
 server/CLI archives. It has no `synveda-client-*` assets or Windows packages.
 Do not point the client installer at v0.4.0 public downloads. The source examples
-below use locally built candidates matching the 0.4.1 workspace version.
+later in this page also support locally built candidates matching the 0.4.1
+workspace version.
 
-For a future published client release, download your platform's archive,
+For v0.4.1, download your platform's archive,
 `SHA256SUMS` and `SHA256SUMS.sigstore.json` into a private directory. Follow the
 [publisher and checksum verification steps](RELEASING.md#artifacts-and-verification)
 before installation. Use the installer from that exact tag and inspect it.
 From the directory containing the verified downloads on Unix:
 
 ```sh
-: "${RELEASE_VERSION:?set the published client version without its v prefix}"
+RELEASE_VERSION=0.4.1
 curl -fL "https://raw.githubusercontent.com/synveda/synveda/v$RELEASE_VERSION/scripts/install.sh" \
   -o synveda-install.sh
 # Inspect synveda-install.sh before executing it.
@@ -45,14 +44,15 @@ to those files. Follow the Windows ownership and PowerShell requirements below.
 Neither route requires a compiler, Docker, system Node or registry credentials.
 The installer checks checksums; it does not perform the attestation step for you.
 
-## Client archive candidate
+<a id="client-archive-candidate"></a>
+## Client archive contents and local candidates
 
 `synveda-client-VERSION-TARGET.tar.gz` (Unix) or `.zip` (Windows) contains the CLI, Claude marketplace,
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
-`windows-x86_64`. These are candidate targets; each requires its own native
-artifact execution report.
+`windows-x86_64`. All six targets have native artifact execution reports in
+the v0.4.1 release; broader OS versions and signing remain unqualified.
 The CLI's Unix peer-witness code is isolated, and CLI/hooks share a tested
 platform path contract. Windows credential storage now has a native candidate
 for ACL, file-identity, bounded reads, locking and replacement checks. Private

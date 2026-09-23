@@ -1,6 +1,6 @@
 # Deploy to Kubernetes
 
-These examples use the **published v0.4.0 chart** and its matching digest
+These examples use the **published v0.4.1 chart** and its matching digest
 overlay. Start with the [download and verification steps](../README.md#namespace-installer-and-artifact-acquisition),
 which set `CHART` and create `release-images.yaml`. The dependency is
 vendored at Keycloak chart 7.3.2; installation does not fetch another chart.
@@ -35,7 +35,7 @@ helm upgrade --install synveda "$CHART" -n synveda-evaluation \
 
 The verified overlay pins the published product, bundled PostgreSQL and
 Keycloak bytes. Keep that same overlay for subsequent operations. The OCI chart
-is also available at `oci://ghcr.io/synveda/charts/synveda`, version `0.4.0`;
+is also available at `oci://ghcr.io/synveda/charts/synveda`, version `0.4.1`;
 `helm pull` is not required when using the verified archive above.
 
 Preparation writes mode-0600 private files once. It creates unique database

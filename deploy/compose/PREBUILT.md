@@ -5,24 +5,19 @@ evaluation, or select the reference HTTPS configuration for infrastructure you
 operate. Both use the same Compose services, database authority checks,
 Cedar, forced RLS, VedaFlow and audit.
 
-<!-- installation-version: 0.4.1; publication: unreleased -->
-Source version 0.4.1 is a release candidate. This page continues to document
-the last published v0.4.0 bundle until its successor qualifies.
-**[v0.4.0 is published](https://github.com/synveda/synveda/releases/tag/v0.4.0).**
-Use the matching archive, image manifest and checksummed installation reports.
+<!-- installation-version: 0.4.1; publication: published -->
+**[v0.4.1 is published](https://github.com/synveda/synveda/releases/tag/v0.4.1).**
+Use its matching archive, image manifest and attested checksum inventory.
 The [release manifest](../../docs/installation.json) owns this status.
 
-These instructions describe v0.4.0's existing GHCR images and checksum-only
-downloads. The [refactored release contract](../../docs/RELEASING.md) adds Docker
-Hub distribution, attested checksums and six native CLI packages for a future
-approved release. It does not change these immutable downloads. No Docker Hub
-token or native CLI is needed to install this public server bundle.
+The [refactored release contract](../../docs/RELEASING.md) distributes immutable
+images through Docker Hub and GHCR and includes six native CLI packages. No
+publisher token or native CLI is needed to install the server bundle.
 
-## Version 0.4.1 release bundle
+<a id="download-and-verify"></a>
+## Download and verify v0.4.1
 
-Use this procedure only after the [v0.4.1 release](https://github.com/synveda/synveda/releases/tag/v0.4.1)
-has completed publication with its reference archive, `SHA256SUMS` and
-`SHA256SUMS.sigstore.json`. It downloads tested images by digest and never
+The bundle downloads tested images by digest and never
 builds from a consumer source checkout. Verify the publisher before trusting
 the checksums; the GitHub CLI is a verification tool, not an installation
 dependency of the bundle.
@@ -51,13 +46,13 @@ cd "synveda-reference-$version"
 ./synveda-compose up
 ```
 
-The remaining lifecycle and first-sign-in guidance applies to this bundle;
-the v0.4.0 download example below remains for the previous public release.
+The remaining lifecycle and first-sign-in guidance applies to this bundle.
 
 ## Requirements
 
 An ordinary account with access to a **local Docker daemon**, Compose 2.33.1+
-(the minimum for the existing merge contract), curl, tar and a SHA-256 utility.
+(the minimum for the existing merge contract), curl, tar, a SHA-256 utility and
+GitHub CLI for publisher attestation verification.
 The published bundle passed on native Linux AMD64/ARM64 with Docker 28.0.4 and
 Compose 2.38.2. Local candidate testing also used macOS/OrbStack, Engine 29.4.0,
 Compose 5.1.2 and Apple Silicon. Docker Desktop and Windows/WSL2 remain
@@ -71,9 +66,10 @@ Preparation runs briefly in the product image with no network or Docker socket.
 The localhost endpoint is plaintext and binds only 127.0.0.1. Use reference
 HTTPS for remote users. Do not forward the local port onto an untrusted network.
 
-## Download and verify
+## Previous v0.4.0 release
 
-Download the release archive and verify its entry in the checksum inventory:
+For the immutable v0.4.0 release, download its original archive and verify its
+entry in the checksum inventory:
 
 ```sh
 version=0.4.0

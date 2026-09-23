@@ -13,7 +13,7 @@ source-deployment lifecycle and optional modes.
 
 To run a server without a checkout or compiler, use the
 [prebuilt Docker guide](PREBUILT.md). It uses this same deployment graph and a
-release-pinned launcher. The published v0.4.0 bundle includes the reference
+release-pinned launcher. The published v0.4.1 bundle includes the reference
 archive; earlier pre-epoch-3 databases are deliberately refused.
 
 The [CI/release guide](../../docs/CI.md) describes candidate validation and
@@ -21,7 +21,8 @@ publication. Shared Docker jobs build each native AMD64/ARM64 image once, then
 test the extracted bundle against those exact OCI candidates. Release copies
 qualified bytes to Docker Hub and GHCR and repeats public installation checks.
 Published consumers need no source build or publisher token. The existing
-v0.4.0 downloads retain their original GHCR/checksum contract.
+v0.4.0 downloads retain their original GHCR/checksum contract; v0.4.1 uses
+attested checksums and both registries.
 
 It supports development and reference configuration. A clean development
 acceptance passed on macOS 26.6.2 arm64 with OrbStack Docker Engine 29.4.0 and

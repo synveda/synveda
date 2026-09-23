@@ -145,8 +145,8 @@ Brave/Playwright checks pass at 1440, 768, 390 and 320 pixels for images,
 horizontal overflow, keyboard/skip/menu navigation and fragment refresh.
 axe-core 4.11.0 reports zero detected WCAG 2 A/AA or 2.1 AA violations; its
 incomplete items were non-text decorative arrows, inspected manually.
-The current website build labels source 0.4.1 as a candidate and keeps the
-published v0.4.0 installation instructions until the successor qualifies;
+The current website build labels v0.4.1 as published and points to its
+attested installation instructions;
 the [installation record](../docs/backlog/CPR-45.md#installation-mission-2026-09-20)
 owns runtime and release qualification.
 

@@ -13,6 +13,11 @@ Docker and four-mode Kind qualification passed; the original qualified bytes
 were published after an upload-only failure, without moving the tag. Exact
 release/run links and remaining Docker Desktop/WSL2, OpenShift and N-1 blockers
 are in [CPR-45](CPR-45.md#installation-mission-2026-09-20) and [OPS-11](OPS-11.md).
+The [v0.4.1 release](https://github.com/synveda/synveda/releases/tag/v0.4.1)
+uses source `d74e75b8991f22d8f4dd07034b3cd91db1ffb867` and adds Docker
+Hub distribution, attested checksums and six native CLI packages. Its
+[tagged workflow](https://github.com/synveda/synveda/actions/runs/35900269117)
+requires complete native Docker/Helm, client and public-asset verification.
 [Production readiness](../PRODUCTION_READINESS.md) owns the remaining custody,
 recovery and support gaps. Passing installation checks is not HA or certification.
 The fresh contributor walkthrough still needs unoccupied Docker/hosts resources;
@@ -45,8 +50,6 @@ The Unix witness code is now isolated and CLI/hooks share platform path fixtures
 (ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier
 Windows x64 compilation/refusal job and expanded credential job passed. Exact
 evidence and the next action are in [OPS-12](OPS-12.md).
-Complete hosted deployment qualification and publication still need GHCR access,
-repository protection and a separately authorized new release.
 The pipeline refactor adds conservative selection, CI Result, shared native
 CLI/Docker candidate validation and exact-source/draft publication gates
 (ADR-0108). Local gates and packaging checks passed. Initial hosted attempts
@@ -55,16 +58,20 @@ input, restricted-PATH `gzip` and AMD64 realm-startup timing issues. The final
 [PR CI](https://github.com/synveda/synveda/actions/runs/35844879556) and
 [nonpublishing Release](https://github.com/synveda/synveda/actions/runs/35845344195)
 on `47fb126` passed all six native CLI packages and both Docker/Helm candidates.
-The dry-run bundle's 21 payload checksums passed, but its images are unpublished;
-the existing public v0.4.0 release still lacks native client-only archives.
-Version 0.4.1 is now an unreleased candidate for the owner-authorized follow-up.
-Next: complete its main CI and nonpublishing drill, then public release only
-after required repository settings; real issuer/harness acceptance and
-signing/notarization remain separate gaps. The temporary-worktree Compose
+The dry-run bundle's 21 payload checksums passed, but its images were
+unpublished. Version 0.4.1 passed exact-source
+[main CI](https://github.com/synveda/synveda/actions/runs/35884349132) and a
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/35884456435)
+before its immutable tag was pushed. The tagged release then qualifies both
+registries and all 31 stable assets. Real issuer/harness acceptance,
+installer attestation enforcement and OS signing/notarization remain separate
+gaps. The temporary-worktree Compose
 fixture initially hit local ownership/loopback restrictions; the complete
 deployment and chart gate passed after those environment inputs were corrected.
 The Docker Hub variables and release environment secret are configured;
-required-check, tag-protection and GHCR settings remain in [the CI guide](../CI.md).
+`CI Result` is required on main and `v*` updates/deletions are protected.
+Restricting new `v*` tag creation to the release operator remains a manual
+setting in [the CI guide](../CI.md#manual-owner-settings).
 
 [Client support](../CLIENT_SUPPORT.md) and [SDK compatibility](../../sdks/README.md#compatibility-and-release-boundary)
 own tested versions and limits. [ADPT-4](ADPT-4.md) retains SDK release decisions.
