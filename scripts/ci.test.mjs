@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { changedPaths, selectChanges, stages } from "./ci-select.mjs";
+import { changedPaths, selectChanges, selectForEvent, stages } from "./ci-select.mjs";
 import { ciResult, requiredJobs } from "./ci-result.mjs";
 
 const all = () => selectChanges(undefined);
@@ -57,6 +57,26 @@ test("conservative selection covers shared dependencies, unknowns and explicit f
   );
   assert.deepEqual(selectChanges([]), all());
   assert.deepEqual(selectChanges(["docs/CI.md"], true), all());
+});
+test("PRs defer native Docker qualification while main, merge queue and dispatch require it", () => {
+  for (const paths of [
+    undefined,
+    [],
+    ["Cargo.lock"],
+    ["console/src/app.tsx"],
+    ["new-directory/file"],
+  ]) {
+    const selected = selectForEvent(paths, "pull_request");
+    assert.equal(selected.docker, false);
+    assert.equal(selected.deploy, true);
+    assert.equal(selected.helm, true);
+    assert.deepEqual(ciResult(evidence(selected)), []);
+    const unexpectedlySkipped = evidence(selected);
+    unexpectedlySkipped.helm.result = "skipped";
+    assert.ok(ciResult(unexpectedlySkipped).length);
+  }
+  for (const event of ["push", "merge_group", "workflow_dispatch"])
+    assert.deepEqual(selectForEvent(["docs/CI.md"], event), all());
 });
 test("diff covers deletions, both rename paths and more than GitHub's 300-path limit", () => {
   const directory = mkdtempSync(join(tmpdir(), "synveda-ci-diff-"));
