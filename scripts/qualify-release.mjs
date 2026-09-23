@@ -37,6 +37,38 @@ function secretHashes() {
   const root = join(home, "state/synveda-evaluation/secrets");
   return readdirSync(root, { withFileTypes: true }).filter((file) => file.isFile()).map((file) => [file.name, createHash("sha256").update(readFileSync(join(root, file.name))).digest("hex")]);
 }
+function reportFailedRealmConvergence() {
+  // Read diagnostics before the exact-project cleanup removes the container.
+  // The supervisor's ordinary logs are bounded and private file values are
+  // redacted before anything reaches the Actions log.
+  try {
+    const ids = spawnSync("docker", ["ps", "-aq", "--filter", "label=com.docker.compose.project=synveda-evaluation",
+      "--filter", "label=com.docker.compose.service=keycloak-realm-convergence"],
+    { env, encoding: "utf8", timeout: 15_000 });
+    const id = ids.status === 0 ? ids.stdout.trim().split("\n")[0] : "";
+    if (!id) return;
+    const inspected = spawnSync("docker", ["inspect", "--format", "{{json .State}}", id],
+      { env, encoding: "utf8", timeout: 15_000 });
+    const state = inspected.status === 0 ? JSON.parse(inspected.stdout) : {};
+    const logs = spawnSync("docker", ["logs", "--tail", "50", id],
+      { env, encoding: "utf8", timeout: 15_000, maxBuffer: 1024 * 1024 });
+    let health = JSON.stringify({ status: state.Status, exitCode: state.ExitCode,
+      health: state.Health?.Status, recentHealth: state.Health?.Log?.slice(-3).map((entry) => entry.Output?.slice(-400)) });
+    let recentLogs = (logs.stdout ?? "") + (logs.stderr ?? "");
+    const secrets = join(home, "state/synveda-evaluation/secrets");
+    for (const file of readdirSync(secrets, { withFileTypes: true }).filter((entry) => entry.isFile())) {
+      const value = readFileSync(join(secrets, file.name), "utf8").trim();
+      if (value.length >= 8) {
+        health = health.replaceAll(value, "[REDACTED]");
+        recentLogs = recentLogs.replaceAll(value, "[REDACTED]");
+      }
+    }
+    console.error(`qualification realm-convergence state: ${health.slice(-800)}`);
+    console.error(`qualification realm-convergence recent logs: ${recentLogs.slice(-2200)}`);
+  } catch {
+    console.error("qualification realm-convergence diagnostics unavailable");
+  }
+}
 // Never reuse an operator's deployment or quietly clean up its data.
 assert.equal(run("docker", ["ps", "-aq", "--filter", "label=com.docker.compose.project=synveda-evaluation"]).trim(), "", "evaluation project already exists");
 assert.equal(run("docker", ["volume", "ls", "-q", "--filter", "name=^synveda-evaluation_"]).trim(), "", "evaluation volumes already exist");
@@ -96,6 +128,9 @@ try {
   report.failures = evaluationFailureChecks(bundle, home);
   writeFileSync(resolve(output), `${JSON.stringify(report, null, 2)}\n`);
   console.log(`PASS candidate Docker installation and recovery: ${resolve(output)}`);
+} catch (error) {
+  reportFailedRealmConvergence();
+  throw error;
 } finally {
   // Only the exact project proved absent above was created by this fixture.
   // Keep private backups for diagnosis; no global prune or unrelated cleanup.

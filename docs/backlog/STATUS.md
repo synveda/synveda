@@ -37,20 +37,24 @@ checks (ADR-0065 amendment 13). X64 and arm64 passed all seven checks on clean s
 and unsafe archive/installer refusals. The x64 archive/report hashes and native
 identities were also checked locally; OPS-12 records both native job identities
 and the arm64 evidence bundle digest.
-Next: obtain the four Unix hosted archive reports and artifact-based
+Next: obtain passing Linux x64/ARM64 native archive reports and artifact-based
 real issuer/harness acceptance evidence.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures
 (ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier
 Windows x64 compilation/refusal job and expanded credential job passed. Exact
 evidence and the next action are in [OPS-12](OPS-12.md).
-Hosted deployment qualification and publication still need owner registry settings and a
-separately authorized new release.
+Complete hosted deployment qualification and publication still need GHCR access,
+repository protection and a separately authorized new release.
 The pipeline refactor adds conservative selection, CI Result, shared native
 CLI/Docker candidate validation and exact-source/draft publication gates
-(ADR-0108). Local gate and packaging checks are implemented; hosted matrix,
-fork, cold-cache and clean-host qualification remain pending. Next: run CI and
-a nonpublishing Release dispatch for the committed refactor, then configure
-the required check and registry environment as listed in [the CI guide](../CI.md).
+(ADR-0108). Local gate and packaging checks passed. First hosted PR CI and
+nonpublishing Release runs passed macOS/Windows clients and ARM64 Docker/Helm;
+Linux client packaging and AMD64 realm convergence failed, so CI Result blocked
+the PR. The workflow now copies Cargo's Linux hard-linked binary into an
+unlinked packaging input and captures bounded AMD64 diagnostics. Next: rerun
+both workflows for the follow-up commit and inspect any remaining failure.
+The Docker Hub variables and release environment secret are configured;
+required-check, tag-protection and GHCR settings remain in [the CI guide](../CI.md).
 
 [Client support](../CLIENT_SUPPORT.md) and [SDK compatibility](../../sdks/README.md#compatibility-and-release-boundary)
 own tested versions and limits. [ADPT-4](ADPT-4.md) retains SDK release decisions.

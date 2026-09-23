@@ -97,8 +97,11 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/download-client-node.mjs "$CLIENT_TARGET" private-node.tar.gz
+          # Cargo may hard-link the output to its build tree on Linux. Package a
+          # detached copy so the packager's unlinked-input rule stays strict.
+          cp "target/${{ matrix.rust-target }}/release/synveda" "$RUNNER_TEMP/synveda-client-binary"
           node scripts/package-client.mjs "$VERSION" "$CLIENT_TARGET" \
-            "target/${{ matrix.rust-target }}/release/synveda" private-node.tar.gz . "$SOURCE_SHA"
+            "$RUNNER_TEMP/synveda-client-binary" private-node.tar.gz . "$SOURCE_SHA"
           node scripts/check-client-package.mjs "$VERSION" \
             "synveda-client-$VERSION-$CLIENT_TARGET.tar.gz" "synveda-client-report-$CLIENT_TARGET.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

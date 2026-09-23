@@ -125,8 +125,18 @@ and release-note checks to follow their new files. HTTP fixtures ran with
 loopback access. All pinned Kubernetes/OpenShift schema renders passed.
 Formatting, strict CLI Clippy and the focused native Rust tests also passed.
 
-Hosted execution of this refactor is still required: all native runners, cold
-caches, fork PRs, OCI archive transfer/storage and fresh Docker/Kind qualification.
+The first hosted [PR CI run](https://github.com/synveda/synveda/actions/runs/35827387823)
+and [nonpublishing Release run](https://github.com/synveda/synveda/actions/runs/35827409973)
+on `34355d7` exercised the new jobs. macOS and Windows client packages and the
+ARM64 Docker/Helm candidate passed. Linux x64/ARM64 packaging refused Cargo's
+hard-linked executable input; the workflow now packages a detached copy without
+relaxing that check. AMD64 Docker reached Compose installation, where bundled
+Keycloak realm convergence became unhealthy; bounded, redacted diagnostics were
+added before exact-project cleanup. CI Result failed and Release's downstream
+publication jobs skipped as designed. A hosted rerun of both workflows is
+required before claiming full candidate qualification. Cold caches, fork PRs,
+OCI archive transfer/storage and fresh native Docker/Kind qualification remain
+to be assessed from successful runs.
 The local Docker host has retained evaluation volumes; full qualification refuses
 them and they must not be reset for this task. No new release, tag, registry write
 or protection change was performed. There is **no measured after timing**; extra
@@ -140,16 +150,15 @@ Compare equivalent hosted runs and cache states before claiming savings.
    or deliberately enable merge queue; `merge_group` already selects all stages.
    Do not require individual matrix job names. No required checks currently exist.
 2. Repository variables: `DOCKERHUB_NAMESPACE` (owned namespace) and
-   `DOCKERHUB_USERNAME` (publisher). Repository variables and secrets were empty
-   at inspection. Create the six public Docker Hub repositories named in
+   `DOCKERHUB_USERNAME` (publisher). Both variables were configured on
+   2026-09-23. Create or verify the six public Docker Hub repositories named in
    [RELEASING](RELEASING.md#owner-setup). Follow the exact
    [Docker Hub token setup](RELEASING.md#docker-hub-token-setup) for an expiring
    read/write token without delete permission and the correct publisher username.
-3. Create environment **release**, require owner review, restrict deployment to
-   `v*` tags, and put **DOCKERHUB_TOKEN** there. Protect creation/update/deletion of
-   release tags with an owner-controlled tag ruleset. Only `github-pages` exists
-   today. **release-dry-run** needs no secrets or approval and may be created
-   automatically on first dispatch.
+3. Environment **release** now has an owner reviewer, a `v*` tag rule and the
+   **DOCKERHUB_TOKEN** secret. Protect creation/update/deletion of release tags
+   with an owner-controlled tag ruleset before publication. **release-dry-run**
+   needs no secrets or approval and was exercised separately.
 4. Give this repository's Actions token write access to the six GHCR packages
    and `ghcr.io/synveda/charts/synveda`; make all public for anonymous verification.
    Permit pinned Actions and workflow-scoped `packages: write`, `contents: write`,

@@ -548,21 +548,28 @@ installed binary. Its local macOS ARM64 debug archive passed restricted-PATH
 install/reinstall, Codex/Copilot replay and seven auth/platform process tests;
 the dirty source report is not publication evidence. Exact OCI candidates must
 pass native Compose and four-mode Helm qualification before copying to public
-registries. The new workflow has not run on hosted runners. Blocker: native
-Windows/Intel Linux/macOS execution and a clean full Docker/Kind host are not
-available in this checkout; retained local evaluation volumes are deliberately
-untouched. Next action: run full CI and nonpublishing Release dispatch for the
-committed refactor, retain all six client and both candidate reports, then apply
-the owner settings in [CI](../CI.md#manual-owner-settings). Do not tag or publish
-as part of that validation. Registry publication still requires separate owner
-authorization and a successful exact-commit main CI Result.
+registries. The first hosted PR CI and nonpublishing Release runs on `34355d7`
+passed macOS/Windows client packaging and the ARM64 Docker/Helm candidate.
+Linux x64/ARM64 packaging refused Cargo's hard-linked executable; an isolated
+copy now retains the packager's single-link rule. AMD64 Docker failed when the
+bundled Keycloak realm convergence service became unhealthy; the fixture now
+captures bounded, redacted diagnostics before cleanup. CI Result rejected the
+run. Next action: rerun PR CI and nonpublishing Release for the follow-up
+commit, inspect the AMD64 diagnostic if it recurs, and retain all six client
+and both candidate reports. Local retained evaluation volumes remain untouched.
+The owner has configured both Docker Hub variables and the protected release
+environment secret; tag protection, required CI Result and GHCR access still
+need review under [CI](../CI.md#manual-owner-settings). Do not tag or publish
+as part of this validation. Publication still needs separate authorization
+and a successful exact-commit main CI Result.
 
-Continue from this OPS-12 checkpoint on `main` and retain version `0.4.0` until an owner
+Continue from this OPS-12 checkpoint and retain version `0.4.0` until an owner
 authorizes a coordinated new version. For another local candidate, use the
 existing `package-release.sh` arguments with the explicit candidate flag, extract
 the archive, then run `node scripts/qualify-release.mjs --consumer-candidate
 EXTRACTED_BUNDLE REPORT.json`. It creates an absent random acceptance project,
 leaves source/restore databases, installation state and the paired recovery set
 retained. Release CI runs the same gate on both native architectures and requires
-its checksummed reports, but those hosted runs remain pending a separately
-authorized release. Do not reuse an unrelated deployment or replace published artifacts.
+its checksummed reports. The first hosted dry run stopped before consumer
+qualification because AMD64 Docker failed; a tagged release remains separately
+authorized. Do not reuse an unrelated deployment or replace published artifacts.
