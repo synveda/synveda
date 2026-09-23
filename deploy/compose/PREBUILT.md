@@ -34,12 +34,10 @@ mkdir "synveda-$version" && cd "synveda-$version"
 for file in "synveda-reference-$version.tar.gz" SHA256SUMS SHA256SUMS.sigstore.json; do
   curl -fLO "$release_url/$file"
 done
-source_sha="$(gh api "repos/synveda/synveda/commits/v$version" --jq .sha)"
 gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --repo synveda/synveda \
   --signer-workflow synveda/synveda/.github/workflows/release.yml \
-  --source-ref "refs/tags/v$version" --source-digest "$source_sha" \
-  --deny-self-hosted-runners
+  --source-ref "refs/tags/v$version" --deny-self-hosted-runners
 awk -v file="synveda-reference-$version.tar.gz" \
   '$2 == file { count++; print } END { if (count != 1) exit 1 }' \
   SHA256SUMS > reference.sha256

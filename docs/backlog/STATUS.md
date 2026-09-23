@@ -59,7 +59,8 @@ Version 0.4.1 is now an unreleased candidate for the owner-authorized follow-up.
 Next: complete its main CI and nonpublishing drill, then public release only
 after required repository settings; real issuer/harness acceptance and
 signing/notarization remain separate gaps. The temporary-worktree Compose
-fixture hit a repository-root ownership assertion; OPS-12 records the rerun.
+fixture initially hit local ownership/loopback restrictions; the complete
+deployment and chart gate passed after those environment inputs were corrected.
 The Docker Hub variables and release environment secret are configured;
 required-check, tag-protection and GHCR settings remain in [the CI guide](../CI.md).
 

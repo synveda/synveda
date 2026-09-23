@@ -585,10 +585,11 @@ authorized a follow-up release. No tag should be pushed until version 0.4.1
 is merged, its exact commit passes full main CI and the nonpublishing release
 drill, and the repository settings are complete.
 Local 0.4.1 version parity, chart lint, generated contracts, SDKs, TypeScript,
-formatting, strict Clippy and focused native CLI tests passed. The broader
-Compose fixture run in the `/private/tmp` worktree hit its repository-root
-ownership assertion for `recovery-secrets`; rerun that gate from a normal
-owned checkout or use the hosted candidate jobs before tagging.
+website, formatting, strict Clippy and focused native CLI tests passed. The
+temporary worktree's root group and sandbox loopback permission initially
+blocked two fixtures; after correcting those environment inputs, the complete
+`make check-deploy chart-lint` gate passed, including all 171 Compose contract
+tests. Hosted native candidate jobs remain required before tagging.
 
 Continue from this OPS-12 checkpoint with version `0.4.1` as an unreleased
 candidate; the published v0.4.0 bytes remain immutable. For another local candidate, use the

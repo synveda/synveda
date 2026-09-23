@@ -41,9 +41,10 @@ loopback evaluation, reference HTTPS, first workspace and lifecycle commands.
 
 The remaining sections describe product use after authenticated startup.
 
-The current source CLI's [native consumer commands](CONSUMER_CLI.md) are an
-unpublished OPS-12 candidate. They add receipt-bound Compose lifecycle and
-project/adapter setup; published v0.4.0 does not contain them.
+The current source CLI's [native consumer commands](CONSUMER_CLI.md) become
+public with the matching 0.4.1 release; until then they are an OPS-12
+candidate. They add receipt-bound Compose lifecycle and project/adapter setup;
+published v0.4.0 does not contain them.
 
 ## Bootstrap policy
 
