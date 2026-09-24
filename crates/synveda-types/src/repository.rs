@@ -30,13 +30,14 @@
 //! - credentials in the authority are dropped, which is also why a canonical
 //!   URI is safe to store, log and return (seed: no secret in an ordinary API
 //!   response);
-//! - the host is lower-cased and a default port removed;
+//! - the host is lower-cased and a default port removed; a non-default port is
+//!   refused until the stored URI grammar can represent it;
 //! - a `.git` suffix and any trailing slash are removed.
 //!
 //! Path **case is preserved**, because a generic git server's paths may be
-//! case-sensitive; uniqueness is enforced case-insensitively by the store, so
-//! `Acme/payments` and `acme/payments` are one row that displays the
-//! capitalisation the first caller used.
+//! case-sensitive. The epoch-3 store still enforces case-insensitive
+//! uniqueness, so a second spelling is rejected as a conflict rather than
+//! silently rebound. Distinct case-sensitive paths require a schema change.
 
 use std::fmt;
 use std::str::FromStr;
@@ -411,20 +412,29 @@ fn parse_remote(remote: &str) -> Result<ParsedRemote> {
         )));
     }
     if remote.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err(invalid(format!(
-            "{remote:?} is not a repository URI: it holds whitespace or control characters"
-        )));
+        return Err(invalid(
+            "a repository URI cannot hold whitespace or control characters".to_owned(),
+        ));
     }
     refuse_filesystem_path(remote)?;
 
+    if remote.contains('?') || remote.contains('#') {
+        return Err(invalid(
+            "a repository URI cannot hold a query or fragment".to_owned(),
+        ));
+    }
+
     let (authority, path) = split_authority(remote)?;
-    let host = normalise_host(&authority)?;
-    let segments = path_segments(&path, remote)?;
+    let transport = remote
+        .split_once("://")
+        .map(|(scheme, _)| scheme.to_ascii_lowercase());
+    let host = normalise_host(&authority, transport.as_deref())?;
+    let segments = path_segments(&path)?;
     let (owner, name) = split_owner_and_name(&segments);
     let canonical = format!("https://{host}/{}", segments.join("/"));
     if canonical.chars().count() > MAX_CANONICAL_URI_CHARS {
         return Err(invalid(format!(
-            "the canonical form of {remote:?} is over {MAX_CANONICAL_URI_CHARS} characters"
+            "the canonical repository URI is over {MAX_CANONICAL_URI_CHARS} characters"
         )));
     }
     Ok(ParsedRemote {
@@ -454,12 +464,13 @@ fn refuse_filesystem_path(remote: &str) -> Result<()> {
         // authority, which is never a hostname.
         || windows_drive(remote);
     if path_like {
-        return Err(invalid(format!(
-            "{remote:?} is a filesystem path, and a path is never a repository identity: \
+        return Err(invalid(
+            "a filesystem path is never a repository identity: \
              it differs per machine and changes when somebody moves a directory. Send the \
              remote (`git remote get-url origin`), or `local_fingerprint` — a stable \
              content id such as the root commit — when there is no remote."
-        )));
+                .to_owned(),
+        ));
     }
     Ok(())
 }
@@ -481,7 +492,7 @@ fn split_authority(remote: &str) -> Result<(String, String)> {
         let scheme = scheme.to_ascii_lowercase();
         if !TRANSPORTS.contains(&scheme.as_str()) {
             return Err(invalid(format!(
-                "{remote:?} uses the {scheme:?} transport; repository URIs use one of {}",
+                "unsupported repository transport; use one of {}",
                 TRANSPORTS.join(", ")
             )));
         }
@@ -496,45 +507,53 @@ fn split_authority(remote: &str) -> Result<(String, String)> {
         {
             return Ok((authority.to_owned(), path.to_owned()));
         }
-        return Err(invalid(format!(
-            "{remote:?} is not a repository URI: expected `https://host/owner/name` or \
+        return Err(invalid(
+            "not a repository URI: expected `https://host/owner/name` or \
              `git@host:owner/name`"
-        )));
+                .to_owned(),
+        ));
     }
-    Err(invalid(format!(
-        "{remote:?} is not a repository URI: it names no host. Expected \
+    Err(invalid(
+        "not a repository URI: it names no host. Expected \
          `https://host/owner/name` or `git@host:owner/name`."
-    )))
+            .to_owned(),
+    ))
 }
 
-/// Drops credentials and the port, and lower-cases what is left.
+/// Drops credentials and a transport's default port, then lower-cases the host.
 ///
 /// Dropping the credential is why a canonical URI is safe to store and return:
 /// a caller that pasted `https://x-access-token:ghp_…@github.com/acme/repo`
 /// has handed us a live token, and the row must not keep it.
 ///
-/// **The port goes too, and that is a decision rather than an omission.** A
-/// canonical URI is an identity, not a clone endpoint: the same repository is
-/// reached on 443 over https and on 22 (or 2222) over ssh, and a form that
-/// kept whichever number the caller happened to use would make one repository
-/// two. What a client needs to *clone* is the URI it already has; what it
-/// needs from us is the answer to "is this the same one you saw yesterday".
-/// A deployment running two git servers on one host and path, distinguished
-/// only by port, is the case this loses — it can keep the raw URI in
-/// `metadata`, and no product surface reads it.
-fn normalise_host(authority: &str) -> Result<String> {
+/// A non-default port is refused: epoch 3 cannot store it, and discarding it
+/// would silently merge distinct servers at the same host and path.
+fn normalise_host(authority: &str, transport: Option<&str>) -> Result<String> {
     let host_port = authority
         .rsplit_once('@')
         .map_or(authority, |(_, host)| host);
     let host = match host_port.rsplit_once(':') {
-        Some((host, port)) if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => host,
+        Some((host, "")) => host,
+        Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => {
+            let default = match transport {
+                Some("https") => "443",
+                Some("http") => "80",
+                Some("ssh") => "22",
+                Some("git") => "9418",
+                _ => "",
+            };
+            if port.trim_start_matches('0') != default {
+                return Err(invalid(
+                    "a non-default repository port cannot be represented safely".to_owned(),
+                ));
+            }
+            host
+        }
         _ => host_port,
     };
     let host = host.to_ascii_lowercase();
     if host.is_empty() {
-        return Err(invalid(format!(
-            "{authority:?} names no host; a repository URI needs one"
-        )));
+        return Err(invalid("a repository URI needs a host".to_owned()));
     }
     // Names only. An IPv6 literal (`[::1]`) is refused rather than mangled:
     // the canonical form has one grammar, the database mirrors it as a CHECK,
@@ -544,16 +563,14 @@ fn normalise_host(authority: &str) -> Result<String> {
             .chars()
             .any(|c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')))
     {
-        return Err(invalid(format!(
-            "{host:?} is not a repository hostname; a name is expected"
-        )));
+        return Err(invalid("invalid repository hostname".to_owned()));
     }
     Ok(host)
 }
 
 /// The path, split into segments with the `.git` suffix, empty segments and a
 /// trailing slash removed.
-fn path_segments(path: &str, remote: &str) -> Result<Vec<String>> {
+fn path_segments(path: &str) -> Result<Vec<String>> {
     let trimmed = path.trim_matches('/');
     let trimmed = trimmed.strip_suffix(".git").unwrap_or(trimmed);
     let segments: Vec<String> = trimmed
@@ -562,15 +579,15 @@ fn path_segments(path: &str, remote: &str) -> Result<Vec<String>> {
         .map(ToOwned::to_owned)
         .collect();
     if segments.is_empty() {
-        return Err(invalid(format!(
-            "{remote:?} names a host but no repository path"
-        )));
+        return Err(invalid("repository URI has no path".to_owned()));
     }
     if segments
         .iter()
         .any(|segment| segment == "." || segment == "..")
     {
-        return Err(invalid(format!("{remote:?} holds a relative path segment")));
+        return Err(invalid(
+            "repository URI has a relative path segment".to_owned(),
+        ));
     }
     Ok(segments)
 }
@@ -594,7 +611,7 @@ fn normalise_fingerprint(fingerprint: &str) -> Result<String> {
         return Err(invalid(format!(
             "a local fingerprint is {MIN_FINGERPRINT_CHARS}–{MAX_FINGERPRINT_CHARS} hex \
              characters — a stable content id such as a git root-commit object id, never \
-             a path. Got {fingerprint:?}."
+             a path."
         )));
     }
     Ok(lowered)
@@ -649,19 +666,53 @@ mod tests {
             "git@github.com:Acme/payments.git",
             "git@GitHub.com:Acme/payments",
             "https://github.com:443/Acme/payments.git",
+            "https://github.com:/Acme/payments.git",
+            "https://github.com:00443/Acme/payments.git",
+            "ssh://git@github.com:00022/Acme/payments.git",
         ] {
             assert_eq!(remote(uri).canonical_uri, canonical, "{uri}");
         }
     }
 
-    /// The port is part of how you reach a repository, not of which one it
-    /// is — so a non-default one unifies with the rest rather than minting a
-    /// second identity.
+    /// A distinct port may serve an entirely different repository at the
+    /// same host and path. Until the stored URI grammar admits ports, refuse
+    /// that remote rather than silently attaching it to the default port.
     #[test]
-    fn a_non_default_port_does_not_mint_a_second_repository() {
-        assert_eq!(
-            remote("ssh://git@git.acme.internal:2222/acme/payments.git").canonical_uri,
-            remote("https://git.acme.internal/acme/payments").canonical_uri
+    fn a_non_default_port_does_not_alias_the_default_repository() {
+        assert!(
+            identify(
+                Some("ssh://git@git.acme.internal:2222/acme/payments.git"),
+                None,
+                None,
+                None,
+            )
+            .is_err()
+        );
+        assert!(
+            identify(
+                Some("https://github.com:00444/Acme/payments.git"),
+                None,
+                None,
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn hosts_and_case_sensitive_paths_keep_distinct_canonical_identities() {
+        let original = remote("https://git.example.test/Acme/repo");
+        assert_ne!(
+            original.canonical_uri,
+            remote("https://git.example.test/acme/repo").canonical_uri
+        );
+        assert_ne!(
+            original.canonical_uri,
+            remote("https://other.example.test/Acme/repo").canonical_uri
+        );
+        assert_ne!(
+            original.canonical_uri,
+            remote("https://git.example.test/Acme/fork").canonical_uri
         );
     }
 
@@ -684,6 +735,21 @@ mod tests {
             "a canonical URI must never carry a credential: {}",
             identity.canonical_uri
         );
+    }
+
+    #[test]
+    fn malformed_remotes_never_echo_credentials_or_home_paths() {
+        for remote in [
+            "https://x-token:topsecret@github.com/acme/repo?auth=topsecret",
+            "https://x-token:topsecret@github.com/",
+            "ssh://x-token:topsecret@github.com:bad/acme/repo",
+            "/Users/alice/private-repo",
+        ] {
+            let error = identify(Some(remote), None, None, None).expect_err("invalid remote");
+            let message = error.to_string();
+            assert!(!message.contains("topsecret"), "{message}");
+            assert!(!message.contains("/Users/alice"), "{message}");
+        }
     }
 
     #[test]
@@ -792,6 +858,11 @@ mod tests {
                 "{bad:?} should be refused as a fingerprint"
             );
         }
+        let path = "/Users/sam/src/payments";
+        let message = identify(None, Some(path), Some("payments"), None)
+            .expect_err("a path is not a fingerprint")
+            .to_string();
+        assert!(!message.contains(path), "{message}");
     }
 
     #[test]

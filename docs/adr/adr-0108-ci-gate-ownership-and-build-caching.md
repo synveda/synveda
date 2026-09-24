@@ -137,3 +137,22 @@ Release runs never cancel one another. Existing immutable tags remain untouched.
 OCI transfer and additional native tests may cost time; measure hosted runs
 before claiming savings. Caches remain optional and cannot supply acceptance.
 This changes no Cedar, RLS, VedaFlow, audit, product schema or support claim.
+
+## Amendment: reuse source-built images within the external Helm job (2026-09-23)
+
+The successful full-main CI run `35884349132` spent 45m47s in the
+`external-external` operations job. After its source-built starter acceptance,
+the separate external TLS/OIDC fixture rebuilt the same product image for
+10m53s on the same runner. The starter also built the PostgreSQL and Keycloak
+images that the external fixture needs. Rust caching is already enabled on the
+relevant jobs; that run's Rust job restored a 744 MB cache and took 8m25s.
+
+Use the starter's exact image tags for all three images and verify their local
+IDs against the starter's completed, content-free evidence report before the
+external fixture sets `SKIP_BUILD=1`. This reuses only images built earlier in
+the same successful job. The external fixture still creates a fresh Kind
+cluster and independent provider credentials and performs every TLS, issuer,
+audience, upgrade and audit assertion. A missing report, image or ID mismatch
+fails the job. Do not use a cross-job artifact or a published image as a
+substitute for this source build. Compare hosted before/after timings before
+claiming a measured wall-clock saving.

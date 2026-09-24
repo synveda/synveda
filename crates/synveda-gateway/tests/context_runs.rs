@@ -816,6 +816,91 @@ async fn planner_selects_only_current_knowledge_and_feedback_names_one_revision(
 }
 
 #[tokio::test]
+async fn two_sessions_share_approved_project_knowledge_without_sharing_private_context() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let corpus = corpus(&world).await;
+
+    for (token, session, key) in [
+        (&world.alice_token, &world.alice_session, "shared-alice"),
+        (&world.bob_token, &world.bob_session, "shared-bob"),
+    ] {
+        let run = context_run(
+            &world,
+            token,
+            session,
+            key,
+            "PulseBoard correlation header",
+            None,
+        )
+        .await;
+        assert_eq!(run["session_id"], session.as_str());
+        assert!(
+            run["rendered"]
+                .as_str()
+                .is_some_and(|text| text.contains("traceparent")),
+            "{run}"
+        );
+        let detail = detail(&world, token, run["id"].as_str().expect("run id")).await;
+        assert!(
+            detail["selections"].as_array().is_some_and(|items| items
+                .iter()
+                .any(|item| item["knowledge_item_id"] == corpus.active_id)),
+            "{detail}"
+        );
+    }
+
+    let private = context_run(
+        &world,
+        &world.alice_token,
+        &world.alice_session,
+        "private-alice",
+        "private quick-test command",
+        None,
+    )
+    .await;
+    assert!(
+        private["rendered"]
+            .as_str()
+            .is_some_and(|text| text.contains("test-fast-secret")),
+        "{private}"
+    );
+    for key in ["private-bob-first", "private-bob-repeat"] {
+        let run = context_run(
+            &world,
+            &world.bob_token,
+            &world.bob_session,
+            key,
+            "private quick-test command",
+            None,
+        )
+        .await;
+        assert_eq!(run["session_id"], world.bob_session);
+        assert!(
+            !run["rendered"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("test-fast-secret"),
+            "{run}"
+        );
+        let detail = detail(
+            &world,
+            &world.bob_token,
+            run["id"].as_str().expect("Bob run id"),
+        )
+        .await;
+        let disclosure = detail.to_string();
+        assert!(!disclosure.contains(&corpus.private_id), "{disclosure}");
+        assert!(
+            !disclosure.contains(&corpus.private_revision),
+            "{disclosure}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn bounded_graph_improves_two_hop_recall_and_denied_endpoints_leave_no_trace() {
     let _guard = serial().await;
     let Some(world) = admitted_world().await else {

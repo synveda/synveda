@@ -1,6 +1,6 @@
 # ADR-0071: workspaces and projects as subtypes of a governed scope, canonical repository identity, and the first OpenAPI contract
 
-- **Status**: Accepted
+- **Status**: Accepted; repository URI safety amended 2026-09-23
 - **Date**: 2026-08-17
 - **Feature(s)**: CPR-4
 - **Deciders**: sujitn
@@ -119,7 +119,7 @@ behind the tiered reads.
 **4. A repository's identity is its canonical remote URI, and a filesystem path
 is never one.** `synveda_types::repository::identify` collapses the transports
 (`https`, `http`, `ssh`, `git` all canonicalise to `https`), drops the
-credential, drops the port, drops a `.git` suffix and a trailing slash, and
+credential, normalises a default port, drops a `.git` suffix and a trailing slash, and
 lower-cases the host — so `git@github.com:Acme/payments.git` and
 `https://x-token:secret@github.com:443/Acme/payments/` are one identity. A
 repository with **no** remote is identified by a `git+fingerprint:<hex>` URI
@@ -133,6 +133,16 @@ Dropping the credential is not tidiness: it is what makes `canonical_uri` safe
 to store, return, log and put in an audit payload, and a caller who pasted
 `https://x-access-token:ghp_…@github.com/acme/repo` has handed the gateway a
 live token.
+
+**2026-09-23 amendment to decision 4.** A non-default port can identify a
+different server at the same host and path. Because the epoch-3 URI constraint
+cannot store ports, identity resolution refuses such a remote instead of
+discarding its port. URL queries and fragments are also refused: they can
+contain credentials and are not repository paths. Diagnostics never echo a
+submitted remote or filesystem path, including one supplied as a local
+fingerprint. Supporting distinct non-default ports
+requires a separately reviewed, data-preserving schema change. Existing
+default-port identities and stored rows keep their spelling.
 
 **5. Updates carry a required revision precondition.** Every subtype has a
 monotonic `revision`, and `PATCH` takes `expected_revision`. A mismatch is
@@ -266,10 +276,9 @@ express** is easier to trust than one that emits `unknown` and moves on.
   denormalised `slug` exist for constraints and are never read by application
   code. ADR-0070 accepted the same cost for `parent_kind`; this adds three more
   columns a reader will meet without the migration header and wonder about.
-- **Negative / accepted.** The canonical URI **drops the port**, so a deployment
-  running two git servers on one host and path, distinguished only by a port, is
-  a case this collapses into one identity. It can keep the raw URI in
-  `metadata`, and no product surface reads it.
+- **Negative / accepted.** Non-default ports cannot currently be attached by
+  remote URI. The 2026-09-23 amendment refuses them rather than merging two
+  servers. A later schema change can admit ports while preserving existing rows.
 - **Negative / accepted.** `idempotency_records` accumulates. Nothing prunes it;
   the index on `created_at` exists so that the retention plane's sweep is a
   range scan when it arrives.

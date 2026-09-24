@@ -37,6 +37,7 @@ import {
   type TranscriptEntry,
 } from "./transcript.mjs";
 import type { SessionEventType } from "./types.mjs";
+import type { CheckoutObservation } from "./git.mjs";
 
 /** `MAX_EVENT_BATCH` in the gateway. */
 export const MAX_EVENTS_PER_BATCH = 200;
@@ -79,6 +80,7 @@ interface PayloadContext {
   model?: string;
   /** The harness version, as the transcript entry itself records it. */
   harness_version?: string;
+  checkout?: CheckoutObservation;
 }
 
 /**
@@ -98,6 +100,7 @@ interface PayloadContext {
 export function toSessionEvents(
   entries: TranscriptEntry[],
   model: string | undefined,
+  checkout?: CheckoutObservation,
 ): RecordedEvent[] {
   const events: RecordedEvent[] = [];
   for (const entry of entries) {
@@ -108,7 +111,7 @@ export function toSessionEvents(
     // is structure, and structure is not memory.
     if (text.length === 0 && tools.length === 0 && calls.length === 0) continue;
 
-    const context = contextOf(entry, model);
+    const context = contextOf(entry, model, checkout);
     const occurred_at = occurredAt(entry.timestamp);
     if (text.length > 0) {
       const payload: Payload = { text };
@@ -179,6 +182,7 @@ export function chunk<T>(items: T[], size: number): T[][] {
 function contextOf(
   entry: TranscriptEntry,
   model: string | undefined,
+  checkout?: CheckoutObservation,
 ): PayloadContext | undefined {
   const project = entry.cwd !== undefined ? basename(entry.cwd) : undefined;
   const context: PayloadContext = {};
@@ -186,6 +190,7 @@ function contextOf(
   if (entry.gitBranch !== undefined) context.git_branch = entry.gitBranch;
   if (model !== undefined) context.model = model;
   if (entry.version !== undefined) context.harness_version = entry.version;
+  if (checkout !== undefined) context.checkout = checkout;
   return Object.keys(context).length > 0 ? context : undefined;
 }
 

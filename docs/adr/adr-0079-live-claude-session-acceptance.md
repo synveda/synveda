@@ -43,6 +43,12 @@ The run took **5,526ms** in the client. Measured components were SessionStart
 continues to own outage/lost-ack recovery and ordinary CI. The host-killed-
 before-any-hook tail remains outside the guarantee.
 
+**2026-09-23 interpretation.** The run above really ended, but that was the
+adapter's then-current response to `SessionEnd` reason `other`. Claude Code
+can resume that native ID. Current hooks retain the run and binding on an
+ordinary exit and close on `clear` (ADR-0078 amendment). The revised rule has
+captured-frame and database replay evidence, not a new live-client run.
+
 Isolation exposed one credential rule the runner now handles explicitly: an
 exported Claude credential can shadow a valid native login, while changing
 HOME or `CLAUDE_CONFIG_DIR` changes the macOS Keychain namespace used by this

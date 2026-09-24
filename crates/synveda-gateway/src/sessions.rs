@@ -1052,7 +1052,7 @@ pub(crate) async fn open(
             }
         };
         let id = SessionId::from_uuid(replayed.expect("replay id"));
-        let session = replay_open(&state, tenant_id, id, &claim).await?;
+        let session = replay_open(&state, tenant_id, id, &claim, &body).await?;
         Ok((StatusCode::OK, Json(SessionView::from(session))))
     }
     .await;
@@ -1134,6 +1134,7 @@ async fn replay_open(
     tenant_id: TenantId,
     id: SessionId,
     claim: &Claim,
+    body: &OpenSessionBody,
 ) -> Result<Session> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let session = sessions::get(&mut *tx, tenant_id, id)
@@ -1147,6 +1148,20 @@ async fn replay_open(
         Subject::Session(&session),
     )
     .await?;
+    // The idempotency digest predates checkout/repository observations. A
+    // replay still has to agree with the stored immutable identity, after
+    // authorisation so the comparison cannot disclose a foreign binding.
+    if session.workspace_id != body.workspace_id
+        || session.project_id != body.project_id
+        || session.client_name != body.client_name
+        || session.external_session_id != body.external_session_id
+        || session.client_installation_id != body.client_installation_id
+        || session.repository_id != body.repository_id
+    {
+        return Err(Error::Conflict {
+            message: "session open replay differs from the stored binding".to_owned(),
+        });
+    }
     read_event(
         &mut tx,
         tenant_id,
@@ -1541,9 +1556,15 @@ pub(crate) async fn append_events(
         // CPU work, O(payload bytes): off the reactor. The request span travels
         // along so the scan spans nest under it.
         let span = tracing::Span::current();
-        let scans: Vec<ScanOutcome> = tokio::task::spawn_blocking(move || {
+        let scans: Vec<(String, ScanOutcome)> = tokio::task::spawn_blocking(move || {
             let _entered = span.enter();
-            payloads.into_iter().map(synveda_ingest::scan).collect()
+            payloads
+                .into_iter()
+                .map(|payload| {
+                    let hash = sessions::payload_hash(&payload);
+                    (hash, synveda_ingest::scan(payload))
+                })
+                .collect()
         })
         .await
         .map_err(|err| Error::Internal {
@@ -1561,7 +1582,7 @@ pub(crate) async fn append_events(
         let mut events: Vec<NewSessionEvent> = Vec::with_capacity(body.events.len());
         let mut submitted_order: Vec<Option<usize>> = Vec::with_capacity(body.events.len());
         let mut rule_summary: BTreeMap<&'static str, u64> = BTreeMap::new();
-        for (event, scan) in body.events.iter().zip(scans) {
+        for (event, (source_payload_hash, scan)) in body.events.iter().zip(scans) {
             for finding in &scan.findings {
                 metrics::counter!(
                     REDACTION_FINDINGS_TOTAL,
@@ -1598,6 +1619,7 @@ pub(crate) async fn append_events(
                 client_event_id: event.client_event_id.clone(),
                 occurred_at: event.occurred_at,
                 payload: scan.payload,
+                source_payload_hash,
                 redactions,
                 quarantine: disposition == Some(RedactionMode::Quarantine),
             });

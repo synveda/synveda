@@ -56,6 +56,7 @@ import {
   listQuery,
   runDescription,
   runTitle,
+  shortSessionRef,
   statusLabel,
   statusTone,
   type Filters,
@@ -114,7 +115,10 @@ export function Sessions() {
               ) : (
                 <ul className="sessions">
                   {rows.map((session) => (
-                    <Row key={session.id} session={session} />
+                    <Row key={session.id} session={session}
+                      projectLabel={session.project_id
+                        ? projects.find((item) => item.id === session.project_id)?.display_name ?? "project unavailable"
+                        : "workspace"} />
                   ))}
                 </ul>
               )}
@@ -153,7 +157,7 @@ export function Sessions() {
  * after a refresh — which is what somebody investigating a failed run
  * actually needs to do with it.
  */
-function Row({ session }: { session: SessionView }) {
+function Row({ session, projectLabel }: { session: SessionView; projectLabel: string }) {
   const duration = durationOf(session, Date.now());
   return (
     <li className={isIncomplete(session) ? "incomplete" : undefined}>
@@ -163,6 +167,9 @@ function Row({ session }: { session: SessionView }) {
         <div className="muted">
           {runDescription(session)} · {session.principal_id} · started {whenOf(session.started_at)}
           {duration === null ? null : ` · ${duration}`}
+          {` · ${projectLabel}`}
+          {session.repository_id ? ` · repo ${shortSessionRef(session.repository_id)}` : ""}
+          {` · session ${shortSessionRef(session.id)}`}
         </div>
       </Link>
     </li>

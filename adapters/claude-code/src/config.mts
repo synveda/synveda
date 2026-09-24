@@ -62,6 +62,8 @@ export interface AdapterConfig {
    * supported adapter setting could put it there.
    */
   projectId?: string;
+  /** Explicit attachment within projectId; Git remotes never grant authority. */
+  repositoryId?: string;
 }
 
 /** The project file's shape — every field unknown until proven. */
@@ -74,6 +76,7 @@ interface ProjectConfig {
   gateway_url?: unknown;
   workspace_id?: unknown;
   project_id?: unknown;
+  repository_id?: unknown;
   timeout_ms?: unknown;
   budget_tokens?: unknown;
   compact_budget_tokens?: unknown;
@@ -84,6 +87,7 @@ export function loadConfig(cwd: string | undefined): AdapterConfig {
   const project = readProjectConfig(root);
   const workspaceId = str(process.env.SYNVEDA_WORKSPACE) ?? str(project.workspace_id);
   const projectId = str(process.env.SYNVEDA_PROJECT) ?? str(project.project_id);
+  const repositoryId = str(process.env.SYNVEDA_REPOSITORY) ?? str(project.repository_id);
   return {
     disabled: truthy(process.env.SYNVEDA_DISABLED) || bool(project.disabled) === true,
     inject: bool(project.inject) !== false,
@@ -100,6 +104,7 @@ export function loadConfig(cwd: string | undefined): AdapterConfig {
     compactBudgetTokens: positive(project.compact_budget_tokens),
     workspaceId,
     projectId,
+    repositoryId,
   };
 }
 

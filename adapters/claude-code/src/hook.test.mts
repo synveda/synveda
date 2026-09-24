@@ -14,8 +14,8 @@
 
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,7 +35,8 @@ process.env.SYNVEDA_CLI = join(stateHome, "no-cli-here");
 
 const { turn: turnHook } = await import("./turn.mjs");
 const { sessionStart } = await import("./session-start.mjs");
-const { loadSpool, pending, spoolFile } = await import("./spool.mjs");
+const { closeRun, retryBacklog } = await import("./deliver.mjs");
+const { loadSpool, newSpool, pending, record, saveSpool, spoolFile } = await import("./spool.mjs");
 type AdapterConfig = (typeof import("./config.mjs"))["loadConfig"] extends (
   cwd: string | undefined,
 ) => infer T
@@ -192,6 +193,99 @@ test("a configured project is sent on the first open and retained in the spool",
   }
 });
 
+test("two worktrees and conversations retain distinct checkout evidence under one explicit repository", async () => {
+  const root = mkdtempSync(join(tmpdir(), "synveda-worktrees-"));
+  const main = join(root, "main");
+  const other = join(root, "other");
+  const git = (...args: string[]) => execFileSync("git", args, { stdio: "pipe", timeout: 5000 });
+  git("init", "-b", "main", main);
+  writeFileSync(join(main, "README"), "one\n");
+  git("-C", main, "add", "README");
+  git("-C", main, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "initial");
+  git("-C", main, "worktree", "add", "-b", "parallel", other);
+  const mock = await gateway(script((request) => {
+    if (request.path !== "/v1/sessions") return undefined;
+    const id = request.body.external_session_id === "wt-a"
+      ? "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+      : "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    return { status: 201, body: session(id) };
+  }));
+  try {
+    const configured = config(mock.url, {
+      projectId: "44444444-4444-4444-4444-444444444444",
+      repositoryId: "55555555-5555-5555-5555-555555555555",
+    });
+    await Promise.all([
+      sessionStart({ hook_event_name: "SessionStart", session_id: "wt-a", cwd: main }, configured),
+      sessionStart({ hook_event_name: "SessionStart", session_id: "wt-b", cwd: other }, configured),
+    ]);
+    const opens = mock.requests.filter((request) => request.path === "/v1/sessions");
+    const checkoutRef = (request: RecordedRequest) =>
+      (request.body.metadata as { checkout?: { ref?: string } } | undefined)?.checkout?.ref;
+    assert.equal(opens.length, 2);
+    assert.deepEqual(opens.map((request) => request.body.repository_id), [configured.repositoryId, configured.repositoryId]);
+    assert.notEqual(checkoutRef(opens[0] as RecordedRequest), checkoutRef(opens[1] as RecordedRequest));
+    assert.deepEqual(new Set(opens.map((request) => request.body.branch)), new Set(["main", "parallel"]));
+    assert.equal(loadSpool("wt-a")?.checkout?.ref, checkoutRef(opens.find((request) => request.body.external_session_id === "wt-a") as RecordedRequest));
+  } finally {
+    await mock.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("offline events replay with the checkout observation recorded before a branch change", async () => {
+  const root = mkdtempSync(join(tmpdir(), "synveda-replay-git-"));
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { stdio: "pipe", timeout: 5000 });
+  execFileSync("git", ["init", "-b", "main", root], { stdio: "pipe", timeout: 5000 });
+  writeFileSync(join(root, "README"), "one\n");
+  git("add", "README");
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "initial");
+  const mock = await gateway(ok);
+  const first = entry("original-branch", "the ask");
+  const second = entry("later-turn", "the follow-up");
+  const third = entry("resumed-turn", "the next ask");
+  const path = transcript([first]);
+  try {
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "replay-branch", source: "startup", cwd: root, transcript_path: path },
+      config(mock.url, { inject: false }),
+    );
+    await turnHook(
+      { hook_event_name: "Stop", session_id: "replay-branch", cwd: root, transcript_path: path },
+      config(mock.url),
+    );
+    const recorded = loadSpool("replay-branch");
+    const recordedPayload = recorded?.entries[0]?.payload as { context?: { checkout?: { branch?: string } } } | undefined;
+    assert.equal(recordedPayload?.context?.checkout?.branch, "main");
+    const originalCheckout = recorded?.checkout;
+    assert.ok(originalCheckout);
+    git("checkout", "-b", "later");
+    writeFileSync(path, [first, second].map((item) => JSON.stringify(item)).join("\n"));
+    await turnHook(
+      { hook_event_name: "Stop", session_id: "replay-branch", cwd: root, transcript_path: path },
+      config(mock.url),
+    );
+    writeFileSync(path, [first, second, third].map((item) => JSON.stringify(item)).join("\n"));
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "replay-branch", source: "resume", cwd: root, transcript_path: path },
+      config(mock.url, { inject: false }),
+    );
+    const append = mock.requests.find((request) => request.path.endsWith("/events"));
+    const events = append?.body.events as { payload?: { context?: { checkout?: { branch?: string } } } }[] | undefined;
+    assert.equal(events?.[0]?.payload?.context?.checkout?.branch, "main");
+    const spool = loadSpool("replay-branch");
+    for (const saved of spool?.entries ?? []) {
+      const payload = saved.payload as { context?: { checkout?: typeof originalCheckout } };
+      assert.deepEqual(payload.context?.checkout, originalCheckout);
+    }
+    assert.equal(spool?.entries.length, 3);
+    assert.equal(loadSpool("replay-branch")?.checkout?.branch, "main");
+  } finally {
+    await mock.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the run is reused on the next start rather than reopened", async () => {
   const mock = await gateway(ok);
   try {
@@ -205,6 +299,46 @@ test("the run is reused on the next start rather than reopened", async () => {
     );
     const opens = mock.requests.filter((request) => request.path === "/v1/sessions");
     assert.equal(opens.length, 1, "the second start must resume, not reopen");
+  } finally {
+    await mock.close();
+  }
+});
+
+test("changing an explicit repository selection cannot silently rebind an active native conversation", async () => {
+  const mock = await gateway(ok);
+  try {
+    const first = config(mock.url, {
+      projectId: "44444444-4444-4444-4444-444444444444",
+      repositoryId: "55555555-5555-5555-5555-555555555555",
+    });
+    await sessionStart({ hook_event_name: "SessionStart", session_id: "selection-fixed" }, first);
+    const output = await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "selection-fixed", source: "resume" },
+      { ...first, repositoryId: "66666666-6666-6666-6666-666666666666" },
+    );
+    assert.deepEqual(output, {});
+    assert.equal(mock.requests.filter((request) => request.path === "/v1/sessions").length, 1);
+    assert.equal(mock.requests.filter((request) => request.path.endsWith("/context-runs")).length, 1);
+    assert.equal(loadSpool("selection-fixed")?.repository_id, first.repositoryId);
+  } finally {
+    await mock.close();
+  }
+});
+
+test("a hook without a native conversation ID cannot open a shared unknown run", async () => {
+  const mock = await gateway(ok);
+  try {
+    const output = await sessionStart(
+      { hook_event_name: "SessionStart", source: "startup" },
+      config(mock.url),
+    );
+    await turnHook(
+      { hook_event_name: "Stop", transcript_path: transcript([entry("missing-id", "private")]) },
+      config(mock.url),
+    );
+    assert.deepEqual(output, {});
+    assert.equal(mock.requests.length, 0);
+    assert.equal(loadSpool("unknown"), undefined);
   } finally {
     await mock.close();
   }
@@ -518,6 +652,29 @@ test("a tampered spool is held and the automatic retry sends nothing", async () 
   }
 });
 
+test("another installation's pending spool is not retried by this start", async () => {
+  const mock = await gateway(ok);
+  const foreign = newSpool("foreign-installation-task", "claude-code", "foreign-installation");
+  foreign.gateway_url = mock.url;
+  foreign.session_id = "99999999-9999-9999-9999-999999999999";
+  record(foreign, [{
+    event_type: "message.user", client_event_id: "foreign-event",
+    occurred_at: "2026-08-25T10:00:00.000Z", payload: { text: "foreign installation" },
+  }]);
+  assert.ok(saveSpool(foreign));
+  const before = readFileSync(spoolFile(foreign.external_session_id));
+  try {
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "local-installation-task", source: "startup" },
+      config(mock.url, { inject: false }),
+    );
+    assert.ok(!mock.requests.some((request) => request.path.endsWith("/events")));
+    assert.deepEqual(readFileSync(spoolFile(foreign.external_session_id)), before);
+  } finally {
+    await mock.close();
+  }
+});
+
 test("a spool never crosses from one gateway deployment to another", async () => {
   const path = transcript([entry("gateway-u1", "deployment one only")]);
   const first = await gateway(ok);
@@ -608,7 +765,7 @@ test("a precompact records before the transcript can be rewritten", async () => 
   }
 });
 
-test("a session end flushes and closes the run", async () => {
+test("a clear flushes and closes the old run", async () => {
   const mock = await gateway(ok);
   const path = transcript([entry("u1", "the ask")]);
   try {
@@ -617,13 +774,77 @@ test("a session end flushes and closes the run", async () => {
       config(mock.url, { inject: false }),
     );
     await turnHook(
-      { hook_event_name: "SessionEnd", session_id: "f5", transcript_path: path, reason: "user exited" },
+      { hook_event_name: "SessionEnd", session_id: "f5", transcript_path: path, reason: "clear" },
       config(mock.url),
     );
     const close = mock.requests.find((request) => request.path.endsWith("/end"));
     assert.ok(close);
     assert.equal(close.body.status, "ended");
-    assert.equal(close.body.end_reason, "user exited");
+    assert.equal(close.body.end_reason, "clear");
+  } finally {
+    await mock.close();
+  }
+});
+
+test("a clear without credentials durably owes a close for the next start", async () => {
+  let opens = 0;
+  const mock = await gateway(script((request) => {
+    if (request.path === "/v1/sessions") {
+      opens += 1;
+      return { status: 201, body: session(opens === 1
+        ? "22222222-2222-2222-2222-222222222222"
+        : "44444444-4444-4444-4444-444444444444") };
+    }
+    return undefined;
+  }));
+  const path = transcript([entry("u1", "last turn")]);
+  try {
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "f-clear-offline", source: "startup" },
+      config(mock.url, { inject: false }),
+    );
+    delete process.env.SYNVEDA_TOKEN;
+    await turnHook(
+      { hook_event_name: "SessionEnd", session_id: "f-clear-offline", reason: "clear", transcript_path: path },
+      config(mock.url),
+    );
+    const owed = loadSpool("f-clear-offline");
+    assert.ok(owed);
+    assert.equal(owed.close_requested, true);
+    assert.equal(pending(owed).length, 1);
+
+    process.env.SYNVEDA_TOKEN = "dev-bearer";
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "f-clear-next", source: "startup" },
+      config(mock.url, { inject: false }),
+    );
+    assert.ok(mock.requests.some((request) => request.path === "/v1/sessions/22222222-2222-2222-2222-222222222222/end"));
+    assert.equal(loadSpool("f-clear-offline"), undefined);
+  } finally {
+    process.env.SYNVEDA_TOKEN = "dev-bearer";
+    await mock.close();
+  }
+});
+
+test("an ordinary exit flushes without terminating a resumable conversation", async () => {
+  const mock = await gateway(ok);
+  const path = transcript([entry("u-exit", "the ask")]);
+  try {
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "f-resume", source: "startup", transcript_path: path },
+      config(mock.url, { inject: false }),
+    );
+    await turnHook(
+      { hook_event_name: "SessionEnd", session_id: "f-resume", transcript_path: path, reason: "other" },
+      config(mock.url),
+    );
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "f-resume", source: "resume", transcript_path: path },
+      config(mock.url, { inject: false }),
+    );
+    assert.equal(mock.requests.filter((request) => request.path === "/v1/sessions").length, 1);
+    assert.equal(mock.requests.filter((request) => request.path.endsWith("/end")).length, 0);
+    assert.equal(loadSpool("f-resume")?.close_requested, false);
   } finally {
     await mock.close();
   }
@@ -647,7 +868,7 @@ test("a session end that cannot drain says ending and owes a close", async () =>
       config(mock.url, { inject: false }),
     );
     await turnHook(
-      { hook_event_name: "SessionEnd", session_id: "f6", transcript_path: path },
+      { hook_event_name: "SessionEnd", session_id: "f6", transcript_path: path, reason: "clear" },
       config(mock.url),
     );
     const close = mock.requests.find((request) => request.path.endsWith("/end"));
@@ -655,6 +876,52 @@ test("a session end that cannot drain says ending and owes a close", async () =>
     const spool = loadSpool("f6");
     assert.ok(spool);
     assert.equal(spool.close_requested, true);
+    assert.equal(pending(spool).length, 1);
+  } finally {
+    await mock.close();
+  }
+});
+
+test("a repeated close conflict completes the local close", async () => {
+  const mock = await gateway(script((request) =>
+    request.path.endsWith("/end") ? { status: 409, body: {} } : undefined,
+  ));
+  try {
+    const spool = newSpool("close-conflict", "claude-code", "test-installation");
+    spool.session_id = "22222222-2222-2222-2222-222222222222";
+    spool.gateway_url = mock.url;
+    spool.close_requested = true;
+    await closeRun(spool, config(mock.url), "dev-bearer", "clear");
+    assert.equal(spool.close_requested, false);
+    assert.equal(spool.closed, true);
+    assert.equal(saveSpool(spool), true);
+    await retryBacklog(config(mock.url), "dev-bearer", "other-session", "test-installation", Date.now() + 1000);
+    assert.equal(mock.requests.filter((request) => request.path.endsWith("/end")).length, 1);
+    assert.equal(mock.requests.filter((request) => request.path.endsWith("/events")).length, 0);
+  } finally {
+    await mock.close();
+    rmSync(spoolFile("close-conflict"), { force: true });
+  }
+});
+
+test("an ending conflict retains the close and pending events", async () => {
+  const mock = await gateway(script((request) =>
+    request.path.endsWith("/end") ? { status: 409, body: {} } : undefined,
+  ));
+  try {
+    const spool = newSpool("ending-conflict", "claude-code", "test-installation");
+    spool.session_id = "22222222-2222-2222-2222-222222222222";
+    spool.close_requested = true;
+    record(spool, [{
+      event_type: "message.user",
+      client_event_id: "ending-conflict-event",
+      occurred_at: "2026-08-25T10:00:00.000Z",
+      payload: { text: "buffered" },
+    }]);
+    await closeRun(spool, config(mock.url), "dev-bearer", "clear");
+    assert.equal(mock.requests.find((request) => request.path.endsWith("/end"))?.body.status, "ending");
+    assert.equal(spool.close_requested, true);
+    assert.equal(spool.closed, false);
     assert.equal(pending(spool).length, 1);
   } finally {
     await mock.close();

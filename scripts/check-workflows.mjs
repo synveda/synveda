@@ -364,6 +364,22 @@ export function ciWorkflowFindings(source) {
     )
   )
     errors.push("CI trigger/cancellation contract changed");
+  const operations = jobBlock(source, "helm-operations");
+  const starter = stepBlock(operations, "Source-built starter acceptance");
+  const external = stepBlock(operations, "External TLS and OIDC negative acceptance");
+  if (
+    !starter.includes("run: demos/ops-2-helm-install.sh") ||
+    !starter.includes('STARTER_MATRIX: "1"') ||
+    !starter.includes('OPERATIONS: "1"') ||
+    !starter.includes("PRODUCT_IMAGE: synveda/product:ops11") ||
+    starter.includes("SKIP_BUILD") ||
+    !external.includes("if: matrix.profile == 'external-external'") ||
+    !external.includes("node scripts/verify-starter-image-reuse.mjs\n") ||
+    !external.includes("POSTGRES_MODE: external") ||
+    !external.includes('SKIP_BUILD: "1"') ||
+    operations.indexOf(starter) >= operations.indexOf(external)
+  )
+    errors.push("external acceptance must verify and reuse this job's source-built images");
   return errors;
 }
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {

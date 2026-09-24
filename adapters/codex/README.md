@@ -25,6 +25,11 @@ only spools for the same client and pinned gateway. An explicit task owner
 uses the public Capture/end APIs; closing an MCP connection does neither.
 `SessionStart` with `source: "compact"` reuses the context path and its configured
 `compact_budget_tokens`. PostCompact has no separate write or injection path.
+Git checkout facts are optional observations from the hook's cwd; attach an
+existing repository explicitly with `SYNVEDA_REPOSITORY` or the project
+`repository_id`. Start a new native conversation when changing authenticated
+principals on one gateway: local Stop/PreCompact cannot prove that switch.
+Automatic retry holds a spool from another installation rather than adopting it.
 
 Input is limited to 64 KiB and transcript reads to 8 MiB/20,000 records. Wrong
 Session IDs, symlinks, non-regular files, partial JSON and unrecognised tool

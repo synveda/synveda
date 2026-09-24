@@ -28,6 +28,7 @@ import { resolveGateway, type AdapterConfig } from "./config.mjs";
 import { resolveBearer, SIGN_IN_MESSAGE } from "./credentials.mjs";
 import { recordDelta, retryBacklog, deliver } from "./deliver.mjs";
 import { installationId } from "./install-id.mjs";
+import { observeGit } from "./git.mjs";
 import { log } from "./log.mjs";
 import {
   bindGateway,
@@ -55,24 +56,35 @@ export async function sessionStart(
   readEntries: typeof readTranscript = readTranscript,
 ): Promise<HookOutput> {
   const externalId = harnessSessionId(input.session_id);
-  const spool = loadOrCreateSpool(externalId, configured.clientName ?? CLIENT_NAME, installationId());
-  if (spool === undefined) return {};
-  // Placement is fixed before the first open. Once a run exists, its
-  // workspace/project pair is server-owned and a later config edit cannot
-  // move it; `resolveRun` returns early for that case.
-  if (spool.session_id === undefined) {
-    if (configured.workspaceId !== undefined) spool.workspace_id = configured.workspaceId;
-    if (configured.projectId !== undefined) spool.project_id = configured.projectId;
+  if (externalId === undefined) {
+    log("session.identity_unavailable", { hook: input.hook_event_name });
+    return {};
   }
+  const currentInstallation = installationId();
+  if (currentInstallation === undefined) {
+    log("installation.identity_unavailable", { hook: input.hook_event_name });
+    return {};
+  }
+  const spool = loadOrCreateSpool(externalId, configured.clientName ?? CLIENT_NAME, currentInstallation);
+  if (spool === undefined) return {};
+  if (!pinPlacement(spool, configured)) {
+    log("session.binding_mismatch", { session: externalId });
+    return {};
+  }
+  const currentCheckout = observeGit(input.cwd, spool.client_installation_id);
+  if (spool.checkout === undefined) spool.checkout = currentCheckout;
   if (input.transcript_path !== undefined) spool.transcript_path = input.transcript_path;
   if (input.model !== undefined) spool.model = input.model;
+  // A new spool must survive credential resolution. An already-bound spool is
+  // held unchanged until the selected gateway is checked below.
+  if (spool.gateway_url === undefined && !saveSpool(spool)) return {};
 
   const bearer = await resolveBearer();
   if (bearer === undefined) {
     // Record anyway. A conversation that starts before anybody has logged in
     // still happened, and the events are worth keeping for the session that
     // follows the login.
-    recordDelta(spool, input.transcript_path, readEntries);
+    recordDelta(spool, input.transcript_path, readEntries, spool.checkout);
     saveSpool(spool);
     return { systemMessage: SIGN_IN_MESSAGE };
   }
@@ -81,6 +93,8 @@ export async function sessionStart(
     log("spool.held", { session: externalId, reason: "gateway_mismatch", corrupt: 0 });
     return {};
   }
+  // Persist placement and the original checkout before any API open or replay.
+  if (!saveSpool(spool)) return {};
 
   // 1. The run.
   const opened = await resolveRun(spool, config, bearer.token, input);
@@ -88,17 +102,19 @@ export async function sessionStart(
   if (!opened) {
     // No run and therefore nowhere to compose from. Events keep accumulating
     // locally and the next start tries again.
-    recordDelta(spool, input.transcript_path, readEntries);
+    recordDelta(spool, input.transcript_path, readEntries, spool.checkout);
     saveSpool(spool);
     return {};
   }
 
   // 2. The backlog — this conversation's, then everything else's.
-  recordDelta(spool, input.transcript_path, readEntries);
+  recordDelta(spool, input.transcript_path, readEntries, spool.checkout);
   if (!saveSpool(spool)) return {};
   await deliver(spool, config, bearer.token, Date.now() + BACKLOG_BUDGET_MS);
   saveSpool(spool);
-  await retryBacklog(config, bearer.token, externalId, Date.now() + BACKLOG_BUDGET_MS);
+  await retryBacklog(
+    config, bearer.token, externalId, spool.client_installation_id, Date.now() + BACKLOG_BUDGET_MS,
+  );
 
   // 3. The context block.
   if (!configured.inject) return disclosureOnly(input, config);
@@ -163,9 +179,27 @@ export async function sessionStart(
  * hook holding only this can find the run it already opened instead of minting
  * a second one.
  */
-export function harnessSessionId(sessionId: string | undefined): string {
-  const id = sessionId !== undefined && sessionId.length > 0 ? sessionId : "unknown";
-  return id.slice(0, 200);
+export function harnessSessionId(sessionId: string | undefined): string | undefined {
+  if (typeof sessionId !== "string" || sessionId.length === 0 || sessionId.length > 200 ||
+      /[\s\u0000-\u001f\u007f]/u.test(sessionId)) return undefined;
+  return sessionId;
+}
+
+/** Keep a native conversation's selected scope and repository fixed. */
+export function pinPlacement(spool: Spool, configured: AdapterConfig): boolean {
+  const selections: { field: "workspace_id" | "project_id" | "repository_id"; value?: string }[] = [
+    { field: "workspace_id", value: configured.workspaceId },
+    { field: "project_id", value: configured.projectId },
+    { field: "repository_id", value: configured.repositoryId },
+  ];
+  for (const { field, value } of selections) {
+    if (value === undefined) continue;
+    const held = spool[field];
+    if (held !== undefined && held !== value) return false;
+    if (spool.session_id !== undefined && held === undefined) return false;
+    spool[field] = value;
+  }
+  return true;
 }
 
 /**
@@ -190,12 +224,15 @@ async function resolveRun(
     {
       workspace_id: workspace,
       ...(spool.project_id === undefined ? {} : { project_id: spool.project_id }),
+      ...(spool.repository_id === undefined ? {} : { repository_id: spool.repository_id }),
       client_name: config.clientName ?? CLIENT_NAME,
       client_version: CLIENT_VERSION,
       client_installation_id: spool.client_installation_id,
       external_session_id: spool.external_session_id,
       agent_name: config.clientName ?? CLIENT_NAME,
       ...(input.model === undefined ? {} : { model_name: input.model }),
+      ...(spool.checkout?.branch === undefined ? {} : { branch: spool.checkout.branch }),
+      ...(spool.checkout === undefined ? {} : { metadata: { checkout: spool.checkout } }),
     },
     // Derived from the harness id rather than random: a SessionStart that
     // times out and fires again must land on the same run.

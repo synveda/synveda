@@ -20,7 +20,7 @@ caller's own bearer, and inherits whatever the PDP allows that identity
 | `SessionStart` | `skills` | `synveda skill sync` into this plugin's own `skills/`; async, returns nothing |
 | `Stop` | `turn` | Synchronously records the turn into the spool, then returns before credential or network work |
 | `PreCompact` | `turn` | Synchronously records everything the transcript still holds, then returns before compaction rewrites it |
-| `SessionEnd` | `turn` | Records the last turn, then a **bounded** synchronous flush, then closes the run |
+| `SessionEnd` | `turn` | Records the last turn and makes a **bounded** synchronous flush; `/clear` closes the old run |
 
 `SessionStart` is the only one of the four that can contribute context —
 `PreCompact`'s output becomes compaction instructions and its only
@@ -110,6 +110,24 @@ no OAuth code of its own (ADR-0027 decisions 4 to 6).
 
 The composed block is passed through verbatim, preceded by the resolved
 Synveda Session ID. That identifier lets MCP calls use this application task.
+The native `session_id` is required for automatic binding. If a hook omits it,
+the adapter neither opens a shared fallback run nor records its turn. A shared
+MCP process still requires the supplied Synveda Session ID on every task call.
+Repeated starts, compaction and ordinary exit preserve the native mapping;
+`/clear` closes the old run. A later resume of an exited session keeps its
+Synveda Session ID. Automatic cross-installation continuation is unavailable:
+hooks hold a spool from another installation and open replay refuses a changed
+installation binding. A manually supplied
+Synveda Session ID can still be used by an authorised MCP client.
+If the private installation ID cannot be persisted, automatic hook binding is
+unavailable until that storage is restored; no temporary identity is minted.
+If `/clear` occurs after the run opened but credentials are now unavailable,
+its close intent remains in the spool for the next authenticated start or
+explicit flush. An observation recorded before any run opened still needs that
+native ID to start again before it can be delivered.
+Start a new native conversation when changing the authenticated principal on
+the same gateway. Local Stop and PreCompact hooks do not resolve credentials,
+so cross-principal continuation of one native ID is not qualified.
 
 The injected context block is budgeted. For deeper MCP recall, pass the
 `session_id` supplied in that context; the tool reads the same authorised
@@ -187,6 +205,8 @@ Environment (highest precedence):
 - `SYNVEDA_PROJECT` — the project runs belong to. Optional, but it must be
   explicit when project-scoped context is required; project list order is not
   an identity
+- `SYNVEDA_REPOSITORY` — an existing repository attachment ID in that project.
+  Use the same ID in linked worktrees; the adapter does not guess from a remote
 - `SYNVEDA_TIMEOUT_MS` — per-call deadline, default 3000
 
 Per project, optional, at `.synveda/config.json` at the Git root (also used by
@@ -201,6 +221,7 @@ hooks launched from subdirectories):
   "gateway_url": "http://127.0.0.1:8120",
   "workspace_id": "0198e4c1-0000-7000-8000-000000000001",
   "project_id": "0198e4c1-0000-7000-8000-000000000002",
+  "repository_id": "0198e4c1-0000-7000-8000-000000000003",
   "timeout_ms": 3000,
   "budget_tokens": 4000,
   "compact_budget_tokens": 1500
@@ -213,6 +234,14 @@ A budget narrows and never widens: the effective budget is
 `workspace_id` and `project_id` are safe to set in a checked-out repository, unlike
 `gateway_url`: naming a workspace inside a tenant you are already
 authenticated to cannot redirect a credential anywhere.
+The repository ID is checked against the stored project attachment by the
+gateway. A changed selection cannot silently rebind an active conversation.
+Git is optional. When available at the hook's cwd, the adapter records an
+opaque checkout ref, branch, commit, dirty state and observation time. It
+never reads a remote or stores a local path for identity. The first checkout
+observation and each captured event's observation are spooled before replay,
+so a later branch change does not relabel older events. These are local
+observations, not proof that two clones are the same repository.
 
 `gateway_url` here applies only when no `synveda login` credential is in
 play. A credential names the gateway it was issued for and that one
@@ -255,6 +284,10 @@ SessionEnd performs a bounded flush; the next `SessionStart` or `synveda
 session flush` delivers anything it could not acknowledge. An unreachable
 gateway, an expired login, a compaction or a reboot therefore costs no event
 which reached the spool.
+The spool retains an active conversation's binding even after its events are
+acknowledged or purged. It is retired only after the gateway accepts a terminal
+close. An ordinary Claude exit or interactive `/resume` is a delivery boundary,
+not a terminal close; `/clear` closes the old native conversation.
 
 Delivery is idempotent per event. Each event carries the transcript entry's own
 uuid as its `client_event_id`, so a redelivered batch that overlaps a previous

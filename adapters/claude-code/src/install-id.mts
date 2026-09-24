@@ -29,20 +29,20 @@ function installationFile(): string {
 /**
  * This installation's id, minted on first use.
  *
- * Never throws and always answers: a read-only home directory yields an
- * ephemeral id rather than a failed hook. That degrades the question "which
- * machine" to "some machine", which is the right trade against costing
- * somebody their session.
+ * An installation identity must survive hook processes. If private storage
+ * cannot keep one, automatic binding is unavailable for this invocation.
  */
-export function installationId(): string {
+export function installationId(): string | undefined {
   if (process.platform === "win32") {
     try {
       const id = privateState({ operation: "installation_id" }).id;
       if (typeof id === "string" && id.length > 0 && id.length <= 200) return id;
     } catch { /* Private storage refused; never fall back to an unchecked file. */ }
-    return randomUUID();
+    return undefined;
   }
-  const path = installationFile();
+  let path: string;
+  try { path = installationFile(); }
+  catch { return undefined; }
   try {
     const existing = readFileSync(path, "utf8").trim();
     if (existing.length > 0) return existing.slice(0, 200);
@@ -70,6 +70,6 @@ export function installationId(): string {
     } catch (error) {
       log("installation.unwritable", { error: diagnostic(error) });
     }
-    return minted;
+    return undefined;
   }
 }

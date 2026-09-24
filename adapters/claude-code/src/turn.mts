@@ -7,7 +7,7 @@
  * |---|---|---|
  * | `Stop` | the turn | returns once the local spool is durable |
  * | `PreCompact` | everything the transcript still holds | returns once the local spool is durable |
- * | `SessionEnd` | the last turn | a **bounded** synchronous flush, then closes |
+ * | `SessionEnd` | the last turn | a **bounded** synchronous flush; `clear` closes |
  *
  * `Stop` is the real write seam: it fires at the end of every turn. Its hook is
  * synchronous because Claude Code kills async hooks when `-p` tears down, but
@@ -30,6 +30,7 @@ import { resolveBearer } from "./credentials.mjs";
 import { closeRun, deliver, recordDelta } from "./deliver.mjs";
 import { CLIENT_NAME } from "./client.mjs";
 import { installationId } from "./install-id.mjs";
+import { observeGit } from "./git.mjs";
 import { log } from "./log.mjs";
 import {
   bindGateway,
@@ -38,7 +39,7 @@ import {
   retireIfComplete,
   saveSpool,
 } from "./spool.mjs";
-import { harnessSessionId } from "./session-start.mjs";
+import { harnessSessionId, pinPlacement } from "./session-start.mjs";
 import type { HookInput, HookOutput } from "./types.mjs";
 import { readTranscript } from "./transcript.mjs";
 
@@ -71,13 +72,36 @@ export async function turn(
     return {};
   }
   const externalId = harnessSessionId(input.session_id);
-  const spool = loadOrCreateSpool(externalId, configured.clientName ?? CLIENT_NAME, installationId());
+  if (externalId === undefined) {
+    log("session.identity_unavailable", { hook: input.hook_event_name });
+    return {};
+  }
+  const currentInstallation = installationId();
+  if (currentInstallation === undefined) {
+    log("installation.identity_unavailable", { hook: input.hook_event_name });
+    return {};
+  }
+  const spool = loadOrCreateSpool(externalId, configured.clientName ?? CLIENT_NAME, currentInstallation);
   if (spool === undefined) return {};
+  if (!pinPlacement(spool, configured)) {
+    log("session.binding_mismatch", { session: externalId });
+    return {};
+  }
+  const currentCheckout = observeGit(input.cwd, spool.client_installation_id);
+  if (spool.checkout === undefined) spool.checkout = currentCheckout;
   if (input.transcript_path !== undefined) spool.transcript_path = input.transcript_path;
+  // Terminal intent is part of the durable observation, even when a login is
+  // unavailable at this hook. A later start can drain and close the run.
+  const closesTask = input.hook_event_name === "SessionEnd" &&
+    (configured.clientName ?? CLIENT_NAME) === CLIENT_NAME && input.reason === "clear";
+  if (closesTask) {
+    spool.close_requested = true;
+    spool.end_reason = endReason(input, false);
+  }
 
   // Record first, always, and persist before anything touches the network.
   // This is the step the previous design did not have.
-  const recorded = recordDelta(spool, input.transcript_path, readEntries);
+  const recorded = recordDelta(spool, input.transcript_path, readEntries, spool.checkout);
   const durable = saveSpool(spool);
   if (!durable) {
     // The spool did not land. Delivering anyway would risk sending events
@@ -104,7 +128,9 @@ export async function turn(
     return {};
   }
 
-  const closesTask = (configured.clientName ?? CLIENT_NAME) === CLIENT_NAME;
+  // Claude can emit SessionEnd on ordinary exit or a switch to another
+  // conversation, then later resume the same native ID. Only /clear retires
+  // that identity. The Codex/Copilot wrappers have their own task semantics.
   const taskDeadline = closesTask ? undefined : hookStarted + TASK_EXIT_BUDGET_MS;
   const bearer = await resolveBearer(taskDeadline);
   // Silent: the session-start hook already told the user to log in, and saying

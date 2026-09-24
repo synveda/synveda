@@ -67,8 +67,10 @@ export interface OpenSessionRequest {
   external_session_id?: string;
   agent_name?: string;
   model_name?: string;
+  repository_id?: string;
   branch?: string;
   task_summary?: string;
+  metadata?: Record<string, unknown>;
 }
 
 /** `POST /v1/sessions` — the run, as much of it as the adapter reads. */

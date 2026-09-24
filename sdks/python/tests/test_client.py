@@ -59,6 +59,26 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.headers.get("idempotency-key"), options.get("idempotency_key"))
             self.assertEqual(request.headers["traceparent"], PARENT)
 
+    async def test_one_client_interleaves_explicit_sessions_without_inheriting_a_task(self):
+        seen = []
+        async def handler(request):
+            seen.append(request.url.path)
+            session_id = request.url.path.rsplit("/", 1)[-1]
+            if session_id == "denied":
+                return httpx.Response(404, json={"kind": "not_found"})
+            await asyncio.sleep(0.02 if session_id == "first" else 0)
+            return httpx.Response(200, json={"id": session_id})
+
+        client = await self.client(handler)
+        results = await asyncio.gather(*(client.request("get_session", path={"session_id": session_id})
+                                         for session_id in ("first", "second", "denied")),
+                                       return_exceptions=True)
+        self.assertEqual(results[0].data["id"], "first")
+        self.assertEqual(results[1].data["id"], "second")
+        self.assertIsInstance(results[2], ApiError)
+        self.assertEqual(results[2].status, 404)
+        self.assertEqual(set(seen), {"/v1/sessions/first", "/v1/sessions/second", "/v1/sessions/denied"})
+
     async def test_bounded_safe_refresh(self):
         refreshes, calls = [], []
         async def token(refresh):

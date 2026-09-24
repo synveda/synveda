@@ -243,6 +243,18 @@ Six OpenAPI tests and strict workspace Clippy pass. The
 records the current contract and validation limits. Licence
 selection is complete; registry publication and wider ADPT-4 scope remain open.
 
+**Concurrent task checkpoint (2026-09-23)**
+
+One TypeScript or Python client can interleave requests for two explicit Session
+IDs and a denied ID without carrying a mutable current task. Both source suites
+now pass ten tests; generated 15-operation/52-schema drift passes. The existing
+shared captured-Claude/SDK workflow passed through a fresh exact-role gateway
+and database, including allowed context, approved Skill bytes, pending proposal,
+foreign-Session denial and audit. This is fixture and gateway evidence, not a
+new live vendor/OIDC or installed-package qualification. The remaining release
+blocker is verified registry access and the owner support-policy decisions above;
+the next action remains the selected candidate release path after those inputs.
+
 Next: resolve the concrete choices in the release decision proposal above,
 starting with verified registry access, then execute only
 the selected release path and support policy. No public package was published.

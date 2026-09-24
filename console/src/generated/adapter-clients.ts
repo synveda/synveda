@@ -7,7 +7,7 @@ export const GENERATED_AGENT_CLIENTS = [
     "label": "Claude Code",
     "via": "plugin",
     "supportLevel": "verified",
-    "note": "verified: Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them."
+    "note": "verified: Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. Ordinary Claude exit preserves a resumable run; /clear closes it. The revised close rule has local fixture evidence, not a new paid native run."
   },
   {
     "id": "cursor",

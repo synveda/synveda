@@ -72,6 +72,12 @@ Rust/Kind/candidate build caches are saved only by main pushes. Candidate jobs
 reclaim their dedicated builder layers after OCI export, before installation.
 Keep production
 build and tests on one runner; do not transfer incompatible Cargo build trees.
+The external Helm job verifies the image IDs recorded by its successful
+source-built starter step, then reuses those three local images in a fresh
+external-provider Kind fixture. The second fixture still runs all TLS, issuer,
+audience, upgrade and audit checks. On the earlier full-main run, rebuilding
+the product image in that second fixture took 10m53s; compare hosted runs
+before claiming a wall-clock saving from reuse.
 
 ## Running and releasing
 

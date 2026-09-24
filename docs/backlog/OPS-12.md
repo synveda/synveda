@@ -102,6 +102,36 @@ Required local checks: `make check-fast`, focused Node packaging/release tests,
 Rust increments also require formatting, strict CLI Clippy and focused tests.
 Report services, credentials and native platforms separately from test failures.
 
+Concurrent-conversation verification on 2026-09-23 used captured Claude Code
+2.1.241 frames, the built hook, isolated PostgreSQL, and local Git worktrees.
+Ordinary exit now retains the native binding and `clear` closes it; duplicate
+event IDs with different content conflict. A new live two-conversation,
+resume, fork and subagent run remains open: this host has Claude Code 2.1.241
+but no native login, isolated provider credential or Synveda bearer. The next
+action is an explicitly authorized provider run in a disposable configuration,
+capture of the native child/fork fields, and comparison against persisted
+session/event provenance. The same-gateway cross-principal switch of one native
+ID also needs a stable authenticated namespace: Stop and PreCompact are local
+only, so the current spool cannot prove a principal change at those hooks.
+Until that is resolved, start a new native conversation when changing
+principals. A fixture replay alone does not qualify the live claim.
+An offline native run that never opened a Synveda Session still needs a
+SessionStart for that same native ID; a later different conversation cannot
+guess its placement and promote its undelivered events.
+The same shared-runtime audit found and fixed a Codex/Copilot regression:
+native runtime exit must flush without ending the task. Existing captured-frame
+tests failed on an unexpected `/end` call before the fix; Codex's eight and
+Copilot's 31 tests pass after it. An origin-mismatched Copilot start also now
+holds the saved spool byte-for-byte. Registry fixture/digest checks, shared MCP
+interleaving and the fresh captured-Claude/Python/TypeScript gateway workflow
+pass. These replays do not replace an authenticated native multi-conversation
+run for the three harnesses.
+Two additional failing-then-passing regressions pin automatic spool lookup and
+background retry to the persisted client installation ID. A copied spool from
+another installation is held; explicit operator recovery remains separate.
+An unwritable installation-ID store also now refuses automatic binding rather
+than minting a different namespace at each hook invocation.
+
 Earlier OPS-12 results: `make check-fast check-release-parity` passes (48 Node tests
 plus deterministic packaging/Helm parity). `cargo fmt --all --check`,
 `SQLX_OFFLINE=true cargo clippy -p synveda-cli --all-targets -- -D warnings` and

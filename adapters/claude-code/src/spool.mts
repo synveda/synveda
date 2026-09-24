@@ -52,6 +52,7 @@ import { diagnostic, log } from "./log.mjs";
 import { ensureDir, requirePrivateState, spoolDir } from "./paths.mjs";
 import { privateBytes, privateState } from "./private-state.mjs";
 import type { SessionEventType } from "./types.mjs";
+import type { CheckoutObservation } from "./git.mjs";
 
 /** The format version this build writes and reads. */
 export const SPOOL_VERSION = 1;
@@ -102,11 +103,16 @@ export interface Spool {
   external_session_id: string;
   workspace_id?: string;
   project_id?: string;
+  repository_id?: string;
+  /** First local observation, fixed before opening even if delivery is offline. */
+  checkout?: CheckoutObservation;
   gateway_url?: string;
   /** The last transcript entry turned into an entry here. */
   recorded_through?: string;
   /** Whether a close is owed once the backlog drains. */
   close_requested: boolean;
+  /** True after the gateway accepts or confirms a terminal close. */
+  closed?: boolean;
   end_reason?: string;
   /** Carried across hooks: only `SessionStart` payloads name them. */
   transcript_path?: string;
@@ -192,6 +198,10 @@ export function loadOrCreateSpool(
     state.spool.client_name !== clientName
   ) {
     log("spool.held", { session: externalSessionId, reason: "session_mismatch", corrupt: 0 });
+    return undefined;
+  }
+  if (state.spool.client_installation_id !== installationId) {
+    log("spool.held", { session: externalSessionId, reason: "installation_mismatch", corrupt: 0 });
     return undefined;
   }
   return state.spool;
@@ -295,12 +305,15 @@ function validSpool(spool: Spool): boolean {
     !optionalString(spool.session_id) ||
     !optionalString(spool.workspace_id) ||
     !optionalString(spool.project_id) ||
+    !optionalString(spool.repository_id) ||
+    !validCheckout(spool.checkout) ||
     !optionalString(spool.gateway_url) ||
     !optionalString(spool.recorded_through) ||
     !optionalString(spool.end_reason) ||
     !optionalString(spool.transcript_path) ||
     !optionalString(spool.model) ||
     typeof spool.close_requested !== "boolean" ||
+    (spool.closed !== undefined && typeof spool.closed !== "boolean") ||
     typeof spool.created_at !== "string" ||
     typeof spool.updated_at !== "string" ||
     !Array.isArray(spool.entries)
@@ -347,6 +360,16 @@ function optionalString(value: unknown): value is string | undefined {
   return value === undefined || typeof value === "string";
 }
 
+function validCheckout(value: unknown): value is CheckoutObservation | undefined {
+  if (value === undefined) return true;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const checkout = value as Record<string, unknown>;
+  return typeof checkout.ref === "string" && /^[0-9a-f]{24}$/u.test(checkout.ref)
+    && typeof checkout.observed_at === "string"
+    && optionalString(checkout.branch) && optionalString(checkout.commit)
+    && (checkout.dirty === undefined || typeof checkout.dirty === "boolean");
+}
+
 /** A fresh spool for a harness session. */
 export function newSpool(
   externalSessionId: string,
@@ -360,6 +383,7 @@ export function newSpool(
     client_name: clientName,
     external_session_id: externalSessionId,
     close_requested: false,
+    closed: false,
     created_at: now,
     updated_at: now,
     entries: [],
@@ -530,14 +554,16 @@ export function recordAttempt(spool: Spool): void {
 }
 
 /**
- * Removes a spool whose work is finished: every event acknowledged and no
- * close owed.
+ * Removes a closed spool whose work is finished: every event acknowledged and
+ * no close owed. An active spool is the durable native-to-Synveda binding even
+ * when it has no pending events.
  *
  * Deleting acknowledged events is otherwise `synveda session spool purge
  * --acknowledged`'s job. This is the narrow case where the whole file is
  * finished, and leaving it would mean a directory that only ever grows.
  */
 export function retireIfComplete(spool: Spool, path?: string): boolean {
+  if (spool.closed !== true) return false;
   if (spool.close_requested) return false;
   if (spool.entries.some((entry) => !entry.acknowledged)) return false;
   try {

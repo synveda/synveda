@@ -642,6 +642,9 @@ pub struct NewSessionEvent {
     /// The content, **already redacted** by the scan seam (CPR-12,
     /// ADR-0078 decision 1): raw finding text never reaches this module.
     pub payload: serde_json::Value,
+    /// Canonical hash of the submitted payload, computed before redaction.
+    /// The raw payload never reaches this module.
+    pub source_payload_hash: String,
     /// The scan's finding summary — `[{rule, category, count}]`, never
     /// matched text — stamped on the row as immutable provenance. `None`
     /// when the payload was clean.
@@ -702,6 +705,7 @@ struct EventRow {
     received_at: DateTime<Utc>,
     payload: serde_json::Value,
     payload_hash: String,
+    source_payload_hash: String,
     redactions: Option<serde_json::Value>,
 }
 
@@ -738,7 +742,7 @@ impl TryFrom<EventRow> for SessionEvent {
 /// re-sent with its keys in a different order is a different digest — which
 /// makes the hash a statement about an HTTP library rather than about the
 /// content. Found by the unit test below, not by reading.
-fn payload_hash(payload: &serde_json::Value) -> String {
+pub fn payload_hash(payload: &serde_json::Value) -> String {
     blake3::hash(
         synveda_types::json::canonicalise(payload)
             .to_string()
@@ -797,6 +801,17 @@ pub async fn append_events(
     for event in events {
         validate_client_event_id(&event.client_event_id)?;
         validate_json_object("payload", &event.payload, MAX_EVENT_PAYLOAD_BYTES)?;
+        if event.source_payload_hash.len() != 64
+            || !event
+                .source_payload_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(Error::Invalid {
+                message: "`source_payload_hash` must be a lowercase BLAKE3-256 hex digest"
+                    .to_owned(),
+            });
+        }
         if event.event_schema_version < 1 {
             return Err(Error::Invalid {
                 message: "`event_schema_version` is at least 1".to_owned(),
@@ -933,6 +948,10 @@ pub async fn append_events(
             .iter()
             .map(|event| payload_hash(&event.payload))
             .collect();
+        let source_hashes: Vec<String> = fresh
+            .iter()
+            .map(|event| event.source_payload_hash.clone())
+            .collect();
         // Nullable elements cannot ride a typed vec; `redactions` goes over as
         // a jsonb array whose elements are the per-event summary or json null
         // (mapped back to a SQL null in the insert).
@@ -947,18 +966,18 @@ pub async fn append_events(
             r#"
             insert into session_events
                 (id, tenant_id, session_id, event_type, event_schema_version,
-                 client_event_id, sequence, occurred_at, payload, payload_hash,
+                 client_event_id, sequence, occurred_at, payload, payload_hash, source_payload_hash,
                  redactions)
             select u.id, $1, $2, u.event_type, u.version, u.client_event_id,
-                   $3 + u.ord, u.occurred_at, u.payload, u.payload_hash,
-                   nullif($11::jsonb -> (u.ord - 1)::int, 'null'::jsonb)
+                   $3 + u.ord, u.occurred_at, u.payload, u.payload_hash, u.source_payload_hash,
+                   nullif($12::jsonb -> (u.ord - 1)::int, 'null'::jsonb)
             from unnest($4::uuid[], $5::text[], $6::int[], $7::text[],
-                        $8::timestamptz[], $9::jsonb[], $10::text[])
+                        $8::timestamptz[], $9::jsonb[], $10::text[], $11::text[])
                     with ordinality as u(id, event_type, version, client_event_id,
-                                         occurred_at, payload, payload_hash, ord)
+                                         occurred_at, payload, payload_hash, source_payload_hash, ord)
             returning id, tenant_id, session_id, event_type, event_schema_version,
                       client_event_id, sequence, occurred_at, received_at,
-                      payload, payload_hash, redactions
+                      payload, payload_hash, source_payload_hash, redactions
             "#,
             tenant_id.as_uuid(),
             session_id.as_uuid(),
@@ -970,6 +989,7 @@ pub async fn append_events(
             &occurred,
             &payloads,
             &hashes,
+            &source_hashes,
             redactions,
         )
         .fetch_all(&mut *conn)
@@ -981,13 +1001,15 @@ pub async fn append_events(
     // its own copy handed back.
     let mut held: std::collections::HashMap<String, SessionEvent> =
         std::collections::HashMap::new();
+    let mut held_source_hashes: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     if existing.len() < events.len() || !existing.is_empty() {
         for row in sqlx::query_as!(
             EventRow,
             r#"
             select id, tenant_id, session_id, event_type, event_schema_version,
                    client_event_id, sequence, occurred_at, received_at, payload,
-                   payload_hash, redactions
+                   payload_hash, source_payload_hash, redactions
             from session_events
             where tenant_id = $1 and session_id = $2
               and client_event_id = any($3::text[])
@@ -1000,8 +1022,29 @@ pub async fn append_events(
         .await
         .map_err(storage_error)?
         {
+            held_source_hashes.insert(row.client_event_id.clone(), row.source_payload_hash.clone());
             let event: SessionEvent = row.try_into()?;
             held.insert(event.client_event_id.clone(), event);
+        }
+    }
+
+    for event in events {
+        if !existing.contains(&event.client_event_id) {
+            continue;
+        }
+        let stored = held
+            .get(&event.client_event_id)
+            .ok_or_else(|| Error::Internal {
+                message: "a previously appended event could not be read back".to_owned(),
+            })?;
+        if stored.event_type != event.event_type
+            || stored.event_schema_version != event.event_schema_version
+            || stored.occurred_at.timestamp_micros() != event.occurred_at.timestamp_micros()
+            || held_source_hashes.get(&event.client_event_id) != Some(&event.source_payload_hash)
+        {
+            return Err(Error::Conflict {
+                message: "client_event_id already names a different event".to_owned(),
+            });
         }
     }
 
@@ -1140,7 +1183,7 @@ pub async fn event(
         r#"
         select id, tenant_id, session_id, event_type, event_schema_version,
                client_event_id, sequence, occurred_at, received_at, payload,
-               payload_hash, redactions
+               payload_hash, source_payload_hash, redactions
         from session_events
         where tenant_id = $1 and session_id = $2 and id = $3
         "#,
@@ -1178,7 +1221,7 @@ pub async fn events(
         r#"
         select id, tenant_id, session_id, event_type, event_schema_version,
                client_event_id, sequence, occurred_at, received_at, payload,
-               payload_hash, redactions
+               payload_hash, source_payload_hash, redactions
         from session_events
         where tenant_id = $1 and session_id = $2 and sequence > $3
         order by sequence

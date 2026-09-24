@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, session_id, event_type, event_schema_version,\n               client_event_id, sequence, occurred_at, received_at, payload,\n               payload_hash, redactions\n        from session_events\n        where tenant_id = $1 and session_id = $2 and id = $3\n        ",
+  "query": "\n            insert into session_events\n                (id, tenant_id, session_id, event_type, event_schema_version,\n                 client_event_id, sequence, occurred_at, payload, payload_hash, source_payload_hash,\n                 redactions)\n            select u.id, $1, $2, u.event_type, u.version, u.client_event_id,\n                   $3 + u.ord, u.occurred_at, u.payload, u.payload_hash, u.source_payload_hash,\n                   nullif($12::jsonb -> (u.ord - 1)::int, 'null'::jsonb)\n            from unnest($4::uuid[], $5::text[], $6::int[], $7::text[],\n                        $8::timestamptz[], $9::jsonb[], $10::text[], $11::text[])\n                    with ordinality as u(id, event_type, version, client_event_id,\n                                         occurred_at, payload, payload_hash, source_payload_hash, ord)\n            returning id, tenant_id, session_id, event_type, event_schema_version,\n                      client_event_id, sequence, occurred_at, received_at,\n                      payload, payload_hash, source_payload_hash, redactions\n            ",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,11 @@
       },
       {
         "ordinal": 11,
+        "name": "source_payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
         "name": "redactions",
         "type_info": "Jsonb"
       }
@@ -68,7 +73,16 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "Uuid"
+        "Int8",
+        "UuidArray",
+        "TextArray",
+        "Int4Array",
+        "TextArray",
+        "TimestamptzArray",
+        "JsonbArray",
+        "TextArray",
+        "TextArray",
+        "Jsonb"
       ]
     },
     "nullable": [
@@ -83,8 +97,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "a97fb50710a36821022287cd1207e25eac622d58971f8257ac73ed21d0116ffa"
+  "hash": "5eccc91ec7752994b99ef5e06b930cdcc099eb82be10e74ac4d14b054d23f515"
 }

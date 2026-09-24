@@ -1897,6 +1897,9 @@ async fn seed_quarantined(pool: &PgPool) -> (TenantId, SessionId, synveda_types:
             client_event_id: "rls-q1".to_owned(),
             occurred_at: chrono::Utc::now(),
             payload: serde_json::json!({"text": "[REDACTED:aws-access-key-id] fixture"}),
+            source_payload_hash: sessions::payload_hash(
+                &serde_json::json!({"text": "[REDACTED:aws-access-key-id] fixture"}),
+            ),
             redactions: Some(serde_json::json!([
                 {"rule": "aws-access-key-id", "category": "secret", "count": 1}
             ])),
@@ -1969,6 +1972,7 @@ fn cross_tenant_session_append_is_rejected() {
                 client_event_id: "forged".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({"text": "forged"}),
+                source_payload_hash: sessions::payload_hash(&serde_json::json!({"text": "forged"})),
                 redactions: None,
                 quarantine: false,
             }],
@@ -2101,6 +2105,9 @@ fn same_tenant_session_admission_works_under_rls() {
                     client_event_id: "e1".to_owned(),
                     occurred_at: chrono::Utc::now(),
                     payload: serde_json::json!({"text": "redelivered"}),
+                    source_payload_hash: sessions::payload_hash(
+                        &serde_json::json!({"text": "redelivered"}),
+                    ),
                     redactions: None,
                     quarantine: false,
                 },
@@ -2110,6 +2117,9 @@ fn same_tenant_session_admission_works_under_rls() {
                     client_event_id: "e3".to_owned(),
                     occurred_at: chrono::Utc::now(),
                     payload: serde_json::json!({"text": "fresh"}),
+                    source_payload_hash: sessions::payload_hash(
+                        &serde_json::json!({"text": "fresh"}),
+                    ),
                     redactions: None,
                     quarantine: false,
                 },
@@ -2193,6 +2203,9 @@ fn bookkeeping_events_are_recorded_without_a_work_signal() {
                 client_event_id: "warn-1".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({"text": "dropped a batch"}),
+                source_payload_hash: sessions::payload_hash(
+                    &serde_json::json!({"text": "dropped a batch"}),
+                ),
                 redactions: None,
                 quarantine: false,
             }],
@@ -4967,6 +4980,9 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
                 client_event_id: "e1".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({"text": "a secret plan"}),
+                source_payload_hash: sessions::payload_hash(
+                    &serde_json::json!({"text": "a secret plan"}),
+                ),
                 redactions: None,
                 quarantine: false,
             },
@@ -4976,6 +4992,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
                 client_event_id: "e2".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({"tool": "grep"}),
+                source_payload_hash: sessions::payload_hash(&serde_json::json!({"tool": "grep"})),
                 redactions: None,
                 quarantine: false,
             },
@@ -5632,6 +5649,9 @@ fn same_tenant_session_lifecycle_works_under_rls() {
                 client_event_id: "e1".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({"text": "a secret plan"}),
+                source_payload_hash: sessions::payload_hash(
+                    &serde_json::json!({"text": "a secret plan"}),
+                ),
                 redactions: None,
                 quarantine: false,
             }],
@@ -5708,6 +5728,7 @@ fn same_tenant_session_lifecycle_works_under_rls() {
                 client_event_id: "e3".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({}),
+                source_payload_hash: sessions::payload_hash(&serde_json::json!({})),
                 redactions: None,
                 quarantine: false,
             }],
@@ -5745,6 +5766,7 @@ fn same_tenant_session_lifecycle_works_under_rls() {
                 client_event_id: "e4".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({}),
+                source_payload_hash: sessions::payload_hash(&serde_json::json!({})),
                 redactions: None,
                 quarantine: false,
             }],
