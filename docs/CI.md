@@ -205,8 +205,17 @@ passed all six CLI archives and both native Docker/Helm candidates; only the
 publishing job was intentionally skipped. [PR #55 CI](https://github.com/synveda/synveda/actions/runs/35875955340)
 passed with the heavy Docker jobs deliberately skipped on a PR. The tagged
 [v0.4.1 Release run](https://github.com/synveda/synveda/actions/runs/35900269117)
-uses that exact source SHA. Record its publication and anonymous pull results
-here after it completes; the earlier v0.4.0 asset set stays immutable.
+used that exact source SHA. Both native published-image jobs failed in the
+anonymous pull step. The linked ARM64 job reported a failure at its first
+Docker Hub `product` pull: the verifier required the full `docker.io/`
+prefix in local `RepoDigests`, while Docker reports its familiar Hub name
+without that prefix. The final publish job was skipped, so v0.4.1 has no
+attested inventory or public GitHub Release assets. The release regression
+fixture now reproduces the mismatch and checks that a wrong digest or repository
+still fails. A tag rerun would use the original verifier and encounter already
+populated write-once image tags. Retain those candidates. The owner selected a new v0.4.2 candidate from main;
+it requires full exact-source CI and a nonpublishing drill before tagging.
+v0.4.0 remains the public release.
 
 The last full [refactor PR run](https://github.com/synveda/synveda/actions/runs/35860525470)
 took 2h12m24s. The [lightweight PR #55 run](https://github.com/synveda/synveda/actions/runs/35875955340)
@@ -231,9 +240,9 @@ not a controlled speedup measurement.
    read/write token without delete permission and the correct publisher username.
 3. Environment **release** has an owner reviewer, a `v*` deployment tag rule and
    the **DOCKERHUB_TOKEN** secret. An active Git tag ruleset blocks updates and
-   deletion of `v*` tags; creation is still unrestricted for repository writers.
-   Add a separate creation-only `v*` ruleset with bypass for the release
-   operator's team or role. Keep the update/deletion ruleset without bypass.
+   deletion of `v*` tags without bypass. A separate creation-only `v*` ruleset
+   now restricts new tags with administrator-role bypass for the release
+   operator; both rulesets were verified on 2026-09-24.
    **release-dry-run** needs no secrets or approval and passed on the exact
    v0.4.1 source commit.
 4. Give this repository's Actions token write access to the six GHCR packages
@@ -248,5 +257,6 @@ not a controlled speedup measurement.
 
 The [native CLI asset table](RELEASING.md#native-cli-release-artifacts) names
 every required public package. The existing v0.4.0 release has neither those
-six client-only archives nor the new authenticated checksum inventory; v0.4.1
-must satisfy the complete asset gate before it appears as a stable release.
+six client-only archives nor the new authenticated checksum inventory; the new
+v0.4.2 candidate must satisfy the complete asset gate before it appears as a
+stable release.

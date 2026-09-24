@@ -6,19 +6,22 @@ or existing OIDC. Bundled PostgreSQL is a persistent namespaced StatefulSet;
 CNPG is an explicit alternative requiring an operator you already manage.
 All modes preserve Cedar, forced RLS, VedaFlow, audit and the migration contract.
 
-<!-- installation-version: 0.4.1; publication: published -->
-**[v0.4.1 is published](https://github.com/synveda/synveda/releases/tag/v0.4.1).**
-The OCI chart and downloadable archive are identical. Both native Linux
-architectures passed the four ownership modes using the published image digests.
+<!-- installation-version: 0.4.2; publication: unreleased -->
+**v0.4.2 is the current source candidate and is not published.** The earlier
+[v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
+failed before native chart installation qualification. Use the
+[published v0.4.0 chart and instructions](https://github.com/synveda/synveda/tree/v0.4.0/deploy/helm/synveda)
+for a public artifact, or build this candidate from source.
 
 The [release pipeline](../../../docs/CI.md) retains all four modes, locked chart
 dependencies, install/upgrade/reinstall and recovery checks. It publishes
 Docker Hub/GHCR images and attested checksums after testing exact native OCI
 candidates. Server installation needs no native CLI package or publisher token.
 
-## Version 0.4.1 chart
+## Pending version 0.4.2 chart
 
-Use `RELEASE_VERSION=0.4.1` in the download procedure below. Verify `SHA256SUMS`
+The download procedure below requires completed publication. Use
+`RELEASE_VERSION=0.4.2` only after its assets exist. Verify `SHA256SUMS`
 with its attestation before trusting chart or overlay checksums. The package and its two image
 overlays come from that same release; no source build or registry login is
 needed. The release checks the archive against the anonymously retrievable
@@ -54,7 +57,7 @@ The release qualification uses Kind 0.32.0, Kubernetes and kubectl 1.36.1,
 Helm 4.2.3, PostgreSQL 17.11 with vector 0.8.6 and btree_gin 1.3, and Keycloak
 26.7.2 via locked keycloakx 7.3.2. Earlier explicit CNPG evidence used operator
 1.30.0; the bundled release installs no operator. Native Linux AMD64/ARM64
-runners qualified the published artifacts; local candidate evidence also covers
+runners qualified the source-built OCI candidates; local candidate evidence also covers
 Linux arm64 on macOS/OrbStack. The four-mode fixture uses private-CA HTTPS; the local recipe
 uses loopback port-forwarding. Real ingress,
 OpenShift, cloud services and a general Kubernetes minor-version window remain
@@ -112,7 +115,7 @@ on any download or checksum failure. No Rust compiler, native CLI, Dockerfile
 inspection or source edit is part of chart installation.
 
 ```sh
-RELEASE_VERSION=${RELEASE_VERSION:-0.4.1}
+RELEASE_VERSION=${RELEASE_VERSION:-0.4.2}
 release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
 mkdir "synveda-chart-$RELEASE_VERSION"
 cd "synveda-chart-$RELEASE_VERSION"
@@ -143,11 +146,11 @@ cp "synveda-images-$RELEASE_VERSION.yaml" release-images.yaml
 ```
 
 Save the verified archive, overlays, checksums and source revision with operator
-configuration. The public OCI chart at
-`oci://ghcr.io/synveda/charts/synveda`, version `0.4.1`, is byte-identical to
-the downloadable archive and requires no registry token. An unpublished
-candidate must instead come from its reviewed qualification artifacts; never
-substitute an arbitrary PR build for a trusted release.
+configuration. After v0.4.2 publication, the public OCI chart at
+`oci://ghcr.io/synveda/charts/synveda`, version `0.4.2`, will be byte-identical
+to the downloadable archive and require no registry token. Until then, use a
+reviewed local qualification artifact for this candidate; never substitute an
+arbitrary PR build for a trusted release.
 
 Private image mirrors need existing namespace-local pull
 Secrets in `imagePullSecrets` and, for packaged identity,

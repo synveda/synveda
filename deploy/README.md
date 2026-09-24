@@ -1,10 +1,13 @@
 # Deployment
 
 Public entry points: [Run with Docker](compose/PREBUILT.md) and
-[Deploy to Kubernetes](helm/synveda/README.md). The published v0.4.1 release
-includes Docker Hub and GHCR images, attested checksums and six native
-[CLI packages](../docs/RELEASING.md#native-cli-release-artifacts). The earlier
-v0.4.0 release remains immutable. The [CI and Release guide](../docs/CI.md)
+[Deploy to Kubernetes](helm/synveda/README.md). Published v0.4.0 remains the
+current complete release. The v0.4.1 tagged run copied images to Docker Hub
+and GHCR but failed before its attested checksum and native
+[CLI package](../docs/RELEASING.md#native-cli-release-artifacts) publication.
+The current v0.4.2 source candidate carries the digest-verifier fix and awaits
+the normal source CI, release drill and tagged qualification.
+The [CI and Release guide](../docs/CI.md)
 describes validation and publication.
 
 This file is the infrastructure-shape overview. Source-checkout operator steps
@@ -38,7 +41,7 @@ freshness or Skill/Tool advertisement.
   paired logical `backup`/fresh private `restore-smoke`, `down` and
   exact-confirmation `reset` lifecycle, plus optional observability and Apalis
   canary profiles.
-  Published v0.4.1 passed native Linux AMD64/ARM64 installation and recovery.
+  Published v0.4.0 passed native Linux AMD64/ARM64 installation and recovery.
   Separate source-development evidence includes a macOS/OrbStack clean-volume
   run; Docker Desktop and Windows/WSL2 remain unqualified. The plain-Compose
   bundle and refactored pipeline passed hosted native qualification.
@@ -50,10 +53,9 @@ freshness or Skill/Tool advertisement.
   Only CNPG mode requires a separately installed operator. The release workflow packages this
   chart and a digest-bound reference bundle using one versioned six-image plan:
   product, single-host and CloudNativePG PostgreSQL, optimized Keycloak,
-  reference proxy and browser acceptance. Published v0.4.1 passed exact OCI
-  candidate testing, two-registry publication, anonymous pulls and installation
-  in all four bundled/external database and identity combinations using the
-  final destination digests.
+  reference proxy and browser acceptance. The v0.4.1 source candidate passed
+  OCI, Compose and four-mode Helm testing, and the images reached both registries.
+  Its published-image pull gate failed before installation qualification.
 
 ## Bootstrap boundary
 
@@ -119,9 +121,10 @@ upgrade-shaped replacement. The CPR-36 database acceptance test also proves a
 runtime login with no tenant GUC cannot read tenant data. Current live Kind
 acceptance proves Keycloak login, a governed product round trip and worker
 readiness after CloudNativePG primary failover. That is Kubernetes source-image
-evidence. Published v0.4.1 has separate native Linux reports for Docker and the
-four operator-free Helm ownership modes; its optional CNPG path still needs
-qualification with the published images.
+evidence. Published v0.4.0 has separate native Linux reports for Docker and the
+four operator-free Helm ownership modes; the v0.4.1 candidate passed the same
+source-built modes but not public-image installation. The optional CNPG path
+still needs qualification with published images.
 
 ## Embeddings
 
@@ -152,10 +155,10 @@ profile remains pending.
 - The chart has no Qdrant, workflow scheduler, backup promise, external HSM or
   customer-managed-key implementation. Provider credentials are Secret
   references; rendered diagnostics must not contain values.
-- Native binaries have no OS code signature or notarization. Public v0.4.1
-  contains all six native client packages, including Windows x64/ARM64, with
-  hosted installed-binary reports. The checksum inventory is attested, but the
-  installer does not yet enforce attestation verification. There is no
+- Native binaries have no OS code signature or notarization. The v0.4.1
+  candidate passed all six native client package jobs, including Windows
+  x64/ARM64, but none was published. The installer does not yet enforce
+  attestation verification. There is no
   zero-downtime gateway upgrade guarantee or old-schema translator.
 
 <a id="small-team-kubernetes-release-contract"></a>
@@ -177,7 +180,7 @@ by ADR-0109 through ADR-0112 and the deployment contract above.
 | Portability | Restricted-ID Kind simulation and Kubernetes/OpenShift structural schemas; real SCC/router/CNI/CSI/cloud execution remains unqualified |
 | Recovery | Writer-quiesced native PostgreSQL archives, original key/issuer custody and clean-namespace functional verification; actual measurements are recorded in OPS-11, not inferred from retained PVCs |
 | Upgrade | Same-epoch migration reruns/locking and retained reinstall; no general N-1 release window is qualified, and the retired v0.2.0 schema is refused |
-| Distribution | v0.4.1 chart/images and digest overlays have anonymous retrieval evidence; six native CLI packages, qualified OCI candidates, Docker Hub/GHCR parity and attested checksums passed the release gate |
+| Distribution | v0.4.0 is the complete public set; v0.4.1 qualified OCI candidates and two-registry descriptor parity, but its anonymous image gate failed and no attested release asset set was published |
 
 The [release guide](../docs/RELEASING.md#owner-setup) records the owner
 settings needed for subsequent versions. A general

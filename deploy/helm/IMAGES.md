@@ -58,9 +58,10 @@ The shared Docker workflow builds native amd64 and arm64 OCI archives and tests
 those exact candidates. Release copies the qualified same-run bytes to Docker
 Hub and GHCR, joins each registry's indexes, and records both destinations in
 the release inventory. The packaged reference deployment's `environment.json`
-uses Docker Hub digests. `<version>` represents the release input. Published
-v0.4.1 uses the qualified Docker Hub digests and retains equivalent GHCR images.
-The earlier v0.4.0 release retains its original GHCR digests.
+uses Docker Hub digests. `<version>` represents the release input. The v0.4.1
+tagged run copied equivalent images to Docker Hub and GHCR but failed before
+anonymous installation verification or release asset publication. Published
+v0.4.0 retains its original GHCR digests.
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
@@ -72,9 +73,10 @@ The earlier v0.4.0 release retains its original GHCR digests.
 | `ghcr.io/synveda/browser-acceptance:<version>` | release acceptance fixture | Synveda, fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Digest-bound one-shot needed by reference acceptance, restore and upgrade smoke. It is not a product service. |
 
 Docker Hub is the consumer destination configured through
-`DOCKERHUB_NAMESPACE`; v0.4.1 uses `docker.io/synveda`. GHCR retains the same
-built artifacts. Each registry's index digest is recorded independently in the
-release inventory; see [release setup](../../docs/RELEASING.md).
+`DOCKERHUB_NAMESPACE`; the v0.4.1 candidate used `docker.io/synveda`. GHCR
+retains the same built artifacts. Each registry's index digest was recorded
+independently in the assembled Actions inventory; see
+[release setup](../../docs/RELEASING.md).
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|

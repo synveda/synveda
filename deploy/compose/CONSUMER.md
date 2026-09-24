@@ -1,6 +1,6 @@
 # Plain Compose consumer bundle
 
-This 0.4.1 bundle is a qualification artifact until the matching GitHub Release
+This 0.4.2 bundle is a qualification artifact until the matching GitHub Release
 is stable; the released v0.4.0 launcher remains available. This bundle uses the
 existing evaluation services with named private state; it cannot adopt the
 launcher's retained host state. Its artifact gate includes paired backup/restore;
@@ -19,7 +19,7 @@ source checkout). Start that route
 with a fresh project; it cannot adopt an existing direct-Compose installation.
 For a published client release, use its matching native `synveda-client-*`
 archive from the GitHub Release; all six OS/architecture packages are required
-by the pipeline. Until v0.4.1 is published, use the locally qualified candidate
+by the pipeline. Until v0.4.2 is published, use the locally qualified candidate
 instructions in `docs/CONSUMER_CLI.md`.
 
 For a disposable evaluation on a local Linux-container Docker engine, extract

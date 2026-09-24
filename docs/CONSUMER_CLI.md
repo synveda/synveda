@@ -1,9 +1,11 @@
 # Native consumer commands
 
-These commands are in the [v0.4.1 native client archives](https://github.com/synveda/synveda/releases/tag/v0.4.1)
-and matching plugin. Build the current CLI with
-`SQLX_OFFLINE=true cargo build -p synveda-cli`, or install the matching release
-archive below. [OPS-12](backlog/OPS-12.md) records native
+These commands are in the v0.4.2 source candidate and matching plugin. The
+[v0.4.1 tagged workflow](https://github.com/synveda/synveda/actions/runs/35900269117)
+qualified its native archives but did not publish them; v0.4.2 still needs its
+own native qualification. Build the current CLI with
+`SQLX_OFFLINE=true cargo build -p synveda-cli` or install a locally built
+candidate. [OPS-12](backlog/OPS-12.md) records native
 execution reports and the remaining qualification gaps.
 
 ## Release downloads
@@ -13,23 +15,23 @@ on Linux, macOS and Windows, each on x64 and ARM64. The
 [release asset table](RELEASING.md#native-cli-release-artifacts) gives their exact
 names. Every package and successful native report is required for stable
 publication; a failing target cannot be omitted. Actions artifacts named
-`binaries-TARGET` are available from successful validation runs. The v0.4.1
-archives and reports are public on its GitHub Release.
+`binaries-TARGET` are retained by a tagged validation run. The v0.4.2
+archives and reports have not yet been built or published.
 
 The existing v0.4.0 release has only the historical macOS ARM64 and Linux x64
 server/CLI archives. It has no `synveda-client-*` assets or Windows packages.
 Do not point the client installer at v0.4.0 public downloads. The source examples
-later in this page also support locally built candidates matching the 0.4.1
+later in this page also support locally built candidates matching the 0.4.2
 workspace version.
 
-For v0.4.1, download your platform's archive,
+After a complete release is published, download your platform's archive,
 `SHA256SUMS` and `SHA256SUMS.sigstore.json` into a private directory. Follow the
 [publisher and checksum verification steps](RELEASING.md#artifacts-and-verification)
 before installation. Use the installer from that exact tag and inspect it.
 From the directory containing the verified downloads on Unix:
 
 ```sh
-RELEASE_VERSION=0.4.1
+RELEASE_VERSION=0.4.2
 curl -fL "https://raw.githubusercontent.com/synveda/synveda/v$RELEASE_VERSION/scripts/install.sh" \
   -o synveda-install.sh
 # Inspect synveda-install.sh before executing it.
@@ -51,8 +53,9 @@ The installer checks checksums; it does not perform the attestation step for you
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
-`windows-x86_64`. All six targets have native artifact execution reports in
-the v0.4.1 release; broader OS versions and signing remain unqualified.
+`windows-x86_64`. All six targets passed native candidate artifact execution
+in the v0.4.1 tagged run; v0.4.2 must repeat those checks. Broader OS versions
+and signing remain unqualified.
 The CLI's Unix peer-witness code is isolated, and CLI/hooks share a tested
 platform path contract. Windows credential storage now has a native candidate
 for ACL, file-identity, bounded reads, locking and replacement checks. Private
@@ -85,7 +88,7 @@ The existing installer has an explicit client mode. For **locally built**
 candidate assets and their `SHA256SUMS` in an absolute directory:
 
 ```sh
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.1 \
+SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.2 \
   SYNVEDA_BASE_URL=file:///absolute/path/to/candidate-assets \
   sh scripts/install.sh
 ```
@@ -105,7 +108,7 @@ On native Windows x64 or arm64, use the source PowerShell installer with
 existing PowerShell policy permits it; the installer never changes that policy:
 
 ```powershell
-& ./scripts/install.ps1 -Version 0.4.1 -BaseUrl 'file:///C:/candidate-assets'
+& ./scripts/install.ps1 -Version 0.4.2 -BaseUrl 'file:///C:/candidate-assets'
 ```
 
 PowerShell 5.1+ and a private local fixed-drive parent are required. The default
@@ -149,11 +152,11 @@ and Corepack. Build the existing adapters first, download the selected pinned
 archive, then run on that target's native host:
 
 ```sh
-node scripts/package-client.mjs 0.4.1 darwin-arm64 target/debug/synveda \
+node scripts/package-client.mjs 0.4.2 darwin-arm64 target/debug/synveda \
   /absolute/path/to/node-v24.21.0-darwin-arm64.tar.gz \
   /absolute/path/to/candidate-assets "$(git rev-parse HEAD)"
-node scripts/check-client-package.mjs 0.4.1 \
-  /absolute/path/to/candidate-assets/synveda-client-0.4.1-darwin-arm64.tar.gz \
+node scripts/check-client-package.mjs 0.4.2 \
+  /absolute/path/to/candidate-assets/synveda-client-0.4.2-darwin-arm64.tar.gz \
   /absolute/path/to/client-report.json
 ```
 
@@ -170,7 +173,7 @@ replay is not real issuer login or native vendor loading.
 On each native Windows host, build the same adapters and CLI, then run:
 
 ```powershell
-node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.1 windows-arm64 C:/candidate-assets (git rev-parse HEAD)
+node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.2 windows-arm64 C:/candidate-assets (git rev-parse HEAD)
 ```
 
 Use `windows-x86_64` on x64. This downloads the pinned Node ZIP, packages the
@@ -190,11 +193,11 @@ when absent; the CLI does not build images.
 From a terminal, using the built CLI on PATH:
 
 ```sh
-synveda doctor --bundle /absolute/path/to/synveda-reference-0.4.1
-synveda up --bundle /absolute/path/to/synveda-reference-0.4.1
-synveda status --bundle /absolute/path/to/synveda-reference-0.4.1
-synveda logs --bundle /absolute/path/to/synveda-reference-0.4.1 --tail 100
-synveda down --bundle /absolute/path/to/synveda-reference-0.4.1
+synveda doctor --bundle /absolute/path/to/synveda-reference-0.4.2
+synveda up --bundle /absolute/path/to/synveda-reference-0.4.2
+synveda status --bundle /absolute/path/to/synveda-reference-0.4.2
+synveda logs --bundle /absolute/path/to/synveda-reference-0.4.2 --tail 100
+synveda down --bundle /absolute/path/to/synveda-reference-0.4.2
 ```
 
 Without `--bundle`, the commands look in `$SYNVEDA_HOME/reference/current`

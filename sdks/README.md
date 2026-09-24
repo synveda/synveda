@@ -3,7 +3,7 @@
 This initial, unpublished slice covers 15 operations from Synveda's checked
 OpenAPI: Sessions, observations, Context, approved immutable Skills, Knowledge
 proposals and audit pages. The generated contracts include the source SHA-256;
-they target the 0.4.1 API in this checkout. Broader API coverage, published
+they target the 0.4.2 API in this checkout. Broader API coverage, published
 packages and a public support policy remain in `docs/backlog/ADPT-4.md`.
 
 TypeScript uses Node's maintained Fetch implementation; Python uses HTTPX.
@@ -76,8 +76,8 @@ generated types, operation bindings, contract metadata and `py.typed`.
 
 ## Compatibility and release boundary
 
-SDK version **0.1.0** targets API version **0.4.1** and checked OpenAPI SHA-256
-`440c64a6772b4fea8e0503d5d0f268dfc9f64098d9f3a597f8e9ebeb120a69da`.
+SDK version **0.1.0** targets API version **0.4.2** and checked OpenAPI SHA-256
+`935ecca14d12adfbd1324d8ae16560698e93286195a8b67ab860618d9f164e32`.
 That digest covers the whole API document; the SDK exposes only the 15 selected
 operations. Another server version or contract has no compatibility claim from
 these checks. Regenerate after reviewed contract or package-version changes,
@@ -99,13 +99,14 @@ use that generated SDK version. Installed-package checks compare all three
 values with their sources and verify the actual client-identification header.
 They print the OS, architecture and runtime with content-free archive evidence.
 
-The 2026-09-20 product version bump regenerates the API version and document
+The 2026-09-20 v0.4.0 product version bump regenerated the API version and document
 digest; all 15 operation bindings and 52 SDK schemas remain unchanged. Local
 macOS arm64 checks with Node 24.18.0/Python 3.14.6 pass nine source tests and nine
 installed-package tests per SDK, including identical clean builds, installed
-types/resources, licence text and 0.4.0 target metadata. Authenticated gateway
-acceptance and the Linux runtime matrix were not rerun for this metadata change;
-the earlier evidence below remains tied to its named source.
+types/resources, licence text and 0.4.0 target metadata. That is historical
+evidence. The current v0.4.2 candidate regenerated the checked contract and
+passed local source and installed-package checks; its hosted runtime matrix and
+authenticated gateway acceptance remain gated by this candidate's CI.
 
 The 2026-09-19 Apache-2.0 increment starting at `9365c92` repeats the two
 native arm64 rows below, including exact installed licence/notice checks.

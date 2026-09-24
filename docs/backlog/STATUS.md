@@ -13,11 +13,17 @@ Docker and four-mode Kind qualification passed; the original qualified bytes
 were published after an upload-only failure, without moving the tag. Exact
 release/run links and remaining Docker Desktop/WSL2, OpenShift and N-1 blockers
 are in [CPR-45](CPR-45.md#installation-mission-2026-09-20) and [OPS-11](OPS-11.md).
-The [v0.4.1 release](https://github.com/synveda/synveda/releases/tag/v0.4.1)
-uses source `d74e75b8991f22d8f4dd07034b3cd91db1ffb867` and adds Docker
-Hub distribution, attested checksums and six native CLI packages. Its
+The v0.4.1 source `d74e75b8991f22d8f4dd07034b3cd91db1ffb867` passed full
+main CI and a nonpublishing release drill. Its
 [tagged workflow](https://github.com/synveda/synveda/actions/runs/35900269117)
-requires complete native Docker/Helm, client and public-asset verification.
+published the versioned image candidates and assembled release assets, but both
+anonymous Docker jobs failed. The linked ARM64 job reports a Docker Hub
+RepoDigest spelling mismatch.
+The final attestation and GitHub Release were skipped; v0.4.0 remains the current
+public download. OPS-12 records the verifier fix and the authorized v0.4.2
+candidate from current main. Its next gates are merge CI Result, exact-source
+main CI, the nonpublishing Release drill and tagged native verification. The
+v0.4.1 tag and existing image coordinates remain immutable.
 [Production readiness](../PRODUCTION_READINESS.md) owns the remaining custody,
 recovery and support gaps. Passing installation checks is not HA or certification.
 The fresh contributor walkthrough still needs unoccupied Docker/hosts resources;
@@ -42,8 +48,9 @@ checks (ADR-0065 amendment 13). X64 and arm64 passed all seven checks on clean s
 and unsafe archive/installer refusals. The x64 archive/report hashes and native
 identities were also checked locally; OPS-12 records both native job identities
 and the arm64 evidence bundle digest.
-Next: obtain passing Linux x64/ARM64 native archive reports and artifact-based
-real issuer/harness acceptance evidence. The 2026-09-23 concurrent-session
+Both Linux x64/ARM64 native archive reports passed in the v0.4.1 tagged run,
+but those archives are not public release assets. Next: artifact-based real
+issuer/harness acceptance evidence. The 2026-09-23 concurrent-session
 replay is local fixture evidence; OPS-12 records the missing authenticated
 two-conversation and child/fork run and its next action.
 The Unix witness code is now isolated and CLI/hooks share platform path fixtures
@@ -62,16 +69,18 @@ The dry-run bundle's 21 payload checksums passed, but its images were
 unpublished. Version 0.4.1 passed exact-source
 [main CI](https://github.com/synveda/synveda/actions/runs/35884349132) and a
 [nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/35884456435)
-before its immutable tag was pushed. The tagged release then qualifies both
-registries and all 31 stable assets. Real issuer/harness acceptance,
+before its immutable tag was pushed. The tagged run failed at the first
+anonymous Docker Hub RepoDigest check on both architectures; none of the 31
+assets passed final publication. Real issuer/harness acceptance,
 installer attestation enforcement and OS signing/notarization remain separate
 gaps. The temporary-worktree Compose
 fixture initially hit local ownership/loopback restrictions; the complete
 deployment and chart gate passed after those environment inputs were corrected.
 The Docker Hub variables and release environment secret are configured;
-`CI Result` is required on main and `v*` updates/deletions are protected.
-Restricting new `v*` tag creation to the release operator remains a manual
-setting in [the CI guide](../CI.md#manual-owner-settings).
+`CI Result` is required on main, `v*` updates/deletions are protected without
+bypass, and a separate creation-only ruleset restricts new `v*` tags to the
+administrator release operator as recorded in
+[the CI guide](../CI.md#manual-owner-settings).
 The 2026-09-24 CI gate amendment keeps native image smoke and four-mode Helm
 qualification on main, while both full local Compose lifecycle/recovery drills
 run on each architecture in the required nonpublishing and tagged Release jobs.

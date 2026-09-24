@@ -159,13 +159,40 @@ test("anonymous verification checks both destinations and refuses a synthetic or
       const expected = Object.values(inventory.registries).flatMap((entry) => Object.values(entry.images)).find((entry) => entry.reference === args.at(-1));
       return JSON.stringify(expected ? { manifests: expected.descriptors.map((entry) => JSON.parse(entry)) } : index(args.at(-1)));
     }
-    if (args[0] === "image") return JSON.stringify([{ Os: "linux", Architecture: "arm64", Id: hash("image"), RepoDigests: [args[2].replace(/:[^/:@]+(?=@sha256:)/, "")], Config: { Labels: { "org.opencontainers.image.source": "https://github.com/synveda/synveda", "org.opencontainers.image.revision": source, "org.opencontainers.image.version": version } } }]);
+    if (args[0] === "image") {
+      const familiarDigest = args[2]
+        .replace(/:[^/:@]+(?=@sha256:)/, "")
+        .replace(/^docker\.io\//, "");
+      return JSON.stringify([{
+        Os: "linux", Architecture: "arm64", Id: hash("image"),
+        RepoDigests: [familiarDigest],
+        Config: { Labels: {
+          "org.opencontainers.image.source": "https://github.com/synveda/synveda",
+          "org.opencontainers.image.revision": source,
+          "org.opencontainers.image.version": version,
+        } },
+      }]);
+    }
     if (args[0] === "run" && args.includes("/usr/local/bin/synveda")) return `synveda ${version}`;
     return "";
   };
   const report = verifyRegistrySet(manifest, inventory, "linux/arm64", version, source, run);
   assert.deepEqual(Object.keys(report.registries), ["dockerhub", "ghcr"]);
   assert.equal(calls.filter((args) => args[0] === "pull").length, 16);
+  for (const mutate of [
+    (digest) => digest.replace(/@sha256:.*/, `@${hash("wrong image")}`),
+    (digest) => digest.replace("owner-team/product", "other/product"),
+  ]) {
+    const wrongLocalDigest = (args) => {
+      if (args[0] !== "image") return run(args);
+      const [local] = JSON.parse(run(args));
+      if (args[2] === manifest.images.product) {
+        local.RepoDigests = [mutate(local.RepoDigests[0])];
+      }
+      return JSON.stringify([local]);
+    };
+    assert.throws(() => verifyRegistrySet(manifest, inventory, "linux/arm64", version, source, wrongLocalDigest), /product: local image lost its release digest/);
+  }
   const changed = structuredClone(manifest);
   changed.images.product = changed.images.product.replace(/@.*/, `@${hash("wrong")}`);
   for (const [environment, record] of [[changed, inventory], [manifest, { ...inventory, published: false }]]) {

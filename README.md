@@ -20,37 +20,36 @@ The screenshot shows the synthetic sample, not a live-agent or human-review clai
 
 ## Run with Docker
 
-The recommended first run uses the **prebuilt v0.4.1 bundle**, bundled PostgreSQL
+The current public first run uses the **prebuilt v0.4.0 bundle**, bundled PostgreSQL
 and Keycloak, and generated private credentials. You need a local Docker Engine
 28+, Compose 2.33.1+, curl, tar and a SHA-256 utility; start with 6 GiB available
-to Docker, plus GitHub CLI to verify the release attestation. No compiler,
-hostname edit, cloud account or model subscription is
+to Docker. No compiler, hostname edit, cloud account or model subscription is
 needed. Linux AMD64/ARM64 release installation is verified; macOS/OrbStack has
 local candidate evidence. Docker Desktop and Windows/WSL2 remain unqualified.
 
-<!-- installation-version: 0.4.1; publication: published -->
-[Release downloads and installation reports](https://github.com/synveda/synveda/releases/tag/v0.4.1).
-Use a new directory and stop if checksum verification fails:
+<!-- installation-version: 0.4.2; publication: unreleased -->
+The [v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
+stopped at the anonymous image check, before installation qualification or
+release publication. The v0.4.2 source candidate contains the verifier fix.
+Use the [v0.4.0 release](https://github.com/synveda/synveda/releases/tag/v0.4.0)
+until a complete successor is published. Its checksum detects corruption but
+does not authenticate the publisher. Use a new directory and stop if verification
+fails:
 
 ```sh
-mkdir synveda-0.4.1 && cd synveda-0.4.1
-release_url=https://github.com/synveda/synveda/releases/download/v0.4.1
-curl -fLO "$release_url/synveda-reference-0.4.1.tar.gz"
+mkdir synveda-0.4.0 && cd synveda-0.4.0
+release_url=https://github.com/synveda/synveda/releases/download/v0.4.0
+curl -fLO "$release_url/synveda-reference-0.4.0.tar.gz"
 curl -fLO "$release_url/SHA256SUMS"
-curl -fLO "$release_url/SHA256SUMS.sigstore.json"
-gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
-  --repo synveda/synveda \
-  --signer-workflow synveda/synveda/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.4.1 --deny-self-hosted-runners
-awk '$2 == "synveda-reference-0.4.1.tar.gz" { n++; print } END { if (n != 1) exit 1 }' \
+awk '$2 == "synveda-reference-0.4.0.tar.gz" { n++; print } END { if (n != 1) exit 1 }' \
   SHA256SUMS > reference.sha256
 if command -v shasum >/dev/null 2>&1; then
   shasum -a 256 --check reference.sha256
 else
   sha256sum --check reference.sha256
 fi
-tar -xzf synveda-reference-0.4.1.tar.gz
-cd synveda-reference-0.4.1
+tar -xzf synveda-reference-0.4.0.tar.gz
+cd synveda-reference-0.4.0
 ./synveda-compose up
 ./synveda-compose credential author
 ```
@@ -125,8 +124,9 @@ The [native consumer commands](docs/CONSUMER_CLI.md) provide lifecycle,
 project setup and managed adapter registration in the matching client package.
 
 The [v0.4.1 native CLI archives](docs/RELEASING.md#native-cli-release-artifacts)
-cover Linux, macOS and Windows on both x64 and ARM64. Download the matching
-archive and native validation report from the release assets.
+passed hosted candidate checks on Linux, macOS and Windows x64/ARM64, but are
+not public release assets. Build the current CLI from source or use a published
+v0.4.0 binary within its narrower platform and command contract.
 
 <a id="run-with-prebuilt-docker-images"></a>
 <a id="quick-start-from-a-source-checkout"></a>

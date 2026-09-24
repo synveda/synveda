@@ -173,7 +173,12 @@ export function verifyImages(
       );
     }
     const canonicalImage = image.replace(/:[^/:@]+(?=@sha256:)/, "");
-    if (!local.RepoDigests?.includes(canonicalImage))
+    // Docker reports Hub references by their familiar name after a pull, even
+    // when the immutable input explicitly names docker.io.
+    const localNames = canonicalImage.startsWith("docker.io/")
+      ? [canonicalImage, canonicalImage.slice("docker.io/".length)]
+      : [canonicalImage];
+    if (!local.RepoDigests?.some((digest) => localNames.includes(digest)))
       throw new Error(`${name}: local image lost its release digest`);
     if (firstParty) {
       const labels = local.Config?.Labels;
