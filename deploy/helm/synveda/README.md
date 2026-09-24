@@ -6,10 +6,13 @@ or existing OIDC. Bundled PostgreSQL is a persistent namespaced StatefulSet;
 CNPG is an explicit alternative requiring an operator you already manage.
 All modes preserve Cedar, forced RLS, VedaFlow, audit and the migration contract.
 
-<!-- installation-version: 0.4.2; publication: unreleased -->
-**v0.4.2 is the current source candidate and is not published.** The earlier
+<!-- installation-version: 0.4.3; publication: unreleased -->
+**v0.4.3 is the current source candidate and is not published.** The earlier
 [v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
-failed before native chart installation qualification. Use the
+failed before native chart installation qualification. The
+[v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
+passed anonymous image pulls but timed out after its full candidate chart
+qualification while repeating deployment checks. Use the
 [published v0.4.0 chart and instructions](https://github.com/synveda/synveda/tree/v0.4.0/deploy/helm/synveda)
 for a public artifact, or build this candidate from source.
 
@@ -18,10 +21,10 @@ dependencies, install/upgrade/reinstall and recovery checks. It publishes
 Docker Hub/GHCR images and attested checksums after testing exact native OCI
 candidates. Server installation needs no native CLI package or publisher token.
 
-## Pending version 0.4.2 chart
+## Pending version 0.4.3 chart
 
 The download procedure below requires completed publication. Use
-`RELEASE_VERSION=0.4.2` only after its assets exist. Verify `SHA256SUMS`
+`RELEASE_VERSION=0.4.3` only after its assets exist. Verify `SHA256SUMS`
 with its attestation before trusting chart or overlay checksums. The package and its two image
 overlays come from that same release; no source build or registry login is
 needed. The release checks the archive against the anonymously retrievable
@@ -115,7 +118,7 @@ on any download or checksum failure. No Rust compiler, native CLI, Dockerfile
 inspection or source edit is part of chart installation.
 
 ```sh
-RELEASE_VERSION=${RELEASE_VERSION:-0.4.2}
+RELEASE_VERSION=${RELEASE_VERSION:-0.4.3}
 release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
 mkdir "synveda-chart-$RELEASE_VERSION"
 cd "synveda-chart-$RELEASE_VERSION"
@@ -146,8 +149,8 @@ cp "synveda-images-$RELEASE_VERSION.yaml" release-images.yaml
 ```
 
 Save the verified archive, overlays, checksums and source revision with operator
-configuration. After v0.4.2 publication, the public OCI chart at
-`oci://ghcr.io/synveda/charts/synveda`, version `0.4.2`, will be byte-identical
+configuration. After v0.4.3 publication, the public OCI chart at
+`oci://ghcr.io/synveda/charts/synveda`, version `0.4.3`, will be byte-identical
 to the downloadable archive and require no registry token. Until then, use a
 reviewed local qualification artifact for this candidate; never substitute an
 arbitrary PR build for a trusted release.

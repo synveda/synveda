@@ -11,10 +11,11 @@ size: XL
 ## Problem and evidence
 
 Start: `f9620cd2d51d18873523e9ab1abec1b3464c13ec`, clean `main`, workspace
-version `0.4.0`. Committing and pushing this OPS-12 checkpoint to `main` is
-authorized. Branch changes, version bumps, tags and release publication still
-require separate authorization; never replace v0.4.0. The published release uses
-`e59284619567d6a13b70ce3f3b3e81121b7621e6`; it is not this working tree.
+version `0.4.0`. The owner subsequently authorized merging the CI fixes and
+publishing a successor from latest main. v0.4.1 and v0.4.2 tagged publication
+stopped before their final signed asset sets. The next immutable candidate is
+v0.4.3; never replace the existing tags, images or chart. The latest complete
+public release remains v0.4.0 at `e59284619567d6a13b70ce3f3b3e81121b7621e6`.
 
 Deliver authenticated local evaluation through the existing Compose graph and
 native client-only installation. Keep external PostgreSQL, generic OIDC,
@@ -32,11 +33,13 @@ exact scope, observation and receipt contracts.
 The published reference launcher prepares host files before Compose. This
 working tree adds a plain-Compose candidate with locally qualified named-volume
 recovery. Release CI now packages it and requires its separate native lifecycle
-and recovery reports before publication; no new release has been authorized.
+and recovery reports before publication; the owner authorized a new immutable
+v0.4.3 release after the two failed tagged runs.
 
-Current release builds six images once per native Linux architecture: product,
-postgres, cnpg-postgres, keycloak, proxy and browser-acceptance. GHCR is the only
-published registry. Native binary archives contain CLI, gateway and worker for
+The v0.4.0 release used GHCR only. Current release builds six images once per
+native Linux architecture: product, postgres, cnpg-postgres, keycloak, proxy and
+browser-acceptance, then copies the same OCI candidates to Docker Hub and GHCR.
+Native binary archives contain CLI, gateway and worker for
 macOS arm64 and Linux x86_64. The plugin archive contains compiled Claude,
 Codex and Copilot hooks but requires system Node. The installer downloads server
 artifacts for every client. Credentials still assume HOME/XDG. This working tree
@@ -638,13 +641,31 @@ change the immutable tag's workflow code. The image candidates and assembled
 assets remain in that run, but no signed inventory or public GitHub Release
 was produced. Do not rerun the tag into write-once image coordinates.
 
+The v0.4.2 source `d7441eb4a403b7cee2122c249c6bd931edb1e672` passed
+[full main CI](https://github.com/synveda/synveda/actions/runs/35976416487)
+and the [nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/35976499619).
+Its [tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
+published both registries' exact candidate copies and the OCI chart. Both
+anonymous native pulls and executable checks passed, resolving the v0.4.1
+RepoDigest failure. The public verification jobs then repeated both full
+Compose drills and four Helm modes serially. ARM64 completed all those checks
+but was cancelled before uploading its report at the 90-minute limit. AMD64
+completed the reference Compose drill and was in the plain-Compose recovery
+drill when its limit cancelled it. Final attestation and GitHub Release were
+skipped. Preserve the v0.4.2 tag, image coordinates and chart; no new signed
+public asset set was produced.
+
 Continue OPS-12 from the published v0.4.0 bytes. The owner authorized a new
-v0.4.2 release from the latest mainline source. Its candidate includes the
-Docker Hub RepoDigest verifier fix and coordinated workspace, chart, adapter,
-console, OpenAPI and SDK version metadata. Next: merge it through CI Result,
-wait for full exact-source main CI, run the nonpublishing Release drill, then
-push the unused v0.4.2 tag for native anonymous pull, Docker, Helm and final
-asset verification. Preserve existing v0.4.1 image tags and the source tag.
+v0.4.3 release from the latest mainline source. Its candidate includes the
+Docker Hub RepoDigest verifier fix, keeps full native candidate Compose/Helm
+qualification and retains those source-bound reports in the signed asset set.
+The final jobs check both registries anonymously and compare the OCI chart;
+they do not repeat the slow full deployment drills. The candidate also aligns
+workspace, chart, adapter, console, OpenAPI and SDK version metadata. Next:
+merge it through CI Result, wait for full exact-source main CI, run the
+nonpublishing Release drill, then push the unused v0.4.3 tag for anonymous
+native image/chart and final asset verification. Preserve both failed tags and
+their existing image/chart coordinates.
 For another local candidate, use the
 existing `package-release.sh` arguments with the explicit candidate flag, extract
 the archive, then run `node scripts/qualify-release.mjs --consumer-candidate

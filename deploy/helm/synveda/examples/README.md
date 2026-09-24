@@ -1,6 +1,6 @@
 # Deploy to Kubernetes
 
-These examples target the **unpublished v0.4.2 chart candidate** and its
+These examples target the **unpublished v0.4.3 chart candidate** and its
 matching digest overlay. Public artifact downloads are unavailable until a
 complete release is verified. For current source checks, start with the
 [chart setup](../README.md#namespace-installer-and-artifact-acquisition),
@@ -35,9 +35,9 @@ helm upgrade --install synveda "$CHART" -n synveda-evaluation \
   --wait --wait-for-jobs --timeout 15m
 ```
 
-After v0.4.2 publication, the verified overlay will pin its product, bundled
+After v0.4.3 publication, the verified overlay will pin its product, bundled
 PostgreSQL and Keycloak bytes. Keep that same overlay for subsequent operations.
-The OCI chart at `oci://ghcr.io/synveda/charts/synveda`, version `0.4.2`, will
+The OCI chart at `oci://ghcr.io/synveda/charts/synveda`, version `0.4.3`, will
 then be available; `helm pull` is unnecessary when using the verified archive.
 
 Preparation writes mode-0600 private files once. It creates unique database

@@ -19,11 +19,16 @@ main CI and a nonpublishing release drill. Its
 published the versioned image candidates and assembled release assets, but both
 anonymous Docker jobs failed. The linked ARM64 job reports a Docker Hub
 RepoDigest spelling mismatch.
-The final attestation and GitHub Release were skipped; v0.4.0 remains the current
-public download. OPS-12 records the verifier fix and the authorized v0.4.2
-candidate from current main. Its next gates are merge CI Result, exact-source
-main CI, the nonpublishing Release drill and tagged native verification. The
-v0.4.1 tag and existing image coordinates remain immutable.
+The [v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
+passed anonymous Docker Hub/GHCR pulls on both native architectures. Its public
+jobs then repeated the full candidate deployment drills and reached their
+90-minute limit before retaining reports or publishing a signed inventory.
+The final attestation and GitHub Release were skipped again; v0.4.0 remains the
+current public download. OPS-12 records the authorized v0.4.3 candidate, which
+retains both full native candidate drills and bounds public verification to
+anonymous image execution and chart parity. Its next gates are merge CI Result,
+exact-source main CI, the nonpublishing Release drill and tagged native
+verification. Both failed tags and their image coordinates remain immutable.
 [Production readiness](../PRODUCTION_READINESS.md) owns the remaining custody,
 recovery and support gaps. Passing installation checks is not HA or certification.
 The fresh contributor walkthrough still needs unoccupied Docker/hosts resources;

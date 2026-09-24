@@ -5,7 +5,9 @@ Public entry points: [Run with Docker](compose/PREBUILT.md) and
 current complete release. The v0.4.1 tagged run copied images to Docker Hub
 and GHCR but failed before its attested checksum and native
 [CLI package](../docs/RELEASING.md#native-cli-release-artifacts) publication.
-The current v0.4.2 source candidate carries the digest-verifier fix and awaits
+The v0.4.2 tagged run passed anonymous image pulls but timed out while
+repeating the complete installation drills, also before final publication.
+The current v0.4.3 source candidate carries the digest-verifier fix and awaits
 the normal source CI, release drill and tagged qualification.
 The [CI and Release guide](../docs/CI.md)
 describes validation and publication.

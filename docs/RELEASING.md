@@ -4,10 +4,14 @@ OPS-8 / OPS-12; [ADR-0115](adr/adr-0115-prebuilt-container-release-verification.
 The [CI/release guide](CI.md) owns the workflow map, source gate, local checks
 and current manual repository settings.
 The [v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
-failed in both anonymous Docker verification jobs; its final attestation and
-GitHub Release publication were skipped. The versioned images and assembled
-assets remain immutable. The v0.4.2 source candidate contains the verifier
-fix and is awaiting exact-source CI, a nonpublishing drill and a new tag. The
+failed at Docker Hub RepoDigest verification. The
+[v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
+passed anonymous digest pulls on both architectures, then timed out while
+repeating the complete deployment drills. Neither run reached final attestation
+or GitHub Release publication. Their versioned images, charts and tags remain
+immutable. The v0.4.3 source candidate retains native candidate qualification
+and shortens the public verification gate; it awaits exact-source CI, a
+nonpublishing drill and a new tag. The
 published v0.4.0 remains unchanged and uses GHCR, its original
 installer and its original checksum-only trust boundary. Never rerun publication
 against that version. The [installation guide](../deploy/compose/PREBUILT.md)
@@ -40,7 +44,7 @@ CI and Release dry runs also retain these packages as Actions artifacts named
 `binaries-TARGET`; those are validation outputs, not public releases. A missing
 runner, archive or successful report blocks publication; no target is optional.
 
-The v0.4.2 source candidate retains `synveda-client-VERSION-TARGET.tar.gz`
+The v0.4.3 source candidate retains `synveda-client-VERSION-TARGET.tar.gz`
 for native macOS/Linux x86_64 and arm64, plus `.zip` for Windows
 x86_64/arm64. Each contains the existing CLI and adapters plus private Node pinned
 by upstream SHA-256 in [the runtime inventory](../scripts/node-runtimes.json),
@@ -153,8 +157,8 @@ already populated versioned image tags, so rerunning that tag would hit the
 write-once preflight and would also execute the original verifier. Inspect and
 retain those bytes; do not delete/rebuild/overwrite them automatically. Recover
 using the original verified artifacts under an explicitly reviewed owner procedure,
-or publish v0.4.2 after its separate gates pass. Do not move a published Git tag.
-Stable announcement now follows a draft upload and verification of all 31
+or publish v0.4.3 after its separate gates pass. Do not move a published Git tag.
+Stable announcement now follows a draft upload and verification of all 35
 expected asset names, sizes and completed upload states. An upload failure
 leaves the draft unpublished. For upload-only recovery after full qualification,
 use the original `verified-release-assets` artifact (30-day retention), which includes the
@@ -228,10 +232,11 @@ never use a real release to test whether the secret was added correctly.
 
 ## Artifacts and verification
 
-The complete stable inventory is 31 assets: six native client archives and six
+The complete stable inventory is 35 assets: six native client archives and six
 matching reports; the two historical server archives; console, plugin and
 reference archives; the Helm chart and two image overlays; the two-registry
-inventory; eight native image/Compose/consumer/Helm qualification reports; and
+inventory; two native anonymous image reports, two candidate identities, two
+candidate image smoke reports and six candidate Compose/consumer/Helm reports; and
 `SHA256SUMS` plus `SHA256SUMS.sigstore.json`. The executable inventory is
 [`scripts/check-release-assets.mjs`](../scripts/check-release-assets.mjs).
 
@@ -250,16 +255,21 @@ Use the release's immutable overlay when installing the packaged chart.
 
 Native verification starts with an empty Docker credential store. It checks
 both registries, including descriptor parity, anonymous digest pulls, labels
-and executable assets. The full existing Docker lifecycle/browser login/sample/
-paired-recovery and Kind checks then consume the Docker Hub bundle. The archive
-also includes the plain-Compose candidate and `synveda-recovery`. Both native
-jobs must run `qualify-release.mjs --consumer-candidate` against those extracted
+and executable assets, then pulls the OCI chart anonymously and compares its
+bytes to the release archive. Before registry publication, both native candidate
+jobs run the full Docker lifecycle/browser login/sample/paired-recovery and
+four-mode Kind checks against the exact OCI bytes that are copied to the public
+registries. The candidate archive also includes the plain-Compose graph and
+`synveda-recovery`. Both native jobs must run
+`qualify-release.mjs --consumer-candidate` against those extracted candidate
 bytes. The required `release-consumer-{amd64,arm64}.json` reports cover stopped
 writers, a private empty-target restore, original sealed keys, audit/key
 verification, real browser access and the original sample receipt. They join
 the checksummed, attested release inventory; a missing or failed report blocks
-publication. The host-state Docker and Kind gates remain required. These
-reports distinguish image smoke from full deployment evidence; they do not
+publication. The candidate identity and smoke reports bind the deployment
+reports to the published image descriptors. The public jobs do not repeat those
+full deployment drills. These reports distinguish anonymous distribution from
+candidate deployment evidence; they do not
 qualify Windows, Docker Desktop, OpenShift or an N-1 migration.
 
 The full drills are `scripts/qualify-release.mjs` and

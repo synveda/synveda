@@ -14,14 +14,16 @@ source-deployment lifecycle and optional modes.
 To run a server without a checkout or compiler, use the
 [prebuilt Docker guide](PREBUILT.md). It uses this same deployment graph and a
 release-pinned launcher. The published v0.4.0 bundle includes the reference
-archive. The v0.4.1 tagged verification failed; v0.4.2 is the current
+archive. The v0.4.1 digest check and v0.4.2 public-verifier timeout prevented
+publication; v0.4.3 is the current
 unpublished source candidate. Earlier pre-epoch-3 databases are deliberately
 refused.
 
 The [CI/release guide](../../docs/CI.md) describes candidate validation and
 publication. Shared Docker jobs build each native AMD64/ARM64 image once, then
 test the extracted bundle against those exact OCI candidates. Release copies
-qualified bytes to Docker Hub and GHCR and repeats public installation checks.
+qualified bytes to Docker Hub and GHCR, then checks anonymous digest pulls and
+executable assets on both native architectures.
 Published consumers need no source build or publisher token. The existing
 v0.4.0 downloads retain their original GHCR/checksum contract. v0.4.1 intended
 attested checksums and both registries, but its tagged verification failed.

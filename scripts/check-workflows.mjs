@@ -151,9 +151,16 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     'SYNVEDA_PACKAGE_CONSUMER_CANDIDATE: "1"',
     'node scripts/check-release-assets.mjs assets "$VERSION" "$GITHUB_SHA" "$PUBLISH" assembled',
     'pattern: "{binaries-*,bundles}"',
+    "pattern: docker-checks-*",
+    "Stage this run's native candidate qualification reports",
     "name: release-assets",
     "assets/synveda-client-*.zip",
     "assets/synveda-client-report-*.json",
+    "assets/release-candidate-*.json",
+    "assets/release-local-images-*.json",
+    "assets/release-docker-*.json",
+    "assets/release-consumer-*.json",
+    "assets/release-kubernetes-*.json",
   ])
     require(assembly.includes(marker), `assembly boundary missing: ${marker}`);
   const oci = stepBlock(assembly, "Publish and pull the OCI chart");
@@ -172,17 +179,16 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
   require(!/secrets\.|docker\/login-action|packages: write/.test(
     verify,
   ), "public verification must be anonymous and read-only");
+  require(!/node scripts\/qualify-(?:release|kubernetes-release)\.mjs|helm\/kind-action/.test(
+    verify,
+  ), "public verification must not repeat full native candidate drills");
   for (const marker of [
     'mktemp -d "$RUNNER_TEMP/synveda-anonymous-docker.XXXXXX"',
     'echo "DOCKER_CONFIG=$directory" >> "$GITHUB_ENV"',
     "sha256sum --check SHA256SUMS",
     "node scripts/verify-release-images.mjs",
     '"assets/synveda-registry-images-$VERSION.json"',
-    "node scripts/qualify-release.mjs \\",
-    "node scripts/qualify-release.mjs --consumer-candidate",
-    "node scripts/qualify-kubernetes-release.mjs",
     'cmp "assets/synveda-$VERSION.tgz" "anonymous-chart/synveda-$VERSION.tgz"',
-    "release-consumer-${{ matrix.arch }}.json",
     "name: release-verification-${{ matrix.arch }}",
   ])
     require(verify.includes(
@@ -319,6 +325,7 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     "node scripts/qualify-release.mjs",
     "node scripts/qualify-release.mjs --consumer-candidate",
     "node scripts/qualify-kubernetes-release.mjs",
+    "${{ runner.temp }}/images/candidate.json",
     "name: docker-candidate-${{ matrix.arch }}",
   ])
     require(shared.docker.includes(

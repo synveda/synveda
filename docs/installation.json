@@ -1,5 +1,5 @@
 {
-  "sourceVersion": "0.4.2",
+  "sourceVersion": "0.4.3",
   "publication": "unreleased",
   "precedingRelease": "v0.4.0",
   "precedingReleaseStatus": "published with its original GHCR and checksum-only installation contract",

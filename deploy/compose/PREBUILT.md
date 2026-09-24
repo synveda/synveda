@@ -5,10 +5,13 @@ evaluation, or select the reference HTTPS configuration for infrastructure you
 operate. Both use the same Compose services, database authority checks,
 Cedar, forced RLS, VedaFlow and audit.
 
-<!-- installation-version: 0.4.2; publication: unreleased -->
-**v0.4.2 is the current source candidate and is not published.** The earlier
+<!-- installation-version: 0.4.3; publication: unreleased -->
+**v0.4.3 is the current source candidate and is not published.** The earlier
 [v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
-failed before native installation qualification. For a working public download,
+failed before native installation qualification. The
+[v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
+also stopped before final publication after anonymous pulls passed and the
+repeated full drills timed out. For a working public download,
 use [v0.4.0 below](#previous-v040-release) and its original checksum contract.
 The [release manifest](../../docs/installation.json) owns this status.
 
@@ -17,7 +20,7 @@ images through Docker Hub and GHCR and includes six native CLI packages. No
 publisher token or native CLI is needed to install the server bundle.
 
 <a id="download-and-verify"></a>
-## Version 0.4.2 release bundle
+## Version 0.4.3 release bundle
 
 These commands require completed publication and will fail until its assets
 exist. The bundle downloads tested images by digest and never
@@ -26,7 +29,7 @@ the checksums; the GitHub CLI is a verification tool, not an installation
 dependency of the bundle.
 
 ```sh
-version=0.4.2
+version=0.4.3
 release_url="https://github.com/synveda/synveda/releases/download/v$version"
 mkdir "synveda-$version" && cd "synveda-$version"
 for file in "synveda-reference-$version.tar.gz" SHA256SUMS SHA256SUMS.sigstore.json; do

@@ -1,6 +1,6 @@
 # ADR-0108: Run each CI contract once and cache Kind image builds
 
-- **Status**: Accepted
+- **Status**: Accepted; amended
 - **Date**: 2026-09-19
 - **Feature(s)**: FND-1
 - **Deciders**: Synveda CI maintenance
@@ -184,3 +184,30 @@ publication credentials, Cedar/RLS/audit, or support claims. Compare hosted
 before and after durations before claiming a measured improvement. If the
 release drill ceases to block tags, restore full Compose to the exact-source
 main gate.
+
+## Amendment: retain candidate drills and bound public verification (2026-09-24)
+
+The v0.4.2 tagged run completed the full native candidate drills before copying
+their OCI bytes to Docker Hub and GHCR. Its public verification then repeated
+both Compose recovery drills and all four Helm modes serially on each native
+runner. The ARM64 runner completed those duplicate drills, but the job reached
+its 90-minute limit before retaining reports; AMD64 was still in the second
+Compose recovery drill. The release was not announced.
+
+Keep the full reference Compose, plain Compose and four-mode Helm drills in both
+native candidate jobs, including the nonpublishing Release drill before a tag.
+Retain their source-bound reports in the same tagged run and include them in the
+authenticated release inventory. After publication, fresh native runners must
+still pull and execute the exact Docker Hub and GHCR digests anonymously, check
+descriptors and source labels, and pull and byte-compare the OCI chart. The
+public jobs no longer repeat full deployment and recovery against registry
+copies. The candidate jobs and immutable-copy/descriptor checks establish the
+relationship between those deployment reports and the public bytes.
+
+This narrows the post-publication claim: it proves public distribution and
+executable smoke on both architectures, plus full deployment of the copied
+candidate bytes, but does not claim a second independent public-registry
+deployment. If anonymous smoke, digest parity or the native candidate reports
+fail, publication still stops. Reintroduce a fresh public deployment drill if
+copy parity cannot be established or a registry-specific deployment failure is
+observed.

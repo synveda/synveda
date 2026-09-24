@@ -1,6 +1,6 @@
 # ADR-0115: Verify prebuilt containers before announcing a release
 
-- **Status**: Accepted; amended twice
+- **Status**: Accepted; amended three times
 - **Date**: 2026-09-20
 - **Feature(s)**: OPS-8, CPR-45, OPS-12; coordinates OPS-11
 - **Deciders**: Owner's request for precompiled Docker deployment and release CI
@@ -120,7 +120,12 @@ synthetic manifest explicitly states that it cannot be installed. No rolling
 alias is introduced. Published v0.4.0 and its instructions remain unchanged.
 
 The native anonymous pull gate verifies both registries from empty credentials.
-The existing complete Docker and Kind gates consume the Docker Hub bundle.
+The existing complete Docker and Kind gates consume the native candidate bundle
+before its exact OCI bytes are copied. Their source-bound reports join the final
+authenticated inventory. The bounded public gate pulls and executes both
+registries' images anonymously and compares the published OCI chart byte for
+byte, without repeating full deployment and recovery; ADR-0108 records the
+v0.4.2 timeout evidence and this release-gate split.
 Publisher credentials are available only in protected publishing jobs. Final
 checksums and their image inventory are authenticated by an identity-bound
 GitHub build attestation, with a pinned action and explicit workflow/tag/source
