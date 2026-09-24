@@ -43,6 +43,7 @@ test("workflow refactor retains release, native platform and security boundaries
       "needs: [version, bundles]",
     ],
     ["release", "node scripts/require-release-ci.mjs", "echo skipped"],
+    ["release", "full_compose: true", "full_compose: false"],
     ["release", "node scripts/publish-images.mjs", "echo rebuilt"],
     ["release", "node scripts/verify-release-images.mjs", "echo skipped"],
     [
@@ -147,6 +148,7 @@ test("workflow refactor retains release, native platform and security boundaries
       "node scripts/qualify-release.mjs --consumer-candidate",
       "echo skipped",
     ],
+    ["docker", "if: inputs.full_compose", "if: false"],
     ["docker", "node scripts/qualify-kubernetes-release.mjs", "echo skipped"],
   ];
   for (const [file, from, to] of mutants) {
@@ -168,6 +170,7 @@ test("workflow refactor retains release, native platform and security boundaries
     ["if: needs.changes.outputs.cli == 'true'", "if: false"],
     ["node scripts/verify-starter-image-reuse.mjs", "echo unchecked images"],
     ["PRODUCT_IMAGE: synveda/product:ops11", "PRODUCT_IMAGE: unrelated/image:old"],
+    ["full_compose: false", "full_compose: true"],
   ])
     assert.ok(ciWorkflowFindings(current.ci.replace(from, to)).length);
 });

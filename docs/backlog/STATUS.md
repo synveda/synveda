@@ -80,6 +80,9 @@ The Docker Hub variables and release environment secret are configured;
 `CI Result` is required on main and `v*` updates/deletions are protected.
 Restricting new `v*` tag creation to the release operator remains a manual
 setting in [the CI guide](../CI.md#manual-owner-settings).
+The 2026-09-24 CI gate amendment keeps native image smoke and four-mode Helm
+qualification on main, while both full local Compose lifecycle/recovery drills
+run on each architecture in the required nonpublishing and tagged Release jobs.
 
 [Client support](../CLIENT_SUPPORT.md) and [SDK compatibility](../../sdks/README.md#compatibility-and-release-boundary)
 own tested versions and limits. [ADPT-4](ADPT-4.md) retains SDK release decisions.

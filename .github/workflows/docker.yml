@@ -6,6 +6,9 @@ on:
       version:
         type: string
         required: true
+      full_compose:
+        type: boolean
+        required: true
 
 permissions:
   contents: read
@@ -155,6 +158,7 @@ jobs:
           version: v0.32.0
           kubectl_version: v1.36.1
       - name: Test documented Compose installation and recovery
+        if: inputs.full_compose
         run: |
           node scripts/qualify-release.mjs "$IMAGES/bundle/synveda-reference-$VERSION" "$IMAGES/docker-checks.json"
           node scripts/qualify-release.mjs --consumer-candidate "$IMAGES/bundle/synveda-reference-$VERSION" "$IMAGES/consumer-checks.json"

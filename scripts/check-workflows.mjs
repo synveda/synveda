@@ -98,7 +98,8 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     ), "release must package all native clients and historical servers");
   require(jobs.docker.includes(
     "uses: ./.github/workflows/docker.yml",
-  ), "release must test shared Docker candidates");
+  ) && jobs.docker.includes("full_compose: true"),
+    "release must run full Compose candidate qualification");
   const version = jobs.version;
   for (const marker of [
     'test "$(git rev-parse HEAD)" = "$TRIGGER_SHA"',
@@ -323,6 +324,14 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     require(shared.docker.includes(
       marker,
     ), `local Docker qualification missing: ${marker}`);
+  require(shared.docker.includes("      full_compose:\n        type: boolean\n        required: true\n"),
+    "Compose qualification choice must be explicit for every caller");
+  const compose = stepBlock(shared.docker, "Test documented Compose installation and recovery");
+  require(compose.includes("        if: inputs.full_compose\n") &&
+    compose.includes("node scripts/qualify-release.mjs --consumer-candidate"),
+    "both full Compose drills must run when the release caller requests them");
+  require(!stepBlock(shared.docker, "Test Helm dependency combinations, install, upgrade and recovery").includes("        if:"),
+    "Helm candidate qualification must run for every Docker workflow caller");
   return findings;
 }
 export function ciWorkflowFindings(source) {
@@ -356,6 +365,8 @@ export function ciWorkflowFindings(source) {
       )
     )
       errors.push(`${name}: wrong change-selection dependency`);
+  if (!jobBlock(source, "docker").includes("full_compose: false"))
+    errors.push("main CI must reserve full Compose lifecycle for Release drills");
   if (
     !source.includes("  merge_group:") ||
     !source.includes("    branches: [main]") ||
