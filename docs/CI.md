@@ -27,7 +27,7 @@ independent. Only CLI and Docker share reusable jobs between CI and Release.
 | Release `binaries` ×4, `windows-clients` ×2 | Native packaging | CLI shared jobs in CI and Release | Linux/macOS/Windows x64 and ARM64, private Node checksums, packaged adapter/auth lifecycle; Release retains both historical server archives |
 | Release `version` | Source/version choice | Check release source | Exact checkout/version plus successful full main CI for that exact commit before publishing |
 | Release `bundles` | Frontend/plugin/chart | Build release bundles | Same locked console, plugin and chart packages; existing vendor validator remains advisory |
-| Release `images` ×2 | Six native images, two registries | Docker candidate validation; Publish Docker candidates | Same Dockerfiles, targets, labels, SBOM/provenance; tested OCI archives copied to Docker Hub and GHCR without rebuilding |
+| Release `images` ×2 | Six native images, two registries | Docker candidate validation; Publish Docker candidates | Same Dockerfiles, targets, labels, SBOM/provenance; Release dispatch and tag runs add both full Compose lifecycle/recovery drills before tested OCI archives are copied to Docker Hub and GHCR |
 | Release `assemble` | Indexes and asset inventory | Assemble release assets | Independently inspected registry digests, reference bundle/overlays, byte-identical OCI chart; all six client reports mandatory |
 | Release `verify-images` ×2 | Anonymous distribution/install | Test published Docker and Helm artifacts | Both registries, exact digest smoke, extracted Compose lifecycle/recovery and all four independent PostgreSQL/Keycloak modes; anonymous chart comparison |
 | Release `publish` | Attest and announce | Publish verified release | Exact-source attestation and checksum inventory; draft stays unpublished until all 31 assets upload successfully |
@@ -51,13 +51,19 @@ across these jobs has not been demonstrated.
 CI runs on PRs, main pushes, manual dispatch and `merge_group`. Feature-branch
 pushes do not create duplicate CI runs. Only superseded PR runs are cancelled.
 Main, manual and merge-group runs select everything, including both native
-Docker/Compose candidate jobs. PR selection uses the full Git merge-base diff,
+Docker candidate jobs. They build and smoke exact images and qualify four Helm
+dependency modes. The full reference and plain Compose lifecycle/recovery
+drills run in the nonpublishing Release dispatch and tagged Release workflow on
+both architectures; an operator runs that dispatch successfully before tagging.
+PR selection uses the full Git merge-base diff,
 including both sides of renames/deletions; failed comparison, an empty diff or
-any unknown/shared input selects every PR-eligible stage. Native Docker/Compose
-candidate qualification is deferred until main CI and the nonpublishing Release
-drill. PRs still run static deployment checks and live Helm installation,
+any unknown/shared input selects every PR-eligible stage. Native candidate
+qualification is deferred until main CI; the full local Compose ceremony is a
+release gate. PRs still run static deployment checks and live Helm installation,
 upgrade and recovery tests. A Docker candidate problem can therefore first
-appear after merge; exact-source main CI blocks tagging until it passes.
+appear after merge; exact-source main CI and its subsequent Release drill both
+block tagging until they pass. This split is recorded in
+[ADR-0108](adr/adr-0108-ci-gate-ownership-and-build-caching.md#amendment-qualify-the-full-local-compose-lifecycle-at-release-time-2026-09-24).
 
 The small allowlist in [ci-select.mjs](../scripts/ci-select.mjs) skips expensive
 jobs only for identified prose; website changes still select TypeScript and
@@ -69,7 +75,8 @@ skips or a changed dependency inventory fail the gate.
 
 Caches are optional: lockfiles remain required; cache hits never skip tests.
 Rust/Kind/candidate build caches are saved only by main pushes. Candidate jobs
-reclaim their dedicated builder layers after OCI export, before installation.
+reclaim their dedicated builder layers after OCI export, before native smoke and
+Helm qualification; Release runs then perform the full Compose drills.
 Keep production
 build and tests on one runner; do not transfer incompatible Cargo build trees.
 The external Helm job verifies the image IDs recorded by its successful
