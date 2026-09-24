@@ -77,9 +77,10 @@ gaps. The temporary-worktree Compose
 fixture initially hit local ownership/loopback restrictions; the complete
 deployment and chart gate passed after those environment inputs were corrected.
 The Docker Hub variables and release environment secret are configured;
-`CI Result` is required on main and `v*` updates/deletions are protected.
-Restricting new `v*` tag creation to the release operator remains a manual
-setting in [the CI guide](../CI.md#manual-owner-settings).
+`CI Result` is required on main, `v*` updates/deletions are protected without
+bypass, and a separate creation-only ruleset restricts new `v*` tags to the
+administrator release operator as recorded in
+[the CI guide](../CI.md#manual-owner-settings).
 The 2026-09-24 CI gate amendment keeps native image smoke and four-mode Helm
 qualification on main, while both full local Compose lifecycle/recovery drills
 run on each architecture in the required nonpublishing and tagged Release jobs.

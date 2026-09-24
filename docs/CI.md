@@ -240,9 +240,9 @@ not a controlled speedup measurement.
    read/write token without delete permission and the correct publisher username.
 3. Environment **release** has an owner reviewer, a `v*` deployment tag rule and
    the **DOCKERHUB_TOKEN** secret. An active Git tag ruleset blocks updates and
-   deletion of `v*` tags; creation is still unrestricted for repository writers.
-   Add a separate creation-only `v*` ruleset with bypass for the release
-   operator's team or role. Keep the update/deletion ruleset without bypass.
+   deletion of `v*` tags without bypass. A separate creation-only `v*` ruleset
+   now restricts new tags with administrator-role bypass for the release
+   operator; both rulesets were verified on 2026-09-24.
    **release-dry-run** needs no secrets or approval and passed on the exact
    v0.4.1 source commit.
 4. Give this repository's Actions token write access to the six GHCR packages
