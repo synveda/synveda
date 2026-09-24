@@ -80,11 +80,21 @@ export function publishRelease(
     ],
     { stdio: "inherit" },
   );
-  const release = JSON.parse(
-    run("gh", ["api", `repos/${repository}/releases/tags/${tag}`], {
+  // GitHub does not resolve a new draft through /releases/tags/{tag} until
+  // publication. Find the draft in the release list and keep its numeric ID
+  // through asset verification and promotion.
+  const releases = JSON.parse(
+    run("gh", ["api", `repos/${repository}/releases?per_page=100`], {
       encoding: "utf8",
     }),
   );
+  assert.ok(Array.isArray(releases), "release list is not an array");
+  const drafts = releases.filter((entry) => entry.tag_name === tag);
+  assert.equal(drafts.length, 1, "expected exactly one release for the tag");
+  const [release] = drafts;
+  assert.equal(release.draft, true, "release must still be a draft");
+  assert.equal(release.target_commitish, source, "draft targets another source");
+  assert.equal(release.name, `Synveda ${tag}`, "draft title differs");
   assert.ok(Number.isSafeInteger(release.id) && release.id > 0);
   // The expected set is smaller than one explicit page; an extra asset makes
   // the exact comparison fail, even if a later page exists.
@@ -96,7 +106,24 @@ export function publishRelease(
     ),
   );
   uploadedAssets(release, expected);
-  run("gh", ["release", "edit", tag, "--draft=false"], { stdio: "inherit" });
+  const published = JSON.parse(
+    run(
+      "gh",
+      [
+        "api",
+        "--method",
+        "PATCH",
+        `repos/${repository}/releases/${release.id}`,
+        "-F",
+        "draft=false",
+      ],
+      { encoding: "utf8" },
+    ),
+  );
+  assert.equal(published.id, release.id);
+  assert.equal(published.tag_name, tag);
+  assert.equal(published.target_commitish, source);
+  assert.equal(published.draft, false);
 }
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   const [directory, version] = process.argv.slice(2);

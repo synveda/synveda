@@ -503,17 +503,40 @@ test("stable publication waits for every expected upload and never includes chec
           )
             throw new Error("upload failed");
           if (command === "gh" && args[0] === "api") {
+            if (args[1] === "--method" && args[2] === "PATCH")
+              return JSON.stringify({
+                id: 42,
+                tag_name: `v${version}`,
+                target_commitish: source,
+                draft: false,
+              });
             if (args[1].includes("/commits/"))
               return JSON.stringify({
                 sha: fault === "tag" ? "b".repeat(40) : source,
               });
+            if (args[1].includes("/releases/tags/"))
+              throw new Error("draft release lookup by tag returns 404");
+            if (args[1].includes("/releases?")) {
+              const draft = {
+                id: 42,
+                tag_name: `v${version}`,
+                target_commitish: fault === "source" ? "b".repeat(40) : source,
+                name: `Synveda v${version}`,
+                draft: fault !== "draft",
+              };
+              return JSON.stringify([
+                { ...draft, id: 41, tag_name: "v0.3.0" },
+                draft,
+                ...(fault === "ambiguous" ? [{ ...draft, id: 43 }] : []),
+              ]);
+            }
             if (args[1].includes("/assets?"))
               return JSON.stringify(
                 expected
                   .slice(fault === "missing" ? 1 : 0)
                   .map((entry) => ({ ...entry, state: "uploaded" })),
               );
-            return JSON.stringify({ id: 42, draft: true });
+            return "";
           }
           return "";
         },
@@ -533,14 +556,32 @@ test("stable publication waits for every expected upload and never includes chec
     );
     assert.deepEqual(calls.at(-1), [
       "gh",
-      ["release", "edit", "v0.4.0", "--draft=false"],
+      [
+        "api",
+        "--method",
+        "PATCH",
+        "repos/synveda/synveda/releases/42",
+        "-F",
+        "draft=false",
+      ],
     ]);
-    for (const fault of ["upload", "missing", "tag"]) {
+    for (const fault of [
+      "upload",
+      "missing",
+      "tag",
+      "source",
+      "draft",
+      "ambiguous",
+    ]) {
       calls.length = 0;
       assert.throws(() => invoke(fault));
       assert.ok(
         !calls.some(
-          ([command, args]) => command === "gh" && args[1] === "edit",
+          ([command, args]) =>
+            command === "gh" &&
+            args[0] === "api" &&
+            args[1] === "--method" &&
+            args[2] === "PATCH",
         ),
       );
       if (fault === "tag")
