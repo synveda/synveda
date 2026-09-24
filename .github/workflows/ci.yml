@@ -358,6 +358,7 @@ jobs:
     uses: ./.github/workflows/docker.yml
     with:
       version: ${{ needs.changes.outputs.version }}
+      full_compose: false
 
   cli:
     name: CLI

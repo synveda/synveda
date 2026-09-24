@@ -156,3 +156,31 @@ audience, upgrade and audit assertion. A missing report, image or ID mismatch
 fails the job. Do not use a cross-job artifact or a published image as a
 substitute for this source build. Compare hosted before/after timings before
 claiming a measured wall-clock saving.
+
+## Amendment: qualify the full local Compose lifecycle at release time (2026-09-24)
+
+The successful full-main CI run `35884349132` spent 89.2 minutes on AMD64 and
+63.4 minutes on ARM64 in its Compose step. It ran two distinct full lifecycle
+drills serially per architecture: the reference launcher and the plain Compose
+consumer candidate. Native image builds took 13.1/9.8 minutes and Helm
+qualification took 24.4/23.2 minutes. The owner's supported Compose scope is a
+local single-host reference; publication, rather than every main push, is the
+point at which its full installation and recovery ceremony must be proven.
+
+Keep both native six-image build and exact-candidate smoke jobs, plus all four
+Helm dependency and recovery modes, in main CI. Run both full Compose lifecycle
+and paired recovery drills on AMD64 and ARM64 in the nonpublishing Release
+dispatch and tagged Release candidate validation. The tagged workflow also
+keeps its independent anonymous Docker Hub and GHCR distribution checks. Make
+the reusable Docker workflow's Compose input explicit and required, with the
+Release caller selecting the full drill and the CI caller declining it. Guard
+that split with workflow contract tests so a Release caller cannot silently
+skip the drill. The required exact-source main CI and separate successful
+nonpublishing Release drill remain prerequisites to creating a new tag.
+
+This reduces repeated main-push work without treating a local candidate smoke
+as published installation evidence. It does not change image bytes, tests,
+publication credentials, Cedar/RLS/audit, or support claims. Compare hosted
+before and after durations before claiming a measured improvement. If the
+release drill ceases to block tags, restore full Compose to the exact-source
+main gate.

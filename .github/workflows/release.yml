@@ -89,6 +89,7 @@ jobs:
     uses: ./.github/workflows/docker.yml
     with:
       version: ${{ needs.version.outputs.version }}
+      full_compose: true
 
   bundles:
     name: Build release bundles
