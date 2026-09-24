@@ -5,8 +5,8 @@ import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkClientRelease } from "./check-client-release.mjs";
-import { fileHash } from "./docker-candidate.mjs";
-import { validateRegistryManifest } from "./release-registries.mjs";
+import { candidateIdentity, fileHash } from "./docker-candidate.mjs";
+import { releaseImages, validateRegistryManifest } from "./release-registries.mjs";
 
 export const clientTargets = [
   "darwin-arm64",
@@ -32,10 +32,11 @@ export function releaseAssets(version, qualified = false) {
       `synveda-client-report-${target}.json`,
     ]),
   ];
-  if (qualified)
-    for (const arch of ["amd64", "arm64"])
-      for (const kind of ["images", "docker", "consumer", "kubernetes"])
-        assets.push(`release-${kind}-${arch}.json`);
+  for (const arch of ["amd64", "arm64"]) {
+    for (const kind of ["candidate", "local-images", "docker", "consumer", "kubernetes"])
+      assets.push(`release-${kind}-${arch}.json`);
+    if (qualified) assets.push(`release-images-${arch}.json`);
+  }
   return assets;
 }
 export function regularAssets(directory, names) {
@@ -49,32 +50,46 @@ export function regularAssets(directory, names) {
   });
 }
 export function checkQualification(directory, version, source, inventory) {
-  const images = Object.fromEntries(
-    Object.entries(inventory.registries.dockerhub.images).map(
-      ([name, entry]) => [name, entry.reference],
-    ),
-  );
   const read = (kind, arch) =>
     JSON.parse(readFileSync(join(directory, `release-${kind}-${arch}.json`)));
   for (const arch of ["amd64", "arm64"]) {
+    const platform = `linux/${arch}`;
     const image = read("images", arch);
     assert.equal(image.release_version, version);
     assert.equal(image.source_sha, source);
-    assert.equal(image.platform, `linux/${arch}`);
+    assert.equal(image.platform, platform);
     assert.equal(image.anonymous_pull, true);
     for (const registry of ["dockerhub", "ghcr"]) {
       const result = image.registries?.[registry];
       assert.equal(result?.anonymous_pull, true);
-      assert.equal(result?.platform, `linux/${arch}`);
+      assert.equal(result?.platform, platform);
       for (const [name, entry] of Object.entries(
         inventory.registries[registry].images,
       ))
-        assert.ok(
-          result.images.some(
-            (checked) =>
-              checked.name === name && checked.image === entry.reference,
-          ),
-        );
+        assert.ok(result.images.some((checked) =>
+          checked.name === name && checked.image === entry.reference &&
+          checked.platforms?.[platform] === entry.platforms[platform] &&
+          checked.executable_checks > 0,
+        ));
+    }
+    const candidate = read("candidate", arch);
+    candidateIdentity(candidate, version, source, arch);
+    const images = Object.fromEntries(Object.entries(releaseImages).map(
+      ([name, repo]) => [name,
+        `localhost:5000/synveda/${repo}@${candidate.images[name].digest}`],
+    ));
+    const local = read("local-images", arch);
+    assert.equal(local.release_version, version);
+    assert.equal(local.source_sha, source);
+    assert.equal(local.platform, platform);
+    assert.equal(local.local_candidate, true);
+    assert.equal(local.anonymous_pull, false);
+    for (const [name, reference] of Object.entries(images)) {
+      const checked = local.images.find((entry) => entry.name === name);
+      assert.equal(checked?.image, reference);
+      assert.equal(checked?.platforms?.[platform],
+        inventory.registries.dockerhub.images[name].platforms[platform]);
+      assert.ok(checked?.executable_checks > 0);
     }
     for (const kind of ["docker", "consumer", "kubernetes"]) {
       const report = read(kind, arch);

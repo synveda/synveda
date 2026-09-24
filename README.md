@@ -27,10 +27,13 @@ to Docker. No compiler, hostname edit, cloud account or model subscription is
 needed. Linux AMD64/ARM64 release installation is verified; macOS/OrbStack has
 local candidate evidence. Docker Desktop and Windows/WSL2 remain unqualified.
 
-<!-- installation-version: 0.4.2; publication: unreleased -->
+<!-- installation-version: 0.4.3; publication: unreleased -->
 The [v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
 stopped at the anonymous image check, before installation qualification or
-release publication. The v0.4.2 source candidate contains the verifier fix.
+release publication. The [v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
+passed anonymous image checks but timed out while repeating the full deployment
+drills. The v0.4.3 source candidate keeps full native candidate qualification
+and a bounded public artifact check.
 Use the [v0.4.0 release](https://github.com/synveda/synveda/releases/tag/v0.4.0)
 until a complete successor is published. Its checksum detects corruption but
 does not authenticate the publisher. Use a new directory and stop if verification

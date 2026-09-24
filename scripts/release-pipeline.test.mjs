@@ -46,12 +46,8 @@ test("workflow refactor retains release, native platform and security boundaries
     ["release", "full_compose: true", "full_compose: false"],
     ["release", "node scripts/publish-images.mjs", "echo rebuilt"],
     ["release", "node scripts/verify-release-images.mjs", "echo skipped"],
-    [
-      "release",
-      "node scripts/qualify-release.mjs --consumer-candidate",
-      "echo skipped",
-    ],
-    ["release", "node scripts/qualify-kubernetes-release.mjs", "echo skipped"],
+    ["release", "pattern: docker-checks-*", "pattern: wrong-reports-*"],
+    ["release", "assets/release-candidate-*.json", "assets/unrelated-*.json"],
     [
       "release",
       'SYNVEDA_PACKAGE_CONSUMER_CANDIDATE: "1"',
@@ -150,6 +146,7 @@ test("workflow refactor retains release, native platform and security boundaries
     ],
     ["docker", "if: inputs.full_compose", "if: false"],
     ["docker", "node scripts/qualify-kubernetes-release.mjs", "echo skipped"],
+    ["docker", "${{ runner.temp }}/images/candidate.json", "missing-candidate.json"],
   ];
   for (const [file, from, to] of mutants) {
     const shared = { ...current, [file]: current[file].replace(from, to) };
@@ -307,18 +304,19 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
             images: Object.fromEntries(
               Object.entries(releaseImages).map(([name, repo]) => [
                 name,
-                { reference: `${registry}/${repo}@sha256:${"b".repeat(64)}` },
+                {
+                  reference: `${registry}/${repo}@sha256:${"b".repeat(64)}`,
+                  platforms: {
+                    "linux/amd64": `sha256:${"d".repeat(64)}`,
+                    "linux/arm64": `sha256:${"e".repeat(64)}`,
+                  },
+                },
               ]),
             ),
           },
         ]),
       ),
     };
-    const images = Object.fromEntries(
-      Object.entries(inventory.registries.dockerhub.images).map(
-        ([name, entry]) => [name, entry.reference],
-      ),
-    );
     // The retained operator fixture has day-two evidence for the two complete
     // ownership modes and install/upgrade evidence for all four combinations.
     const evidence = JSON.parse(
@@ -326,20 +324,54 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
     );
     const reports = {};
     for (const arch of ["amd64", "arm64"]) {
+      const platform = `linux/${arch}`;
+      const candidate = {
+        version,
+        source,
+        source_dirty: false,
+        arch,
+        images: Object.fromEntries(Object.entries(releaseImages).map(
+          ([name, repo]) => [name, {
+            archive: `${repo}.tar`,
+            sha256: "c".repeat(64),
+            digest: `sha256:${"a".repeat(64)}`,
+          }],
+        )),
+      };
+      const images = Object.fromEntries(Object.entries(releaseImages).map(
+        ([name, repo]) => [name,
+          `localhost:5000/synveda/${repo}@${candidate.images[name].digest}`],
+      ));
+      reports[`release-candidate-${arch}.json`] = candidate;
+      reports[`release-local-images-${arch}.json`] = {
+        release_version: version,
+        source_sha: source,
+        platform,
+        anonymous_pull: false,
+        local_candidate: true,
+        images: Object.entries(images).map(([name, image]) => ({
+          name,
+          image,
+          platforms: { [platform]: inventory.registries.dockerhub.images[name].platforms[platform] },
+          executable_checks: 1,
+        })),
+      };
       reports[`release-images-${arch}.json`] = {
         release_version: version,
         source_sha: source,
-        platform: `linux/${arch}`,
+        platform,
         anonymous_pull: true,
         registries: Object.fromEntries(
           Object.entries(inventory.registries).map(([registry, result]) => [
             registry,
             {
-              platform: `linux/${arch}`,
+              platform,
               anonymous_pull: true,
               images: Object.entries(result.images).map(([name, entry]) => ({
                 name,
                 image: entry.reference,
+                platforms: { [platform]: entry.platforms[platform] },
+                executable_checks: 1,
               })),
             },
           ]),
@@ -374,6 +406,12 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
     for (const change of [
       (r) => {
         r["release-docker-arm64.json"].source = "c".repeat(40);
+      },
+      (r) => {
+        r["release-candidate-arm64.json"].images.product.digest = `sha256:${"f".repeat(64)}`;
+      },
+      (r) => {
+        r["release-local-images-amd64.json"].images[0].platforms["linux/amd64"] = `sha256:${"f".repeat(64)}`;
       },
       (r) => {
         r["release-consumer-amd64.json"].sourceDirty = true;
@@ -425,12 +463,13 @@ test("stable publication waits for every expected upload and never includes chec
   try {
     const version = "0.4.0",
       source = "a".repeat(40);
+    assert.equal(releaseAssets(version).length, 31);
     const names = [
       ...releaseAssets(version, true),
       "SHA256SUMS",
       "SHA256SUMS.sigstore.json",
     ];
-    assert.equal(names.length, 31);
+    assert.equal(names.length, 35);
     for (const target of [
       "darwin-arm64",
       "darwin-x86_64",

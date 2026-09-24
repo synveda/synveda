@@ -224,6 +224,21 @@ jobs:
           path: assets
           pattern: "{binaries-*,bundles}"
           merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: candidate-reports
+          pattern: docker-checks-*
+      - name: Stage this run's native candidate qualification reports
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            reports="candidate-reports/docker-checks-$arch"
+            cp "$reports/candidate.json" "assets/release-candidate-$arch.json"
+            cp "$reports/image-checks.json" "assets/release-local-images-$arch.json"
+            cp "$reports/docker-checks.json" "assets/release-docker-$arch.json"
+            cp "$reports/consumer-checks.json" "assets/release-consumer-$arch.json"
+            cp "$reports/helm-checks.json" "assets/release-kubernetes-$arch.json"
+          done
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: needs.version.outputs.publish == 'true'
         with:
@@ -284,6 +299,11 @@ jobs:
             assets/synveda-*.yaml
             assets/synveda-registry-images-*.json
             assets/synveda-client-report-*.json
+            assets/release-candidate-*.json
+            assets/release-local-images-*.json
+            assets/release-docker-*.json
+            assets/release-consumer-*.json
+            assets/release-kubernetes-*.json
           if-no-files-found: error
 
 
@@ -303,7 +323,7 @@ jobs:
             platform: linux/arm64
             runs-on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -341,25 +361,12 @@ jobs:
         if: needs.version.outputs.publish == 'true'
         with:
           version: v4.2.3
-      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
-        if: needs.version.outputs.publish == 'true'
-        with:
-          install_only: true
-          version: v0.32.0
-          kubectl_version: v1.36.1
-      - name: Qualify the exact Docker and chart artifacts
+      - name: Compare the anonymously downloaded OCI chart
         if: needs.version.outputs.publish == 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          node scripts/qualify-release.mjs \
-            "$RUNNER_TEMP/synveda-reference-$VERSION" "release-docker-${{ matrix.arch }}.json"
-          node scripts/qualify-release.mjs --consumer-candidate \
-            "$RUNNER_TEMP/synveda-reference-$VERSION" "release-consumer-${{ matrix.arch }}.json"
-          node scripts/qualify-kubernetes-release.mjs \
-            "$RUNNER_TEMP/synveda-reference-$VERSION" "assets/synveda-$VERSION.tgz" \
-            "release-kubernetes-${{ matrix.arch }}.json"
           export HELM_REGISTRY_CONFIG="$RUNNER_TEMP/anonymous-helm.json"
           mkdir anonymous-chart
           helm pull oci://ghcr.io/synveda/charts/synveda --version "$VERSION" --destination anonymous-chart
@@ -367,16 +374,13 @@ jobs:
       - name: Explain the dry-run boundary
         if: needs.version.outputs.publish != 'true'
         run: |
-          echo "Dry run: native OCI candidates, Compose and Helm were tested by Docker. The synthetic public inventory is not installable; no public registry verification or publication ran."
+          echo "Dry run: native OCI candidates, Compose and Helm were tested by Docker. The synthetic public inventory is not installable; no anonymous registry verification or publication ran."
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: needs.version.outputs.publish == 'true'
         with:
           name: release-verification-${{ matrix.arch }}
           path: |
             release-images-${{ matrix.arch }}.json
-            release-docker-${{ matrix.arch }}.json
-            release-consumer-${{ matrix.arch }}.json
-            release-kubernetes-${{ matrix.arch }}.json
           if-no-files-found: error
 
   publish:

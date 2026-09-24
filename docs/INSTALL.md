@@ -6,19 +6,21 @@ and exposure do not select a different product edition or confer readiness.
 
 ## Choose an installation workflow
 
-<!-- installation-version: 0.4.2; publication: unreleased -->
-**v0.4.2 is the current source candidate and is not published.** The earlier
+<!-- installation-version: 0.4.3; publication: unreleased -->
+**v0.4.3 is the current source candidate and is not published.** The earlier
 [v0.4.1 tagged release run](https://github.com/synveda/synveda/actions/runs/35900269117)
 failed during anonymous image verification before installation qualification.
+The [v0.4.2 run](https://github.com/synveda/synveda/actions/runs/35987467297)
+passed anonymous pulls but timed out while repeating full deployment drills.
 The [published v0.4.0 release](https://github.com/synveda/synveda/releases/tag/v0.4.0)
 retains its original installation contract.
 
 | Choice | Canonical instructions | Prerequisites and evidence |
 |---|---|---|
 | Run with Docker | [Prebuilt bundle](../deploy/compose/PREBUILT.md) | Published v0.4.0 bundle; native Linux AMD64/ARM64 release evidence and local macOS/OrbStack candidate evidence |
-| Deploy to Kubernetes | [Application chart](../deploy/helm/synveda/README.md) | Published v0.4.0 chart or current v0.4.2 source candidate; release artifact qualification remains pending |
+| Deploy to Kubernetes | [Application chart](../deploy/helm/synveda/README.md) | Published v0.4.0 chart or current v0.4.3 source candidate; release artifact qualification remains pending |
 | Use existing infrastructure | [Provider contract](../deploy/helm/synveda/CONFIGURATION.md) | Supplied database/identity endpoints and trusted CA inputs; no provider takeover |
-| Install a native CLI | [Client downloads](CONSUMER_CLI.md#release-downloads) | Published v0.4.0 binaries or locally built v0.4.2 candidate; six new client packages are not public |
+| Install a native CLI | [Client downloads](CONSUMER_CLI.md#release-downloads) | Published v0.4.0 binaries or locally built v0.4.3 candidate; six new client packages are not public |
 | Build from source | [Source development](DEVELOPMENT.md#running-your-changes) | Contributor tools and source-only hostname setup |
 
 Database and identity ownership are independent on both platforms. Bundled
@@ -41,7 +43,7 @@ loopback evaluation, reference HTTPS, first workspace and lifecycle commands.
 
 The remaining sections describe product use after authenticated startup.
 
-The [native consumer commands](CONSUMER_CLI.md) in the v0.4.2 source candidate add receipt-bound
+The [native consumer commands](CONSUMER_CLI.md) in the v0.4.3 source candidate add receipt-bound
 Compose lifecycle and project/adapter setup. The older v0.4.0 release does not
 contain them.
 
@@ -828,7 +830,7 @@ Client cleanup stays explicit: `synveda mcp uninstall --client cursor` or
 
 Use the [published v0.4.0 prebuilt download instructions](../deploy/compose/PREBUILT.md#previous-v040-release).
 The [six-platform client asset table](RELEASING.md#native-cli-release-artifacts)
-describes the unpublished v0.4.2 source candidate; those archives are not present in
+describes the unpublished v0.4.3 source candidate; those archives are not present in
 v0.4.0. The native installers are
 tag-bound, verify checksums and never start containers or edit an AI client.
 Inspect the matching installer before execution. For a future attested client

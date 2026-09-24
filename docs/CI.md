@@ -28,9 +28,9 @@ independent. Only CLI and Docker share reusable jobs between CI and Release.
 | Release `version` | Source/version choice | Check release source | Exact checkout/version plus successful full main CI for that exact commit before publishing |
 | Release `bundles` | Frontend/plugin/chart | Build release bundles | Same locked console, plugin and chart packages; existing vendor validator remains advisory |
 | Release `images` ×2 | Six native images, two registries | Docker candidate validation; Publish Docker candidates | Same Dockerfiles, targets, labels, SBOM/provenance; Release dispatch and tag runs add both full Compose lifecycle/recovery drills before tested OCI archives are copied to Docker Hub and GHCR |
-| Release `assemble` | Indexes and asset inventory | Assemble release assets | Independently inspected registry digests, reference bundle/overlays, byte-identical OCI chart; all six client reports mandatory |
-| Release `verify-images` ×2 | Anonymous distribution/install | Test published Docker and Helm artifacts | Both registries, exact digest smoke, extracted Compose lifecycle/recovery and all four independent PostgreSQL/Keycloak modes; anonymous chart comparison |
-| Release `publish` | Attest and announce | Publish verified release | Exact-source attestation and checksum inventory; draft stays unpublished until all 31 assets upload successfully |
+| Release `assemble` | Indexes and asset inventory | Assemble release assets | Independently inspected registry digests, reference bundle/overlays, byte-identical OCI chart; all six client and both native candidate report sets mandatory |
+| Release `verify-images` ×2 | Anonymous distribution | Test published Docker and Helm artifacts | Both registries, exact digest and executable smoke, anonymous chart comparison; full native candidate reports were retained earlier in the same run |
+| Release `publish` | Attest and announce | Publish verified release | Exact-source attestation and checksum inventory; draft stays unpublished until all 35 assets upload successfully |
 | Eval `eval`, `retrieval`, `security` | Scheduled deeper evaluation | Extended Tests (same `eval.yml`) | Same nightly deterministic, real TEI retrieval and 10,000-variant security gates |
 | Pages `build` ×2, `deploy` | Website | Pages unchanged | Native amd64/arm64 site/brand/docs checks; main-only deployment |
 
@@ -111,8 +111,8 @@ with a successful **main-push CI run for that exact SHA**, including CI Result
 and no skipped jobs. Wait for that CI run before tagging. Publication downloads
 only artifacts produced in the same release run; no PR/cross-run artifact is
 promoted. Registry jobs copy hash-checked OCI files, then assemble both platforms.
-Fresh runners retain anonymous distribution checks. All 29 payloads enter the
-attested SHA256SUMS; the inventory and its attestation make 31 public assets.
+Fresh runners retain anonymous distribution checks. All 33 payloads enter the
+attested SHA256SUMS; the inventory and its attestation make 35 public assets.
 Upload failure leaves a draft. `verified-release-assets` retains the signed set
 for 30 days; candidate OCI files retain seven days and diagnostic reports 14.
 Follow [RELEASING](RELEASING.md) for reviewed recovery and immutable-tag rules.
@@ -185,9 +185,9 @@ UTC, 2h27m). Each native candidate report records seven launcher Compose checks,
 20 plain-consumer/recovery checks and all four Helm modes. The dry-run
 `release-assets` artifact contains 21 payloads plus `SHA256SUMS`; all 21
 checksums were verified after download. Its registry inventory explicitly says
-`published: false`. The eight public-distribution verification reports and
+`published: false`. The native candidate and public-distribution reports and
 checksum attestation only exist on a successful tagged publication path; that
-path must verify all 31 assets before making the draft stable.
+path must verify all 35 assets before making the draft stable.
 
 The final PR ARM64 fresh launcher took 577s, and AMD64 took 769s; the exact-source
 Release dry run took 588s and 769s respectively. An older published run's
@@ -213,9 +213,19 @@ without that prefix. The final publish job was skipped, so v0.4.1 has no
 attested inventory or public GitHub Release assets. The release regression
 fixture now reproduces the mismatch and checks that a wrong digest or repository
 still fails. A tag rerun would use the original verifier and encounter already
-populated write-once image tags. Retain those candidates. The owner selected a new v0.4.2 candidate from main;
+populated write-once image tags. Retain those candidates. The owner selected a new v0.4.3 candidate from main;
 it requires full exact-source CI and a nonpublishing drill before tagging.
 v0.4.0 remains the public release.
+
+The [v0.4.2 Release run](https://github.com/synveda/synveda/actions/runs/35987467297)
+passed both anonymous native image pulls and executable checks after its full
+candidate jobs passed. The public verifier repeated two full Compose recovery
+drills and four Helm modes serially on each runner; both jobs reached their
+90-minute limit before reports were uploaded. The final signed inventory and
+GitHub Release were skipped. ADR-0108 now keeps those full drills in the native
+candidate jobs and retains their reports with the candidate image identity.
+Fresh public jobs check both registries and the OCI chart without replaying the
+deployment. The v0.4.2 tag, images and chart remain immutable.
 
 The last full [refactor PR run](https://github.com/synveda/synveda/actions/runs/35860525470)
 took 2h12m24s. The [lightweight PR #55 run](https://github.com/synveda/synveda/actions/runs/35875955340)
@@ -258,5 +268,5 @@ not a controlled speedup measurement.
 The [native CLI asset table](RELEASING.md#native-cli-release-artifacts) names
 every required public package. The existing v0.4.0 release has neither those
 six client-only archives nor the new authenticated checksum inventory; the new
-v0.4.2 candidate must satisfy the complete asset gate before it appears as a
+v0.4.3 candidate must satisfy the complete asset gate before it appears as a
 stable release.

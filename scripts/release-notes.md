@@ -87,8 +87,10 @@ contract; use explicit `client` mode for the six-platform packages above.
 
 Consumer images: `docker.io/{{namespace}}/product:{{version}}`
 and the other five images recorded in the attested registry inventory.
-Both registries passed anonymous native pulls; full deployment checks
-used the Docker Hub destination digests. GHCR mirrors include
+Both registries passed anonymous native pulls. Full deployment checks ran on
+the exact native OCI candidates before their digests were copied to Docker Hub
+and GHCR. The published OCI chart was downloaded anonymously and compared byte
+for byte with the release asset. GHCR mirrors include
 `ghcr.io/synveda/product:{{version}}`,
 `ghcr.io/synveda/postgres:{{version}}`, and
 `ghcr.io/synveda/cnpg-postgres:17.11-synveda-{{version}}`.
