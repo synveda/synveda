@@ -14,8 +14,9 @@ source-deployment lifecycle and optional modes.
 To run a server without a checkout or compiler, use the
 [prebuilt Docker guide](PREBUILT.md). It uses this same deployment graph and a
 release-pinned launcher. The published v0.4.0 bundle includes the reference
-archive; v0.4.1 remains an unpublished candidate. Earlier pre-epoch-3 databases
-are deliberately refused.
+archive. The v0.4.1 tagged verification failed; v0.4.2 is the current
+unpublished source candidate. Earlier pre-epoch-3 databases are deliberately
+refused.
 
 The [CI/release guide](../../docs/CI.md) describes candidate validation and
 publication. Shared Docker jobs build each native AMD64/ARM64 image once, then

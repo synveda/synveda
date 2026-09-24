@@ -35,10 +35,10 @@ helm upgrade --install synveda "$CHART" -n synveda-evaluation \
   --wait --wait-for-jobs --timeout 15m
 ```
 
-The verified overlay pins the published product, bundled PostgreSQL and
-Keycloak bytes. Keep that same overlay for subsequent operations. The OCI chart
-is also available at `oci://ghcr.io/synveda/charts/synveda`, version `0.4.2`;
-`helm pull` is not required when using the verified archive above.
+After v0.4.2 publication, the verified overlay will pin its product, bundled
+PostgreSQL and Keycloak bytes. Keep that same overlay for subsequent operations.
+The OCI chart at `oci://ghcr.io/synveda/charts/synveda`, version `0.4.2`, will
+then be available; `helm pull` is unnecessary when using the verified archive.
 
 Preparation writes mode-0600 private files once. It creates unique database
 passwords, a local database TLS CA/certificate, the original KMS key, fixed

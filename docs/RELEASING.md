@@ -107,7 +107,8 @@ and system-Node plugin archive retain their existing contract.
    candidates through a loopback registry, Compose and Helm. It never logs in,
    publishes to an external registry, signs or creates a Release. Its public
    inventory has `published: false` and cannot pass anonymous release verification.
-7. After reviewing local and hosted results, push the new tag. The existing
+7. With explicit release authorization, after reviewing local and hosted results,
+   push the new tag. The existing
    `v*` workflow is the only publisher. Confirm the protected
    environment approvals, both native image reports, Docker and all four Kind
    ownership-mode reports, and final attestation verification. Only then update

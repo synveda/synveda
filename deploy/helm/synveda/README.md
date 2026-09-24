@@ -146,11 +146,11 @@ cp "synveda-images-$RELEASE_VERSION.yaml" release-images.yaml
 ```
 
 Save the verified archive, overlays, checksums and source revision with operator
-configuration. The public OCI chart at
-`oci://ghcr.io/synveda/charts/synveda`, version `0.4.2`, is byte-identical to
-the downloadable archive and requires no registry token. An unpublished
-candidate must instead come from its reviewed qualification artifacts; never
-substitute an arbitrary PR build for a trusted release.
+configuration. After v0.4.2 publication, the public OCI chart at
+`oci://ghcr.io/synveda/charts/synveda`, version `0.4.2`, will be byte-identical
+to the downloadable archive and require no registry token. Until then, use a
+reviewed local qualification artifact for this candidate; never substitute an
+arbitrary PR build for a trusted release.
 
 Private image mirrors need existing namespace-local pull
 Secrets in `imagePullSecrets` and, for packaged identity,

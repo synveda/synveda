@@ -610,8 +610,9 @@ archives through this dry run.
 
 The owner configured both Docker Hub variables and the protected release
 environment secret. `CI Result` is now required on main; a `v*` ruleset blocks
-updates and deletions. Creation restriction for future version tags remains an
-owner setting under [CI](../CI.md#manual-owner-settings). The owner authorized
+updates and deletions. A separate creation-only `v*` ruleset with administrator
+release-operator bypass was verified on 2026-09-24 under
+[CI](../CI.md#manual-owner-settings). The owner authorized
 the v0.4.1 follow-up release.
 Local 0.4.1 version parity, chart lint, generated contracts, SDKs, TypeScript,
 website, formatting, strict Clippy and focused native CLI tests passed. The

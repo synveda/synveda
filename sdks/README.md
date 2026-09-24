@@ -99,13 +99,14 @@ use that generated SDK version. Installed-package checks compare all three
 values with their sources and verify the actual client-identification header.
 They print the OS, architecture and runtime with content-free archive evidence.
 
-The 2026-09-20 product version bump regenerates the API version and document
+The 2026-09-20 v0.4.0 product version bump regenerated the API version and document
 digest; all 15 operation bindings and 52 SDK schemas remain unchanged. Local
 macOS arm64 checks with Node 24.18.0/Python 3.14.6 pass nine source tests and nine
 installed-package tests per SDK, including identical clean builds, installed
-types/resources, licence text and 0.4.0 target metadata. Authenticated gateway
-acceptance and the Linux runtime matrix were not rerun for this metadata change;
-the earlier evidence below remains tied to its named source.
+types/resources, licence text and 0.4.0 target metadata. That is historical
+evidence. The current v0.4.2 candidate regenerated the checked contract and
+passed local source and installed-package checks; its hosted runtime matrix and
+authenticated gateway acceptance remain gated by this candidate's CI.
 
 The 2026-09-19 Apache-2.0 increment starting at `9365c92` repeats the two
 native arm64 rows below, including exact installed licence/notice checks.
