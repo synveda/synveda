@@ -3,7 +3,7 @@
 This initial, unpublished slice covers 15 operations from Synveda's checked
 OpenAPI: Sessions, observations, Context, approved immutable Skills, Knowledge
 proposals and audit pages. The generated contracts include the source SHA-256;
-they target the 0.4.1 API in this checkout. Broader API coverage, published
+they target the 0.4.2 API in this checkout. Broader API coverage, published
 packages and a public support policy remain in `docs/backlog/ADPT-4.md`.
 
 TypeScript uses Node's maintained Fetch implementation; Python uses HTTPX.
@@ -76,8 +76,8 @@ generated types, operation bindings, contract metadata and `py.typed`.
 
 ## Compatibility and release boundary
 
-SDK version **0.1.0** targets API version **0.4.1** and checked OpenAPI SHA-256
-`440c64a6772b4fea8e0503d5d0f268dfc9f64098d9f3a597f8e9ebeb120a69da`.
+SDK version **0.1.0** targets API version **0.4.2** and checked OpenAPI SHA-256
+`935ecca14d12adfbd1324d8ae16560698e93286195a8b67ab860618d9f164e32`.
 That digest covers the whole API document; the SDK exposes only the 15 selected
 operations. Another server version or contract has no compatibility claim from
 these checks. Regenerate after reviewed contract or package-version changes,

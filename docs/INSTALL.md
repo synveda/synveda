@@ -6,17 +6,19 @@ and exposure do not select a different product edition or confer readiness.
 
 ## Choose an installation workflow
 
-<!-- installation-version: 0.4.1; publication: published -->
-**[v0.4.1 is published](https://github.com/synveda/synveda/releases/tag/v0.4.1).**
-Its attested checksum inventory, deployment bundles and six native CLI packages
-are public release assets. Installation needs no registry account.
+<!-- installation-version: 0.4.2; publication: unreleased -->
+**v0.4.2 is the current source candidate and is not published.** The earlier
+[v0.4.1 tagged release run](https://github.com/synveda/synveda/actions/runs/35900269117)
+failed during anonymous image verification before installation qualification.
+The [published v0.4.0 release](https://github.com/synveda/synveda/releases/tag/v0.4.0)
+retains its original installation contract.
 
 | Choice | Canonical instructions | Prerequisites and evidence |
 |---|---|---|
-| Run with Docker | [Prebuilt bundle](../deploy/compose/PREBUILT.md) | Docker Compose; loopback bundled evaluation; native Linux AMD64/ARM64 release evidence and local macOS/OrbStack candidate evidence |
-| Deploy to Kubernetes | [Application chart](../deploy/helm/synveda/README.md) | Namespaced permissions, supplied Secrets/storage; packaged-chart Kind 1.36.1 evidence on native Linux AMD64/ARM64 |
+| Run with Docker | [Prebuilt bundle](../deploy/compose/PREBUILT.md) | Published v0.4.0 bundle; native Linux AMD64/ARM64 release evidence and local macOS/OrbStack candidate evidence |
+| Deploy to Kubernetes | [Application chart](../deploy/helm/synveda/README.md) | Published v0.4.0 chart or current v0.4.2 source candidate; release artifact qualification remains pending |
 | Use existing infrastructure | [Provider contract](../deploy/helm/synveda/CONFIGURATION.md) | Supplied database/identity endpoints and trusted CA inputs; no provider takeover |
-| Install a native CLI | [Client downloads](CONSUMER_CLI.md#release-downloads) | Six v0.4.1 native client packages with matching execution reports |
+| Install a native CLI | [Client downloads](CONSUMER_CLI.md#release-downloads) | Published v0.4.0 binaries or locally built v0.4.2 candidate; six new client packages are not public |
 | Build from source | [Source development](DEVELOPMENT.md#running-your-changes) | Contributor tools and source-only hostname setup |
 
 Database and identity ownership are independent on both platforms. Bundled
@@ -39,7 +41,7 @@ loopback evaluation, reference HTTPS, first workspace and lifecycle commands.
 
 The remaining sections describe product use after authenticated startup.
 
-The [native consumer commands](CONSUMER_CLI.md) in v0.4.1 add receipt-bound
+The [native consumer commands](CONSUMER_CLI.md) in the v0.4.2 source candidate add receipt-bound
 Compose lifecycle and project/adapter setup. The older v0.4.0 release does not
 contain them.
 
@@ -824,14 +826,14 @@ Client cleanup stays explicit: `synveda mcp uninstall --client cursor` or
 
 ## Install a release artifact
 
-Use the [prebuilt download and checksum instructions](../deploy/compose/PREBUILT.md#download-and-verify).
-For CLI-only use, follow [native client downloads](CONSUMER_CLI.md#release-downloads)
-and the [six-platform asset table](RELEASING.md#native-cli-release-artifacts).
-Those client archives are v0.4.1 assets and are not present in v0.4.0. The native installers are
+Use the [published v0.4.0 prebuilt download instructions](../deploy/compose/PREBUILT.md#previous-v040-release).
+The [six-platform client asset table](RELEASING.md#native-cli-release-artifacts)
+describes the unpublished v0.4.2 source candidate; those archives are not present in
+v0.4.0. The native installers are
 tag-bound, verify checksums and never start containers or edit an AI client.
-Inspect the matching installer before execution. For v0.4.1, verify publisher
-identity separately as described in the release guide; the
-installer does not enforce that verification itself.
+Inspect the matching installer before execution. For a future attested client
+release, verify publisher identity separately as described in the release
+guide; the installer does not enforce that verification itself.
 
 ## What the artifact installer places
 
@@ -853,9 +855,10 @@ state. Download the matching reference archive separately to operate Compose.
 
 Read [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) and the content-free
 reports under [demos/evidence](../demos/evidence) and attached to
-[v0.4.1](https://github.com/synveda/synveda/releases/tag/v0.4.1). Static gates,
+[v0.4.0](https://github.com/synveda/synveda/releases/tag/v0.4.0). Static gates,
 local source/candidate runtime, hosted release qualification and anonymous
-published retrieval are distinct evidence. The release workflow requires the
+published retrieval are distinct evidence. The v0.4.1 tagged run stopped before
+public installation qualification. The release workflow requires the
 complete 31-asset inventory, checksum attestation, byte-identical OCI and
 downloadable charts, and native Docker/Helm verification before stable
 publication. Broader platform, N-1 upgrade and production recovery claims

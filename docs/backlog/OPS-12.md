@@ -622,10 +622,29 @@ tests. The exact merged source `d74e75b8991f22d8f4dd07034b3cd91db1ffb867`
 then passed [full main CI](https://github.com/synveda/synveda/actions/runs/35884349132)
 and the [nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/35884456435),
 including all six native CLI packages and both Docker/Helm candidates. The
-immutable `v0.4.1` tag triggered [publication](https://github.com/synveda/synveda/actions/runs/35900269117).
+immutable `v0.4.1` tag triggered a [Release run](https://github.com/synveda/synveda/actions/runs/35900269117).
+Both native published-image jobs failed in the anonymous pull step; the linked
+ARM64 job reported `product: local image lost its release digest`. The final
+publish job was skipped.
+The verifier compared the bundle's `docker.io/<namespace>/product@sha256:...`
+with Docker Engine's familiar `<namespace>/product@sha256:...` RepoDigest.
+The two-registry fixture now reproduces that exact failure and accepts only
+the same repository/digest in either Hub spelling. A local native ARM64 pull of
+the public v0.4.1 proxy index on Docker 29.4.0 independently returned
+`synveda/proxy@sha256:...` in `RepoDigests` for a `docker.io/synveda/proxy@sha256:...`
+request. This source fix cannot
+change the immutable tag's workflow code. The image candidates and assembled
+assets remain in that run, but no signed inventory or public GitHub Release
+was produced. Do not rerun the tag into write-once image coordinates.
 
-Continue OPS-12 from published v0.4.1; the earlier v0.4.0 bytes remain
-immutable. For another local candidate, use the
+Continue OPS-12 from the published v0.4.0 bytes. The owner authorized a new
+v0.4.2 release from the latest mainline source. Its candidate includes the
+Docker Hub RepoDigest verifier fix and coordinated workspace, chart, adapter,
+console, OpenAPI and SDK version metadata. Next: merge it through CI Result,
+wait for full exact-source main CI, run the nonpublishing Release drill, then
+push the unused v0.4.2 tag for native anonymous pull, Docker, Helm and final
+asset verification. Preserve existing v0.4.1 image tags and the source tag.
+For another local candidate, use the
 existing `package-release.sh` arguments with the explicit candidate flag, extract
 the archive, then run `node scripts/qualify-release.mjs --consumer-candidate
 EXTRACTED_BUNDLE REPORT.json`. It creates an absent random acceptance project,

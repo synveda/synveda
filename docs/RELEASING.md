@@ -3,9 +3,12 @@
 OPS-8 / OPS-12; [ADR-0115](adr/adr-0115-prebuilt-container-release-verification.md).
 The [CI/release guide](CI.md) owns the workflow map, source gate, local checks
 and current manual repository settings.
-The [v0.4.1 release](https://github.com/synveda/synveda/releases/tag/v0.4.1)
-uses Docker Hub and GHCR, an attested checksum inventory and six native client
-packages. The published v0.4.0 remains unchanged and uses GHCR, its original
+The [v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
+failed in both anonymous Docker verification jobs; its final attestation and
+GitHub Release publication were skipped. The versioned images and assembled
+assets remain immutable. The v0.4.2 source candidate contains the verifier
+fix and is awaiting exact-source CI, a nonpublishing drill and a new tag. The
+published v0.4.0 remains unchanged and uses GHCR, its original
 installer and its original checksum-only trust boundary. Never rerun publication
 against that version. The [installation guide](../deploy/compose/PREBUILT.md)
 keeps its earlier download procedure for existing v0.4.0 installations.
@@ -20,9 +23,9 @@ and recovered release are verified. v0.3.0 also remains immutable.
 
 The Release workflow requires every archive below and its native execution
 report before it can publish a stable release. `VERSION` is the workspace
-version without the `v` prefix. All six client-only archives and their reports
-are [v0.4.1 release assets](https://github.com/synveda/synveda/releases/tag/v0.4.1);
-none is present in v0.4.0.
+version without the `v` prefix. All six v0.4.1 client-only archives and their
+reports passed their native build jobs but remain Actions artifacts, not public
+release assets. None is present in v0.4.0.
 
 | Operating system | CPU | Required GitHub Release asset |
 |---|---|---|
@@ -37,8 +40,9 @@ CI and Release dry runs also retain these packages as Actions artifacts named
 `binaries-TARGET`; those are validation outputs, not public releases. A missing
 runner, archive or successful report blocks publication; no target is optional.
 
-v0.4.1 adds `synveda-client-VERSION-TARGET.tar.gz` for native macOS/Linux x86_64
-and arm64, plus `.zip` for Windows x86_64/arm64. Each contains the existing CLI and adapters plus private Node pinned
+The v0.4.2 source candidate retains `synveda-client-VERSION-TARGET.tar.gz`
+for native macOS/Linux x86_64 and arm64, plus `.zip` for Windows
+x86_64/arm64. Each contains the existing CLI and adapters plus private Node pinned
 by upstream SHA-256 in [the runtime inventory](../scripts/node-runtimes.json),
 with Synveda and complete Node licence notices. It contains no server binaries
 or deployment bundle. The [candidate guide](CONSUMER_CLI.md#client-archive-candidate)
@@ -103,8 +107,8 @@ and system-Node plugin archive retain their existing contract.
    candidates through a loopback registry, Compose and Helm. It never logs in,
    publishes to an external registry, signs or creates a Release. Its public
    inventory has `published: false` and cannot pass anonymous release verification.
-7. After reviewing local and hosted results, separately authorize the new tag
-   push. The existing `v*` workflow is the only publisher. Confirm the protected
+7. After reviewing local and hosted results, push the new tag. The existing
+   `v*` workflow is the only publisher. Confirm the protected
    environment approvals, both native image reports, Docker and all four Kind
    ownership-mode reports, and final attestation verification. Only then update
    the publication manifest, README, site and UI to name the new release.
@@ -126,7 +130,7 @@ git switch main
 git fetch origin main --tags
 git pull --ff-only origin main
 test -z "$(git status --porcelain)"
-VERSION=0.4.1
+VERSION=YOUR_APPROVED_UNUSED_VERSION
 sh scripts/release-version.sh "$VERSION"
 SOURCE_SHA=$(git rev-parse HEAD)
 git ls-remote origin "refs/tags/v$VERSION" # must print nothing
@@ -143,17 +147,20 @@ tag or rebuilding images under an existing version.
 The workflow checks every existing image tag before writing. A missing secret,
 private pull, authentication/rate-limit/network error, incomplete architecture,
 lost BuildKit attestation or different mirror descriptor fails the release.
-An interrupted publication can leave unannounced artifacts. Inspect and retain
-those bytes; do not delete/rebuild/overwrite them automatically. Recover using
-the original verified artifacts under an explicitly reviewed owner procedure,
-or authorize a new version. Do not move a published Git tag.
+An interrupted publication can leave unannounced artifacts. The v0.4.1 run
+already populated versioned image tags, so rerunning that tag would hit the
+write-once preflight and would also execute the original verifier. Inspect and
+retain those bytes; do not delete/rebuild/overwrite them automatically. Recover
+using the original verified artifacts under an explicitly reviewed owner procedure,
+or publish v0.4.2 after its separate gates pass. Do not move a published Git tag.
 Stable announcement now follows a draft upload and verification of all 31
 expected asset names, sizes and completed upload states. An upload failure
-leaves the draft unpublished. For upload-only recovery, use the original
-`verified-release-assets` artifact (30-day retention), which includes the
+leaves the draft unpublished. For upload-only recovery after full qualification,
+use the original `verified-release-assets` artifact (30-day retention), which includes the
 qualified reports and authenticated final checksum inventory, and verify all
 checksums/source/image identities. The old checksum-only
-v0.4.0 recovery is not a signing bypass for a new release.
+v0.4.0 recovery is not a signing bypass for a new release. The v0.4.1 run
+stopped before this artifact or the required signed inventory existed.
 
 Docker documents [multiple registry exports](https://docs.docker.com/build/ci/github-actions/push-multi-registries/),
 [personal tokens](https://docs.docker.com/security/access-tokens/personal-access-tokens/)

@@ -5,9 +5,11 @@ evaluation, or select the reference HTTPS configuration for infrastructure you
 operate. Both use the same Compose services, database authority checks,
 Cedar, forced RLS, VedaFlow and audit.
 
-<!-- installation-version: 0.4.1; publication: published -->
-**[v0.4.1 is published](https://github.com/synveda/synveda/releases/tag/v0.4.1).**
-Use its matching archive, image manifest and attested checksum inventory.
+<!-- installation-version: 0.4.2; publication: unreleased -->
+**v0.4.2 is the current source candidate and is not published.** The earlier
+[v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
+failed before native installation qualification. For a working public download,
+use [v0.4.0 below](#previous-v040-release) and its original checksum contract.
 The [release manifest](../../docs/installation.json) owns this status.
 
 The [refactored release contract](../../docs/RELEASING.md) distributes immutable
@@ -15,15 +17,16 @@ images through Docker Hub and GHCR and includes six native CLI packages. No
 publisher token or native CLI is needed to install the server bundle.
 
 <a id="download-and-verify"></a>
-## Download and verify v0.4.1
+## Version 0.4.2 release bundle
 
-The bundle downloads tested images by digest and never
+These commands require completed publication and will fail until its assets
+exist. The bundle downloads tested images by digest and never
 builds from a consumer source checkout. Verify the publisher before trusting
 the checksums; the GitHub CLI is a verification tool, not an installation
 dependency of the bundle.
 
 ```sh
-version=0.4.1
+version=0.4.2
 release_url="https://github.com/synveda/synveda/releases/download/v$version"
 mkdir "synveda-$version" && cd "synveda-$version"
 for file in "synveda-reference-$version.tar.gz" SHA256SUMS SHA256SUMS.sigstore.json; do
@@ -51,9 +54,9 @@ The remaining lifecycle and first-sign-in guidance applies to this bundle.
 ## Requirements
 
 An ordinary account with access to a **local Docker daemon**, Compose 2.33.1+
-(the minimum for the existing merge contract), curl, tar, a SHA-256 utility and
-GitHub CLI for publisher attestation verification.
-The published bundle passed on native Linux AMD64/ARM64 with Docker 28.0.4 and
+(the minimum for the existing merge contract), curl, tar and a SHA-256 utility.
+A future attested release also needs GitHub CLI for publisher verification.
+The published v0.4.0 bundle passed on native Linux AMD64/ARM64 with Docker 28.0.4 and
 Compose 2.38.2. Local candidate testing also used macOS/OrbStack, Engine 29.4.0,
 Compose 5.1.2 and Apple Silicon. Docker Desktop and Windows/WSL2 remain
 unqualified. Use at least 6 GiB available to Docker for
