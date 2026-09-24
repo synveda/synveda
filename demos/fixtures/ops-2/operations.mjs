@@ -123,13 +123,22 @@ export async function operations(c) {
   // private host directory; production custody is a separate encrypted copy.
   result.recoveryPoint = team(ns, "recovery-point");
   const backupAt = Date.now();
-  quiesce(ns, identityNs);
+  await quiesce(ns, identityNs);
   const backup = join(scratch, `${ns}-backup`); mkdirSync(backup, { mode: 0o700 });
   const archived = [];
   for (const db of ["synveda", "keycloak"]) {
     const namespace = db === "synveda" || (database !== "external" && identity === "packaged") ? dbNs : providers;
     const target = namespace === dbNs ? primary() : "deployment/postgres";
-    assert.equal(sql(namespace, target, "postgres", `SELECT count(*) FROM pg_stat_activity WHERE datname='${db}'`), "0", "all writers must be stopped before the pair is dumped");
+    // PostgreSQL can retain a backend briefly after Kubernetes removes its
+    // owning Pod. Fail closed if any client remains past the bounded drain.
+    const drainDeadline = Date.now() + 30_000;
+    let connections;
+    do {
+      connections = sql(namespace, target, "postgres", `SELECT count(*) FROM pg_stat_activity WHERE datname='${db}'`);
+      if (connections === "0" || Date.now() >= drainDeadline) break;
+      await sleep(1000);
+    } while (true);
+    assert.equal(connections, "0", `${db}: all clients must disconnect before the pair is dumped`);
     const dump = spawnSync("kubectl", ["exec", "-n", namespace, target, "--", "pg_dump", "-U", "postgres", "-d", db, "--format=custom", "--create", "--lock-wait-timeout=10s"], { env, timeout: 120000, maxBuffer: 64 * 1024 * 1024 });
     assert.equal(dump.status, 0, `${db} pg_dump failed`);
     writeFileSync(join(backup, `${db}.dump`), dump.stdout, { mode: 0o600 });
@@ -175,7 +184,7 @@ export async function operations(c) {
   const verification = k(["exec", "-n", ns, "team-test", "-c", "node", "--", "env", `DIRECT_APP=http://synveda.${restored}.svc.cluster.local:8120`, "node", "/scripts/starter-team.mjs", "restore-verify"], { timeout: 180000 });
   result.restore = { ...JSON.parse(verification.trim().split("\n").at(-1)), durationMs: Date.now() - restoreAt, target: "fresh namespace; independent PostgreSQL; packaged Keycloak", issuerPreserved: true, sourceDataRetained: true };
   console.log(`PASS joint restore: ${result.restore.durationMs} ms; native logical archives plus original KMS and issuer`);
-  quiesce(restored, restored);
+  await quiesce(restored, restored);
   apply(ns, sourceProxy); k(["rollout", "restart", "-n", ns, "deployment/proxy"]); wait(ns, "deployment", "proxy");
   k(["scale", "-n", identityNs, "statefulset/keycloak", "--replicas=1"]); wait(identityNs, "statefulset", "keycloak");
   k(["scale", "-n", ns, "deployment/synveda", "deployment/synveda-worker", "--replicas=1"]);

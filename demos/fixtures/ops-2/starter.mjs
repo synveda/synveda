@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { operations } from "./operations.mjs";
 
 const cluster = process.env.CLUSTER ?? "synveda-ops11-starter";
@@ -65,10 +66,20 @@ function wait(namespace, kind, name) {
     : ["rollout", "status", "-n", namespace, `${kind}/${name}`, "--timeout=600s"];
   k(args, { timeout: 620000 });
 }
-function quiesce(namespace, identityNamespace) {
+async function quiesce(namespace, identityNamespace) {
   k(["scale", "-n", namespace, "deployment/synveda", "deployment/synveda-worker", "--replicas=0"]);
   k(["scale", "-n", identityNamespace, "statefulset/keycloak", "--replicas=0"]);
   wait(namespace, "deployment", "synveda"); wait(namespace, "deployment", "synveda-worker");
+  // Zero-replica rollout status can complete while old Pods still own database
+  // sessions. A list handles Pods that vanished before this check began.
+  const podDeadline = Date.now() + 180_000;
+  for (;;) {
+    const pods = JSON.parse(k(["get", "pods", "-n", namespace, "-o", "json"])).items;
+    const writers = pods.filter((pod) => ["gateway", "worker"].includes(pod.metadata.labels?.["app.kubernetes.io/component"]));
+    if (writers.length === 0) break;
+    assert.ok(Date.now() < podDeadline, `runtime Pods did not stop: ${writers.map((pod) => pod.metadata.name).join(", ")}`);
+    await sleep(1000);
+  }
   k(["wait", "-n", identityNamespace, "pod/keycloak-0", "--for=delete", "--timeout=180s"], { timeout: 200000 });
 }
 function certificate(name, hosts) {
@@ -353,7 +364,7 @@ try {
     console.log(`${ns}: planned pod recreation`);
     // Quiesce clients for this single-instance maintenance test. Preserve the
     // provider's shutdown grace; force deletion would not prove safe recovery.
-    quiesce(ns, identityNs);
+    await quiesce(ns, identityNs);
     if (database === "cnpg") k(["delete", "pod", "-n", ns, "-l", "cnpg.io/cluster=synveda-pg", "--timeout=360s"], { timeout: 380000 });
     if (externalHost) { k(["rollout", "restart", "-n", providers, "deployment/postgres"]); wait(providers, "deployment", "postgres"); }
     if (database === "bundled") { k(["delete", "pod", "-n", ns, "synveda-pg-0", "--timeout=180s"], { timeout: 200000 }); wait(ns, "statefulset", "synveda-pg"); }
@@ -375,7 +386,7 @@ try {
     await mcp(ns, true);
     report.cases.push({ selection: selected, seed, workload, revoke, resources, dayTwo, persistentCredentials: true, persistentContent: true, uninstallReinstall: true });
     console.log(`PASS ${selected}: install, PKCE/team/service/MCP, recreation, upgrade, retained reinstall and revocation`);
-    quiesce(ns, identityNs);
+    await quiesce(ns, identityNs);
     k(["delete", "namespace", ns, providers, "--wait=true", "--timeout=180s"], { timeout: 200000 });
   }
   mkdirSync("demos/evidence", { recursive: true });
