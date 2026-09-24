@@ -7,11 +7,12 @@ launcher's retained host state. Its artifact gate includes paired backup/restore
 native Docker Desktop qualification remains separate.
 
 The refactored CI and Release workflows test this extracted bundle against
-the exact native AMD64/ARM64 OCI candidates. A tagged release also verifies
-anonymous pulls and recovery using the final Docker Hub destination digests,
-with GHCR copies retained. These are required gates for the next publication,
-not new claims about v0.4.0. Public installation needs no publisher token and
-never builds images from source.
+the exact native AMD64/ARM64 OCI candidates, including paired recovery. A
+tagged release separately verifies anonymous pulls, source labels and executable
+smoke for the copied Docker Hub and GHCR digests. The public gate does not
+repeat the full recovery drill. These are required gates for the next
+publication, not new claims about v0.4.0. Public installation needs no
+publisher token and never builds images from source.
 
 The matching source CLI offers native lifecycle commands over this graph,
 with engine/project/bundle ownership receipts (`docs/CONSUMER_CLI.md` in the

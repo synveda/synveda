@@ -861,9 +861,10 @@ reports under [demos/evidence](../demos/evidence) and attached to
 local source/candidate runtime, hosted release qualification and anonymous
 published retrieval are distinct evidence. The v0.4.1 tagged run stopped before
 public installation qualification. The release workflow requires the
-complete 31-asset inventory, checksum attestation, byte-identical OCI and
-downloadable charts, and native Docker/Helm verification before stable
-publication. Broader platform, N-1 upgrade and production recovery claims
+complete 35-asset inventory, checksum attestation, byte-identical OCI and
+downloadable charts, full native candidate Docker/Helm qualification and
+anonymous execution of the copied public images before stable publication.
+Broader platform, N-1 upgrade and production recovery claims
 remain unqualified.
 
 v0.4.0's original checksum-only release remains immutable; it does not contain
