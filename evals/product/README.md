@@ -80,6 +80,26 @@ per-task regressions. It labels manually imported answers unverified, so even
 its `PASS` is not live provider evidence. This factual task-use probe remains
 narrower than coding-task success or a native compact/resume run.
 
+After an explicit total-spend approval and a locally authenticated Claude Code
+client, the opt-in runner invokes each prompt as a separate no-tools,
+non-persistent print call. It divides the approved cap across 16 calls, checks
+the returned model and per-call usage, and writes private answer and score
+files under `target/`. For a USD $5.00 approval and the `sonnet` CLI selector:
+
+```sh
+SYNVEDA_CONFIRM_MODEL_SPEND=ctx-probe:5.00:16 \
+  node scripts/run-context-model-probe.mjs \
+    target/context-model-probe/prompts.json sonnet 5.00 \
+    target/context-model-probe/live
+```
+
+The runner refuses a stale or dirty prompt manifest, absent confirmation or
+authentication, model drift, missing usage, malformed JSON and a reported
+cost above the per-call cap. It retains a labelled partial result if a later
+call fails. Its final score measures factual answers in this synthetic
+questionnaire only; native hooks, coding-task success, subscription invoices
+and net savings require separate evidence.
+
 Run the definition-only CI gate with:
 
 ```sh
