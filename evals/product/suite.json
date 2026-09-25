@@ -29,6 +29,12 @@
     "paired_tasks_minimum": 4,
     "compression_case_reduction_minimum_tokens": 1
   },
+  "checkpoint_restart_gates": {
+    "task_count_minimum": 4,
+    "critical_fact_loss_maximum": 0,
+    "provenance_failure_maximum": 0,
+    "assisted_p95_latency_maximum_ms": 500
+  },
   "scenarios": [
     {
       "id": "capture_precision",
@@ -176,6 +182,13 @@
       "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "conservative_dedup_preserves_same_body_across_distinct_authority", "--", "--exact"],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
       "measures": ["provenance_separation"]
+    },
+    {
+      "id": "checkpoint_restart_held_out_tasks",
+      "title": "Four synthetic tasks retain independently declared Session facts and Knowledge after two compactions",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenance", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": ["checkpoint_fact_retention", "checkpoint_provenance", "restart_preview_latency_ms"]
     }
   ]
 }

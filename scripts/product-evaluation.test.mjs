@@ -35,6 +35,15 @@ test("CTX-8 required-fact and privacy tolerances stay at zero", () => {
   assert.match(validateSuite(suite, baseline, root).join("\n"), /CTX-8 safety tolerance must be zero/);
 });
 
+test("CTX-6 task, fact, provenance and latency bounds stay predeclared", () => {
+  const suite = copy();
+  suite.checkpoint_restart_gates.critical_fact_loss_maximum = 1;
+  assert.match(validateSuite(suite, baseline, root).join("\n"), /CTX-6 requires four tasks/);
+  suite.checkpoint_restart_gates.critical_fact_loss_maximum = 0;
+  suite.checkpoint_restart_gates.assisted_p95_latency_maximum_ms = 1000;
+  assert.match(validateSuite(suite, baseline, root).join("\n"), /predeclared 500 ms/);
+});
+
 test("a stale exact test name is refused", () => {
   const suite = copy();
   suite.scenarios[0].command[6] = "missing_test";

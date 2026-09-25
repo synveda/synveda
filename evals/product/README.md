@@ -14,6 +14,18 @@ leakage and preview delivery. It requires one fixed optional-content fixture
 to reduce the rendered block by at least one token. These are deterministic
 source fixtures, not model task-success, provider-usage or cost measurements.
 
+CTX-6 adds a separate four-task synthetic restart corpus in
+`checkpoint-tasks.json`. The exact-role gateway test compares previews with
+restart off and on after two compaction boundaries, under the same Knowledge
+snapshot and 1,400-token `o200k_base` Synveda text budget. It checks 12
+independently declared Session facts, exact required Knowledge, checkpoint and
+tail event attribution, and coverage. Both paths receive one warmup request
+per task; the report records one timed request per mode and a four-sample
+assisted p95. The predeclared local ceiling is 500 ms, with zero tolerance for
+fact or provenance loss. This is a deterministic probe, not a model answer,
+task-success or provider-cost measurement; four samples do not establish a
+production latency distribution.
+
 Run the definition-only CI gate with:
 
 ```sh
@@ -31,7 +43,7 @@ The runner requires `DATABASE_URL`; it fails if the PulseBoard test skips and
 therefore cannot turn an unavailable database into green evidence. It records
 the exact git revision, retrieval/index/embedding identity, independently
 persisted retrieved/selected/injected/feedback counts, token use, ContextRun
-latencies, paired CTX-8 evidence and every scenario duration.
+latencies, paired CTX-8 and CTX-6 evidence and every scenario duration.
 
 This deterministic suite uses the rule extractor and the test embedder, which
 is lexical-only. `make eval-retrieval` remains the BGE-M3 semantic run;

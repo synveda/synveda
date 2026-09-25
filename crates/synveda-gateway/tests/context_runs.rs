@@ -8,7 +8,7 @@
 mod tenant_fixture;
 
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::Body;
@@ -996,6 +996,259 @@ async fn foreign_checkpoint_routes_match_an_unknown_session() {
         assert_eq!(foreign_status, fictional_status, "{foreign_path}");
         assert_eq!(foreign_error["kind"], fictional_error["kind"]);
         assert!(!foreign_error.to_string().contains(checkpoint_id));
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CheckpointTaskCorpus {
+    schema_version: u8,
+    scope: String,
+    budget_tokens: u32,
+    encoding: String,
+    tasks: Vec<CheckpointTask>,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckpointTask {
+    id: String,
+    query: String,
+    knowledge_title: String,
+    knowledge_fact: String,
+    first_fact: String,
+    second_fact: String,
+    tail_fact: String,
+}
+
+#[tokio::test]
+async fn held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenance() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let corpus: CheckpointTaskCorpus =
+        serde_json::from_str(include_str!("../../../evals/product/checkpoint-tasks.json"))
+            .expect("parse independent CTX-6 task corpus");
+    assert_eq!(corpus.schema_version, 1);
+    assert_eq!(corpus.encoding, "o200k_base");
+    assert_eq!(corpus.tasks.len(), 4);
+
+    let mut task_evidence = Vec::new();
+    for task in &corpus.tasks {
+        let (item_id, revision_id) = create_knowledge(
+            &world,
+            &format!("ctx6-held-out-{}", task.id),
+            world.project_scope,
+            Some(&world.project_id),
+            None,
+            &task.knowledge_title,
+            &task.knowledge_fact,
+            None,
+        )
+        .await;
+        let (status, session) = call(
+            &world.app,
+            "POST",
+            "/v1/sessions",
+            &world.alice_token,
+            Some(&format!("ctx6-held-out-session-{}", task.id)),
+            Some(json!({
+                "workspace_id": world.workspace_id,
+                "project_id": world.project_id,
+                "client_name": "claude-code",
+                "external_session_id": format!("ctx6-held-out-{}", task.id),
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{}: {session}", task.id);
+        let session_id = session["id"].as_str().expect("held-out Session id");
+        let first_id = format!("{}-user-1", task.id);
+        let second_id = format!("{}-user-2", task.id);
+        let (status, appended) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/sessions/{session_id}/events"),
+            &world.alice_token,
+            None,
+            Some(json!({"events": [
+                {"event_type": "message.user", "client_event_id": first_id,
+                    "occurred_at": "2020-01-01T10:00:00Z", "payload": {"text": task.first_fact}},
+                {"event_type": "session.compaction_boundary",
+                    "client_event_id": format!("{}-boundary-1", task.id),
+                    "occurred_at": "2020-01-01T10:00:01Z",
+                    "payload": {"schema_version": 1, "local_high_sequence": 2,
+                        "expected_client_event_ids": [first_id],
+                        "expected_ids_truncated": false}},
+                {"event_type": "message.user", "client_event_id": second_id,
+                    "occurred_at": "2020-01-01T10:00:02Z", "payload": {"text": task.second_fact}},
+                {"event_type": "session.compaction_boundary",
+                    "client_event_id": format!("{}-boundary-2", task.id),
+                    "occurred_at": "2020-01-01T10:00:03Z",
+                    "payload": {"schema_version": 1, "local_high_sequence": 4,
+                        "expected_client_event_ids": [second_id],
+                        "expected_ids_truncated": false}},
+            ]})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{}: {appended}", task.id);
+        let first_source = appended["events"][0]["event"]["id"]
+            .as_str()
+            .expect("first source id");
+        let second_source = appended["events"][2]["event"]["id"]
+            .as_str()
+            .expect("second source id");
+        let (status, tail) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/sessions/{session_id}/events"),
+            &world.alice_token,
+            None,
+            Some(json!({"events": [{
+                "event_type": "message.user",
+                "client_event_id": format!("{}-tail", task.id),
+                "occurred_at": "2020-01-01T10:00:04Z",
+                "payload": {"text": task.tail_fact},
+            }]})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{}: {tail}", task.id);
+        let tail_source = tail["events"][0]["event"]["id"]
+            .as_str()
+            .expect("tail source id");
+
+        // Both previews use one admitted source snapshot, one encoding and one
+        // governed budget. Only the supported restart flag changes.
+        let request = json!({
+            "query": task.query,
+            "budget_tokens": corpus.budget_tokens,
+            "tokenizer_encoding": corpus.encoding,
+            "required_knowledge_revisions": [{"item_id": item_id, "revision_id": revision_id}],
+        });
+        let path = format!("/v1/sessions/{session_id}/context-preview");
+        let mut restart_request = request.clone();
+        restart_request["restart"] = json!(true);
+        for warmup_request in [request.clone(), restart_request.clone()] {
+            let (status, warmup) = call(
+                &world.app,
+                "POST",
+                &path,
+                &world.alice_token,
+                None,
+                Some(warmup_request),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{} warmup: {warmup}", task.id);
+        }
+        let baseline_started = Instant::now();
+        let (status, without_assist) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            None,
+            Some(request.clone()),
+        )
+        .await;
+        let baseline_ms = baseline_started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(status, StatusCode::OK, "{}: {without_assist}", task.id);
+        let assisted_started = Instant::now();
+        let (status, with_assist) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            None,
+            Some(restart_request),
+        )
+        .await;
+        let assisted_ms = assisted_started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(status, StatusCode::OK, "{}: {with_assist}", task.id);
+
+        let baseline = without_assist["rendered"]
+            .as_str()
+            .expect("baseline rendered text");
+        let assisted = with_assist["rendered"]
+            .as_str()
+            .expect("assisted rendered text");
+        let knowledge_exact = [baseline, assisted].iter().all(|text| {
+            text.contains(&format!("\"body_markdown\":{}", json!(task.knowledge_fact)))
+        });
+        let baseline_session_facts_absent = [&task.first_fact, &task.second_fact, &task.tail_fact]
+            .iter()
+            .all(|fact| !baseline.contains(*fact));
+        let checkpoint_id = with_assist["restart_checkpoint_event_id"]
+            .as_str()
+            .expect("assisted checkpoint id");
+        let lines: Vec<Value> = assisted
+            .lines()
+            .filter_map(|line| line.strip_prefix("- "))
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        let attributed = |source: &str, fact: &str, kind: &str| {
+            lines.iter().find(|line| {
+                line["session_event_id"] == source
+                    && line["text"] == fact
+                    && line["kind"] == kind
+                    && line["assertion_class"] == "user_authored"
+            })
+        };
+        let first = attributed(first_source, &task.first_fact, "checkpoint_user_excerpt");
+        let second = attributed(second_source, &task.second_fact, "checkpoint_user_excerpt");
+        let recent = attributed(tail_source, &task.tail_fact, "recent_user_event");
+        let first_attributed = first.is_some_and(|line| {
+            line["checkpoint_event_id"].is_string() && line["checkpoint_event_id"] != checkpoint_id
+        });
+        let second_attributed =
+            second.is_some_and(|line| line["checkpoint_event_id"] == checkpoint_id);
+        let recent_attributed = recent.is_some();
+        let retained =
+            u8::from(first_attributed) + u8::from(second_attributed) + u8::from(recent_attributed);
+        let facts_attributed = retained == 3;
+        let within_budget = with_assist["tokens"]
+            .as_u64()
+            .is_some_and(|tokens| tokens <= u64::from(corpus.budget_tokens));
+        assert!(knowledge_exact, "{}: required Knowledge changed", task.id);
+        assert!(
+            baseline_session_facts_absent,
+            "{}: baseline included Session evidence",
+            task.id
+        );
+        assert!(
+            facts_attributed,
+            "{}: restart source attribution failed: {with_assist}",
+            task.id
+        );
+        assert_eq!(with_assist["restart_coverage"], "observed_window");
+        assert!(within_budget, "{}: restart exceeded budget", task.id);
+        task_evidence.push(json!({
+            "task": task.id,
+            "without_assist_tokens": without_assist["tokens"],
+            "with_assist_tokens": with_assist["tokens"],
+            "baseline_ms": baseline_ms,
+            "assisted_ms": assisted_ms,
+            "critical_facts_retained": retained,
+            "critical_facts_expected": 3,
+            "knowledge_exact": knowledge_exact,
+            "facts_attributed": facts_attributed,
+            "coverage": with_assist["restart_coverage"],
+            "within_budget": within_budget,
+            "provider_usage": "unavailable",
+        }));
+    }
+    if let Ok(path) = std::env::var("SYNVEDA_CHECKPOINT_TASK_EVIDENCE") {
+        let evidence = json!({
+            "schema_version": corpus.schema_version,
+            "scope": corpus.scope,
+            "encoding": corpus.encoding,
+            "budget_tokens": corpus.budget_tokens,
+            "warmup_requests_per_task": 2,
+            "measured_requests_per_mode_per_task": 1,
+            "tasks": task_evidence,
+            "provider_usage": "unavailable",
+            "task_outcome": "not measured",
+            "cost": "unavailable",
+        });
+        std::fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap())
+            .expect("write content-free CTX-6 held-out task evidence");
     }
 }
 
