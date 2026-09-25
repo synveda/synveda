@@ -2,16 +2,9 @@
 
 Public entry points: [Run with Docker](compose/PREBUILT.md) and
 [Deploy to Kubernetes](helm/synveda/README.md). Published v0.4.3 is the
-current complete release. The v0.4.1 tagged run copied images to Docker Hub
-and GHCR but failed before its attested checksum and native
-[CLI package](../docs/RELEASING.md#native-cli-release-artifacts) publication.
-The v0.4.2 tagged run passed anonymous image pulls but timed out while
-repeating the complete installation drills, also before final publication.
-The v0.4.3 release completed exact-source CI, the nonpublishing drill, native
-candidate qualification and anonymous public image/chart checks. The v0.4.0
-installation retains its original GHCR and checksum-only contract.
-The [CI and Release guide](../docs/CI.md)
-describes validation and publication.
+current complete release. It passed exact-source CI, native installation drills
+and anonymous image/chart checks. The [CI and Release guide](../docs/CI.md)
+records the release history and publication procedure.
 
 This file is the infrastructure-shape overview. Source-checkout operator steps
 live in the [canonical Compose guide](compose/README.md); the normative mapping
@@ -56,9 +49,9 @@ freshness or Skill/Tool advertisement.
   Only CNPG mode requires a separately installed operator. The release workflow packages this
   chart and a digest-bound reference bundle using one versioned six-image plan:
   product, single-host and CloudNativePG PostgreSQL, optimized Keycloak,
-  reference proxy and browser acceptance. The v0.4.1 source candidate passed
-  OCI, Compose and four-mode Helm testing, and the images reached both registries.
-  Its published-image pull gate failed before installation qualification.
+  reference proxy and browser acceptance. Published v0.4.3 provides the chart,
+  digest overlays and four-mode native Kind reports. Real OpenShift and a
+  published cross-release upgrade remain outside the qualified set.
 
 ## Bootstrap boundary
 
@@ -182,12 +175,12 @@ by ADR-0109 through ADR-0112 and the deployment contract above.
 | Runtime | One product image, gateway-served console, separate worker and existing PostgreSQL jobs; mandatory authority readiness separate from optional provider diagnostics |
 | Portability | Restricted-ID Kind simulation and Kubernetes/OpenShift structural schemas; real SCC/router/CNI/CSI/cloud execution remains unqualified |
 | Recovery | Writer-quiesced native PostgreSQL archives, original key/issuer custody and clean-namespace functional verification; actual measurements are recorded in OPS-11, not inferred from retained PVCs |
-| Upgrade | Same-epoch migration reruns/locking and retained reinstall; no general N-1 release window is qualified, and the retired v0.2.0 schema is refused |
-| Distribution | v0.4.0 is the complete public set; v0.4.1 qualified OCI candidates and two-registry descriptor parity, but its anonymous image gate failed and no attested release asset set was published |
+| Upgrade | Same-source migration reruns and retained reinstall work; no published upgrade pair is supported. v0.4.0 and v0.4.3 have different epoch-3 baseline checksums. |
+| Distribution | v0.4.3 publishes the chart, immutable image overlays and native AMD64/ARM64 Kubernetes reports; both registries and the OCI chart passed anonymous checks. |
 
 The [release guide](../docs/RELEASING.md#owner-setup) records the owner
 settings needed for subsequent versions. A general
-supported N-1 upgrade window and real target-platform qualification remain
+supported N-1 upgrade window and real OpenShift qualification remain
 separate readiness work. External administrators own provider compatibility
 and backup custody. No operator, workflow engine, service mesh, schema
 translator or application replica knob is introduced.
