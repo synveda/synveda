@@ -24,8 +24,9 @@ use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::{Action, Resource, ResourceEntity, ScopeNode};
 use synveda_retrieval::{
-    AuthoredReadInputs, CandidateScope, ComposeRequest, compose_authored, composition_plan,
-    estimated_tokens,
+    AuthoredReadInputs, CandidateScope, ComposeRequest, ComposedBlock, SourceSpan, TokenCounter,
+    compose_authored, composition_plan, ranked_source_units, record_authored_delivery_metrics,
+    task_overlap,
 };
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::capture::{self as capture_store, CandidateFilter};
@@ -39,7 +40,7 @@ use synveda_store::sessions::{self, ContextRunCursor, ContextRunFilter, NewConte
 use synveda_store::{configuration, policy_assignments, rls, scopes};
 use synveda_types::capture::{CaptureCandidate, CaptureCandidateState};
 use synveda_types::configuration::{
-    ConfigurationContextChannel, EffectiveConfiguration, ExternalProvider,
+    ConfigurationContextChannel, ContextOptimizationMode, EffectiveConfiguration, ExternalProvider,
 };
 use synveda_types::context::{
     ContextFeedbackType, ContextGraphDirection, ContextReasonCode, TraceRetentionMode,
@@ -90,6 +91,9 @@ const TRACE_LIFECYCLE_LIMIT: i64 = 16;
 const UNREVIEWED_CANDIDATE_LIMIT: usize = 24;
 const MAX_QUERY_CHARS: usize = 4_096;
 const RETRIEVAL_VERSION: &str = "knowledge-planner-v2";
+const CONSERVATIVE_ESTIMATE_VERSION: &str = "knowledge-planner-v3-conservative-o200k-estimate";
+const CONSERVATIVE_EXACT_VERSION: &str = "knowledge-planner-v3-conservative-o200k-exact";
+const OFF_EXACT_VERSION: &str = "knowledge-planner-v2-off-o200k-exact";
 const INDEX_VERSION: &str = "knowledge-search-v1";
 
 /// Integer score components retained for an authorised candidate.
@@ -375,10 +379,130 @@ pub struct CreateContextRunBody {
     /// Requested budget; the governed pack remains the ceiling.
     #[serde(default)]
     pub budget_tokens: Option<u32>,
+    /// Optional exact text encoding selected by the caller. The only supported
+    /// value is `o200k_base`; omission keeps an explicit estimate.
+    #[serde(default)]
+    pub tokenizer_encoding: Option<String>,
+    /// Current immutable Knowledge revisions required verbatim by the
+    /// authenticated session caller.
+    #[serde(default)]
+    pub required_knowledge_revisions: Vec<RequiredKnowledgeRevision>,
     /// Optional sensitivity narrowing.
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub max_sensitivity: Option<Sensitivity>,
+}
+
+/// Exact current Knowledge revision designated by the session caller.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RequiredKnowledgeRevision {
+    /// Stable Knowledge item identity.
+    #[schema(value_type = String, format = "uuid")]
+    pub item_id: KnowledgeItemId,
+    /// Immutable revision identity.
+    #[schema(value_type = String, format = "uuid")]
+    pub revision_id: KnowledgeRevisionId,
+}
+
+/// One policy-visible source considered by a preview. Absent addresses in a
+/// reduced trace mode are omitted rather than replaced with a denied count.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ContextPreviewSourceView {
+    /// Source family.
+    pub channel: String,
+    /// Visible stable Knowledge identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub knowledge_item_id: Option<KnowledgeItemId>,
+    /// Visible immutable Knowledge revision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub knowledge_revision_id: Option<KnowledgeRevisionId>,
+    /// Visible unreviewed candidate identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub capture_candidate_id: Option<CaptureCandidateId>,
+    /// Source revision or candidate content hash.
+    pub source_content_hash: String,
+    /// BLAKE3 hash of exact delivered body bytes, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivered_body_hash: Option<String>,
+    /// Exact half-open source byte span, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_body_byte_span: Option<[usize; 2]>,
+    /// Selection or transformation reasons.
+    pub reason_codes: Vec<String>,
+    /// Visible omission reason, if this source was omitted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub omission_reason: Option<String>,
+    /// Whether the session caller marked this exact revision as required.
+    pub required: bool,
+}
+
+/// Authored chunk material selected by a preview.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ContextPreviewPackView {
+    /// Immutable published chunk identity.
+    #[schema(value_type = String, format = "uuid")]
+    pub chunk_id: synveda_types::ContextPackChunkId,
+    /// Address of the published document.
+    pub document_hash: String,
+    /// Hash of the source chunk bytes.
+    pub source_content_hash: String,
+    /// Hash of the exact line included in the rendered block.
+    pub delivered_line_hash: String,
+    /// Complete body or title-only index.
+    pub presentation: String,
+}
+
+/// A pure preview of what Synveda would contribute at this instant. It is not
+/// a ContextRun delivery, provider request or observed usage record.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ContextPreviewView {
+    /// Session whose policy and scope were used.
+    #[schema(value_type = String, format = "uuid")]
+    pub session_id: SessionId,
+    /// Exact Synveda text that would be delivered.
+    pub rendered: String,
+    /// BLAKE3 over `rendered`.
+    pub rendered_hash: String,
+    /// Local count of the full rendered text.
+    pub tokens: u32,
+    /// Effective Synveda text allowance after policy narrowing.
+    pub budget_tokens: u32,
+    /// Caller requested allowance, if one was supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_budget_tokens: Option<u32>,
+    /// Governed off or conservative mode.
+    pub optimization_mode: String,
+    /// Estimated or exact for the selected encoding.
+    pub token_count_kind: String,
+    /// Local encoding used, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokenizer_encoding: Option<String>,
+    /// Scope of the local count; provider framing and history are excluded.
+    pub accounting_boundary: String,
+    /// Authorised sources included in the rendered text.
+    pub selected: Vec<ContextPreviewSourceView>,
+    /// Authorised sources omitted from the rendered text.
+    pub omitted: Vec<ContextPreviewSourceView>,
+    /// Published authored chunks selected for this contribution.
+    pub authored_packs: Vec<ContextPreviewPackView>,
+    /// Immutable Skill versions advertised in this contribution.
+    pub advertised_skill_versions: Vec<String>,
+    /// Standalone authored component count; not additive with other components.
+    pub authored_rendered_tokens: u32,
+    /// Standalone Knowledge component count; not additive with other components.
+    pub knowledge_rendered_tokens: u32,
+    /// Explanation of final serialized accounting.
+    pub overhead_note: String,
+    /// Why observed provider usage is unavailable.
+    pub observed_usage_status: String,
+    /// Retrieval degradation reasons.
+    pub degraded: Vec<String>,
+    /// Generic policy exclusion indicator without denied-resource detail.
+    pub policy_exclusion_message: Option<String>,
 }
 
 /// Ordinary session-scoped deep query.
@@ -740,6 +864,8 @@ struct PlannedCandidate {
     exclusion: Option<ContextReasonCode>,
     authorization: Value,
     selected_tokens: Option<i32>,
+    delivery_span: Option<SourceSpan>,
+    required: bool,
     graph_path: Vec<PlannedGraphStep>,
 }
 
@@ -1396,6 +1522,8 @@ async fn collect_planned_candidates(
             exclusion,
             authorization,
             selected_tokens: None,
+            delivery_span: None,
+            required: false,
             graph_path: Vec::new(),
         });
     }
@@ -1457,18 +1585,23 @@ async fn collect_planned_candidates(
                 exclusion,
                 authorization,
                 selected_tokens: None,
+                delivery_span: None,
+                required: false,
                 graph_path: Vec::new(),
             });
         }
     }
 
-    rank_and_deduplicate(&mut planned);
+    rank_and_deduplicate(
+        &mut planned,
+        prepared.configuration.document.context.optimization_mode,
+    );
     metrics::counter!(CONTEXT_CANDIDATES_TOTAL, "outcome" => "visible")
         .increment(planned.len() as u64);
     Ok((planned, denied))
 }
 
-fn rank_and_deduplicate(planned: &mut [PlannedCandidate]) {
+fn rank_and_deduplicate(planned: &mut [PlannedCandidate], mode: ContextOptimizationMode) {
     for candidate in planned.iter_mut() {
         if candidate.exclusion == Some(ContextReasonCode::Duplicate) {
             candidate.exclusion = None;
@@ -1478,9 +1611,10 @@ fn rank_and_deduplicate(planned: &mut [PlannedCandidate]) {
         }
     }
     planned.sort_by(|left, right| {
-        left.exclusion
-            .is_some()
-            .cmp(&right.exclusion.is_some())
+        right
+            .required
+            .cmp(&left.required)
+            .then_with(|| left.exclusion.is_some().cmp(&right.exclusion.is_some()))
             .then_with(|| right.final_micros.cmp(&left.final_micros))
             .then_with(|| right.updated_at().cmp(&left.updated_at()))
             .then_with(|| right.item_id().cmp(&left.item_id()))
@@ -1491,13 +1625,123 @@ fn rank_and_deduplicate(planned: &mut [PlannedCandidate]) {
     // visible, explainable candidate but cannot consume context twice.
     let mut content = HashSet::new();
     for candidate in planned.iter_mut() {
-        if candidate.exclusion.is_none() && !content.insert(candidate.content_hash().to_owned()) {
+        let identity = if mode == ContextOptimizationMode::Conservative {
+            // Equal bytes at two independently governed addresses may have
+            // different provenance. Only the exact revision may collapse.
+            context_reference(candidate)
+        } else {
+            candidate.content_hash().to_owned()
+        };
+        if candidate.exclusion.is_none() && !content.insert(identity) {
             candidate.exclusion = Some(ContextReasonCode::Duplicate);
             if !candidate.reasons.contains(&ContextReasonCode::Duplicate) {
                 candidate.reasons.push(ContextReasonCode::Duplicate);
             }
         }
     }
+}
+
+struct RequiredKnowledgeInput<'a> {
+    prepared: &'a PreparedContext,
+    principal_id: &'a str,
+    at: DateTime<Utc>,
+    ceiling: Option<Sensitivity>,
+    required: &'a [RequiredKnowledgeRevision],
+    mode: ContextOptimizationMode,
+}
+
+async fn require_current_knowledge(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    candidates: &mut Vec<PlannedCandidate>,
+    input: RequiredKnowledgeInput<'_>,
+) -> Result<()> {
+    let RequiredKnowledgeInput {
+        prepared,
+        principal_id,
+        at,
+        ceiling,
+        required,
+        mode,
+    } = input;
+    if required.len() > 16 {
+        return Err(Error::Invalid {
+            message: "at most 16 required Knowledge revisions may be requested".to_owned(),
+        });
+    }
+    let mut seen = HashSet::new();
+    for exact in required {
+        if !seen.insert((exact.item_id, exact.revision_id)) {
+            return Err(Error::Invalid {
+                message: "required Knowledge revisions must be unique".to_owned(),
+            });
+        }
+        let unavailable = || Error::NotFound {
+            entity: "required Knowledge revision".to_owned(),
+        };
+        let snapshot = knowledge::current(&mut *tx, tenant_id, exact.item_id)
+            .await?
+            .ok_or_else(unavailable)?;
+        if snapshot.revision.id != exact.revision_id
+            || !current_active_at(&snapshot, at)
+            || !prepared.knowledge_scopes.contains(&snapshot.item.scope_id)
+            || ceiling.is_some_and(|limit| snapshot.revision.content.sensitivity > limit)
+        {
+            return Err(unavailable());
+        }
+        let authorization =
+            match crate::knowledge_api::authorize_snapshot(state, tx, tenant_id, &snapshot).await {
+                Ok(allowed) => audit::decision_context(Action::KnowledgeRead, &allowed),
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
+                    return Err(unavailable());
+                }
+                Err(error) => return Err(error),
+            };
+        if graph::stale_at(tx, tenant_id, &snapshot, at).await? {
+            return Err(unavailable());
+        }
+        if let Some(candidate) = candidates
+            .iter_mut()
+            .find(|candidate| candidate.revision_id() == Some(exact.revision_id))
+        {
+            candidate.required = true;
+            candidate.exclusion = None;
+        } else {
+            let (freshness, pin, anchor, final_score, reasons) = planned_score(
+                &snapshot,
+                ScoreSeed::default(),
+                principal_id,
+                prepared.session.project_id,
+                at,
+            );
+            candidates.push(PlannedCandidate {
+                id: ContextCandidateId::new(),
+                payload: PlannedPayload::Knowledge(snapshot),
+                sources: Vec::new(),
+                keyword_micros: 0,
+                semantic_micros: 0,
+                anchor_micros: anchor,
+                edge_weight_micros: 0,
+                hop_penalty_micros: 0,
+                freshness_micros: freshness,
+                pin_micros: pin,
+                current_state_micros: 100_000,
+                final_micros: final_score,
+                reasons,
+                exclusion: None,
+                authorization,
+                selected_tokens: None,
+                delivery_span: None,
+                required: true,
+                graph_path: Vec::new(),
+            });
+        }
+    }
+    if !required.is_empty() {
+        rank_and_deduplicate(candidates, mode);
+    }
+    Ok(())
 }
 
 fn push_degradation(values: &mut Vec<String>, value: &str) {
@@ -1515,7 +1759,11 @@ fn source_line(source: &KnowledgeSource) -> String {
     format!("{}:{address}", source.source_type.as_str())
 }
 
-fn knowledge_snippet(candidate: &PlannedCandidate) -> String {
+fn knowledge_snippet(
+    candidate: &PlannedCandidate,
+    span: Option<SourceSpan>,
+    conservative: bool,
+) -> String {
     match &candidate.payload {
         PlannedPayload::Knowledge(snapshot) => {
             let revision = &snapshot.revision;
@@ -1526,7 +1774,7 @@ fn knowledge_snippet(candidate: &PlannedCandidate) -> String {
                 .map(source_line)
                 .collect::<Vec<_>>();
             let evidence_available = !evidence.is_empty();
-            let entry = json!({
+            let mut entry = json!({
                 "kind": "published_knowledge",
                 "title": revision.content.title,
                 "body_markdown": revision.content.body_markdown,
@@ -1538,6 +1786,14 @@ fn knowledge_snippet(candidate: &PlannedCandidate) -> String {
                 "sensitivity": revision.content.sensitivity.as_str(),
                 "scope_id": item.scope_id,
             });
+            if conservative && let Some(range) = span {
+                let body = range
+                    .text(&revision.content.body_markdown)
+                    .unwrap_or(&revision.content.body_markdown);
+                entry["body_markdown"] = json!(body);
+                entry["presentation"] = json!("excerpt");
+                entry["source_body_byte_span"] = json!([range.start, range.end]);
+            }
             format!(
                 "\n- {}\n",
                 serde_json::to_string(&entry).expect("a JSON value always serializes")
@@ -1585,15 +1841,35 @@ fn context_reference(candidate: &PlannedCandidate) -> String {
     }
 }
 
+struct KnowledgeAssembly<'a> {
+    budget: u32,
+    at: DateTime<Utc>,
+    query: Option<&'a str>,
+    mode: ContextOptimizationMode,
+    counter: &'a TokenCounter,
+}
+
 async fn assemble_knowledge(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     candidates: &mut [PlannedCandidate],
-    budget: u32,
-    at: DateTime<Utc>,
+    assembly: KnowledgeAssembly<'_>,
 ) -> Result<(String, u32)> {
+    let KnowledgeAssembly {
+        budget,
+        at,
+        query,
+        mode,
+        counter,
+    } = assembly;
     if budget == 0 {
+        if candidates.iter().any(|candidate| candidate.required) {
+            return Err(Error::InsufficientBudget {
+                required_tokens: 1,
+                budget_tokens: 0,
+            });
+        }
         for candidate in candidates
             .iter_mut()
             .filter(|candidate| candidate.exclusion.is_none())
@@ -1616,22 +1892,75 @@ async fn assemble_knowledge(
         if let Some(snapshot) = candidate.knowledge() {
             candidate.sources = visible_sources(state, tx, tenant_id, &snapshot.revision).await?;
         }
-        let snippet = knowledge_snippet(candidate);
+        let conservative = mode == ContextOptimizationMode::Conservative;
+        let full = knowledge_snippet(candidate, None, conservative);
         let mut next_refs = refs.clone();
         next_refs.push(context_reference(candidate));
         let footer = format!("\n[Synveda Knowledge: {}]\n", next_refs.join(","));
-        let prospective = format!(
-            "{header}{}{footer}",
-            [snippets.join(""), snippet.clone()].concat()
-        );
-        let tokens = estimated_tokens(&prospective);
-        if tokens > budget {
+        let prefix = snippets.join("");
+        let fits = |snippet: &str| {
+            let prospective = format!("{header}{prefix}{snippet}{footer}");
+            prospective.len() <= synveda_retrieval::MAX_RENDERED_CONTEXT_BYTES
+                && counter.count(&prospective) <= budget
+        };
+        let required_tokens = candidate
+            .required
+            .then(|| counter.count(&format!("{header}{prefix}{full}{footer}")));
+        let full_fits = fits(&full);
+        let excerpt = if conservative && !candidate.required {
+            candidate.knowledge().and_then(|snapshot| {
+                ranked_source_units(&snapshot.revision.content.body_markdown, query)
+                    .into_iter()
+                    .filter(|span| {
+                        span.start > 0 || span.end < snapshot.revision.content.body_markdown.len()
+                    })
+                    .map(|span| {
+                        let source = span
+                            .text(&snapshot.revision.content.body_markdown)
+                            .unwrap_or_default();
+                        (
+                            knowledge_snippet(candidate, Some(span), true),
+                            span,
+                            query.map_or(0, |task| task_overlap(source, task)),
+                        )
+                    })
+                    .find(|(snippet, _, _)| fits(snippet))
+            })
+        } else {
+            None
+        };
+        let prefer_excerpt = full_fits
+            && query.is_some()
+            && excerpt.as_ref().is_some_and(|(snippet, _, overlap)| {
+                *overlap > 0 && counter.count(&full).saturating_sub(counter.count(snippet)) >= 64
+            });
+        let selected = if prefer_excerpt || !full_fits {
+            excerpt.map(|(snippet, span, _)| (snippet, Some(span)))
+        } else {
+            Some((full, None))
+        };
+        let Some((snippet, excerpt_span)) = selected else {
+            if candidate.required {
+                return Err(Error::InsufficientBudget {
+                    required_tokens: required_tokens.unwrap_or(u32::MAX),
+                    budget_tokens: budget,
+                });
+            }
             candidate.exclusion = Some(ContextReasonCode::TokenBudget);
             candidate.reasons.push(ContextReasonCode::TokenBudget);
             continue;
+        };
+        if excerpt_span.is_some() {
+            candidate.reasons.push(ContextReasonCode::Excerpt);
+        }
+        if conservative && let Some(snapshot) = candidate.knowledge() {
+            candidate.delivery_span = Some(excerpt_span.unwrap_or(SourceSpan {
+                start: 0,
+                end: snapshot.revision.content.body_markdown.len(),
+            }));
         }
         candidate.selected_tokens =
-            Some(i32::try_from(estimated_tokens(&snippet)).unwrap_or(i32::MAX));
+            Some(i32::try_from(counter.count(&snippet)).unwrap_or(i32::MAX));
         refs = next_refs;
         snippets.push(snippet);
     }
@@ -1643,7 +1972,7 @@ async fn assemble_knowledge(
         snippets.concat(),
         refs.join(",")
     );
-    Ok((text.clone(), estimated_tokens(&text)))
+    Ok((text.clone(), counter.count(&text)))
 }
 
 struct TraceAddresses {
@@ -1789,6 +2118,52 @@ fn context_run_response(status: StatusCode, run: ContextRun) -> Response {
     response
 }
 
+/// `POST /v1/sessions/{session_id}/context-preview` — read the current plan
+/// without creating a ContextRun delivery or provider-usage record.
+#[utoipa::path(
+    post,
+    path = "/v1/sessions/{session_id}/context-preview",
+    operation_id = "preview_context",
+    tag = "context",
+    params(("session_id" = String, Path, description = "The session's id")),
+    request_body = CreateContextRunBody,
+    responses(
+        (status = 200, description = "Authorised context preview; no delivery recorded", body = ContextPreviewView),
+        (status = 400, description = "Invalid body or unsupported encoding", body = ApiErrorBody),
+        (status = 403, description = "The PDP denied session writing", body = ApiErrorBody),
+        (status = 404, description = "No such session", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+#[tracing::instrument(name = "context.preview", skip_all, fields(session.id = %session_id))]
+pub(crate) async fn preview_context(
+    State(state): State<AppState>,
+    Path(session_id): Path<SessionId>,
+    payload: std::result::Result<Json<CreateContextRunBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        if let Some(query) = &body.query {
+            query_text(query)?;
+        }
+        if body.budget_tokens == Some(0) {
+            return Err(Error::Invalid {
+                message: "`budget_tokens` is at least 1".to_owned(),
+            });
+        }
+        let tenant_id = tenant_id()?;
+        let principal_id = subject()?;
+        match plan_context_run(&state, tenant_id, &principal_id, session_id, &body, None).await? {
+            ContextPlanOutcome::Preview(preview) => Ok(Json(preview).into_response()),
+            ContextPlanOutcome::Delivered(_) => Err(Error::Internal {
+                message: "preview planner recorded a delivery".to_owned(),
+            }),
+        }
+    }
+    .await;
+    respond(&state, "context.preview", result).await
+}
+
 /// `POST /v1/sessions/{session_id}/context-runs` — plan and deliver context.
 #[utoipa::path(
     post,
@@ -1839,6 +2214,8 @@ pub(crate) async fn create_context_run(
                 "session_id": session_id,
                 "query": body.query,
                 "budget_tokens": body.budget_tokens,
+                "tokenizer_encoding": body.tokenizer_encoding,
+                "required_knowledge_revisions": body.required_knowledge_revisions,
                 "max_sensitivity": body.max_sensitivity,
             }),
         )?;
@@ -1855,10 +2232,22 @@ pub(crate) async fn create_context_run(
                 Ok(context_run_response(StatusCode::OK, run))
             }
             Dispatch::Create => {
-                match plan_context_run(&state, tenant_id, &principal_id, session_id, &body, &claim)
-                    .await
+                match plan_context_run(
+                    &state,
+                    tenant_id,
+                    &principal_id,
+                    session_id,
+                    &body,
+                    Some(&claim),
+                )
+                .await
                 {
-                    Ok(run) => Ok(context_run_response(StatusCode::CREATED, run)),
+                    Ok(ContextPlanOutcome::Delivered(run)) => {
+                        Ok(context_run_response(StatusCode::CREATED, run))
+                    }
+                    Ok(ContextPlanOutcome::Preview(_)) => Err(Error::Internal {
+                        message: "delivery planner returned a preview".to_owned(),
+                    }),
                     Err(conflict @ Error::Conflict { .. }) => {
                         let id = crate::idempotency::resolve_conflict(
                             &state.pool,
@@ -1886,14 +2275,115 @@ pub(crate) async fn create_context_run(
     respond(&state, "context.create", result).await
 }
 
+enum ContextPlanOutcome {
+    Delivered(ContextRun),
+    Preview(ContextPreviewView),
+}
+
+struct PreviewInputs<'a> {
+    session_id: SessionId,
+    rendered: &'a str,
+    rendered_hash: &'a str,
+    tokens: u32,
+    budget: u32,
+    requested: Option<u32>,
+    mode: ContextOptimizationMode,
+    counter: &'a TokenCounter,
+    candidates: &'a [PlannedCandidate],
+    authored: &'a ComposedBlock,
+    knowledge_text: &'a str,
+    degraded: Vec<String>,
+    policy_exclusion: bool,
+    trace_retention: TraceRetentionMode,
+}
+
+fn context_preview_view(input: PreviewInputs<'_>) -> ContextPreviewView {
+    let show_refs = matches!(
+        input.trace_retention,
+        TraceRetentionMode::Full | TraceRetentionMode::Redacted
+    );
+    let show_trace = input.trace_retention != TraceRetentionMode::Disabled;
+    let mut selected = Vec::new();
+    let mut omitted = Vec::new();
+    if show_trace {
+        for candidate in input.candidates {
+            let span = candidate.delivery_span;
+            let delivered_body_hash = candidate.knowledge().and_then(|snapshot| {
+                span.and_then(|range| range.text(&snapshot.revision.content.body_markdown))
+                    .map(|body| blake3::hash(body.as_bytes()).to_hex().to_string())
+            });
+            let view = ContextPreviewSourceView {
+                channel: candidate.channel().as_str().to_owned(),
+                knowledge_item_id: show_refs.then(|| candidate.item_id()).flatten(),
+                knowledge_revision_id: show_refs.then(|| candidate.revision_id()).flatten(),
+                capture_candidate_id: show_refs
+                    .then(|| candidate.capture_candidate_id())
+                    .flatten(),
+                source_content_hash: candidate.content_hash().to_owned(),
+                delivered_body_hash,
+                source_body_byte_span: if show_refs {
+                    span.map(|range| [range.start, range.end])
+                } else {
+                    None
+                },
+                reason_codes: reason_names(&candidate.reasons),
+                omission_reason: candidate.exclusion.map(|reason| reason.as_str().to_owned()),
+                required: candidate.required,
+            };
+            if candidate.selected_tokens.is_some() {
+                selected.push(view);
+            } else {
+                omitted.push(view);
+            }
+        }
+    }
+    ContextPreviewView {
+        session_id: input.session_id,
+        rendered: input.rendered.to_owned(),
+        rendered_hash: input.rendered_hash.to_owned(),
+        tokens: input.tokens,
+        budget_tokens: input.budget,
+        requested_budget_tokens: input.requested,
+        optimization_mode: input.mode.as_str().to_owned(),
+        token_count_kind: input.counter.method().certainty().to_owned(),
+        tokenizer_encoding: input.counter.method().encoding().map(str::to_owned),
+        accounting_boundary: "rendered_synveda_text_only".to_owned(),
+        selected,
+        omitted,
+        authored_packs: if show_refs {
+            input.authored.entries.iter().map(|entry| ContextPreviewPackView {
+                chunk_id: entry.chunk_id,
+                document_hash: entry.document_hash.clone(),
+                source_content_hash: entry.content_hash.clone(),
+                delivered_line_hash: entry.delivered_line_hash.clone(),
+                presentation: entry.tier.as_str().to_owned(),
+            }).collect()
+        } else {
+            Vec::new()
+        },
+        advertised_skill_versions: if show_refs {
+            input.authored.skills.iter().map(|skill| skill.version_id.to_string()).collect()
+        } else {
+            Vec::new()
+        },
+        authored_rendered_tokens: input.counter.count(&input.authored.text),
+        knowledge_rendered_tokens: input.counter.count(input.knowledge_text),
+        overhead_note: "Headers, references, serialization and provenance are included in the rendered count; component counts are not additive.".to_owned(),
+        observed_usage_status: "unavailable: no provider request was made".to_owned(),
+        degraded: input.degraded,
+        policy_exclusion_message: input.policy_exclusion
+            .then(|| "Some content was excluded by policy.".to_owned()),
+    }
+}
+
 async fn plan_context_run(
     state: &AppState,
     tenant_id: TenantId,
     principal_id: &str,
     session_id: SessionId,
     body: &CreateContextRunBody,
-    claim: &Claim,
-) -> Result<ContextRun> {
+    claim: Option<&Claim>,
+) -> Result<ContextPlanOutcome> {
     let started = std::time::Instant::now();
     let prepared = prepare_context(state, tenant_id, session_id).await?;
     metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "authorize")
@@ -1902,6 +2392,17 @@ async fn plan_context_run(
     let budget = requested
         .map(|value| value.min(prepared.plan.budget_tokens))
         .unwrap_or(prepared.plan.budget_tokens);
+    let mode = prepared.configuration.document.context.optimization_mode;
+    let counter = match (mode, body.tokenizer_encoding.as_deref()) {
+        (ContextOptimizationMode::Off, None) => TokenCounter::legacy(),
+        (_, None) => TokenCounter::o200k(false)?,
+        (_, Some("o200k_base")) => TokenCounter::o200k(true)?,
+        (_, Some(_)) => {
+            return Err(Error::Invalid {
+                message: "unsupported tokenizer_encoding; supported: o200k_base".to_owned(),
+            });
+        }
+    };
     let at = Utc::now();
     let query = body.query.as_deref().map(query_text).transpose()?;
 
@@ -1958,6 +2459,22 @@ async fn plan_context_run(
         &mut candidates,
         graph_expansion,
         at,
+        mode,
+    )
+    .await?;
+    require_current_knowledge(
+        state,
+        &mut tx,
+        tenant_id,
+        &mut candidates,
+        RequiredKnowledgeInput {
+            prepared: &prepared,
+            principal_id,
+            at,
+            ceiling: body.max_sensitivity,
+            required: &body.required_knowledge_revisions,
+            mode,
+        },
     )
     .await?;
     metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "graph_expand")
@@ -1973,17 +2490,26 @@ async fn plan_context_run(
     metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "retrieve")
         .record(retrieve_started.elapsed().as_secs_f64());
 
-    // Authored assets receive a bounded share first; unused capacity remains
-    // available to Knowledge. The two blocks together are still charged to
-    // one governed budget.
-    let authored_budget = budget.saturating_div(5).saturating_sub(4);
+    // Authored assets receive an initial share; unspent capacity is available
+    // to Knowledge and then returned to authored assets in conservative mode.
+    let authored_budget = if mode == ContextOptimizationMode::Conservative
+        && !body.required_knowledge_revisions.is_empty()
+    {
+        0
+    } else {
+        budget.saturating_div(5).saturating_sub(4)
+    };
     let mut authored_request =
-        ComposeRequest::new(prepared.plan.scopes.clone(), authored_budget, at);
+        ComposeRequest::new(prepared.plan.scopes.clone(), authored_budget, at)
+            .with_counter(counter.clone());
     if let Some(ceiling) = body.max_sensitivity {
         authored_request = authored_request.narrowed_to(ceiling);
     }
-    let authored = compose_authored(&mut tx, tenant_id, &authored_request).await?;
-    let knowledge_budget = budget.saturating_sub(authored.tokens).saturating_sub(2);
+    let mut authored = compose_authored(&mut tx, tenant_id, &authored_request).await?;
+    let authored_cost = counter.count(&authored.text);
+    let knowledge_budget = budget
+        .saturating_sub(authored_cost)
+        .saturating_sub(counter.count("\n\n"));
 
     let select_started = std::time::Instant::now();
     let (knowledge_text, _) = assemble_knowledge(
@@ -1991,34 +2517,81 @@ async fn plan_context_run(
         &mut tx,
         tenant_id,
         &mut candidates,
-        knowledge_budget,
-        at,
+        KnowledgeAssembly {
+            budget: knowledge_budget,
+            at,
+            query: query.as_deref(),
+            mode,
+            counter: &counter,
+        },
     )
     .await?;
-    let rendered = match (knowledge_text.is_empty(), authored.text.is_empty()) {
+    if mode == ContextOptimizationMode::Conservative {
+        let knowledge_cost = counter.count(&knowledge_text);
+        let separator_cost = if knowledge_text.is_empty() {
+            0
+        } else {
+            counter.count("\n\n")
+        };
+        let remaining_for_authored = budget
+            .saturating_sub(knowledge_cost)
+            .saturating_sub(separator_cost);
+        if remaining_for_authored > authored_budget {
+            authored_request.budget_tokens = remaining_for_authored;
+            authored = compose_authored(&mut tx, tenant_id, &authored_request).await?;
+        }
+    }
+    let mut rendered = match (knowledge_text.is_empty(), authored.text.is_empty()) {
         (true, true) => String::new(),
-        (false, true) => knowledge_text,
+        (false, true) => knowledge_text.clone(),
         (true, false) => authored.text.clone(),
         (false, false) => format!("{knowledge_text}\n\n{}", authored.text),
     };
-    let tokens = estimated_tokens(&rendered);
+    if mode == ContextOptimizationMode::Conservative && counter.count(&rendered) > budget {
+        // Tokenising the joined representation can cost more than the sum of
+        // separately counted sections. Give authored material a bounded
+        // smaller retry, then omit it if the joined form still overflows.
+        let overflow = counter.count(&rendered) - budget;
+        authored_request.budget_tokens = authored_request
+            .budget_tokens
+            .saturating_sub(overflow.saturating_add(8));
+        authored = compose_authored(&mut tx, tenant_id, &authored_request).await?;
+        rendered = if knowledge_text.is_empty() {
+            authored.text.clone()
+        } else if authored.text.is_empty() {
+            knowledge_text.clone()
+        } else {
+            format!("{knowledge_text}\n\n{}", authored.text)
+        };
+        if counter.count(&rendered) > budget {
+            authored_request.budget_tokens = 0;
+            authored = compose_authored(&mut tx, tenant_id, &authored_request).await?;
+            rendered = knowledge_text.clone();
+        }
+    }
+    counter.check_bytes(&rendered)?;
+    let tokens = counter.count(&rendered);
     if tokens > budget {
-        return Err(Error::Internal {
-            message: format!(
-                "context assembly exceeded its governed budget: {tokens} > {budget} tokens"
-            ),
-        });
+        return if body.required_knowledge_revisions.is_empty() {
+            Err(Error::Invalid {
+                message: format!(
+                    "insufficient context budget for rendered overhead: {tokens} > {budget}"
+                ),
+            })
+        } else {
+            Err(Error::InsufficientBudget {
+                required_tokens: tokens,
+                budget_tokens: budget,
+            })
+        };
     }
     let selected_count = candidates
         .iter()
         .filter(|candidate| candidate.selected_tokens.is_some())
         .count();
-    metrics::counter!(CONTEXT_SELECTIONS_TOTAL, "outcome" => "selected")
-        .increment(selected_count as u64);
     metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "select")
         .record(select_started.elapsed().as_secs_f64());
 
-    let run_id = ContextRunId::new();
     let block_hash = blake3::hash(rendered.as_bytes()).to_hex().to_string();
     let mut degraded = Vec::new();
     if let Some(reason) = &semantic_degradation {
@@ -2034,6 +2607,49 @@ async fn plan_context_run(
     for reason in graph_degradation {
         push_degradation(&mut degraded, &reason);
     }
+    let Some(claim) = claim else {
+        let preview = context_preview_view(PreviewInputs {
+            session_id,
+            rendered: &rendered,
+            rendered_hash: &block_hash,
+            tokens,
+            budget,
+            requested,
+            mode,
+            counter: &counter,
+            candidates: &candidates,
+            authored: &authored,
+            knowledge_text: &knowledge_text,
+            degraded,
+            policy_exclusion,
+            trace_retention: prepared.plan.trace_retention,
+        });
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::ContextPreviewed,
+            prepared.session_resource.to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::SessionWrite, &prepared.session_allowed),
+                "session_id": session_id,
+                "task_hash": query.as_deref().map(task_hash),
+                "rendered_hash": block_hash,
+                "tokens": tokens,
+                "budget_tokens": budget,
+                "configuration_version_id": prepared.configuration.version_id,
+                "configuration_hash": prepared.configuration.content_hash,
+                "optimization_mode": mode.as_str(),
+                "token_count_kind": counter.method().certainty(),
+                "tokenizer_encoding": counter.method().encoding(),
+                "policy_exclusion": policy_exclusion,
+            }),
+        )
+        .await?;
+        commit(tx).await?;
+        return Ok(ContextPlanOutcome::Preview(preview));
+    };
+    let run_id = ContextRunId::new();
     let run = sessions::record_context_run(
         &mut tx,
         tenant_id,
@@ -2075,7 +2691,18 @@ async fn plan_context_run(
             ),
             degraded: degraded.clone(),
             as_of: at,
-            retrieval_version: RETRIEVAL_VERSION.to_owned(),
+            retrieval_version: match (mode, counter.method()) {
+                (ContextOptimizationMode::Off, synveda_retrieval::CountMethod::LegacyEstimate) => {
+                    RETRIEVAL_VERSION
+                }
+                (ContextOptimizationMode::Off, _) => OFF_EXACT_VERSION,
+                (
+                    ContextOptimizationMode::Conservative,
+                    synveda_retrieval::CountMethod::ExactO200kBase,
+                ) => CONSERVATIVE_EXACT_VERSION,
+                (ContextOptimizationMode::Conservative, _) => CONSERVATIVE_ESTIMATE_VERSION,
+            }
+            .to_owned(),
             embedding_model,
             index_version: INDEX_VERSION.to_owned(),
             graph_version: graph_attempted.then(|| graph::VERSION.to_owned()),
@@ -2253,7 +2880,7 @@ async fn plan_context_run(
             "context_run_id": run_id,
             "candidate_count": candidate_refs.len(),
             "policy_exclusion": policy_exclusion,
-            "retrieval_version": RETRIEVAL_VERSION,
+            "retrieval_version": run.retrieval_version,
             "embedding_model": run.embedding_model,
             "index_version": INDEX_VERSION,
             "graph_version": run.graph_version,
@@ -2324,7 +2951,7 @@ async fn plan_context_run(
             "configuration": configuration_evidence,
             "relaxations": relaxation_evidence,
             "degraded": run.degraded,
-            "retrieval_version": RETRIEVAL_VERSION,
+            "retrieval_version": run.retrieval_version,
             "index_version": INDEX_VERSION,
             "graph_version": run.graph_version,
             "idempotency_key": claim.key,
@@ -2335,7 +2962,10 @@ async fn plan_context_run(
         debug_assert_eq!(selections.len(), selected_count);
     }
     commit(tx).await?;
-    Ok(run)
+    metrics::counter!(CONTEXT_SELECTIONS_TOTAL, "outcome" => "selected")
+        .increment(selected_count as u64);
+    record_authored_delivery_metrics(&authored);
+    Ok(ContextPlanOutcome::Delivered(run))
 }
 
 async fn replay_context_run(

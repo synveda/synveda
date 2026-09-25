@@ -60,7 +60,7 @@ const document: ConfigurationDocumentBody = {
 
 test("the complete immutable document round-trips without a second DTO", () => {
   assert.deepEqual(parseConfiguration(renderConfiguration(document)), document);
-  assert.match(configurationSummary(document), /standard · 1500 tokens · redacted traces/);
+  assert.match(configurationSummary(document), /standard · 1500 tokens · off optimisation · redacted traces/);
   assert.throws(() => parseConfiguration("[]"), /complete JSON object/);
 });
 
@@ -83,6 +83,7 @@ test("the demo form edits bounded Capture and Context fields without dropping th
   assert.deepEqual(proposed.context, {
     ...document.context,
     token_budget: 2048,
+    optimization_mode: "off",
     trace_retention: "hashes_only",
     channels: ["current_knowledge", "unreviewed_candidates"],
   });

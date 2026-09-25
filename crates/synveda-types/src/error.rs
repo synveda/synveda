@@ -57,6 +57,17 @@ pub enum Error {
         message: String,
     },
 
+    /// The authorised required context cannot fit the bounded contribution.
+    #[error(
+        "insufficient context budget: requires {required_tokens} tokens, allows {budget_tokens}"
+    )]
+    InsufficientBudget {
+        /// Local rendered-text tokens needed for the required material.
+        required_tokens: u32,
+        /// Local rendered-text tokens available at this planning stage.
+        budget_tokens: u32,
+    },
+
     /// The operation conflicts with current state: duplicate creation,
     /// concurrent modification, or a stale ref in a VedaFlow proposal.
     #[error("conflict: {message}")]
@@ -108,6 +119,7 @@ impl Error {
             Error::PolicyDenied { .. } => "policy_denied",
             Error::NotFound { .. } => "not_found",
             Error::Invalid { .. } => "invalid",
+            Error::InsufficientBudget { .. } => "insufficient_budget",
             Error::Conflict { .. } => "conflict",
             Error::RateLimited { .. } => "rate_limited",
             Error::Storage { .. } => "storage",

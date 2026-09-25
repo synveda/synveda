@@ -1,11 +1,11 @@
 # Feature inventory
 
-147 features in this index. This file owns feature identity and delivered/open
+148 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-114 delivered; 33 open. CI checks the counts, IDs and open-brief contract.
+114 delivered; 34 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
 is available for self-hosted evaluation. [Production readiness](../PRODUCTION_READINESS.md)
@@ -102,6 +102,7 @@ remain in Git and the linked release evidence.
 - [ ] [OPS-4: Vector index scale decision](OPS-4.md) — open
 - [ ] [ADPT-3: Additional API transport decision](ADPT-3.md) — open
 - [ ] [CTX-6: Session compression assist](CTX-6.md) — open
+- [ ] [CTX-8: Governed context optimisation](CTX-8.md) — open
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
 
 ## Phase 4 — Clients and operations

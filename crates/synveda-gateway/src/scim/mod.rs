@@ -139,6 +139,11 @@ impl ScimError {
             Error::Invalid { message } => {
                 ScimError::typed(StatusCode::BAD_REQUEST, "invalidValue", message.clone())
             }
+            Error::InsufficientBudget { .. } => ScimError::typed(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalidValue",
+                "insufficient context budget",
+            ),
             Error::PolicyDenied { .. } => ScimError::plain(StatusCode::FORBIDDEN, "not permitted"),
             Error::Unauthenticated { .. } => {
                 ScimError::plain(StatusCode::UNAUTHORIZED, "invalid credential")

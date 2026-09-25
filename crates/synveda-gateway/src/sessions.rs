@@ -356,6 +356,13 @@ pub struct ContextRunView {
     pub block_hash: String,
     /// Estimated tokens of `rendered`.
     pub tokens: i32,
+    /// Governed mode used for this immutable delivery.
+    pub optimization_mode: String,
+    /// `estimated` or `exact_encoding`; neither implies provider billing.
+    pub token_count_kind: String,
+    /// Local text encoding used, when one was available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokenizer_encoding: Option<String>,
     /// The budget it composed under.
     pub budget_tokens: i32,
     /// Caller-requested budget before the governed ceiling.
@@ -413,6 +420,22 @@ impl From<ContextRun> for ContextRunView {
             rendered: Some(run.rendered),
             block_hash: run.block_hash,
             tokens: run.tokens,
+            optimization_mode: if run.retrieval_version.contains("conservative") {
+                "conservative"
+            } else {
+                "off"
+            }
+            .to_owned(),
+            token_count_kind: if run.retrieval_version.ends_with("-exact") {
+                "exact_encoding"
+            } else {
+                "estimated"
+            }
+            .to_owned(),
+            tokenizer_encoding: run
+                .retrieval_version
+                .contains("o200k")
+                .then(|| "o200k_base".to_owned()),
             budget_tokens: run.budget_tokens,
             requested_budget_tokens: run.requested_budget_tokens,
             entry_count: run.entry_count,

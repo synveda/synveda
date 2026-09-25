@@ -78,20 +78,20 @@ pub enum EntryTier {
     /// The authored chunk's full content composed.
     #[default]
     Body,
-    /// A compact summary composed because the full chunk did not fit.
-    Summary,
+    /// A title-only index; no source content or generated summary was sent.
+    Index,
 }
 
 impl EntryTier {
     /// Both tiers.
-    pub const ALL: [EntryTier; 2] = [EntryTier::Body, EntryTier::Summary];
+    pub const ALL: [EntryTier; 2] = [EntryTier::Body, EntryTier::Index];
 
     /// Stable wire name, identical to the serde form.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
             EntryTier::Body => "body",
-            EntryTier::Summary => "summary",
+            EntryTier::Index => "index",
         }
     }
 }

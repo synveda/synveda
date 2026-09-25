@@ -14,6 +14,7 @@ import {
   TRACE_RETENTION_OPTIONS,
   applyDemoConfigurationDraft,
   configurationSummary,
+  CONTEXT_OPTIMIZATION_OPTIONS,
   configurationTarget,
   demoConfigurationDraft,
   mutationMessage,
@@ -554,6 +555,20 @@ function ArtifactControls({
 
           <fieldset>
             <legend>Context</legend>
+            <label>
+              Optimisation mode
+              <select
+                value={draft.contextOptimizationMode}
+                onChange={(event) => updateDraft({
+                  contextOptimizationMode: event.target.value as DemoConfigurationDraft["contextOptimizationMode"],
+                })}
+              >
+                {CONTEXT_OPTIMIZATION_OPTIONS.map((mode) => (
+                  <option key={mode} value={mode}>{mode}</option>
+                ))}
+              </select>
+              <span className="muted">Conservative uses local deterministic excerpts and requires no model service. Publishing still follows VedaFlow review.</span>
+            </label>
             <label>
               Maximum token budget (1–100000)
               <input

@@ -26,6 +26,15 @@ test("a non-zero trust tolerance is refused", () => {
   assert.match(validateSuite(suite, baseline, root).join("\n"), /maximum must be zero/);
 });
 
+test("CTX-8 required-fact and privacy tolerances stay at zero", () => {
+  const suite = copy();
+  suite.context_optimisation_gates.critical_fact_loss_maximum = 1;
+  assert.match(validateSuite(suite, baseline, root).join("\n"), /CTX-8 safety tolerance must be zero/);
+  suite.context_optimisation_gates.critical_fact_loss_maximum = 0;
+  suite.context_optimisation_gates.private_source_leak_maximum = 1;
+  assert.match(validateSuite(suite, baseline, root).join("\n"), /CTX-8 safety tolerance must be zero/);
+});
+
 test("a stale exact test name is refused", () => {
   const suite = copy();
   suite.scenarios[0].command[6] = "missing_test";

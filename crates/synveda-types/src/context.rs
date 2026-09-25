@@ -161,7 +161,9 @@ pub enum ContextReasonCode {
     OutsideTaskScope,
     /// It survived retrieval but did not fit the context budget.
     TokenBudget,
-    /// Another visible candidate had the same canonical content hash.
+    /// Only an exact source span was delivered from this revision.
+    Excerpt,
+    /// Another visible candidate was safely deduplicated within this run.
     Duplicate,
     /// An authorised `KnowledgeRelation` path contributed to rank.
     GraphExpansion,
@@ -171,7 +173,7 @@ pub enum ContextReasonCode {
 
 impl ContextReasonCode {
     /// Complete initial reason vocabulary.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::SemanticMatch,
         Self::KeywordMatch,
         Self::ProjectConvention,
@@ -182,6 +184,7 @@ impl ContextReasonCode {
         Self::Stale,
         Self::OutsideTaskScope,
         Self::TokenBudget,
+        Self::Excerpt,
         Self::Duplicate,
         Self::GraphExpansion,
         Self::ContradictionWarning,
@@ -201,6 +204,7 @@ impl ContextReasonCode {
             Self::Stale => "stale",
             Self::OutsideTaskScope => "outside_task_scope",
             Self::TokenBudget => "token_budget",
+            Self::Excerpt => "excerpt",
             Self::Duplicate => "duplicate",
             Self::GraphExpansion => "graph_expansion",
             Self::ContradictionWarning => "contradiction_warning",

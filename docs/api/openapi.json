@@ -9911,6 +9911,83 @@
         ]
       }
     },
+    "/v1/sessions/{session_id}/context-preview": {
+      "post": {
+        "tags": [
+          "context"
+        ],
+        "summary": "`POST /v1/sessions/{session_id}/context-preview` — read the current plan\nwithout creating a ContextRun delivery or provider-usage record.",
+        "operationId": "preview_context",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "The session's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateContextRunBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authorised context preview; no delivery recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextPreviewView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or unsupported encoding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied session writing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/sessions/{session_id}/context-runs": {
       "post": {
         "tags": [
@@ -16334,6 +16411,13 @@
           "graph": {
             "$ref": "#/components/schemas/GraphRetrievalConfigurationBody"
           },
+          "optimization_mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "conservative"
+            ]
+          },
           "token_budget": {
             "type": "integer",
             "format": "int32",
@@ -16831,6 +16915,260 @@
           }
         }
       },
+      "ContextPreviewPackView": {
+        "type": "object",
+        "description": "Authored chunk material selected by a preview.",
+        "required": [
+          "chunk_id",
+          "document_hash",
+          "source_content_hash",
+          "delivered_line_hash",
+          "presentation"
+        ],
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Immutable published chunk identity."
+          },
+          "delivered_line_hash": {
+            "type": "string",
+            "description": "Hash of the exact line included in the rendered block."
+          },
+          "document_hash": {
+            "type": "string",
+            "description": "Address of the published document."
+          },
+          "presentation": {
+            "type": "string",
+            "description": "Complete body or title-only index."
+          },
+          "source_content_hash": {
+            "type": "string",
+            "description": "Hash of the source chunk bytes."
+          }
+        }
+      },
+      "ContextPreviewSourceView": {
+        "type": "object",
+        "description": "One policy-visible source considered by a preview. Absent addresses in a\nreduced trace mode are omitted rather than replaced with a denied count.",
+        "required": [
+          "channel",
+          "source_content_hash",
+          "reason_codes",
+          "required"
+        ],
+        "properties": {
+          "capture_candidate_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Visible unreviewed candidate identity."
+          },
+          "channel": {
+            "type": "string",
+            "description": "Source family."
+          },
+          "delivered_body_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "BLAKE3 hash of exact delivered body bytes, when available."
+          },
+          "knowledge_item_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Visible stable Knowledge identity."
+          },
+          "knowledge_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Visible immutable Knowledge revision."
+          },
+          "omission_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Visible omission reason, if this source was omitted."
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Selection or transformation reasons."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether the session caller marked this exact revision as required."
+          },
+          "source_body_byte_span": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Exact half-open source byte span, when available."
+          },
+          "source_content_hash": {
+            "type": "string",
+            "description": "Source revision or candidate content hash."
+          }
+        }
+      },
+      "ContextPreviewView": {
+        "type": "object",
+        "description": "A pure preview of what Synveda would contribute at this instant. It is not\na ContextRun delivery, provider request or observed usage record.",
+        "required": [
+          "session_id",
+          "rendered",
+          "rendered_hash",
+          "tokens",
+          "budget_tokens",
+          "optimization_mode",
+          "token_count_kind",
+          "accounting_boundary",
+          "selected",
+          "omitted",
+          "authored_packs",
+          "advertised_skill_versions",
+          "authored_rendered_tokens",
+          "knowledge_rendered_tokens",
+          "overhead_note",
+          "observed_usage_status",
+          "degraded"
+        ],
+        "properties": {
+          "accounting_boundary": {
+            "type": "string",
+            "description": "Scope of the local count; provider framing and history are excluded."
+          },
+          "advertised_skill_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Immutable Skill versions advertised in this contribution."
+          },
+          "authored_packs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextPreviewPackView"
+            },
+            "description": "Published authored chunks selected for this contribution."
+          },
+          "authored_rendered_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Standalone authored component count; not additive with other components.",
+            "minimum": 0
+          },
+          "budget_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Effective Synveda text allowance after policy narrowing.",
+            "minimum": 0
+          },
+          "degraded": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Retrieval degradation reasons."
+          },
+          "knowledge_rendered_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Standalone Knowledge component count; not additive with other components.",
+            "minimum": 0
+          },
+          "observed_usage_status": {
+            "type": "string",
+            "description": "Why observed provider usage is unavailable."
+          },
+          "omitted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextPreviewSourceView"
+            },
+            "description": "Authorised sources omitted from the rendered text."
+          },
+          "optimization_mode": {
+            "type": "string",
+            "description": "Governed off or conservative mode."
+          },
+          "overhead_note": {
+            "type": "string",
+            "description": "Explanation of final serialized accounting."
+          },
+          "policy_exclusion_message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Generic policy exclusion indicator without denied-resource detail."
+          },
+          "rendered": {
+            "type": "string",
+            "description": "Exact Synveda text that would be delivered."
+          },
+          "rendered_hash": {
+            "type": "string",
+            "description": "BLAKE3 over `rendered`."
+          },
+          "requested_budget_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Caller requested allowance, if one was supplied.",
+            "minimum": 0
+          },
+          "selected": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextPreviewSourceView"
+            },
+            "description": "Authorised sources included in the rendered text."
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Session whose policy and scope were used."
+          },
+          "token_count_kind": {
+            "type": "string",
+            "description": "Estimated or exact for the selected encoding."
+          },
+          "tokenizer_encoding": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Local encoding used, if any."
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Local count of the full rendered text.",
+            "minimum": 0
+          }
+        }
+      },
       "ContextRunDetailView": {
         "type": "object",
         "description": "Freshly re-authorised detail for one context run.",
@@ -16909,6 +17247,8 @@
           "configuration_hash",
           "block_hash",
           "tokens",
+          "optimization_mode",
+          "token_count_kind",
           "budget_tokens",
           "entry_count",
           "candidate_count",
@@ -16998,6 +17338,10 @@
             "type": "string",
             "description": "Knowledge index implementation version."
           },
+          "optimization_mode": {
+            "type": "string",
+            "description": "Governed mode used for this immutable delivery."
+          },
           "policy_exclusion_message": {
             "type": [
               "string",
@@ -17064,6 +17408,17 @@
           "skills": {
             "type": "object",
             "description": "The skills this block advertised (ADR-0054 decision 8): name, scope,\ncommit and object address, so an adapter can materialise exactly what\nwas named without asking twice."
+          },
+          "token_count_kind": {
+            "type": "string",
+            "description": "`estimated` or `exact_encoding`; neither implies provider billing."
+          },
+          "tokenizer_encoding": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Local text encoding used, when one was available."
           },
           "tokens": {
             "type": "integer",
@@ -17338,6 +17693,20 @@
               "null"
             ],
             "description": "Task/query; omission is the session-start recency shape."
+          },
+          "required_knowledge_revisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequiredKnowledgeRevision"
+            },
+            "description": "Current immutable Knowledge revisions required verbatim by the\nauthenticated session caller."
+          },
+          "tokenizer_encoding": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional exact text encoding selected by the caller. The only supported\nvalue is `o200k_base`; omission keeps an explicit estimate."
           }
         },
         "additionalProperties": false
@@ -22535,6 +22904,27 @@
             "description": "When it last changed."
           }
         }
+      },
+      "RequiredKnowledgeRevision": {
+        "type": "object",
+        "description": "Exact current Knowledge revision designated by the session caller.",
+        "required": [
+          "item_id",
+          "revision_id"
+        ],
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable Knowledge item identity."
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Immutable revision identity."
+          }
+        },
+        "additionalProperties": false
       },
       "ResolveConflictBody": {
         "type": "object",

@@ -1428,6 +1428,7 @@ export type ContextConfigurationBody = {
      */
     channels: string[];
     graph: GraphRetrievalConfigurationBody;
+    optimization_mode?: "off" | "conservative";
     token_budget: number;
     trace_retention: "full" | "redacted" | "hashes_only" | "disabled";
   };
@@ -1706,6 +1707,166 @@ export type ContextPackView = {
   };
 
 /**
+ * Authored chunk material selected by a preview.
+ */
+export type ContextPreviewPackView = {
+    /**
+     * Immutable published chunk identity.
+     */
+    chunk_id: string;
+    /**
+     * Hash of the exact line included in the rendered block.
+     */
+    delivered_line_hash: string;
+    /**
+     * Address of the published document.
+     */
+    document_hash: string;
+    /**
+     * Complete body or title-only index.
+     */
+    presentation: string;
+    /**
+     * Hash of the source chunk bytes.
+     */
+    source_content_hash: string;
+  };
+
+/**
+ * One policy-visible source considered by a preview. Absent addresses in a
+ * reduced trace mode are omitted rather than replaced with a denied count.
+ */
+export type ContextPreviewSourceView = {
+    /**
+     * Visible unreviewed candidate identity.
+     */
+    capture_candidate_id?: string | null;
+    /**
+     * Source family.
+     */
+    channel: string;
+    /**
+     * BLAKE3 hash of exact delivered body bytes, when available.
+     */
+    delivered_body_hash?: string | null;
+    /**
+     * Visible stable Knowledge identity.
+     */
+    knowledge_item_id?: string | null;
+    /**
+     * Visible immutable Knowledge revision.
+     */
+    knowledge_revision_id?: string | null;
+    /**
+     * Visible omission reason, if this source was omitted.
+     */
+    omission_reason?: string | null;
+    /**
+     * Selection or transformation reasons.
+     */
+    reason_codes: string[];
+    /**
+     * Whether the session caller marked this exact revision as required.
+     */
+    required: boolean;
+    /**
+     * Exact half-open source byte span, when available.
+     */
+    source_body_byte_span?: number[] | null;
+    /**
+     * Source revision or candidate content hash.
+     */
+    source_content_hash: string;
+  };
+
+/**
+ * A pure preview of what Synveda would contribute at this instant. It is not
+ * a ContextRun delivery, provider request or observed usage record.
+ */
+export type ContextPreviewView = {
+    /**
+     * Scope of the local count; provider framing and history are excluded.
+     */
+    accounting_boundary: string;
+    /**
+     * Immutable Skill versions advertised in this contribution.
+     */
+    advertised_skill_versions: string[];
+    /**
+     * Published authored chunks selected for this contribution.
+     */
+    authored_packs: ContextPreviewPackView[];
+    /**
+     * Standalone authored component count; not additive with other components.
+     */
+    authored_rendered_tokens: number;
+    /**
+     * Effective Synveda text allowance after policy narrowing.
+     */
+    budget_tokens: number;
+    /**
+     * Retrieval degradation reasons.
+     */
+    degraded: string[];
+    /**
+     * Standalone Knowledge component count; not additive with other components.
+     */
+    knowledge_rendered_tokens: number;
+    /**
+     * Why observed provider usage is unavailable.
+     */
+    observed_usage_status: string;
+    /**
+     * Authorised sources omitted from the rendered text.
+     */
+    omitted: ContextPreviewSourceView[];
+    /**
+     * Governed off or conservative mode.
+     */
+    optimization_mode: string;
+    /**
+     * Explanation of final serialized accounting.
+     */
+    overhead_note: string;
+    /**
+     * Generic policy exclusion indicator without denied-resource detail.
+     */
+    policy_exclusion_message?: string | null;
+    /**
+     * Exact Synveda text that would be delivered.
+     */
+    rendered: string;
+    /**
+     * BLAKE3 over `rendered`.
+     */
+    rendered_hash: string;
+    /**
+     * Caller requested allowance, if one was supplied.
+     */
+    requested_budget_tokens?: number | null;
+    /**
+     * Authorised sources included in the rendered text.
+     */
+    selected: ContextPreviewSourceView[];
+    /**
+     * Session whose policy and scope were used.
+     */
+    session_id: string;
+    /**
+     * Estimated or exact for the selected encoding.
+     */
+    token_count_kind: string;
+    /**
+     * Local encoding used, if any.
+     */
+    tokenizer_encoding?: string | null;
+    /**
+     * Local count of the full rendered text.
+     */
+    tokens: number;
+  };
+
+/**
  * Freshly re-authorised detail for one context run.
  */
 export type ContextRunDetailView = {
@@ -1808,6 +1969,10 @@ export type ContextRunView = {
      */
     index_version: string;
     /**
+     * Governed mode used for this immutable delivery.
+     */
+    optimization_mode: string;
+    /**
      * Aggregate policy-filtering notice without a denied count.
      */
     policy_exclusion_message?: string | null;
@@ -1854,6 +2019,14 @@ export type ContextRunView = {
      * was named without asking twice.
      */
     skills: Record<string, unknown>;
+    /**
+     * `estimated` or `exact_encoding`; neither implies provider billing.
+     */
+    token_count_kind: string;
+    /**
+     * Local text encoding used, when one was available.
+     */
+    tokenizer_encoding?: string | null;
     /**
      * Estimated tokens of `rendered`.
      */
@@ -2002,6 +2175,16 @@ export type CreateContextRunBody = {
      * Task/query; omission is the session-start recency shape.
      */
     query?: string | null;
+    /**
+     * Current immutable Knowledge revisions required verbatim by the
+     * authenticated session caller.
+     */
+    required_knowledge_revisions?: RequiredKnowledgeRevision[];
+    /**
+     * Optional exact text encoding selected by the caller. The only supported
+     * value is `o200k_base`; omission keeps an explicit estimate.
+     */
+    tokenizer_encoding?: string | null;
   };
 
 /**
@@ -4846,6 +5029,20 @@ export type RepositoryView = {
   };
 
 /**
+ * Exact current Knowledge revision designated by the session caller.
+ */
+export type RequiredKnowledgeRevision = {
+    /**
+     * Stable Knowledge item identity.
+     */
+    item_id: string;
+    /**
+     * Immutable revision identity.
+     */
+    revision_id: string;
+  };
+
+/**
  * One governed conflict resolution.
  */
 export type ResolveConflictBody = {
@@ -7527,6 +7724,16 @@ export type Operations = {
     readonly response: CaptureBatchView;
   };
   /**
+   * `POST /v1/sessions/{session_id}/context-preview` — read the current plan
+   * without creating a ContextRun delivery or provider-usage record.
+   */
+  readonly preview_context: {
+    readonly path: "/v1/sessions/{session_id}/context-preview";
+    readonly method: "POST";
+    readonly body: CreateContextRunBody;
+    readonly response: ContextPreviewView;
+  };
+  /**
    * `POST /v1/sessions/{session_id}/context-runs` — plan and deliver context.
    */
   readonly create_context_run: {
@@ -8125,6 +8332,7 @@ export const OPERATIONS = {
   open_session: { path: "/v1/sessions", method: "POST", idempotent: true },
   get_session: { path: "/v1/sessions/{session_id}", method: "GET" },
   create_capture_batch: { path: "/v1/sessions/{session_id}/capture-batches", method: "POST", idempotent: true },
+  preview_context: { path: "/v1/sessions/{session_id}/context-preview", method: "POST" },
   create_context_run: { path: "/v1/sessions/{session_id}/context-runs", method: "POST", idempotent: true },
   end_session: { path: "/v1/sessions/{session_id}/end", method: "POST" },
   append_session_events: { path: "/v1/sessions/{session_id}/events", method: "POST" },

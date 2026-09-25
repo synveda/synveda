@@ -33,6 +33,9 @@ const REQUIRED_SCENARIOS = [
   "secret_safety",
   "okf_round_trip",
   "adapter_outage_recovery",
+  "conservative_context_compression",
+  "conservative_context_paired_tasks",
+  "conservative_authority_dedup",
 ];
 const REQUIRED_MEASUREMENTS = [
   "retrieved",
@@ -107,6 +110,14 @@ export function validateSuite(suite, baseline, root = ROOT) {
   }
   if (!sameMembers(Object.keys(suite.hard_gates ?? {}), REQUIRED_GATES)) {
     fail("hard_gates must contain the six zero-tolerance trust gates exactly");
+  }
+  const optimisationGates = suite.context_optimisation_gates ?? {};
+  for (const name of ["critical_fact_loss_maximum", "private_source_leak_maximum", "obsolete_revision_served_maximum", "preview_delivery_maximum"]) {
+    if (optimisationGates[name] !== 0) fail(`${name}: CTX-8 safety tolerance must be zero`);
+  }
+  if (optimisationGates.paired_tasks_minimum !== 4) fail("CTX-8 must compare four paired task fixtures");
+  if (optimisationGates.compression_case_reduction_minimum_tokens !== 1) {
+    fail("CTX-8 fixture must save at least one rendered-text token");
   }
   for (const [name, gate] of Object.entries(suite.hard_gates ?? {})) {
     if (gate.maximum !== 0) fail(`${name}: hard-gate maximum must be zero`);
@@ -196,7 +207,55 @@ function renderHuman(report) {
   const codeState = report.code_dirty
     ? `dirty; patch SHA-256 \`${report.worktree_patch_sha256}\``
     : "clean";
-  return `# Context-platform product evaluation\n\nRevision: \`${report.code_revision}\` (${codeState})  \nStarted: ${report.started_at}  \nResult: **${report.passed ? "PASS" : "FAIL"}**\n\nRuntime versions: model/extractor \`${report.runtime.model}\`, retrieval \`${report.runtime.retrieval_version}\`, index \`${report.runtime.index_version}\`, embedding \`${report.runtime.embedding_model ?? "none"}\`.\n\n## Scenarios\n\n| Scenario | Result | Wall ms |\n| --- | --- | ---: |\n${scenarioRows}\n\n## Separate outcome measurements\n\n| Measurement | Value |\n| --- | ---: |\n${measurements}\n\nThe five feedback rows are deliberately independent observations against one exact ContextRun selection. They do not infer “helpful” from retrieval or injection.\n\n## Zero-tolerance trust gates\n\n| Gate | Measured | Result | Evidence scenario |\n| --- | ---: | --- | --- |\n${gates}\n\n## Reproducibility\n\nThe JSON sibling is the machine-readable authority. A dirty pre-commit run records the exact worktree patch digest; checkpoint evidence is rerun from a clean feature commit. Scenario wall time includes test-process overhead and is reported, not gated. Context latency values are measured around the two public in-process ContextRun requests. The deterministic embedder is lexical-only and is not described as semantic. Model-backed extraction and BGE-M3 retrieval remain separate opt-in runs.\n`;
+  const optimisation = report.context_optimisation;
+  const taskRows = optimisation.paired_tasks.map((task) => `| ${task.task} | ${task.off_tokens} | ${task.conservative_tokens} | ${task.required_body_exact ? "PASS" : "FAIL"} |`).join("\n");
+  const optimisationChecks = optimisation.gates.map((gate) => `| ${gate.name} | ${gate.measured} | ${gate.bound} | ${gate.passed ? "PASS" : "FAIL"} |`).join("\n");
+  return `# Context-platform product evaluation\n\nRevision: \`${report.code_revision}\` (${codeState})  \nStarted: ${report.started_at}  \nResult: **${report.passed ? "PASS" : "FAIL"}**\n\nRuntime versions: model/extractor \`${report.runtime.model}\`, retrieval \`${report.runtime.retrieval_version}\`, index \`${report.runtime.index_version}\`, embedding \`${report.runtime.embedding_model ?? "none"}\`.\n\n## Scenarios\n\n| Scenario | Result | Wall ms |\n| --- | --- | ---: |\n${scenarioRows}\n\n## Separate outcome measurements\n\n| Measurement | Value |\n| --- | ---: |\n${measurements}\n\nThe five feedback rows are deliberately independent observations against one exact ContextRun selection. They do not infer “helpful” from retrieval or injection.\n\n## Zero-tolerance trust gates\n\n| Gate | Measured | Result | Evidence scenario |\n| --- | ---: | --- | --- |\n${gates}\n\n## CTX-8 paired context evidence\n\nThe compression fixture used ${optimisation.compression.off_tokens} off and ${optimisation.compression.conservative_tokens} conservative local \`${optimisation.encoding}\` rendered-text tokens. The four required-body tasks below use the same policy-visible source snapshot per pair. They establish exact fact retention, not task success. Provider usage, cache effects and monetary cost are unavailable.\n\n| Task | Off tokens | Conservative tokens | Required body exact |\n| --- | ---: | ---: | --- |\n${taskRows}\n\n| Gate | Measured | Bound | Result |\n| --- | ---: | --- | --- |\n${optimisationChecks}\n\n## Reproducibility\n\nThe JSON sibling is the machine-readable authority. A dirty pre-commit run records the exact worktree patch digest; checkpoint evidence is rerun from a clean feature commit. Scenario wall time includes test-process overhead and is reported, not gated. Context latency values are measured around the two public in-process ContextRun requests. The deterministic embedder is lexical-only and is not described as semantic. Model-backed extraction and BGE-M3 retrieval remain separate opt-in runs.\n`;
+}
+
+function contextOptimisationEvidence(compression, paired, policy) {
+  if (compression.schema_version !== 1 || paired.schema_version !== 1
+      || compression.encoding !== "o200k_base" || paired.encoding !== "o200k_base"
+      || compression.scope !== "Synveda-rendered text only"
+      || paired.scope !== compression.scope
+      || compression.provider_usage !== "unavailable" || paired.provider_usage !== "unavailable"
+      || compression.cost !== "unavailable" || paired.cost !== "unavailable"
+      || !Array.isArray(paired.tasks)) {
+    throw new Error("CTX-8 evidence has an incomplete accounting boundary");
+  }
+  const tasks = paired.tasks;
+  const taskIds = new Set(tasks.map((task) => task.task));
+  if (tasks.length !== 4 || !sameMembers([...taskIds], ["auth-adapter", "configuration", "rust-typescript", "multilingual"])) {
+    throw new Error("CTX-8 paired tasks do not cover the required fixture identities");
+  }
+  for (const task of tasks) {
+    finite(task.off_tokens, `${task.task} off_tokens`);
+    finite(task.conservative_tokens, `${task.task} conservative_tokens`);
+  }
+  const saved = finite(compression.off_tokens, "CTX-8 off_tokens")
+    - finite(compression.conservative_tokens, "CTX-8 conservative_tokens");
+  const lost = finite(compression.required_fact_loss_count, "CTX-8 required_fact_loss_count")
+    + finite(paired.critical_fact_loss_count, "CTX-8 critical_fact_loss_count")
+    + tasks.filter((task) => task.required_body_exact !== true).length;
+  const gates = [
+    { name: "compression_fixture_reduction_tokens", measured: saved, bound: `>= ${policy.compression_case_reduction_minimum_tokens}`, passed: saved >= policy.compression_case_reduction_minimum_tokens },
+    { name: "critical_fact_loss_count", measured: lost, bound: `<= ${policy.critical_fact_loss_maximum}`, passed: lost <= policy.critical_fact_loss_maximum },
+    { name: "private_source_leak_count", measured: finite(compression.private_source_leak_count, "CTX-8 private_source_leak_count"), bound: `<= ${policy.private_source_leak_maximum}`, passed: compression.private_source_leak_count <= policy.private_source_leak_maximum },
+    { name: "obsolete_required_revision_served_count", measured: finite(compression.obsolete_required_revision_served_count, "CTX-8 obsolete_required_revision_served_count"), bound: `<= ${policy.obsolete_revision_served_maximum}`, passed: compression.obsolete_required_revision_served_count <= policy.obsolete_revision_served_maximum },
+    { name: "preview_delivery_count", measured: finite(compression.preview_delivery_count, "CTX-8 preview_delivery_count"), bound: `<= ${policy.preview_delivery_maximum}`, passed: compression.preview_delivery_count <= policy.preview_delivery_maximum },
+    { name: "paired_task_count", measured: tasks.length, bound: `>= ${policy.paired_tasks_minimum}`, passed: tasks.length >= policy.paired_tasks_minimum },
+    { name: "paired_token_nonincrease", measured: tasks.filter((task) => task.conservative_tokens > task.off_tokens).length, bound: "= 0", passed: tasks.every((task) => task.conservative_tokens <= task.off_tokens) },
+  ];
+  return {
+    boundary: compression.scope,
+    encoding: compression.encoding,
+    provider_usage: "unavailable",
+    cost: "unavailable",
+    compression: { off_tokens: compression.off_tokens, conservative_tokens: compression.conservative_tokens, excerpt_selected: compression.excerpt_selected },
+    paired_tasks: tasks,
+    gates,
+    passed: gates.every((gate) => gate.passed) && compression.excerpt_selected === true,
+  };
 }
 
 export function runEvaluation({ suitePath = SUITE, baselinePath = BASELINE, outputDir = OUTPUT } = {}) {
@@ -209,6 +268,8 @@ export function runEvaluation({ suitePath = SUITE, baselinePath = BASELINE, outp
 
   mkdirSync(outputDir, { recursive: true });
   const evidencePath = resolve(outputDir, "pulseboard-evidence.json");
+  const compressionPath = resolve(outputDir, "context-compression-evidence.json");
+  const pairedPath = resolve(outputDir, "context-paired-evidence.json");
   const provenance = codeProvenance();
   const revision = provenance.revision;
   const byId = new Map(suite.scenarios.map((scenario) => [scenario.id, scenario]));
@@ -220,18 +281,26 @@ export function runEvaluation({ suitePath = SUITE, baselinePath = BASELINE, outp
   const commandResults = new Map();
   for (const [key, command] of commands) {
     const pulseboard = command.includes("pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end");
+    const compression = command.includes("conservative_preview_is_not_delivery_and_required_revisions_fail_closed");
+    const paired = command.includes("conservative_required_fact_matrix_preserves_exact_task_evidence");
     const env = {
       ...process.env,
       SQLX_OFFLINE: "true",
       SYNVEDA_PRODUCT_EVAL_CODE_REVISION: revision,
       ...(pulseboard ? { SYNVEDA_PRODUCT_EVAL_EVIDENCE: evidencePath } : {}),
+      ...(compression ? { SYNVEDA_CONTEXT_OPT_COMPRESSION_EVIDENCE: compressionPath } : {}),
+      ...(paired ? { SYNVEDA_CONTEXT_OPT_TASK_EVIDENCE: pairedPath } : {}),
     };
     commandResults.set(key, runCommand(command, env));
   }
   if (!existsSync(evidencePath)) {
     throw new Error("PulseBoard emitted no evidence; a database-backed test probably skipped or failed");
   }
+  if (!existsSync(compressionPath) || !existsSync(pairedPath)) {
+    throw new Error("CTX-8 emitted no paired evidence; a database-backed test probably skipped or failed");
+  }
   const evidence = load(evidencePath);
+  const contextOptimisation = contextOptimisationEvidence(load(compressionPath), load(pairedPath), suite.context_optimisation_gates);
   if (evidence.code_revision !== revision) throw new Error("PulseBoard evidence names a different code revision");
   const scenarios = suite.scenarios.map((scenario) => {
     const result = commandResults.get(JSON.stringify(commandFor(scenario, byId)));
@@ -285,10 +354,12 @@ export function runEvaluation({ suitePath = SUITE, baselinePath = BASELINE, outp
     scenarios,
     measurements,
     hard_gates: hardGates,
+    context_optimisation: contextOptimisation,
     baseline_checks: baselineChecks,
     passed: scenarios.every((scenario) => scenario.passed)
       && Object.values(hardGates).every((gate) => gate.passed)
-      && baselineChecks.every((check) => check.passed),
+      && baselineChecks.every((check) => check.passed)
+      && contextOptimisation.passed,
   };
   writeFileSync(resolve(outputDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   writeFileSync(resolve(outputDir, "report.md"), renderHuman(report));
