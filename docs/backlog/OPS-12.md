@@ -13,9 +13,11 @@ size: XL
 Start: `f9620cd2d51d18873523e9ab1abec1b3464c13ec`, clean `main`, workspace
 version `0.4.0`. The owner subsequently authorized merging the CI fixes and
 publishing a successor from latest main. v0.4.1 and v0.4.2 tagged publication
-stopped before their final signed asset sets. The next immutable candidate is
-v0.4.3; never replace the existing tags, images or chart. The latest complete
-public release remains v0.4.0 at `e59284619567d6a13b70ce3f3b3e81121b7621e6`.
+stopped before their final signed asset sets. The next immutable version,
+v0.4.3, was published from `2acc66f02625727b2ccdfe223358468bf10eef85`
+after exact-artifact draft recovery. Never replace the existing tags, images or
+charts. The earlier v0.4.0 release remains at
+`e59284619567d6a13b70ce3f3b3e81121b7621e6`.
 
 Deliver authenticated local evaluation through the existing Compose graph and
 native client-only installation. Keep external PostgreSQL, generic OIDC,
@@ -26,15 +28,14 @@ Published commands: `./synveda-compose up|down|status|logs|credential|sample`,
 `synveda login --gateway URL --profile NAME`, `synveda whoami --profile NAME
 --json`, `synveda plugin install --scope user|project|local`, and
 `synveda mcp install|uninstall --client CLIENT`. `synveda init` refuses.
-The source CLI now implements `up/down/status/logs/doctor/setup/adapter` under
-[ADR-0116](../adr/adr-0116-native-consumer-commands.md); these are not in the
-published binary. The [candidate command guide](../CONSUMER_CLI.md) owns their
+The v0.4.3 client implements `up/down/status/logs/doctor/setup/adapter` under
+[ADR-0116](../adr/adr-0116-native-consumer-commands.md); these were not in the
+v0.4.0 binary. The [consumer command guide](../CONSUMER_CLI.md) owns their
 exact scope, observation and receipt contracts.
 The published reference launcher prepares host files before Compose. This
-working tree adds a plain-Compose candidate with locally qualified named-volume
-recovery. Release CI now packages it and requires its separate native lifecycle
-and recovery reports before publication; the owner authorized a new immutable
-v0.4.3 release after the two failed tagged runs.
+release adds a plain-Compose bundle with native named-volume recovery reports.
+Release CI packages it and requires its separate lifecycle and recovery reports
+before publication.
 
 The v0.4.0 release used GHCR only. Current release builds six images once per
 native Linux architecture: product, postgres, cnpg-postgres, keycloak, proxy and
@@ -42,7 +43,7 @@ browser-acceptance, then copies the same OCI candidates to Docker Hub and GHCR.
 Native binary archives contain CLI, gateway and worker for
 macOS arm64 and Linux x86_64. The plugin archive contains compiled Claude,
 Codex and Copilot hooks but requires system Node. The installer downloads server
-artifacts for every client. Credentials still assume HOME/XDG. This working tree
+artifacts for every client. Credentials still assume HOME/XDG. The v0.4.3 client
 fixes Claude removal/replacement scope and serializes credential refresh, login
 persistence and logout across updated CLI processes; published v0.4.0 lacks both
 fixes.
@@ -655,17 +656,24 @@ drill when its limit cancelled it. Final attestation and GitHub Release were
 skipped. Preserve the v0.4.2 tag, image coordinates and chart; no new signed
 public asset set was produced.
 
-Continue OPS-12 from the published v0.4.0 bytes. The owner authorized a new
-v0.4.3 release from the latest mainline source. Its candidate includes the
-Docker Hub RepoDigest verifier fix, keeps full native candidate Compose/Helm
-qualification and retains those source-bound reports in the signed asset set.
-The final jobs check both registries anonymously and compare the OCI chart;
-they do not repeat the slow full deployment drills. The candidate also aligns
-workspace, chart, adapter, console, OpenAPI and SDK version metadata. Next:
-merge it through CI Result, wait for full exact-source main CI, run the
-nonpublishing Release drill, then push the unused v0.4.3 tag for anonymous
-native image/chart and final asset verification. Preserve both failed tags and
-their existing image/chart coordinates.
+The v0.4.3 source includes the Docker Hub RepoDigest verifier fix, keeps full
+native candidate Compose/Helm qualification and retains those source-bound
+reports in the signed asset set. The final jobs checked both registries
+anonymously and compared the OCI chart without repeating the slow deployment
+drills. Source `2acc66f02625727b2ccdfe223358468bf10eef85` passed
+[main CI](https://github.com/synveda/synveda/actions/runs/36048573688) and the
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/36048616477).
+The [tagged run](https://github.com/synveda/synveda/actions/runs/36062182772)
+passed six native client jobs, both native Docker/Helm candidates, both registry
+copies, assembly and both anonymous public verifiers. Its final job attested
+and uploaded all 35 assets, then failed because `/releases/tags/v0.4.3`
+returned 404 for its draft. The exact draft `396162642` was verified by signer,
+source, names and all server-computed digests and promoted by ID. The
+[public v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
+and checksum inventory were downloaded anonymously. The workflow remains
+failed at that post-upload lookup; [PR #63](https://github.com/synveda/synveda/pull/63)
+repairs future draft publication. Preserve both earlier failed tags and their
+existing image/chart coordinates.
 For another local candidate, use the
 existing `package-release.sh` arguments with the explicit candidate flag, extract
 the archive, then run `node scripts/qualify-release.mjs --consumer-candidate

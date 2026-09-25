@@ -1,14 +1,15 @@
 # Deployment
 
 Public entry points: [Run with Docker](compose/PREBUILT.md) and
-[Deploy to Kubernetes](helm/synveda/README.md). Published v0.4.0 remains the
+[Deploy to Kubernetes](helm/synveda/README.md). Published v0.4.3 is the
 current complete release. The v0.4.1 tagged run copied images to Docker Hub
 and GHCR but failed before its attested checksum and native
 [CLI package](../docs/RELEASING.md#native-cli-release-artifacts) publication.
 The v0.4.2 tagged run passed anonymous image pulls but timed out while
 repeating the complete installation drills, also before final publication.
-The current v0.4.3 source candidate carries the digest-verifier fix and awaits
-the normal source CI, release drill and tagged qualification.
+The v0.4.3 release completed exact-source CI, the nonpublishing drill, native
+candidate qualification and anonymous public image/chart checks. The v0.4.0
+installation retains its original GHCR and checksum-only contract.
 The [CI and Release guide](../docs/CI.md)
 describes validation and publication.
 

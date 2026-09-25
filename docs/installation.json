@@ -1,6 +1,6 @@
 {
   "sourceVersion": "0.4.3",
-  "publication": "unreleased",
+  "publication": "published",
   "precedingRelease": "v0.4.0",
   "precedingReleaseStatus": "published with its original GHCR and checksum-only installation contract",
   "pagesUrl": "https://synveda.github.io/synveda/",

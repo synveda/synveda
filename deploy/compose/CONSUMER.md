@@ -1,18 +1,17 @@
 # Plain Compose consumer bundle
 
-This 0.4.3 bundle is a qualification artifact until the matching GitHub Release
-is stable; the released v0.4.0 launcher remains available. This bundle uses the
+This 0.4.3 bundle is part of the matching published GitHub Release; the earlier
+v0.4.0 launcher remains available. This bundle uses the
 existing evaluation services with named private state; it cannot adopt the
 launcher's retained host state. Its artifact gate includes paired backup/restore;
 native Docker Desktop qualification remains separate.
 
 The refactored CI and Release workflows test this extracted bundle against
-the exact native AMD64/ARM64 OCI candidates, including paired recovery. A
+the exact native AMD64/ARM64 OCI candidates, including paired recovery. The
 tagged release separately verifies anonymous pulls, source labels and executable
 smoke for the copied Docker Hub and GHCR digests. The public gate does not
-repeat the full recovery drill. These are required gates for the next
-publication, not new claims about v0.4.0. Public installation needs no
-publisher token and never builds images from source.
+repeat the full recovery drill. Public installation needs no publisher token
+and never builds images from source.
 
 The matching source CLI offers native lifecycle commands over this graph,
 with engine/project/bundle ownership receipts (`docs/CONSUMER_CLI.md` in the
@@ -20,11 +19,11 @@ source checkout). Start that route
 with a fresh project; it cannot adopt an existing direct-Compose installation.
 For a published client release, use its matching native `synveda-client-*`
 archive from the GitHub Release; all six OS/architecture packages are required
-by the pipeline. Until v0.4.3 is published, use the locally qualified candidate
-instructions in `docs/CONSUMER_CLI.md`.
+by the pipeline. Use the published installation instructions in
+`docs/CONSUMER_CLI.md`.
 
 For a disposable evaluation on a local Linux-container Docker engine, extract
-the verified candidate archive into a directory and run:
+the verified release archive into a directory and run:
 
 ```sh
 docker compose up -d --wait --wait-timeout 900
@@ -37,7 +36,7 @@ do not contain passwords. Docker Compose 2.35 or later and an engine supporting
 named-volume subpaths are required. No Git, Rust, Node, npm, pnpm, Make, host
 OpenSSL, host mappings or installed certificates are used at runtime. Use a
 local Docker context with access to the extracted files; remote daemons are
-outside this candidate's qualification.
+outside this bundle's qualification.
 
 The optional fictional sample uses real browser sign-in and public workflows:
 
@@ -73,7 +72,7 @@ issuer checks, and the Keycloak generation gate.
 
 ## Paired logical recovery
 
-Use the candidate's `synveda-recovery` command from the extracted bundle. The
+Use the bundle's `synveda-recovery` command from the extracted archive. The
 host-state launcher's recovery commands do not operate these named volumes.
 Do not run direct Compose commands concurrently with recovery. For the default
 `synveda-local` installation:
