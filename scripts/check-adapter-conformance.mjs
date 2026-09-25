@@ -131,12 +131,12 @@ export function renderTypescript(registry) {
 
 export function readmeSupportStatement(registry) {
   const verified = registry.clients.filter((client) => client.support_level === "verified");
-  if (verified.length === 0) return "No client lifecycle is currently verified.";
+  if (verified.length === 0) return "No client guides are listed yet.";
   const names = verified.map(
     (client) => `${client.display_name} ${client.conformance.tested_version}`,
   );
-  if (names.length === 1) return `${names[0]} is the only verified lifecycle.`;
-  return `Verified client lifecycles: ${names.join(", ")}.`;
+  if (names.length === 1) return `Client guide: ${names[0]}.`;
+  return `Client guides: ${names.join(", ")}.`;
 }
 
 export function renderReadmeSupportSection(registry) {
@@ -144,10 +144,9 @@ export function renderReadmeSupportSection(registry) {
 
 ${readmeSupportStatement(registry)}
 
-See the [client support matrix](docs/CLIENT_SUPPORT.md) for the tested platforms,
-setup and remaining limits. Other clients have partial checks or setup recipes;
-those do not establish a working end-to-end lifecycle. This summary is checked
-against [the adapter registry](adapters/registry.json).
+See the [client support matrix](docs/CLIENT_SUPPORT.md) for platform coverage,
+setup steps and capabilities. This list comes from the
+[adapter registry](adapters/registry.json).
 
 `;
 }

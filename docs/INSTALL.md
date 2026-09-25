@@ -1,870 +1,245 @@
-# Install and operate Synveda
+# Install and use Synveda
 
-Synveda has one governed runtime: gateway, worker, PostgreSQL, generic OIDC,
-the public API, Cedar, forced RLS, VedaFlow and audit. Infrastructure ownership
-and exposure do not select a different product edition or confer readiness.
-
-## Choose an installation workflow
+Synveda keeps knowledge from agent sessions in a project or personal scope.
+People can inspect its source, review proposed changes and choose what later
+sessions may use. The web console handles everyday work; the CLI and public API
+support automation and advanced administration.
 
 <!-- installation-version: 0.4.3; publication: published -->
-**v0.4.3 is the current published release.** The earlier
-[v0.4.1 tagged release run](https://github.com/synveda/synveda/actions/runs/35900269117)
-passed native candidate qualification but failed during anonymous image verification.
-The [v0.4.2 run](https://github.com/synveda/synveda/actions/runs/35987467297)
-passed anonymous pulls but timed out while repeating full deployment drills.
-The [published v0.4.0 release](https://github.com/synveda/synveda/releases/tag/v0.4.0)
-retains its original installation contract.
+The current published release is **v0.4.3**. Choose the route that matches your
+infrastructure:
 
-| Choice | Canonical instructions | Prerequisites and evidence |
-|---|---|---|
-| Run with Docker | [Prebuilt bundle](../deploy/compose/PREBUILT.md) | Published v0.4.3 bundle; native Linux AMD64/ARM64 candidate deployment, anonymous public image checks and local macOS/OrbStack candidate evidence |
-| Deploy to Kubernetes | [Application chart](../deploy/helm/synveda/README.md) | Published v0.4.3 chart; four native candidate ownership modes and anonymous OCI chart parity passed |
-| Use existing infrastructure | [Provider contract](../deploy/helm/synveda/CONFIGURATION.md) | Supplied database/identity endpoints and trusted CA inputs; no provider takeover |
-| Install a native CLI | [Client downloads](CONSUMER_CLI.md#release-downloads) | Published v0.4.3 client archives for six native OS/architecture targets; verify the signed inventory before installation |
-| Build from source | [Source development](DEVELOPMENT.md#running-your-changes) | Contributor tools and source-only hostname setup |
+| Route | Guide | When to use it |
+| --- | --- | --- |
+| Prebuilt Docker bundle | [Download and verify](../deploy/compose/PREBUILT.md#download-and-verify) | First local evaluation with bundled PostgreSQL and Keycloak. |
+| Kubernetes chart | [Chart installation](../deploy/helm/synveda/README.md) | A cluster with persistent storage and an operator who can manage its namespace. |
+| Existing PostgreSQL or OIDC | [Compose reference](../deploy/compose/PREBUILT.md#use-existing-infrastructure) or [chart configuration](../deploy/helm/synveda/CONFIGURATION.md) | You already operate the database, identity provider or both. |
+| Source checkout | [Development setup](DEVELOPMENT.md#running-your-changes) | You are changing Synveda or running its tests. |
 
-Database and identity ownership are independent on both platforms. Bundled
-Keycloak has a durable database and owner distinct from Synveda's roles.
-Optional CNPG requires its existing operator; bundled evaluation does not.
-The [readiness register](PRODUCTION_READINESS.md) owns unresolved host, release,
-HA, key custody and disaster-recovery qualification. Passing a local drill does
-not certify another platform. Generated [client support](CLIENT_SUPPORT.md)
-owns client claims.
+## First run with Docker
 
-### Source checkout
+Use the [README download commands](../README.md#install-for-local-evaluation)
+to verify and extract the prebuilt bundle. It pulls fixed container images and
+does not compile source on the host.
 
-Moved to [Source development](DEVELOPMENT.md#running-your-changes) and the detailed
-[source Compose guide](../deploy/compose/README.md).
+### 1. Set local options before startup
 
-### Packaged reference
+Open `evaluation.json` in the extracted bundle. Its keys are:
 
-Moved to the [prebuilt Docker guide](../deploy/compose/PREBUILT.md), including
-loopback evaluation, reference HTTPS, first workspace and lifecycle commands.
+| Key | Default | Change it when |
+| --- | --- | --- |
+| `port` | `8080` | That loopback port is already in use. |
+| `subnet` | Private Docker `/24` | It overlaps a local or VPN network. |
+| `demoAccounts` | `true` | Set `false` to use identities you provision yourself. |
 
-The remaining sections describe product use after authenticated startup.
+The selected port, subnet and account mode are recorded in private installation
+state. Keep that state, the database volumes and encryption keys together. The
+launcher uses the fixed `synveda-evaluation` Compose project, even from another
+directory. For exact state and recovery rules, see the
+[Docker lifecycle guide](../deploy/compose/PREBUILT.md#state-and-ordinary-lifecycle).
 
-The [native consumer commands](CONSUMER_CLI.md) in the published v0.4.3 client add receipt-bound
-Compose lifecycle and project/adapter setup. The older v0.4.0 release does not
-contain them.
-
-## Bootstrap policy
-
-Reference bootstrap creates **no organisation**. After tenant
-admission the tenant contains one row and the audit chain contains one
-break-glass event to say so:
-
-```
-1  tenant.created  BREAK-GLASS
-```
-
-There are no scopes, identities, grants, Configuration bindings or Knowledge
-items, because
-everything the product has a governed surface for is created *through* that
-surface, by a person the PDP can decide about. Deployment bootstrap runs once
-with elevated database authority before anybody is watching — it is the worst
-place in this product to keep a shortcut past the policy engine (seed §2.2).
-
-## Log in — this is where the governed scope tree starts to exist
+### 2. Start and sign in
 
 ```sh
-export SYNVEDA_GATEWAY=http://localhost:8080
-synveda login --gateway "$SYNVEDA_GATEWAY"
+./synveda-compose up
+# With demoAccounts set to true:
+./synveda-compose credential author
 ```
 
-Use your deployment's actual URL when it differs from the bundled default.
-Use credentials provisioned by the deployment's identity operator; no current
-`init` path prints demo credentials. The browser opens, you sign in, and
-**that login is where the tenant's governed product structure starts to
-exist**: on a fresh admitted tenant whose administrator bootstrap remains
-unclaimed, the tenant
-root scope is minted from the tenant's own slug and name, your identity gets
-its own `principal`-shaped scope under it, and you are granted
-`administrator` **at the tenant root** because yours is the first qualifying
-`synveda-admins` login (CPR-45, ADR-0102). All three are chained under *your*
-subject, not an installer's:
+Open `http://localhost:8080/console/`, replacing `8080` with your configured
+port. Sign in as `synveda-demo-admin` with the password printed by the second
+command. The password is generated for this installation. If you disabled demo
+accounts, sign in with an identity from your configured OIDC provider; the
+[provider guide](../deploy/compose/PREBUILT.md#use-existing-infrastructure)
+covers that setup.
 
-```
-2  access.granted         <your subject>
-3  identity.provisioned   <your subject>
-```
+**Getting started** asks you to create a workspace and project. A workspace is
+a place for a person or team; a project is where related sessions and knowledge
+live. You can attach a repository and choose an agent client afterward.
 
-## Build your scope tree
+### 3. Run the sample and inspect the result
 
 ```sh
-synveda scope list --json
-root="<parent.id UUID from the JSON output>"
-
-synveda scope create --parent "$root" --kind org_unit --slug eng --name Engineering
-eng="<created Engineering scope UUID>"
-synveda scope create --parent "$eng" --kind workspace --slug platform --name Platform
-
-synveda scope tree
+./synveda-compose sample
 ```
 
-Each of those is a `ScopeCreate` decision the PDP takes at the *parent*
-scope, creation takes a required `Idempotency-Key` (the CLI mints one), and
-each chains its own `scope.created` carrying that decision. There is no
-bulk import and no seeding shortcut; scopes are governed objects — and
-there is no delete: retiring one is `synveda scope move`-shaped
-administration plus a status transition through the PATCH route.
+This creates fictional **Northstar Delivery → Ingestion API** data through
+Synveda's public API. In **Sessions**, inspect the source session. In **New
+Learnings**, open its proposed ingestion retry finding. The sample does not
+approve its own proposal.
 
-Personal scopes are not created here — each person gets their own when they
-first log in. While bootstrap remains unclaimed, the tenant's first qualifying
-`synveda-admins` login gets the initial `administrator` grant at the tenant
-root; later administrators must receive a governed Synveda grant.
+To complete the review, sign out and use `./synveda-compose credential reviewer`
+to get the password for `synveda-demo-member`. Sign in as that reviewer, open
+**Advanced → Reviews**, inspect the proposal, then approve and apply it.
+Select **Ingestion API** in **Context** and request context about ingestion
+retries. The result should cite the approved knowledge revision and its source.
+The [step-by-step walkthrough](../deploy/compose/PREBUILT.md#first-workspace-and-sample)
+also covers the sample Skill proposal.
 
-## Workspaces, projects and the grants that decide
+## Configure access and behavior
 
-The scope tree above is the one tree (CPR-7): workspaces and projects are
-product-level subtypes of a governed scope, and grants — not role
-bindings — are what let people act:
+### People and scopes
+
+Use **People** to invite teammates and grant access to a workspace or project.
+A workspace grant reaches its projects; a project grant stays in that project.
+Each person's private scope is separate. The initial administrator comes from
+the configured first-login identity group; later grants are made through
+Synveda. Access is checked again for every operation.
+
+### Governed runtime configuration
+
+Use **Advanced → Configuration** to select a policy pack and set capture,
+context, Skill and Tool behavior for a scope. A configuration is versioned and
+governed: publishing or binding a change may apply immediately or wait for
+review, according to the active policy. A change cannot bypass Cedar access
+checks, PostgreSQL tenant isolation or audit.
+
+The console is the simplest route. With an installed and authenticated native
+CLI, copy the target scope UUID and use the corresponding commands:
 
 ```sh
-printf 'authorization: Bearer %s\n' "$(synveda auth token)" |
-  curl --silent --show-error --header @- "$SYNVEDA_GATEWAY/v1/me"
-```
-
-`/v1/me` is the one call a client makes first. It answers who you are, what
-exists, what is missing, and — the part worth reading — **where you stand and
-what you may do there**:
-
-```json
-"anchors": [
-  {"scope_id": "…", "kind": "principal", "source": "principal_scope",
-   "direct": false, "roles": [], "actions": {"knowledge.write": true, …}},
-  {"scope_id": "…", "kind": "workspace", "source": "grant",
-   "direct": true,  "roles": ["owner"], "actions": {"workspace.update": true, …}}
-]
-```
-
-Every `actions` entry is a **real PDP decision** taken at that scope under
-that scope's effective immutable Configuration — a forecast of what an act
-would answer, never a
-grant and never a shape read off a plan. Three things follow from the model
-that are worth knowing before you hand somebody a role key:
-
-- **A grant reaches downward.** Give somebody a workspace and they reach its
-  projects, with no row written at any of them. Give somebody one project and
-  they reach that project and **nothing above it**.
-- **Your own scope is yours.** `/v1/me` mints a `principal`-shaped scope for
-  every caller the first time they call it. Nothing above it reaches in — not
-  a tenant-wide grant, not an administrator, under no profile. The only way
-  somebody else reaches it is a grant written **at** it, by you.
-- **Revocation is immediate.** Access is resolved on every request, so
-  revoking a grant is refused on the very next one. Nothing has to run.
-
-### The first grant
-
-While the marker remains unclaimed, a tenant's first qualifying member of the
-IdP's `synveda-admins` group gets an `administrator` grant at the tenant root —
-that is the one-time operator door. Any earlier governed root-administrator
-grant consumes the same marker. The marker survives revocation, so neither
-that revocation nor a later group login reopens IdP authority; later
-administrators must receive governed Synveda grants. A fresh tenant admitted
-with `synveda tenant create` for dev-token use has no IdP group to read and
-therefore does not acquire administrator authority implicitly. Use the
-deployment-owned tenant convergence command for deterministic local fixtures,
-or admit the first administrator through the configured OIDC group. Every
-later grant goes through `/v1/admin/grants` under the PDP. Direct SQL is not an
-application bootstrap or authorization interface.
-
-## Governed runtime configuration
-
-One complete Configuration document selects the Cedar pack and narrows the
-runtime at a governed scope: capture triggers and bounds, context token budget
-and channels, trace retention, type-aware freshness, Skill/Tool advertisement
-and allowed external-provider families. Resolution walks the scope chain
-nearest first. A tenant-root binding is the ordinary tenant selection; with no
-binding, the built-in enterprise document is the conservative fail-safe.
-
-`personal`, `team` and `enterprise` are templates, not editions. Choosing one
-copies its document into an ordinary stable aggregate and immutable version.
-Every create, publish, bind, pin, enable/disable and rollback still opens a
-typed VedaFlow change, passes the PDP and leaves content-free audit evidence.
-A permissive decision may apply it immediately; a stricter one reports
-`pending_review`. Capture batches and context runs retain the exact version ID
-and digest they used, so a later publication cannot rewrite their history.
-
-Inspect and operate the public surface from **Advanced → Configuration**, or
-with the HTTP-only CLI:
-
-```sh
+scope_id="PASTE_SCOPE_UUID_HERE"
 synveda configuration templates
-synveda configuration effective <scope-id>
-synveda configuration create --scope <scope-id> --name project-runtime --template team
-synveda configuration show <configuration-id>
-synveda configuration compare <configuration-id> --from <version-id> --to <version-id>
-synveda configuration bind --scope <scope-id> --artifact <configuration-id>
-synveda configuration rollback <binding-id> --expected-revision 2 --version <version-id>
+synveda configuration effective "$scope_id"
+synveda configuration create --scope "$scope_id" --name project-runtime --template team
+configuration_id="PASTE_ID_RETURNED_BY_CREATE"
+synveda configuration show "$configuration_id"
+synveda configuration bind --scope "$scope_id" --artifact "$configuration_id"
 ```
 
-Publishing a hand-edited document uses `configuration publish ... --file
-document.json --expected-version <version-id>`. Binding mutations require the
-exact binding revision. The deleted `/v1/policy/default` and per-scope policy
-assignment routes have no aliases; `/v1/policy/packs` remains a read-only Cedar
-source catalogue and local `synveda policy apply|clear` remains documented
-operator break-glass for source installation, not runtime selection.
+Start with `effective` to see what the project currently uses. Create a
+configuration from a template, inspect it, then bind it to the intended scope.
+Check the returned state before expecting a pending change to affect sessions.
+The [policy guide](../policies/README.md) explains the packs, and the
+[OpenAPI contract](api/openapi.json) defines the exact request fields.
 
-## Unified reviews
+### Existing identity and data services
 
-**Advanced → Reviews** is the comprehensive VedaFlow queue for Knowledge,
-Skills, Tool servers and bindings, Configuration, policy relaxations,
-OKF-sourced publication, prompts and context packs. Filter by artifact family,
-then inspect the stable artifact id, operation, exact version or digest,
-stale-head precondition, immutable effect, inherited approval requirement and
-opened/reviewed/closed timeline. New Learnings remains the lightweight capture
-decision page; the session-event quarantine remains a separate secret-admission
-control.
+Synveda uses OIDC authorization code with PKCE. The issuer in discovery,
+tokens and the deployment configuration must match. The first eligible member
+of the configured `synveda-admins` group can claim the initial tenant
+administrator grant; subsequent access is governed within Synveda. Directory
+synchronization through SCIM is a separate setup. Follow the
+[Compose OIDC contract](../deploy/compose/README.md#external-oidc) or
+[Kubernetes provider contract](../deploy/helm/synveda/CONFIGURATION.md)
+for client, audience, certificate and database settings.
 
-Approve and Reject send the exact proposal commit currently displayed. If the
-proposal changed, the gateway returns a conflict and records no verdict.
-Rejection requires a reason. Where the live profile forbids author review, the
-author must Cancel or ask another authorised reviewer. Under
-`regulated-strict`, a person who authored or counted as a reviewer cannot also
-apply or publish the effect; a separately authorised actor completes it. The
-`standard` profile requires a reviewer distinct from the author but permits the
-author to execute after that review. Personal auto-apply is unchanged: an empty
-live requirement still creates the proposal, object/commit, typed command and
-audit evidence before applying it.
+## Connect an agent client
 
-API clients use `expected_commit` in both verdict bodies. CLI
-`synveda proposal approve|reject` first reads the proposal and supplies that
-precondition automatically. Cancel uses the existing withdrawal operation—no
-second lifecycle or alias exists—and Apply/Publish repeat Cedar, the live
-matrix, separation and artifact revision checks.
-
-## Governed policy relaxations
-
-A relaxation temporarily widens one provisioned subject's ability to read
-current Knowledge at one non-personal scope. It is not a Cedar bypass: create,
-revision and early revocation each open a typed `Policy/apply` VedaFlow change,
-the live matrix returns `applied`, `pending_review` or `rejected`, and Cedar
-still makes every Knowledge decision. The first release supports only the
-closed `knowledge.read` action.
-
-The effective Configuration at the target must enable that action and caps the
-window. The stored hard expiry is calculated when the change applies; database
-time ends authority even if the expiry bookkeeping worker is unavailable.
-Changing Configuration may narrow a standing relaxation immediately. Personal
-principal scopes cannot be targets, and quarantine, sealing and service-token
-confinement remain overriding forbids.
-
-Inspect these under **Advanced → Scopes**, or with the public-HTTP CLI:
+Install the [native client package](CONSUMER_CLI.md#release-downloads) on the
+machine running your agent, then sign in to the gateway:
 
 ```sh
-start="<current RFC 3339 UTC timestamp>"
-end="<later RFC 3339 UTC timestamp within the configured maximum>"
-narrower_end="<earlier end timestamp, still after start>"
-
-synveda relaxation list --scope <scope-id>
-synveda relaxation show <relaxation-id>
-synveda relaxation create --scope <scope-id> --subject <identity-id> \
-  --start "$start" --end "$end" \
-  --reason "bounded incident investigation"
-synveda relaxation revise <relaxation-id> --expected <current-version-id> \
-  --subject <identity-id> --start "$start" \
-  --end "$narrower_end" --reason "narrowed investigation window"
-synveda relaxation revoke <relaxation-id> --expected <current-version-id> \
-  --reason "investigation complete"
+synveda login --gateway http://localhost:8080
+synveda whoami
 ```
 
-The subject flag takes the identity UUID returned by the authenticated
-identity surface, not a free-form user name. Revisions require the exact
-current immutable version. Ordinary API, console, CLI, log and audit responses
-carry identifiers, hashes and bounded reasons, never Knowledge content or a
-second permission token. The predecessor routes and command have no aliases;
-an old development database is refused by the schema-epoch guard rather than
-translated.
+Use the actual gateway URL if it differs. Then follow the setup for your
+client:
 
-## Check it works
+| Client | Setup |
+| --- | --- |
+| Claude Code | [Plugin and hooks](../adapters/claude-code/README.md) |
+| Codex CLI | [Native hooks and MCP](integrations/codex.md) |
+| GitHub Copilot CLI | [Native hooks and MCP](integrations/copilot-cli.md) |
+| Other MCP clients | `synveda mcp install --print` shows the entry; see the [support matrix](CLIENT_SUPPORT.md) for host capabilities. |
+
+The [support matrix](CLIENT_SUPPORT.md) is generated from the client registry
+and lists versions, platforms and capabilities.
+Python and TypeScript SDKs have an initial API slice; their
+[guide](../sdks/README.md) states the publication boundary.
+
+## Working with knowledge
+
+A Session records agent activity. Capture turns eligible evidence into a
+reviewable candidate. **New Learnings** lets you accept, edit, merge, replace
+or dismiss it. A governed change creates an immutable Knowledge revision only
+when it applies. **Knowledge** shows the current revision and source; **Context**
+shows which revisions a session received and why.
+
+The console also provides **Skills** for versioned Skill bundles, **Tools** for
+reviewed MCP server definitions, and **Import / Export** for bounded OKF v0.2
+project knowledge exchange. The gateway records external Tool metadata and
+bindings; it does not execute those tools. For API clients, use the generated
+[OpenAPI reference](api/openapi.json). For local OKF files, the CLI offers:
 
 ```sh
-synveda scope tree                          # your governed scope tree
-synveda recall --query "..."                 # a governed read
-synveda audit tail --limit 20 # policy-visible recent activity
-synveda audit verify         # the caller's tenant chain
-synveda audit events --context-run-id <uuid> # content-free exact evidence
-synveda audit export --output audit-chain.json # frozen public-API prefix
-synveda audit verify-export audit-chain.json # offline; no profile needed
-```
-
-Traces are exported through the configured OTLP endpoint. The core Compose
-Collector is private; a local trace UI is optional and backend-specific.
-
-Audit query and export require tenant-wide `audit.read`; a grant below the
-tenant root is refused rather than served a misleading partial chain. The
-export command never accepts a tenant or database URL, verifies every canonical
-hash input before its atomic no-overwrite write, and contains identifiers,
-hashes, decisions and provenance—not Knowledge bodies, Skill files, Tool
-credentials or Configuration documents.
-
-## Connect an AI client
-
-Two commands, because the two kinds of client are genuinely different.
-
-### Claude Code
-
-```sh
-synveda plugin install              # --dry-run to see it first
-```
-
-The release carries a plugin — a **marketplace**, which is the unit Claude
-Code installs — and this adds it and installs the one plugin in it by running
-`claude plugin` itself. That gets you more than an MCP server: four hooks, so
-a session composes a watermarked context block at `SessionStart` and every
-turn is recorded back at `Stop`, `PreCompact` and `SessionEnd`. Start a new
-session to pick it up, and check it loaded:
-
-```sh
-claude plugin list          # synveda@synveda … Status: ✔ enabled
-```
-
-Run it again after every upgrade. It compares what Claude Code has installed
-against the bundle the release put on disk: the same version is left alone,
-a different one is **replaced**, and `--force` replaces regardless. That
-comparison is the point — Claude Code keeps its own copy of a plugin, so
-until you re-run this an upgraded release still has the *old* plugin running,
-reporting itself enabled and healthy.
-
-Nothing is written outside Claude Code's own plugin state, and the `claude`
-CLI has to be on your `PATH` — this drives it rather than editing the three
-JSON files it keeps.
-
-It needs a login to do anything: `synveda login` stores the bearer, and the
-plugin reads it per call. There is no other configuration.
-
-#### What happens when the gateway is unreachable
-
-Valid spooled events survive a gateway outage, and ordinary outage recovery is
-automatic.
-
-Every event the plugin records is written to a **local spool** first — one
-file per session under `$XDG_STATE_HOME/synveda/spool/` (or
-`~/.local/state/synveda/spool/`) — and only then delivered.
-A write is a temp file, an `fsync` and a rename, so a machine that dies
-mid-write leaves the previous state or the new one and never half of either.
-An event is deleted only once the gateway has acknowledged it.
-
-Delivery happens on the lifecycle hooks: `Stop` and `PreCompact` synchronously
-record to the local spool and return before credential or network work;
-`SessionEnd` flushes what it can inside a bounded budget; and the **next**
-`SessionStart` retries whatever is still unacknowledged. So a session worked
-on a plane, or against a gateway that was down for the afternoon, delivers
-itself the next time you start Claude Code with a network.
-
-Three commands if you want to look, or to hurry it along:
-
-```sh
-synveda session spool status                # what is held, and how old
-synveda session flush                       # deliver everything now
-synveda session spool purge --acknowledged  # reclaim the delivered
-```
-
-`purge` **requires** `--acknowledged` and there is no `--all`. It will not
-delete an observation the gateway has not confirmed.
-
-The adapter validates the spool version, structure, event ordering and each
-payload hash before either automatic or manual delivery. A malformed,
-unreadable, future-version or hash-mismatched file is **held in place** rather
-than treated as absent, overwritten or sent. A spool is also pinned on first
-authenticated use to its canonical gateway origin; changing profiles to a
-different gateway holds the old run rather than sending its transcript across
-deployments. `synveda session spool status` reports held state, and the
-adapter log records only a fixed reason class — never the rejected payload or
-credential-bearing exception text.
-
-The SHA-256 payload hash detects accidental local corruption. It is not a MAC
-and does not protect against a process that already has arbitrary write access
-to your account and can replace both payload and hash. Synveda does not claim
-to preserve trustworthy client evidence after full local-account compromise.
-
-Once events reach the gateway, a terminal session freezes the exact eligible
-event snapshot as a durable capture batch. An explicit client can request the
-same operation with
-`POST /v1/sessions/{session_id}/capture-batches`; retrying either path resolves
-to the same snapshot rather than calling the extractor twice. Extraction
-creates candidates, not current Knowledge. Accept, edit-and-accept, merge or
-replace calls the governed Knowledge/VedaFlow command layer, and a strict
-profile can retain the result as `pending_review`. Dismissal publishes
-nothing. Candidate content needs both access to its source session and
-Knowledge-read authority at its proposed destination, so a private preference
-derived during a shared run is not a shared draft.
-
-> **The one thing that is lost.** If the host client is killed outright —
-> SIGKILL, a kernel panic, a battery dying — before any lifecycle hook can
-> run, the events since the last `Stop` go with it. No hook fires, so nothing
-> writes.
->
-> Claude Code fires `Stop` at the end of every turn, so the window is one
-> turn, not one session: usually seconds. Closing it entirely would mean
-> writing to disk on every token, which costs more than it saves. What is
-> guaranteed is the other half — **a valid event that reached the spool is
-> retained until the gateway acknowledges it.** Refused spool bytes are held
-> for explicit recovery; they are not silently discarded or delivered.
-
-### Everything else — MCP clients
-
-Connection support and lifecycle verification are different claims. The
-generated [client support matrix](CLIENT_SUPPORT.md) records the exact level,
-tested versions, authentic fixture digests and limitations for every built-in
-client. In particular, Cursor configuration is available but its lifecycle is
-currently experimental and has not been run by a real Cursor client here.
-
-`synveda mcp` serves governed context to any MCP client over stdio: `recall`
-uses the ordinary Knowledge query on the caller's public session, and
-`remember` appends an assertion event to that Session's governed scope for
-later Capture. Appending does not start extraction or publish Knowledge.
-Recall returns exact immutable revision and source
-addresses; it neither consumes a context token budget nor opens the separately
-authorised diagnostics enumeration lens. The deleted tenant-global
-`/v1/recall` route has not returned. You do not have to write the config by
-hand —
-
-```sh
-synveda mcp install --client claude-desktop   # or: --client cursor
-synveda mcp install --client cursor --dry-run # see it first
-```
-
-It changes one key in the client's own config file and writes everything else
-back as it found it, so your other MCP servers are untouched. An existing
-`synveda` entry that differs is reported rather than replaced; pass `--force`
-if you meant to replace it. Restart the client afterwards.
-
-Authenticated calls require application identity independently of the MCP
-connection. Supply `session_id` per tool call when a host shares a server
-between conversations. A dedicated process may instead launch with
-`synveda mcp --session <existing-session-uuid>` or `synveda mcp --task
-<stable-application-key> --project <project-uuid>`. Reuse a task key only for
-the same application task across reconnects; transport disconnect never ends
-it. The outer `--session`/`--task` selectors are also preserved by `mcp install`.
-Claude's hook supplies its Session ID in context. See
-[Codex CLI setup](integrations/codex.md) for its native configuration and the
-[language clients](../sdks/README.md) for shared application workflows.
-
-For a client this release does not know, `synveda mcp install --print` gives you
-the entry to place yourself, and `--config <path>` writes a config kept
-somewhere unusual — a project-level `.cursor/mcp.json`, say.
-
-**Claude Code needs none of this** — use `synveda plugin install` above. Its
-plugin carries its own MCP entry, and launches the server with the write tool
-switched off, because its `Stop` hook is already recording your turns and the
-tool would store each one a second time.
-
-If a client will not connect, the server's diagnostics are on its stderr, which
-is where clients collect them — Claude Desktop keeps them in
-`~/Library/Logs/Claude/mcp-server-synveda.log`. It is quiet by default; add
-`RUST_LOG` to the entry's `env` to turn it up:
-
-```json
-"synveda": {
-  "command": "/usr/local/bin/synveda",
-  "args": ["mcp", "--writes", "tool"],
-  "env": { "RUST_LOG": "synveda=debug,rmcp=debug" }
-}
-```
-
-`rmcp` is the protocol SDK, so including it shows the frames themselves — which
-is what you want when the handshake is the thing failing.
-
-### Trusting an external MCP server for a project
-
-The `synveda mcp` command above is Synveda's own thin client adapter. The
-trusted MCP catalogue is a different plane: it records which exact external
-server source, transport, authentication shape and tools/resources/prompts a
-project reviewed. The public `/v1/tool-servers` and `/v1/tool-bindings`
-operations import metadata, retain immutable raw and normalised discovery
-snapshots, compare versions and pin one approved version to a project.
-
-A changed schema, description, source, transport or authentication shape is a
-new quarantined version. Approving it does not move an existing project
-binding; repinning is a separate governed change. Authentication entries name
-an opaque secret reference only. Do not put a token, header value or environment
-credential in an imported manifest or client configuration: the API rejects
-it and generated configuration never resolves the reference.
-
-For a Synveda-custodied Tool credential, mint a stable local reference at the
-Tool server's governing scope. Values come from a file or stdin—never argv:
-
-```sh
-synveda tenant secret put \
-  --tenant <tenant-uuid> \
-  --scope <governing-scope-uuid> \
-  --kind tool_server \
-  --label pulseboard.mcp \
-  --provider remote_mcp \
-  --from ./private-token
-```
-
-The command prints `synveda-secret://<uuid>`. Put that reference, not the
-credential, in `secret_reference`. Registration, VedaFlow application and
-every generated configuration recheck the exact tenant, scope, kind and active
-state. A missing, revoked or foreign reference has one non-oracular refusal.
-External references remain opaque adapter metadata and grant no permission.
-Revoke a local reference with `synveda tenant secret revoke --tenant
-<tenant-uuid> <secret-uuid>`; a revoked binding can still be removed, but it
-cannot be rendered or re-enabled.
-
-Local stdio commands are untrusted executable metadata. The gateway never runs
-an imported command. A trusted local adapter may perform MCP `server/discover`
-and the three list operations on the user's machine and report that bounded
-evidence; catalogue tests refuse `tools/call` and are not an execution proxy.
-The accepted external contract is the stateless MCP `2026-07-28` specification
-over stdio or Streamable HTTP. Retired HTTP+SSE/session-shaped servers are not
-translated.
-
-In the console, select the target project and open **Tools**. The catalogue
-links each stable server to its immutable versions, exact digests, transport,
-authentication shape, tools/resources/prompts and JSON schemas. A quarantined
-version is never offered in the binding picker; use its **Advanced Reviews**
-link, then explicitly repin the project if that exact approved version is the
-one it should advertise. Disable and remove preserve binding history. The
-configuration preview masks opaque secret-reference identifiers, and its
-health section labels the trusted adapter and exact read-only methods behind
-each report. A `passed` row does not mean the gateway executed a tool.
-
-### Exchanging project Knowledge with OKF v0.2
-
-Synveda implements only the canonical Open Knowledge Format **v0.2** contract,
-pinned to `GoogleCloudPlatform/open-knowledge-format@ad30107`. The public API
-accepts already enumerated directory or checked-out Git files, or bounded zip,
-tar and tar-gzip bytes. It never accepts server filesystem authority, runs Git,
-follows a symlink, fetches a frontmatter URL or executes imported content.
-
-The exchange is deliberately two-stage:
-
-1. `POST /v1/projects/{project_id}/okf/imports` validates the bytes and creates
-   an immutable dry-run plan. Supply `Idempotency-Key`; the same source and
-   digest resolves to the same job.
-2. Inspect it with `GET /v1/okf/imports/{id}`, then call
-   `POST /v1/okf/imports/{id}/materialize` with another idempotency key. This
-   creates ordinary capture candidates, not active Knowledge. Review them in
-   **New Learnings**; Accept, Merge or Replace still creates a VedaFlow change.
-
-`POST /v1/projects/{project_id}/okf/exports` deterministically renders selected
-current project Knowledge, or all visible current project Knowledge when the
-selection is empty. Every item, provenance source and retained relationship is
-re-authorised before it enters the output. Unknown v0.2 types and extension
-metadata survive; a declared v0.1 bundle is rejected rather than translated.
-The generated OpenAPI document is the exact request/response reference. The
-filesystem-owning client commands are:
-
-```sh
+project_id="PASTE_PROJECT_UUID_HERE"
 synveda okf validate ./knowledge-bundle
-synveda okf inspect ./knowledge-bundle --source-revision release-42
-synveda okf import ./knowledge-bundle --project <project-id> --dry-run
-synveda okf import ./knowledge-bundle --project <project-id>
-synveda okf export --project <project-id> --output ./exported-knowledge
+synveda okf import ./knowledge-bundle --project "$project_id" --dry-run
+synveda okf import ./knowledge-bundle --project "$project_id"
 ```
 
-Validation and inspection are local. Import packages inert bytes and calls the
-public project API; omitting `--dry-run` creates New Learnings only. Export
-verifies the server-returned pin, paths and hashes before atomically publishing
-a new local directory and refuses an existing output path. In the console,
-select the project and open **Import / Export** for the same dry-run history,
-classification, candidate and deterministic export views. Neither surface is
-a scheduled Git synchroniser, database seeder or direct-publication shortcut.
+Import first reports a plan; materialized items appear as reviewable
+candidates, not active Knowledge. Review them in **New Learnings**.
 
-## Choosing an embedder for semantic Knowledge search
+## Advanced operator reference
 
-A separately validated deployment selects `tei` for BGE-M3 or `deterministic`
-for reproducible lexical-only evaluation through the ordinary runtime
-configuration contract. The canonical Compose semantic profile and its
-endpoint acceptance remain pending; the withdrawn `init` flags are not a
-selection path.
+### MCP connections
 
-The public Knowledge collection is always lexically searchable from its
-immutable current revision. With `tei`, a restart-safe indexer also stores a
-model-labelled revision vector and search fuses bounded lexical and semantic
-candidates. A newly written revision is available lexically immediately and
-joins the semantic leg after that asynchronous index converges.
+`synveda mcp` is a public-API client over stdio. Inspect a connection entry
+with `synveda mcp install --print`, or register a supported client with, for
+example, `synveda mcp install --client claude-desktop`. A shared MCP process
+needs the Synveda Session ID on each tool call; an MCP connection alone does
+not record the full agent session. Use the [client matrix](CLIENT_SUPPORT.md)
+for each host's capabilities. Claude Code's plugin already includes
+its own MCP entry.
 
-The default `deterministic` embedder remains useful for reproducible functional
-tests, but its BLAKE3 geometry has no semantic meaning. The Knowledge API never
-queries or labels it as semantic: responses say `lexical` and report
-`deterministic_embedder_is_not_semantic`. Use TEI/BGE-M3 for a quality or
-semantic demonstration.
+### Directory synchronization
 
-Vectors are keyed by immutable revision and model, so changing models does not
-reinterpret old vectors. The indexer creates rows for the configured model as
-it converges; no runtime reader falls back to the replaced aggregate.
-Supported index dimensions remain 16 and 1024 (ADR-0024 decision 5), so adding
-a third model shape requires an explicit schema decision.
+OIDC sign-in and SCIM provisioning are separate. Once the external issuer is
+configured, issue a SCIM credential with
+`synveda scim token issue --label directory` and supply the printed token once
+to the directory provider. The
+tenant endpoint is `https://YOUR_HOST/scim/v2`. Directory groups and members
+do not grant scope access on their own; an authorized operator creates a
+directory access assignment through the public API. For Microsoft Entra ID,
+set the issuer's `external_id_claim` to `oid` so login and provisioning use the
+same stable identity. See the [OpenAPI contract](api/openapi.json) for the
+assignment request.
 
-## Using your own IdP
+### Audit, keys and export
 
-An external issuer remains part of the generic application contract, but the
-withdrawn `init` verb is not an external-IdP setup path. A separately validated
-deployment must mount the issuer configuration and provision a public
-authorization-code client with PKCE S256, its exact deployment callback/origin,
-and the exact scopes named by `login_scopes`. The base configuration requests
-`openid`, `profile` and `email`; add a provider-specific groups scope only when
-that provider requires it to emit the configured groups claim. The issuer in
-discovery, tokens and gateway configuration must be byte-for-byte identical.
-
-The canonical Compose guide contains the exact
-[provider-neutral issuer document shape](../deploy/compose/README.md#external-oidc),
-including the distinct login-client/API audiences and static tenant binding.
-
-One group claim is read: `synveda-admins` may seed the first tenant-root
-`administrator` grant only while the tenant's insert-only bootstrap remains
-unclaimed. It never governs later administrator assignment. There is no
-placement convention — everybody arrives at their own scope and reaches
-anything else through a grant (ADR-0074 decision 3). Issuer configuration does
-not sync a directory.
-
-Directory *synchronisation* — joiners, movers, leavers — is a separate,
-deliberate step (AUTH-4, ADR-0059). Once the instance is up:
+An administrator with tenant-wide `audit.read` can inspect and export the
+content-free audit chain:
 
 ```sh
-synveda scim token issue --label entra
+synveda audit tail --limit 20
+synveda audit verify
+synveda audit export --output audit-chain.json
+synveda audit verify-export audit-chain.json
 ```
 
-prints a provisioning credential **once**. Paste it into Entra
-(Provisioning → Admin Credentials → Secret Token) or Okta (Provisioning →
-Integration → API Token) with the tenant URL `https://<your-host>/scim/v2`,
-which is the same for every tenant — the credential names its own. Two
-credentials may be live at once, so rotation never stops provisioning.
+Keep the deployment encryption key with database recovery material. The
+native CLI can inspect or rotate a tenant data key and create a sealed export:
 
-**For Entra, set `external_id_claim` to `oid` on the issuer.** Entra's `sub`
-is pairwise per application and never equals the object id its provisioning
-agent sends, so the default (`sub`) would match nothing and a person who
-logged in before the directory reached them would end up with a second
-identity. Okta needs no change.
-
-Synchronisation projects users onto stable identities and principal scopes,
-and directory groups onto the same Group and identity-keyed membership rows
-used by the rest of the product. It can join, disable, rehire and change group
-membership; it cannot name a scope, role, policy pack or governed artifact —
-those are not in the wire format.
-
-To let one directory group act in a governed subtree, an authorised operator
-uses the dedicated public application command:
-
-```http
-POST /v1/directory/access-assignments
-Idempotency-Key: <unique retry key>
-
-{"scope_id":"<scope uuid>","group_id":"<directory Group uuid>","role":"member"}
+```sh
+tenant_id="PASTE_TENANT_UUID_HERE"
+synveda tenant key status --tenant "$tenant_id"
+synveda tenant key rotate --tenant "$tenant_id"
+synveda tenant export --tenant "$tenant_id" --out tenant.svexp
 ```
 
-That creates an ordinary source-bearing `scope_grants` row after the same
-`membership.grant` Cedar decision used for manual access. Removing a member,
-disabling their identity or archiving the directory group withdraws effective
-access on the next request. Ordinary group/grant mutation routes refuse
-directory-owned rows and tell the operator to change the directory or use the
-dedicated assignment route. No live Entra or Okta verification is claimed by
-the repository fixtures; they remain labelled captured or transcribed.
+The tenant export contains Knowledge history and audit evidence. It has no
+matching import or complete tenant-erasure operation. Use the platform's
+paired database and key backup for deployment recovery.
 
-## Local governed product walkthrough
+## Stop, recover and upgrade
 
-The canonical source-checkout walkthrough is
-[Governed ingestion-retry walkthrough](../deploy/compose/README.md#governed-ingestion-retry-walkthrough).
-It uses three real Keycloak logins and only public Synveda APIs to inspect a
-synthetic Session, capture a learning, demonstrate a denied viewer action,
-perform separate review/apply transitions, bind a versioned Skill, select the
-approved Knowledge revision into authorised context and inspect provenance and
-content-free audit evidence. Its seed is resumable and intentionally stops
-before Capture; no demo reset, model subscription or alternate backend is
-required.
+```sh
+./synveda-compose status
+./synveda-compose down
+./synveda-compose up
+```
 
-## The admin console
+`down` removes containers and networks but preserves volumes and keys.
+The [Docker guide](../deploy/compose/PREBUILT.md#backup-and-restore) has the
+backup and restore procedure. Keep both the Synveda and Keycloak databases
+with the matching encryption and identity material. For Kubernetes, use its
+[operations guide](../deploy/helm/synveda/OPERATIONS.md).
 
-`http://app.synveda.test:8080/console/` in development, or the configured
-reference HTTPS application URL, is served by the gateway from its own origin —
-no second process and no second port. Sign in with credentials provisioned by
-the deployment's identity operator; the session is an `HttpOnly` cookie, so
-there is no token to paste.
-
-The first sign-in on a fresh deployment goes to a six-step **getting started**
-flow — create a workspace (just you, or a team), create the first project,
-attach the repository it is about, choose your agent client, copy the two
-commands that connect it, and run a connection check. The workflow starts with
-the governed scope and project in which Sessions, Knowledge and reusable Skills
-will live; it does not require a separate organisation declaration.
-
-After that the left-hand navigation is the product: **Home, Sessions,
-Knowledge, New Learnings, Skills, Tools, Operations, People, Settings**, with a
-workspace and a project switcher in the header that remember what you chose.
-**People**
-is where you invite somebody (a one-time link you copy — this product emails
-nobody), see who may act in a workspace and who has access only to one
-project, and read *why* each of them does: granted here, inherited from a
-scope above, through a group, or managed by your directory.
-
-**Skills** is the immutable Skills Library. Its catalogue shows what the
-selected personal or project session would actually receive; a Skill's detail
-page shows exact versions and files, provenance, scanner evidence, bindings,
-controlled tests and usage. Declared tools are metadata only. Installing,
-updating, pinning, disabling or rolling back reports the VedaFlow outcome, so a
-pending review is never presented as an active change.
-
-**Tools** is the trusted MCP catalogue. It shows immutable source and
-capability snapshots, quarantined changes and their approved-version diff,
-exact project bindings, discovery-only adapter reports and generated client
-configuration. Capability descriptions and requested permissions are review
-metadata, not authorisation; imported commands are never launched by the
-gateway and secret-reference values are masked in ordinary console output.
-
-Governance lives under **Advanced** — Reviews (the proposals inbox), Scopes
-(the scope tree, effective Configuration and standing relaxations),
-Configuration, Audit and Service identities. Those five appear only if the
-policy decision point says
-you may read them, so a viewer who holds no governance role sees no Advanced
-section at all. That is a forecast and not a permission: every act is decided
-again at its own seam, and a page you reach anyway will show you the gateway's
-own refusal.
-
-**Operations** shows bounded, authorised lists of recent operations, Sessions,
-context runs and Capture batches. It labels stale, partial and unavailable
-signals and does not expose provider task IDs, raw content or infrastructure
-administration.
-
-**Sessions** is where you see what your agents have actually been doing.
-Every run an agent opened against this deployment, newest first, narrowed by
-state, project, client, who ran it and a range of days, a page at a time.
-Open one and you get its whole timeline: the messages, tool calls, file
-changes, commands and skill loads in the order the server assigned them,
-beside the context blocks composed for that run. Each entry shows **both
-clocks** — when the client says a thing happened, and when this deployment was
-told — and an entry that did not arrive live is marked with how far behind it
-was, because the agent clients here spool to disk when the gateway is
-unreachable and flush later. An adapter warning gets a banner and a mark in
-place. A run that never finished says which way it stopped and, when the
-client said so, why.
-
-Raw event payloads are **not** shown by default: a timeline says a message was
-sent and summarises it, and the payload is what was actually said. Expanding
-one takes `session.diagnostics` at that run's scope — a separate authority
-from reading the timeline, so a team can follow what its agents did without
-handing everybody a transcript of everybody's prompts. Where you hold it, each
-entry gets a *Show raw payload* control; where you do not, the page says which
-role it takes.
-
-The public Knowledge Browser searches current active revisions and exposes
-immutable history and independently authorised provenance. Its conflict queue
-compares exact revisions and resolves keep-separate, support, duplicate,
-supersede, future-transition or archive choices through VedaFlow. Conflicting
-challengers remain `transitional` and absent from ordinary results until that
-change applies; capture-backed challengers stay in New Learnings. **Valid at**
-and **As known at** are separate controls, and history/transitional rows only
-appear when explicitly requested. The staleness queue explains explicit or
-configured due dates plus type-specific repository-change, failed-use and
-source-freshness signals; verification creates a new immutable revision.
-Session extraction
-produces reviewable capture candidates; **New Learnings** groups them by batch
-and lets you filter by project, session and decision state, inspect their exact
-source-event summaries and current-Knowledge comparisons, and accept, edit,
-merge, replace, change scope or dismiss. Private, project and workspace choices
-are named distinctly and a scope you cannot publish into is not offered. An
-applied decision links to its Knowledge item; a stricter profile's pending
-change links to Advanced Reviews and remains explicitly unpublished. Raw source
-payloads still require `session.diagnostics` at the run.
-
-Signing in needs a **key plane**, because a console session seals its tokens
-under the deployment's encryption key (TEN-4). Gateway and worker accept the
-same mutually exclusive direct/file KMS settings; canonical Compose mounts a
-mode-0600 key file. The deployment must generate, retain and back up that key
-separately from PostgreSQL, since every tenant key in the database is wrapped
-by it. Canonical Compose generates and retains the project-scoped file but has
-only deterministic joint database/key restore evidence; the live recovery
-gate has not run on a supported Docker host. The
-console ships with release artifacts; from a checkout it needs
-`pnpm --filter @synveda/console build` first, and without a bundle the route
-404s rather than failing boot, because a static asset must not be a dependency
-of the audit log (CNSL-1, ADR-0056).
-
-Each tenant has its own versioned data key. `synveda tenant key status
---tenant <uuid>` lists only credential-free secret metadata and durable
-re-encryption jobs. `synveda tenant key rotate --tenant <uuid>` retains the
-old generation for external archives, creates a retryable job, and advances
-every active database-owned secret envelope without changing the secret's
-stable identity or logical value revision. Directory configuration uses the
-same aggregate through `synveda directory set-credential`; clearing it revokes
-the stable row, so a stale credential cannot silently fall back to a deployment
-directory.
-
-`synveda tenant export --tenant <uuid> --out tenant.svexp` writes the hard-cut
-context export: Knowledge heads and head history, immutable revisions,
-normalised sources and relations, plus the audit chain. Its body is sealed
-under a fresh archive key wrapped by that tenant's key. There is no Record
-section, old-format reader, re-import or tenant-erasure claim.
-
-The shipped provider is the local `SYNVEDA_KMS_KEY` boundary. Keep it outside
-the database and back it up. The provider interface leaves room for later
-custody integrations, but this release does not support cloud KMS, an HSM,
-customer-managed keys or secret-manager resolution inside the gateway.
-
-## Backing up and restoring the Compose reference
-
-Use the [Docker recovery instructions](../deploy/compose/PREBUILT.md#backup-and-restore)
-for the released/candidate evaluation launcher, or the existing
-[source reference guide](../deploy/compose/README.md) for source acceptance.
-Kubernetes recovery is in [OPERATIONS.md](../deploy/helm/synveda/OPERATIONS.md).
-Keep both databases and their original encryption/identity material together.
-
-## Upgrading
-
-Use [Docker update and removal](../deploy/compose/PREBUILT.md#update-and-removal)
-or [Kubernetes upgrade and failure recovery](../deploy/helm/synveda/OPERATIONS.md#upgrade-and-failure-recovery).
-
-### If the upgrade refuses to start: the schema epoch
-
-Epoch 3 is one baseline. Earlier schemas fail with reset guidance; no
-compatibility migrator exists. A destructive reset is not a successful upgrade.
-Application or Helm rollback does not reverse database migrations.
-
-## Stopping and starting
-
-The [Docker lifecycle](../deploy/compose/PREBUILT.md#state-and-ordinary-lifecycle)
-preserves volumes and matching private state. Keep one canonical issuer and
-state directory across recreation.
-
-## Uninstalling
-
-Use the platform's documented retained removal. Automatic global artifact
-uninstallation remains refused until OPS-10 can prove its ownership receipt.
-Client cleanup stays explicit: `synveda mcp uninstall --client cursor` or
-`synveda plugin uninstall` removes only the corresponding integration.
-
-## Install a release artifact
-
-Use the [published v0.4.3 prebuilt download instructions](../deploy/compose/PREBUILT.md#download-and-verify).
-The [six-platform client asset table](RELEASING.md#native-cli-release-artifacts)
-describes the v0.4.3 archives; those assets were not present in v0.4.0. The native installers are
-tag-bound, verify checksums and never start containers or edit an AI client.
-Inspect the matching installer before execution. Verify publisher identity
-separately as described in the release
-guide; the installer does not enforce that verification itself.
-
-## What the artifact installer places
-
-The shell installer's historical default `reference` mode places its CLI,
-console and client hooks below
-`SYNVEDA_HOME` (default `~/.synveda`), plus the immutable version/source-bound
-reference archive and a validated `reference/current` selection. `SYNVEDA_BIN`
-chooses the CLI directory; user-owned paths avoid privilege elevation. Server-only
-Docker installation does not require the native installer.
-
-The new explicit `SYNVEDA_INSTALL_MODE=client` mode installs only the CLI,
-adapters and private Node under `client/releases`, with an atomic current
-selection. It contains no server, console or deployment bundle. The Windows
-PowerShell installer uses this client-only layout under
-`$env:LOCALAPPDATA\SynvedaClient`. See the client guide for paths and retained
-state. Download the matching reference archive separately to operate Compose.
-
-## Current verification boundary
-
-Read [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) and the content-free
-reports under [demos/evidence](../demos/evidence) and attached to
-[v0.4.0](https://github.com/synveda/synveda/releases/tag/v0.4.0). Static gates,
-local source/candidate runtime, hosted release qualification and anonymous
-published retrieval are distinct evidence. The v0.4.1 tagged run stopped before
-public installation qualification. The release workflow requires the
-complete 35-asset inventory, checksum attestation, byte-identical OCI and
-downloadable charts, full native candidate Docker/Helm qualification and
-anonymous execution of the copied public images before stable publication.
-Broader platform, N-1 upgrade and production recovery claims
-remain unqualified.
-
-v0.4.0's original checksum-only release remains immutable; it does not contain
-the native client-only packages or Docker Hub images.
+Schema epoch 3 is the current baseline. Older schemas are refused; they are
+not migrated. A reset deletes data and requires the exact confirmation in the
+Docker guide. Application rollback does not reverse a database migration.
+The [production readiness assessment](PRODUCTION_READINESS.md) states current
+platform, recovery and availability limits.

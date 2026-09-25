@@ -1,26 +1,16 @@
 # Run with Docker
 
-Run the versioned prebuilt bundle with bundled dependencies for a local
-evaluation, or select the reference HTTPS configuration for infrastructure you
-operate. Both use the same Compose services, database authority checks,
-Cedar, forced RLS, VedaFlow and audit.
+Run the prebuilt bundle for local evaluation, or use reference HTTPS with
+infrastructure you already operate. Both use the same Synveda services and
+access controls.
 
 <!-- installation-version: 0.4.3; publication: published -->
-**v0.4.3 is the current published bundle.** The earlier
-[v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
-passed native candidate qualification but failed during anonymous image checks. The
-[v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
-also stopped before final publication after anonymous pulls passed and the
-repeated full drills timed out. The [v0.4.0 instructions](#previous-v040-release)
-retain their original GHCR and checksum-only contract.
-The [release manifest](../../docs/installation.json) owns this status.
-
-The [refactored release contract](../../docs/RELEASING.md) distributes immutable
-images through Docker Hub and GHCR and includes six native CLI packages. No
-publisher token or native CLI is needed to install the server bundle.
+**v0.4.3 is the current published bundle.** It downloads images by digest from
+the public registry. Installing the server bundle does not require a native
+Synveda CLI or registry credentials.
 
 <a id="download-and-verify"></a>
-## Version 0.4.3 release bundle
+## Download and verify
 
 The bundle downloads tested images by digest and never
 builds from a consumer source checkout. Verify the publisher before trusting
@@ -48,22 +38,18 @@ else
 fi
 tar -xzf "synveda-reference-$version.tar.gz"
 cd "synveda-reference-$version"
-./synveda-compose up
 ```
 
-The remaining lifecycle and first-sign-in guidance applies to this bundle.
+Review `evaluation.json` before starting the installation, as described below.
 
 ## Requirements
 
-An ordinary account with access to a **local Docker daemon**, Compose 2.33.1+
-(the minimum for the existing merge contract), curl, tar and a SHA-256 utility.
-Verifying v0.4.3's publisher attestation also needs GitHub CLI.
-The published v0.4.0 bundle passed on native Linux AMD64/ARM64 with Docker 28.0.4 and
-Compose 2.38.2. Local candidate testing also used macOS/OrbStack, Engine 29.4.0,
-Compose 5.1.2 and Apple Silicon. Docker Desktop and Windows/WSL2 remain
-unqualified. Use at least 6 GiB available to Docker for
-PostgreSQL, Keycloak, gateway, worker and private telemetry; this is an
-operational starting allocation, not a measured capacity guarantee.
+An ordinary account with access to a local Docker daemon, Docker Engine 28+,
+Compose 2.33.1+, `curl`, `tar`, a SHA-256 utility and GitHub CLI for publisher
+verification. Start on native Linux AMD64/ARM64. For macOS/OrbStack, Docker
+Desktop and Windows/WSL2, see the
+[platform limits](../../docs/PRODUCTION_READINESS.md). Allow at least 6 GiB for
+PostgreSQL, Keycloak, gateway, worker and private telemetry.
 
 No Git, Rust, host Node/OpenSSL, Make, Buildx selection, DNS edits, external
 account, paid model or public wildcard DNS is required for local evaluation.
@@ -71,40 +57,9 @@ Preparation runs briefly in the product image with no network or Docker socket.
 The localhost endpoint is plaintext and binds only 127.0.0.1. Use reference
 HTTPS for remote users. Do not forward the local port onto an untrusted network.
 
-## Previous v0.4.0 release
-
-For the immutable v0.4.0 release, download its original archive and verify its
-entry in the checksum inventory:
-
-```sh
-version=0.4.0
-release_url="https://github.com/synveda/synveda/releases/download/v$version"
-mkdir "synveda-$version"
-cd "synveda-$version"
-curl -fLO "$release_url/synveda-reference-$version.tar.gz"
-curl -fLO "$release_url/SHA256SUMS"
-awk -v file="synveda-reference-$version.tar.gz" \
-  '$2 == file { count++; print } END { if (count != 1) exit 1 }' \
-  SHA256SUMS > reference.sha256
-# macOS:
-shasum -a 256 --check reference.sha256
-# Linux alternative: sha256sum --check reference.sha256
-tar -xzf "synveda-reference-$version.tar.gz"
-cd "synveda-reference-$version"
-cat environment.json
-./synveda-compose up
-```
-
-Stop on a checksum failure. v0.4.0's unsigned checksums detect corruption but do
-not authenticate their own download channel. `environment.json` binds source,
-version, image digests and dependencies. The launcher never builds source or
-selects `latest`. No registry login should be required for a published bundle;
-an anonymous-pull failure is a release defect, not a reason to supply a
-publisher's token.
-
-The first download is separate from startup and may be large. `up` waits for
-health, completed bootstrap/migrations and issuer diagnostics. It prints the
-console URL without passwords. Normal logs contain no secret values.
+The first image download may be large. `up` waits for healthy services,
+bootstrap and migrations, then prints the console URL without passwords.
+Normal logs contain no secret values.
 
 Before the first `up`, edit the small `evaluation.json` file if port 8080 is
 occupied or its private /24 overlaps a VPN. Supported keys are `port`, `subnet`
@@ -112,6 +67,10 @@ and the explicit `demoAccounts` choice. Their identity is fixed in private
 state after preparation; an accidental later change is refused. Use paths
 without spaces or shell metacharacters. Do not set source-development
 `SYNVEDA_*` variables to override the prepared contract.
+
+```sh
+./synveda-compose up
+```
 
 ## First workspace and sample
 
@@ -150,11 +109,6 @@ receipt/idempotency keys preserve existing resources and reviewer edits.
    source evidence. The sample's Skill version requires the two distinct
    configured administrators; use `credential approver` only for a deliberate
    second evaluation decision, then create its binding through **Skills**.
-
-These are your evaluation actions, not verified historical human reviews.
-The automated acceptance fixture can perform explicit test acts; those are
-reported separately. Live-agent verification is owned by the
-[client support matrix](../../docs/CLIENT_SUPPORT.md).
 
 Console **Sign out** removes the Synveda session and makes subsequent API reads
 unauthenticated. Keycloak's SSO session is separate: use a private browser window
@@ -235,10 +189,10 @@ state. Back up first. Use the new bundle only when its notes explicitly support
 your schema epoch. Keep the same runtime selection: an existing HTTPS reference
 deployment must retain `SYNVEDA_COMPOSE_RUNTIME=reference`. Switching to the
 loopback evaluation creates a separate deployment; it does not migrate the
-reference volume, realm or issuer. The current baseline is **epoch 3**. Earlier epochs fail with
-reset guidance; there is no compatibility migrator or supported v0.2.0 → current
-data upgrade. Local same-epoch reapply is evidence only for the tested revisions.
-Helm/application rollback never reverses SQL migrations.
+reference volume, realm or issuer. The current baseline is **epoch 3**. Earlier
+epochs fail with reset guidance; there is no compatibility migrator or
+supported v0.2.0 → current data upgrade. Helm/application rollback never
+reverses SQL migrations.
 
 Ordinary removal is `down`, followed by deliberate removal of the extracted
 archive if desired. Data and secrets survive. For a disposable destructive reset:
