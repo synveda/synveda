@@ -32,6 +32,54 @@ checkpoint's source event and the required body under a generous allowance,
 then tightens the allowance and requires the optional restart text to be
 omitted without losing required Knowledge or exposing the omitted source ID.
 
+### Prepared model task-use probe
+
+`context-model-probe.json` fixes eight synthetic factual questions and answer
+fields before any model comparison. The two existing public-API tests can export
+their actual paired ContextRun text only when explicitly asked. The export is
+separate from the content-free product report and belongs under ignored
+`target/`; never use a real tenant in this probe.
+
+```sh
+mkdir -p target/context-model-probe
+SYNVEDA_CONTEXT_OPT_MODEL_INPUT="$PWD/target/context-model-probe/optimisation-input.json" \
+  SYNVEDA_DB_TEST_TASK=workspace bash scripts/db-test.sh -p synveda-gateway \
+    --test context_runs conservative_required_fact_matrix_preserves_exact_task_evidence \
+    -- --exact --test-threads=1
+SYNVEDA_CHECKPOINT_MODEL_INPUT="$PWD/target/context-model-probe/checkpoint-input.json" \
+  SYNVEDA_DB_TEST_TASK=workspace bash scripts/db-test.sh -p synveda-gateway \
+    --test context_runs held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenance \
+    -- --exact --test-threads=1
+node scripts/prepare-context-model-probe.mjs \
+  target/context-model-probe/optimisation-input.json \
+  target/context-model-probe/checkpoint-input.json \
+  target/context-model-probe/prompts.json
+```
+
+`prompts.json` contains 16 paired, synthetic, source-derived prompts and SHA-256
+digests plus checkout revision/dirty state. Its `synthetic_context_preparation_only` label means no model was
+called and no task outcome, provider usage, cost or live Claude hook was
+measured. The answer key stays in the separate source rubric, outside prompts.
+A later bounded provider run must use the same model/settings per pair and
+send only each `prompt` string with tools disabled, then record the served
+model, prompt digest and actual usage. Collect its 16 JSON
+answers as `{"schema_version":1,"model_id":"...","responses":[...]}`;
+each response names `family`, `task_id`, `variant`, the corresponding
+`prompt_sha256`, and an `answer` object with exactly the rubric's fields. Then
+score the fixed rubric with:
+
+```sh
+node scripts/score-context-model-probe.mjs \
+  target/context-model-probe/prompts.json \
+  target/context-model-probe/answers.json \
+  target/context-model-probe/score.json
+```
+
+The scorer rejects missing, repeated or mismatched answers and reports
+per-task regressions. It labels manually imported answers unverified, so even
+its `PASS` is not live provider evidence. This factual task-use probe remains
+narrower than coding-task success or a native compact/resume run.
+
 Run the definition-only CI gate with:
 
 ```sh

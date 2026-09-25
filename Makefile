@@ -132,7 +132,7 @@ eval-extraction-live:
 eval-check:
 	cargo run -q -p synveda-eval -- check
 	node scripts/product-evaluation.mjs --check
-	node --test scripts/product-evaluation.test.mjs
+	node --test scripts/product-evaluation.test.mjs scripts/prepare-context-model-probe.test.mjs
 
 # CPR-40's deterministic product/trust suite. It executes exact
 # database-backed acceptance cases on a fresh migrated scratch database,
@@ -146,7 +146,7 @@ eval-product:
 
 check-product-eval:
 	node scripts/product-evaluation.mjs --check
-	node --test scripts/product-evaluation.test.mjs
+	node --test scripts/product-evaluation.test.mjs scripts/prepare-context-model-probe.test.mjs
 
 # The judge measured before it measures (EVAL-3, ADR-0061 decision 4):
 # the configured judge over the labelled sets, with no gateway and no

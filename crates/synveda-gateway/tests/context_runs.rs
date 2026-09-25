@@ -1033,6 +1033,7 @@ async fn held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenanc
     assert_eq!(corpus.tasks.len(), 4);
 
     let mut task_evidence = Vec::new();
+    let mut model_inputs = Vec::new();
     for task in &corpus.tasks {
         let (item_id, revision_id) = create_knowledge(
             &world,
@@ -1233,6 +1234,32 @@ async fn held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenanc
             "within_budget": within_budget,
             "provider_usage": "unavailable",
         }));
+        if std::env::var_os("SYNVEDA_CHECKPOINT_MODEL_INPUT").is_some() {
+            model_inputs.push(json!({
+                "id": task.id,
+                "query": task.query,
+                "without_assist": {
+                    "rendered": baseline,
+                    "tokens": without_assist["tokens"],
+                },
+                "with_assist": {
+                    "rendered": assisted,
+                    "tokens": with_assist["tokens"],
+                },
+            }));
+        }
+    }
+    if let Ok(path) = std::env::var("SYNVEDA_CHECKPOINT_MODEL_INPUT") {
+        let input = json!({
+            "schema_version": 1,
+            "family": "checkpoint_restart",
+            "synthetic": true,
+            "encoding": corpus.encoding,
+            "budget_tokens": corpus.budget_tokens,
+            "tasks": model_inputs,
+        });
+        std::fs::write(path, serde_json::to_vec_pretty(&input).unwrap())
+            .expect("write synthetic CTX-6 model probe input");
     }
     if let Ok(path) = std::env::var("SYNVEDA_CHECKPOINT_TASK_EVIDENCE") {
         let evidence = json!({
@@ -1766,7 +1793,7 @@ async fn conservative_required_fact_matrix_preserves_exact_task_evidence() {
         addresses.push((key, body, query, item, revision));
     }
 
-    let mut off_counts = Vec::new();
+    let mut off_previews = Vec::new();
     for (key, body, query, item, revision) in &addresses {
         let request = json!({
             "query": query,
@@ -1791,7 +1818,10 @@ async fn conservative_required_fact_matrix_preserves_exact_task_evidence() {
                 .contains(&format!("\"body_markdown\":{}", json!(body))),
             "off {key} lost an exact required body"
         );
-        off_counts.push(result["tokens"].as_u64().unwrap());
+        off_previews.push((
+            result["tokens"].as_u64().unwrap(),
+            result["rendered"].as_str().unwrap().to_owned(),
+        ));
     }
     let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
@@ -1810,6 +1840,7 @@ async fn conservative_required_fact_matrix_preserves_exact_task_evidence() {
     tx.commit().await.expect("commit governed Configuration");
 
     let mut task_evidence = Vec::new();
+    let mut model_inputs = Vec::new();
     for (index, (key, body, query, item, revision)) in addresses.iter().enumerate() {
         let request = json!({
             "query": query,
@@ -1848,18 +1879,44 @@ async fn conservative_required_fact_matrix_preserves_exact_task_evidence() {
         );
         assert_eq!(result["selected"][0]["required"], true);
         let conservative_tokens = result["tokens"].as_u64().unwrap();
-        assert!(conservative_tokens <= off_counts[index]);
+        assert!(conservative_tokens <= off_previews[index].0);
         task_evidence.push(json!({
             "task": key,
-            "off_tokens": off_counts[index],
+            "off_tokens": off_previews[index].0,
             "conservative_tokens": conservative_tokens,
             "required_body_exact": true,
             "provider_usage": "unavailable",
         }));
+        if std::env::var_os("SYNVEDA_CONTEXT_OPT_MODEL_INPUT").is_some() {
+            model_inputs.push(json!({
+                "id": key,
+                "query": query,
+                "off": {
+                    "rendered": off_previews[index].1,
+                    "tokens": off_previews[index].0,
+                },
+                "conservative": {
+                    "rendered": result["rendered"],
+                    "tokens": conservative_tokens,
+                },
+            }));
+        }
         eprintln!(
             "CTX-8 paired {key}: off={} conservative={} local o200k_base rendered-text tokens; exact required body retained; provider usage unavailable",
-            off_counts[index], result["tokens"]
+            off_previews[index].0, result["tokens"]
         );
+    }
+    if let Ok(path) = std::env::var("SYNVEDA_CONTEXT_OPT_MODEL_INPUT") {
+        let input = json!({
+            "schema_version": 1,
+            "family": "context_optimisation",
+            "synthetic": true,
+            "encoding": "o200k_base",
+            "budget_tokens": 1400,
+            "tasks": model_inputs,
+        });
+        std::fs::write(path, serde_json::to_vec_pretty(&input).unwrap())
+            .expect("write synthetic CTX-8 model probe input");
     }
     if let Ok(path) = std::env::var("SYNVEDA_CONTEXT_OPT_TASK_EVIDENCE") {
         let evidence = json!({
