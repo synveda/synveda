@@ -19,6 +19,7 @@ pub fn status_of(error: &Error) -> StatusCode {
         Error::PolicyDenied { .. } => StatusCode::FORBIDDEN,
         Error::NotFound { .. } => StatusCode::NOT_FOUND,
         Error::Invalid { .. } => StatusCode::BAD_REQUEST,
+        Error::InsufficientBudget { .. } => StatusCode::UNPROCESSABLE_ENTITY,
         Error::Conflict { .. } => StatusCode::CONFLICT,
         Error::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
         Error::Storage { .. } => StatusCode::SERVICE_UNAVAILABLE,

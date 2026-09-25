@@ -596,7 +596,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     );
     // Authored-context summary cost, emitted by composition.
     metrics::describe_histogram!(
-        synveda_retrieval::AUTHORED_SUMMARY_TOKENS,
+        synveda_retrieval::AUTHORED_INDEX_TOKENS,
         "Estimated tokens spent abbreviating authored context"
     );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the

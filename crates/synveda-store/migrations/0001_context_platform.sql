@@ -512,6 +512,44 @@ $$;
 
 
 --
+-- Name: synveda_context_run_restart_sources(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.synveda_context_run_restart_sources() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+    if new.checkpoint_event_id is not null and not exists (
+        select 1 from session_events event
+        where event.tenant_id = new.tenant_id
+          and event.session_id = new.session_id
+          and event.id = new.checkpoint_event_id
+          and event.event_type = 'session.checkpoint'
+    ) then
+        raise exception 'context run checkpoint must be from its own session'
+            using errcode = '23514';
+    end if;
+    if (select count(*) from unnest(new.restart_event_ids) as source(id)) <>
+       (select count(distinct id) from unnest(new.restart_event_ids) as source(id))
+       or exists (
+           select 1 from unnest(new.restart_event_ids) as source(id)
+           where not exists (
+               select 1 from session_events event
+               where event.tenant_id = new.tenant_id
+                 and event.session_id = new.session_id
+                 and event.id = source.id
+                 and event.event_type = 'message.user'
+           )
+       ) then
+        raise exception 'restart event sources must be unique user events in this session'
+            using errcode = '23514';
+    end if;
+    return new;
+end
+$$;
+
+
+--
 -- Name: synveda_current_tenant(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2719,11 +2757,11 @@ CREATE TABLE public.context_candidates (
     hop_penalty_micros integer NOT NULL,
     CONSTRAINT context_candidates_address_shape_check CHECK ((((channel = 'current_knowledge'::text) AND (capture_candidate_id IS NULL) AND (((knowledge_item_id IS NULL) AND (knowledge_revision_id IS NULL) AND (scope_id IS NULL)) OR ((knowledge_item_id IS NOT NULL) AND (knowledge_revision_id IS NOT NULL) AND (scope_id IS NOT NULL)))) OR ((channel = 'unreviewed_candidates'::text) AND (knowledge_item_id IS NULL) AND (knowledge_revision_id IS NULL) AND (lifecycle_state IS NULL) AND (((capture_candidate_id IS NULL) AND (scope_id IS NULL)) OR ((capture_candidate_id IS NOT NULL) AND (scope_id IS NOT NULL)))))),
     CONSTRAINT context_candidates_channel_check CHECK ((channel = ANY (ARRAY['current_knowledge'::text, 'unreviewed_candidates'::text]))),
-    CONSTRAINT context_candidates_exclusion_check CHECK (((exclusion_reason IS NULL) OR (exclusion_reason = ANY (ARRAY['semantic_match'::text, 'keyword_match'::text, 'project_convention'::text, 'personal_preference'::text, 'freshness_boost'::text, 'explicit_pin'::text, 'superseded'::text, 'stale'::text, 'outside_task_scope'::text, 'token_budget'::text, 'duplicate'::text, 'graph_expansion'::text, 'contradiction_warning'::text])))),
+    CONSTRAINT context_candidates_exclusion_check CHECK (((exclusion_reason IS NULL) OR (exclusion_reason = ANY (ARRAY['semantic_match'::text, 'keyword_match'::text, 'project_convention'::text, 'personal_preference'::text, 'freshness_boost'::text, 'explicit_pin'::text, 'superseded'::text, 'stale'::text, 'outside_task_scope'::text, 'token_budget'::text, 'excerpt'::text, 'duplicate'::text, 'graph_expansion'::text, 'contradiction_warning'::text])))),
     CONSTRAINT context_candidates_hash_check CHECK ((content_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT context_candidates_lifecycle_check CHECK (((lifecycle_state IS NULL) OR (lifecycle_state = ANY (ARRAY['active'::text, 'stale'::text, 'superseded'::text, 'archived'::text, 'erasure_pending'::text, 'erased'::text])))),
     CONSTRAINT context_candidates_ordinal_check CHECK ((ordinal >= 0)),
-    CONSTRAINT context_candidates_reasons_check CHECK ((((cardinality(reason_codes) >= 1) AND (cardinality(reason_codes) <= 13)) AND (array_position(reason_codes, NULL::text) IS NULL) AND (reason_codes <@ ARRAY['semantic_match'::text, 'keyword_match'::text, 'project_convention'::text, 'personal_preference'::text, 'freshness_boost'::text, 'explicit_pin'::text, 'superseded'::text, 'stale'::text, 'outside_task_scope'::text, 'token_budget'::text, 'duplicate'::text, 'graph_expansion'::text, 'contradiction_warning'::text]))),
+    CONSTRAINT context_candidates_reasons_check CHECK ((((cardinality(reason_codes) >= 1) AND (cardinality(reason_codes) <= 14)) AND (array_position(reason_codes, NULL::text) IS NULL) AND (reason_codes <@ ARRAY['semantic_match'::text, 'keyword_match'::text, 'project_convention'::text, 'personal_preference'::text, 'freshness_boost'::text, 'explicit_pin'::text, 'superseded'::text, 'stale'::text, 'outside_task_scope'::text, 'token_budget'::text, 'excerpt'::text, 'duplicate'::text, 'graph_expansion'::text, 'contradiction_warning'::text]))),
     CONSTRAINT context_candidates_scores_check CHECK ((((keyword_score_micros >= 0) AND (keyword_score_micros <= 1000000)) AND ((semantic_score_micros >= 0) AND (semantic_score_micros <= 1000000)) AND ((anchor_score_micros >= 0) AND (anchor_score_micros <= 5000000)) AND ((edge_weight_micros >= 0) AND (edge_weight_micros <= 2000000)) AND ((hop_penalty_micros >= 0) AND (hop_penalty_micros <= 1000000)) AND ((freshness_score_micros >= 0) AND (freshness_score_micros <= 1000000)) AND ((pin_score_micros >= 0) AND (pin_score_micros <= 1000000)) AND ((current_state_score_micros >= 0) AND (current_state_score_micros <= 1000000)) AND ((final_score_micros >= 0) AND (final_score_micros <= 5000000))))
 );
 
@@ -2885,7 +2923,7 @@ CREATE TABLE public.context_selections (
     CONSTRAINT context_selections_channel_check CHECK ((channel = ANY (ARRAY['current_knowledge'::text, 'unreviewed_candidates'::text]))),
     CONSTRAINT context_selections_hash_check CHECK ((content_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT context_selections_rank_check CHECK ((rank >= 1)),
-    CONSTRAINT context_selections_reasons_check CHECK ((((cardinality(reason_codes) >= 1) AND (cardinality(reason_codes) <= 13)) AND (array_position(reason_codes, NULL::text) IS NULL) AND (reason_codes <@ ARRAY['semantic_match'::text, 'keyword_match'::text, 'project_convention'::text, 'personal_preference'::text, 'freshness_boost'::text, 'explicit_pin'::text, 'superseded'::text, 'stale'::text, 'outside_task_scope'::text, 'token_budget'::text, 'duplicate'::text, 'graph_expansion'::text, 'contradiction_warning'::text]))),
+    CONSTRAINT context_selections_reasons_check CHECK ((((cardinality(reason_codes) >= 1) AND (cardinality(reason_codes) <= 14)) AND (array_position(reason_codes, NULL::text) IS NULL) AND (reason_codes <@ ARRAY['semantic_match'::text, 'keyword_match'::text, 'project_convention'::text, 'personal_preference'::text, 'freshness_boost'::text, 'explicit_pin'::text, 'superseded'::text, 'stale'::text, 'outside_task_scope'::text, 'token_budget'::text, 'excerpt'::text, 'duplicate'::text, 'graph_expansion'::text, 'contradiction_warning'::text]))),
     CONSTRAINT context_selections_token_check CHECK ((token_count >= 0))
 );
 
@@ -4093,6 +4131,8 @@ CREATE TABLE public.session_context_runs (
     id uuid NOT NULL,
     tenant_id uuid NOT NULL,
     session_id uuid NOT NULL,
+    checkpoint_event_id uuid,
+    restart_event_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
     scope_id uuid NOT NULL,
     principal_id text NOT NULL,
     query text,
@@ -4131,6 +4171,7 @@ CREATE TABLE public.session_context_runs (
     CONSTRAINT session_context_runs_query_check CHECK (((query IS NULL) OR ((btrim(query) <> ''::text) AND (length(query) <= 4096)))),
     CONSTRAINT session_context_runs_query_hash_check CHECK (((as_of IS NULL) OR (((query IS NULL) = (query_hash IS NULL)) AND ((query_hash IS NULL) OR (query_hash ~ '^[0-9a-f]{64}$'::text))))),
     CONSTRAINT session_context_runs_requested_budget_check CHECK (((requested_budget_tokens IS NULL) OR (requested_budget_tokens > 0))),
+    CONSTRAINT session_context_runs_restart_events_check CHECK ((cardinality(restart_event_ids) <= 16)),
     CONSTRAINT session_context_runs_retrieval_version_check CHECK (((btrim(retrieval_version) <> ''::text) AND (char_length(retrieval_version) <= 200))),
     CONSTRAINT session_context_runs_skills_array_check CHECK ((jsonb_typeof(skills) = 'array'::text)),
     CONSTRAINT session_context_runs_tokens_check CHECK (((tokens >= 0) AND (budget_tokens >= 0) AND (entry_count >= 0))),
@@ -4192,7 +4233,7 @@ CREATE TABLE public.session_events (
     CONSTRAINT session_events_redactions_array_check CHECK (((redactions IS NULL) OR (jsonb_typeof(redactions) = 'array'::text))),
     CONSTRAINT session_events_schema_version_check CHECK (((event_schema_version >= 1) AND (event_schema_version <= 1000))),
     CONSTRAINT session_events_sequence_check CHECK ((sequence >= 1)),
-    CONSTRAINT session_events_type_check CHECK ((event_type = ANY (ARRAY['session.started'::text, 'session.ended'::text, 'message.user'::text, 'message.assistant'::text, 'tool.invoked'::text, 'tool.result'::text, 'file.read'::text, 'file.changed'::text, 'command.executed'::text, 'skill.loaded'::text, 'context.requested'::text, 'adapter.warning'::text, 'memory.asserted'::text])))
+    CONSTRAINT session_events_type_check CHECK ((event_type = ANY (ARRAY['session.started'::text, 'session.ended'::text, 'session.compaction_boundary'::text, 'session.checkpoint'::text, 'message.user'::text, 'message.assistant'::text, 'tool.invoked'::text, 'tool.result'::text, 'file.read'::text, 'file.changed'::text, 'command.executed'::text, 'skill.loaded'::text, 'context.requested'::text, 'adapter.warning'::text, 'memory.asserted'::text])))
 );
 
 ALTER TABLE ONLY public.session_events FORCE ROW LEVEL SECURITY;
@@ -7219,6 +7260,13 @@ CREATE INDEX session_events_by_session ON public.session_events USING btree (ten
 
 
 --
+-- Name: session_events_checkpoints_latest; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX session_events_checkpoints_latest ON public.session_events USING btree (tenant_id, session_id, sequence DESC) WHERE (event_type = 'session.checkpoint'::text);
+
+
+--
 -- Name: session_events_tenant_id_unique; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7832,6 +7880,13 @@ CREATE TRIGGER scopes_immutable_columns BEFORE UPDATE ON public.scopes FOR EACH 
 --
 
 CREATE TRIGGER session_context_runs_immutable BEFORE DELETE OR UPDATE ON public.session_context_runs FOR EACH ROW EXECUTE FUNCTION public.synveda_context_trace_immutable();
+
+
+--
+-- Name: session_context_runs session_context_runs_restart_sources; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER session_context_runs_restart_sources BEFORE INSERT ON public.session_context_runs FOR EACH ROW EXECUTE FUNCTION public.synveda_context_run_restart_sources();
 
 
 --

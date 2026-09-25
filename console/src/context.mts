@@ -37,6 +37,7 @@ const REASON_LABELS: Record<string, string> = {
   stale: "stale",
   outside_task_scope: "outside task scope",
   token_budget: "token budget",
+  excerpt: "exact source excerpt",
   duplicate: "duplicate",
   graph_expansion: "graph expansion",
   contradiction_warning: "contradiction warning",

@@ -55,9 +55,15 @@ COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bi
 RUN /usr/local/bin/assert-build-proxy-closed
 WORKDIR /src
 
-# The toolchain file pins the same version this image starts from; copying
-# it keeps a mismatch a build error rather than a silent upgrade.
+# The official Rust image has the compiler and Cargo but omits the rustfmt and
+# Clippy components requested for source development. Check the version pin
+# before selecting the installed toolchain for image compilation, so a base
+# image mismatch still fails without a network fetch for unused components.
 COPY rust-toolchain.toml ./
+RUN set -eu; \
+    grep -Fqx "channel = \"$RUST_VERSION\"" rust-toolchain.toml; \
+    test "$(RUSTUP_TOOLCHAIN="$RUST_VERSION" rustc --version | cut -d ' ' -f 2)" = "$RUST_VERSION"
+ENV RUSTUP_TOOLCHAIN=$RUST_VERSION
 
 # Dependency layer: the manifests and a stub for every crate in the
 # workspace, so `cargo build` resolves and compiles the dependency graph

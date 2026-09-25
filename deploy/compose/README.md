@@ -442,6 +442,86 @@ refuses a different gateway, different identities, a
 different effective curator file or changed receipt ownership. There is no
 fixture reset endpoint and no business-table SQL.
 
+### Governed context optimisation in this source checkout
+
+CTX-8 adds an opt-in `conservative` context mode to the same Configuration
+document and Session context route. This source change is not in the published
+v0.4.3 images or CLI. Start the source deployment above and build the local CLI
+from this checkout once; the deployed product does not need an extra model,
+Python service or GPU:
+
+```sh
+cargo build -p synveda-cli --bin synveda
+export PATH="$PWD/target/debug:$PATH"
+export SYNVEDA_GATEWAY=http://app.synveda.test:8080
+export SYNVEDA_INSECURE_DEVELOPMENT_HTTP=true
+synveda login --gateway "$SYNVEDA_GATEWAY" --profile author --no-browser
+```
+
+In the console, choose the project, open Configuration, select **Conservative**
+in the existing context editor, and publish the complete document under the
+ordinary VedaFlow review and binding rules. The equivalent CLI path for an
+already bound artifact is:
+
+```sh
+synveda configuration effective <scope-id> --profile author --json > /tmp/context-effective.json
+node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); x.document.context.optimization_mode="conservative"; fs.writeFileSync(process.argv[2],JSON.stringify(x.document,null,2)+"\n")' /tmp/context-effective.json /tmp/context-conservative.json
+synveda configuration publish <artifact-id> --expected-version <version-id> \
+  --file /tmp/context-conservative.json --profile author
+synveda configuration effective <scope-id> --profile author --json
+```
+
+Use `artifact_id` and `version_id` from the first effective response. If its
+binding pins an older version, update that binding through the normal
+`synveda configuration update-binding` command. A pending review must be
+approved and applied before the new version is effective. To roll back,
+publish an otherwise identical document with `optimization_mode: "off"` or
+rebind an earlier off version. Do not edit a stored version in place.
+
+After an agent has opened a Session, preview and inspect with its exact IDs:
+
+```sh
+synveda context preview <session-id> --query 'traceparent correlation header' \
+  --tokenizer-encoding o200k_base --profile author --json
+synveda context preview <session-id> --query 'traceparent correlation header' \
+  --require-knowledge <item-id>@<revision-id> --profile author
+synveda context preview <claude-session-id> --restart --query 'resume the pending task' \
+  --profile author
+synveda context inspect <context-run-id> --profile author
+synveda context detail <item-id> <revision-id> --profile author
+```
+
+The first command is a preview only. Request a real ContextRun in the console
+Context page, then use its returned ID with `context inspect`. `context detail`
+pages through the existing reauthorised Knowledge history route for one exact
+revision. `--restart` includes the latest available Claude checkpoint chain and a bounded
+later event window when current SessionRead permits it. The checkpoint's
+coverage label describes only the server-observed window, not the entire host
+transcript. It is a preview, never a host compaction rewrite.
+`--tokenizer-encoding o200k_base` counts that local text encoding;
+without a declared compatible encoding the count is labelled an estimate.
+These counts cover the Synveda-rendered contribution, not host history,
+provider framing, output tokens or a billable request. The expandable console
+preview shows visible selected and omitted sources, exact excerpts and authored
+title indexes. Denied source details remain absent.
+
+The deterministic source demo runs against a disposable exact-role database:
+
+```sh
+SYNVEDA_DB_TEST_TASK=demo bash scripts/db-test.sh demos/ctx-8-context-optimisation.sh
+SYNVEDA_DB_TEST_TASK=demo bash scripts/db-test.sh demos/ctx-6-checkpoint-restart.sh
+```
+
+It compares the same authorised fixture in off and conservative modes, fetches
+the original detail, and checks that preview creates no delivery. Its token
+numbers are a local rendered-text comparison; no provider request or monetary
+savings are measured.
+
+The second demo replays Claude's public Session event and compact/restart
+requests against a disposable exact-role database. It checks checkpoint
+identity, incomplete coverage, duplicate delivery and source-labelled recent
+events. It is an API and adapter-frame fixture, not a live Claude invocation.
+
 The existing isolated browser acceptance starts from an explicitly fresh,
 suffixed project. If the ordinary development block is installed, stop that
 project and hand off the one owned hosts-file block first:

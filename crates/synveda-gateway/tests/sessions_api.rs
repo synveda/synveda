@@ -32,6 +32,7 @@ use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::session::{SessionCheckpoint, SessionEventType};
 use synveda_types::{GrantId, TenantId};
 use tower::ServiceExt;
 
@@ -668,6 +669,353 @@ async fn a_retry_creates_nothing_twice_and_a_partial_redelivery_appends_the_rest
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+}
+
+#[tokio::test]
+async fn compact_replay_keeps_both_checkpoint_windows_and_the_uncovered_tail() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, project_id) = seed_place(&app, &token, "ctx6-restart").await;
+    let (_, session) = open_session(
+        &app,
+        &token,
+        "ctx6-session",
+        json!({
+            "workspace_id": workspace_id,
+            "project_id": project_id,
+            "client_name": "claude-code",
+        }),
+    )
+    .await;
+    let session_id = session["id"].as_str().expect("session id");
+    let path = format!("/v1/sessions/{session_id}/events");
+    let first_fact = "The recovery marker is azure-17.";
+    let second_fact = "Never replace azure-17 with azure-18.";
+    let tail_fact = "The pending task is to update retry.rs.";
+    let batch = json!({"events": [
+        event("ctx6-user-1", "message.user", json!({"text": first_fact})),
+        event("ctx6-boundary-1", "session.compaction_boundary", json!({
+            "schema_version": 1,
+            "local_high_sequence": 2,
+            "expected_client_event_ids": ["ctx6-user-1"],
+            "expected_ids_truncated": false,
+        })),
+        event("ctx6-user-2", "message.user", json!({"text": second_fact})),
+        event("ctx6-boundary-2", "session.compaction_boundary", json!({
+            "schema_version": 1,
+            "local_high_sequence": 4,
+            "expected_client_event_ids": ["ctx6-user-2"],
+            "expected_ids_truncated": false,
+        })),
+    ]});
+    let (status, appended) =
+        call(&app, "POST", &path, Some(&token), None, Some(batch.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{appended}");
+    assert_eq!(appended["appended"], 4);
+
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin checkpoint inspection");
+    let session_key = session_id.parse().expect("session key");
+    let held = synveda_store::sessions::events(&mut *tx, tenant_id, session_key, 0, 20)
+        .await
+        .expect("read admitted Session evidence");
+    let checkpoints: Vec<_> = held
+        .iter()
+        .filter(|event| event.event_type == SessionEventType::Checkpoint)
+        .collect();
+    assert_eq!(checkpoints.len(), 2);
+    let first: SessionCheckpoint =
+        serde_json::from_value(checkpoints[0].payload.clone()).expect("typed checkpoint");
+    let second: SessionCheckpoint =
+        serde_json::from_value(checkpoints[1].payload.clone()).expect("typed checkpoint");
+    assert_eq!(first.coverage, "observed_window");
+    assert_eq!(second.coverage, "observed_window");
+    assert_eq!(first.sources.len(), 1);
+    assert_eq!(second.sources.len(), 1);
+    assert_eq!(first.source_first_sequence, Some(1));
+    assert_eq!(second.source_first_sequence, Some(3));
+    assert_eq!(second.previous_checkpoint_event_id, Some(checkpoints[0].id));
+    tx.commit().await.expect("finish checkpoint inspection");
+
+    let (status, replay) = call(&app, "POST", &path, Some(&token), None, Some(batch)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["appended"], 0);
+    assert_eq!(replay["duplicates"], 4);
+    let (status, tail) = call(
+        &app,
+        "POST",
+        &path,
+        Some(&token),
+        None,
+        Some(json!({"events": [event(
+            "ctx6-user-3",
+            "message.user",
+            json!({"text": tail_fact}),
+        )]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{tail}");
+
+    let (status, preview) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{session_id}/context-preview"),
+        Some(&token),
+        None,
+        Some(json!({
+            "query": "recovery marker and retry task",
+            "budget_tokens": 1000,
+            "tokenizer_encoding": "o200k_base",
+            "restart": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let rendered = preview["rendered"].as_str().expect("rendered preview");
+    for fact in [first_fact, second_fact, tail_fact] {
+        assert!(rendered.contains(fact), "missing {fact:?}: {preview}");
+    }
+    assert!(rendered.contains(&checkpoints[1].id.to_string()));
+    assert_eq!(preview["restart_coverage"], "observed_window");
+    assert!(preview["tokens"].as_u64().unwrap() <= 1000);
+    assert_eq!(
+        preview["observed_usage_status"],
+        "unavailable: no provider request was made"
+    );
+
+    let (status, run) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{session_id}/context-runs"),
+        Some(&token),
+        Some("ctx6-delivery"),
+        Some(json!({
+            "query": "recovery marker and retry task",
+            "budget_tokens": 1000,
+            "tokenizer_encoding": "o200k_base",
+            "restart": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{run}");
+    assert_eq!(run["checkpoint_event_id"], checkpoints[1].id.to_string());
+    assert!(run["rendered"].as_str().unwrap().contains(tail_fact));
+    let run_id = run["id"].as_str().expect("run id").parse().expect("run id");
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin retained run read");
+    let retained = synveda_store::sessions::context_run(&mut *tx, tenant_id, run_id)
+        .await
+        .expect("read retained run")
+        .expect("retained run exists");
+    assert_eq!(retained.checkpoint_event_id, Some(checkpoints[1].id));
+    assert_eq!(retained.restart_event_ids.len(), 1);
+    tx.commit().await.expect("finish retained run read");
+
+    // Simulate the separately authorised, tenant-scoped retention disposal.
+    // A retained checkpoint and ContextRun must stop serving the removed fact.
+    let source_id: uuid::Uuid = appended["events"][0]["event"]["id"]
+        .as_str()
+        .expect("source event id")
+        .parse()
+        .expect("parse source event id");
+    let owner = tenant_fixture::migrator_pool(&state.pool).await;
+    let mut tx = synveda_store::rls::begin_tenant_tx(&owner, tenant_id)
+        .await
+        .expect("begin scoped retention disposal");
+    sqlx::raw_sql("set local synveda.retention_purge = 'on'")
+        .execute(&mut *tx)
+        .await
+        .expect("declare retention disposal");
+    let removed = sqlx::query(
+        "delete from session_events where tenant_id = $1 and session_id = $2 and id = $3",
+    )
+    .bind(tenant_id.as_uuid())
+    .bind(session_key.as_uuid())
+    .bind(source_id)
+    .execute(&mut *tx)
+    .await
+    .expect("dispose exact source event")
+    .rows_affected();
+    assert_eq!(removed, 1);
+    tx.commit().await.expect("commit scoped retention disposal");
+    owner.close().await;
+
+    let (status, detail) = call(
+        &app,
+        "GET",
+        &format!("/v1/context-runs/{run_id}"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail["run"]["rendered"].is_null());
+    assert!(!detail.to_string().contains(first_fact));
+    let (status, checkpoint_detail) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{session_id}/events/{}", checkpoints[1].id),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{checkpoint_detail}");
+}
+
+#[tokio::test]
+async fn concurrent_boundary_replay_marks_missing_evidence_and_keeps_late_events() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, project_id) = seed_place(&app, &token, "ctx6-gap").await;
+    let (_, session) = open_session(
+        &app,
+        &token,
+        "ctx6-gap-session",
+        json!({
+            "workspace_id": workspace_id,
+            "project_id": project_id,
+            "client_name": "claude-code",
+        }),
+    )
+    .await;
+    let session_id = session["id"].as_str().expect("session id");
+    let path = format!("/v1/sessions/{session_id}/events");
+    let boundary = json!({"events": [event(
+        "ctx6-gap-boundary",
+        "session.compaction_boundary",
+        json!({
+            "schema_version": 1,
+            "local_high_sequence": 2,
+            "expected_client_event_ids": ["ctx6-late-user"],
+            "expected_ids_truncated": false,
+        }),
+    )]});
+    let (left, right) = tokio::join!(
+        call(
+            &app,
+            "POST",
+            &path,
+            Some(&token),
+            None,
+            Some(boundary.clone())
+        ),
+        call(&app, "POST", &path, Some(&token), None, Some(boundary)),
+    );
+    assert_eq!(left.0, StatusCode::OK, "{}", left.1);
+    assert_eq!(right.0, StatusCode::OK, "{}", right.1);
+    assert_eq!(
+        left.1["appended"].as_u64().unwrap() + right.1["appended"].as_u64().unwrap(),
+        1
+    );
+    assert_eq!(
+        left.1["duplicates"].as_u64().unwrap() + right.1["duplicates"].as_u64().unwrap(),
+        1
+    );
+
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin checkpoint read");
+    let session_key = session_id.parse().expect("session key");
+    let held = synveda_store::sessions::events(&mut *tx, tenant_id, session_key, 0, 10)
+        .await
+        .expect("read admitted events");
+    let checkpoints: Vec<_> = held
+        .iter()
+        .filter(|event| event.event_type == SessionEventType::Checkpoint)
+        .collect();
+    assert_eq!(checkpoints.len(), 1);
+    let checkpoint: SessionCheckpoint =
+        serde_json::from_value(checkpoints[0].payload.clone()).expect("typed checkpoint");
+    assert_eq!(checkpoint.coverage, "incomplete");
+    assert_eq!(checkpoint.declared_missing_count, 1);
+    tx.commit().await.expect("finish checkpoint read");
+
+    let late_fact = "The late replay still says preserve nonce-41.";
+    let (status, appended) = call(
+        &app,
+        "POST",
+        &path,
+        Some(&token),
+        None,
+        Some(json!({"events": [event(
+            "ctx6-late-user",
+            "message.user",
+            json!({"text": late_fact}),
+        )]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{appended}");
+    let (status, restart) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{session_id}/context-preview"),
+        Some(&token),
+        None,
+        Some(json!({
+            "query": "nonce recovery",
+            "budget_tokens": 800,
+            "tokenizer_encoding": "o200k_base",
+            "restart": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{restart}");
+    assert!(restart["rendered"].as_str().unwrap().contains(late_fact));
+    assert_eq!(restart["restart_coverage"], "incomplete");
+
+    let (_, unsupported) = open_session(
+        &app,
+        &token,
+        "ctx6-unsupported",
+        json!({
+            "workspace_id": workspace_id,
+            "project_id": project_id,
+            "client_name": "codex",
+        }),
+    )
+    .await;
+    let unsupported_id = unsupported["id"].as_str().expect("unsupported session id");
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{unsupported_id}/events"),
+        Some(&token),
+        None,
+        Some(json!({"events": [event(
+            "unsupported-boundary",
+            "session.compaction_boundary",
+            json!({
+                "schema_version": 1,
+                "local_high_sequence": 1,
+                "expected_client_event_ids": [],
+                "expected_ids_truncated": false,
+            }),
+        )]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{unsupported_id}/context-preview"),
+        Some(&token),
+        None,
+        Some(json!({"query": "nonce", "restart": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

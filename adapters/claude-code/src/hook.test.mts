@@ -363,6 +363,7 @@ test("a compacted session start carries the last prompt as its query", async () 
     );
     const compose = mock.requests.find((request) => request.path.endsWith("/context-runs"));
     assert.equal(compose?.body.query, "wire the retry budget");
+    assert.equal(compose?.body.restart, true);
   } finally {
     await mock.close();
   }
@@ -377,6 +378,7 @@ test("a cold start has no query — the block is the recency branch", async () =
     );
     const compose = mock.requests.find((request) => request.path.endsWith("/context-runs"));
     assert.equal(compose?.body.query, undefined);
+    assert.equal(compose?.body.restart, undefined);
   } finally {
     await mock.close();
   }
@@ -758,8 +760,41 @@ test("a precompact records before the transcript can be rewritten", async () => 
     writeFileSync(path, "");
     const spool = loadSpool("f4");
     assert.ok(spool);
-    assert.equal(spool.entries.length, 1);
+    assert.equal(spool.entries.length, 2);
     assert.equal(spool.entries[0]?.client_event_id, "u1");
+    assert.equal(spool.entries[1]?.event_type, "session.compaction_boundary");
+    assert.deepEqual(spool.entries[1]?.payload, {
+      schema_version: 1,
+      local_high_sequence: 2,
+      expected_client_event_ids: ["u1"],
+      expected_ids_truncated: false,
+    });
+  } finally {
+    await failing.close();
+  }
+});
+
+test("repeated precompacts declare only the uncovered local window", async () => {
+  const failing = await gateway(() => ({ status: 503, body: {} }));
+  const path = transcript([entry("u1", "before the first compaction")]);
+  try {
+    await turnHook(
+      { hook_event_name: "PreCompact", session_id: "f4-repeat", transcript_path: path },
+      config(failing.url),
+    );
+    writeFileSync(path, `${JSON.stringify(entry("u2", "before the second compaction"))}\n`);
+    await turnHook(
+      { hook_event_name: "PreCompact", session_id: "f4-repeat", transcript_path: path },
+      config(failing.url),
+    );
+    const spool = loadSpool("f4-repeat");
+    assert.ok(spool);
+    assert.deepEqual(spool.entries.at(-1)?.payload, {
+      schema_version: 1,
+      local_high_sequence: 4,
+      expected_client_event_ids: ["u2"],
+      expected_ids_truncated: false,
+    });
   } finally {
     await failing.close();
   }

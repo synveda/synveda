@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        insert into session_context_runs\n            (id, tenant_id, session_id, workspace_id, project_id, scope_id,\n             principal_id, configuration_version_id, configuration_hash,\n             query, query_hash, rendered, block_hash, tokens,\n             budget_tokens, requested_budget_tokens, entry_count,\n             candidate_count, selection_count, skills, degraded, as_of,\n             retrieval_version, embedding_model, index_version, graph_version,\n             trace_retention_mode, completion_status, policy_exclusion)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,\n                $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,\n                $25, $26, $27, $28, $29)\n        returning id, tenant_id, session_id, workspace_id as \"workspace_id!\",\n                  project_id, scope_id,\n                  principal_id, configuration_version_id, configuration_hash,\n                  query, query_hash, rendered, block_hash, tokens,\n                  budget_tokens, requested_budget_tokens, entry_count,\n                  candidate_count, selection_count, skills, degraded,\n                  as_of as \"as_of!\",\n                  retrieval_version as \"retrieval_version!\", embedding_model,\n                  index_version as \"index_version!\", graph_version,\n                  trace_retention_mode as \"trace_retention_mode!\",\n                  completion_status as \"completion_status!\",\n                  policy_exclusion, created_at\n        ",
+  "query": "\n        insert into session_context_runs\n            (id, tenant_id, session_id, workspace_id, project_id, scope_id,\n             principal_id, configuration_version_id, configuration_hash,\n             query, query_hash, rendered, block_hash, tokens,\n             budget_tokens, requested_budget_tokens, entry_count,\n             candidate_count, selection_count, skills, degraded, as_of,\n             retrieval_version, embedding_model, index_version, graph_version,\n             trace_retention_mode, completion_status, policy_exclusion,\n             checkpoint_event_id, restart_event_ids)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,\n                $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,\n                $25, $26, $27, $28, $29, $30, $31)\n        returning id, tenant_id, session_id, checkpoint_event_id, restart_event_ids, workspace_id as \"workspace_id!\",\n                  project_id, scope_id,\n                  principal_id, configuration_version_id, configuration_hash,\n                  query, query_hash, rendered, block_hash, tokens,\n                  budget_tokens, requested_budget_tokens, entry_count,\n                  candidate_count, selection_count, skills, degraded,\n                  as_of as \"as_of!\",\n                  retrieval_version as \"retrieval_version!\", embedding_model,\n                  index_version as \"index_version!\", graph_version,\n                  trace_retention_mode as \"trace_retention_mode!\",\n                  completion_status as \"completion_status!\",\n                  policy_exclusion, created_at\n        ",
   "describe": {
     "columns": [
       {
@@ -20,136 +20,146 @@
       },
       {
         "ordinal": 3,
-        "name": "workspace_id!",
+        "name": "checkpoint_event_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 4,
-        "name": "project_id",
-        "type_info": "Uuid"
+        "name": "restart_event_ids",
+        "type_info": "UuidArray"
       },
       {
         "ordinal": 5,
-        "name": "scope_id",
+        "name": "workspace_id!",
         "type_info": "Uuid"
       },
       {
         "ordinal": 6,
-        "name": "principal_id",
-        "type_info": "Text"
+        "name": "project_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 7,
-        "name": "configuration_version_id",
+        "name": "scope_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 8,
-        "name": "configuration_hash",
+        "name": "principal_id",
         "type_info": "Text"
       },
       {
         "ordinal": 9,
-        "name": "query",
-        "type_info": "Text"
+        "name": "configuration_version_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 10,
-        "name": "query_hash",
+        "name": "configuration_hash",
         "type_info": "Text"
       },
       {
         "ordinal": 11,
-        "name": "rendered",
+        "name": "query",
         "type_info": "Text"
       },
       {
         "ordinal": 12,
-        "name": "block_hash",
+        "name": "query_hash",
         "type_info": "Text"
       },
       {
         "ordinal": 13,
+        "name": "rendered",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "block_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
         "name": "tokens",
         "type_info": "Int4"
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "budget_tokens",
         "type_info": "Int4"
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "requested_budget_tokens",
         "type_info": "Int4"
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "entry_count",
         "type_info": "Int4"
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "candidate_count",
         "type_info": "Int4"
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "selection_count",
         "type_info": "Int4"
       },
       {
-        "ordinal": 19,
+        "ordinal": 21,
         "name": "skills",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 20,
+        "ordinal": 22,
         "name": "degraded",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 21,
+        "ordinal": 23,
         "name": "as_of!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 22,
+        "ordinal": 24,
         "name": "retrieval_version!",
         "type_info": "Text"
       },
       {
-        "ordinal": 23,
+        "ordinal": 25,
         "name": "embedding_model",
         "type_info": "Text"
       },
       {
-        "ordinal": 24,
+        "ordinal": 26,
         "name": "index_version!",
         "type_info": "Text"
       },
       {
-        "ordinal": 25,
+        "ordinal": 27,
         "name": "graph_version",
         "type_info": "Text"
       },
       {
-        "ordinal": 26,
+        "ordinal": 28,
         "name": "trace_retention_mode!",
         "type_info": "Text"
       },
       {
-        "ordinal": 27,
+        "ordinal": 29,
         "name": "completion_status!",
         "type_info": "Text"
       },
       {
-        "ordinal": 28,
+        "ordinal": 30,
         "name": "policy_exclusion",
         "type_info": "Bool"
       },
       {
-        "ordinal": 29,
+        "ordinal": 31,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -184,12 +194,16 @@
         "Text",
         "Text",
         "Text",
-        "Bool"
+        "Bool",
+        "Uuid",
+        "UuidArray"
       ]
     },
     "nullable": [
       false,
       false,
+      false,
+      true,
       false,
       true,
       true,
@@ -220,5 +234,5 @@
       false
     ]
   },
-  "hash": "4e9019770a2863b81209c0d24b6b900bd8007eb522c11c171999949c9ad5747f"
+  "hash": "ee1c1313ffed7bcb66d0559c7e155c0933edbb44f878af2761223fba190568d6"
 }

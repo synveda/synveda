@@ -225,6 +225,13 @@ pub enum SessionEventType {
     /// The run reached its own end, as the client saw it.
     #[serde(rename = "session.ended")]
     SessionEnded,
+    /// The client reached a compaction boundary after durably recording its
+    /// available transcript delta. The host may still have undisclosed gaps.
+    #[serde(rename = "session.compaction_boundary")]
+    CompactionBoundary,
+    /// A server-derived checkpoint over immutable, redacted Session evidence.
+    #[serde(rename = "session.checkpoint")]
+    Checkpoint,
     /// A person said something.
     #[serde(rename = "message.user")]
     MessageUser,
@@ -282,6 +289,8 @@ impl SessionEventType {
     pub const ALL: &'static [SessionEventType] = &[
         SessionEventType::SessionStarted,
         SessionEventType::SessionEnded,
+        SessionEventType::CompactionBoundary,
+        SessionEventType::Checkpoint,
         SessionEventType::MessageUser,
         SessionEventType::MessageAssistant,
         SessionEventType::ToolInvoked,
@@ -307,6 +316,8 @@ impl SessionEventType {
         match self {
             SessionEventType::SessionStarted => "session.started",
             SessionEventType::SessionEnded => "session.ended",
+            SessionEventType::CompactionBoundary => "session.compaction_boundary",
+            SessionEventType::Checkpoint => "session.checkpoint",
             SessionEventType::MessageUser => "message.user",
             SessionEventType::MessageAssistant => "message.assistant",
             SessionEventType::ToolInvoked => "tool.invoked",
@@ -325,7 +336,7 @@ impl SessionEventType {
     ///
     /// A distinction the old four-value `ObserveKind` never had to make: all
     /// four of its values carried content somebody said or a tool returned.
-    /// Thirteen names include bookkeeping — a run starting, a skill being
+    /// The closed vocabulary includes bookkeeping — a run starting, a skill being
     /// materialised, an adapter reporting that it dropped something — and
     /// running an extractor over "session started" is LLM spend that can only
     /// produce noise.
@@ -351,6 +362,8 @@ impl SessionEventType {
             // change.
             SessionEventType::SessionStarted
             | SessionEventType::SessionEnded
+            | SessionEventType::CompactionBoundary
+            | SessionEventType::Checkpoint
             | SessionEventType::FileRead
             | SessionEventType::SkillLoaded
             | SessionEventType::ContextRequested
@@ -364,7 +377,10 @@ impl SessionEventType {
     #[must_use]
     pub const fn family(&self) -> &'static str {
         match self {
-            SessionEventType::SessionStarted | SessionEventType::SessionEnded => "lifecycle",
+            SessionEventType::SessionStarted
+            | SessionEventType::SessionEnded
+            | SessionEventType::CompactionBoundary
+            | SessionEventType::Checkpoint => "lifecycle",
             SessionEventType::MessageUser | SessionEventType::MessageAssistant => "message",
             SessionEventType::ToolInvoked | SessionEventType::ToolResult => "tool",
             SessionEventType::FileRead | SessionEventType::FileChanged => "file",
@@ -547,6 +563,87 @@ pub struct SessionEvent {
     pub redactions: Option<serde_json::Value>,
 }
 
+/// Client-declared boundary stored after the locally durable transcript delta.
+/// The expected IDs can reveal known delivery gaps, but cannot prove that a
+/// proprietary host exposed its entire transcript.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompactionBoundary {
+    /// Version of this closed marker shape.
+    pub schema_version: u8,
+    /// Last sequence in the local durable spool, including this marker.
+    pub local_high_sequence: u64,
+    /// Bounded client IDs expected to precede the marker on the server.
+    pub expected_client_event_ids: Vec<String>,
+    /// Whether older local IDs were omitted by the marker's bound.
+    pub expected_ids_truncated: bool,
+}
+
+/// One immutable source address and digest included in a checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointSource {
+    /// Immutable server event address.
+    pub event_id: SessionEventId,
+    /// Server-assigned position at derivation time.
+    pub sequence: i64,
+    /// Canonical hash of the admitted, redacted event payload.
+    pub payload_hash: String,
+}
+
+/// One field copied from explicit source evidence, with its epistemic status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointEvidence {
+    /// Immutable Session event that supplied this field.
+    pub source_event_id: SessionEventId,
+    /// Exact copied excerpt or typed value.
+    pub text: String,
+    /// `user_authored`, `client_asserted` or `adapter_observed`.
+    pub assertion_class: String,
+}
+
+/// Server-derived working state. Empty fields mean the source events did not
+/// supply typed evidence; the server never guesses structured facts from prose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionCheckpoint {
+    /// Version of this typed derivative.
+    pub schema_version: u8,
+    /// Exact derivation method and implementation version.
+    pub method: String,
+    /// Admitted compaction marker that fixed the upper boundary.
+    pub boundary_event_id: SessionEventId,
+    /// Prior checkpoint in this one Session, when present.
+    pub previous_checkpoint_event_id: Option<SessionEventId>,
+    /// First included server sequence, absent for an empty range.
+    pub source_first_sequence: Option<i64>,
+    /// Last included server sequence, absent for an empty range.
+    pub source_last_sequence: Option<i64>,
+    /// Domain-separated digest of the ordered source addresses and hashes.
+    pub source_digest: String,
+    /// Exact immutable source events covered by this derivative.
+    pub sources: Vec<CheckpointSource>,
+    /// Observed window or incomplete; neither asserts full host coverage.
+    pub coverage: String,
+    /// Client-declared IDs not present before the marker.
+    pub declared_missing_count: u32,
+    /// Explicitly typed goals, empty when not evidenced.
+    pub goals: Vec<CheckpointEvidence>,
+    /// Explicitly typed constraints, empty when not evidenced.
+    pub constraints: Vec<CheckpointEvidence>,
+    /// Explicitly typed decisions, empty when not evidenced.
+    pub decisions: Vec<CheckpointEvidence>,
+    /// Explicitly typed open questions, empty when not evidenced.
+    pub unresolved_questions: Vec<CheckpointEvidence>,
+    /// Explicitly typed artefact references, empty when not evidenced.
+    pub artefact_references: Vec<CheckpointEvidence>,
+    /// Observed verification, distinct from an agent's assertion.
+    pub verification_evidence: Vec<CheckpointEvidence>,
+    /// Bounded excerpts copied from admitted user-authored Session events.
+    pub labelled_excerpts: Vec<CheckpointEvidence>,
+}
+
 /// One act of composing context for a session.
 ///
 /// Minimal by intent (ADR-0076 decision 7): an identity, what was asked, and
@@ -562,6 +659,11 @@ pub struct ContextRun {
     pub tenant_id: TenantId,
     /// The session it was composed for.
     pub session_id: SessionId,
+    /// Exact checkpoint event used for this delivery, when restart assistance
+    /// contributed derived Session working state.
+    pub checkpoint_event_id: Option<SessionEventId>,
+    /// Exact recent Session events whose text entered a restart delivery.
+    pub restart_event_ids: Vec<SessionEventId>,
     /// Workspace derived from the session.
     pub workspace_id: WorkspaceId,
     /// Project derived from the session, when the run is workspace-wide.

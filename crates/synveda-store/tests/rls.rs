@@ -2103,10 +2103,10 @@ fn same_tenant_session_admission_works_under_rls() {
                     event_type: SessionEventType::MessageUser,
                     event_schema_version: 1,
                     client_event_id: "e1".to_owned(),
-                    occurred_at: chrono::Utc::now(),
-                    payload: serde_json::json!({"text": "redelivered"}),
+                    occurred_at: fixture.event_e1_at,
+                    payload: serde_json::json!({"text": "a secret plan"}),
                     source_payload_hash: sessions::payload_hash(
-                        &serde_json::json!({"text": "redelivered"}),
+                        &serde_json::json!({"text": "a secret plan"}),
                     ),
                     redactions: None,
                     quarantine: false,
@@ -4917,6 +4917,7 @@ struct SessionFixture {
     scope: ScopeId,
     session: SessionId,
     run: ContextRunId,
+    event_e1_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Admits a tenant with a workspace, one session in it, two events and one
@@ -4969,6 +4970,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
     )
     .await
     .expect("open session");
+    let event_e1_at = chrono::Utc::now();
     sessions::append_events(
         &mut tx,
         tenant,
@@ -4978,7 +4980,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
                 event_type: SessionEventType::MessageUser,
                 event_schema_version: 1,
                 client_event_id: "e1".to_owned(),
-                occurred_at: chrono::Utc::now(),
+                occurred_at: event_e1_at,
                 payload: serde_json::json!({"text": "a secret plan"}),
                 source_payload_hash: sessions::payload_hash(
                     &serde_json::json!({"text": "a secret plan"}),
@@ -5007,6 +5009,8 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
             id: ContextRunId::new(),
             skills: serde_json::json!([]),
             session_id: session.id,
+            checkpoint_event_id: None,
+            restart_event_ids: Vec::new(),
             workspace_id: workspace.id,
             project_id: None,
             scope_id: workspace.scope_id,
@@ -5189,6 +5193,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
         scope: workspace.scope_id,
         session: session.id,
         run: run.id,
+        event_e1_at,
     }
 }
 
@@ -5647,7 +5652,7 @@ fn same_tenant_session_lifecycle_works_under_rls() {
                 event_type: SessionEventType::MessageUser,
                 event_schema_version: 1,
                 client_event_id: "e1".to_owned(),
-                occurred_at: chrono::Utc::now(),
+                occurred_at: fixture.event_e1_at,
                 payload: serde_json::json!({"text": "a secret plan"}),
                 source_payload_hash: sessions::payload_hash(
                     &serde_json::json!({"text": "a secret plan"}),

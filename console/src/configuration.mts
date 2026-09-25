@@ -26,6 +26,8 @@ export function organisationConfigurationTarget(me: MeView): ConfigurationTarget
 
 export const TRACE_RETENTION_OPTIONS = ["full", "redacted", "hashes_only", "disabled"] as const;
 export type TraceRetention = (typeof TRACE_RETENTION_OPTIONS)[number];
+export const CONTEXT_OPTIMIZATION_OPTIONS = ["off", "conservative"] as const;
+export type ContextOptimizationMode = (typeof CONTEXT_OPTIMIZATION_OPTIONS)[number];
 
 /** The deliberately small normal editor for the local product walkthrough. */
 export interface DemoConfigurationDraft {
@@ -35,6 +37,7 @@ export interface DemoConfigurationDraft {
   captureMinimumConfidencePermille: string;
   captureMaximumCandidatesPerBatch: string;
   contextTokenBudget: string;
+  contextOptimizationMode: ContextOptimizationMode;
   contextTraceRetention: TraceRetention;
   contextIncludeUnreviewedCandidates: boolean;
 }
@@ -76,6 +79,7 @@ export function demoConfigurationDraft(
     captureMinimumConfidencePermille: String(document.capture.minimum_confidence_permille),
     captureMaximumCandidatesPerBatch: String(document.capture.maximum_candidates_per_batch),
     contextTokenBudget: String(document.context.token_budget),
+    contextOptimizationMode: document.context.optimization_mode ?? "off",
     contextTraceRetention: document.context.trace_retention,
     contextIncludeUnreviewedCandidates: document.context.channels.includes(
       "unreviewed_candidates",
@@ -120,6 +124,9 @@ export function applyDemoConfigurationDraft(
   if (!TRACE_RETENTION_OPTIONS.includes(draft.contextTraceRetention)) {
     throw new Error("Context trace retention is not a supported contract value.");
   }
+  if (!CONTEXT_OPTIMIZATION_OPTIONS.includes(draft.contextOptimizationMode)) {
+    throw new Error("Context optimisation mode is not a supported contract value.");
+  }
   const channels = document.context.channels.filter(
     (channel) => channel !== "unreviewed_candidates",
   );
@@ -140,6 +147,7 @@ export function applyDemoConfigurationDraft(
     context: {
       ...document.context,
       token_budget: contextBudget,
+      optimization_mode: draft.contextOptimizationMode,
       trace_retention: draft.contextTraceRetention,
       channels,
     },
@@ -155,7 +163,7 @@ function boundedInteger(label: string, value: string, minimum: number, maximum: 
 }
 
 export function configurationSummary(document: ConfigurationDocumentBody): string {
-  return `${document.policy_pack} · ${document.context.token_budget} tokens · ${document.context.trace_retention} traces · Skills ${document.advertisement.skills ? "on" : "off"} · Tools ${document.advertisement.tools ? "on" : "off"}`;
+  return `${document.policy_pack} · ${document.context.token_budget} tokens · ${document.context.optimization_mode ?? "off"} optimisation · ${document.context.trace_retention} traces · Skills ${document.advertisement.skills ? "on" : "off"} · Tools ${document.advertisement.tools ? "on" : "off"}`;
 }
 
 export function mutationMessage(result: ConfigurationMutationView): string {

@@ -1,11 +1,11 @@
 # Feature inventory
 
-147 features in this index. This file owns feature identity and delivered/open
+148 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-114 delivered; 33 open. CI checks the counts, IDs and open-brief contract.
+114 delivered; 34 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
 is available for self-hosted evaluation. [Production readiness](../PRODUCTION_READINESS.md)
@@ -102,7 +102,11 @@ remain in Git and the linked release evidence.
 - [ ] [OPS-4: Vector index scale decision](OPS-4.md) — open
 - [ ] [ADPT-3: Additional API transport decision](ADPT-3.md) — open
 - [ ] [CTX-6: Session compression assist](CTX-6.md) — open
+- [ ] [CTX-8: Governed context optimisation](CTX-8.md) — open
+
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
+
+CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes, and a passing create/read/use/capture policy matrix including revocation and foreign-tenant comparisons. Four predeclared synthetic task probes pass in the fresh-database 23-scenario product suite: 12/12 Session facts and four exact Knowledge bodies retained, provenance intact, local assisted preview p95 below the 500 ms guard. A separate combined-mode gate preserves checkpoint source attribution and exact required Knowledge in both off and conservative modes, omitting optional restart text under a tight shared budget. An opt-in export now prepares the actual paired synthetic ContextRun blocks against a fixed JSON-answer rubric without calling a model, and a capped no-tools runner passes a fake-client end-to-end test. This does not measure model task success or provider usage. A live proprietary-client run remains open. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision. An isolated hostname handoff and resolver check passed without resetting retained interop state, and the original mapping was restored. The product source image now selects its verified pinned Rust compiler without fetching development-only components, but Cargo index/archive endpoints time out from this host and Docker, with a fresh direct host HTTPS timeout on 2026-09-25, so full Compose/browser acceptance and CTX-8 held-out model quality evidence remain open. Next restore Cargo source-build egress within the documented trust boundary, rerun paired deployment checks, then run the bounded factual/model and live Claude probes when credentials and spend permission are available. The open briefs hold the exact evidence and limits.
 
 ## Phase 4 — Clients and operations
 

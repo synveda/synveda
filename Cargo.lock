@@ -3913,6 +3913,7 @@ dependencies = [
  "synveda-store",
  "synveda-types",
  "synveda-vedaflow",
+ "tiktoken-rs",
  "tokio",
  "tracing",
  "uuid",

@@ -127,6 +127,8 @@ function contextRun(): ContextRunView {
     block_hash: "PRIVATE-BLOCK-HASH",
     configuration_hash: "PRIVATE-CONFIGURATION-HASH",
     retrieval_version: "PRIVATE-RETRIEVAL-VERSION",
+    optimization_mode: "off",
+    token_count_kind: "estimated",
     index_version: "PRIVATE-INDEX-VERSION",
     embedding_model: "PRIVATE-EMBEDDING-MODEL",
     as_of: "2026-09-08T10:04:00Z",

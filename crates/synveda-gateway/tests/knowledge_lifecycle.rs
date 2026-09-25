@@ -2182,6 +2182,8 @@ async fn forget_scrubs_later_context_import_and_conflict_references() {
         &sessions::NewContextRun {
             id: run_id,
             session_id: session.id,
+            checkpoint_event_id: None,
+            restart_event_ids: Vec::new(),
             workspace_id: workspace.id,
             project_id: Some(project.id),
             scope_id: session.scope_id,

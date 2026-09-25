@@ -1372,6 +1372,80 @@ async fn context_detail(app: &Router, token: &str, run_id: &str) -> Value {
 }
 
 #[tokio::test]
+async fn checkpoint_capture_freezes_primary_evidence_as_review_only() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant(synveda_policy::STANDARD).await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, _) = workspace(&app, &token, "checkpoint-capture").await;
+    let (project_id, _) = project(&app, &token, &workspace_id, "checkpoint").await;
+    let (status, session) = call(
+        &app,
+        "POST",
+        "/v1/sessions",
+        &token,
+        Some("checkpoint-capture-session"),
+        Some(json!({
+            "workspace_id": workspace_id,
+            "project_id": project_id,
+            "client_name": "claude-code",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{session}");
+    let session_id = session["id"].as_str().expect("session id");
+    let source = event(
+        "checkpoint-capture-source",
+        "CAPTURE-CHECKPOINT The rollback marker is copper-19.",
+    );
+    let appended = append(
+        &app,
+        &token,
+        session_id,
+        vec![
+            source,
+            json!({
+                "event_type": "session.compaction_boundary",
+                "client_event_id": "checkpoint-capture-boundary",
+                "occurred_at": "2026-08-01T10:00:01Z",
+                "payload": {
+                    "schema_version": 1,
+                    "local_high_sequence": 2,
+                    "expected_client_event_ids": ["checkpoint-capture-source"],
+                    "expected_ids_truncated": false,
+                },
+            }),
+        ],
+    )
+    .await;
+    let source_id = appended["events"][0]["event"]["id"]
+        .as_str()
+        .expect("source id");
+    let (status, batch) = freeze(&app, &token, session_id, "checkpoint-capture-freeze").await;
+    assert_eq!(status, StatusCode::CREATED, "{batch}");
+    assert_eq!(
+        batch["event_count"], 1,
+        "the derived checkpoint is not a source"
+    );
+    run_capture(&state).await;
+    let proposals = candidates(&app, &token, batch["id"].as_str().expect("batch id")).await;
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(proposals[0]["state"], "pending");
+    assert_eq!(proposals[0]["source_event_ids"], json!([source_id]));
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
+    let active: i64 =
+        sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
+            .bind(tenant_id.as_uuid())
+            .fetch_one(&mut *tx)
+            .await
+            .expect("count active Knowledge");
+    tx.commit().await.expect("finish Knowledge inspection");
+    assert_eq!(active, 0, "capture must not publish Knowledge");
+}
+
+#[tokio::test]
 async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
     let _guard = serial().await;
     let Some((state, tenant_id)) = admitted_tenant(synveda_policy::STANDARD).await else {

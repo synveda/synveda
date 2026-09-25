@@ -9,7 +9,7 @@ use synveda_policy::Action;
 use synveda_retrieval::estimated_tokens;
 use synveda_store::knowledge::{self as knowledge, KnowledgeSnapshot};
 use synveda_store::knowledge_freshness;
-use synveda_types::configuration::GraphRetrievalConfiguration;
+use synveda_types::configuration::{ContextOptimizationMode, GraphRetrievalConfiguration};
 use synveda_types::context::{ContextGraphDirection, ContextReasonCode};
 use synveda_types::knowledge::{
     KnowledgeLifecycleState, KnowledgeRelation, KnowledgeRelationType, assess_freshness,
@@ -445,6 +445,7 @@ pub(super) async fn merge_graph_expansion(
     candidates: &mut Vec<PlannedCandidate>,
     expansion: GraphExpansion,
     at: DateTime<Utc>,
+    mode: ContextOptimizationMode,
 ) -> Result<bool> {
     let mut policy_exclusion = expansion.policy_exclusion;
     for candidate in candidates.iter_mut() {
@@ -539,10 +540,12 @@ pub(super) async fn merge_graph_expansion(
             exclusion: expanded.exclusion,
             authorization,
             selected_tokens: None,
+            delivery_span: None,
+            required: false,
             graph_path: expanded.path,
         });
     }
-    rank_and_deduplicate(candidates);
+    rank_and_deduplicate(candidates, mode);
     Ok(policy_exclusion)
 }
 

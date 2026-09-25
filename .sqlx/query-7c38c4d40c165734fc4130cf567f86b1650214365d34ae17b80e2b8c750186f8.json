@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select client_event_id\n        from session_events\n        where tenant_id = $1 and session_id = $2\n          and sequence < $3 and client_event_id = any($4::text[])\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "client_event_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7c38c4d40c165734fc4130cf567f86b1650214365d34ae17b80e2b8c750186f8"
+}
