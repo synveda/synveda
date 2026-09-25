@@ -1,194 +1,101 @@
 # Feature inventory
 
 147 features in this index. This file owns feature identity and delivered/open
-state. Delivered names identify historical slices, not a claim that every
-original implementation remains. Code, generated contracts and current ADRs
-own today's behavior; open entries link to implementation briefs.
+state. Delivered names identify historical slices; current behavior comes from
+code, generated contracts and accepted decisions. Only open features retain
+implementation briefs.
 
-114 delivered; 33 open. CI checks counts, IDs and the open-brief contract.
+114 delivered; 33 open. CI checks the counts, IDs and open-brief contract.
 
-The published [v0.4.0 installation increment](https://github.com/synveda/synveda/releases/tag/v0.4.0)
-uses source `e59284619567d6a13b70ce3f3b3e81121b7621e6`. Native Linux AMD64/ARM64
-Docker and four-mode Kind qualification passed; the original qualified bytes
-were published after an upload-only failure, without moving the tag. Exact
-release/run links and remaining Docker Desktop/WSL2, OpenShift and N-1 blockers
-are in [CPR-45](CPR-45.md#installation-mission-2026-09-20) and [OPS-11](OPS-11.md).
-The v0.4.1 source `d74e75b8991f22d8f4dd07034b3cd91db1ffb867` passed full
-main CI and a nonpublishing release drill. Its
-[tagged workflow](https://github.com/synveda/synveda/actions/runs/35900269117)
-published the versioned image candidates and assembled release assets, but both
-anonymous Docker jobs failed. The linked ARM64 job reports a Docker Hub
-RepoDigest spelling mismatch.
-The [v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
-passed anonymous Docker Hub/GHCR pulls on both native architectures. Its public
-jobs then repeated the full candidate deployment drills and reached their
-90-minute limit before retaining reports or publishing a signed inventory.
-The final attestation and GitHub Release were skipped again. The v0.4.3 source
-`2acc66f02625727b2ccdfe223358468bf10eef85` passed
-[main CI](https://github.com/synveda/synveda/actions/runs/36048573688), the
-[nonpublishing drill](https://github.com/synveda/synveda/actions/runs/36048616477),
-both full tagged native candidate drills and short anonymous public image/chart
-checks. The [tagged run](https://github.com/synveda/synveda/actions/runs/36062182772)
-attested and uploaded all 35 assets, then failed on GitHub's draft-by-tag lookup.
-The exact draft was verified by signer, source and every asset digest, then
-promoted by ID. [v0.4.3](https://github.com/synveda/synveda/releases/tag/v0.4.3)
-is now the public download; the failed workflow remains recorded. Both earlier
-failed tags and their image coordinates remain immutable.
-[Production readiness](../PRODUCTION_READINESS.md) owns the remaining custody,
-recovery and support gaps. Passing installation checks is not HA or certification.
-The fresh contributor walkthrough still needs unoccupied Docker/hosts resources;
-[CPR-45 dependencies](CPR-45.md#dependencies) records the blocker and next action.
-Consumer installation is tracked in [OPS-12](OPS-12.md). Registry configuration,
-Claude scope checks and serialized credential refresh are implemented locally.
-The published plain-Compose bundle has paired named-volume recovery and a complete
-20-check local artifact drill; release CI retained its native recovery reports.
-Native lifecycle/setup/adapter routes now use the bundle and existing public
-APIs/installers, with private receipts, observation consent and conflict-safe
-removal (ADR-0116). The source CLI has local OrbStack lifecycle and browser evidence;
-manual Codex/Copilot trust/setup and broader native qualification remain separate.
-Private pinned Node and Unix client-only archives/installation now have local
-macOS arm64 artifact evidence and required native release-report gates. Windows
-credentials now have candidate ACL/file-identity/replacement enforcement with
-passing native Windows x64/arm64 storage and process-refresh tests. Private Rust
-receipt/spool consumers and the bounded Node storage protocol passed all five
-native checks on both architectures at `418669f`.
-PowerShell installation and Windows ZIP packaging now have native archive
-checks (ADR-0065 amendment 13). X64 and arm64 passed all seven checks on clean source
-`418669f`, including install/reinstall, storage interoperability, retained state
-and unsafe archive/installer refusals. The x64 archive/report hashes and native
-identities were also checked locally; OPS-12 records both native job identities
-and the arm64 evidence bundle digest.
-Both Linux x64/ARM64 native archive reports passed in the v0.4.1 tagged run;
-v0.4.3 publishes its separately qualified archives. Next: artifact-based real
-issuer/harness acceptance evidence. The 2026-09-23 concurrent-session
-replay is local fixture evidence; OPS-12 records the missing authenticated
-two-conversation and child/fork run and its next action.
-The Unix witness code is now isolated and CLI/hooks share platform path fixtures
-(ADR-0117); other non-Unix private-state operations explicitly refuse. The earlier
-Windows x64 compilation/refusal job and expanded credential job passed. Exact
-evidence and the next action are in [OPS-12](OPS-12.md).
-The pipeline refactor adds conservative selection, CI Result, shared native
-CLI/Docker candidate validation and exact-source/draft publication gates
-(ADR-0108). Local gates and packaging checks passed. Initial hosted attempts
-proved CI Result blocks required failures, then exposed Linux hard-link archive
-input, restricted-PATH `gzip` and AMD64 realm-startup timing issues. The final
-[PR CI](https://github.com/synveda/synveda/actions/runs/35844879556) and
-[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/35845344195)
-on `47fb126` passed all six native CLI packages and both Docker/Helm candidates.
-The dry-run bundle's 21 payload checksums passed, but its images were
-unpublished. Version 0.4.1 passed exact-source
-[main CI](https://github.com/synveda/synveda/actions/runs/35884349132) and a
-[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/35884456435)
-before its immutable tag was pushed. The tagged run failed at the first
-anonymous Docker Hub RepoDigest check on both architectures; none of the 31
-assets passed final publication. Real issuer/harness acceptance,
-installer attestation enforcement and OS signing/notarization remain separate
-gaps. The temporary-worktree Compose
-fixture initially hit local ownership/loopback restrictions; the complete
-deployment and chart gate passed after those environment inputs were corrected.
-The Docker Hub variables and release environment secret are configured;
-`CI Result` is required on main, `v*` updates/deletions are protected without
-bypass, and a separate creation-only ruleset restricts new `v*` tags to the
-administrator release operator as recorded in
-[the CI guide](../CI.md#manual-owner-settings).
-The 2026-09-24 CI gate amendment keeps native image smoke and four-mode Helm
-qualification on main, while both full local Compose lifecycle/recovery drills
-run on each architecture in the required nonpublishing and tagged Release jobs.
+The current [v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
+is available for self-hosted evaluation. [Production readiness](../PRODUCTION_READINESS.md)
+tracks deployment and recovery gaps; the generated [client support matrix](../CLIENT_SUPPORT.md)
+tracks tested agent versions. The release history and implementation diaries
+remain in Git and the linked release evidence.
 
-[Client support](../CLIENT_SUPPORT.md) and [SDK compatibility](../../sdks/README.md#compatibility-and-release-boundary)
-own tested versions and limits. [ADPT-4](ADPT-4.md) retains SDK release decisions.
-The 2026-09-23 cross-client replay restored Codex/Copilot runtime-exit identity,
-kept origin-mismatched Copilot spools unchanged, and passed concurrent Python/TS
-Session calls plus fresh shared gateway interoperability. Native multi-conversation
-qualification and SDK release decisions remain open in OPS-12 and ADPT-4.
-The [public site](https://synveda.github.io/synveda/) and console share the
-canonical brand under ADR-0113/0114; [website maintenance](../../website/README.md)
-owns asset generation. Session-specific execution diaries stay in Git rather
-than in this inventory.
+## Phase 0 — Foundation
 
-## Phase 0 — Foundation (wk 1)
+- [x] FND-1: Workspace scaffold — delivered
+- [x] FND-2: Dev environment — delivered
+- [x] FND-3: synveda-types + error model — delivered
+- [x] FND-4: Migrations & bitemporal base tables — delivered
+- [x] FND-5: Observability baseline — delivered
+- [x] FND-6: Foundational architecture decisions — delivered
+- [x] FND-7: Public website and canonical brand assets — delivered
 
-- [x] FND-1: Workspace scaffold — delivered 2026-07-16; contributor setup, CI Result and candidate validation/publication boundaries: ADR-0108
-- [x] FND-2: Dev environment — delivered 2026-07-17
-- [x] FND-3: synveda-types + error model — delivered 2026-07-18
-- [x] FND-4: Migrations & bitemporal base tables — delivered 2026-07-18
-- [x] FND-5: Observability baseline — delivered 2026-07-18
-- [x] FND-6: Foundational architecture decisions — delivered 2026-07-18; current graph rationale: ADR-0097
-- [x] FND-7: Public website and canonical brand assets — delivered 2026-09-20; ADR-0113
+## Phase 1 — Core runtime
 
-## Phase 1 — The spine (wk 2–5)
+- [x] TEN-1: Tenant model & resolution — delivered
+- [x] TEN-2: Postgres row-level security as backstop — delivered
+- [x] AUTH-1: OIDC login (code+PKCE) — delivered
+- [x] HIER-1: Hierarchy store — delivered
+- [x] AUTHZ-1: Cedar PDP embedded — delivered
+- [x] AUTH-2: JIT user provisioning from claims — delivered
+- [x] AUTHZ-2: Policy packs — delivered
+- [x] AUTHZ-3: Roles & role bindings — delivered
+- [x] HIER-2: Scope chain resolver — delivered
+- [x] HIER-3: Cedar entity sync — delivered
+- [x] AUTH-3: Service identities — delivered
+- [x] AUD-1: Hash-chained audit log — delivered
+- [x] MEM-1: observe API + PGMQ buffer — delivered
+- [x] MEM-2: Redaction & secret scanning — delivered
+- [x] MEM-3: Extraction pipeline — delivered
+- [x] MEM-4: Transactional embed-or-fail — delivered
+- [x] CTX-1: Hybrid retrieval — delivered
+- [x] CTX-2: Composition engine — delivered
+- [x] CTX-3: inject API — delivered
+- [x] ADPT-1: Claude Code adapter — delivered
+- [x] EVAL-1: Eval harness skeleton — delivered
 
-- [x] TEN-1: Tenant model & resolution — delivered 2026-07-18
-- [x] TEN-2: Postgres row-level security as backstop — delivered 2026-07-18
-- [x] AUTH-1: OIDC login (code+PKCE) — delivered 2026-07-18
-- [x] HIER-1: Hierarchy store — delivered 2026-07-18; ADR-0074
-- [x] AUTHZ-1: Cedar PDP embedded — delivered 2026-07-18
-- [x] AUTH-2: JIT user provisioning from claims — delivered 2026-07-18
-- [x] AUTHZ-2: Policy packs — delivered 2026-07-19
-- [x] AUTHZ-3: Roles & role bindings — delivered 2026-07-19; ADR-0074
-- [x] HIER-2: Scope chain resolver — delivered 2026-07-19; ADR-0074
-- [x] HIER-3: Cedar entity sync — delivered 2026-07-19
-- [x] AUTH-3: Service identities — delivered 2026-07-19
-- [x] AUD-1: Hash-chained audit log — delivered 2026-07-19
-- [x] MEM-1: observe API + PGMQ buffer — delivered 2026-07-19
-- [x] MEM-2: Redaction & secret scanning — delivered 2026-07-19
-- [x] MEM-3: Extraction pipeline — delivered 2026-07-22
-- [x] MEM-4: Transactional embed-or-fail — delivered 2026-07-22
-- [x] CTX-1: Hybrid retrieval — delivered 2026-07-23
-- [x] CTX-2: Composition engine — delivered 2026-07-23
-- [x] CTX-3: inject API — delivered 2026-07-23
-- [x] ADPT-1: Claude Code adapter — delivered 2026-07-25
-- [x] EVAL-1: Eval harness skeleton — delivered 2026-07-25
+## Phase 2 — Governance
 
-## Phase 2 — Governance (wk 6–10)
+- [x] FLOW-1: Object store — delivered
+- [x] FLOW-2: Channels — delivered
+- [x] FLOW-3: Proposals & approval matrix — delivered
+- [x] FLOW-4: Auto-promotion rules — delivered
+- [x] FLOW-5: Cross-scope promotion — delivered
+- [x] FLOW-6: CLI review flow — delivered
+- [x] FLOW-7: Rollback & pinning — delivered
+- [x] AUTHZ-4: Lapses (controlled relaxation) — delivered
+- [x] AUTHZ-5: ABAC conditions — delivered
+- [x] MEM-5: Always-on dedup & conflict detection — delivered
+- [x] MEM-6: Decay, TTL & staleness — delivered
+- [x] CTX-4: Tiered injection / progressive disclosure — delivered
+- [x] CTX-5: recall API + MCP tool — delivered
+- [x] GRPH-1: Multi-graph schema — delivered
+- [x] GRPH-2: Graph-linking stage — delivered
+- [x] GRPH-4: AGE performance spike / graph fallback assessment — delivered
+- [x] AUD-2: Audit query & auditor role surface — delivered
+- [x] EVAL-2: Extraction quality suite — delivered
+- [x] EVAL-4: Retrieval & injection quality — delivered
+- [x] EVAL-5: Security evals — delivered
+- [x] PRMT-1: Prompt templates as assets — delivered
+- [x] PRMT-2: Context packs — delivered
 
-- [x] FLOW-1: Object store — delivered 2026-07-25; ADR-0030
-- [x] FLOW-2: Channels — delivered 2026-07-25; ADR-0031
-- [x] FLOW-3: Proposals & approval matrix — delivered 2026-07-25; ADR-0032
-- [x] FLOW-4: Auto-promotion rules — delivered 2026-07-25; ADR-0033
-- [x] FLOW-5: Cross-scope promotion — delivered 2026-07-25; ADR-0034
-- [x] FLOW-6: CLI review flow — delivered 2026-07-25; ADR-0035
-- [x] FLOW-7: Rollback & pinning — delivered 2026-07-25; ADR-0036
-- [x] AUTHZ-4: Lapses (controlled relaxation) — delivered 2026-07-26; ADR-0037
-- [x] AUTHZ-5: ABAC conditions — delivered 2026-07-26; ADR-0038
-- [x] MEM-5: Always-on dedup & conflict detection — delivered 2026-07-26; ADR-0039
-- [x] MEM-6: Decay, TTL & staleness — delivered 2026-07-26; ADR-0040
-- [x] CTX-4: Tiered injection / progressive disclosure — delivered 2026-07-27; ADR-0041
-- [x] CTX-5: recall API + MCP tool — delivered 2026-07-27; ADR-0042
-- [x] GRPH-1: Multi-graph schema — delivered 2026-07-28; ADR-0097
-- [x] GRPH-2: Graph-linking stage — delivered 2026-07-28; ADR-0097
-- [x] GRPH-4: AGE performance spike / graph fallback assessment — delivered 2026-07-25; ADR-0097 (historical spike retired)
-- [x] AUD-2: Audit query & auditor role surface — delivered 2026-07-28; ADR-0045
-- [x] EVAL-2: Extraction quality suite — delivered 2026-07-30; ADR-0046
-- [x] EVAL-4: Retrieval & injection quality — delivered 2026-07-31; ADR-0047
-- [x] EVAL-5: Security evals — delivered 2026-07-31; ADR-0048
-- [x] PRMT-1: Prompt templates as assets — delivered 2026-08-02; ADR-0049
-- [x] PRMT-2: Context packs — delivered 2026-08-03; ADR-0050
+## Phase 3 — Deployment foundations
 
-## Phase 3 — Enterprise (wk 11–16)
-
-- [x] SKIL-1: agentskills.io-compliant model — delivered 2026-08-03; ADR-0051
-- [x] SKIL-2: Security scanning gate — delivered 2026-08-03; ADR-0052
-- [x] SKIL-3: Skill quality scoring — delivered 2026-08-03; ADR-0053
-- [x] SKIL-4: Scope-targeted distribution — delivered 2026-08-03; ADR-0054
-- [x] OPS-1: SMB profile — delivered 2026-08-04; ADR-0055
-- [x] CNSL-1: Proposals inbox (hero screen) — delivered 2026-08-04; ADR-0056
-- [x] ADPT-2: Generic MCP server — delivered 2026-08-05; ADR-0057
-- [x] CNSL-2: Hierarchy & policy explorer — delivered 2026-08-05; ADR-0058
-- [x] AUTH-4: SCIM 2.0 server — delivered 2026-08-05; ADR-0059
-- [x] AUTH-5: Directory sync fallback — delivered 2026-08-07; ADR-0060
-- [x] EVAL-3: Public benchmark adapters — delivered 2026-08-09; ADR-0061
-- [x] OPS-2: Helm chart / enterprise profile — delivered 2026-08-10; ADR-0062
-- [x] TEN-3: Dense-leg retrieval benchmark — delivered 2026-08-10; ADR-0063
-- [x] TEN-4: Per-tenant encryption keys — delivered 2026-08-11; ADR-0064
-- [x] OPS-8: Release & distribution — delivered 2026-08-11; ADR-0065
+- [x] SKIL-1: agentskills.io-compliant model — delivered
+- [x] SKIL-2: Security scanning gate — delivered
+- [x] SKIL-3: Skill quality scoring — delivered
+- [x] SKIL-4: Scope-targeted distribution — delivered
+- [x] OPS-1: SMB profile — delivered
+- [x] CNSL-1: Proposals inbox (hero screen) — delivered
+- [x] ADPT-2: Generic MCP server — delivered
+- [x] CNSL-2: Hierarchy & policy explorer — delivered
+- [x] AUTH-4: SCIM 2.0 server — delivered
+- [x] AUTH-5: Directory sync fallback — delivered
+- [x] EVAL-3: Public benchmark adapters — delivered
+- [x] OPS-2: Helm chart / enterprise profile — delivered
+- [x] TEN-3: Dense-leg retrieval benchmark — delivered
+- [x] TEN-4: Per-tenant encryption keys — delivered
+- [x] OPS-8: Release & distribution — delivered
 - [ ] [OPS-9: Release-shaped beta acceptance](OPS-9.md) — open
 - [ ] [OPS-10: Uninstall & cleanup](OPS-10.md) — open
 - [ ] [TEN-5: Tenant lifecycle](TEN-5.md) — open
 - [ ] [TEN-6: Cross-tenant isolation test harness](TEN-6.md) — open
 - [ ] [AUD-3: External immutable audit retention](AUD-3.md) — open
 - [ ] [AUD-4: SIEM streaming](AUD-4.md) — open
-- [x] GRPH-3: Graph-augmented recall — delivered; ADR-0097
+- [x] GRPH-3: Graph-augmented recall — delivered
 - [ ] [EVAL-6: Load & latency suite](EVAL-6.md) — open
 - [ ] [CTX-7: Dense-leg plan stability](CTX-7.md) — open
 - [ ] [OPS-3: Residency routing](OPS-3.md) — open
@@ -197,14 +104,14 @@ than in this inventory.
 - [ ] [CTX-6: Session compression assist](CTX-6.md) — open
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
 
-## Phase 4 — Ecosystem
+## Phase 4 — Clients and operations
 
 - [ ] [ADPT-4: Python & TS SDKs](ADPT-4.md) — open
 - [ ] [ADPT-5: Source-format converters](ADPT-5.md) — open
 - [ ] [ADPT-6: LlamaIndex memory adapter](ADPT-6.md) — open
 - [ ] [ADPT-7: Semantic Kernel memory connector](ADPT-7.md) — open
-- [x] ADPT-8: Observation that survives a session that does not wait — delivered 2026-08-24; ADR-0027
-- [x] ADPT-9: GitHub Copilot CLI adapter — delivered 2026-09-19; ADR-0107
+- [x] ADPT-8: Observation that survives a session that does not wait — delivered
+- [x] ADPT-9: GitHub Copilot CLI adapter — delivered
 - [ ] [PRMT-3: Prompt experiment evidence](PRMT-3.md) — open
 - [ ] [SKIL-5: Authentic Skill usage reporting](SKIL-5.md) — open
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open
@@ -214,60 +121,60 @@ than in this inventory.
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
-- [x] CNSL-4: Knowledge browser — delivered 2026-08-24; ADR-0082
-- [x] CNSL-5: Console theme and everyday usability — delivered 2026-09-20; ADR-0114
+- [x] CNSL-4: Knowledge browser — delivered
+- [x] CNSL-5: Console theme and everyday usability — delivered
 - [ ] [AUD-5: Compliance mapping doc](AUD-5.md) — open
 - [ ] [AUTHZ-6: Authorisation scale decision](AUTHZ-6.md) — open
 - [ ] [AUTHZ-7: Governed admin-plane mutation](AUTHZ-7.md) — open
 - [ ] [TEN-7: Tenant storage partition decision](TEN-7.md) — open
 - [ ] [EVAL-7: A second public benchmark](EVAL-7.md) — open
 
-## Phase 5 — Context platform redesign
+## Phase 5 — Context platform
 
-- [x] CPR-1: Implementation baseline & locked decisions — delivered 2026-08-17; ADR-0068
-- [x] CPR-2: Fresh schema epoch, startup guard & local reset — delivered 2026-08-17; ADR-0069
-- [x] CPR-3: Generic governed scope substrate — delivered 2026-08-17; ADR-0070
-- [x] CPR-4: Workspaces, projects & canonical repository identity — delivered 2026-08-17; ADR-0071
-- [x] CPR-5: Membership, groups, grants & invitations — delivered 2026-08-18; ADR-0072
-- [x] CPR-6: Governed scope anchors — the PDP re-cut — delivered 2026-08-19; ADR-0073
-- [x] CPR-7: The hierarchy cutover — one scope tree — delivered 2026-08-20; ADR-0074
-- [x] CPR-8: The console product shell & first-run onboarding — delivered 2026-08-21; ADR-0075
-- [x] CPR-9: The foundation audit — hardening the scope and access cutover — delivered 2026-08-22
-- [x] CPR-10: The session ledger and runtime API — delivered 2026-08-23; ADR-0076
-- [x] CPR-11: The session product experience — delivered 2026-08-24; ADR-0077
-- [x] CPR-12: Durable Claude session delivery — delivered 2026-08-23; ADR-0078
-- [x] CPR-13: The demo corpus re-point — delivered 2026-08-24
-- [x] CPR-14: Live Claude Code session acceptance gate — delivered 2026-08-24; ADR-0079
-- [x] CPR-15: Versioned Knowledge aggregate and provenance — delivered 2026-08-24; ADR-0080
-- [x] CPR-16: Governed Knowledge mutation lifecycle — delivered 2026-08-24; ADR-0081
-- [x] CPR-17: Public Knowledge API, search and browser — delivered 2026-08-24; ADR-0082
-- [x] CPR-18: Session-based capture batches and reviewable candidates — delivered 2026-08-24; ADR-0083
-- [x] CPR-19: New Learnings lightweight review workflow — delivered 2026-08-24
-- [x] CPR-20: Explainable Knowledge context planning and scoped query — delivered 2026-08-24; ADR-0084
-- [x] CPR-21: Context Inspector and outcome feedback — delivered 2026-08-24
-- [x] CPR-22: Core individual and small-team MVP acceptance — delivered 2026-08-24
-- [x] CPR-23: Immutable skill versions, bindings and usage — delivered 2026-08-24; ADR-0085
-- [x] CPR-24: Skills Library product experience — delivered 2026-08-24
-- [x] CPR-25: Trusted MCP server catalogue and project bindings — delivered 2026-08-25; ADR-0086
-- [x] CPR-26: MCP Tools catalogue product experience — delivered 2026-08-25
-- [x] CPR-27: OKF v0.2 knowledge exchange adapter — delivered 2026-08-25; ADR-0087
-- [x] CPR-28: OKF import and export product workflows — delivered 2026-08-25
-- [x] CPR-29: Public contract and client convergence — delivered 2026-08-25; ADR-0088
-- [x] CPR-30: Governed runtime configuration artifacts — delivered 2026-08-25; ADR-0089
-- [x] CPR-31: Governed auto-apply and policy relaxations — delivered 2026-08-25; ADR-0090
-- [x] CPR-32: Unified approvals across governed artifacts — delivered 2026-08-25; ADR-0091
-- [x] CPR-33: Context-platform audit query and deterministic export — delivered 2026-08-25; ADR-0092
-- [x] CPR-34: Directory adapter convergence — delivered 2026-08-25; ADR-0093
-- [x] CPR-35: Context-platform key and secret convergence — delivered 2026-08-25; ADR-0094
-- [x] CPR-36: One-runtime deployment convergence — delivered 2026-08-25; ADR-0095
-- [x] CPR-37: Conflict, supersession and freshness engine — delivered 2026-08-25; ADR-0096
-- [x] CPR-38: Bounded graph-augmented retrieval — delivered 2026-08-25; ADR-0097
-- [x] CPR-39: Second verified client — delivered 2026-09-12; ADR-0098, ADR-0106
-- [x] CPR-40: Context-platform product and trust evaluation — delivered 2026-08-26; ADR-0099
-- [x] CPR-41: One-command realistic product demo — delivered 2026-08-26; ADR-0100
-- [x] CPR-42: Context-platform security and product-integrity audit — delivered 2026-08-26; ADR-0078
-- [x] CPR-43: Final context-platform hard cut — delivered 2026-08-26; ADR-0069
-- [x] CPR-44: Production hardening and maintainability cut — delivered 2026-08-26; ADR-0101
+- [x] CPR-1: Implementation baseline & locked decisions — delivered
+- [x] CPR-2: Fresh schema epoch, startup guard & local reset — delivered
+- [x] CPR-3: Generic governed scope substrate — delivered
+- [x] CPR-4: Workspaces, projects & canonical repository identity — delivered
+- [x] CPR-5: Membership, groups, grants & invitations — delivered
+- [x] CPR-6: Governed scope anchors — the PDP re-cut — delivered
+- [x] CPR-7: The hierarchy cutover — one scope tree — delivered
+- [x] CPR-8: The console product shell & first-run onboarding — delivered
+- [x] CPR-9: The foundation audit — hardening the scope and access cutover — delivered
+- [x] CPR-10: The session ledger and runtime API — delivered
+- [x] CPR-11: The session product experience — delivered
+- [x] CPR-12: Durable Claude session delivery — delivered
+- [x] CPR-13: The demo corpus re-point — delivered
+- [x] CPR-14: Live Claude Code session acceptance gate — delivered
+- [x] CPR-15: Versioned Knowledge aggregate and provenance — delivered
+- [x] CPR-16: Governed Knowledge mutation lifecycle — delivered
+- [x] CPR-17: Public Knowledge API, search and browser — delivered
+- [x] CPR-18: Session-based capture batches and reviewable candidates — delivered
+- [x] CPR-19: New Learnings lightweight review workflow — delivered
+- [x] CPR-20: Explainable Knowledge context planning and scoped query — delivered
+- [x] CPR-21: Context Inspector and outcome feedback — delivered
+- [x] CPR-22: Core individual and small-team MVP acceptance — delivered
+- [x] CPR-23: Immutable skill versions, bindings and usage — delivered
+- [x] CPR-24: Skills Library product experience — delivered
+- [x] CPR-25: Trusted MCP server catalogue and project bindings — delivered
+- [x] CPR-26: MCP Tools catalogue product experience — delivered
+- [x] CPR-27: OKF v0.2 knowledge exchange adapter — delivered
+- [x] CPR-28: OKF import and export product workflows — delivered
+- [x] CPR-29: Public contract and client convergence — delivered
+- [x] CPR-30: Governed runtime configuration artifacts — delivered
+- [x] CPR-31: Governed auto-apply and policy relaxations — delivered
+- [x] CPR-32: Unified approvals across governed artifacts — delivered
+- [x] CPR-33: Context-platform audit query and deterministic export — delivered
+- [x] CPR-34: Directory adapter convergence — delivered
+- [x] CPR-35: Context-platform key and secret convergence — delivered
+- [x] CPR-36: One-runtime deployment convergence — delivered
+- [x] CPR-37: Conflict, supersession and freshness engine — delivered
+- [x] CPR-38: Bounded graph-augmented retrieval — delivered
+- [x] CPR-39: Second verified client — delivered
+- [x] CPR-40: Context-platform product and trust evaluation — delivered
+- [x] CPR-41: One-command realistic product demo — delivered
+- [x] CPR-42: Context-platform security and product-integrity audit — delivered
+- [x] CPR-43: Final context-platform hard cut — delivered
+- [x] CPR-44: Production hardening and maintainability cut — delivered
 - [ ] [CPR-45: Docker-first portable reference deployment](CPR-45.md) — open
 
 ## Unscheduled — not listed in the Sequencing section

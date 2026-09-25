@@ -1,29 +1,17 @@
 # Native consumer commands
 
-These commands are in the published v0.4.3 client archive and matching plugin. The
-[v0.4.1 tagged workflow](https://github.com/synveda/synveda/actions/runs/35900269117)
-qualified its native archives but did not publish them; the v0.4.2 tagged run
-also qualified all six archives but timed out before publication. The v0.4.3
-tagged workflow completed all six native packages. Install the matching
-published archive or build the current CLI with
-`SQLX_OFFLINE=true cargo build -p synveda-cli`. [OPS-12](backlog/OPS-12.md) records native
-execution reports and the remaining qualification gaps.
+These commands are in the published v0.4.3 client archive and matching plugin.
+Install the archive for your platform, or build the current CLI with
+`SQLX_OFFLINE=true cargo build -p synveda-cli`. The
+[client support matrix](CLIENT_SUPPORT.md) records tested agent versions and
+platform limits.
 
 ## Release downloads
 
-The refactored CI and Release workflows build and test client packages natively
-on Linux, macOS and Windows, each on x64 and ARM64. The
-[release asset table](RELEASING.md#native-cli-release-artifacts) gives their exact
-names. Every package and successful native report is required for stable
-publication; a failing target cannot be omitted. Actions artifacts named
-`binaries-TARGET` are retained by a tagged validation run. The v0.4.3
-archives and reports are public GitHub Release assets.
-
-The existing v0.4.0 release has only the historical macOS ARM64 and Linux x64
-server/CLI archives. It has no `synveda-client-*` assets or Windows packages.
-Do not point the client installer at v0.4.0 public downloads. The source examples
-later in this page also support locally built candidates matching the 0.4.3
-workspace version.
+The [release asset table](RELEASING.md#native-cli-release-artifacts) names the
+Linux, macOS and Windows archives for x64 and ARM64. Download the v0.4.3
+archive for your platform. Source examples later in this guide use locally
+built assets from the same workspace version.
 
 For published v0.4.3, download your platform's archive,
 `SHA256SUMS` and `SHA256SUMS.sigstore.json` into a private directory. Follow the
@@ -54,17 +42,11 @@ The installer checks checksums; it does not perform the attestation step for you
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
-`windows-x86_64`. All six targets passed native candidate artifact execution
-in the v0.4.1 tagged run and again in the v0.4.3 release. Broader OS versions
-and signing remain unqualified.
-The CLI's Unix peer-witness code is isolated, and CLI/hooks share a tested
-platform path contract. Windows credential storage now has a native candidate
-for ACL, file-identity, bounded reads, locking and replacement checks. Private
-receipt/spool storage, the Rust/Node bridge and PowerShell installation are now
-implemented candidates; exact native storage, process-refresh and archive
-qualification evidence is recorded in [OPS-12](backlog/OPS-12.md).
-Windows setup/vendor configuration writers, deployment and diagnostic logs
-still refuse. The commands in later sections require Unix unless stated otherwise.
+`windows-x86_64`. The v0.4.3 release includes all six archives. See the
+[readiness assessment](PRODUCTION_READINESS.md) for platform limits.
+On Windows, credentials, receipts and hook spool state use private local storage.
+Windows setup and vendor configuration writers, deployment and diagnostic logs
+require Unix. The commands in later sections require Unix unless stated otherwise.
 
 On Unix, config uses absolute `XDG_CONFIG_HOME` or `HOME/.config`; state uses
 absolute `XDG_STATE_HOME` or `HOME/.local/state`, each with a `synveda` child.
@@ -82,8 +64,7 @@ require `SYNVEDA_CLI` to name the absolute native `.exe` and use bounded local
 pipes for state; no credential or gateway operation is exposed by that protocol.
 Spool reads/writes are limited to 16 MiB and scans to 4096 entries. A stable lock
 and digest comparison refuse stale replacement/removal. Unsafe files remain
-held for inspection; see
-[ADR-0117](adr/adr-0117-client-platform-boundaries.md).
+held for inspection.
 
 The existing installer has an explicit client mode. For **locally built**
 candidate assets and their `SHA256SUMS` in an absolute directory:
@@ -167,9 +148,8 @@ existing Codex/Copilot lifecycle fixtures with the extracted private runtime.
 It also reruns the credential-refresh and platform process tests against the
 installed CLI. CI and Release package release-profile binaries on each native
 runner; the debug binary above is only a local packaging example.
-Reports include archive bytes, local install/reinstall timings, source identity
-and dirty-tree state. Local file-copy timing is not network-download timing;
-replay is not real issuer login or native vendor loading.
+Reports include archive bytes, install results, source identity and dirty-tree
+state.
 
 On each native Windows host, build the same adapters and CLI, then run:
 
@@ -180,10 +160,8 @@ node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.3 windows
 Use `windows-x86_64` on x64. This downloads the pinned Node ZIP, packages the
 native candidate and runs `check-windows-client-package.mjs`. That check uses
 Windows PowerShell, a restricted PATH, extracted private Node/CLI, Rust/Node
-storage interoperability and malformed ZIP/reinstall refusals. CI carries both
-native architectures and their exact archive/report bytes; configuration alone
-does not qualify installation. The local macOS PowerShell parser check is syntax
-evidence only.
+storage interoperability and malformed ZIP/reinstall refusals. CI runs both
+native architectures.
 
 ## Local deployment
 
@@ -204,8 +182,8 @@ synveda down --bundle /absolute/path/to/synveda-reference-0.4.3
 Without `--bundle`, the commands look in `$SYNVEDA_HOME/reference/current`
 (default `~/.synveda/reference/current`). An older host-state bundle is refused;
 its launcher is a different layout. `--dry-run` prints arguments without Docker
-access or file writes. `doctor` checks prerequisites, file identity and ownership;
-it does not establish authentication or recoverability.
+access or file writes. `doctor` checks prerequisites, file identity and ownership.
+Run `up` and sign in to check the deployment.
 
 The project defaults to `synveda-local`. Tests can explicitly select a fresh
 `synveda-local-acceptance-<name>` using `--project-name`. On first startup, any
@@ -270,8 +248,8 @@ The managed route supports `project` and `local`; user-wide hooks cannot use
 one project's consent for every repository. The bundle must carry the checked
 receipt-aware hook contract; historical same-version bundles are refused.
 Registration preserves other scopes, the shared marketplace and persistent
-plugin data. Review the vendor's trust prompts and start a new session to verify
-loading. Enabled registration alone is not loading or live-client evidence.
+plugin data. Review the vendor's trust prompts and start a new session to check
+that the client loads the adapter.
 
 For existing registry-backed MCP clients, `--scope user` uses the registry's
 user config. Project scope requires an explicit file inside the current repository:

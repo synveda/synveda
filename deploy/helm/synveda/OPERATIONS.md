@@ -216,11 +216,13 @@ and [restore](https://www.postgresql.org/docs/17/app-pgrestore.html) semantics.
 
 ## Upgrade and failure recovery
 
-There is **no general supported N-1 release window**. Public v0.2.0 has the
-retired schema and deployment graph; epoch-3 startup refuses it. Do not reset a
-team database to make an upgrade pass. Same-source Helm migration reruns and
-retained reinstall are continuity evidence only. OPS-6 owns a future declared
-release compatibility window; no baseline/down-migration is invented here.
+There is **no supported upgrade between published versions**. Public v0.2.0 has
+the retired schema. Published v0.4.0 and v0.4.3 both use epoch 3 and baseline
+revision 3, but the `0001` migration changed; the candidate's read-only
+`synveda db migrate --check` rejects the changed SQLx checksum. Keep the current
+installation and its data rather than resetting it to make an upgrade pass.
+Same-source Helm migration reruns and retained reinstall are continuity checks,
+not cross-release upgrades. OPS-6 owns a future declared compatibility window.
 CI and Release retain four-mode install/upgrade/reinstall checks and the two
 end-to-end recovery drills. Passing those checks does not establish migration
 compatibility between two different published versions.
