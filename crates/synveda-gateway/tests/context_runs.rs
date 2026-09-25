@@ -634,7 +634,7 @@ async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
 }
 
 #[tokio::test]
-async fn restart_preview_requires_a_fresh_session_read_decision() {
+async fn checkpoint_create_read_use_and_capture_follow_current_session_policy() {
     let _guard = serial().await;
     let Some(world) = admitted_world().await else {
         return;
@@ -683,6 +683,50 @@ async fn restart_preview_requires_a_fresh_session_read_decision() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{appended}");
+    let event_path = format!("/v1/sessions/{session_id}/events");
+    let preview_path = format!("/v1/sessions/{session_id}/context-preview");
+    let capture_path = format!("/v1/sessions/{session_id}/capture-batches");
+    let (status, timeline) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/sessions/{session_id}/timeline"),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timeline}");
+    let checkpoint_id = timeline["entries"]
+        .as_array()
+        .expect("timeline entries")
+        .iter()
+        .find(|entry| entry["event_type"] == "session.checkpoint")
+        .and_then(|entry| entry["id"].as_str())
+        .expect("server-derived checkpoint");
+    let diagnostic_path = format!("/v1/sessions/{session_id}/events/{checkpoint_id}");
+    let (status, diagnostic) = call(
+        &world.app,
+        "GET",
+        &diagnostic_path,
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{diagnostic}");
+    assert_eq!(diagnostic["payload"]["labelled_excerpts"][0]["text"], fact);
+    let (status, allowed_preview) = call(
+        &world.app,
+        "POST",
+        &preview_path,
+        &world.alice_token,
+        None,
+        Some(json!({"restart": true, "budget_tokens": 1000})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{allowed_preview}");
+    assert!(allowed_preview["rendered"].as_str().unwrap().contains(fact));
+    assert_eq!(allowed_preview["restart_coverage"], "observed_window");
 
     world
         .state
@@ -709,7 +753,7 @@ async fn restart_preview_requires_a_fresh_session_read_decision() {
     let (status, preview) = call(
         &world.app,
         "POST",
-        &format!("/v1/sessions/{session_id}/context-preview"),
+        &preview_path,
         &world.alice_token,
         None,
         Some(json!({"restart": true, "budget_tokens": 500})),
@@ -719,6 +763,240 @@ async fn restart_preview_requires_a_fresh_session_read_decision() {
     assert_eq!(preview["restart_coverage"], "unavailable");
     assert!(!preview.to_string().contains(fact));
     assert!(preview.get("restart_checkpoint_event_id").is_none());
+    let (status, refused_diagnostic) = call(
+        &world.app,
+        "GET",
+        &diagnostic_path,
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused_diagnostic}");
+    assert_eq!(refused_diagnostic["action"], "session.diagnostics");
+    let (status, batch) = call(
+        &world.app,
+        "POST",
+        &capture_path,
+        &world.alice_token,
+        Some("ctx6-write-only-capture"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{batch}");
+    assert_eq!(batch["event_count"], 1);
+
+    world
+        .state
+        .pdp
+        .install_source(
+            world.tenant_id,
+            "ctx6-session-read-only",
+            1,
+            r#"permit (
+                 principal,
+                 action == Synveda::Action::"SessionRead",
+                 resource
+               ) when { resource in principal.tenant };
+               permit (
+                 principal,
+                 action == Synveda::Action::"SessionDiagnostics",
+                 resource
+               ) when { resource in principal.tenant };"#,
+            PackConfig::default(),
+        )
+        .expect("install read-only session policy");
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin read-only policy binding");
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, "ctx6-session-read-only")
+        .await;
+    tx.commit().await.expect("commit read-only policy binding");
+
+    let (status, denied_append) = call(
+        &world.app,
+        "POST",
+        &event_path,
+        &world.alice_token,
+        None,
+        Some(json!({"events": [{
+            "event_type": "session.compaction_boundary",
+            "client_event_id": "ctx6-denied-boundary",
+            "occurred_at": "2020-01-01T10:00:02Z",
+            "payload": {"schema_version": 1, "local_high_sequence": 3,
+                "expected_client_event_ids": ["ctx6-read-source"],
+                "expected_ids_truncated": false},
+        }]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_append}");
+    assert_eq!(denied_append["action"], "session.write");
+    let (status, denied_capture) = call(
+        &world.app,
+        "POST",
+        &capture_path,
+        &world.alice_token,
+        Some("ctx6-read-only-capture"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_capture}");
+    assert_eq!(denied_capture["action"], "session.write");
+    let (status, denied_preview) = call(
+        &world.app,
+        "POST",
+        &preview_path,
+        &world.alice_token,
+        None,
+        Some(json!({"restart": true, "budget_tokens": 500})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_preview}");
+    assert_eq!(denied_preview["action"], "session.write");
+    let (status, retained) = call(
+        &world.app,
+        "GET",
+        &diagnostic_path,
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{retained}");
+    assert_eq!(retained["payload"]["labelled_excerpts"][0]["text"], fact);
+    let (status, timeline) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/sessions/{session_id}/timeline"),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timeline}");
+    assert_eq!(timeline["event_counts"]["session.checkpoint"], 1);
+}
+
+#[tokio::test]
+async fn foreign_checkpoint_routes_match_an_unknown_session() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let Some(foreign) = admitted_world().await else {
+        return;
+    };
+    let (status, session) = call(
+        &foreign.app,
+        "POST",
+        "/v1/sessions",
+        &foreign.alice_token,
+        Some("ctx6-foreign-checkpoint-session"),
+        Some(json!({
+            "workspace_id": foreign.workspace_id,
+            "project_id": foreign.project_id,
+            "client_name": "claude-code",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{session}");
+    let foreign_id = session["id"].as_str().expect("foreign session id");
+    let (status, appended) = call(
+        &foreign.app,
+        "POST",
+        &format!("/v1/sessions/{foreign_id}/events"),
+        &foreign.alice_token,
+        None,
+        Some(json!({"events": [
+            {
+                "event_type": "message.user",
+                "client_event_id": "ctx6-foreign-source",
+                "occurred_at": "2020-01-01T10:00:00Z",
+                "payload": {"text": "The foreign marker is violet-23."},
+            },
+            {
+                "event_type": "session.compaction_boundary",
+                "client_event_id": "ctx6-foreign-boundary",
+                "occurred_at": "2020-01-01T10:00:01Z",
+                "payload": {"schema_version": 1, "local_high_sequence": 2,
+                    "expected_client_event_ids": ["ctx6-foreign-source"],
+                    "expected_ids_truncated": false},
+            },
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{appended}");
+    let (status, timeline) = call(
+        &foreign.app,
+        "GET",
+        &format!("/v1/sessions/{foreign_id}/timeline"),
+        &foreign.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timeline}");
+    let checkpoint_id = timeline["entries"]
+        .as_array()
+        .expect("foreign timeline entries")
+        .iter()
+        .find(|entry| entry["event_type"] == "session.checkpoint")
+        .and_then(|entry| entry["id"].as_str())
+        .expect("foreign server-derived checkpoint");
+    let fictional = synveda_types::SessionId::new().to_string();
+    let suffixes: [(&str, &str, Option<&str>, Option<Value>); 5] = [
+        ("GET", "/timeline", None, None),
+        ("GET", &format!("/events/{checkpoint_id}"), None, None),
+        (
+            "POST",
+            "/context-preview",
+            None,
+            Some(json!({"restart": true, "budget_tokens": 500})),
+        ),
+        (
+            "POST",
+            "/events",
+            None,
+            Some(json!({"events": [{
+                "event_type": "message.user",
+                "client_event_id": "ctx6-foreign-write-probe",
+                "occurred_at": "2020-01-01T10:00:02Z",
+                "payload": {"text": "A caller-owned probe."},
+            }]})),
+        ),
+        (
+            "POST",
+            "/capture-batches",
+            Some("ctx6-foreign-capture-probe"),
+            None,
+        ),
+    ];
+    for (method, suffix, key, body) in suffixes {
+        let foreign_path = format!("/v1/sessions/{foreign_id}{suffix}");
+        let fictional_path = format!("/v1/sessions/{fictional}{suffix}");
+        let (foreign_status, foreign_error) = call(
+            &world.app,
+            method,
+            &foreign_path,
+            &world.alice_token,
+            key,
+            body.clone(),
+        )
+        .await;
+        let (fictional_status, fictional_error) = call(
+            &world.app,
+            method,
+            &fictional_path,
+            &world.alice_token,
+            key,
+            body,
+        )
+        .await;
+        assert_eq!(foreign_status, StatusCode::NOT_FOUND, "{foreign_error}");
+        assert_eq!(foreign_status, fictional_status, "{foreign_path}");
+        assert_eq!(foreign_error["kind"], fictional_error["kind"]);
+        assert!(!foreign_error.to_string().contains(checkpoint_id));
+    }
 }
 
 #[tokio::test]
