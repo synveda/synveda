@@ -106,7 +106,7 @@ remain in Git and the linked release evidence.
 
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
 
-CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes; the broader policy matrix, held-out task probes and a live client run remain open. Next run those probes using approved synthetic fixtures. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision; source Compose/browser acceptance is blocked by an existing separately owned hosts block, and held-out quality/latency evidence remains open. Next arrange an isolated acceptance hostname without resetting retained state, then run the paired source deployment checks. The open briefs hold the exact evidence and limits.
+CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes; the broader policy matrix, held-out task probes and a live client run remain open. Next run those probes using approved synthetic fixtures. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision. An isolated hostname handoff and resolver check passed without resetting retained interop state, but fresh source Compose/browser acceptance stopped during image build on outbound Rust/Debian fetches before project assets existed; held-out quality/latency evidence remains open. Next restore source-build egress within the documented trust boundary and rerun paired source deployment checks. The open briefs hold the exact evidence and limits.
 
 ## Phase 4 — Clients and operations
 
