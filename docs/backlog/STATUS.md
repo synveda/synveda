@@ -23,21 +23,26 @@ The [v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467
 passed anonymous Docker Hub/GHCR pulls on both native architectures. Its public
 jobs then repeated the full candidate deployment drills and reached their
 90-minute limit before retaining reports or publishing a signed inventory.
-The final attestation and GitHub Release were skipped again; v0.4.0 remains the
-current public download. OPS-12 records the authorized v0.4.3 candidate, which
-retains both full native candidate drills and bounds public verification to
-anonymous image execution and chart parity. Its next gates are merge CI Result,
-exact-source main CI, the nonpublishing Release drill and tagged native
-verification. Both failed tags and their image coordinates remain immutable.
+The final attestation and GitHub Release were skipped again. The v0.4.3 source
+`2acc66f02625727b2ccdfe223358468bf10eef85` passed
+[main CI](https://github.com/synveda/synveda/actions/runs/36048573688), the
+[nonpublishing drill](https://github.com/synveda/synveda/actions/runs/36048616477),
+both full tagged native candidate drills and short anonymous public image/chart
+checks. The [tagged run](https://github.com/synveda/synveda/actions/runs/36062182772)
+attested and uploaded all 35 assets, then failed on GitHub's draft-by-tag lookup.
+The exact draft was verified by signer, source and every asset digest, then
+promoted by ID. [v0.4.3](https://github.com/synveda/synveda/releases/tag/v0.4.3)
+is now the public download; the failed workflow remains recorded. Both earlier
+failed tags and their image coordinates remain immutable.
 [Production readiness](../PRODUCTION_READINESS.md) owns the remaining custody,
 recovery and support gaps. Passing installation checks is not HA or certification.
 The fresh contributor walkthrough still needs unoccupied Docker/hosts resources;
 [CPR-45 dependencies](CPR-45.md#dependencies) records the blocker and next action.
 Consumer installation is tracked in [OPS-12](OPS-12.md). Registry configuration,
 Claude scope checks and serialized credential refresh are implemented locally.
-The plain-Compose candidate now has paired named-volume recovery and a complete
-20-check local artifact drill; release CI requires its native recovery reports.
-Native lifecycle/setup/adapter routes now use the candidate and existing public
+The published plain-Compose bundle has paired named-volume recovery and a complete
+20-check local artifact drill; release CI retained its native recovery reports.
+Native lifecycle/setup/adapter routes now use the bundle and existing public
 APIs/installers, with private receipts, observation consent and conflict-safe
 removal (ADR-0116). The source CLI has local OrbStack lifecycle and browser evidence;
 manual Codex/Copilot trust/setup and broader native qualification remain separate.
@@ -53,8 +58,8 @@ checks (ADR-0065 amendment 13). X64 and arm64 passed all seven checks on clean s
 and unsafe archive/installer refusals. The x64 archive/report hashes and native
 identities were also checked locally; OPS-12 records both native job identities
 and the arm64 evidence bundle digest.
-Both Linux x64/ARM64 native archive reports passed in the v0.4.1 tagged run,
-but those archives are not public release assets. Next: artifact-based real
+Both Linux x64/ARM64 native archive reports passed in the v0.4.1 tagged run;
+v0.4.3 publishes its separately qualified archives. Next: artifact-based real
 issuer/harness acceptance evidence. The 2026-09-23 concurrent-session
 replay is local fixture evidence; OPS-12 records the missing authenticated
 two-conversation and child/fork run and its next action.

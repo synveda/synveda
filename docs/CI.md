@@ -213,9 +213,10 @@ without that prefix. The final publish job was skipped, so v0.4.1 has no
 attested inventory or public GitHub Release assets. The release regression
 fixture now reproduces the mismatch and checks that a wrong digest or repository
 still fails. A tag rerun would use the original verifier and encounter already
-populated write-once image tags. Retain those candidates. The owner selected a new v0.4.3 candidate from main;
-it requires full exact-source CI and a nonpublishing drill before tagging.
-v0.4.0 remains the public release.
+populated write-once image tags. Retain those candidates. The owner selected
+v0.4.3 from main; it passed full exact-source CI and a nonpublishing drill
+before tagging.
+v0.4.0 retains its earlier public installation contract.
 
 The [v0.4.2 Release run](https://github.com/synveda/synveda/actions/runs/35987467297)
 passed both anonymous native image pulls and executable checks after its full
@@ -226,6 +227,27 @@ GitHub Release were skipped. ADR-0108 now keeps those full drills in the native
 candidate jobs and retains their reports with the candidate image identity.
 Fresh public jobs check both registries and the OCI chart without replaying the
 deployment. The v0.4.2 tag, images and chart remain immutable.
+
+The v0.4.3 source `2acc66f02625727b2ccdfe223358468bf10eef85` passed
+[full main CI](https://github.com/synveda/synveda/actions/runs/36048573688) with
+`CI Result` success and the
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/36048616477).
+The latter completed six native CLI packages, both native Compose and Helm
+candidate gates, and same-run asset assembly in 2h01m. Its publish job was
+intentionally skipped. The
+[v0.4.3 tagged run](https://github.com/synveda/synveda/actions/runs/36062182772)
+passed the same native candidates, copied the exact images to Docker Hub and
+GHCR, assembled the OCI chart and assets, and passed both anonymous public
+image/chart verifiers. The final job attested `SHA256SUMS` and uploaded all 35
+assets to a draft, then failed because GitHub returned 404 for a draft lookup
+through `/releases/tags/v0.4.3`. The exact draft `396162642` was recovered by
+ID after verifying the signer, tag, source commit, all expected names and every
+server-computed asset digest against the signed inventory. The
+[v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3) and
+inventory are anonymously accessible. The tagged workflow remains failed at
+the post-upload lookup; [PR #63](https://github.com/synveda/synveda/pull/63)
+corrects future draft lookup and promotion by ID. No v0.4.3 image, chart or
+tag was rebuilt or moved during recovery.
 
 The last full [refactor PR run](https://github.com/synveda/synveda/actions/runs/35860525470)
 took 2h12m24s. The [lightweight PR #55 run](https://github.com/synveda/synveda/actions/runs/35875955340)
@@ -254,7 +276,7 @@ not a controlled speedup measurement.
    now restricts new tags with administrator-role bypass for the release
    operator; both rulesets were verified on 2026-09-24.
    **release-dry-run** needs no secrets or approval and passed on the exact
-   v0.4.1 source commit.
+   v0.4.3 source commit.
 4. Give this repository's Actions token write access to the six GHCR packages
    and `ghcr.io/synveda/charts/synveda`; make all public for anonymous verification.
    Permit pinned Actions and workflow-scoped `packages: write`, `contents: write`,
@@ -266,7 +288,6 @@ not a controlled speedup measurement.
    attestation enforcement and real client issuer/harness gaps remain OPS-12 work.
 
 The [native CLI asset table](RELEASING.md#native-cli-release-artifacts) names
-every required public package. The existing v0.4.0 release has neither those
-six client-only archives nor the new authenticated checksum inventory; the new
-v0.4.3 candidate must satisfy the complete asset gate before it appears as a
-stable release.
+every required public package. The v0.4.3 release includes all six client-only
+archives, their native reports and the authenticated checksum inventory. The
+earlier v0.4.0 release has none of those assets.

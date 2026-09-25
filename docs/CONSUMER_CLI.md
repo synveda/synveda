@@ -1,12 +1,12 @@
 # Native consumer commands
 
-These commands are in the v0.4.3 source candidate and matching plugin. The
+These commands are in the published v0.4.3 client archive and matching plugin. The
 [v0.4.1 tagged workflow](https://github.com/synveda/synveda/actions/runs/35900269117)
 qualified its native archives but did not publish them; the v0.4.2 tagged run
-also qualified all six archives but timed out before publication. v0.4.3 still needs its
-own native qualification. Build the current CLI with
-`SQLX_OFFLINE=true cargo build -p synveda-cli` or install a locally built
-candidate. [OPS-12](backlog/OPS-12.md) records native
+also qualified all six archives but timed out before publication. The v0.4.3
+tagged workflow completed all six native packages. Install the matching
+published archive or build the current CLI with
+`SQLX_OFFLINE=true cargo build -p synveda-cli`. [OPS-12](backlog/OPS-12.md) records native
 execution reports and the remaining qualification gaps.
 
 ## Release downloads
@@ -17,7 +17,7 @@ on Linux, macOS and Windows, each on x64 and ARM64. The
 names. Every package and successful native report is required for stable
 publication; a failing target cannot be omitted. Actions artifacts named
 `binaries-TARGET` are retained by a tagged validation run. The v0.4.3
-archives and reports have not yet been built or published.
+archives and reports are public GitHub Release assets.
 
 The existing v0.4.0 release has only the historical macOS ARM64 and Linux x64
 server/CLI archives. It has no `synveda-client-*` assets or Windows packages.
@@ -25,7 +25,7 @@ Do not point the client installer at v0.4.0 public downloads. The source example
 later in this page also support locally built candidates matching the 0.4.3
 workspace version.
 
-After a complete release is published, download your platform's archive,
+For published v0.4.3, download your platform's archive,
 `SHA256SUMS` and `SHA256SUMS.sigstore.json` into a private directory. Follow the
 [publisher and checksum verification steps](RELEASING.md#artifacts-and-verification)
 before installation. Use the installer from that exact tag and inspect it.
@@ -55,7 +55,7 @@ Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
 `windows-x86_64`. All six targets passed native candidate artifact execution
-in the v0.4.1 tagged run; v0.4.3 must repeat those checks. Broader OS versions
+in the v0.4.1 tagged run and again in the v0.4.3 release. Broader OS versions
 and signing remain unqualified.
 The CLI's Unix peer-witness code is isolated, and CLI/hooks share a tested
 platform path contract. Windows credential storage now has a native candidate
@@ -187,7 +187,7 @@ evidence only.
 
 ## Local deployment
 
-Use the extracted [plain-Compose candidate](../deploy/compose/CONSUMER.md), a
+Use the extracted [plain-Compose bundle](../deploy/compose/CONSUMER.md), a
 local Linux-container Docker engine and Compose 2.35+. The CLI and bundle must
 have matching versions. Startup lets Compose pull the bundle's pinned images
 when absent; the CLI does not build images.
@@ -217,7 +217,7 @@ receipt to force adoption. Preserve the original artifact and inspect the
 reported difference. This is not a cross-release upgrade command.
 
 `down` stops the graph with every profile selected and retains all volumes,
-identity and encryption keys. It never passes `--volumes`. Follow the candidate
+identity and encryption keys. It never passes `--volumes`. Follow the bundle
 guide for deliberate password retrieval, sample use and paired recovery. Direct
 Compose and recovery operations must not run concurrently with these commands.
 

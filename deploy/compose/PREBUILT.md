@@ -5,14 +5,14 @@ evaluation, or select the reference HTTPS configuration for infrastructure you
 operate. Both use the same Compose services, database authority checks,
 Cedar, forced RLS, VedaFlow and audit.
 
-<!-- installation-version: 0.4.3; publication: unreleased -->
-**v0.4.3 is the current source candidate and is not published.** The earlier
+<!-- installation-version: 0.4.3; publication: published -->
+**v0.4.3 is the current published bundle.** The earlier
 [v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
-failed before native installation qualification. The
+passed native candidate qualification but failed during anonymous image checks. The
 [v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
 also stopped before final publication after anonymous pulls passed and the
-repeated full drills timed out. For a working public download,
-use [v0.4.0 below](#previous-v040-release) and its original checksum contract.
+repeated full drills timed out. The [v0.4.0 instructions](#previous-v040-release)
+retain their original GHCR and checksum-only contract.
 The [release manifest](../../docs/installation.json) owns this status.
 
 The [refactored release contract](../../docs/RELEASING.md) distributes immutable
@@ -22,8 +22,7 @@ publisher token or native CLI is needed to install the server bundle.
 <a id="download-and-verify"></a>
 ## Version 0.4.3 release bundle
 
-These commands require completed publication and will fail until its assets
-exist. The bundle downloads tested images by digest and never
+The bundle downloads tested images by digest and never
 builds from a consumer source checkout. Verify the publisher before trusting
 the checksums; the GitHub CLI is a verification tool, not an installation
 dependency of the bundle.
@@ -58,7 +57,7 @@ The remaining lifecycle and first-sign-in guidance applies to this bundle.
 
 An ordinary account with access to a **local Docker daemon**, Compose 2.33.1+
 (the minimum for the existing merge contract), curl, tar and a SHA-256 utility.
-A future attested release also needs GitHub CLI for publisher verification.
+Verifying v0.4.3's publisher attestation also needs GitHub CLI.
 The published v0.4.0 bundle passed on native Linux AMD64/ARM64 with Docker 28.0.4 and
 Compose 2.38.2. Local candidate testing also used macOS/OrbStack, Engine 29.4.0,
 Compose 5.1.2 and Apple Silicon. Docker Desktop and Windows/WSL2 remain

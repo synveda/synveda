@@ -9,10 +9,12 @@ failed at Docker Hub RepoDigest verification. The
 passed anonymous digest pulls on both architectures, then timed out while
 repeating the complete deployment drills. Neither run reached final attestation
 or GitHub Release publication. Their versioned images, charts and tags remain
-immutable. The v0.4.3 source candidate retains native candidate qualification
-and shortens the public verification gate; it awaits exact-source CI, a
-nonpublishing drill and a new tag. The
-published v0.4.0 remains unchanged and uses GHCR, its original
+immutable. The [v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
+passed exact-source CI, the nonpublishing drill, native candidate qualification
+and short anonymous public verification. Its tagged job uploaded the complete
+attested draft, then failed while looking up that draft by tag. The exact draft
+was verified and promoted by ID; [CI](CI.md) records the recovery evidence.
+Published v0.4.0 remains unchanged and uses GHCR, its original
 installer and its original checksum-only trust boundary. Never rerun publication
 against that version. The [installation guide](../deploy/compose/PREBUILT.md)
 keeps its earlier download procedure for existing v0.4.0 installations.
@@ -29,7 +31,8 @@ The Release workflow requires every archive below and its native execution
 report before it can publish a stable release. `VERSION` is the workspace
 version without the `v` prefix. All six v0.4.1 client-only archives and their
 reports passed their native build jobs but remain Actions artifacts, not public
-release assets. None is present in v0.4.0.
+release assets. The six v0.4.3 client archives and reports are public; none is
+present in v0.4.0.
 
 | Operating system | CPU | Required GitHub Release asset |
 |---|---|---|
@@ -44,7 +47,7 @@ CI and Release dry runs also retain these packages as Actions artifacts named
 `binaries-TARGET`; those are validation outputs, not public releases. A missing
 runner, archive or successful report blocks publication; no target is optional.
 
-The v0.4.3 source candidate retains `synveda-client-VERSION-TARGET.tar.gz`
+The published v0.4.3 release includes `synveda-client-VERSION-TARGET.tar.gz`
 for native macOS/Linux x86_64 and arm64, plus `.zip` for Windows
 x86_64/arm64. Each contains the existing CLI and adapters plus private Node pinned
 by upstream SHA-256 in [the runtime inventory](../scripts/node-runtimes.json),
@@ -157,7 +160,8 @@ already populated versioned image tags, so rerunning that tag would hit the
 write-once preflight and would also execute the original verifier. Inspect and
 retain those bytes; do not delete/rebuild/overwrite them automatically. Recover
 using the original verified artifacts under an explicitly reviewed owner procedure,
-or publish v0.4.3 after its separate gates pass. Do not move a published Git tag.
+as done for v0.4.3 after its post-upload draft lookup failed. Do not move a
+published Git tag.
 Stable announcement now follows a draft upload and verification of all 35
 expected asset names, sizes and completed upload states. An upload failure
 leaves the draft unpublished. For upload-only recovery after full qualification,

@@ -20,39 +20,43 @@ The screenshot shows the synthetic sample, not a live-agent or human-review clai
 
 ## Run with Docker
 
-The current public first run uses the **prebuilt v0.4.0 bundle**, bundled PostgreSQL
+The current public first run uses the **prebuilt v0.4.3 bundle**, bundled PostgreSQL
 and Keycloak, and generated private credentials. You need a local Docker Engine
-28+, Compose 2.33.1+, curl, tar and a SHA-256 utility; start with 6 GiB available
-to Docker. No compiler, hostname edit, cloud account or model subscription is
-needed. Linux AMD64/ARM64 release installation is verified; macOS/OrbStack has
+28+, Compose 2.33.1+, curl, tar, GitHub CLI and a SHA-256 utility; start with
+6 GiB available to Docker. No compiler, hostname edit, cloud account or model
+subscription is needed. Native Linux AMD64/ARM64 candidate deployment and
+anonymous public image execution are verified; macOS/OrbStack has
 local candidate evidence. Docker Desktop and Windows/WSL2 remain unqualified.
 
-<!-- installation-version: 0.4.3; publication: unreleased -->
+<!-- installation-version: 0.4.3; publication: published -->
 The [v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
 stopped at the anonymous image check, before installation qualification or
 release publication. The [v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
 passed anonymous image checks but timed out while repeating the full deployment
-drills. The v0.4.3 source candidate keeps full native candidate qualification
-and a bounded public artifact check.
-Use the [v0.4.0 release](https://github.com/synveda/synveda/releases/tag/v0.4.0)
-until a complete successor is published. Its checksum detects corruption but
-does not authenticate the publisher. Use a new directory and stop if verification
-fails:
+drills. [v0.4.3](https://github.com/synveda/synveda/releases/tag/v0.4.3)
+retains full native candidate qualification and verifies the copied public
+images anonymously. Its checksum inventory has a publisher attestation. Use a
+new directory and stop if publisher or checksum verification fails:
 
 ```sh
-mkdir synveda-0.4.0 && cd synveda-0.4.0
-release_url=https://github.com/synveda/synveda/releases/download/v0.4.0
-curl -fLO "$release_url/synveda-reference-0.4.0.tar.gz"
-curl -fLO "$release_url/SHA256SUMS"
-awk '$2 == "synveda-reference-0.4.0.tar.gz" { n++; print } END { if (n != 1) exit 1 }' \
+mkdir synveda-0.4.3 && cd synveda-0.4.3
+release_url=https://github.com/synveda/synveda/releases/download/v0.4.3
+for file in synveda-reference-0.4.3.tar.gz SHA256SUMS SHA256SUMS.sigstore.json; do
+  curl -fLO "$release_url/$file"
+done
+gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+  --repo synveda/synveda \
+  --signer-workflow synveda/synveda/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.4.3 --deny-self-hosted-runners
+awk '$2 == "synveda-reference-0.4.3.tar.gz" { n++; print } END { if (n != 1) exit 1 }' \
   SHA256SUMS > reference.sha256
 if command -v shasum >/dev/null 2>&1; then
   shasum -a 256 --check reference.sha256
 else
   sha256sum --check reference.sha256
 fi
-tar -xzf synveda-reference-0.4.0.tar.gz
-cd synveda-reference-0.4.0
+tar -xzf synveda-reference-0.4.3.tar.gz
+cd synveda-reference-0.4.3
 ./synveda-compose up
 ./synveda-compose credential author
 ```
@@ -126,10 +130,10 @@ straight to a PR; no AI harness or prior agent-session knowledge is required.
 The [native consumer commands](docs/CONSUMER_CLI.md) provide lifecycle,
 project setup and managed adapter registration in the matching client package.
 
-The [v0.4.1 native CLI archives](docs/RELEASING.md#native-cli-release-artifacts)
-passed hosted candidate checks on Linux, macOS and Windows x64/ARM64, but are
-not public release assets. Build the current CLI from source or use a published
-v0.4.0 binary within its narrower platform and command contract.
+The [v0.4.3 native CLI archives](docs/RELEASING.md#native-cli-release-artifacts)
+are published for Linux, macOS and Windows x64/ARM64. Verify their attested
+checksum inventory before using the matching installer; platform limits remain
+in the [consumer guide](docs/CONSUMER_CLI.md).
 
 <a id="run-with-prebuilt-docker-images"></a>
 <a id="quick-start-from-a-source-checkout"></a>

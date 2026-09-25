@@ -6,25 +6,24 @@ or existing OIDC. Bundled PostgreSQL is a persistent namespaced StatefulSet;
 CNPG is an explicit alternative requiring an operator you already manage.
 All modes preserve Cedar, forced RLS, VedaFlow, audit and the migration contract.
 
-<!-- installation-version: 0.4.3; publication: unreleased -->
-**v0.4.3 is the current source candidate and is not published.** The earlier
+<!-- installation-version: 0.4.3; publication: published -->
+**v0.4.3 is the current published chart.** The earlier
 [v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
-failed before native chart installation qualification. The
+passed native candidate qualification but failed during anonymous image checks. The
 [v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
 passed anonymous image pulls but timed out after its full candidate chart
-qualification while repeating deployment checks. Use the
+qualification while repeating deployment checks. The
 [published v0.4.0 chart and instructions](https://github.com/synveda/synveda/tree/v0.4.0/deploy/helm/synveda)
-for a public artifact, or build this candidate from source.
+retain their earlier contract.
 
 The [release pipeline](../../../docs/CI.md) retains all four modes, locked chart
 dependencies, install/upgrade/reinstall and recovery checks. It publishes
 Docker Hub/GHCR images and attested checksums after testing exact native OCI
 candidates. Server installation needs no native CLI package or publisher token.
 
-## Pending version 0.4.3 chart
+## Version 0.4.3 chart
 
-The download procedure below requires completed publication. Use
-`RELEASE_VERSION=0.4.3` only after its assets exist. Verify `SHA256SUMS`
+Verify `SHA256SUMS`
 with its attestation before trusting chart or overlay checksums. The package and its two image
 overlays come from that same release; no source build or registry login is
 needed. The release checks the archive against the anonymously retrievable
@@ -149,11 +148,10 @@ cp "synveda-images-$RELEASE_VERSION.yaml" release-images.yaml
 ```
 
 Save the verified archive, overlays, checksums and source revision with operator
-configuration. After v0.4.3 publication, the public OCI chart at
-`oci://ghcr.io/synveda/charts/synveda`, version `0.4.3`, will be byte-identical
-to the downloadable archive and require no registry token. Until then, use a
-reviewed local qualification artifact for this candidate; never substitute an
-arbitrary PR build for a trusted release.
+configuration. The public OCI chart at
+`oci://ghcr.io/synveda/charts/synveda`, version `0.4.3`, is byte-identical
+to the downloadable archive and requires no registry token. Do not substitute
+an arbitrary PR build for this trusted release.
 
 Private image mirrors need existing namespace-local pull
 Secrets in `imagePullSecrets` and, for packaged identity,
@@ -172,7 +170,7 @@ do not pass registry passwords in shell arguments.
 | CNPG / external | Starter with `keycloak.enabled: false` | CNPG owns product DB; identity administrator owns identities |
 
 Copy the selected file from `$CHART` to `team-values.yaml`. Replace every example
-host, tenant and Secret reference. For CNPG only, append the candidate's
+host, tenant and Secret reference. For CNPG only, append the verified release's
 `synveda-cnpg-image-$RELEASE_VERSION.yaml` to `release-images.yaml` (its top-level
 `postgres` key is distinct). Keep database and identity image digests unchanged
 on later application-only upgrades. For external services, complete
