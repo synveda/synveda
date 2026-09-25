@@ -26,6 +26,12 @@ fact or provenance loss. This is a deterministic probe, not a model answer,
 task-success or provider-cost measurement; four samples do not establish a
 production latency distribution.
 
+The shared-budget scenario repeats a checkpoint restart beside exact required
+Knowledge in both governed `off` and `conservative` modes. It verifies the
+checkpoint's source event and the required body under a generous allowance,
+then tightens the allowance and requires the optional restart text to be
+omitted without losing required Knowledge or exposing the omitted source ID.
+
 Run the definition-only CI gate with:
 
 ```sh

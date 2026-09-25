@@ -1302,6 +1302,9 @@ async fn restart_and_required_knowledge_share_one_budget_with_required_priority(
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{events}");
+    let source_event_id = events["events"][0]["event"]["id"]
+        .as_str()
+        .expect("source event id");
 
     let required_body = "Never change the retry cap from 9 to 10. ".repeat(45);
     let (item_id, revision_id) = create_knowledge(
@@ -1322,47 +1325,87 @@ async fn restart_and_required_knowledge_share_one_budget_with_required_priority(
         "required_knowledge_revisions": [{"item_id": item_id, "revision_id": revision_id}],
     });
     let path = format!("/v1/sessions/{session_id}/context-preview");
-    let (status, required_only) = call(
-        &world.app,
-        "POST",
-        &path,
-        &world.alice_token,
-        None,
-        Some(request.clone()),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{required_only}");
-    let required_tokens = required_only["tokens"].as_u64().expect("token count");
-    let mut with_restart = request.clone();
-    with_restart["restart"] = json!(true);
-    let (status, generous) = call(
-        &world.app,
-        "POST",
-        &path,
-        &world.alice_token,
-        None,
-        Some(with_restart.clone()),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{generous}");
-    let generous_text = generous["rendered"].as_str().expect("rendered context");
-    assert!(generous_text.contains(fact));
-    assert!(generous_text.contains(&required_body));
+    for mode in [
+        ContextOptimizationMode::Off,
+        ContextOptimizationMode::Conservative,
+    ] {
+        if mode == ContextOptimizationMode::Conservative {
+            let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+                .await
+                .expect("begin governed Configuration change");
+            let root = scopes::tenant_root(&mut *tx, world.tenant_id)
+                .await
+                .expect("read root")
+                .expect("root exists");
+            configuration_support::set_optimization_mode(&mut tx, world.tenant_id, root.id, mode)
+                .await;
+            tx.commit().await.expect("commit governed Configuration");
+        }
 
-    with_restart["budget_tokens"] = json!(required_tokens + 20);
-    let (status, tight) = call(
-        &world.app,
-        "POST",
-        &path,
-        &world.alice_token,
-        None,
-        Some(with_restart),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{tight}");
-    assert_eq!(tight["restart_coverage"], "omitted_budget");
-    assert!(tight["rendered"].as_str().unwrap().contains(&required_body));
-    assert!(!tight["rendered"].as_str().unwrap().contains(fact));
+        let (status, required_only) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            None,
+            Some(request.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{mode:?}: {required_only}");
+        assert_eq!(required_only["optimization_mode"], mode.as_str());
+        let required_tokens = required_only["tokens"].as_u64().expect("token count");
+        let mut with_restart = request.clone();
+        with_restart["restart"] = json!(true);
+        let (status, generous) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            None,
+            Some(with_restart.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{mode:?}: {generous}");
+        assert_eq!(generous["optimization_mode"], mode.as_str());
+        assert_eq!(generous["token_count_kind"], "exact_encoding");
+        assert_eq!(generous["restart_coverage"], "observed_window");
+        assert!(generous["restart_checkpoint_event_id"].is_string());
+        assert!(generous["tokens"].as_u64().unwrap() <= 2000);
+        let generous_text = generous["rendered"].as_str().expect("rendered context");
+        assert!(generous_text.contains(&format!("\"body_markdown\":{}", json!(required_body))));
+        let excerpt = generous_text
+            .lines()
+            .filter_map(|line| line.strip_prefix("- "))
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find(|line| line["text"] == fact && line["kind"] == "checkpoint_user_excerpt")
+            .expect("restart fact has a labelled source");
+        assert_eq!(excerpt["session_event_id"], source_event_id);
+        assert_eq!(excerpt["assertion_class"], "user_authored");
+        assert_eq!(
+            excerpt["checkpoint_event_id"],
+            generous["restart_checkpoint_event_id"]
+        );
+
+        with_restart["budget_tokens"] = json!(required_tokens + 20);
+        let (status, tight) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            None,
+            Some(with_restart),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{mode:?}: {tight}");
+        assert_eq!(tight["optimization_mode"], mode.as_str());
+        assert_eq!(tight["restart_coverage"], "omitted_budget");
+        assert!(tight["restart_checkpoint_event_id"].is_null());
+        assert!(tight["tokens"].as_u64().unwrap() <= required_tokens + 20);
+        let tight_text = tight["rendered"].as_str().expect("rendered tight context");
+        assert!(tight_text.contains(&format!("\"body_markdown\":{}", json!(required_body))));
+        assert!(!tight_text.contains(fact));
+        assert!(!tight_text.contains(source_event_id));
+    }
 }
 
 #[tokio::test]

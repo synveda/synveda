@@ -189,6 +189,13 @@
       "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenance", "--", "--exact"],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
       "measures": ["checkpoint_fact_retention", "checkpoint_provenance", "restart_preview_latency_ms"]
+    },
+    {
+      "id": "checkpoint_conservative_shared_budget",
+      "title": "Restart and required Knowledge keep exact provenance and budget priority in both governed optimisation modes",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "restart_and_required_knowledge_share_one_budget_with_required_priority", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": ["combined_mode_budget", "checkpoint_provenance", "required_knowledge_retention"]
     }
   ]
 }
