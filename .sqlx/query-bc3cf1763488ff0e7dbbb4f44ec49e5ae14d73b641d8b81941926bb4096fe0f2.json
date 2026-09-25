@@ -1,0 +1,96 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select checkpoint.id, checkpoint.tenant_id, checkpoint.session_id,\n               checkpoint.event_type, checkpoint.event_schema_version,\n               checkpoint.client_event_id, checkpoint.sequence,\n               checkpoint.occurred_at, checkpoint.received_at, checkpoint.payload,\n               checkpoint.payload_hash, checkpoint.source_payload_hash,\n               checkpoint.redactions\n        from session_events as checkpoint\n        join session_events as boundary\n          on boundary.tenant_id = checkpoint.tenant_id\n         and boundary.session_id = checkpoint.session_id\n         and boundary.id::text = checkpoint.payload->>'boundary_event_id'\n         and boundary.event_type = 'session.compaction_boundary'\n        where checkpoint.tenant_id = $1 and checkpoint.session_id = $2\n          and checkpoint.event_type = 'session.checkpoint'\n          and ($3::bigint is null or boundary.sequence < $3)\n        order by checkpoint.sequence desc\n        limit 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "event_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "event_schema_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "client_event_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "sequence",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "occurred_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "received_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "source_payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "redactions",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "bc3cf1763488ff0e7dbbb4f44ec49e5ae14d73b641d8b81941926bb4096fe0f2"
+}

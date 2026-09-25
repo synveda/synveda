@@ -582,6 +582,9 @@ enum ContextCommand {
         /// Exact local text encoding, currently `o200k_base` only.
         #[arg(long)]
         tokenizer_encoding: Option<String>,
+        /// Include governed compact/restart evidence for a supported Claude Session.
+        #[arg(long)]
+        restart: bool,
         /// Exact current Knowledge revision to keep in full, as ITEM_ID@REVISION_ID.
         #[arg(long = "require-knowledge")]
         required_knowledge_revisions: Vec<String>,
@@ -3149,6 +3152,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 query,
                 budget_tokens,
                 tokenizer_encoding,
+                restart,
                 required_knowledge_revisions,
                 max_sensitivity,
                 json,
@@ -3161,6 +3165,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         query: query.as_deref(),
                         budget_tokens,
                         tokenizer_encoding: tokenizer_encoding.as_deref(),
+                        restart,
                         required_knowledge_revisions: &required_knowledge_revisions,
                         max_sensitivity,
                         json,

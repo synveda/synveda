@@ -1845,6 +1845,20 @@ export type ContextPreviewView = {
      */
     requested_budget_tokens?: number | null;
     /**
+     * Checkpoint address used for this restart preview, when trace policy
+     * permits addresses and the source remains available.
+     */
+    restart_checkpoint_event_id?: string | null;
+    /**
+     * `observed_window`, `incomplete`, `uncheckpointed`, or a generic
+     * unavailable reason. Host transcript completeness is never asserted.
+     */
+    restart_coverage?: string | null;
+    /**
+     * Standalone restart component count, not additive with other sections.
+     */
+    restart_rendered_tokens: number;
+    /**
      * Authorised sources included in the rendered text.
      */
     selected: ContextPreviewSourceView[];
@@ -1926,6 +1940,10 @@ export type ContextRunView = {
      * Visible candidates retained for the run.
      */
     candidate_count: number;
+    /**
+     * Checkpoint used by a compact/restart delivery, when present.
+     */
+    checkpoint_event_id?: string | null;
     /**
      * `pending`, `completed` or `failed`.
      */
@@ -2180,6 +2198,11 @@ export type CreateContextRunBody = {
      * authenticated session caller.
      */
     required_knowledge_revisions?: RequiredKnowledgeRevision[];
+    /**
+     * Include bounded Session checkpoint and recent-event evidence after a
+     * supported compact/restart hook. The same Session remains authoritative.
+     */
+    restart?: boolean;
     /**
      * Optional exact text encoding selected by the caller. The only supported
      * value is `o200k_base`; omission keeps an explicit estimate.
@@ -3622,7 +3645,7 @@ export type NewEventBody = {
      * The payload shape this client declares. Defaults to the current one.
      */
     event_schema_version?: number;
-    event_type: "session.started" | "session.ended" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * When the client says it happened.
      */
@@ -5238,7 +5261,7 @@ export type SessionEventView = {
      * The payload shape the client declared.
      */
     event_schema_version: number;
-    event_type: "session.started" | "session.ended" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * The event's id in this deployment.
      */

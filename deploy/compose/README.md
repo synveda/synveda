@@ -485,6 +485,8 @@ synveda context preview <session-id> --query 'traceparent correlation header' \
   --tokenizer-encoding o200k_base --profile author --json
 synveda context preview <session-id> --query 'traceparent correlation header' \
   --require-knowledge <item-id>@<revision-id> --profile author
+synveda context preview <claude-session-id> --restart --query 'resume the pending task' \
+  --profile author
 synveda context inspect <context-run-id> --profile author
 synveda context detail <item-id> <revision-id> --profile author
 ```
@@ -492,7 +494,11 @@ synveda context detail <item-id> <revision-id> --profile author
 The first command is a preview only. Request a real ContextRun in the console
 Context page, then use its returned ID with `context inspect`. `context detail`
 pages through the existing reauthorised Knowledge history route for one exact
-revision. `--tokenizer-encoding o200k_base` counts that local text encoding;
+revision. `--restart` includes the latest available Claude checkpoint chain and a bounded
+later event window when current SessionRead permits it. The checkpoint's
+coverage label describes only the server-observed window, not the entire host
+transcript. It is a preview, never a host compaction rewrite.
+`--tokenizer-encoding o200k_base` counts that local text encoding;
 without a declared compatible encoding the count is labelled an estimate.
 These counts cover the Synveda-rendered contribution, not host history,
 provider framing, output tokens or a billable request. The expandable console
@@ -503,12 +509,18 @@ The deterministic source demo runs against a disposable exact-role database:
 
 ```sh
 SYNVEDA_DB_TEST_TASK=demo bash scripts/db-test.sh demos/ctx-8-context-optimisation.sh
+SYNVEDA_DB_TEST_TASK=demo bash scripts/db-test.sh demos/ctx-6-checkpoint-restart.sh
 ```
 
 It compares the same authorised fixture in off and conservative modes, fetches
 the original detail, and checks that preview creates no delivery. Its token
 numbers are a local rendered-text comparison; no provider request or monetary
 savings are measured.
+
+The second demo replays Claude's public Session event and compact/restart
+requests against a disposable exact-role database. It checks checkpoint
+identity, incomplete coverage, duplicate delivery and source-labelled recent
+events. It is an API and adapter-frame fixture, not a live Claude invocation.
 
 The existing isolated browser acceptance starts from an explicitly fresh,
 suffixed project. If the ordinary development block is installed, stop that

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select event_id\n        from session_event_quarantine\n        where tenant_id = $1 and session_id = $2\n          and event_id = any($3::uuid[]) and state <> 'released'\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6b19172b5c0d96526f10c2b06fed48dff9c9f2fa326297bdf081f3d12de6a497"
+}

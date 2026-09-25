@@ -17047,6 +17047,7 @@
           "advertised_skill_versions",
           "authored_rendered_tokens",
           "knowledge_rendered_tokens",
+          "restart_rendered_tokens",
           "overhead_note",
           "observed_usage_status",
           "degraded"
@@ -17136,6 +17137,27 @@
             ],
             "format": "int32",
             "description": "Caller requested allowance, if one was supplied.",
+            "minimum": 0
+          },
+          "restart_checkpoint_event_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Checkpoint address used for this restart preview, when trace policy\npermits addresses and the source remains available."
+          },
+          "restart_coverage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`observed_window`, `incomplete`, `uncheckpointed`, or a generic\nunavailable reason. Host transcript completeness is never asserted."
+          },
+          "restart_rendered_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Standalone restart component count, not additive with other sections.",
             "minimum": 0
           },
           "selected": {
@@ -17281,6 +17303,14 @@
             "type": "integer",
             "format": "int32",
             "description": "Visible candidates retained for the run."
+          },
+          "checkpoint_event_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Checkpoint used by a compact/restart delivery, when present."
           },
           "completion_status": {
             "type": "string",
@@ -17700,6 +17730,10 @@
               "$ref": "#/components/schemas/RequiredKnowledgeRevision"
             },
             "description": "Current immutable Knowledge revisions required verbatim by the\nauthenticated session caller."
+          },
+          "restart": {
+            "type": "boolean",
+            "description": "Include bounded Session checkpoint and recent-event evidence after a\nsupported compact/restart hook. The same Session remains authoritative."
           },
           "tokenizer_encoding": {
             "type": [
@@ -20272,6 +20306,8 @@
             "enum": [
               "session.started",
               "session.ended",
+              "session.compaction_boundary",
+              "session.checkpoint",
               "message.user",
               "message.assistant",
               "tool.invoked",
@@ -23391,6 +23427,8 @@
             "enum": [
               "session.started",
               "session.ended",
+              "session.compaction_boundary",
+              "session.checkpoint",
               "message.user",
               "message.assistant",
               "tool.invoked",

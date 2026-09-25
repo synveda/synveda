@@ -45,6 +45,8 @@
 //! would be a second copy of `session_events`, and the two would disagree the
 //! first time one was written and the other was not.
 
+pub(crate) mod checkpoint;
+
 use std::collections::BTreeMap;
 
 use axum::Json;
@@ -325,6 +327,10 @@ pub struct ContextRunView {
     /// The session it was composed for.
     #[schema(value_type = String, format = "uuid")]
     pub session_id: SessionId,
+    /// Checkpoint used by a compact/restart delivery, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub checkpoint_event_id: Option<synveda_types::SessionEventId>,
     /// Workspace derived from the session.
     #[schema(value_type = String, format = "uuid")]
     pub workspace_id: WorkspaceId,
@@ -410,6 +416,7 @@ impl From<ContextRun> for ContextRunView {
         ContextRunView {
             id: run.id,
             session_id: run.session_id,
+            checkpoint_event_id: run.checkpoint_event_id,
             workspace_id: run.workspace_id,
             project_id: run.project_id,
             scope_id: run.scope_id,
@@ -467,6 +474,7 @@ impl ContextRunView {
         if !matches!(mode, synveda_types::TraceRetentionMode::Full) {
             view.query = None;
             view.rendered = None;
+            view.checkpoint_event_id = None;
         }
         view
     }
@@ -477,6 +485,7 @@ impl ContextRunView {
     /// existed before the detail surface has re-authorised exact revisions.
     pub(crate) fn for_listing(run: ContextRun) -> Self {
         let mut view = Self::for_trace(run);
+        view.checkpoint_event_id = None;
         view.rendered = None;
         view.block_hash = blake3::hash(b"").to_hex().to_string();
         view.tokens = 0;
@@ -631,7 +640,7 @@ pub struct OpenSessionBody {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NewEventBody {
-    /// What happened — one of the twelve names.
+    /// What happened — one of the closed Session event names.
     #[schema(schema_with = event_type_schema)]
     pub event_type: SessionEventType,
     /// The payload shape this client declares. Defaults to the current one.
@@ -1492,6 +1501,13 @@ pub(crate) async fn get_event(
             Subject::Session(&session),
         )
         .await?;
+        if event.event_type == SessionEventType::Checkpoint
+            && !checkpoint::source_available(&mut tx, tenant_id, session_id, event_id).await?
+        {
+            return Err(Error::NotFound {
+                entity: format!("event {event_id} of session {session_id}"),
+            });
+        }
         // The chain records **which** event was expanded and never the payload
         // it served: an audit log that copied every prompt somebody read would
         // be a second, unbounded transcript store with weaker access rules than
@@ -1545,10 +1561,30 @@ pub(crate) async fn append_events(
 ) -> Response {
     let result = async {
         let body = body(payload)?;
+        for event in &body.events {
+            if event.event_type == SessionEventType::Checkpoint {
+                return Err(Error::Invalid {
+                    message: "checkpoint events are derived by the server".to_owned(),
+                });
+            }
+            if event.event_type == SessionEventType::CompactionBoundary {
+                checkpoint::validate_boundary(event.payload.as_ref())?;
+            }
+        }
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let (session, authorized, _, input) =
             load_with_input(&state, &mut tx, tenant_id, id, Action::SessionWrite).await?;
+        if session.client_name != "claude-code"
+            && body
+                .events
+                .iter()
+                .any(|event| event.event_type == SessionEventType::CompactionBoundary)
+        {
+            return Err(Error::Invalid {
+                message: "compaction boundaries are unsupported for this client".to_owned(),
+            });
+        }
 
         // ── The scan seam (MEM-2, ADR-0021 decision 1; CPR-12,
         // ADR-0078 decision 1) ──
@@ -1653,6 +1689,21 @@ pub(crate) async fn append_events(
         } else {
             sessions::append_events(&mut tx, tenant_id, id, &events).await?
         };
+        let mut checkpoint_ids = Vec::new();
+        for outcome in &appended {
+            if outcome.outcome != AppendOutcome::Appended
+                || outcome.quarantined
+                || outcome.event.event_type != SessionEventType::CompactionBoundary
+            {
+                continue;
+            }
+            let boundary = checkpoint::validate_boundary(Some(&outcome.event.payload))?;
+            if let Some(created) =
+                checkpoint::materialize(&mut tx, tenant_id, id, &outcome.event, &boundary).await?
+            {
+                checkpoint_ids.push(created.id);
+            }
+        }
 
         let written = appended
             .iter()
@@ -1693,6 +1744,7 @@ pub(crate) async fn append_events(
                 "quarantined": quarantined,
                 "denied": denied,
                 "by_type": by_type,
+                "checkpoint_ids": checkpoint_ids,
                 "first_sequence": sequences.first(),
                 "last_sequence": sequences.last(),
                 // Rule ids and counts only. The finding summary is already

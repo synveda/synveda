@@ -50,7 +50,7 @@ use synveda_types::knowledge::{
     KnowledgeType,
 };
 use synveda_types::relaxation::CurrentRelaxation;
-use synveda_types::session::{ContextRun, Session};
+use synveda_types::session::{ContextRun, Session, SessionEventType};
 use synveda_types::{
     ArtifactFamily, ArtifactReference, CaptureCandidateId, ContextCandidate, ContextCandidateId,
     ContextCompletionStatus, ContextFeedback, ContextFeedbackId, ContextGraphStep, ContextRunId,
@@ -379,6 +379,10 @@ pub struct CreateContextRunBody {
     /// Requested budget; the governed pack remains the ceiling.
     #[serde(default)]
     pub budget_tokens: Option<u32>,
+    /// Include bounded Session checkpoint and recent-event evidence after a
+    /// supported compact/restart hook. The same Session remains authoritative.
+    #[serde(default)]
+    pub restart: bool,
     /// Optional exact text encoding selected by the caller. The only supported
     /// value is `o200k_base`; omission keeps an explicit estimate.
     #[serde(default)]
@@ -495,6 +499,17 @@ pub struct ContextPreviewView {
     pub authored_rendered_tokens: u32,
     /// Standalone Knowledge component count; not additive with other components.
     pub knowledge_rendered_tokens: u32,
+    /// Checkpoint address used for this restart preview, when trace policy
+    /// permits addresses and the source remains available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub restart_checkpoint_event_id: Option<synveda_types::SessionEventId>,
+    /// `observed_window`, `incomplete`, `uncheckpointed`, or a generic
+    /// unavailable reason. Host transcript completeness is never asserted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart_coverage: Option<String>,
+    /// Standalone restart component count, not additive with other sections.
+    pub restart_rendered_tokens: u32,
     /// Explanation of final serialized accounting.
     pub overhead_note: String,
     /// Why observed provider usage is unavailable.
@@ -842,11 +857,13 @@ struct ScoreSeed {
     semantic_micros: i32,
 }
 
+#[derive(Clone)]
 enum PlannedPayload {
     Knowledge(KnowledgeSnapshot),
     Unreviewed(CaptureCandidate),
 }
 
+#[derive(Clone)]
 struct PlannedCandidate {
     id: ContextCandidateId,
     payload: PlannedPayload,
@@ -2292,6 +2309,9 @@ struct PreviewInputs<'a> {
     candidates: &'a [PlannedCandidate],
     authored: &'a ComposedBlock,
     knowledge_text: &'a str,
+    restart_text: &'a str,
+    restart_checkpoint_event_id: Option<synveda_types::SessionEventId>,
+    restart_coverage: Option<&'a str>,
     degraded: Vec<String>,
     policy_exclusion: bool,
     trace_retention: TraceRetentionMode,
@@ -2368,12 +2388,23 @@ fn context_preview_view(input: PreviewInputs<'_>) -> ContextPreviewView {
         },
         authored_rendered_tokens: input.counter.count(&input.authored.text),
         knowledge_rendered_tokens: input.counter.count(input.knowledge_text),
+        restart_checkpoint_event_id: if show_refs { input.restart_checkpoint_event_id } else { None },
+        restart_coverage: input.restart_coverage.map(str::to_owned),
+        restart_rendered_tokens: input.counter.count(input.restart_text),
         overhead_note: "Headers, references, serialization and provenance are included in the rendered count; component counts are not additive.".to_owned(),
         observed_usage_status: "unavailable: no provider request was made".to_owned(),
         degraded: input.degraded,
         policy_exclusion_message: input.policy_exclusion
             .then(|| "Some content was excluded by policy.".to_owned()),
     }
+}
+
+fn combined_context(restart: &str, knowledge: &str, authored: &str) -> String {
+    [restart, knowledge, authored]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 async fn plan_context_run(
@@ -2490,6 +2521,45 @@ async fn plan_context_run(
     metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "retrieve")
         .record(retrieve_started.elapsed().as_secs_f64());
 
+    let mut restart_text = String::new();
+    let mut checkpoint_event_id = None;
+    let mut restart_coverage = None;
+    let mut restart_event_ids = Vec::new();
+    if body.restart {
+        if prepared.session.client_name != "claude-code" {
+            return Err(Error::Invalid {
+                message: "checkpoint restart is unsupported for this client".to_owned(),
+            });
+        }
+        match crate::sessions::load(state, &mut tx, tenant_id, session_id, Action::SessionRead)
+            .await
+        {
+            Ok(_) => {
+                let allowance = budget.saturating_div(2).min(2_048);
+                let (text, id, coverage, tail_ids) = crate::sessions::checkpoint::restart_context(
+                    &mut tx, tenant_id, session_id, allowance, &counter,
+                )
+                .await?;
+                restart_text = text;
+                checkpoint_event_id = id.filter(|_| !restart_text.is_empty());
+                restart_coverage = Some(coverage);
+                restart_event_ids = tail_ids;
+            }
+            Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
+                restart_coverage = Some("unavailable".to_owned());
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let restart_reservation = if restart_text.is_empty() {
+        0
+    } else {
+        counter
+            .count(&restart_text)
+            .saturating_add(counter.count("\n\n"))
+    };
+    let mut content_budget = budget.saturating_sub(restart_reservation);
+
     // Authored assets receive an initial share; unspent capacity is available
     // to Knowledge and then returned to authored assets in conservative mode.
     let authored_budget = if mode == ContextOptimizationMode::Conservative
@@ -2497,7 +2567,7 @@ async fn plan_context_run(
     {
         0
     } else {
-        budget.saturating_div(5).saturating_sub(4)
+        content_budget.saturating_div(5).saturating_sub(4)
     };
     let mut authored_request =
         ComposeRequest::new(prepared.plan.scopes.clone(), authored_budget, at)
@@ -2507,12 +2577,15 @@ async fn plan_context_run(
     }
     let mut authored = compose_authored(&mut tx, tenant_id, &authored_request).await?;
     let authored_cost = counter.count(&authored.text);
-    let knowledge_budget = budget
+    let knowledge_budget = content_budget
         .saturating_sub(authored_cost)
         .saturating_sub(counter.count("\n\n"));
 
     let select_started = std::time::Instant::now();
-    let (knowledge_text, _) = assemble_knowledge(
+    let retry_candidates =
+        (body.restart && !restart_text.is_empty() && !body.required_knowledge_revisions.is_empty())
+            .then(|| candidates.clone());
+    let first_assembly = assemble_knowledge(
         state,
         &mut tx,
         tenant_id,
@@ -2525,7 +2598,40 @@ async fn plan_context_run(
             counter: &counter,
         },
     )
-    .await?;
+    .await;
+    let (knowledge_text, _) = match first_assembly {
+        Ok(assembled) => assembled,
+        Err(error @ Error::InsufficientBudget { .. }) => {
+            let Some(original_candidates) = retry_candidates else {
+                return Err(error);
+            };
+            // Required Knowledge keeps its exact-body priority. Retry once
+            // without restart material when the combined allowance is tight.
+            candidates = original_candidates;
+            restart_text.clear();
+            checkpoint_event_id = None;
+            restart_event_ids.clear();
+            restart_coverage = Some("omitted_budget".to_owned());
+            content_budget = budget;
+            assemble_knowledge(
+                state,
+                &mut tx,
+                tenant_id,
+                &mut candidates,
+                KnowledgeAssembly {
+                    budget: content_budget
+                        .saturating_sub(authored_cost)
+                        .saturating_sub(counter.count("\n\n")),
+                    at,
+                    query: query.as_deref(),
+                    mode,
+                    counter: &counter,
+                },
+            )
+            .await?
+        }
+        Err(error) => return Err(error),
+    };
     if mode == ContextOptimizationMode::Conservative {
         let knowledge_cost = counter.count(&knowledge_text);
         let separator_cost = if knowledge_text.is_empty() {
@@ -2533,7 +2639,7 @@ async fn plan_context_run(
         } else {
             counter.count("\n\n")
         };
-        let remaining_for_authored = budget
+        let remaining_for_authored = content_budget
             .saturating_sub(knowledge_cost)
             .saturating_sub(separator_cost);
         if remaining_for_authored > authored_budget {
@@ -2541,13 +2647,10 @@ async fn plan_context_run(
             authored = compose_authored(&mut tx, tenant_id, &authored_request).await?;
         }
     }
-    let mut rendered = match (knowledge_text.is_empty(), authored.text.is_empty()) {
-        (true, true) => String::new(),
-        (false, true) => knowledge_text.clone(),
-        (true, false) => authored.text.clone(),
-        (false, false) => format!("{knowledge_text}\n\n{}", authored.text),
-    };
-    if mode == ContextOptimizationMode::Conservative && counter.count(&rendered) > budget {
+    let mut rendered = combined_context(&restart_text, &knowledge_text, &authored.text);
+    if (mode == ContextOptimizationMode::Conservative || body.restart)
+        && counter.count(&rendered) > budget
+    {
         // Tokenising the joined representation can cost more than the sum of
         // separately counted sections. Give authored material a bounded
         // smaller retry, then omit it if the joined form still overflows.
@@ -2556,16 +2659,17 @@ async fn plan_context_run(
             .budget_tokens
             .saturating_sub(overflow.saturating_add(8));
         authored = compose_authored(&mut tx, tenant_id, &authored_request).await?;
-        rendered = if knowledge_text.is_empty() {
-            authored.text.clone()
-        } else if authored.text.is_empty() {
-            knowledge_text.clone()
-        } else {
-            format!("{knowledge_text}\n\n{}", authored.text)
-        };
+        rendered = combined_context(&restart_text, &knowledge_text, &authored.text);
         if counter.count(&rendered) > budget {
             authored_request.budget_tokens = 0;
             authored = compose_authored(&mut tx, tenant_id, &authored_request).await?;
+            rendered = combined_context(&restart_text, &knowledge_text, "");
+        }
+        if counter.count(&rendered) > budget {
+            restart_text.clear();
+            checkpoint_event_id = None;
+            restart_event_ids.clear();
+            restart_coverage = Some("omitted_budget".to_owned());
             rendered = knowledge_text.clone();
         }
     }
@@ -2607,6 +2711,9 @@ async fn plan_context_run(
     for reason in graph_degradation {
         push_degradation(&mut degraded, &reason);
     }
+    if body.restart && restart_coverage.as_deref() != Some("observed_window") {
+        push_degradation(&mut degraded, "checkpoint");
+    }
     let Some(claim) = claim else {
         let preview = context_preview_view(PreviewInputs {
             session_id,
@@ -2620,6 +2727,9 @@ async fn plan_context_run(
             candidates: &candidates,
             authored: &authored,
             knowledge_text: &knowledge_text,
+            restart_text: &restart_text,
+            restart_checkpoint_event_id: checkpoint_event_id,
+            restart_coverage: restart_coverage.as_deref(),
             degraded,
             policy_exclusion,
             trace_retention: prepared.plan.trace_retention,
@@ -2642,6 +2752,8 @@ async fn plan_context_run(
                 "optimization_mode": mode.as_str(),
                 "token_count_kind": counter.method().certainty(),
                 "tokenizer_encoding": counter.method().encoding(),
+                "checkpoint_event_id": checkpoint_event_id,
+                "restart_coverage": restart_coverage,
                 "policy_exclusion": policy_exclusion,
             }),
         )
@@ -2656,6 +2768,8 @@ async fn plan_context_run(
         &NewContextRun {
             id: run_id,
             session_id,
+            checkpoint_event_id,
+            restart_event_ids,
             workspace_id: prepared.session.workspace_id,
             project_id: prepared.session.project_id,
             scope_id: prepared.session.scope_id,
@@ -2670,7 +2784,10 @@ async fn plan_context_run(
             budget_tokens: i32::try_from(budget).unwrap_or(i32::MAX),
             requested_budget_tokens: requested
                 .map(|value| i32::try_from(value).unwrap_or(i32::MAX)),
-            entry_count: i32::try_from(selected_count + authored.entries.len()).unwrap_or(i32::MAX),
+            entry_count: i32::try_from(
+                selected_count + authored.entries.len() + usize::from(!restart_text.is_empty()),
+            )
+            .unwrap_or(i32::MAX),
             candidate_count: i32::try_from(candidates.len()).unwrap_or(i32::MAX),
             selection_count: i32::try_from(selected_count).unwrap_or(i32::MAX),
             skills: json!(
@@ -2924,6 +3041,8 @@ async fn plan_context_run(
             "authz": audit::decision_context(Action::SessionWrite, &prepared.session_allowed),
             "session_id": session_id,
             "context_run_id": run_id,
+            "checkpoint_event_id": checkpoint_event_id,
+            "restart_coverage": restart_coverage,
             "artifact_references": artifact_references,
             "task_hash": query.as_deref().map(task_hash),
             "block_hash": run.block_hash,
@@ -3471,13 +3590,34 @@ async fn detail_view(
         .filter(|entry| visible_selection_ids.contains(&entry.context_selection_id))
         .map(Into::into)
         .collect();
+    let mut restart_detail_unavailable = false;
+    if let Some(checkpoint_id) = run.checkpoint_event_id {
+        restart_detail_unavailable = !crate::sessions::checkpoint::source_available(
+            tx,
+            tenant_id,
+            run.session_id,
+            checkpoint_id,
+        )
+        .await?;
+    }
+    for event_id in &run.restart_event_ids {
+        let event = sessions::event(&mut *tx, tenant_id, run.session_id, *event_id).await?;
+        if !event.is_some_and(|held| held.event_type == SessionEventType::MessageUser)
+            || !sessions::withheld_event_ids(&mut *tx, tenant_id, run.session_id, &[*event_id])
+                .await?
+                .is_empty()
+        {
+            restart_detail_unavailable = true;
+            break;
+        }
+    }
     let mut run_view = ContextRunView::for_trace(run);
     run_view.candidate_count = i32::try_from(candidates.len()).unwrap_or(i32::MAX);
     run_view.selection_count = i32::try_from(selections.len()).unwrap_or(i32::MAX);
     // A full historical block may contain a selection whose current policy no
     // longer permits it. Exact selection re-authorisation therefore gates the
     // whole rendered block as well as every content-derived size/hash/count.
-    if selection_policy_exclusion || authored_detail_unavailable {
+    if selection_policy_exclusion || authored_detail_unavailable || restart_detail_unavailable {
         policy_exclusion = true;
         run_view.rendered = None;
         run_view.block_hash = blake3::hash(b"").to_hex().to_string();

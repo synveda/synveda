@@ -634,6 +634,207 @@ async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
 }
 
 #[tokio::test]
+async fn restart_preview_requires_a_fresh_session_read_decision() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let (status, session) = call(
+        &world.app,
+        "POST",
+        "/v1/sessions",
+        &world.alice_token,
+        Some("ctx6-read-policy-session"),
+        Some(json!({
+            "workspace_id": world.workspace_id,
+            "project_id": world.project_id,
+            "client_name": "claude-code",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{session}");
+    let session_id = session["id"].as_str().expect("session id");
+    let fact = "The private restart marker is silver-29.";
+    let (status, appended) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{session_id}/events"),
+        &world.alice_token,
+        None,
+        Some(json!({"events": [
+            {
+                "event_type": "message.user",
+                "client_event_id": "ctx6-read-source",
+                "occurred_at": "2020-01-01T10:00:00Z",
+                "payload": {"text": fact},
+            },
+            {
+                "event_type": "session.compaction_boundary",
+                "client_event_id": "ctx6-read-boundary",
+                "occurred_at": "2020-01-01T10:00:01Z",
+                "payload": {
+                    "schema_version": 1,
+                    "local_high_sequence": 2,
+                    "expected_client_event_ids": ["ctx6-read-source"],
+                    "expected_ids_truncated": false,
+                },
+            },
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{appended}");
+
+    world
+        .state
+        .pdp
+        .install_source(
+            world.tenant_id,
+            "ctx6-session-write-only",
+            1,
+            r#"permit (
+                 principal,
+                 action == Synveda::Action::"SessionWrite",
+                 resource
+               ) when { resource in principal.tenant };"#,
+            PackConfig::default(),
+        )
+        .expect("install write-only session policy");
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin policy binding");
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, "ctx6-session-write-only")
+        .await;
+    tx.commit().await.expect("commit policy binding");
+
+    let (status, preview) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{session_id}/context-preview"),
+        &world.alice_token,
+        None,
+        Some(json!({"restart": true, "budget_tokens": 500})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["restart_coverage"], "unavailable");
+    assert!(!preview.to_string().contains(fact));
+    assert!(preview.get("restart_checkpoint_event_id").is_none());
+}
+
+#[tokio::test]
+async fn restart_and_required_knowledge_share_one_budget_with_required_priority() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let (status, session) = call(
+        &world.app,
+        "POST",
+        "/v1/sessions",
+        &world.alice_token,
+        Some("ctx6-required-session"),
+        Some(json!({
+            "workspace_id": world.workspace_id,
+            "project_id": world.project_id,
+            "client_name": "claude-code",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{session}");
+    let session_id = session["id"].as_str().expect("session id");
+    let fact = "The restart marker is amber-41.";
+    let (status, events) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{session_id}/events"),
+        &world.alice_token,
+        None,
+        Some(json!({"events": [
+            {
+                "event_type": "message.user",
+                "client_event_id": "ctx6-required-source",
+                "occurred_at": "2020-01-01T10:00:00Z",
+                "payload": {"text": fact},
+            },
+            {
+                "event_type": "session.compaction_boundary",
+                "client_event_id": "ctx6-required-boundary",
+                "occurred_at": "2020-01-01T10:00:01Z",
+                "payload": {
+                    "schema_version": 1,
+                    "local_high_sequence": 2,
+                    "expected_client_event_ids": ["ctx6-required-source"],
+                    "expected_ids_truncated": false,
+                },
+            },
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events}");
+
+    let required_body = "Never change the retry cap from 9 to 10. ".repeat(45);
+    let (item_id, revision_id) = create_knowledge(
+        &world,
+        "ctx6-required-knowledge",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Required retry cap",
+        &required_body,
+        None,
+    )
+    .await;
+    let request = json!({
+        "query": "retry cap",
+        "budget_tokens": 2000,
+        "tokenizer_encoding": "o200k_base",
+        "required_knowledge_revisions": [{"item_id": item_id, "revision_id": revision_id}],
+    });
+    let path = format!("/v1/sessions/{session_id}/context-preview");
+    let (status, required_only) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        None,
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{required_only}");
+    let required_tokens = required_only["tokens"].as_u64().expect("token count");
+    let mut with_restart = request.clone();
+    with_restart["restart"] = json!(true);
+    let (status, generous) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        None,
+        Some(with_restart.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generous}");
+    let generous_text = generous["rendered"].as_str().expect("rendered context");
+    assert!(generous_text.contains(fact));
+    assert!(generous_text.contains(&required_body));
+
+    with_restart["budget_tokens"] = json!(required_tokens + 20);
+    let (status, tight) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        None,
+        Some(with_restart),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{tight}");
+    assert_eq!(tight["restart_coverage"], "omitted_budget");
+    assert!(tight["rendered"].as_str().unwrap().contains(&required_body));
+    assert!(!tight["rendered"].as_str().unwrap().contains(fact));
+}
+
+#[tokio::test]
 async fn conservative_preview_is_not_delivery_and_required_revisions_fail_closed() {
     let _guard = serial().await;
     let Some(world) = admitted_world().await else {

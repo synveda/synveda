@@ -2351,8 +2351,8 @@ async fn application_acl_fingerprint(connection: &mut PgConnection) -> Result<St
 // An exact row count and per-definition byte ceiling make the catalogue read
 // bounded even after hostile owner-level drift.
 const ROUTINE_CATALOG_FINGERPRINT: &str =
-    "1254f5a3d309db75aa1810ad74049cd9c78733050eb53145520b29a4d43d5733";
-const ROUTINE_CATALOG_ROW_COUNT: usize = 69;
+    "b21947ff8f7672cad6b1d7f57c2a8bf1545fa949b06b00146bcab0381d84574c";
+const ROUTINE_CATALOG_ROW_COUNT: usize = 70;
 const ROUTINE_DEFINITION_MAX_BYTES: i32 = 131_072;
 const ROUTINE_CONFIGURATION_MAX_ITEMS: i32 = 32;
 const ROUTINE_CONFIGURATION_ITEM_MAX_BYTES: i32 = 4096;
@@ -2481,8 +2481,8 @@ async fn routine_catalog_fingerprint(
 // `pg_get_triggerdef`, so that state and provider-neutral ownership bits are
 // hashed separately from the deparsed definition.
 const TRIGGER_CATALOG_FINGERPRINT: &str =
-    "e028d5a71bdfacbb4e9f98f165287af5014da6a02a21b8872087e6a8aae15946";
-const TRIGGER_CATALOG_ROW_COUNT: usize = 112;
+    "ddd185e23b659d8e80f4f5348be9b44be83ccf0f8a4550b6fd57c0120a35eab0";
+const TRIGGER_CATALOG_ROW_COUNT: usize = 113;
 const TRIGGER_DEFINITION_MAX_BYTES: i32 = 16_384;
 const TRIGGER_ARGUMENT_MAX_COUNT: i16 = 128;
 

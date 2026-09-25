@@ -14,6 +14,7 @@ pub struct PreviewOptions<'a> {
     pub query: Option<&'a str>,
     pub budget_tokens: Option<u32>,
     pub tokenizer_encoding: Option<&'a str>,
+    pub restart: bool,
     pub required_knowledge_revisions: &'a [String],
     pub max_sensitivity: Option<Sensitivity>,
     pub json: bool,
@@ -56,6 +57,7 @@ pub async fn preview(profile: &str, options: PreviewOptions<'_>) -> Result<(), S
                 "query": options.query,
                 "budget_tokens": options.budget_tokens,
                 "tokenizer_encoding": options.tokenizer_encoding,
+                "restart": options.restart,
                 "required_knowledge_revisions": required,
                 "max_sensitivity": options.max_sensitivity,
             })),
@@ -66,6 +68,17 @@ pub async fn preview(profile: &str, options: PreviewOptions<'_>) -> Result<(), S
     }
     println!("Preview only — no ContextRun delivery or provider request recorded.");
     print_accounting(&response);
+    if options.restart {
+        println!(
+            "Restart evidence: {}",
+            response["restart_coverage"]
+                .as_str()
+                .unwrap_or("unavailable")
+        );
+        if let Some(id) = response["restart_checkpoint_event_id"].as_str() {
+            println!("Checkpoint: {id}");
+        }
+    }
     print_sources(&response["selected"], "Selected");
     print_sources(&response["omitted"], "Omitted");
     if let Some(message) = response["policy_exclusion_message"].as_str() {

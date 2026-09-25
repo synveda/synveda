@@ -21,7 +21,7 @@ The Claude adapter's `PreCompact` hook durably spools the remaining transcript a
 
 ## Architecture seam
 
-Add a typed checkpoint contract beside the Session aggregate, persisted by `synveda-store` and reached through session-scoped gateway application services. Capture consumes the checkpoint as immutable source evidence; the context planner may select it as a separately labelled source after PDP authorization. Adapter hooks remain public-API clients and retain the atomic spool/replay boundary from ADR-0078.
+ADR-0119 fixes the first checkpoint method as a server-derived typed Session event. It is persisted in the existing immutable event ledger, after the ordinary SessionWrite decision and redaction scan. The Claude compact hook spools a typed boundary locally; the normal delivery path derives the checkpoint. Restart composition reads only the same Session after SessionRead, verifies source hashes and review state, and combines bounded excerpts and current Knowledge under one Synveda allowance. Capture continues to freeze the checkpoint's original eligible source events; the derived event cannot publish Knowledge. Adapter hooks remain public-API clients and retain the atomic spool/replay boundary from ADR-0078.
 
 ## Acceptance criteria
 
@@ -46,3 +46,11 @@ Ship storage and ingestion dark, then enable checkpoint planning per adapter/pro
 ## Dependencies
 
 An accepted ADR must fix checkpoint identity, summary provenance, planner priority, and capture interaction. The owner must approve retention, sensitivity/redaction rules, summarizer policy and budget, recent-window bounds, and the probe corpus. Authentic hook evidence depends on access to a supported Claude client and credential.
+
+### Current implementation and open gates (2026-09-25)
+
+The source checkout records `session.compaction_boundary` locally at Claude `PreCompact`, derives one `session.checkpoint` per newly admitted boundary, and reuses Session RLS, PDP, scan, audit and event retention. The deterministic method keeps at most 64 recent source events, eight user-authored excerpts per checkpoint, four checkpoints at restart and 16 tail events. It does not call a model or fill unsupported typed summary fields. Checkpoint coverage distinguishes an observed window from a missing or truncated one; host transcript completeness is not claimed. Restart uses current Knowledge through the existing planner, and a missing, deleted or withheld source fails closed for the affected derivative. The real ContextRun retains its checkpoint and tail dependencies for later trace checks.
+
+The focused exact-role gateway tests pass for two compact boundaries in one delayed batch, duplicate replay, a later event tail, concurrent boundary delivery, a missing event and a late arrival. A scoped retention disposal withholds both checkpoint diagnostic expansion and a retained ContextRun block; a direct capture probe freezes the checkpoint's primary user event as a review-only candidate, never active Knowledge. A combined-budget probe includes checkpoint evidence beside required Knowledge when it fits and keeps the required body exact when restart must be omitted. The 122 Claude adapter tests pass with a loopback mock gateway, including repeated local compaction windows. SQLx generation and check, generated OpenAPI/console types, strict Clippy and repository static gates pass. `demos/ctx-6-checkpoint-restart.sh` replays the public API cases. These tests do not establish a live proprietary Claude run or provider task quality.
+
+The brief stays open for a broader Session policy matrix, held-out compact/restart task evaluation with critical-fact and latency tolerances, and a live-client run with approved synthetic fixture and bounded spend. The source Compose/browser gate still needs a separately owned acceptance hostname; the existing `synveda-development-acceptance-interop` hosts block must not be reset as a shortcut. The next action is to run the remaining policy and held-out probes, then stage a live synthetic Claude compact/resume probe if credentials and spend permission are available.

@@ -1238,6 +1238,134 @@ pub async fn events(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// Latest server-derived checkpoint by its source boundary. A replay batch
+/// may append more events after a marker before the server can materialize
+/// the checkpoint, so the checkpoint's own sequence is not the window edge.
+/// Materialization follows admitted boundary order under the Session append
+/// lock, making checkpoint sequence a safe indexed order for this lookup.
+pub async fn latest_checkpoint(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    before: Option<i64>,
+) -> Result<Option<SessionEvent>> {
+    let row = sqlx::query_as!(
+        EventRow,
+        r#"
+        select checkpoint.id, checkpoint.tenant_id, checkpoint.session_id,
+               checkpoint.event_type, checkpoint.event_schema_version,
+               checkpoint.client_event_id, checkpoint.sequence,
+               checkpoint.occurred_at, checkpoint.received_at, checkpoint.payload,
+               checkpoint.payload_hash, checkpoint.source_payload_hash,
+               checkpoint.redactions
+        from session_events as checkpoint
+        join session_events as boundary
+          on boundary.tenant_id = checkpoint.tenant_id
+         and boundary.session_id = checkpoint.session_id
+         and boundary.id::text = checkpoint.payload->>'boundary_event_id'
+         and boundary.event_type = 'session.compaction_boundary'
+        where checkpoint.tenant_id = $1 and checkpoint.session_id = $2
+          and checkpoint.event_type = 'session.checkpoint'
+          and ($3::bigint is null or boundary.sequence < $3)
+        order by checkpoint.sequence desc
+        limit 1
+        "#,
+        tenant_id.as_uuid(),
+        session_id.as_uuid(),
+        before,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
+/// Bounded immutable evidence preceding a checkpoint boundary, newest first.
+pub async fn events_before(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    after: i64,
+    before: i64,
+    limit: i64,
+) -> Result<Vec<SessionEvent>> {
+    let rows = sqlx::query_as!(
+        EventRow,
+        r#"
+        select id, tenant_id, session_id, event_type, event_schema_version,
+               client_event_id, sequence, occurred_at, received_at, payload,
+               payload_hash, source_payload_hash, redactions
+        from session_events
+        where tenant_id = $1 and session_id = $2
+          and sequence > $3 and sequence < $4
+        order by sequence desc
+        limit $5
+        "#,
+        tenant_id.as_uuid(),
+        session_id.as_uuid(),
+        after,
+        before,
+        limit,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// Client IDs claimed by a compaction marker that actually precede it in
+/// this same Session. The list is bounded by the typed marker contract.
+pub async fn preceding_client_event_ids(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    before: i64,
+    client_event_ids: &[String],
+) -> Result<Vec<String>> {
+    sqlx::query_scalar!(
+        r#"
+        select client_event_id
+        from session_events
+        where tenant_id = $1 and session_id = $2
+          and sequence < $3 and client_event_id = any($4::text[])
+        "#,
+        tenant_id.as_uuid(),
+        session_id.as_uuid(),
+        before,
+        client_event_ids,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)
+}
+
+/// Events whose contents are still withheld by review. Checkpoint source
+/// addresses may include them for coverage, but no derived excerpt may use
+/// their payload while the quarantine is pending or rejected.
+pub async fn withheld_event_ids(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    event_ids: &[SessionEventId],
+) -> Result<Vec<SessionEventId>> {
+    let ids: Vec<Uuid> = event_ids.iter().map(|id| id.as_uuid()).collect();
+    let rows = sqlx::query_scalar!(
+        r#"
+        select event_id
+        from session_event_quarantine
+        where tenant_id = $1 and session_id = $2
+          and event_id = any($3::uuid[]) and state <> 'released'
+        "#,
+        tenant_id.as_uuid(),
+        session_id.as_uuid(),
+        &ids,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    Ok(rows.into_iter().map(SessionEventId::from_uuid).collect())
+}
+
 // ── Context runs ─────────────────────────────────────────────────────────────
 
 /// What [`record_context_run`] stores.
@@ -1247,6 +1375,10 @@ pub struct NewContextRun {
     pub id: ContextRunId,
     /// The session it was composed for.
     pub session_id: SessionId,
+    /// Exact checkpoint dependency, when a restart block was included.
+    pub checkpoint_event_id: Option<SessionEventId>,
+    /// Exact recent Session event dependencies of restart delivery.
+    pub restart_event_ids: Vec<SessionEventId>,
     /// Workspace derived from the session.
     pub workspace_id: WorkspaceId,
     /// Project derived from the session, when present.
@@ -1305,6 +1437,8 @@ struct ContextRunRow {
     id: Uuid,
     tenant_id: Uuid,
     session_id: Uuid,
+    checkpoint_event_id: Option<Uuid>,
+    restart_event_ids: Vec<Uuid>,
     workspace_id: Uuid,
     project_id: Option<Uuid>,
     scope_id: Uuid,
@@ -1342,6 +1476,12 @@ impl TryFrom<ContextRunRow> for ContextRun {
             id: ContextRunId::from_uuid(row.id),
             tenant_id: TenantId::from_uuid(row.tenant_id),
             session_id: SessionId::from_uuid(row.session_id),
+            checkpoint_event_id: row.checkpoint_event_id.map(SessionEventId::from_uuid),
+            restart_event_ids: row
+                .restart_event_ids
+                .into_iter()
+                .map(SessionEventId::from_uuid)
+                .collect(),
             workspace_id: WorkspaceId::from_uuid(row.workspace_id),
             project_id: row.project_id.map(ProjectId::from_uuid),
             scope_id: ScopeId::from_uuid(row.scope_id),
@@ -1392,6 +1532,11 @@ pub async fn record_context_run(
     tenant_id: TenantId,
     new: &NewContextRun,
 ) -> Result<ContextRun> {
+    let restart_ids: Vec<Uuid> = new
+        .restart_event_ids
+        .iter()
+        .map(|id| id.as_uuid())
+        .collect();
     let row = sqlx::query_as!(
         ContextRunRow,
         r#"
@@ -1402,11 +1547,12 @@ pub async fn record_context_run(
              budget_tokens, requested_budget_tokens, entry_count,
              candidate_count, selection_count, skills, degraded, as_of,
              retrieval_version, embedding_model, index_version, graph_version,
-             trace_retention_mode, completion_status, policy_exclusion)
+             trace_retention_mode, completion_status, policy_exclusion,
+             checkpoint_event_id, restart_event_ids)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
                 $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-                $25, $26, $27, $28, $29)
-        returning id, tenant_id, session_id, workspace_id as "workspace_id!",
+                $25, $26, $27, $28, $29, $30, $31)
+        returning id, tenant_id, session_id, checkpoint_event_id, restart_event_ids, workspace_id as "workspace_id!",
                   project_id, scope_id,
                   principal_id, configuration_version_id, configuration_hash,
                   query, query_hash, rendered, block_hash, tokens,
@@ -1448,6 +1594,8 @@ pub async fn record_context_run(
         new.trace_retention.as_str(),
         new.completion_status.as_str(),
         new.policy_exclusion,
+        new.checkpoint_event_id.map(|id| id.as_uuid()),
+        &restart_ids,
     )
     .fetch_one(&mut *conn)
     .await
@@ -1477,7 +1625,7 @@ pub async fn context_run(
     let row = sqlx::query_as!(
         ContextRunRow,
         r#"
-        select id, tenant_id, session_id, workspace_id as "workspace_id!",
+        select id, tenant_id, session_id, checkpoint_event_id, restart_event_ids, workspace_id as "workspace_id!",
                project_id, scope_id,
                principal_id, configuration_version_id, configuration_hash,
                query, query_hash, rendered, block_hash, tokens,
@@ -1521,7 +1669,7 @@ pub async fn context_runs(
     let rows = sqlx::query_as!(
         ContextRunRow,
         r#"
-        select id, tenant_id, session_id, workspace_id as "workspace_id!",
+        select id, tenant_id, session_id, checkpoint_event_id, restart_event_ids, workspace_id as "workspace_id!",
                project_id, scope_id,
                principal_id, configuration_version_id, configuration_hash,
                query, query_hash, '' as "rendered!", block_hash,
@@ -1588,7 +1736,7 @@ pub async fn context_run_candidates(
     let rows = sqlx::query_as!(
         ContextRunRow,
         r#"
-        select id, tenant_id, session_id, workspace_id as "workspace_id!",
+        select id, tenant_id, session_id, checkpoint_event_id, restart_event_ids, workspace_id as "workspace_id!",
                project_id, scope_id,
                principal_id, configuration_version_id, configuration_hash,
                query, query_hash, rendered, block_hash, tokens,

@@ -223,8 +223,8 @@ fn session_event_type_rejects_unknown_names() {
     }
 }
 
-/// The wire names are stored values under a CHECK constraint (migration 0044,
-/// widened by 0046), so renaming one silently orphans every row already
+/// The wire names are stored values under the epoch-3 baseline CHECK, so
+/// renaming one silently orphans every row already
 /// written with the old spelling. Pinned literally, on purpose: this test is
 /// meant to fail when someone edits `as_str`.
 #[test]
@@ -237,6 +237,8 @@ fn session_event_type_wire_names_are_pinned_to_the_stored_vocabulary() {
         vec![
             "session.started",
             "session.ended",
+            "session.compaction_boundary",
+            "session.checkpoint",
             "message.user",
             "message.assistant",
             "tool.invoked",
