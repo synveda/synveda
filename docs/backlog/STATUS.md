@@ -106,7 +106,7 @@ remain in Git and the linked release evidence.
 
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
 
-CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes, and a passing create/read/use/capture policy matrix including revocation and foreign-tenant comparisons. Four predeclared synthetic task probes pass in the fresh-database 23-scenario product suite: 12/12 Session facts and four exact Knowledge bodies retained, provenance intact, local assisted preview p95 below the 500 ms guard. A separate combined-mode gate preserves checkpoint source attribution and exact required Knowledge in both off and conservative modes, omitting optional restart text under a tight shared budget. An opt-in export now prepares the actual paired synthetic ContextRun blocks against a fixed JSON-answer rubric without calling a model, and a capped no-tools runner passes a fake-client end-to-end test. This does not measure model task success or provider usage. A live proprietary-client run remains open. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision. An isolated hostname handoff and resolver check passed without resetting retained interop state, and the original mapping was restored. The product source image now selects its verified pinned Rust compiler without fetching development-only components, but Cargo index/archive endpoints time out from this host and Docker, with a fresh direct host HTTPS timeout on 2026-09-25, so full Compose/browser acceptance and CTX-8 held-out model quality evidence remain open. Next restore Cargo source-build egress within the documented trust boundary, rerun paired deployment checks, then run the bounded factual/model and live Claude probes when credentials and spend permission are available. The open briefs hold the exact evidence and limits.
+CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes, and a passing create/read/use/capture policy matrix including revocation and foreign-tenant comparisons. Four predeclared synthetic task probes pass in the fresh-database 23-scenario product suite: 12/12 Session facts and four exact Knowledge bodies retained, provenance intact, local assisted preview p95 below the 500 ms guard. A separate combined-mode gate preserves checkpoint source attribution and exact required Knowledge in both off and conservative modes, omitting optional restart text under a tight shared budget. An opt-in export now prepares the actual paired synthetic ContextRun blocks against a fixed JSON-answer rubric without calling a model, and a capped no-tools runner passes a fake-client end-to-end test. This does not measure model task success or provider usage. A live proprietary-client run remains open. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision. An isolated hostname handoff and resolver check passed without resetting retained interop state, and the original mapping was restored. The pinned product source image built on 2026-09-29 after official Cargo index/archive access recovered. Fresh CTX-6/CTX-8 Compose/browser acceptance and held-out model quality remain open. Next rerun paired deployment checks, then the bounded factual/model and live Claude probes when credentials and spend permission are available. The open briefs hold the exact evidence and limits.
 
 ## Phase 4 — Clients and operations
 
@@ -140,9 +140,15 @@ transactional `0002` for CTX-6/CTX-8, with byte pins and a staged migration
 guard. This is a source candidate; v0.4.0 remains incompatible and there is
 still no qualified published N-1/N pair. A 24-case isolated exact-role epoch
 run proves the published `0001` checksum, tenant retention, staged refusal and
-stamp recovery with source `0002`; the full isolated database suite passes.
-Next, run the released-byte joint data/identity/key upgrade, injected-failure
-and OPS-5 recovery drills before any supported upgrade claim.
+stamp recovery with source `0002`; the full isolated database suite passes. A
+2026-09-29 disposable released-byte v0.4.3-to-source rehearsal passed linked
+logical database/identity/key backup and fresh restore, old-writer quiescence,
+`0002`, old-binary refusal, candidate gateway/worker/browser acceptance,
+key-open/wrong-key checks and a separate release-binary rollback restore. The
+source candidate shares the 0.4.3 version string; no published N, off-host
+PITR, complete Knowledge/audit-prefix continuity, injected-failure or measured
+maintenance window is qualified. Next run those gates with representative data
+and the OPS-5 recovery set before a supported upgrade claim.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open

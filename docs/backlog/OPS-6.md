@@ -45,16 +45,46 @@ an exact published-baseline SQLx prefix, retained tenant data and baseline
 ledger row, read-only preflight, interrupted-stamp recovery, missing-ledger
 preservation and old-catalogue drift refusal. SQLx generated-metadata
 verification passes on a fresh two-head database, and the full isolated
-`bash scripts/db-test.sh` suite passes, including serial authority tests. This
-does not yet test a published v0.4.3 application binary,
-populated Knowledge/audit/key state or a joint restore.
+`bash scripts/db-test.sh` suite passes, including serial authority tests. At
+that checkpoint this had not tested a published application binary, populated
+audit/key state or a joint restore.
 
-The next action is to exercise the transition with released v0.4.3
-application/Keycloak/key material and a candidate image on a restored copy.
-Inject failures before and after DDL, prove audit/history/key continuity,
-measure lock time and the maintenance window, and complete the OPS-5 joint
-recovery drill. Only then publish and qualify the N-1/N pair. No old binary may
-serve the advanced database; rollback restores the verified recovery set.
+On 2026-09-29, a disposable macOS/OrbStack rehearsal used the published
+v0.4.3 product image at
+`sha256:071bd209cdd26497c3c928949f38a8f2114c49384bea32eb3196952377ab47f3`
+and checksum-matched `synveda-reference-0.4.3.tar.gz`. The release's
+`SHA256SUMS` passed GitHub attestation verification for the exact release
+workflow, tag and source commit `2acc66f02625727b2ccdfe223358468bf10eef85`;
+the image digest matched the checksummed release overlay. The published stack
+passed its public-API sample, leaving a pending governed proposal. A linked
+PostgreSQL/Keycloak/key backup verified, and its independent private restore
+recovered 58 audit events, opened the original tenant key, refused a wrong key
+and passed browser/OIDC/API/logout acceptance. The sample-specific rerun on
+the new browser fixture returned `product-demo failed`; that client-receipt
+continuity remains unverified.
+
+The source product image built from
+`dc77956b94e0f256125baa49dadbd578db8f861d` with local image ID
+`sha256:75107e28325338f5aa4087d13d8330402db2149bb98d619e7e5e523bb8255b08`.
+Its read-only check classified the released head as upgradeable while refusing
+to serve it. On the restored copy, the old gateway and worker stopped, `0002`
+applied, and the candidate's read-only check passed. The published binary
+refused the advanced schema. Candidate gateway and worker became healthy from
+the exact local image ID; its recovery verifier validated the continuing
+81-event audit chain, opened the original key and refused the wrong key. The
+published private browser/OIDC/API/logout check passed against the candidate.
+A second fresh restore from the same pre-migration set recovered the original
+58-event chain and key, refused the wrong key, started the published gateway
+and worker, passed its schema check and browser/API acceptance. The migrated
+copy and original source were never overwritten.
+
+This is source-candidate, local logical-recovery evidence. It does not prove
+the frozen audit prefix byte-for-byte after migration, complete
+Knowledge/Skill/proposal continuity, failure injection, production-sized lock
+or maintenance time, off-host PITR, Helm ordering or a published N-1/N pair.
+Next run those checks against representative data and the OPS-5 off-host
+recovery set, then publish and qualify the pair. No old binary may serve the
+advanced database; rollback restores the verified recovery set.
 
 ## Scope
 
