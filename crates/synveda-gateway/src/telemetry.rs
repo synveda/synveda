@@ -95,6 +95,13 @@ pub const SESSION_OPERATIONS_TOTAL: &str = "synveda_session_operations_total";
 /// last-good compile in force — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
 pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
 
+/// Complete stored-policy sweep outcomes, with a closed `ok|error|timeout`
+/// vocabulary. Only `ok` renews gateway policy freshness (OPS-7, ADR-0127).
+pub const POLICY_PACK_REFRESH_SWEEPS_TOTAL: &str = "synveda_policy_pack_refresh_sweeps_total";
+
+/// Full stored-policy sweep duration, including failed and timed-out sweeps.
+pub const POLICY_PACK_REFRESH_SECONDS: &str = "synveda_policy_pack_refresh_seconds";
+
 /// Policy-source catalogue operations (AUTHZ-2, CPR-30), labelled by `op`
 /// (`packs`) and `outcome` (`ok`, `rejected`, `error`). Runtime selection is
 /// measured separately by the Configuration plane.
@@ -441,6 +448,14 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         POLICY_PACK_RELOADS_TOTAL,
         "Policy pack reloads by outcome (installed/removed/unchanged/error)"
+    );
+    metrics::describe_counter!(
+        POLICY_PACK_REFRESH_SWEEPS_TOTAL,
+        "Complete stored-policy sweep outcomes by ok/error/timeout"
+    );
+    metrics::describe_histogram!(
+        POLICY_PACK_REFRESH_SECONDS,
+        "Complete stored-policy sweep duration in seconds by outcome"
     );
     // AUTHZ-2 counters (ADR-0014): policy-source catalogue reads;
     // fail-safe resolution in synveda-policy.

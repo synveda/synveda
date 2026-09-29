@@ -165,8 +165,12 @@ generation. The chart still pins one gateway/worker and Recreate. Durable
 login state is now a source candidate under ADR-0126: additive `0003` stores
 sealed, hash-selected one-time rows with database TTL and atomic consumption;
 isolated mock-IdP tests complete OIDC login and CLI handoff across independent
-gateway instances, and 25 exact-role epoch tests pass. Bounded post-start
-policy-pack refresh, multi-worker ownership,
+gateway instances, and 25 exact-role epoch tests pass. ADR-0127 adds a
+provisional 30-second gateway policy lease: a complete successful bounded
+sweep renews it, while failed/time-out sweeps do not; expiry withdraws HTTP
+admission/readiness and cancels in-flight work. Source route and isolated
+two-engine compilation tests pass. Production-shaped three-pod refresh
+latency, the worker's stale-compile bound, multi-worker ownership,
 in-flight process/load and three-pod rolling acceptance remain open in the
 brief. Scope, grant, identity and Configuration decisions already use fresh
 request-time database rows and exact-shape Cedar fragments; a generic

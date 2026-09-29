@@ -306,6 +306,126 @@ async fn immutable_configuration_selects_policy_per_scope() {
 }
 
 #[tokio::test]
+async fn separate_gateway_compiles_converge_and_a_bad_pack_does_not_renew_freshness() {
+    let _guard = serial().await;
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("skipping cross-gateway policy refresh test: DATABASE_URL is not set");
+        return;
+    };
+    let first = state(&url);
+    let second = state(&url);
+    synveda_store::epoch::verify(&first.pool)
+        .await
+        .expect("apply migrations");
+    let (tenant, _, _, _) = admitted(&first.pool, "authz2-refresh").await;
+
+    let mut tx = rls::begin_tenant_tx(&first.pool, tenant)
+        .await
+        .expect("begin policy transaction");
+    policy_packs::apply(
+        &mut *tx,
+        tenant,
+        "authz2-reload",
+        FROZEN_PACK,
+        &PackConfig::default(),
+    )
+    .await
+    .expect("store first policy revision");
+    tx.commit().await.expect("commit first revision");
+    authz::refresh_packs_once(&first.pool, &first.pdp)
+        .await
+        .expect("first gateway refresh");
+    authz::refresh_packs_once(&second.pool, &second.pdp)
+        .await
+        .expect("second gateway refresh");
+    assert!(
+        first
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 1))
+    );
+    assert!(
+        second
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 1))
+    );
+
+    let mut tx = rls::begin_tenant_tx(&first.pool, tenant)
+        .await
+        .expect("begin policy update");
+    policy_packs::apply(
+        &mut *tx,
+        tenant,
+        "authz2-reload",
+        FROZEN_PACK,
+        &PackConfig::default(),
+    )
+    .await
+    .expect("store second policy revision");
+    tx.commit().await.expect("commit second revision");
+    authz::refresh_packs_once(&first.pool, &first.pdp)
+        .await
+        .expect("first gateway sees update");
+    assert!(
+        first
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 2))
+    );
+    assert!(
+        second
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 1)),
+        "another gateway stays on its own compile until its sweep"
+    );
+    authz::refresh_packs_once(&second.pool, &second.pdp)
+        .await
+        .expect("second gateway sees update");
+    assert!(
+        second
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 2))
+    );
+
+    let mut tx = rls::begin_tenant_tx(&first.pool, tenant)
+        .await
+        .expect("begin bad policy update");
+    policy_packs::apply(
+        &mut *tx,
+        tenant,
+        "authz2-reload",
+        "permit (",
+        &PackConfig::default(),
+    )
+    .await
+    .expect("store a deliberately invalid test pack");
+    tx.commit().await.expect("commit bad revision");
+    assert!(
+        authz::refresh_packs_once(&second.pool, &second.pdp)
+            .await
+            .is_err()
+    );
+    assert!(
+        second
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 2)),
+        "a failed compile keeps last-good but cannot renew the lease"
+    );
+
+    let mut tx = rls::begin_tenant_tx(&first.pool, tenant)
+        .await
+        .expect("begin bad-pack cleanup");
+    policy_packs::clear(&mut tx, tenant, "authz2-reload")
+        .await
+        .expect("remove invalid test pack");
+    tx.commit().await.expect("commit cleanup");
+}
+
+#[tokio::test]
 async fn cross_tenant_configuration_probes_are_not_found() {
     let _guard = serial().await;
     let Ok(url) = std::env::var("DATABASE_URL") else {

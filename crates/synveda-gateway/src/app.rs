@@ -395,8 +395,11 @@ async fn require_authority(
         () = permit.revoked() => {
             (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response()
         }
+        () = policy_ready.stale_for(generation) => {
+            (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response()
+        }
         response = &mut response => {
-            if permit.is_open() {
+            if permit.is_open() && policy_ready.is_for(generation) {
                 response
             } else {
                 (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response()
@@ -589,6 +592,79 @@ mod assembly_tests {
         assert_eq!(
             app.oneshot(request()).await.expect("response").status(),
             StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_policy_withdraws_admission_and_cancels_in_flight_work() {
+        let gate = AuthorityGate::open_for_test();
+        let admission = GatewayAdmission::new();
+        let policy_ready = PolicyReadyGeneration::with_max_age(Duration::from_millis(200));
+        let generation = gate.open_generation().expect("test authority is open");
+        policy_ready.mark_converged(generation);
+
+        let started = Arc::new(Notify::new());
+        let route_started = Arc::clone(&started);
+        let app = Router::new()
+            .route(
+                "/work",
+                get(move || {
+                    let started = Arc::clone(&route_started);
+                    async move {
+                        started.notify_one();
+                        std::future::pending::<()>().await;
+                        "unreachable"
+                    }
+                }),
+            )
+            .route("/ok", get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(
+                (gate.clone(), policy_ready.clone()),
+                require_authority,
+            ));
+        let first_app = app.clone();
+        let first = tokio::spawn(async move {
+            first_app
+                .oneshot(Request::get("/work").body(Body::empty()).expect("request"))
+                .await
+                .expect("response")
+        });
+        tokio::time::timeout(Duration::from_secs(1), started.notified())
+            .await
+            .expect("work started before policy expiry");
+        let expired = tokio::time::timeout(Duration::from_secs(1), first)
+            .await
+            .expect("stale work was canceled")
+            .expect("request joined");
+        assert_eq!(expired.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            governed_readyz(gate.clone(), admission.clone(), policy_ready.clone())
+                .await
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let request = || Request::get("/ok").body(Body::empty()).expect("request");
+        assert_eq!(
+            app.clone()
+                .oneshot(request())
+                .await
+                .expect("response")
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+
+        policy_ready.mark_refreshed(generation + 1);
+        assert!(!policy_ready.is_for(generation));
+        policy_ready.mark_refreshed(generation);
+        assert_eq!(
+            app.oneshot(request()).await.expect("response").status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            governed_readyz(gate, admission, policy_ready)
+                .await
+                .status(),
+            StatusCode::OK
         );
     }
 }

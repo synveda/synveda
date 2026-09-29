@@ -393,13 +393,18 @@ async fn run_process(
         stop_rx.clone(),
         dispatcher_id,
     ));
-    let refresh_interval =
-        runtime_config::bounded_duration_setting("SYNVEDA_POLICY_REFRESH_SECS", 5, 1, 3_600)?;
+    let refresh_interval = runtime_config::bounded_duration_setting(
+        "SYNVEDA_POLICY_REFRESH_SECS",
+        5,
+        1,
+        runtime_config::POLICY_REFRESH_MAX_SECS,
+    )?;
     let mut policy_task = tokio::spawn(authz::run_pack_refresher(
         product_pool.clone(),
         pdp,
         refresh_interval,
         stop_rx.clone(),
+        None,
     ));
     ready.store(true, Ordering::Release);
     metrics::gauge!(APALIS_READY).set(1.0);

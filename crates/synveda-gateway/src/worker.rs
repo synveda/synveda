@@ -112,8 +112,12 @@ async fn run_process(
         runtime_config::kms_from_env()?,
     ));
     let capture_config = runtime_config::capture_config_from_env()?;
-    let policy_refresh =
-        runtime_config::bounded_duration_setting("SYNVEDA_POLICY_REFRESH_SECS", 5, 1, 3_600)?;
+    let policy_refresh = runtime_config::bounded_duration_setting(
+        "SYNVEDA_POLICY_REFRESH_SECS",
+        5,
+        1,
+        runtime_config::POLICY_REFRESH_MAX_SECS,
+    )?;
     let relaxation_interval =
         runtime_config::bounded_duration_setting("SYNVEDA_RELAXATION_SWEEP_SECS", 60, 1, 3_600)?;
     let shutdown_grace =
@@ -525,6 +529,7 @@ async fn run_authority_generation(
             Arc::clone(&runtime.pdp),
             runtime.policy_refresh,
             work_stop_rx.clone(),
+            None,
         ),
     );
     spawn_governed_named(

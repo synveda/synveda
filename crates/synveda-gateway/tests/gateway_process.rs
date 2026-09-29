@@ -44,7 +44,7 @@ fn spawn_gateway(database_url_file: &Path, addr: &str) -> ChildGuard {
         .env("SYNVEDA_PUBLIC_URL", format!("http://{addr}"))
         .env_remove("SYNVEDA_PUBLIC_URL_FILE")
         .env("SYNVEDA_GATEWAY_SHUTDOWN_SECS", "15")
-        .env("SYNVEDA_POLICY_REFRESH_SECS", "3600")
+        .env("SYNVEDA_POLICY_REFRESH_SECS", "15")
         .env("SYNVEDA_EMBEDDER", "deterministic")
         .env_remove("SYNVEDA_OIDC_ISSUERS")
         .env_remove("SYNVEDA_OIDC_ISSUERS_FILE")

@@ -7,7 +7,7 @@
 //! and `/auth/*`, with `SYNVEDA_PUBLIC_URL` naming this gateway in redirect
 //! URIs, default `http://127.0.0.1:8120`) or `SYNVEDA_DEV_JWT_SECRET` (the
 //! HS256 dev mode, ADR-0008). Neither set means every `/v1` request is
-//! rejected. `SYNVEDA_POLICY_REFRESH_SECS` (default 5, range 1..=3600) paces
+//! rejected. `SYNVEDA_POLICY_REFRESH_SECS` (default 5, range 1..=15) paces
 //! the policy pack refresher (AUTHZ-1, ADR-0012).
 //! `SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS`
 //! (default 3600) caps service identities' token lifetime at the
@@ -169,8 +169,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // The embedded PDP (AUTHZ-1, ADR-0012): failure here means the binary's
     // own schema or an embedded product pack is broken — refuse to boot.
     let pdp = Arc::new(Pdp::new()?);
-    let refresh_interval =
-        runtime_config::bounded_duration_setting("SYNVEDA_POLICY_REFRESH_SECS", 5, 1, 3_600)?;
+    let refresh_interval = runtime_config::bounded_duration_setting(
+        "SYNVEDA_POLICY_REFRESH_SECS",
+        5,
+        1,
+        runtime_config::POLICY_REFRESH_MAX_SECS,
+    )?;
     let shutdown_grace =
         runtime_config::bounded_duration_setting("SYNVEDA_GATEWAY_SHUTDOWN_SECS", 30, 2, 300)?;
 
@@ -517,6 +521,7 @@ async fn run_gateway_background(
             Arc::clone(&pdp),
             refresh_interval,
             generation_stop_rx,
+            Some((policy_ready.clone(), generation)),
         );
         tokio::pin!(refresher);
         let end = tokio::select! {

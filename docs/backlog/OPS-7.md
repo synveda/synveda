@@ -14,8 +14,9 @@ size: L
 
 Helm pins one gateway replica and Recreate. ADR-0126 moves pending OIDC login
 and CLI handoff state into a deployment-key-sealed PostgreSQL ledger. Stored Cedar
-policy packs are compiled process-locally and refreshed on a timer; their
-post-start cross-replica visibility has no fail-closed bound. Scope ancestry,
+policy packs are compiled process-locally and refreshed on a timer; ADR-0127
+adds a provisional gateway freshness lease, while cross-replica latency and
+worker expiry remain unqualified. Scope ancestry,
 identity, grants, groups, assignments and Configuration are already read in
 ordinary request transactions, and cached Cedar fragments compare the exact
 supplied scope shape. Capture, Knowledge indexing,
@@ -56,8 +57,24 @@ another, and begins a CLI login on one, completes its callback on another and
 redeems the handoff on a third. Replays fail. The 25-case epoch suite proves
 the exact `0002` prefix advances without rewriting its SQLx rows or a tenant.
 This is cross-process source acceptance, not a three-pod routing, load, key
-rotation or database-failover result. Next measure and bound post-start policy
-freshness, then prove multi-worker ownership and the full termination sequence.
+rotation or database-failover result. It left post-start policy freshness,
+multi-worker ownership and the full termination sequence open.
+
+[ADR-0127](../adr/adr-0127-expire-stale-gateway-policy-convergence.md)
+now makes a gateway's policy-ready generation expire after 30 seconds without
+a complete successful sweep. A five-second sweep deadline and a 1–15-second
+poll interval bound individual attempts; failures do not renew the lease.
+Expiry removes readiness and cancels governed HTTP work, and a later successful
+sweep can reopen the same authority generation. The sweep publishes duration
+and closed outcome metrics. Unit route acceptance covers expiry, in-flight
+cancel and recovery; an exact-role test with two independent policy engines
+in one process covers a stored revision reaching each engine only after its
+own sweep, and a failed compile
+leaving last-good loaded without counting as convergence. This is source
+behavior, not a measured 30-second end-to-end mutation bound under load. The
+worker's use of a last-good compile is still unbounded. Next measure the
+post-commit latency and failure path on three pods, then align worker expiry
+before lifting the chart limit.
 
 ## Scope
 

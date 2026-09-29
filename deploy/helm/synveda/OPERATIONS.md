@@ -25,8 +25,14 @@ the current authority generation. A recovered database generation requires a
 new load before requests resume, even if the process still holds an older
 compiled pack. An unavailable or invalid stored pack keeps the gateway
 unready; inspect the policy refresh logs rather than routing around the gate.
-Post-start policy-pack change visibility across multiple gateways is not yet
-qualified, so the chart remains single-replica.
+After startup, a complete successful sweep renews a provisional 30-second
+freshness lease. An incomplete, failed or five-second timed-out sweep cannot
+renew it; expiry withdraws readiness and cancels governed HTTP work. The
+`SYNVEDA_POLICY_REFRESH_SECS` range is 1–15 seconds (default 5). Inspect
+`synveda_policy_pack_refresh_sweeps_total` and
+`synveda_policy_pack_refresh_seconds` when readiness drops. Post-start
+change visibility across multiple gateways and worker policy expiry are not
+yet qualified, so the chart remains single-replica.
 
 OIDC login now parks its PKCE state and CLI handoff in the same deployment-key
 plane as console sessions. A missing deployment key refuses `/auth/login`
