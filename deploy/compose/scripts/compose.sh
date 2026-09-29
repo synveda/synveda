@@ -1577,8 +1577,20 @@ if [ "$pitr_enabled" = true ]; then
     pitr_config_file=$pitr_config_dir/pgbackrest.conf
     require_private_file "$pitr_config_file" pgbackrest-configuration
     reject_sensitive_build_context_path "$pitr_config_file" "$compose_dir/runtime" pgbackrest-configuration
+    pitr_ca_enabled=false
+    pitr_ca_file=$pitr_config_dir/pgbackrest-ca.pem
+    if [ -e "$pitr_ca_file" ] || [ -L "$pitr_ca_file" ]; then
+        require_private_file "$pitr_ca_file" pgbackrest-ca
+        reject_sensitive_build_context_path "$pitr_ca_file" "$compose_dir/runtime" pgbackrest-ca
+        [ "$(size_of "$pitr_ca_file")" -le 65536 ] && \
+            openssl x509 -in "$pitr_ca_file" -noout >/dev/null 2>&1 || {
+            echo "compose: pgBackRest CA file was refused" >&2
+            exit 78
+        }
+        pitr_ca_enabled=true
+    fi
     run_bounded 30 "$node_runner" "$script_dir/check-pgbackrest-config.mjs" \
-        "$pitr_config_file"
+        "$pitr_config_file" "$pitr_ca_enabled"
 fi
 
 canonical_recovery_root() {
@@ -2237,8 +2249,13 @@ export SYNVEDA_CADDY_IDENTITY_CONFIG=$caddy_identity_config
 export SYNVEDA_SECRETS_DIR=$secret_dir
 if [ "$pitr_enabled" = true ]; then
     export SYNVEDA_PITR_CONFIG_FILE=$pitr_config_file
+    if [ "$pitr_ca_enabled" = true ]; then
+        export SYNVEDA_PITR_CA_FILE=$pitr_ca_file
+    else
+        unset SYNVEDA_PITR_CA_FILE
+    fi
 else
-    unset SYNVEDA_PITR_CONFIG_FILE
+    unset SYNVEDA_PITR_CONFIG_FILE SYNVEDA_PITR_CA_FILE
 fi
 export SYNVEDA_OIDC_DIRECTORY_SECRETS_DIR=$oidc_directory_secret_dir
 export SYNVEDA_OIDC_ISSUERS_FILE=$issuer_file
@@ -2298,6 +2315,9 @@ if [ "$postgres_mode" = bundled ]; then
 fi
 if [ "$pitr_enabled" = true ]; then
     set -- "$@" -f "$compose_dir/compose.postgres.pitr.yaml"
+    if [ "$pitr_ca_enabled" = true ]; then
+        set -- "$@" -f "$compose_dir/compose.postgres.pitr.ca.yaml"
+    fi
 fi
 if [ "$oidc_mode" = bundled ]; then
     set -- "$@" -f "$compose_dir/compose.keycloak.yaml"

@@ -46,11 +46,14 @@ API, RLS, Knowledge and audit verifier decides whether the recovered generation
 is usable. A repository listing or successful backup command alone is not an
 OPS-5 acceptance result.
 
-The initial source slice supports S3-compatible repositories with public CA
-trust and verified TLS. Azure/GCS can be added by extending the deployment
-validator after their exact configuration and recovery tests, without changing
-application code. The existing logical backup remains the default reference
-until physical restore and joint custody pass a live drill.
+The initial source slice supports S3-compatible repositories with verified
+TLS. A private object-store CA is an optional second project-private file,
+mounted only into PostgreSQL and staged beside the backup configuration in
+runtime tmpfs. Its use is explicit in the validated repository configuration;
+TLS verification cannot be disabled. Azure/GCS can be added by extending the
+deployment validator after their exact configuration and recovery tests,
+without changing application code. The existing logical backup remains the
+default reference until physical restore and joint custody pass a live drill.
 
 ## Options considered
 
@@ -75,6 +78,8 @@ until physical restore and joint custody pass a live drill.
   because that directory rejects unknown entries. A root-owned entrypoint
   stages a postgres-readable copy in the existing runtime tmpfs before the
   stock PostgreSQL entrypoint drops privileges.
+- The optional private CA file follows the same ownership and tmpfs staging
+  rule. It is never mounted into application or bootstrap services.
 - The operator must schedule base backups, monitor archive age/capacity and
   retain an independently restored generation before enabling expiry.
 - A new project cannot be brought up against recovered data until the

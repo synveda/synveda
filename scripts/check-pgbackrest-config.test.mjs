@@ -7,7 +7,6 @@ import test from "node:test";
 
 const CHECK = resolve("deploy/compose/scripts/check-pgbackrest-config.mjs");
 const VALID = `[global]
-pg1-path=/var/lib/postgresql/data
 repo1-type=s3
 repo1-path=/synveda
 repo1-s3-bucket=backup-bucket
@@ -18,15 +17,19 @@ repo1-s3-key-secret=private-key-sentinel
 repo1-cipher-type=aes-256-cbc
 repo1-cipher-pass=${"a".repeat(48)}
 repo1-storage-verify-tls=y
+[synveda]
+pg1-path=/var/lib/postgresql/data
 `;
 
-function check(source) {
+function check(source, caPresent = false) {
   const dir = mkdtempSync(join(tmpdir(), "synveda-pgbackrest-config-"));
   const path = join(dir, "pgbackrest.conf");
   try {
     writeFileSync(path, source, { mode: 0o600 });
     chmodSync(path, 0o600);
-    return spawnSync(process.execPath, [CHECK, path], { encoding: "utf8" });
+    return spawnSync(process.execPath, [CHECK, path, String(caPresent)], {
+      encoding: "utf8",
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -39,6 +42,13 @@ test("S3 backup configuration accepts static and automatic AWS credentials", () 
     "repo1-s3-key-type=auto\n",
   );
   assert.equal(check(auto).status, 0);
+  const privateCa = VALID.replace(
+    "repo1-storage-verify-tls=y\n",
+    "repo1-storage-verify-tls=y\nrepo1-storage-ca-file=/var/run/postgresql/pgbackrest-ca.pem\n",
+  );
+  assert.equal(check(privateCa, true).status, 0);
+  assert.equal(check(privateCa).status, 78);
+  assert.equal(check(VALID, true).status, 78);
 });
 
 test("S3 backup configuration refuses weaker or ambiguous authority", () => {
@@ -49,9 +59,12 @@ test("S3 backup configuration refuses weaker or ambiguous authority", () => {
     VALID.replace(`repo1-cipher-pass=${"a".repeat(48)}`, "repo1-cipher-pass=short"),
     VALID.replace("repo1-s3-bucket=backup-bucket\n", ""),
     VALID.replace("repo1-path=/synveda", "repo1-path=/"),
+    VALID.replace("[synveda]\npg1-path=/var/lib/postgresql/data\n", ""),
+    VALID.replace("[synveda]", "[global]"),
     VALID + "repo1-s3-key-secret=duplicate\n",
     VALID + "[global:backup]\nexpire-auto=y\n",
     VALID + "repo1-s3-process-cmd=/bin/sh\n",
+    VALID + "repo1-storage-ca-file=/etc/ssl/private/foreign.pem\n",
   ];
   for (const source of cases) {
     const result = check(source);

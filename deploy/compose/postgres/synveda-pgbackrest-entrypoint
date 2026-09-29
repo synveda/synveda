@@ -8,4 +8,8 @@ set -eu
 [ -f /run/secrets/pgbackrest_conf ] && [ ! -L /run/secrets/pgbackrest_conf ] || exit 78
 install -o postgres -g postgres -m 0400 \
     /run/secrets/pgbackrest_conf /var/run/postgresql/pgbackrest.conf
+if [ -f /run/secrets/pgbackrest_ca ] && [ ! -L /run/secrets/pgbackrest_ca ]; then
+    install -o postgres -g postgres -m 0400 \
+        /run/secrets/pgbackrest_ca /var/run/postgresql/pgbackrest-ca.pem
+fi
 exec /usr/local/bin/docker-entrypoint.sh "$@"

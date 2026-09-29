@@ -582,12 +582,11 @@ First create the normal project inputs with `make compose-secrets` and
 selectors that will start the deployment. Place a mode-0600
 `pgbackrest.conf` in that project's private runtime directory, beside its
 `secrets` directory. It must be owned by the runtime UID/GID. The lifecycle
-checks the single `[global]` section without printing its values and mounts
-the file only into PostgreSQL. A minimal shape is:
+checks the `[global]` and `[synveda]` sections without printing their values
+and mounts the file only into PostgreSQL. A minimal shape is:
 
 ```ini
 [global]
-pg1-path=/var/lib/postgresql/data
 repo1-type=s3
 repo1-path=/synveda/synveda-development
 repo1-s3-bucket=<operator-owned-bucket>
@@ -598,14 +597,21 @@ repo1-s3-key-secret=<secret-key>
 repo1-cipher-type=aes-256-cbc
 repo1-cipher-pass=<at-least-32-random-characters>
 repo1-storage-verify-tls=y
+
+[synveda]
+pg1-path=/var/lib/postgresql/data
 ```
 
 For supported AWS instance credentials, replace the two static key lines with
 `repo1-s3-key-type=auto`; the container must actually be able to obtain those
 credentials. Use a unique non-root `repo1-path` per source project. A private
 S3-compatible endpoint may also need `repo1-s3-uri-style=path` and
-`repo1-storage-port`. This first slice uses the image's public CA trust;
-custom-CA mounts and Azure/GCS configuration are follow-on work. Keep the
+`repo1-storage-port`. For a private CA, put a mode-0600
+`pgbackrest-ca.pem` beside `pgbackrest.conf` and add
+`repo1-storage-ca-file=/var/run/postgresql/pgbackrest-ca.pem` to its
+`[global]` section. The lifecycle validates the certificate with OpenSSL and
+mounts it only into PostgreSQL; absent CA configuration uses the image's
+public trust. Azure/GCS configuration remains follow-on work. Keep the
 repository cipher passphrase separate from the bucket and escrow it with the
 matching Synveda KMS and issuer recovery set.
 
@@ -620,6 +626,14 @@ The fixed `archive_timeout=60s` forces periodic WAL segments; it is not an
 RPO promise. Do not enable retention deletion before an independent restore of
 the retained generation passes. An isolated selected-point restore with the
 matching identity/KMS set remains the next OPS-5 gate.
+
+Run `sh scripts/ops5-local-pitr-drill.sh` from the repository root to check
+the physical-backup mechanics on a disposable Docker network. It builds the
+opt-in image, starts a pinned local S3-compatible server with a private CA,
+archives WAL, takes an encrypted full backup, restores into two fresh volumes
+before and after a write, and checks wrong-passphrase refusal. It removes its
+own containers, volumes, network and temporary credentials. This local drill
+does not test off-host custody, the Synveda application, Keycloak or KMS.
 
 ## Logical backup and isolated restore
 

@@ -12,10 +12,10 @@ size: M
 
 ## Problem and evidence
 
-There is no production backup configuration, WAL archive, PITR restore or
-recurring restore drill. Disposable database tests are not recovery evidence.
-The Helm chart has no backup stanza, and the local KMS key or externally owned
-Helm Secret must be restored with the database. This is a P0 gap in
+There is no qualified production backup, off-host WAL archive, application
+PITR restore or recurring restore drill. Disposable database tests establish
+mechanics only. The local KMS key or externally owned Helm Secret must be
+restored with the database. This is a P0 gap in
 [production readiness](../PRODUCTION_READINESS.md).
 
 The OPS-11 / ADR-0112 local Kubernetes drill now exercises quiesced native
@@ -35,17 +35,22 @@ AWS S3. Static Helm render/refusal checks cover the disabled default, exact
 object-store/schedule binding, missing plugin API and invalid shapes. This is
 configuration plumbing, not a completed backup or PITR. Neither the plugin nor
 its ObjectStore has been installed or exercised with this chart in a live
-cluster; Compose and external PostgreSQL still lack WAL/PITR.
+cluster; external PostgreSQL remains operator-owned.
 
 ADR-0123 adds a **source-only, opt-in Compose pgBackRest candidate** for bundled
 PostgreSQL. The separate image target pins pgBackRest 2.59.1, and the canonical
 lifecycle validates a private S3-compatible configuration, enables verified-TLS
 WAL archiving and exposes a bounded stanza/check/full-backup action without
 automatic expiry. The default image and logical recovery path remain in place.
-Static validation and an image build are not a live backup or recovery result;
-the Compose path has no selected-point physical restore or joint identity/KMS
-custody yet. Its first slice uses public CA trust; custom CA, Azure and GCS
-are follow-on qualifications.
+On 2026-09-29, `scripts/ops5-local-pitr-drill.sh` passed on macOS/OrbStack.
+It built the opt-in image and used a pinned S3-compatible server on an isolated
+Docker network. The private-CA TLS path, stanza and WAL check, encrypted full
+backup, named-point restore before the second committed write (one row),
+end-of-archive restore after it (two rows), and wrong-passphrase refusal all
+passed in fresh PostgreSQL volumes. The drill uses temporary local storage;
+the Compose lifecycle still has no supported physical restore command or
+joint identity/KMS custody. Neither source candidate has off-host or Synveda
+application recovery evidence. Azure and GCS are follow-on qualifications.
 
 The next action is to choose a real off-host bucket/region, encryption/key
 custody, retention, RPO/RTO and drill owner; install the compatible CNPG/Barman

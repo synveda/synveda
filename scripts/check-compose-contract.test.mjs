@@ -1506,7 +1506,6 @@ test("PITR overlay grants S3 egress and repository secret only to PostgreSQL", (
     writeFileSync(
       config,
       `[global]
-pg1-path=/var/lib/postgresql/data
 repo1-type=s3
 repo1-path=/synveda/render-test
 repo1-s3-bucket=backup-bucket
@@ -1517,6 +1516,8 @@ repo1-s3-key-secret=private-key-sentinel
 repo1-cipher-type=aes-256-cbc
 repo1-cipher-pass=${"a".repeat(48)}
 repo1-storage-verify-tls=y
+[synveda]
+pg1-path=/var/lib/postgresql/data
 `,
       { mode: 0o600 },
     );
@@ -1543,6 +1544,37 @@ repo1-storage-verify-tls=y
     }
     assert.match(postgres.command.join(" "), /archive-push %p/);
     assert.doesNotMatch(readFileSync(output, "utf8"), /private-key-sentinel/);
+
+    const ca = join(fixture.scratch, "synveda-development", "pgbackrest-ca.pem");
+    writeFileSync(ca, readFileSync(join(fixture.secrets, "tls_cert")), {
+      mode: 0o600,
+    });
+    chmodSync(ca, 0o600);
+    writeFileSync(
+      config,
+      readFileSync(config, "utf8").replace(
+        "repo1-storage-verify-tls=y\n",
+        "repo1-storage-verify-tls=y\nrepo1-storage-ca-file=/var/run/postgresql/pgbackrest-ca.pem\n",
+      ),
+    );
+    const caOutput = join(fixture.scratch, "pitr-ca.json");
+    const withCa = spawnSync(WRAPPER, ["config", "--output", caOutput], {
+      cwd: ROOT,
+      env: composeEnvironment(fixture, { SYNVEDA_PITR_ENABLED: "true" }),
+      encoding: "utf8",
+    });
+    assert.equal(withCa.status, 0, withCa.stderr);
+    const caModel = JSON.parse(readFileSync(caOutput, "utf8"));
+    assert.ok(caModel.services.postgres.secrets.some(
+      (secret) => secret.source === "pgbackrest_ca",
+    ));
+    for (const [name, service] of Object.entries(caModel.services)) {
+      if (name !== "postgres") {
+        assert.ok(!(service.secrets ?? []).some(
+          (secret) => secret.source === "pgbackrest_ca",
+        ), `${name} received repository CA`);
+      }
+    }
   } finally {
     rmSync(fixture.scratch, { recursive: true, force: true });
   }

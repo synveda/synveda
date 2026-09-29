@@ -4,7 +4,9 @@
 import { readFileSync, statSync } from "node:fs";
 
 const path = process.argv[2];
-if (!path || process.argv.length !== 3) process.exit(64);
+const caPresent = process.argv[3];
+if (!path || !["true", "false"].includes(caPresent) ||
+    process.argv.length !== 4) process.exit(64);
 
 function refuse() {
   console.error("compose: pgBackRest S3 configuration was refused");
@@ -21,7 +23,6 @@ try {
 if (source.includes("\0") || source.includes("\r")) refuse();
 
 const allowed = new Set([
-  "pg1-path",
   "repo1-type",
   "repo1-path",
   "repo1-cipher-type",
@@ -35,30 +36,38 @@ const allowed = new Set([
   "repo1-s3-token",
   "repo1-s3-uri-style",
   "repo1-storage-port",
+  "repo1-storage-ca-file",
   "repo1-storage-verify-tls",
 ]);
 const options = new Map();
-let inGlobal = false;
-let sectionCount = 0;
+const stanzaOptions = new Map();
+const seenSections = new Set();
+let section;
 for (const raw of source.split("\n")) {
   const line = raw.trim();
   if (line === "" || line.startsWith("#")) continue;
   if (line.startsWith("[")) {
-    if (line !== "[global]" || sectionCount !== 0) refuse();
-    inGlobal = true;
-    sectionCount += 1;
+    if (!["[global]", "[synveda]"].includes(line) || seenSections.has(line)) refuse();
+    section = line;
+    seenSections.add(line);
     continue;
   }
   const equal = line.indexOf("=");
-  if (!inGlobal || equal <= 0) refuse();
+  if (!section || equal <= 0) refuse();
   const key = line.slice(0, equal).trim();
   const value = line.slice(equal + 1).trim();
-  if (!allowed.has(key) || options.has(key) || !value) refuse();
-  options.set(key, value);
+  if (!value) refuse();
+  if (section === "[global]") {
+    if (!allowed.has(key) || options.has(key)) refuse();
+    options.set(key, value);
+  } else {
+    if (key !== "pg1-path" || stanzaOptions.has(key)) refuse();
+    stanzaOptions.set(key, value);
+  }
 }
-if (sectionCount !== 1) refuse();
+if (seenSections.size !== 2 ||
+    stanzaOptions.get("pg1-path") !== "/var/lib/postgresql/data") refuse();
 for (const [key, value] of [
-  ["pg1-path", "/var/lib/postgresql/data"],
   ["repo1-type", "s3"],
   ["repo1-cipher-type", "aes-256-cbc"],
   ["repo1-storage-verify-tls", "y"],
@@ -75,6 +84,10 @@ for (const key of [
 }
 const repoPath = options.get("repo1-path");
 if (!/^\/[A-Za-z0-9][A-Za-z0-9/_-]{0,127}$/.test(repoPath)) refuse();
+const caPath = options.get("repo1-storage-ca-file");
+if (caPath !== undefined && caPath !==
+    "/var/run/postgresql/pgbackrest-ca.pem") refuse();
+if ((caPath !== undefined) !== (caPresent === "true")) refuse();
 if ((options.get("repo1-cipher-pass")?.length ?? 0) < 32) refuse();
 const keyType = options.get("repo1-s3-key-type") ?? "shared";
 if (keyType === "shared") {

@@ -125,10 +125,13 @@ OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL
 and scheduled physical backups, plus an S3-compatible ObjectStore example and
 static chart refusal tests. ADR-0123 adds an opt-in Compose pgBackRest image,
 private S3 configuration check and bounded base-backup action. No live
-encrypted off-host backup, selected-point PITR, matching identity/key
-recovery, recurring drill or owned RPO/RTO has passed. Next qualify both
-source candidates with an owner-selected bucket and independent joint restore;
-the OPS-5 brief owns the exact drill and remaining owner decisions.
+encrypted off-host backup, matching identity/key recovery, recurring drill or
+owned RPO/RTO has passed. A 2026-09-29 isolated local S3/TLS drill passed
+encrypted full backup, WAL archiving, two fresh-volume point-in-time restores
+before/after a committed write and wrong-passphrase refusal. This is database
+mechanics evidence only. Next qualify both source candidates with an
+owner-selected off-host bucket and independent joint application restore; the
+OPS-5 brief owns the exact drill and remaining owner decisions.
 
 - [ ] [OPS-6: Upgrade and rollback discipline](OPS-6.md) — open
 

@@ -883,7 +883,6 @@ test("opt-in S3 archiving validates private config and bounds the backup action"
     writeFileSync(
       config,
       `[global]
-pg1-path=/var/lib/postgresql/data
 repo1-type=s3
 repo1-path=/synveda/test-project
 repo1-s3-bucket=backup-bucket
@@ -894,6 +893,8 @@ repo1-s3-key-secret=private-key-sentinel
 repo1-cipher-type=aes-256-cbc
 repo1-cipher-pass=${"a".repeat(48)}
 repo1-storage-verify-tls=y
+[synveda]
+pg1-path=/var/lib/postgresql/data
 `,
       { mode: 0o600 },
     );
