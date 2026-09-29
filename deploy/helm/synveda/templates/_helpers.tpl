@@ -271,6 +271,14 @@ silent if the chart rendered it anyway.
 {{- if and (eq .Values.postgres.mode "cnpg") (not (.Capabilities.APIVersions.Has "postgresql.cnpg.io/v1")) -}}
 {{- fail "postgres.mode=cnpg requires the preinstalled CloudNativePG operator/API postgresql.cnpg.io/v1; use external mode otherwise (offline template: --api-versions postgresql.cnpg.io/v1)" -}}
 {{- end -}}
+{{- if .Values.postgres.backup.enabled -}}
+{{- if ne .Values.postgres.mode "cnpg" -}}{{ fail "postgres.backup.enabled requires postgres.mode=cnpg" }}{{- end -}}
+{{- if not (.Capabilities.APIVersions.Has "barmancloud.cnpg.io/v1") -}}{{ fail "postgres.backup.enabled requires the preinstalled Barman Cloud plugin/API barmancloud.cnpg.io/v1" }}{{- end -}}
+{{- if not .Values.postgres.backup.objectStoreName -}}{{ fail "postgres.backup.objectStoreName must name an existing same-namespace ObjectStore" }}{{- end -}}
+{{- if not .Values.postgres.backup.schedule -}}{{ fail "postgres.backup.schedule must be an explicit six-field CloudNativePG cron schedule" }}{{- end -}}
+{{- else if or .Values.postgres.backup.objectStoreName .Values.postgres.backup.schedule -}}
+{{- fail "postgres.backup settings require postgres.backup.enabled=true" -}}
+{{- end -}}
 {{- if and .Values.ingress.enabled (not (.Capabilities.APIVersions.Has "networking.k8s.io/v1")) -}}
 {{- fail "ingress.enabled requires the networking.k8s.io/v1 API and an existing ingress controller" -}}
 {{- end -}}

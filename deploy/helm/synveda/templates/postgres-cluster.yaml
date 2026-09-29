@@ -32,6 +32,13 @@ spec:
   {{- end }}
   enableSuperuserAccess: true
   primaryUpdateStrategy: {{ .Values.postgres.primaryUpdateStrategy }}
+  {{- if .Values.postgres.backup.enabled }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ .Values.postgres.backup.objectStoreName | quote }}
+  {{- end }}
 
   bootstrap:
     initdb:

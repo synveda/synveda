@@ -236,8 +236,14 @@ postgres:
       memory: 2Gi
   # Passed through to the Cluster's postgresql.parameters.
   parameters: {}
-  # Barman/object-store backup is OPS-5's, not this chart's. A `backup`
-  # stanza that exists and is empty reads like a backup that exists.
+  # OPS-5: optional Barman Cloud plugin. The operator creates the ObjectStore,
+  # S3-compatible bucket, TLS trust, credentials and key custody separately.
+  # No backup is enabled or scheduled by these defaults.
+  backup:
+    enabled: false
+    objectStoreName: ""
+    # CloudNativePG uses six cron fields, including seconds.
+    schedule: ""
 
 # ── Identity ─────────────────────────────────────────────────────────────
 oidc:

@@ -60,6 +60,13 @@ source database test or same-source Helm rerun is not a released N-1 upgrade;
 the published-artifact, joint recovery and failure drills remain required.
 [OPS-11](backlog/OPS-11.md) records earlier release evidence.
 
+The first OPS-5 source slice follows
+[ADR-0122](adr/adr-0122-provider-owned-object-store-backup-seam.md): optional
+CNPG WAL archiving and scheduled base backups reference an operator-owned
+Barman Cloud ObjectStore. The S3-compatible/AWS path has a render-tested chart
+contract, but no live backup, joint custody or PITR evidence. The Compose
+first-offer path remains open under OPS-5.
+
 ## Medium-team deployment
 
 Qualify the existing Helm chart on a named customer-managed Kubernetes platform

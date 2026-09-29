@@ -46,13 +46,16 @@ For your existing infrastructure use the configuration below.
 Read [configuration](CONFIGURATION.md) for exact database privileges, issuer
 and Secret formats; [operations](OPERATIONS.md) for maintenance and recovery;
 [portability](PORTABILITY.md) for existing ingress, Gateway API and OpenShift
-configuration. Generic OIDC compatibility is not verified support for every IdP.
+configuration. The new opt-in [CNPG backup candidate](BACKUP.md) is available
+in source only and still requires an independent PITR drill. Generic OIDC
+compatibility is not verified support for every IdP.
 
 ## Cluster administrator prerequisites
 
 The administrator supplies a namespace, installer RBAC, quotas, DNS, trusted TLS,
 private networking and registry access. Bundled PostgreSQL needs persistent storage. Only `postgres.mode=cnpg` needs
-a preinstalled CNPG operator. Loopback evaluation needs neither DNS nor ingress TLS. The chart creates no CRD/operator, ingress
+a preinstalled CNPG operator; `postgres.backup.enabled` additionally needs the
+Barman Cloud plugin and an operator-owned ObjectStore. Loopback evaluation needs neither DNS nor ingress TLS. The chart creates no CRD/operator, ingress
 controller, certificate issuer, storage class or monitoring stack.
 
 The release qualification uses Kind 0.32.0, Kubernetes and kubectl 1.36.1,

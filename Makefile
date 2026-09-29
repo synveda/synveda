@@ -410,6 +410,7 @@ chart-lint:
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
 	node scripts/check-helm-contract.mjs
 	node scripts/check-starter-contract.mjs
+	node scripts/check-ops5-backup-chart.mjs
 	node scripts/check-portability-contract.mjs
 
 # Requires kubeconform 0.7.0 and network access to the pinned official schemas.

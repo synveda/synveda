@@ -83,7 +83,7 @@ renumbered.
 | [ADR-0066](adr-0066-beta-demo-profile.md) | Operator-seeded beta demo | Current (partially superseded by ADR-0100) | ADR-0100 provides the resumable public-API PulseBoard demo; externally dependent beta evidence remains open. |
 | [ADR-0067](adr-0067-uninstall-and-cleanup.md) | Uninstall and cleanup | Current (partially superseded by ADR-0102) | Canonical Compose owns lifecycle and reset. Automatic artifact removal remains fail-closed until the installer persists a strict ownership receipt. |
 
-## ADR-0068 through ADR-0121
+## ADR-0068 through ADR-0122
 
 | ADR | Decision | Current classification | Replacement/removal |
 | --- | --- | --- | --- |
@@ -141,3 +141,4 @@ renumbered.
 | [ADR-0119](adr-0119-session-checkpoints-from-verified-ledger-evidence.md) | Checkpoints derived from immutable Session evidence | Current (rollout evidence pending) | CTX-6; deterministic Claude compact/restart replay, capture, scoped retention, Session policy matrix and four synthetic restart task probes pass; live task quality remains open. |
 | [ADR-0120](adr-0120-freeze-epoch-three-baseline.md) | Freeze current epoch-3 source baseline bytes | Superseded by ADR-0121 | Its temporary source-candidate digest pin is replaced by the released v0.4.3 baseline and additive forward migration. |
 | [ADR-0121](adr-0121-preserve-v0-4-3-through-forward-migration.md) | Preserve v0.4.3 through a forward migration | Current (release qualification pending) | OPS-6; exact released baseline plus transactional `0002`, staged catalogue proof and planned interruption. Published-pair recovery evidence remains open. |
+| [ADR-0122](adr-0122-provider-owned-object-store-backup-seam.md) | Provider-owned object store for CNPG backup | Current (live qualification pending) | OPS-5; opt-in Barman Cloud plugin WAL and base-backup schedule from an external ObjectStore. PITR, custody and Compose qualification remain open. |

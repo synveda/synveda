@@ -647,6 +647,29 @@
             "type": "string"
           }
         },
+        "backup": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "objectStoreName": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^$|^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"
+            },
+            "schedule": {
+              "type": "string",
+              "pattern": "^$|^\\S+( \\S+){5}$"
+            }
+          },
+          "required": [
+            "enabled",
+            "objectStoreName",
+            "schedule"
+          ]
+        },
         "retain": {
           "type": "boolean"
         },
@@ -733,7 +756,8 @@
         "storage",
         "maxConnections",
         "resources",
-        "parameters"
+        "parameters",
+        "backup"
       ]
     },
     "oidc": {

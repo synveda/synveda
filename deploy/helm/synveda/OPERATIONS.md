@@ -6,6 +6,11 @@ one gateway and one worker with planned maintenance. It does not establish HA,
 WAL/PITR, zero downtime or a promised RPO/RTO. Compose keeps its existing
 [backup/restore/upgrade entry points](../../compose/README.md).
 
+The optional [OPS-5 CNPG object-store backup candidate](BACKUP.md) adds chart
+plumbing for physical base backup and WAL through the Barman Cloud plugin. It
+does not change this runbook's recovery evidence until a live isolated PITR and
+joint identity/key drill pass.
+
 ## Health, logs and telemetry
 
 Application liveness is `/healthz`; readiness is `/readyz`. Readiness requires

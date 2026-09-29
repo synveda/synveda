@@ -115,6 +115,17 @@ operator and refuses rendering when its API is missing; offline rendering must
 explicitly declare `--api-versions postgresql.cnpg.io/v1`. The default external
 lint needs no operator or CRD.
 
+### Optional CNPG object-store backup
+
+`postgres.backup` defaults off. For CNPG only, set `enabled: true`, an exact
+same-namespace `objectStoreName`, and an explicit six-field `schedule` after
+the operator has installed the Barman Cloud plugin and an encrypted, accessible
+ObjectStore. The chart attaches WAL archiving and schedules physical base
+backups; it does not create provider credentials or select retention. An
+external/bundled database keeps its own backup owner. Follow the
+[OPS-5 backup candidate](BACKUP.md) before using this setting. Offline Helm
+renders also need `--api-versions barmancloud.cnpg.io/v1`.
+
 ## Identity and Secret formats
 
 Create an issuer JSON file with the actual canonical issuer URL, `client_id`,

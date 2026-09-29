@@ -27,6 +27,27 @@ WAL/PITR, owned RPO/RTO or recurring drills. The next action remains an
 owner-selected backup destination and retention/custody policy, followed by a
 production-shaped PITR rehearsal.
 
+ADR-0122 adds a **source-only, opt-in CNPG chart seam** for the Barman Cloud
+plugin: an operator-owned ObjectStore supplies provider credentials, encryption
+and retention; the chart binds it as WAL archiver and renders a six-field
+ScheduledBackup. The first documented provider is S3-compatible, including
+AWS S3. Static Helm render/refusal checks cover the disabled default, exact
+object-store/schedule binding, missing plugin API and invalid shapes. This is
+configuration plumbing, not a completed backup or PITR. Neither the plugin nor
+its ObjectStore has been installed or exercised with this chart in a live
+cluster; Compose and external PostgreSQL still lack WAL/PITR.
+
+The next action is to choose a real off-host bucket/region, encryption/key
+custody, retention, RPO/RTO and drill owner; install the compatible CNPG/Barman
+plugin in a disposable cluster; create the protected S3-compatible ObjectStore;
+and prove continuous WAL plus base backup before and after two committed write
+points. Restore each into new storage with original issuer/KMS custody, run the
+ordinary application/forced-RLS/audit/Knowledge checks, inject incomplete or
+corrupt backup and wrong-key failures, and record elapsed time. Then extend the
+same owned recovery target to the Compose first-offer path and schedule
+recurring drills. Do not enable retention deletion until a generation has
+passed independent restore.
+
 ## Scope
 
 - Encrypt and retain PostgreSQL base backups plus WAL in an owner-selected

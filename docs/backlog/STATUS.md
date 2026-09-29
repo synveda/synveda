@@ -120,6 +120,15 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [ ] [SKIL-5: Authentic Skill usage reporting](SKIL-5.md) — open
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
+
+OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL
+and scheduled physical backups, plus an S3-compatible ObjectStore example and
+static chart refusal tests. No live encrypted off-host backup, PITR, matching
+identity/key recovery, recurring drill or owned RPO/RTO has passed. Next
+qualify the plugin and selected provider in an isolated cluster, then extend
+the recovery contract to the Compose first offer. The OPS-5 brief owns the
+exact drill and remaining owner decisions.
+
 - [ ] [OPS-6: Upgrade and rollback discipline](OPS-6.md) — open
 
 OPS-6 / ADR-0121 now keeps the published v0.4.3 `0001` bytes and adds a

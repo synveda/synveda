@@ -543,7 +543,10 @@ file-mounted existing Secrets, ClusterIP/optional HTTPS Ingress, non-root
 security contexts, verified external PostgreSQL, optional CNPG and external
 OIDC with a private CA. It retains the existing optional TEI and OTLP settings.
 The chart's opt-in NetworkPolicies still need live qualification on an
-enforcing CNI. Operator-owned backup facilities, multi-replica prerequisites,
+enforcing CNI. ADR-0122 adds an opt-in source CNPG/Barman Cloud reference to
+an operator-owned ObjectStore and scheduled physical backup; it has no live
+PITR or joint custody evidence. Compose and external PostgreSQL still require
+their own continuous backup paths. Multi-replica prerequisites,
 disruption budgets, topology spread, OpenShift assigned-UID qualification,
 offline/private-registry distribution, proxy/OTLP private-CA support, KMS and
 FIPS requirements remain explicit promotion gaps.
