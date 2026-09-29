@@ -1498,6 +1498,56 @@ test("development uses one exact browser and container issuer port", () => {
   }
 });
 
+test("PITR overlay grants S3 egress and repository secret only to PostgreSQL", () => {
+  const fixture = makeComposeFixture();
+  try {
+    const config = join(fixture.scratch, "synveda-development", "pgbackrest.conf");
+    const output = join(fixture.scratch, "pitr.json");
+    writeFileSync(
+      config,
+      `[global]
+pg1-path=/var/lib/postgresql/data
+repo1-type=s3
+repo1-path=/synveda/render-test
+repo1-s3-bucket=backup-bucket
+repo1-s3-endpoint=s3.example.test
+repo1-s3-region=eu-west-2
+repo1-s3-key=id
+repo1-s3-key-secret=private-key-sentinel
+repo1-cipher-type=aes-256-cbc
+repo1-cipher-pass=${"a".repeat(48)}
+repo1-storage-verify-tls=y
+`,
+      { mode: 0o600 },
+    );
+    chmodSync(config, 0o600);
+    const result = spawnSync(WRAPPER, ["config", "--output", output], {
+      cwd: ROOT,
+      env: composeEnvironment(fixture, { SYNVEDA_PITR_ENABLED: "true" }),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const model = JSON.parse(readFileSync(output, "utf8"));
+    const postgres = model.services.postgres;
+    assert.deepEqual(postgres.entrypoint, ["/usr/local/bin/synveda-pgbackrest-entrypoint"]);
+    assert.equal(postgres.networks["application-egress"].gw_priority, 1);
+    assert.equal(model.services["database-bootstrap"].build.target, "pitr");
+    assert.ok(postgres.secrets.some((secret) => secret.source === "pgbackrest_conf"));
+    for (const [name, service] of Object.entries(model.services)) {
+      if (name !== "postgres") {
+        assert.ok(
+          !(service.secrets ?? []).some((secret) => secret.source === "pgbackrest_conf"),
+          `${name} received repository credentials`,
+        );
+      }
+    }
+    assert.match(postgres.command.join(" "), /archive-push %p/);
+    assert.doesNotMatch(readFileSync(output, "utf8"), /private-key-sentinel/);
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
 test("browser acceptance renders one sandboxed secret-minimal fixture", () => {
   const fixture = makeComposeFixture();
   try {

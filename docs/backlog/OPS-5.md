@@ -37,16 +37,27 @@ configuration plumbing, not a completed backup or PITR. Neither the plugin nor
 its ObjectStore has been installed or exercised with this chart in a live
 cluster; Compose and external PostgreSQL still lack WAL/PITR.
 
+ADR-0123 adds a **source-only, opt-in Compose pgBackRest candidate** for bundled
+PostgreSQL. The separate image target pins pgBackRest 2.59.1, and the canonical
+lifecycle validates a private S3-compatible configuration, enables verified-TLS
+WAL archiving and exposes a bounded stanza/check/full-backup action without
+automatic expiry. The default image and logical recovery path remain in place.
+Static validation and an image build are not a live backup or recovery result;
+the Compose path has no selected-point physical restore or joint identity/KMS
+custody yet. Its first slice uses public CA trust; custom CA, Azure and GCS
+are follow-on qualifications.
+
 The next action is to choose a real off-host bucket/region, encryption/key
 custody, retention, RPO/RTO and drill owner; install the compatible CNPG/Barman
 plugin in a disposable cluster; create the protected S3-compatible ObjectStore;
 and prove continuous WAL plus base backup before and after two committed write
-points. Restore each into new storage with original issuer/KMS custody, run the
-ordinary application/forced-RLS/audit/Knowledge checks, inject incomplete or
-corrupt backup and wrong-key failures, and record elapsed time. Then extend the
-same owned recovery target to the Compose first-offer path and schedule
-recurring drills. Do not enable retention deletion until a generation has
-passed independent restore.
+points. Run the same repository-shaped Compose candidate against an owned
+bucket. Restore both deployment shapes into new storage at selected instants
+with original issuer/KMS custody, run the ordinary
+application/forced-RLS/audit/Knowledge checks, inject incomplete or corrupt
+backup and wrong-key failures, and record elapsed time. Schedule recurring
+drills only after that evidence passes. Do not enable retention deletion until
+a generation has passed independent restore.
 
 ## Scope
 

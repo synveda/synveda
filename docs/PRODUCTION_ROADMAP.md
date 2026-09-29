@@ -64,8 +64,10 @@ The first OPS-5 source slice follows
 [ADR-0122](adr/adr-0122-provider-owned-object-store-backup-seam.md): optional
 CNPG WAL archiving and scheduled base backups reference an operator-owned
 Barman Cloud ObjectStore. The S3-compatible/AWS path has a render-tested chart
-contract, but no live backup, joint custody or PITR evidence. The Compose
-first-offer path remains open under OPS-5.
+contract. [ADR-0123](adr/adr-0123-opt-in-compose-physical-backup.md) adds a
+source-built opt-in Compose pgBackRest image with S3 WAL archiving and a bounded
+base-backup action. Neither has live off-host backup, selected-point restore or
+joint custody evidence; the first-offer recovery gate remains open under OPS-5.
 
 ## Medium-team deployment
 

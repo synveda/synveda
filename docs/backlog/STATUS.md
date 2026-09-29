@@ -123,11 +123,12 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 
 OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL
 and scheduled physical backups, plus an S3-compatible ObjectStore example and
-static chart refusal tests. No live encrypted off-host backup, PITR, matching
-identity/key recovery, recurring drill or owned RPO/RTO has passed. Next
-qualify the plugin and selected provider in an isolated cluster, then extend
-the recovery contract to the Compose first offer. The OPS-5 brief owns the
-exact drill and remaining owner decisions.
+static chart refusal tests. ADR-0123 adds an opt-in Compose pgBackRest image,
+private S3 configuration check and bounded base-backup action. No live
+encrypted off-host backup, selected-point PITR, matching identity/key
+recovery, recurring drill or owned RPO/RTO has passed. Next qualify both
+source candidates with an owner-selected bucket and independent joint restore;
+the OPS-5 brief owns the exact drill and remaining owner decisions.
 
 - [ ] [OPS-6: Upgrade and rollback discipline](OPS-6.md) — open
 

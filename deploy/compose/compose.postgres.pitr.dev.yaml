@@ -1,0 +1,20 @@
+x-synveda-pitr-proxy-build-closure: &synveda-pitr-proxy-build-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+services:
+  database-bootstrap:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/postgres/Dockerfile
+      target: pitr
+      args:
+        <<: *synveda-pitr-proxy-build-closure

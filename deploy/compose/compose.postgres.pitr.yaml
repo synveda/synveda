@@ -1,0 +1,23 @@
+# OPS-5 source candidate. Only the explicit PITR selector adds repository
+# access and outbound networking to the bundled PostgreSQL service.
+services:
+  postgres:
+    entrypoint: ["/usr/local/bin/synveda-pgbackrest-entrypoint"]
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_timeout=60s
+      - -c
+      - archive_command=pgbackrest --config=/var/run/postgresql/pgbackrest.conf --stanza=synveda --pg1-path=/var/lib/postgresql/data --repo1-type=s3 --repo1-cipher-type=aes-256-cbc --repo1-storage-verify-tls=y --log-level-file=off archive-push %p
+    secrets:
+      - source: pgbackrest_conf
+        target: pgbackrest_conf
+    networks:
+      application-egress:
+        gw_priority: 1
+
+secrets:
+  pgbackrest_conf:
+    file: ${SYNVEDA_PITR_CONFIG_FILE:?set SYNVEDA_PITR_CONFIG_FILE}

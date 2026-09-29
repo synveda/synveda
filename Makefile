@@ -14,7 +14,7 @@ SYNVEDA_TEI_IMAGE ?= $(or $(TEI_IMAGE_$(shell uname -m)),$(TEI_IMAGE_amd64))
 export SYNVEDA_TEI_IMAGE
 RETRIEVAL_COMPOSE = docker compose -p synveda-retrieval-eval -f evals/compose.retrieval.yaml
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-backup compose-restore-smoke compose-upgrade-smoke compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-backup compose-pitr-backup compose-restore-smoke compose-upgrade-smoke compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 # CPR-45's canonical topology renders the closed runtime/provider matrix and
 # optional profiles without starting or pulling images.
@@ -52,6 +52,9 @@ compose-acceptance:
 
 compose-backup:
 	demos/cpr-45-docker-reference.sh backup
+
+compose-pitr-backup:
+	deploy/compose/scripts/compose.sh pitr-backup
 
 compose-restore-smoke:
 	SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance demos/cpr-45-docker-reference.sh restore-smoke
@@ -428,6 +431,7 @@ check-deploy: check-release-parity check-chart-images check-compose-contract
 
 check-compose-contract:
 	node --test scripts/evaluation.test.mjs
+	node --test scripts/check-pgbackrest-config.test.mjs
 	node --test scripts/generate-compose-issuer.test.mjs
 	node --test scripts/check-tls-inputs.test.mjs
 	node --test scripts/manage-hosts-file.test.mjs

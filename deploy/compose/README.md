@@ -568,6 +568,59 @@ Reinstall its hosts block only when continuing development:
       make compose-hosts-install
     make compose-resolver-check
 
+## Opt-in S3 physical backup candidate
+
+OPS-5 has an opt-in pgBackRest image for bundled PostgreSQL. It archives WAL to
+an operator-owned S3-compatible bucket, including AWS S3, and exposes a bounded
+full-base-backup action. This is a source candidate: it has no isolated PITR
+restore command, coupled identity/KMS custody, measured RPO/RTO or live
+off-host acceptance yet. Do not treat a successful backup as disaster-recovery
+evidence. The default Compose image and logical backup path are unchanged.
+
+First create the normal project inputs with `make compose-secrets` and
+`make compose-issuer`, using the same runtime, project suffix and other
+selectors that will start the deployment. Place a mode-0600
+`pgbackrest.conf` in that project's private runtime directory, beside its
+`secrets` directory. It must be owned by the runtime UID/GID. The lifecycle
+checks the single `[global]` section without printing its values and mounts
+the file only into PostgreSQL. A minimal shape is:
+
+```ini
+[global]
+pg1-path=/var/lib/postgresql/data
+repo1-type=s3
+repo1-path=/synveda/synveda-development
+repo1-s3-bucket=<operator-owned-bucket>
+repo1-s3-endpoint=<TLS-hostname>
+repo1-s3-region=<bucket-region>
+repo1-s3-key=<access-id>
+repo1-s3-key-secret=<secret-key>
+repo1-cipher-type=aes-256-cbc
+repo1-cipher-pass=<at-least-32-random-characters>
+repo1-storage-verify-tls=y
+```
+
+For supported AWS instance credentials, replace the two static key lines with
+`repo1-s3-key-type=auto`; the container must actually be able to obtain those
+credentials. Use a unique non-root `repo1-path` per source project. A private
+S3-compatible endpoint may also need `repo1-s3-uri-style=path` and
+`repo1-storage-port`. This first slice uses the image's public CA trust;
+custom-CA mounts and Azure/GCS configuration are follow-on work. Keep the
+repository cipher passphrase separate from the bucket and escrow it with the
+matching Synveda KMS and issuer recovery set.
+
+Set `SYNVEDA_PITR_ENABLED=true` on every lifecycle call for this project.
+Development builds the `pitr` image target. Reference mode requires an
+operator-supplied digest-bound image built from that target. After
+`make compose-up`, promptly run `make compose-pitr-backup`; this creates the
+stanza, checks WAL archiving and takes a full physical backup without automatic
+expiry. PostgreSQL may retain WAL locally until the stanza and repository are
+healthy, so monitor `pg_stat_archiver`, `pg_wal` capacity and backup age.
+The fixed `archive_timeout=60s` forces periodic WAL segments; it is not an
+RPO promise. Do not enable retention deletion before an independent restore of
+the retained generation passes. An isolated selected-point restore with the
+matching identity/KMS set remains the next OPS-5 gate.
+
 ## Logical backup and isolated restore
 
 Recovery currently supports the bundled PostgreSQL and bundled Keycloak modes
@@ -643,9 +696,10 @@ archives and recovery-secret set are sensitive and are not encrypted by this
 tool. SHA-256 links detect accidental alteration, not malicious replacement,
 and are not signatures. The KMS check proves tenant-data-key unwrap; Synveda
 does not claim application-level encryption of Knowledge bodies. Same-host
-storage is validation evidence, not disaster recovery. Scheduling, encrypted
-off-host retention, S3 transfer, WAL/PITR, RPO/RTO and recurring drills remain
-OPS-5 production work.
+storage is validation evidence, not disaster recovery. The opt-in physical
+candidate above does not change this logical path's limits. A live encrypted
+off-host PITR restore, owned RPO/RTO and recurring drills remain OPS-5
+production work.
 
 If interruption reports that the exact-project lock was retained during
 writer stop or backup, assume the four writers may still be stopped. Do not

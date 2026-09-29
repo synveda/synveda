@@ -71,6 +71,30 @@ RUN set -eux; \
         >> /usr/local/share/synveda/extension-fingerprint-assert.psql; \
     chmod 0444 /usr/local/share/synveda/extension-fingerprint-assert.psql
 
+# OPS-5: optional physical-backup image. The reference image below remains
+# the default; this MIT-licensed binary is added only to the explicit PITR
+# variant so the normal reference does not acquire a backup credential path.
+FROM runtime AS pitr
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends pgbackrest=2.59.1-1.pgdg12+1; \
+    test "$(pgbackrest version)" = 'pgBackRest 2.59.1'; \
+    test -s /usr/share/doc/pgbackrest/copyright; \
+    rm -rf /var/lib/apt/lists/*
+COPY --chmod=0555 deploy/compose/postgres/synveda-pgbackrest-entrypoint /usr/local/bin/synveda-pgbackrest-entrypoint
+
 # Default final stage for development, reference, tests and release builds.
 # Database creation and extensions always use the reviewed bootstrap command;
 # no image-level initdb hook owns schema or role lifecycle.

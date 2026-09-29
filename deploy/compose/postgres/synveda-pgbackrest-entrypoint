@@ -1,0 +1,11 @@
+#!/bin/sh
+# Compose file secrets retain host ownership. PostgreSQL's archive process
+# drops to the postgres UID, so stage only its backup config into the existing
+# runtime tmpfs before the stock entrypoint drops privileges.
+set -eu
+
+[ "$(id -u)" -eq 0 ] && [ "$#" -gt 0 ] || exit 78
+[ -f /run/secrets/pgbackrest_conf ] && [ ! -L /run/secrets/pgbackrest_conf ] || exit 78
+install -o postgres -g postgres -m 0400 \
+    /run/secrets/pgbackrest_conf /var/run/postgresql/pgbackrest.conf
+exec /usr/local/bin/docker-entrypoint.sh "$@"
