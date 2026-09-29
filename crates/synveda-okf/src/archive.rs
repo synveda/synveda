@@ -184,6 +184,17 @@ fn tar_entries(reader: impl Read) -> Result<Vec<InputEntry>> {
 }
 
 pub(crate) fn directory_entries(root: &Path) -> Result<Vec<InputEntry>> {
+    if fs::symlink_metadata(root)
+        .map_err(|_| Error::Invalid {
+            message: "OKF directory cannot be opened".to_owned(),
+        })?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(Error::Invalid {
+            message: "OKF directory source cannot be a symlink".to_owned(),
+        });
+    }
     let root = fs::canonicalize(root).map_err(|_| Error::Invalid {
         message: "OKF directory cannot be opened".to_owned(),
     })?;
@@ -193,45 +204,31 @@ pub(crate) fn directory_entries(root: &Path) -> Result<Vec<InputEntry>> {
         });
     }
     let mut output = Vec::new();
-    walk_directory(&root, &root, &mut output)?;
-    Ok(output)
-}
-
-fn walk_directory(root: &Path, current: &Path, output: &mut Vec<InputEntry>) -> Result<()> {
-    if output.len() >= MAX_ARTIFACTS {
-        return Err(Error::Invalid {
-            message: format!("OKF directory exceeds {MAX_ARTIFACTS} entries"),
-        });
-    }
-    let mut children = fs::read_dir(current)
-        .map_err(|_| Error::Invalid {
-            message: "OKF directory cannot be enumerated".to_owned(),
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|_| Error::Invalid {
-            message: "OKF directory contains an unreadable entry".to_owned(),
-        })?;
-    children.sort_by_key(fs::DirEntry::file_name);
-    for child in children {
-        if child.file_name() == ".git" {
+    let mut pending = vec![root.clone()];
+    let mut entry_count = 0usize;
+    let mut total_bytes = 0usize;
+    while let Some(path) = pending.pop() {
+        if path == root {
+            enqueue_children(&path, &mut pending, &mut entry_count)?;
             continue;
         }
-        let path = child.path();
-        let metadata = fs::symlink_metadata(&path).map_err(|_| Error::Invalid {
-            message: "OKF directory entry metadata cannot be read".to_owned(),
+        let relative = path.strip_prefix(&root).map_err(|_| Error::Invalid {
+            message: "OKF directory entry escapes its root".to_owned(),
         })?;
-        let relative = path.strip_prefix(root).expect("walk starts below root");
         let logical_path = relative.to_str().ok_or_else(|| Error::Invalid {
             message: "OKF directory path is not UTF-8".to_owned(),
         })?;
         let logical_path = normalise_path(logical_path)?;
+        let metadata = fs::symlink_metadata(&path).map_err(|_| Error::Invalid {
+            message: "OKF directory entry metadata cannot be read".to_owned(),
+        })?;
         if metadata.file_type().is_symlink() {
             return Err(Error::Invalid {
                 message: format!("OKF directory contains a symlink: {logical_path}"),
             });
         }
         if metadata.is_dir() {
-            walk_directory(root, &path, output)?;
+            enqueue_children(&path, &mut pending, &mut entry_count)?;
             continue;
         }
         if !metadata.is_file() {
@@ -242,7 +239,7 @@ fn walk_directory(root: &Path, current: &Path, output: &mut Vec<InputEntry>) -> 
         let canonical = fs::canonicalize(&path).map_err(|_| Error::Invalid {
             message: format!("OKF directory entry cannot be resolved: {logical_path}"),
         })?;
-        if !canonical.starts_with(root) {
+        if !canonical.starts_with(&root) {
             return Err(Error::Invalid {
                 message: format!("OKF directory entry escapes its root: {logical_path}"),
             });
@@ -252,14 +249,68 @@ fn walk_directory(root: &Path, current: &Path, output: &mut Vec<InputEntry>) -> 
                 message: format!("OKF directory entry exceeds byte limit: {logical_path}"),
             });
         }
-        let bytes = fs::read(canonical).map_err(|_| Error::Invalid {
-            message: format!("OKF directory entry cannot be read: {logical_path}"),
-        })?;
+        let mut bytes = Vec::new();
+        fs::File::open(canonical)
+            .map_err(|_| Error::Invalid {
+                message: format!("OKF directory entry cannot be read: {logical_path}"),
+            })?
+            .take((MAX_ARTIFACT_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|_| Error::Invalid {
+                message: format!("OKF directory entry cannot be read: {logical_path}"),
+            })?;
+        if bytes.len() > MAX_ARTIFACT_BYTES {
+            return Err(Error::Invalid {
+                message: format!("OKF directory entry exceeds byte limit: {logical_path}"),
+            });
+        }
+        total_bytes = total_bytes
+            .checked_add(bytes.len())
+            .ok_or_else(|| Error::Invalid {
+                message: "OKF directory expanded byte total overflowed".to_owned(),
+            })?;
+        if total_bytes > MAX_EXPANDED_BYTES {
+            return Err(Error::Invalid {
+                message: format!("OKF directory exceeds {MAX_EXPANDED_BYTES} expanded bytes"),
+            });
+        }
         output.push(InputEntry {
             logical_path,
             kind: InputEntryKind::File,
             bytes,
         });
+    }
+    Ok(output)
+}
+
+fn enqueue_children(
+    current: &Path,
+    pending: &mut Vec<std::path::PathBuf>,
+    entry_count: &mut usize,
+) -> Result<()> {
+    let mut children = Vec::new();
+    for child in fs::read_dir(current).map_err(|_| Error::Invalid {
+        message: "OKF directory cannot be enumerated".to_owned(),
+    })? {
+        let child = child.map_err(|_| Error::Invalid {
+            message: "OKF directory contains an unreadable entry".to_owned(),
+        })?;
+        if child.file_name() == ".git" {
+            continue;
+        }
+        *entry_count = entry_count.checked_add(1).ok_or_else(|| Error::Invalid {
+            message: "OKF directory entry count overflowed".to_owned(),
+        })?;
+        if *entry_count > MAX_ARTIFACTS {
+            return Err(Error::Invalid {
+                message: format!("OKF directory exceeds {MAX_ARTIFACTS} entries"),
+            });
+        }
+        children.push(child.path());
+    }
+    children.sort();
+    for child in children.into_iter().rev() {
+        pending.push(child);
     }
     Ok(())
 }
@@ -272,6 +323,12 @@ pub(crate) fn normalise_path(value: &str) -> Result<String> {
     {
         return Err(Error::Invalid {
             message: "OKF logical paths must be non-empty relative UTF-8 slash paths".to_owned(),
+        });
+    }
+    // Path::components removes interior `.` segments before we can reject them.
+    if value.split('/').any(|part| part == "." || part == "..") {
+        return Err(Error::Invalid {
+            message: "OKF logical paths must not contain dot segments".to_owned(),
         });
     }
     let path = Path::new(value);
@@ -336,11 +393,50 @@ mod tests {
 
     #[test]
     fn paths_refuse_every_escape_and_resolve_bounded_parent_links() {
-        for invalid in ["", "/root.md", "../escape.md", "a/../b.md", "a\\b.md"] {
+        for invalid in [
+            "",
+            "/root.md",
+            "../escape.md",
+            "a/../b.md",
+            "a/./b.md",
+            "a\\b.md",
+        ] {
             assert!(normalise_path(invalid).is_err(), "{invalid}");
         }
         assert_eq!(normalise_path("a/b.md").unwrap(), "a/b.md");
         assert_eq!(resolve_relative(Some("a/b"), "../c.md").unwrap(), "a/c.md");
         assert!(resolve_relative(None, "../c.md").is_err());
+    }
+
+    #[test]
+    fn local_directory_counts_empty_directories_before_allocating_all_entries() {
+        let root = tempfile::tempdir().expect("temporary OKF directory");
+        for index in 0..=MAX_ARTIFACTS {
+            fs::create_dir(root.path().join(format!("empty-{index:04}")))
+                .expect("create empty directory");
+        }
+        let error = directory_entries(root.path()).expect_err("empty directories count");
+        assert!(error.to_string().contains("entries"));
+    }
+
+    #[test]
+    fn local_directory_bounds_total_bytes_before_returning_entries() {
+        let root = tempfile::tempdir().expect("temporary OKF directory");
+        let content = vec![b'x'; MAX_ARTIFACT_BYTES];
+        for index in 0..16 {
+            fs::write(root.path().join(format!("entry-{index:02}.md")), &content)
+                .expect("write bounded file");
+        }
+        let error = directory_entries(root.path()).expect_err("total must be bounded");
+        assert!(error.to_string().contains("expanded bytes"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_directory_refuses_symlink_root() {
+        let root = tempfile::tempdir().expect("temporary OKF directory");
+        let alias = root.path().join("alias");
+        std::os::unix::fs::symlink(root.path(), &alias).expect("create symlink");
+        assert!(directory_entries(&alias).is_err());
     }
 }

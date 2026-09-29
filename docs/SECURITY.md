@@ -281,7 +281,7 @@ make check-context-security pins these boundaries:
 | context side channels and graph paths | crates/synveda-gateway/tests/context_runs.rs |
 | Skill path safety, non-executing validation and durable-operation isolation | crates/synveda-types/src/skill.rs, crates/synveda-store/src/operations.rs and crates/synveda-gateway/tests/skills.rs |
 | MCP read-only testing and secret lifecycle | crates/synveda-gateway/src/tool_registry.rs and crates/synveda-gateway/tests/tools.rs |
-| OKF traversal and expansion bounds | crates/synveda-okf/tests/okf_v02.rs |
+| OKF traversal and expansion bounds | crates/synveda-okf/src/archive.rs unit tests; crates/synveda-okf/tests/okf_v02.rs |
 | audit content minimisation | crates/synveda-gateway/tests/audit_query.rs |
 | directory credential failure | crates/synveda-gateway/tests/directory_sync.rs |
 | VedaFlow personal auto-apply | crates/synveda-gateway/tests/relaxations.rs |
@@ -309,6 +309,10 @@ each scan class detects a violation.
   universal execution proxy.
 - OKF remote import is bounded and rejects private targets/redirects; it is not
   a general synchroniser.
+- The local OKF directory reader bounds entries and bytes for a stable tree.
+  Concurrent replacement of files or path components is not yet protected by
+  descriptor-based no-follow traversal; import from an owner-controlled stable
+  checkout, not a tree another principal can mutate during the read.
 - Live Entra/Okta and real Cursor evidence remain unavailable. Client claims
   are governed by adapters/registry.json and generated docs/CLIENT_SUPPORT.md.
 

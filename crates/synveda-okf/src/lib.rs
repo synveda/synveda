@@ -39,7 +39,7 @@ pub const MAX_ARCHIVE_BYTES: usize = 1_500_000;
 pub const MAX_EXPANDED_BYTES: usize = 4_000_000;
 /// Maximum bytes in one Markdown artifact.
 pub const MAX_ARTIFACT_BYTES: usize = 262_144;
-/// Maximum files in one bundle.
+/// Maximum archive or local-directory entries, including directories.
 pub const MAX_ARTIFACTS: usize = 2_000;
 /// Maximum YAML frontmatter bytes in one concept.
 pub const MAX_FRONTMATTER_BYTES: usize = 32_768;
