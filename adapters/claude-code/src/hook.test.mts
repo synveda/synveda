@@ -782,6 +782,11 @@ test("repeated precompacts declare only the uncovered local window", async () =>
       { hook_event_name: "PreCompact", session_id: "f4-repeat", transcript_path: path },
       config(failing.url),
     );
+    await turnHook(
+      { hook_event_name: "PreCompact", session_id: "f4-repeat", transcript_path: path },
+      config(failing.url),
+    );
+    assert.equal(loadSpool("f4-repeat")?.entries.length, 2, "a repeated hook has no new source window");
     writeFileSync(path, `${JSON.stringify(entry("u2", "before the second compaction"))}\n`);
     await turnHook(
       { hook_event_name: "PreCompact", session_id: "f4-repeat", transcript_path: path },

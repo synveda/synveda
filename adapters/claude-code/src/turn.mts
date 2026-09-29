@@ -103,7 +103,7 @@ export async function turn(
   // Record first, always, and persist before anything touches the network.
   // This is the step the previous design did not have.
   let recorded = recordDelta(spool, input.transcript_path, readEntries, spool.checkout);
-  if (input.hook_event_name === "PreCompact") {
+  if (input.hook_event_name === "PreCompact" && (configured.clientName ?? CLIENT_NAME) === CLIENT_NAME) {
     let previousBoundary = -1;
     for (let index = spool.entries.length - 1; index >= 0; index -= 1) {
       if (spool.entries[index]?.event_type === "session.compaction_boundary") {
@@ -112,18 +112,21 @@ export async function turn(
       }
     }
     const sourceEntries = spool.entries.slice(previousBoundary + 1);
-    const localHigh = spool.entries.reduce((high, entry) => Math.max(high, entry.sequence), 0) + 1;
-    recorded += record(spool, [{
-      event_type: "session.compaction_boundary",
-      client_event_id: `precompact:${spool.recorded_through ?? "none"}:${localHigh}`,
-      occurred_at: new Date().toISOString(),
-      payload: {
-        schema_version: 1,
-        local_high_sequence: localHigh,
-        expected_client_event_ids: sourceEntries.slice(-64).map((entry) => entry.client_event_id),
-        expected_ids_truncated: sourceEntries.length > 64,
-      },
-    }]);
+    // A replay of the same hook has no new source window to checkpoint.
+    if (previousBoundary < 0 || sourceEntries.length > 0) {
+      const localHigh = spool.entries.reduce((high, entry) => Math.max(high, entry.sequence), 0) + 1;
+      recorded += record(spool, [{
+        event_type: "session.compaction_boundary",
+        client_event_id: `precompact:${spool.recorded_through ?? "none"}:${localHigh}`,
+        occurred_at: new Date().toISOString(),
+        payload: {
+          schema_version: 1,
+          local_high_sequence: localHigh,
+          expected_client_event_ids: sourceEntries.slice(-64).map((entry) => entry.client_event_id),
+          expected_ids_truncated: sourceEntries.length > 64,
+        },
+      }]);
+    }
   }
   const durable = saveSpool(spool);
   if (!durable) {

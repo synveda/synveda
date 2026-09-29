@@ -32,12 +32,6 @@ class OpenSessionBody(TypedDict, closed=True):
     workspace_id: str
 
 
-class CreateContextRunBody(TypedDict, closed=True):
-    budget_tokens: NotRequired[int | None]
-    max_sensitivity: NotRequired[str | None]
-    query: NotRequired[str | None]
-
-
 class EndSessionBody(TypedDict, closed=True):
     end_reason: NotRequired[str | None]
     status: Literal['ending', 'ended', 'abandoned', 'failed']
@@ -109,6 +103,7 @@ class ContextRunView(TypedDict):
     block_hash: str
     budget_tokens: int
     candidate_count: int
+    checkpoint_event_id: NotRequired[str | None]
     completion_status: str
     configuration_hash: str
     configuration_version_id: NotRequired[str | None]
@@ -119,6 +114,7 @@ class ContextRunView(TypedDict):
     graph_version: NotRequired[str | None]
     id: str
     index_version: str
+    optimization_mode: str
     policy_exclusion_message: NotRequired[str | None]
     project_id: NotRequired[str | None]
     query: NotRequired[str | None]
@@ -130,6 +126,8 @@ class ContextRunView(TypedDict):
     selection_count: int
     session_id: str
     skills: dict[str, Any]
+    token_count_kind: str
+    tokenizer_encoding: NotRequired[str | None]
     tokens: int
     trace_retention_mode: str
     workspace_id: str
@@ -221,12 +219,19 @@ class TenantView(TypedDict):
     status: str
 
 
+class RequiredKnowledgeRevision(TypedDict, closed=True):
+    item_id: str
+    revision_id: str
+
+
 class NewEventBody(TypedDict, closed=True):
     client_event_id: str
     event_schema_version: NotRequired[int]
     event_type: Literal[
         'session.started',
         'session.ended',
+        'session.compaction_boundary',
+        'session.checkpoint',
         'message.user',
         'message.assistant',
         'tool.invoked',
@@ -374,6 +379,8 @@ class SessionEventView(TypedDict):
     event_type: Literal[
         'session.started',
         'session.ended',
+        'session.compaction_boundary',
+        'session.checkpoint',
         'message.user',
         'message.assistant',
         'tool.invoked',
@@ -464,6 +471,15 @@ class CreateKnowledgeBody(TypedDict, closed=True):
     project_id: NotRequired[str | None]
     scope_id: str
     sources: NotRequired[list[KnowledgeSourceBody]]
+
+
+class CreateContextRunBody(TypedDict, closed=True):
+    budget_tokens: NotRequired[int | None]
+    max_sensitivity: NotRequired[str | None]
+    query: NotRequired[str | None]
+    required_knowledge_revisions: NotRequired[list[RequiredKnowledgeRevision]]
+    restart: NotRequired[bool]
+    tokenizer_encoding: NotRequired[str | None]
 
 
 class AppendEventsBody(TypedDict, closed=True):

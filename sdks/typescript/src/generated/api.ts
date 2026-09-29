@@ -155,6 +155,21 @@ export type CreateContextRunBody = {
      * Task/query; omission is the session-start recency shape.
      */
     query?: string | null;
+    /**
+     * Current immutable Knowledge revisions required verbatim by the
+     * authenticated session caller.
+     */
+    required_knowledge_revisions?: RequiredKnowledgeRevision[];
+    /**
+     * Include bounded Session checkpoint and recent-event evidence after a
+     * supported compact/restart hook. The same Session remains authoritative.
+     */
+    restart?: boolean;
+    /**
+     * Optional exact text encoding selected by the caller. The only supported
+     * value is `o200k_base`; omission keeps an explicit estimate.
+     */
+    tokenizer_encoding?: string | null;
   };
 
 /**
@@ -490,6 +505,10 @@ export type ContextRunView = {
      */
     candidate_count: number;
     /**
+     * Checkpoint used by a compact/restart delivery, when present.
+     */
+    checkpoint_event_id?: string | null;
+    /**
      * `pending`, `completed` or `failed`.
      */
     completion_status: string;
@@ -531,6 +550,10 @@ export type ContextRunView = {
      * Knowledge index implementation version.
      */
     index_version: string;
+    /**
+     * Governed mode used for this immutable delivery.
+     */
+    optimization_mode: string;
     /**
      * Aggregate policy-filtering notice without a denied count.
      */
@@ -578,6 +601,14 @@ export type ContextRunView = {
      * was named without asking twice.
      */
     skills: Record<string, unknown>;
+    /**
+     * `estimated` or `exact_encoding`; neither implies provider billing.
+     */
+    token_count_kind: string;
+    /**
+     * Local text encoding used, when one was available.
+     */
+    tokenizer_encoding?: string | null;
     /**
      * Estimated tokens of `rendered`.
      */
@@ -1018,6 +1049,20 @@ export type ProposalSummary = {
   };
 
 /**
+ * Exact current Knowledge revision designated by the session caller.
+ */
+export type RequiredKnowledgeRevision = {
+    /**
+     * Stable Knowledge item identity.
+     */
+    item_id: string;
+    /**
+     * Immutable revision identity.
+     */
+    revision_id: string;
+  };
+
+/**
  * One event of a `POST /v1/sessions/{session_id}/events` batch.
  */
 export type NewEventBody = {
@@ -1030,7 +1075,7 @@ export type NewEventBody = {
      * The payload shape this client declares. Defaults to the current one.
      */
     event_schema_version?: number;
-    event_type: "session.started" | "session.ended" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * When the client says it happened.
      */
@@ -1592,7 +1637,7 @@ export type SessionEventView = {
      * The payload shape the client declared.
      */
     event_schema_version: number;
-    event_type: "session.started" | "session.ended" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * The event's id in this deployment.
      */
