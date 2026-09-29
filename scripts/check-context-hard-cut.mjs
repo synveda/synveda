@@ -9,10 +9,17 @@ import {
   readdirSync,
   statSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+// OPS-6 / ADR-0121: pin the published baseline and the first forward migration.
+// A checksum change is a release compatibility change, not routine SQL cleanup.
+const EPOCH_3_BASELINE_SHA256 =
+  "66766e8bc10e2eeea46c15350bfb7d7642fd7d360c1a0dfa64fce3ef4ab89de5";
+const EPOCH_3_FORWARD_SHA256 =
+  "08932e958a8a90ebd53859703ab3a93ab87adce22ec8f1efec003f11b10cd435";
 
 const RETIRED_PATTERNS = [
   ["global runtime route", /\/v1\/(?:observe|inject|recall)\b/giu],
@@ -117,6 +124,24 @@ export function baselineFindings(source) {
   return findings;
 }
 
+export function baselineDigestFindings(source) {
+  const actual = createHash("sha256").update(source).digest("hex");
+  return actual === EPOCH_3_BASELINE_SHA256
+    ? []
+    : [
+        `0001_context_platform.sql SHA-256 changed (${actual}); OPS-6 / ADR-0121 requires an explicit migration and compatibility decision`,
+      ];
+}
+
+export function forwardDigestFindings(source) {
+  const actual = createHash("sha256").update(source).digest("hex");
+  return actual === EPOCH_3_FORWARD_SHA256
+    ? []
+    : [
+        `0002_context_restart_and_excerpt.sql SHA-256 changed (${actual}); OPS-6 / ADR-0121 requires an explicit migration and compatibility decision`,
+      ];
+}
+
 export function databaseBootstrapFindings(source) {
   const findings = [];
   const normalized = source.toLowerCase().replace(/\s+/gu, " ").trim();
@@ -180,7 +205,7 @@ export function main() {
     const source = readFileSync(path, "utf8");
     findings.push(...retiredProductionFindings(source, relative(ROOT, path)));
     for (const match of source.matchAll(/migrations\/(\d{4}_[A-Za-z0-9_-]+\.sql)/gu)) {
-      if (match[1] !== "0001_context_platform.sql") {
+      if (!["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql"].includes(match[1])) {
         const line = source.slice(0, match.index).split("\n").length;
         findings.push(`${relative(ROOT, path)}:${line}: references absent migration ${match[1]}`);
       }
@@ -193,11 +218,15 @@ export function main() {
 
   const migrationDir = join(ROOT, "crates/synveda-store/migrations");
   const migrations = readdirSync(migrationDir).filter((name) => name.endsWith(".sql")).sort();
-  if (JSON.stringify(migrations) !== JSON.stringify(["0001_context_platform.sql"])) {
-    findings.push(`migration inventory is ${migrations.join(", ") || "empty"}; expected one epoch-3 baseline`);
+  if (JSON.stringify(migrations) !== JSON.stringify(["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql"])) {
+    findings.push(`migration inventory is ${migrations.join(", ") || "empty"}; expected the released epoch-3 baseline and one forward migration`);
   }
   const baseline = readFileSync(join(migrationDir, "0001_context_platform.sql"), "utf8");
   findings.push(...baselineFindings(baseline));
+  findings.push(...baselineDigestFindings(baseline));
+  const forward = readFileSync(join(migrationDir, "0002_context_restart_and_excerpt.sql"), "utf8");
+  findings.push(...retiredProductionFindings(forward, "0002_context_restart_and_excerpt.sql").filter((finding) => finding.includes("retired table")));
+  findings.push(...forwardDigestFindings(forward));
   const databaseBootstrap = readFileSync(
     join(ROOT, "deploy/compose/postgres/synveda-database-bootstrap"),
     "utf8",
@@ -225,7 +254,7 @@ export function main() {
 
   if (findings.length > 0) fail(findings);
   console.log(
-    `context hard cut holds: ${productionFiles().length} active files, one epoch-3 migration, ` +
+    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline and forward migration, ` +
       "deployment-owned vector + btree_gin bootstrap, current OpenAPI and SQLx metadata",
   );
 }

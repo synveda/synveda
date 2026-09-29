@@ -89,9 +89,11 @@ make compose-up                   # reuse that same state
 `make compose-reset` is destructive and requires the lifecycle's exact
 project-bound confirmation. It is not a routine troubleshooting or migration
 step. Never remove existing volumes or key files to get a test green.
-Pre-epoch-3 databases are deliberately refused; no compatibility migrator exists.
-For a **new disposable database**, let the normal bootstrap apply
-[the single baseline migration](../crates/synveda-store/migrations/0001_context_platform.sql).
+Pre-epoch-3 databases are deliberately refused. The exact published v0.4.3
+epoch-3 baseline has one reviewed forward migration (ADR-0121); v0.4.0's
+different baseline checksum remains refused. For a **new disposable database**,
+let the normal bootstrap apply [the released baseline](../crates/synveda-store/migrations/0001_context_platform.sql)
+and [forward migration](../crates/synveda-store/migrations/0002_context_restart_and_excerpt.sql).
 
 ## Validation
 

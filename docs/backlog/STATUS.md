@@ -121,6 +121,16 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 - [ ] [OPS-6: Upgrade and rollback discipline](OPS-6.md) — open
+
+OPS-6 / ADR-0121 now keeps the published v0.4.3 `0001` bytes and adds a
+transactional `0002` for CTX-6/CTX-8, with byte pins and a staged migration
+guard. This is a source candidate; v0.4.0 remains incompatible and there is
+still no qualified published N-1/N pair. A 24-case isolated exact-role epoch
+run proves the published `0001` checksum, tenant retention, staged refusal and
+stamp recovery with source `0002`; the full isolated database suite passes.
+Next, run the released-byte joint data/identity/key upgrade, injected-failure
+and OPS-5 recovery drills before any supported upgrade claim.
+
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open

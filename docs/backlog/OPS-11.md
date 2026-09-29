@@ -20,8 +20,9 @@ router, CNI or CSI target has been qualified. Separately, published v0.4.0 and
 v0.4.3 both use schema epoch 3 and baseline revision 3, but v0.4.3 changes the
 single `0001_context_platform.sql` migration by adding `source_payload_hash`.
 The read-only `synveda db migrate --check` compares the exact SQLx migration
-checksum, so this pair cannot be declared a supported in-place upgrade. There
-is no versioned forward migration or accepted published upgrade pair.
+checksum, so this pair cannot be declared a supported in-place upgrade.
+OPS-6 / ADR-0121 now carries the exact v0.4.3 baseline plus a source-only
+`0002` forward migration; there is still no accepted published upgrade pair.
 
 ## Scope
 

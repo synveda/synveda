@@ -1,11 +1,35 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import {
+  baselineDigestFindings,
   baselineFindings,
+  forwardDigestFindings,
   databaseBootstrapFindings,
   retiredProductionFindings,
 } from "./check-context-hard-cut.mjs";
+
+test("the released epoch-3 baseline and first forward migration are byte-pinned", () => {
+  const baseline = readFileSync(
+    new URL("../crates/synveda-store/migrations/0001_context_platform.sql", import.meta.url),
+    "utf8",
+  );
+  assert.deepEqual(baselineDigestFindings(baseline), []);
+  assert.match(
+    baselineDigestFindings(`${baseline}\n-- changed after the pin\n`).join("\n"),
+    /explicit migration and compatibility decision/u,
+  );
+  const forward = readFileSync(
+    new URL("../crates/synveda-store/migrations/0002_context_restart_and_excerpt.sql", import.meta.url),
+    "utf8",
+  );
+  assert.deepEqual(forwardDigestFindings(forward), []);
+  assert.match(
+    forwardDigestFindings(`${forward}\n-- changed after the pin\n`).join("\n"),
+    /explicit migration and compatibility decision/u,
+  );
+});
 
 test("a deliberately reintroduced route DTO table and sidecar fail the gate", () => {
   const findings = retiredProductionFindings(`

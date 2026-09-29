@@ -28,9 +28,9 @@
 //! guarded on both ends. [`epoch::preflight`] refuses to advance a database
 //! written before the context-platform cut, [`epoch::stamp`] records the epoch
 //! it produced, and [`epoch::verify`] is what every process asks before it
-//! serves. [`reset`] is the one supported way past a refusal, and it destroys
-//! rather than translates — there is no migrator from the old model to this
-//! one, by decision.
+//! serves. [`reset`] is the destructive path for pre-cut databases; a
+//! published v0.4.3 baseline advances through an append-only migration
+//! instead. There is no translator from the old model to this one.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -122,17 +122,34 @@ pub async fn check_migration_compatibility(
     runtime_role::configure_authority_snapshot_connection(&mut compatibility).await?;
 
     let checked = async {
-        runtime_role::verify_migrator_read_only_connection(
-            &mut compatibility,
-            database_roles,
-        )
-        .await?;
-        epoch::verify_embedded_baseline_connection(&mut compatibility)
+        let (metadata, stage) = epoch::verify_embedded_head_connection(&mut compatibility)
             .await
             .map_err(|_| Error::Invalid {
                 message: "candidate image does not match the existing database schema contract; keep the currently running image; the database was not changed"
                     .to_owned(),
-            })
+            })?;
+        match stage {
+            epoch::MigrationPreflight::Prior => {
+                runtime_role::verify_v043_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
+            epoch::MigrationPreflight::Current => {
+                runtime_role::verify_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
+            _ => {
+                return Err(Error::Invalid {
+                    message: "candidate database is not at a completely stamped migration head; preserve it and investigate before switching images".to_owned(),
+                });
+            }
+        }
+        Ok(metadata)
     }
     .await;
 
@@ -211,15 +228,18 @@ async fn migrate_locked_connection(
                 )
                 .await?;
             }
-            epoch::MigrationPreflight::PendingStamp => {
-                runtime_role::verify_migrator_connection(&mut authority, database_roles).await?;
+            epoch::MigrationPreflight::PendingStampPrior | epoch::MigrationPreflight::Prior => {
+                runtime_role::verify_v043_migrator_connection(&mut authority, database_roles)
+                    .await?;
             }
-            epoch::MigrationPreflight::Current => {
-                epoch::verify_connection(&mut authority)
-                    .await
-                    .map_err(|error| Error::Invalid {
-                        message: error.to_string(),
-                    })?;
+            epoch::MigrationPreflight::PendingStampCurrent | epoch::MigrationPreflight::Current => {
+                if matches!(preflight, epoch::MigrationPreflight::Current) {
+                    epoch::verify_connection(&mut authority)
+                        .await
+                        .map_err(|error| Error::Invalid {
+                            message: error.to_string(),
+                        })?;
+                }
                 runtime_role::verify_migrator_connection(&mut authority, database_roles).await?;
             }
         }

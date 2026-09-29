@@ -1031,9 +1031,11 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
     begin,
   );
   const acl = runtimeRole.indexOf("application_acl_fingerprint(&mut authority)", snapshot);
-  const routine = runtimeRole.indexOf("routine_catalog_fingerprint(&mut authority", acl);
-  const trigger = runtimeRole.indexOf("trigger_catalog_fingerprint(&mut authority", routine);
+  const routine = runtimeRole.indexOf("let routine_catalog = routine_catalog_fingerprint(", acl);
+  const trigger = runtimeRole.indexOf("let trigger_catalog = trigger_catalog_fingerprint(", routine);
   const rls = runtimeRole.indexOf("rls_catalog_fingerprint(&mut authority)", trigger);
+  const routineCall = runtimeRole.slice(routine, trigger);
+  const triggerCall = runtimeRole.slice(trigger, rls);
   const commit = runtimeRole.indexOf(".commit()", rls);
   const output = runtimeRole.indexOf(
     '"authority-fingerprints baseline_revision={}',
@@ -1054,6 +1056,8 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
       routine > acl &&
       trigger > routine &&
       rls > trigger &&
+      /^\s*ROUTINE_CATALOG_ROW_COUNT,\s*$/m.test(routineCall) &&
+      /^\s*TRIGGER_CATALOG_ROW_COUNT,\s*$/m.test(triggerCall) &&
       commit > rls &&
       output > commit
     ) ||

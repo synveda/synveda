@@ -293,9 +293,10 @@ remaining operational and enterprise qualification gaps.
 - Tenant envelope keys protect the implemented secret/content paths. Complete
   storage encryption, KMS/HSM custody and restore ceremonies remain readiness
   requirements rather than current claims.
-- Pre-1.0 schema-epoch hard cuts are explicit: old databases are refused with
-  a reset instruction, with no data migrator or compatibility reader. After
-  1.0, migration/compatibility policy requires its own accepted ADR.
+- Pre-epoch-3 schema hard cuts remain explicit. ADR-0121 adds a narrow
+  forward migration from the exact published v0.4.3 epoch-3 baseline; the
+  different v0.4.0 checksum and earlier epochs remain refused. This is a
+  planned-interruption candidate, not a qualified production N-1 promise.
 - SOC 2 / ISO 27001 mapping remains open as AUD-5.
 - PDP, RLS, VedaFlow, erasure and context selection require adversarial and
   behaviour-level tests. Coverage percentages are reported only when measured.

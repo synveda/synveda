@@ -18,6 +18,7 @@
       },
       "context": {
         "token_budget": 1500,
+        "optimization_mode": "off",
         "channels": [
           "current_knowledge"
         ],

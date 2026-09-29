@@ -823,13 +823,30 @@ async fn verify_capability_catalog_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<()> {
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Current).await
+}
+
+/// The released v0.4.3 baseline and the forward head differ only in one
+/// routine and one trigger inventory entry. Prove the complete released
+/// catalogue before allowing its SQLx prefix to advance (OPS-6 / ADR-0121).
+#[derive(Clone, Copy)]
+enum CatalogueHead {
+    V043,
+    Current,
+}
+
+async fn verify_capability_catalog_for_head(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+    head: CatalogueHead,
+) -> Result<()> {
     verify_administrative_membership_catalog(connection, database_roles).await?;
     verify_capability_shape_connection(connection, database_roles).await?;
     verify_expected_runtime_catalog(connection, database_roles.runtime()).await?;
     verify_expected_migrator_catalog(connection, database_roles).await?;
     verify_application_acl(connection, database_roles).await?;
-    verify_routine_catalog_fingerprint(connection, database_roles.migrator()).await?;
-    verify_trigger_catalog_fingerprint(connection, database_roles.migrator()).await?;
+    verify_routine_catalog_fingerprint(connection, database_roles.migrator(), head).await?;
+    verify_trigger_catalog_fingerprint(connection, database_roles.migrator(), head).await?;
     verify_rls_catalog_fingerprint(connection).await?;
     verify_tenant_helper_definition(connection, database_roles.migrator()).await?;
     let mut protected_roles = Vec::with_capacity(4);
@@ -2353,6 +2370,9 @@ async fn application_acl_fingerprint(connection: &mut PgConnection) -> Result<St
 const ROUTINE_CATALOG_FINGERPRINT: &str =
     "b21947ff8f7672cad6b1d7f57c2a8bf1545fa949b06b00146bcab0381d84574c";
 const ROUTINE_CATALOG_ROW_COUNT: usize = 70;
+const V043_ROUTINE_CATALOG_FINGERPRINT: &str =
+    "1254f5a3d309db75aa1810ad74049cd9c78733050eb53145520b29a4d43d5733";
+const V043_ROUTINE_CATALOG_ROW_COUNT: usize = 69;
 const ROUTINE_DEFINITION_MAX_BYTES: i32 = 131_072;
 const ROUTINE_CONFIGURATION_MAX_ITEMS: i32 = 32;
 const ROUTINE_CONFIGURATION_ITEM_MAX_BYTES: i32 = 4096;
@@ -2360,9 +2380,17 @@ const ROUTINE_CONFIGURATION_ITEM_MAX_BYTES: i32 = 4096;
 async fn verify_routine_catalog_fingerprint(
     connection: &mut PgConnection,
     migrator: &str,
+    head: CatalogueHead,
 ) -> Result<()> {
-    let actual = routine_catalog_fingerprint(connection, migrator).await?;
-    if actual != ROUTINE_CATALOG_FINGERPRINT {
+    let (expected, row_count) = match head {
+        CatalogueHead::V043 => (
+            V043_ROUTINE_CATALOG_FINGERPRINT,
+            V043_ROUTINE_CATALOG_ROW_COUNT,
+        ),
+        CatalogueHead::Current => (ROUTINE_CATALOG_FINGERPRINT, ROUTINE_CATALOG_ROW_COUNT),
+    };
+    let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
+    if actual != expected {
         return Err(Error::Invalid {
             message: "the application routine definition inventory does not match the current schema epoch 3 baseline"
                 .to_owned(),
@@ -2374,6 +2402,7 @@ async fn verify_routine_catalog_fingerprint(
 async fn routine_catalog_fingerprint(
     connection: &mut PgConnection,
     migrator: &str,
+    row_count: usize,
 ) -> Result<String> {
     let rows = sqlx::query!(
         r#"select namespace.nspname::text as "schema_name!",
@@ -2434,7 +2463,7 @@ async fn routine_catalog_fingerprint(
         ROUTINE_DEFINITION_MAX_BYTES,
         ROUTINE_CONFIGURATION_MAX_ITEMS,
         ROUTINE_CONFIGURATION_ITEM_MAX_BYTES,
-        i64::try_from(ROUTINE_CATALOG_ROW_COUNT + 1).map_err(|_| Error::Invalid {
+        i64::try_from(row_count + 1).map_err(|_| Error::Invalid {
             message: "the application routine inventory bound is invalid".to_owned(),
         })?,
     )
@@ -2442,7 +2471,7 @@ async fn routine_catalog_fingerprint(
     .await
     .map_err(|error| authority_sql_error("read application routine definition inventory", error))?;
 
-    if rows.len() != ROUTINE_CATALOG_ROW_COUNT {
+    if rows.len() != row_count {
         return Err(Error::Invalid {
             message: "the application routine inventory row count does not match the current schema epoch 3 baseline"
                 .to_owned(),
@@ -2483,15 +2512,26 @@ async fn routine_catalog_fingerprint(
 const TRIGGER_CATALOG_FINGERPRINT: &str =
     "ddd185e23b659d8e80f4f5348be9b44be83ccf0f8a4550b6fd57c0120a35eab0";
 const TRIGGER_CATALOG_ROW_COUNT: usize = 113;
+const V043_TRIGGER_CATALOG_FINGERPRINT: &str =
+    "e028d5a71bdfacbb4e9f98f165287af5014da6a02a21b8872087e6a8aae15946";
+const V043_TRIGGER_CATALOG_ROW_COUNT: usize = 112;
 const TRIGGER_DEFINITION_MAX_BYTES: i32 = 16_384;
 const TRIGGER_ARGUMENT_MAX_COUNT: i16 = 128;
 
 async fn verify_trigger_catalog_fingerprint(
     connection: &mut PgConnection,
     migrator: &str,
+    head: CatalogueHead,
 ) -> Result<()> {
-    let actual = trigger_catalog_fingerprint(connection, migrator).await?;
-    if actual != TRIGGER_CATALOG_FINGERPRINT {
+    let (expected, row_count) = match head {
+        CatalogueHead::V043 => (
+            V043_TRIGGER_CATALOG_FINGERPRINT,
+            V043_TRIGGER_CATALOG_ROW_COUNT,
+        ),
+        CatalogueHead::Current => (TRIGGER_CATALOG_FINGERPRINT, TRIGGER_CATALOG_ROW_COUNT),
+    };
+    let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
+    if actual != expected {
         return Err(Error::Invalid {
             message: "the application trigger definition inventory does not match the current schema epoch 3 baseline"
                 .to_owned(),
@@ -2503,6 +2543,7 @@ async fn verify_trigger_catalog_fingerprint(
 async fn trigger_catalog_fingerprint(
     connection: &mut PgConnection,
     migrator: &str,
+    row_count: usize,
 ) -> Result<String> {
     let rows = sqlx::query!(
         r#"select namespace.nspname::text as "schema_name!",
@@ -2554,7 +2595,7 @@ async fn trigger_catalog_fingerprint(
         migrator,
         TRIGGER_DEFINITION_MAX_BYTES,
         TRIGGER_ARGUMENT_MAX_COUNT,
-        i64::try_from(TRIGGER_CATALOG_ROW_COUNT + 1).map_err(|_| Error::Invalid {
+        i64::try_from(row_count + 1).map_err(|_| Error::Invalid {
             message: "the application trigger inventory bound is invalid".to_owned(),
         })?,
     )
@@ -2562,7 +2603,7 @@ async fn trigger_catalog_fingerprint(
     .await
     .map_err(|error| authority_sql_error("read application trigger definition inventory", error))?;
 
-    if rows.len() != TRIGGER_CATALOG_ROW_COUNT {
+    if rows.len() != row_count {
         return Err(Error::Invalid {
             message: "the application trigger inventory row count does not match the current schema epoch 3 baseline"
                 .to_owned(),
@@ -3177,6 +3218,16 @@ pub async fn verify_migrator_connection(
     verify_selected_migrator(connection, database_roles, true).await
 }
 
+/// Full released-catalogue proof before moving an exact v0.4.3 SQLx prefix.
+pub(crate) async fn verify_v043_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::V043).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
 /// Pre-migration migrator proof used by deployment preflight.
 pub async fn verify_migrator_prerequisites_connection(
     connection: &mut PgConnection,
@@ -3207,6 +3258,16 @@ pub(crate) async fn verify_migrator_read_only_connection(
 ) -> Result<VerifiedRuntimeRole> {
     verify_read_only_primary_connection(connection).await?;
     verify_capability_catalog_connection(connection, database_roles).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Read-only candidate proof for a quiesced, exact v0.4.3 installation.
+pub(crate) async fn verify_v043_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::V043).await?;
     verify_selected_migrator_catalog(connection, database_roles).await
 }
 
@@ -3542,12 +3603,20 @@ mod tests {
             .await
             .expect("fingerprint forced-RLS inventory");
         assert_eq!(actual, RLS_CATALOG_FINGERPRINT, "actual={actual}");
-        let routine = routine_catalog_fingerprint(&mut connection, roles.migrator())
-            .await
-            .expect("fingerprint application routines");
-        let trigger = trigger_catalog_fingerprint(&mut connection, roles.migrator())
-            .await
-            .expect("fingerprint application triggers");
+        let routine = routine_catalog_fingerprint(
+            &mut connection,
+            roles.migrator(),
+            ROUTINE_CATALOG_ROW_COUNT,
+        )
+        .await
+        .expect("fingerprint application routines");
+        let trigger = trigger_catalog_fingerprint(
+            &mut connection,
+            roles.migrator(),
+            TRIGGER_CATALOG_ROW_COUNT,
+        )
+        .await
+        .expect("fingerprint application triggers");
         assert_eq!(
             (routine.as_str(), trigger.as_str(),),
             (ROUTINE_CATALOG_FINGERPRINT, TRIGGER_CATALOG_FINGERPRINT),
@@ -3579,12 +3648,20 @@ mod tests {
         let application_acl = application_acl_fingerprint(&mut authority)
             .await
             .expect("fingerprint ACL inventory");
-        let routine_catalog = routine_catalog_fingerprint(&mut authority, roles.migrator())
-            .await
-            .expect("fingerprint application routines");
-        let trigger_catalog = trigger_catalog_fingerprint(&mut authority, roles.migrator())
-            .await
-            .expect("fingerprint application triggers");
+        let routine_catalog = routine_catalog_fingerprint(
+            &mut authority,
+            roles.migrator(),
+            ROUTINE_CATALOG_ROW_COUNT,
+        )
+        .await
+        .expect("fingerprint application routines");
+        let trigger_catalog = trigger_catalog_fingerprint(
+            &mut authority,
+            roles.migrator(),
+            TRIGGER_CATALOG_ROW_COUNT,
+        )
+        .await
+        .expect("fingerprint application triggers");
         let forced_rls = rls_catalog_fingerprint(&mut authority)
             .await
             .expect("fingerprint forced-RLS inventory");
@@ -3699,9 +3776,13 @@ mod tests {
         .execute(&mut *transaction)
         .await
         .expect("replace one application routine body");
-        let routine = routine_catalog_fingerprint(&mut transaction, roles.migrator())
-            .await
-            .expect("fingerprint body-drifted application routines");
+        let routine = routine_catalog_fingerprint(
+            &mut transaction,
+            roles.migrator(),
+            ROUTINE_CATALOG_ROW_COUNT,
+        )
+        .await
+        .expect("fingerprint body-drifted application routines");
         assert_ne!(routine, ROUTINE_CATALOG_FINGERPRINT);
         let error = verify_capability_role_connection(&mut transaction, &roles)
             .await
@@ -3721,9 +3802,13 @@ mod tests {
             .execute(&mut *transaction)
             .await
             .expect("alter one application routine attribute");
-        let routine = routine_catalog_fingerprint(&mut transaction, roles.migrator())
-            .await
-            .expect("fingerprint drifted application routines");
+        let routine = routine_catalog_fingerprint(
+            &mut transaction,
+            roles.migrator(),
+            ROUTINE_CATALOG_ROW_COUNT,
+        )
+        .await
+        .expect("fingerprint drifted application routines");
         assert_ne!(routine, ROUTINE_CATALOG_FINGERPRINT);
         let error = verify_capability_role_connection(&mut transaction, &roles)
             .await
@@ -3746,9 +3831,13 @@ mod tests {
             .execute(&mut *transaction)
             .await
             .expect("disable one immutable-table trigger");
-        let trigger = trigger_catalog_fingerprint(&mut transaction, roles.migrator())
-            .await
-            .expect("fingerprint drifted application triggers");
+        let trigger = trigger_catalog_fingerprint(
+            &mut transaction,
+            roles.migrator(),
+            TRIGGER_CATALOG_ROW_COUNT,
+        )
+        .await
+        .expect("fingerprint drifted application triggers");
         assert_ne!(trigger, TRIGGER_CATALOG_FINGERPRINT);
         let error = verify_capability_role_connection(&mut transaction, &roles)
             .await

@@ -499,8 +499,10 @@ test.
 compose-upgrade-smoke is the bounded reference-mode application-image check.
 It requires an existing suffixed bundled project, the exact demo/browser
 profiles and distinct digest-addressed starting and candidate product images.
-The candidate first verifies the current epoch, embedded SQLx ledger and full
-migrator authority in one read-only repeatable-read transaction. The lifecycle
+The candidate first verifies the epoch, exact embedded SQLx prefix and matching
+migrator authority in one read-only repeatable-read transaction. A prior
+v0.4.3 head may be reported as upgradeable, but this same-schema smoke requires
+the current head before its candidate image can serve. The lifecycle
 then image-transitions only gateway and worker through candidate, starting
 rollback and final candidate checkpoints, while rerunning the disposable
 browser-acceptance service. Each checkpoint proves exact image reference
@@ -540,7 +542,8 @@ The portable Helm increment maps the same image commands to Deployments/Jobs,
 file-mounted existing Secrets, ClusterIP/optional HTTPS Ingress, non-root
 security contexts, verified external PostgreSQL, optional CNPG and external
 OIDC with a private CA. It retains the existing optional TEI and OTLP settings.
-NetworkPolicies, operator-owned backup facilities, multi-replica prerequisites,
+The chart's opt-in NetworkPolicies still need live qualification on an
+enforcing CNI. Operator-owned backup facilities, multi-replica prerequisites,
 disruption budgets, topology spread, OpenShift assigned-UID qualification,
 offline/private-registry distribution, proxy/OTLP private-CA support, KMS and
 FIPS requirements remain explicit promotion gaps.

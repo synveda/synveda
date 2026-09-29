@@ -33,7 +33,7 @@ use synveda_types::knowledge::{
 };
 use synveda_types::{
     CaptureBatchId, Error, IdentityKind, IdentityStatus, Result, ScopeId, Sensitivity, SessionId,
-    TenantId,
+    TenantId, TenantStatus,
 };
 use tokio::sync::{oneshot, watch};
 
@@ -336,24 +336,55 @@ pub async fn sweep_once(deps: &Deps, config: &Config) -> Result<SweepSummary> {
     let mut summary = SweepSummary::default();
     for tenant in tenants::active(&deps.pool).await? {
         summary.tenants += 1;
-        for _ in 0..config.batches_per_tenant.max(1) {
-            match process_one(deps, config, tenant.id).await {
-                Ok(ProcessOutcome::Empty) => break,
-                Ok(ProcessOutcome::Completed) => summary.completed += 1,
-                Ok(ProcessOutcome::FailedAttempt) => summary.failed_attempts += 1,
-                Ok(ProcessOutcome::Abandoned) => {
-                    summary.abandoned_attempts += 1;
-                    break;
-                }
-                Err(error) => {
-                    summary.failed_attempts += 1;
-                    tracing::warn!(tenant.id = %tenant.id, %error, "capture tenant pass failed");
-                    break;
-                }
+        sweep_tenant(deps, config, tenant.id, &mut summary).await;
+    }
+    Ok(summary)
+}
+
+/// Runs one active tenant through the same bounded claim path as [`sweep_once`].
+/// The explicit scope gives acceptance tests a deterministic lease witness
+/// without processing unrelated tenants' pending work.
+pub async fn sweep_tenant_once(
+    deps: &Deps,
+    config: &Config,
+    tenant_id: TenantId,
+) -> Result<SweepSummary> {
+    let tenant = tenants::by_id(&deps.pool, tenant_id).await?;
+    if !matches!(tenant, Some(tenant) if tenant.status == TenantStatus::Active) {
+        return Err(Error::NotFound {
+            entity: "tenant".to_owned(),
+        });
+    }
+    let mut summary = SweepSummary {
+        tenants: 1,
+        ..SweepSummary::default()
+    };
+    sweep_tenant(deps, config, tenant_id, &mut summary).await;
+    Ok(summary)
+}
+
+async fn sweep_tenant(
+    deps: &Deps,
+    config: &Config,
+    tenant_id: TenantId,
+    summary: &mut SweepSummary,
+) {
+    for _ in 0..config.batches_per_tenant.max(1) {
+        match process_one(deps, config, tenant_id).await {
+            Ok(ProcessOutcome::Empty) => break,
+            Ok(ProcessOutcome::Completed) => summary.completed += 1,
+            Ok(ProcessOutcome::FailedAttempt) => summary.failed_attempts += 1,
+            Ok(ProcessOutcome::Abandoned) => {
+                summary.abandoned_attempts += 1;
+                break;
+            }
+            Err(error) => {
+                summary.failed_attempts += 1;
+                tracing::warn!(tenant.id = %tenant_id, %error, "capture tenant pass failed");
+                break;
             }
         }
     }
-    Ok(summary)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

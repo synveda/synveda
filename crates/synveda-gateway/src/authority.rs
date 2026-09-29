@@ -86,6 +86,10 @@ pub enum OperatorGuidance {
     Reset,
     /// The database is newer than the binary and the binary must be upgraded.
     Upgrade,
+    /// A released baseline needs a planned, data-preserving forward migration.
+    Migrate,
+    /// An unknown ledger/marker combination must be investigated without reset.
+    Preserve,
 }
 
 const OUTCOME_UNKNOWN: u8 = 0;
@@ -496,6 +500,14 @@ impl AuthorityMonitor {
                             "\n{}: database baseline is newer than this binary; upgrade the installation\n",
                             self.process
                         ),
+                        Some(OperatorGuidance::Migrate) => eprintln!(
+                            "\n{}: this database needs the planned forward migration; stop writers and verify joint recovery before migrating; preserve the data\n",
+                            self.process
+                        ),
+                        Some(OperatorGuidance::Preserve) => eprintln!(
+                            "\n{}: schema marker or migration ledger is incompatible; preserve the data and investigate the deployment\n",
+                            self.process
+                        ),
                         None => {}
                     }
                 }
@@ -666,11 +678,14 @@ fn outcome_after_rollback(outcome: ProbeOutcome, rollback_succeeded: bool) -> Pr
 fn schema_guidance(error: &synveda_store::epoch::SchemaEpochError) -> Option<OperatorGuidance> {
     use synveda_store::epoch::SchemaEpochError;
     match error {
-        SchemaEpochError::Newer { .. } | SchemaEpochError::NewerRevision { .. } => {
-            Some(OperatorGuidance::Upgrade)
-        }
+        SchemaEpochError::Newer { .. }
+        | SchemaEpochError::NewerRevision { .. }
+        | SchemaEpochError::NewerMigration { .. } => Some(OperatorGuidance::Upgrade),
+        SchemaEpochError::PendingMigration { .. } => Some(OperatorGuidance::Migrate),
+        SchemaEpochError::IncompatibleMigration
+        | SchemaEpochError::Unstamped
+        | SchemaEpochError::Malformed(_) => Some(OperatorGuidance::Preserve),
         SchemaEpochError::Missing
-        | SchemaEpochError::Malformed(_)
         | SchemaEpochError::Older { .. }
         | SchemaEpochError::OlderRevision { .. } => Some(OperatorGuidance::Reset),
         SchemaEpochError::Unreachable(_) | SchemaEpochError::Unreadable => None,
@@ -744,6 +759,30 @@ pub async fn run_sentinel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn released_prior_head_gets_migration_guidance_without_reset() {
+        use synveda_store::epoch::SchemaEpochError;
+
+        assert_eq!(
+            schema_guidance(&SchemaEpochError::PendingMigration {
+                found: "0001".to_owned(),
+            }),
+            Some(OperatorGuidance::Migrate)
+        );
+        assert_eq!(
+            schema_guidance(&SchemaEpochError::IncompatibleMigration),
+            Some(OperatorGuidance::Preserve)
+        );
+        assert_eq!(
+            schema_guidance(&SchemaEpochError::Unstamped),
+            Some(OperatorGuidance::Preserve)
+        );
+        assert_eq!(
+            schema_guidance(&SchemaEpochError::Malformed("marker drift".to_owned())),
+            Some(OperatorGuidance::Preserve)
+        );
+    }
 
     #[test]
     fn rollback_failure_cannot_downgrade_a_conclusive_refusal() {

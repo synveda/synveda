@@ -682,7 +682,10 @@ smoke, Keycloak browser login and existing product receipt. It pulls the
 candidate by exact digest and runs `synveda db migrate --check` in a read-only
 repeatable-read transaction. That check verifies the current schema epoch,
 embedded migration ledger, database authority and forced-RLS catalogue without
-running the SQLx migrator or changing persistent database state.
+running the SQLx migrator or changing persistent database state. This smoke
+transitions product images only and requires an already current migration head;
+an upgradeable older head needs the separate OPS-6 backup, writer shutdown and
+migration sequence before the new image can serve.
 
 Only the long-running product services gateway and worker are
 image-transitioned; the disposable browser-acceptance service is rerun at

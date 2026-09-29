@@ -2608,6 +2608,14 @@ test("authority fingerprints use one isolated report-only catalogue snapshot", (
       '            "authority-fingerprints baseline_revision={} application_acl={application_acl} routine_catalog={routine_catalog} trigger_catalog={trigger_catalog} forced_rls={forced_rls}",',
       '            "authority-fingerprints baseline_revision={}",',
     ),
+    runtimeRole.replace(
+      "let routine_catalog = routine_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            ROUTINE_CATALOG_ROW_COUNT,",
+      "let routine_catalog = routine_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            V043_ROUTINE_CATALOG_ROW_COUNT,",
+    ),
+    runtimeRole.replace(
+      "let trigger_catalog = trigger_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            TRIGGER_CATALOG_ROW_COUNT,",
+      "let trigger_catalog = trigger_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            V043_TRIGGER_CATALOG_ROW_COUNT,",
+    ),
   ]) {
     assert.notDeepEqual(authorityFingerprintFixtureFindings(dbTest, mutated), []);
   }

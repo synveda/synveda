@@ -238,8 +238,11 @@ backup and restore procedure. Keep both the Synveda and Keycloak databases
 with the matching encryption and identity material. For Kubernetes, use its
 [operations guide](../deploy/helm/synveda/OPERATIONS.md).
 
-Schema epoch 3 is the current baseline. Older schemas are refused; they are
-not migrated. A reset deletes data and requires the exact confirmation in the
+Schema epoch 3 now has an exact v0.4.3 baseline and a forward migration in the
+source candidate (ADR-0121). The release-shaped v0.4.3 upgrade and joint
+recovery drill remain unqualified; do not use a source checkout to upgrade
+retained customer data. Older epochs and v0.4.0's different baseline checksum
+are refused. A reset deletes data and requires the exact confirmation in the
 Docker guide. Application rollback does not reverse a database migration.
 The [production readiness assessment](PRODUCTION_READINESS.md) states current
 platform, recovery and availability limits.

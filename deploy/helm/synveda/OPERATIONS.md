@@ -218,11 +218,14 @@ and [restore](https://www.postgresql.org/docs/17/app-pgrestore.html) semantics.
 
 There is **no supported upgrade between published versions**. Public v0.2.0 has
 the retired schema. Published v0.4.0 and v0.4.3 both use epoch 3 and baseline
-revision 3, but the `0001` migration changed; the candidate's read-only
-`synveda db migrate --check` rejects the changed SQLx checksum. Keep the current
-installation and its data rather than resetting it to make an upgrade pass.
-Same-source Helm migration reruns and retained reinstall are continuity checks,
-not cross-release upgrades. OPS-6 owns a future declared compatibility window.
+revision 3, but their `0001` checksums differ and remain incompatible. The
+source candidate now preserves the exact v0.4.3 baseline and adds `0002` under
+ADR-0121; its read-only check identifies an exact v0.4.3 head as upgradeable
+after quiescence, not ready for the new binary to serve. Keep the current
+installation and its data until the published-artifact and joint recovery drill
+qualifies this path. Same-source Helm migration reruns and retained reinstall
+are continuity checks, not cross-release upgrades. OPS-6 owns the declared
+compatibility window.
 CI and Release retain four-mode install/upgrade/reinstall checks and the two
 end-to-end recovery drills. Passing those checks does not establish migration
 compatibility between two different published versions.

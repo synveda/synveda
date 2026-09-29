@@ -83,12 +83,12 @@ renumbered.
 | [ADR-0066](adr-0066-beta-demo-profile.md) | Operator-seeded beta demo | Current (partially superseded by ADR-0100) | ADR-0100 provides the resumable public-API PulseBoard demo; externally dependent beta evidence remains open. |
 | [ADR-0067](adr-0067-uninstall-and-cleanup.md) | Uninstall and cleanup | Current (partially superseded by ADR-0102) | Canonical Compose owns lifecycle and reset. Automatic artifact removal remains fail-closed until the installer persists a strict ownership receipt. |
 
-## ADR-0068 through ADR-0117
+## ADR-0068 through ADR-0121
 
 | ADR | Decision | Current classification | Replacement/removal |
 | --- | --- | --- | --- |
 | [ADR-0068](adr-0068-context-platform-domain-and-epoch.md) | Context-platform domain and epoch | Current | — |
-| [ADR-0069](adr-0069-schema-epoch-and-local-reset.md) | Authoritative schema epoch and reset | Current | — |
+| [ADR-0069](adr-0069-schema-epoch-and-local-reset.md) | Authoritative schema epoch and reset | Current (partially superseded by ADR-0121) | Its pre-epoch hard cut remains; ADR-0121 replaces the one-migration epoch-3 release assumption with a forward path from v0.4.3. |
 | [ADR-0070](adr-0070-generic-governed-scopes.md) | Generic governed scopes | Current | — |
 | [ADR-0071](adr-0071-workspaces-projects-and-repository-identity.md) | Workspaces, projects and repositories | Current | Non-default ports are refused until a data-preserving schema change can represent them. |
 | [ADR-0072](adr-0072-groups-grants-and-invitations.md) | Groups, grants and invitations | Current | — |
@@ -139,3 +139,5 @@ renumbered.
 | [ADR-0117](adr-0117-client-platform-boundaries.md) | Client platform and private-state boundaries | Current (private-storage candidate) | CLI/hooks share path fixtures and Windows credential/receipt/spool ACL and identity checks. A bounded local CLI protocol serves Windows hooks. Repository/vendor edits and deployment witnesses still refuse. |
 | [ADR-0118](adr-0118-governed-context-optimisation.md) | Governed context optimisation inside ContextRun | Current (rollout evidence pending) | CTX-8; off remains the comparison path while Compose and held-out quality gates remain open. |
 | [ADR-0119](adr-0119-session-checkpoints-from-verified-ledger-evidence.md) | Checkpoints derived from immutable Session evidence | Current (rollout evidence pending) | CTX-6; deterministic Claude compact/restart replay, capture, scoped retention, Session policy matrix and four synthetic restart task probes pass; live task quality remains open. |
+| [ADR-0120](adr-0120-freeze-epoch-three-baseline.md) | Freeze current epoch-3 source baseline bytes | Superseded by ADR-0121 | Its temporary source-candidate digest pin is replaced by the released v0.4.3 baseline and additive forward migration. |
+| [ADR-0121](adr-0121-preserve-v0-4-3-through-forward-migration.md) | Preserve v0.4.3 through a forward migration | Current (release qualification pending) | OPS-6; exact released baseline plus transactional `0002`, staged catalogue proof and planned interruption. Published-pair recovery evidence remains open. |
