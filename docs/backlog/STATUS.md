@@ -155,10 +155,15 @@ and the OPS-5 recovery set before a supported upgrade claim.
 OPS-7 has a first single-process drain slice under ADR-0124: SIGTERM withdraws
 gateway readiness and new request admission before HTTP stops, preserves the
 authority sentinel until admitted work drains, and exits inside the configured
-bound in an isolated exact-role subprocess test. The chart still pins one
-gateway/worker and Recreate. Durable login, cross-process invalidation,
-multi-worker ownership, in-flight process/load and three-pod rolling acceptance
-remain open in the brief.
+bound in an isolated exact-role subprocess test. ADR-0125 then closes the
+startup/recovery window between database authority and first stored Cedar
+policy-pack convergence by binding readiness and requests to one authority
+generation. The chart still pins one gateway/worker and Recreate. Durable
+login, bounded post-start policy-pack refresh, multi-worker ownership,
+in-flight process/load and three-pod rolling acceptance remain open in the
+brief. Scope, grant, identity and Configuration decisions already use fresh
+request-time database rows and exact-shape Cedar fragments; a generic
+cross-process entity invalidation bus is not presumed necessary.
 
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open

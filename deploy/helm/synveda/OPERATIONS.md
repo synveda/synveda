@@ -20,6 +20,14 @@ convergence. The authority proof has a five-second deadline and repeats every
 schema or database-identity refusal exits. Restart loops need diagnosis, not
 weaker readiness or an elevated database role.
 
+The gateway also waits for its first successful stored policy-pack load for
+the current authority generation. A recovered database generation requires a
+new load before requests resume, even if the process still holds an older
+compiled pack. An unavailable or invalid stored pack keeps the gateway
+unready; inspect the policy refresh logs rather than routing around the gate.
+Post-start policy-pack change visibility across multiple gateways is not yet
+qualified, so the chart remains single-replica.
+
 After a database outage, Kubernetes' Ready status can lag the application's
 current gate. Probe `/readyz` directly, then validate a fresh login and governed
 read before reopening traffic. The external drill also observed Keycloak using

@@ -38,6 +38,7 @@ use std::time::Duration;
 
 use synveda_gateway::app::{self, AppState, ConfiguredLogin};
 use synveda_gateway::authority::{self, AuthorityGate, AuthorityMonitor, CheckOutcome};
+use synveda_gateway::authz::PolicyReadyGeneration;
 use synveda_gateway::shutdown::GatewayAdmission;
 use synveda_gateway::{authz, runtime_config, shutdown, telemetry};
 use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, TokenVerifier};
@@ -227,14 +228,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(%addr, "synveda-gateway listening");
 
     let admission = GatewayAdmission::new();
+    let policy_ready = PolicyReadyGeneration::new();
     let (http_stop_tx, mut http_stop) = tokio::sync::watch::channel(false);
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let http_gate = gate.clone();
     let http_admission = admission.clone();
+    let http_policy_ready = policy_ready.clone();
     let mut server = tokio::spawn(async move {
         axum::serve(
             listener,
-            app::governed_router(app_state, http_gate, http_admission),
+            app::governed_router(app_state, http_gate, http_admission, http_policy_ready),
         )
         .with_graceful_shutdown(async move {
             while !*http_stop.borrow() && http_stop.changed().await.is_ok() {}
@@ -248,7 +251,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&keys),
         deployment_key_ref,
         refresh_interval,
-        gate.clone(),
+        GatewayPolicyGate {
+            authority: gate.clone(),
+            ready: policy_ready,
+        },
         stop_rx.clone(),
     ));
     let mut pool_monitor = tokio::spawn(run_pool_monitor(pool.clone(), max_connections, stop_rx));
@@ -392,15 +398,24 @@ enum BackgroundGenerationEnd {
     Shutdown,
 }
 
+struct GatewayPolicyGate {
+    authority: AuthorityGate,
+    ready: PolicyReadyGeneration,
+}
+
 async fn run_gateway_background(
     pool: sqlx::PgPool,
     pdp: Arc<Pdp>,
     keys: Arc<synveda_store::keys::KeyRing>,
     deployment_key_ref: Option<String>,
     refresh_interval: Duration,
-    gate: AuthorityGate,
+    policy_gate: GatewayPolicyGate,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), String> {
+    let GatewayPolicyGate {
+        authority: gate,
+        ready: policy_ready,
+    } = policy_gate;
     loop {
         let generation = tokio::select! {
             biased;
@@ -450,6 +465,11 @@ async fn run_gateway_background(
             }
             continue;
         }
+        policy_ready.mark_converged(generation);
+        tracing::info!(
+            authority.generation = generation,
+            "stored policy packs converged for gateway admission"
+        );
 
         if let Some(key_ref) = deployment_key_ref.as_deref() {
             let provision = tokio::time::timeout(

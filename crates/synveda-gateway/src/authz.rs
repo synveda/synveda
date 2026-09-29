@@ -18,6 +18,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use sqlx::PgPool;
@@ -40,6 +41,43 @@ use synveda_types::{
 
 use crate::app::AppState;
 use crate::telemetry::{POLICY_PACK_RELOADS_TOTAL, SERVICE_TOKEN_REJECTIONS_TOTAL};
+
+/// The authority generation whose stored policy packs converged locally.
+///
+/// Database authority may open before the background pack loader finishes.
+/// Keeping this marker separate makes startup and outage recovery refuse
+/// application traffic until the exact new generation has loaded its packs.
+#[derive(Clone)]
+pub struct PolicyReadyGeneration {
+    converged: Arc<AtomicU64>,
+}
+
+impl Default for PolicyReadyGeneration {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PolicyReadyGeneration {
+    /// Starts with no policy generation eligible to serve.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            converged: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// Publishes one completed initial convergence to the HTTP plane.
+    pub fn mark_converged(&self, generation: u64) {
+        self.converged.store(generation, Ordering::Release);
+    }
+
+    /// Whether the current database-authority generation has loaded packs.
+    #[must_use]
+    pub fn is_for(&self, generation: u64) -> bool {
+        generation != 0 && self.converged.load(Ordering::Acquire) == generation
+    }
+}
 
 /// Everything [`require`] assembles for one decision: the principal and
 /// the caller-supplied data the PDP resolves and materialises from.

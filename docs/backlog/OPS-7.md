@@ -13,8 +13,12 @@ size: L
 ## Problem and evidence
 
 Helm pins one gateway replica and Recreate. Pending OIDC login/CLI handoff
-state is process-local in crates/synveda-identity/src/flow.rs, and PDP entity
-invalidation is process-local in the gateway. Capture, Knowledge indexing,
+state is process-local in crates/synveda-identity/src/flow.rs. Stored Cedar
+policy packs are compiled process-locally and refreshed on a timer; their
+post-start cross-replica visibility has no fail-closed bound. Scope ancestry,
+identity, grants, groups, assignments and Configuration are already read in
+ordinary request transactions, and cached Cedar fragments compare the exact
+supplied scope shape. Capture, Knowledge indexing,
 directory pull and relaxation expiry now run in a separate supervised core
 worker, but only one worker replica is supported and concurrent-worker recovery
 has not been proved. Worker SIGTERM withdraws readiness and performs a bounded
@@ -33,16 +37,27 @@ Compose has an outer stop margin. A real exact-role gateway subprocess test
 observed 503 readiness while HTTP remained live, refused new work and exited
 inside its configured 15-second bound. A synthetic in-flight request completed
 after admission withdrawal. This is single-process source evidence, not a
-three-pod, load or interrupted-provider drain result. Next design durable
-one-time login and cross-process invalidation, then prove worker ownership and
-the full Kubernetes termination sequence before lifting the chart refusal.
+three-pod, load or interrupted-provider drain result.
+
+The senior Rust review then found a separate startup window: the database
+authority gate could open before the first stored policy-pack load completed.
+[ADR-0125](../adr/adr-0125-gate-gateway-on-policy-convergence.md) now binds
+readiness and application admission to successful policy convergence for the
+current authority generation. Synthetic route tests prove the initial refusal,
+opening and generation mismatch; the exact-role process path remains the
+deployment check. This closes first-load ordering only. Next persist one-time
+login state, measure and bound post-start policy-pack refresh across processes,
+then prove worker ownership and the full Kubernetes termination sequence
+before lifting the chart refusal.
 
 ## Scope
 
 - Persist one-time login state and CLI handoff redemption with database time,
   TTL and atomic consume semantics.
-- Propagate scope, grant, policy and entity invalidation across replicas within
-  a stated bound.
+- Prove scope, grant, identity and Configuration mutations against fresh
+  request reads on every replica. Bound compiled policy-pack refresh with a
+  fail-closed staleness rule; introduce a notification or generation transport
+  only if measured polling cannot meet that bound.
 - Prove every core-worker job's multi-replica ownership, lease, idempotency and
   provider-concurrency behaviour before lifting the one-worker limit.
 - Withdraw gateway readiness on termination, drain requests, and prove that
@@ -61,10 +76,11 @@ the full Kubernetes termination sequence before lifting the chart refusal.
 
 ## Architecture seam
 
-Login state belongs beside durable console sessions in synveda-store. Scope
-and grant mutations already invalidate local PDP entities; add one
-cross-process generation or notification contract rather than a second
-authorisation cache. Existing durable batch/job tables remain the worker seam.
+Login state belongs beside durable console sessions in synveda-store. Fresh
+request transactions and exact-shape fragment comparison supply scope/grant
+correctness; local entity flush is cache hygiene. Compiled policy packs require
+a measured cross-process refresh bound and fail-closed expiry. Existing durable
+batch/job tables remain the worker seam.
 Gateway readiness owns request drain. The core-worker supervisor owns task
 cancellation and bounded join; each durable aggregate owns its claim/recovery
 semantics. Helm owns the separate replica and termination settings.
@@ -96,14 +112,15 @@ semantics. Helm owns the separate replica and termination settings.
 
 ## Rollout and rollback
 
-Ship durable login and invalidation while still pinned to one replica, observe
-lag, then canary two and three replicas. Retain one-replica/Recreate as the
+Ship durable login and bounded policy refresh while still pinned to one
+replica, observe lag, then canary two and three replicas. Retain
+one-replica/Recreate as the
 rollback until the full acceptance is stable. Rollback must leave durable
 state readable and may reduce replicas without discarding jobs.
 
 ## Dependencies
 
-The owner must define availability, invalidation staleness, drain and provider-
-concurrency limits. Choose a Postgres generation/notification mechanism and
-worker-leadership model in an ADR. OPS-5 and OPS-6 provide recovery and upgrade
-discipline.
+The owner must define availability, policy-pack staleness, drain and provider-
+concurrency limits. Choose a generation/notification mechanism only if the
+measured refresh path needs one; decide worker ownership in an ADR. OPS-5 and
+OPS-6 provide recovery and upgrade discipline.
