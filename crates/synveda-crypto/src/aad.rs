@@ -28,6 +28,10 @@ const DOMAIN: &[u8] = b"synveda/envelope/v1\0";
 /// refresh token column fails to open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Purpose {
+    /// `pending_logins.payload_sealed` (deployment scope).
+    PendingLogin,
+    /// `cli_handoffs.payload_sealed` (deployment scope).
+    CliHandoff,
     /// `console_sessions.access_token_sealed` (deployment scope — decision 5).
     ConsoleAccessToken,
     /// `console_sessions.refresh_token_sealed` (deployment scope).
@@ -52,6 +56,8 @@ impl Purpose {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
+            Purpose::PendingLogin => "login.pending",
+            Purpose::CliHandoff => "login.cli_handoff",
             Purpose::ConsoleAccessToken => "console.access_token",
             Purpose::ConsoleRefreshToken => "console.refresh_token",
             Purpose::TenantSecret => "tenant.secret",
@@ -264,6 +270,8 @@ mod tests {
     #[test]
     fn purpose_names_are_stable_and_distinct() {
         let all = [
+            Purpose::PendingLogin,
+            Purpose::CliHandoff,
             Purpose::ConsoleAccessToken,
             Purpose::ConsoleRefreshToken,
             Purpose::TenantSecret,

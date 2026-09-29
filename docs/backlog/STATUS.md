@@ -148,7 +148,10 @@ key-open/wrong-key checks and a separate release-binary rollback restore. The
 source candidate shares the 0.4.3 version string; no published N, off-host
 PITR, complete Knowledge/audit-prefix continuity, injected-failure or measured
 maintenance window is qualified. Next run those gates with representative data
-and the OPS-5 recovery set before a supported upgrade claim.
+and the OPS-5 recovery set before a supported upgrade claim. OPS-7 now appends
+`0003` for one-time login state; the earlier released-byte rehearsal stopped
+at `0002` and must be repeated through this new head before it can support a
+claim about the current source candidate.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 
@@ -159,7 +162,11 @@ bound in an isolated exact-role subprocess test. ADR-0125 then closes the
 startup/recovery window between database authority and first stored Cedar
 policy-pack convergence by binding readiness and requests to one authority
 generation. The chart still pins one gateway/worker and Recreate. Durable
-login, bounded post-start policy-pack refresh, multi-worker ownership,
+login state is now a source candidate under ADR-0126: additive `0003` stores
+sealed, hash-selected one-time rows with database TTL and atomic consumption;
+isolated mock-IdP tests complete OIDC login and CLI handoff across independent
+gateway instances, and 25 exact-role epoch tests pass. Bounded post-start
+policy-pack refresh, multi-worker ownership,
 in-flight process/load and three-pod rolling acceptance remain open in the
 brief. Scope, grant, identity and Configuration decisions already use fresh
 request-time database rows and exact-shape Cedar fragments; a generic

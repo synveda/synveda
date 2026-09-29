@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from pending_logins where state_hash = $1 and (correlation_hash is null or correlation_hash = $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "91061c12eba96f889b230dad6ed5545e2fb8b171a60d1ce9f404906fec47ea20"
+}

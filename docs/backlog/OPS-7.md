@@ -12,8 +12,8 @@ size: L
 
 ## Problem and evidence
 
-Helm pins one gateway replica and Recreate. Pending OIDC login/CLI handoff
-state is process-local in crates/synveda-identity/src/flow.rs. Stored Cedar
+Helm pins one gateway replica and Recreate. ADR-0126 moves pending OIDC login
+and CLI handoff state into a deployment-key-sealed PostgreSQL ledger. Stored Cedar
 policy packs are compiled process-locally and refreshed on a timer; their
 post-start cross-replica visibility has no fail-closed bound. Scope ancestry,
 identity, grants, groups, assignments and Configuration are already read in
@@ -45,15 +45,24 @@ authority gate could open before the first stored policy-pack load completed.
 readiness and application admission to successful policy convergence for the
 current authority generation. Synthetic route tests prove the initial refusal,
 opening and generation mismatch; the exact-role process path remains the
-deployment check. This closes first-load ordering only. Next persist one-time
-login state, measure and bound post-start policy-pack refresh across processes,
-then prove worker ownership and the full Kubernetes termination sequence
-before lifting the chart refusal.
+deployment check. This closes first-load ordering only.
+
+[ADR-0126](../adr/adr-0126-persist-one-time-login-ledger.md) appends migration
+`0003` for hashed one-time selectors,
+database-clock TTLs and atomic consume. The protocol crate uses a narrow async
+ledger; only tests can select its memory implementation. Exact-role mock-IdP
+acceptance begins an OIDC login on one gateway instance and completes it on
+another, and begins a CLI login on one, completes its callback on another and
+redeems the handoff on a third. Replays fail. The 25-case epoch suite proves
+the exact `0002` prefix advances without rewriting its SQLx rows or a tenant.
+This is cross-process source acceptance, not a three-pod routing, load, key
+rotation or database-failover result. Next measure and bound post-start policy
+freshness, then prove multi-worker ownership and the full termination sequence.
 
 ## Scope
 
-- Persist one-time login state and CLI handoff redemption with database time,
-  TTL and atomic consume semantics.
+- Retain the durable one-time login and CLI handoff contract under real
+  cross-pod routing, key rotation and restart.
 - Prove scope, grant, identity and Configuration mutations against fresh
   request reads on every replica. Bound compiled policy-pack refresh with a
   fail-closed staleness rule; introduce a notification or generation transport
@@ -76,7 +85,8 @@ before lifting the chart refusal.
 
 ## Architecture seam
 
-Login state belongs beside durable console sessions in synveda-store. Fresh
+The one-time login ledger belongs beside durable console sessions in
+synveda-store. Fresh
 request transactions and exact-shape fragment comparison supply scope/grant
 correctness; local entity flush is cache hygiene. Compiled policy packs require
 a measured cross-process refresh bound and fail-closed expiry. Existing durable
@@ -112,9 +122,8 @@ semantics. Helm owns the separate replica and termination settings.
 
 ## Rollout and rollback
 
-Ship durable login and bounded policy refresh while still pinned to one
-replica, observe lag, then canary two and three replicas. Retain
-one-replica/Recreate as the
+Ship bounded policy refresh while still pinned to one replica, observe lag,
+then canary two and three replicas. Retain one-replica/Recreate as the
 rollback until the full acceptance is stable. Rollback must leave durable
 state readable and may reduce replicas without discarding jobs.
 

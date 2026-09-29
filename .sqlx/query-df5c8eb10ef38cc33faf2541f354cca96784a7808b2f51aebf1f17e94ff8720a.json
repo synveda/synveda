@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select payload_sealed from pending_logins where state_hash = $1 and (correlation_hash is null or correlation_hash = $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload_sealed",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "df5c8eb10ef38cc33faf2541f354cca96784a7808b2f51aebf1f17e94ff8720a"
+}

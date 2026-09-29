@@ -52,8 +52,9 @@ pub const CURRENT_EPOCH: i32 = 3;
 pub const CURRENT_BASELINE_REVISION: i32 = 3;
 
 /// The forward head needed before the current binary may serve requests.
-pub const CURRENT_MIGRATION_HEAD: &str = "0002";
+pub const CURRENT_MIGRATION_HEAD: &str = "0003";
 const V043_MIGRATION_HEAD: &str = "0001";
+const FORWARD_MIGRATION_HEAD: &str = "0002";
 
 /// The exact destructive command for a pre-cut database. A compatible older
 /// migration head must be advanced without resetting its data.
@@ -66,7 +67,7 @@ pub struct SchemaMetadata {
     pub epoch: i32,
     /// The immutable baseline revision within the epoch.
     pub baseline_revision: i32,
-    /// The migration head reached, as its four-digit file prefix (`0002`).
+    /// The migration head reached, as its four-digit file prefix (`0003`).
     /// Diagnostic: it tells two databases at the same epoch apart.
     pub migration_head: String,
     /// When this database became a Synveda database.
@@ -349,7 +350,7 @@ pub async fn verify_connection(
     verify_epoch_revision(&metadata)?;
     match metadata.migration_head.as_str() {
         CURRENT_MIGRATION_HEAD => Ok(metadata),
-        V043_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
+        V043_MIGRATION_HEAD | FORWARD_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
             found: metadata.migration_head,
         }),
         found if found > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
@@ -382,7 +383,7 @@ pub(crate) async fn verify_embedded_head_connection(
     let state = migration_preflight_connection(connection).await?;
     if !matches!(
         state,
-        MigrationPreflight::Prior | MigrationPreflight::Current
+        MigrationPreflight::Prior | MigrationPreflight::Forward | MigrationPreflight::Current
     ) {
         return Err(SchemaEpochError::IncompatibleMigration);
     }
@@ -424,10 +425,14 @@ pub(crate) enum MigrationPreflight {
     Clean,
     /// Released baseline committed on a fresh install, before any marker row.
     PendingStampPrior,
-    /// Both migrations committed, but the marker still needs its head stamp.
+    /// The first forward migration committed, but the marker needs its stamp.
+    PendingStampForward,
+    /// All three migrations committed, but the marker needs its head stamp.
     PendingStampCurrent,
     /// The published v0.4.3 baseline and its exact SQLx row are present.
     Prior,
+    /// The first additive migration and its exact SQLx ledger are present.
+    Forward,
     /// The current head and exact SQLx ledger are present.
     Current,
 }
@@ -469,12 +474,22 @@ pub(crate) async fn migration_preflight_connection(
         return match marker {
             Err(SchemaEpochError::Unstamped) => Ok(match prefix {
                 EmbeddedPrefix::Prior => MigrationPreflight::PendingStampPrior,
+                EmbeddedPrefix::Forward => MigrationPreflight::PendingStampForward,
                 EmbeddedPrefix::Current => MigrationPreflight::PendingStampCurrent,
             }),
             Err(error) => Err(error),
             Ok(metadata) => match (metadata.migration_head.as_str(), prefix) {
                 (V043_MIGRATION_HEAD, EmbeddedPrefix::Prior) => Ok(MigrationPreflight::Prior),
+                (V043_MIGRATION_HEAD, EmbeddedPrefix::Forward) => {
+                    Ok(MigrationPreflight::PendingStampForward)
+                }
                 (V043_MIGRATION_HEAD, EmbeddedPrefix::Current) => {
+                    Ok(MigrationPreflight::PendingStampCurrent)
+                }
+                (FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Forward) => {
+                    Ok(MigrationPreflight::Forward)
+                }
+                (FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Current) => {
                     Ok(MigrationPreflight::PendingStampCurrent)
                 }
                 (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current) => {
@@ -498,18 +513,25 @@ pub(crate) async fn migration_preflight_connection(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EmbeddedPrefix {
     Prior,
+    Forward,
     Current,
 }
 
-/// Checks the released baseline and forward migration by exact SQLx identity.
+/// Checks the released baseline and both additive migrations by exact SQLx identity.
 /// A partial or drifted ledger cannot authorize any DDL or stamp repair.
 async fn exact_applied_prefix_connection(
     connection: &mut PgConnection,
 ) -> Result<Option<EmbeddedPrefix>, SchemaEpochError> {
-    let [baseline, forward] = crate::MIGRATOR.migrations.as_ref() else {
+    let [baseline, forward, login] = crate::MIGRATOR.migrations.as_ref() else {
         return Err(SchemaEpochError::IncompatibleMigration);
     };
-    if baseline.no_tx || forward.no_tx || baseline.version != 1 || forward.version != 2 {
+    if baseline.no_tx
+        || forward.no_tx
+        || login.no_tx
+        || baseline.version != 1
+        || forward.version != 2
+        || login.version != 3
+    {
         return Err(SchemaEpochError::IncompatibleMigration);
     }
     let rows = sqlx::query!(
@@ -517,7 +539,7 @@ async fn exact_applied_prefix_connection(
         select version, description, success, checksum, execution_time
           from public._sqlx_migrations
          order by version
-         limit 3
+         limit 4
         "#
     )
     .fetch_all(&mut *connection)
@@ -528,10 +550,10 @@ async fn exact_applied_prefix_connection(
         SchemaEpochError::Missing => SchemaEpochError::IncompatibleMigration,
         other => other,
     })?;
-    if rows.is_empty() || rows.len() > 2 {
+    if rows.is_empty() || rows.len() > 3 {
         return Ok(None);
     }
-    for (row, migration) in rows.iter().zip([baseline, forward]) {
+    for (row, migration) in rows.iter().zip([baseline, forward, login]) {
         if row.version != migration.version
             || row.description != migration.description.as_ref()
             || !row.success
@@ -541,10 +563,11 @@ async fn exact_applied_prefix_connection(
             return Ok(None);
         }
     }
-    Ok(Some(if rows.len() == 1 {
-        EmbeddedPrefix::Prior
-    } else {
-        EmbeddedPrefix::Current
+    Ok(Some(match rows.len() {
+        1 => EmbeddedPrefix::Prior,
+        2 => EmbeddedPrefix::Forward,
+        3 => EmbeddedPrefix::Current,
+        _ => return Ok(None),
     }))
 }
 

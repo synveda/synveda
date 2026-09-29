@@ -351,6 +351,13 @@ fn released_v043_migrator() -> sqlx::migrate::Migrator {
     }
 }
 
+fn forward_migrator() -> sqlx::migrate::Migrator {
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..2].to_vec()),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+}
+
 /// Removes the marker while leaving product data in place. This is the shape
 /// a pre-epoch database presents to the guard; the migration ledger is left
 /// deliberately irrelevant because preflight must refuse before sqlx reads it.
@@ -651,10 +658,10 @@ fn released_v043_prefix_upgrades_without_resetting_tenant_data() {
             .await
             .expect("apply the forward migration and stamp the new head");
         let upgraded = epoch::verify(&pool).await.expect("new image may serve");
-        assert_eq!(upgraded.migration_head, "0002");
+        assert_eq!(upgraded.migration_head, "0003");
         assert_eq!(upgraded.created_by_version, "0.4.3");
         assert_eq!(upgraded.created_at, metadata_before.created_at);
-        assert_eq!(migration_ledger(&pool).await.len(), 2);
+        assert_eq!(migration_ledger(&pool).await.len(), 3);
         assert_eq!(migration_ledger(&pool).await[0], ledger_before[0]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -665,6 +672,50 @@ fn released_v043_prefix_upgrades_without_resetting_tenant_data() {
         synveda_store::check_migration_compatibility(&pool, &scratch.roles)
             .await
             .expect("new head matches embedded catalogue");
+        pool.close().await;
+    });
+}
+
+#[test]
+fn exact_forward_prefix_adds_login_state_without_rewriting_existing_rows() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.expect("forward prefix connection");
+        forward_migrator()
+            .run(&mut *connection)
+            .await
+            .expect("install exact first forward prefix");
+        epoch::stamp_connection(&mut connection, "0.4.3")
+            .await
+            .expect("stamp first forward head");
+        drop(connection);
+        let tenant = admit_a_tenant(&pool).await;
+        let before = migration_ledger(&pool).await;
+        assert_eq!(before.len(), 2);
+        assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0002");
+        assert!(matches!(
+            epoch::verify(&pool).await,
+            Err(SchemaEpochError::PendingMigration { found }) if found == "0002"
+        ));
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect("exact first forward prefix is upgradeable");
+
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("append the login ledger migration");
+        assert_eq!(epoch::verify(&pool).await.unwrap().migration_head, "0003");
+        let after = migration_ledger(&pool).await;
+        assert_eq!(after.len(), 3);
+        assert_eq!(&after[..2], &before[..]);
+        assert!(
+            synveda_store::tenants::by_id(&pool, tenant)
+                .await
+                .unwrap()
+                .is_some()
+        );
         pool.close().await;
     });
 }
@@ -687,8 +738,8 @@ fn an_unstamped_released_baseline_resumes_from_its_exact_sqlx_prefix() {
         synveda_store::migrate(&pool, &scratch.roles)
             .await
             .expect("resume with exact old catalogue and apply forward DDL");
-        assert_eq!(epoch::verify(&pool).await.unwrap().migration_head, "0002");
-        assert_eq!(migration_ledger(&pool).await.len(), 2);
+        assert_eq!(epoch::verify(&pool).await.unwrap().migration_head, "0003");
+        assert_eq!(migration_ledger(&pool).await.len(), 3);
         pool.close().await;
     });
 }
@@ -717,7 +768,7 @@ fn a_committed_forward_migration_with_old_stamp_repairs_only_the_stamp() {
             .expect("commit forward DDL and SQLx row without marker stamp");
         drop(connection);
         let ledger_before = migration_ledger(&pool).await;
-        assert_eq!(ledger_before.len(), 2);
+        assert_eq!(ledger_before.len(), 3);
         assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0001");
         assert!(matches!(
             epoch::verify(&pool).await,
@@ -730,7 +781,7 @@ fn a_committed_forward_migration_with_old_stamp_repairs_only_the_stamp() {
         synveda_store::migrate(&pool, &scratch.roles)
             .await
             .expect("repair only the marker stamp");
-        assert_eq!(epoch::verify(&pool).await.unwrap().migration_head, "0002");
+        assert_eq!(epoch::verify(&pool).await.unwrap().migration_head, "0003");
         assert_eq!(migration_ledger(&pool).await, ledger_before);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -1548,7 +1599,7 @@ fn reset_refuses_a_database_name_it_will_not_quote() {
 
 // ── no old-to-new migrator ───────────────────────────────────────────────
 
-/// Epoch 3 has the released schema-only baseline and one additive forward
+/// Epoch 3 has the released schema-only baseline and two additive forward
 /// migration: no pre-epoch translator, reversible pair or top-level statement
 /// that can carry or seed data. Function
 /// bodies may of course mutate current tables at runtime; the scanner removes
@@ -1575,9 +1626,10 @@ fn no_old_to_new_data_migrator_exists() {
         names,
         [
             "0001_context_platform.sql",
-            "0002_context_restart_and_excerpt.sql"
+            "0002_context_restart_and_excerpt.sql",
+            "0003_one_time_login_ledger.sql"
         ],
-        "epoch 3 has the released baseline and one forward migration"
+        "epoch 3 has the released baseline and two forward migrations"
     );
 
     let down: Vec<_> = names

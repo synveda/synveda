@@ -28,6 +28,12 @@ unready; inspect the policy refresh logs rather than routing around the gate.
 Post-start policy-pack change visibility across multiple gateways is not yet
 qualified, so the chart remains single-replica.
 
+OIDC login now parks its PKCE state and CLI handoff in the same deployment-key
+plane as console sessions. A missing deployment key refuses `/auth/login`
+before redirect; restore the matching key with PostgreSQL so unexpired logins
+can complete after a gateway restart. The isolated cross-process test exercises
+this source path, but the Helm chart still awaits a three-pod drill.
+
 After a database outage, Kubernetes' Ready status can lag the application's
 current gate. Probe `/readyz` directly, then validate a fresh login and governed
 read before reopening traffic. The external drill also observed Keycloak using
@@ -88,7 +94,7 @@ spans; it must not restart the application.
 | Full Synveda PostgreSQL database, schema and SQLx metadata | Identities/grants, Sessions and payloads, Knowledge revisions, VedaFlow objects, Skills, secret envelopes, jobs/outbox and audit all live here |
 | Full packaged Keycloak PostgreSQL database | Users, stable subjects, passwords/credentials, signing keys, realm/client configuration and service identities; a realm configuration export alone is insufficient |
 | Database role/owner/ACL contract and credential custody | `pg_dump` does not back up cluster roles; restore exact separate owner/runtime roles before loading the archive |
-| Original KMS KEK and reference; any external KMS custody | Needed to open deployment and tenant envelopes and sealed console sessions; neither can be reconstructed from ciphertext |
+| Original KMS KEK and reference; any external KMS custody | Needed to open deployment and tenant envelopes, sealed console sessions and pending OIDC/CLI handoffs; none can be reconstructed from ciphertext |
 | Issuer/client configuration and client secrets, provider credentials, CA/TLS keys, saved values and artifact digests | Preserve canonical issuer and subjects; keep signing-key history through Keycloak DB or external IdP recovery |
 | Adapter/client spool or unpublished local work where used | Lives on the client; it has not necessarily reached the server backup |
 
@@ -242,7 +248,8 @@ There is **no supported upgrade between published versions**. Public v0.2.0 has
 the retired schema. Published v0.4.0 and v0.4.3 both use epoch 3 and baseline
 revision 3, but their `0001` checksums differ and remain incompatible. The
 source candidate now preserves the exact v0.4.3 baseline and adds `0002` under
-ADR-0121; its read-only check identifies an exact v0.4.3 head as upgradeable
+ADR-0121 and `0003` under ADR-0126; its read-only check identifies exact
+`0001` and `0002` heads as upgradeable
 after quiescence, not ready for the new binary to serve. Keep the current
 installation and its data until the published-artifact and joint recovery drill
 qualifies this path. Same-source Helm migration reruns and retained reinstall

@@ -35,17 +35,20 @@ baseline revision 3, but the latter changes `0001_context_platform.sql`
 still refused. ADR-0121 selects v0.4.3 as the first forward-upgrade source.
 The source candidate restores its exact `0001` bytes and moves CTX-6/CTX-8 DDL
 to transactional `0002_context_restart_and_excerpt.sql`. The fast gate pins
-both files. The read-only candidate check distinguishes an exact v0.4.3 head
-from the current head; the gateway refuses the former until migration stamps
-`0002`. Old/current catalogue proofs flank SQLx DDL, with exact-prefix crash
-recovery. This is an implementation candidate, not a published upgrade claim.
+both files. OPS-7 / ADR-0126 now appends `0003_one_time_login_ledger.sql`;
+the read-only candidate check distinguishes exact `0001`, `0002` and current
+`0003` heads. The gateway refuses the earlier heads until migration stamps
+`0003`. Head-specific catalogue proofs flank SQLx DDL, with exact-prefix
+crash recovery. This is an implementation candidate, not a published upgrade
+claim.
 
-An isolated exact-role PostgreSQL run passed 24 focused epoch tests, including
+An isolated exact-role PostgreSQL run passed 25 focused epoch tests, including
 an exact published-baseline SQLx prefix, retained tenant data and baseline
-ledger row, read-only preflight, interrupted-stamp recovery, missing-ledger
+ledger row, exact `0002` advancement, read-only preflight, interrupted-stamp recovery, missing-ledger
 preservation and old-catalogue drift refusal. SQLx generated-metadata
-verification passes on a fresh two-head database, and the full isolated
-`bash scripts/db-test.sh` suite passes, including serial authority tests. At
+verification passes on a fresh three-head database. The earlier full isolated
+`bash scripts/db-test.sh` suite passed at `0002`, including serial authority
+tests; the focused 25-case epoch suite has now passed at `0003`. At
 that checkpoint this had not tested a published application binary, populated
 audit/key state or a joint restore.
 
@@ -85,6 +88,12 @@ or maintenance time, off-host PITR, Helm ordering or a published N-1/N pair.
 Next run those checks against representative data and the OPS-5 off-host
 recovery set, then publish and qualify the pair. No old binary may serve the
 advanced database; rollback restores the verified recovery set.
+
+The released-byte rehearsal above ended at `0002`, before the OPS-7 login
+ledger existed. It is historical evidence for that prefix, not qualification
+of the current `0003` source head. Repeat its joint data/key/identity and
+rollback checks through `0003`, including pending-login key recovery and
+cross-process completion, before using it for a current-source upgrade claim.
 
 ## Scope
 

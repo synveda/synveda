@@ -35,11 +35,12 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, ConfiguredLogin, behavior_test_router as router};
+use synveda_gateway::login_ledger::PostgresLoginLedger;
 use synveda_gateway::telemetry;
 use synveda_identity::console::{
     CONSOLE_COOKIE, DEVELOPMENT_CONSOLE_COOKIE, DEVELOPMENT_LOGIN_COOKIE, LOGIN_COOKIE,
 };
-use synveda_identity::{LoginFlow, OidcVerifier, TokenVerifier, parse_issuers};
+use synveda_identity::{LoginFlow, LoginLedger, OidcVerifier, TokenVerifier, parse_issuers};
 use synveda_types::{TenantId, TenantStatus};
 use tower::ServiceExt;
 
@@ -377,7 +378,7 @@ fn pool(url: &str) -> PgPool {
 /// Builds the gateway with one configured OIDC issuer. `refresh_interval`
 /// tunes the JWKS rate limit (zero = always refetch, huge = never twice).
 fn oidc_state(url: &str, issuer: &str, binding: &Binding, refresh_interval: Duration) -> AppState {
-    oidc_state_with_cookie_mode(url, issuer, binding, refresh_interval, false)
+    oidc_state_with_cookie_mode(url, issuer, binding, refresh_interval, false, false)
 }
 
 fn oidc_state_with_cookie_mode(
@@ -386,6 +387,7 @@ fn oidc_state_with_cookie_mode(
     binding: &Binding,
     refresh_interval: Duration,
     explicit_development_http: bool,
+    durable: bool,
 ) -> AppState {
     let config = match binding {
         Binding::Claim => {
@@ -404,12 +406,23 @@ fn oidc_state_with_cookie_mode(
             .expect("build verifier")
             .with_refresh_min_interval(refresh_interval),
     );
+    let pool = pool(url);
+    let keys = Arc::new(synveda_store::keys::KeyRing::new(
+        synveda_crypto::Kms::Local(
+            synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test").expect("test kek"),
+        ),
+    ));
+    let ledger: Arc<dyn LoginLedger> = if durable {
+        Arc::new(PostgresLoginLedger::new(pool.clone(), Arc::clone(&keys)))
+    } else {
+        Arc::new(synveda_identity::MemoryLoginLedger::new())
+    };
     AppState {
-        pool: pool(url),
+        pool,
         metrics: metrics_handle(),
         verifier: verifier.clone(),
         login: Some(Arc::new(ConfiguredLogin::for_behavior_test(
-            LoginFlow::new(verifier, REDIRECT_URI.to_owned()),
+            LoginFlow::new(verifier, REDIRECT_URI.to_owned(), ledger),
             explicit_development_http,
         ))),
         public_origin: "http://127.0.0.1:8120".to_owned(),
@@ -422,12 +435,7 @@ fn oidc_state_with_cookie_mode(
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
-        keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
-            synveda_crypto::Kms::Local(
-                synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test")
-                    .expect("test kek"),
-            ),
-        )),
+        keys,
     }
 }
 
@@ -715,6 +723,116 @@ async fn entra_shaped_login_yields_a_synveda_session() {
 }
 
 #[tokio::test]
+async fn a_callback_on_another_gateway_consumes_the_same_durable_login_once() {
+    let _serial = serial().await;
+    let Some((db_url, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(Some(tenant_id.to_string())).await;
+    let first = oidc_state_with_cookie_mode(
+        &db_url,
+        &idp.issuer,
+        &Binding::Claim,
+        Duration::ZERO,
+        false,
+        true,
+    );
+    first
+        .keys
+        .provision(&first.pool, synveda_crypto::KeyScope::Deployment)
+        .await
+        .expect("provision shared deployment key");
+    let second = oidc_state_with_cookie_mode(
+        &db_url,
+        &idp.issuer,
+        &Binding::Claim,
+        Duration::ZERO,
+        false,
+        true,
+    );
+    let first = router(first);
+    let second = router(second);
+    let callback = drive_to_callback(&first, true).await;
+    let response = second
+        .clone()
+        .oneshot(get_request(&callback, None))
+        .await
+        .expect("callback response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let session = body_json(response).await;
+    assert_eq!(session["tenant"]["id"], tenant_id.to_string());
+
+    let (status, kind) = status_and_kind(
+        first
+            .oneshot(get_request(&callback, None))
+            .await
+            .expect("replayed callback"),
+    )
+    .await;
+    assert_eq!(
+        (status, kind.as_str()),
+        (StatusCode::UNAUTHORIZED, "unauthenticated")
+    );
+}
+
+#[tokio::test]
+async fn another_gateway_cannot_consume_a_console_login_without_its_browser_cookie() {
+    let _serial = serial().await;
+    let Some((db_url, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(Some(tenant_id.to_string())).await;
+    let first = oidc_state_with_cookie_mode(
+        &db_url,
+        &idp.issuer,
+        &Binding::Claim,
+        Duration::ZERO,
+        false,
+        true,
+    );
+    first
+        .keys
+        .provision(&first.pool, synveda_crypto::KeyScope::Deployment)
+        .await
+        .expect("provision shared deployment key");
+    let second = oidc_state_with_cookie_mode(
+        &db_url,
+        &idp.issuer,
+        &Binding::Claim,
+        Duration::ZERO,
+        false,
+        true,
+    );
+    let first = router(first);
+    let second = router(second);
+    let callback = drive_console_to_callback(&first).await;
+
+    let refused = second
+        .clone()
+        .oneshot(cookie_request(&callback.uri, None))
+        .await
+        .expect("unbound callback");
+    assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(idp.token_exchanges(), 0);
+
+    let completed = second
+        .clone()
+        .oneshot(cookie_request(&callback.uri, Some(&callback.cookie)))
+        .await
+        .expect("bound callback");
+    assert_eq!(completed.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(completed.headers()[header::LOCATION], "/console/");
+    assert_eq!(idp.token_exchanges(), 1);
+
+    let replay = first
+        .oneshot(cookie_request(&callback.uri, Some(&callback.cookie)))
+        .await
+        .expect("replayed callback");
+    assert_eq!(replay.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(idp.token_exchanges(), 1);
+}
+
+#[tokio::test]
 async fn static_tenant_binding_login_yields_a_session_too() {
     // The static config shape (ADR-0010 §4): no tenant claim is required in
     // the token because the configured issuer is bound to one tenant.
@@ -781,6 +899,7 @@ async fn assert_successful_console_callback(
         &Binding::Claim,
         Duration::ZERO,
         explicit_development_http,
+        true,
     );
     state
         .keys

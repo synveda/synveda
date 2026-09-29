@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into pending_logins (state_hash, correlation_hash, payload_sealed) values ($1, $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2b5edcc2c7b47d532d69706e3c3e3d971818349502c2268dce76b7728a575a09"
+}

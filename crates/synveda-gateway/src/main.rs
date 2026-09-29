@@ -39,6 +39,7 @@ use std::time::Duration;
 use synveda_gateway::app::{self, AppState, ConfiguredLogin};
 use synveda_gateway::authority::{self, AuthorityGate, AuthorityMonitor, CheckOutcome};
 use synveda_gateway::authz::PolicyReadyGeneration;
+use synveda_gateway::login_ledger::PostgresLoginLedger;
 use synveda_gateway::shutdown::GatewayAdmission;
 use synveda_gateway::{authz, runtime_config, shutdown, telemetry};
 use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, TokenVerifier};
@@ -95,6 +96,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let public_url = runtime_config::public_application_url()?;
     let public_origin = public_url.origin().to_owned();
 
+    // OIDC's pre-tenant one-time state and console sessions share the
+    // deployment key. A disabled KMS leaves bearer-only traffic available,
+    // but beginning a login now fails closed before any redirect is issued.
+    let keys = Arc::new(synveda_store::keys::KeyRing::new(
+        runtime_config::kms_from_env()?,
+    ));
+    let deployment_key_ref = match keys.kms() {
+        synveda_crypto::Kms::Disabled => {
+            tracing::warn!(
+                "no SYNVEDA_KMS_KEY: OIDC login, console sessions and per-tenant secrets are \
+                 unavailable (TEN-4, ADR-0064; OPS-7, ADR-0126)"
+            );
+            None
+        }
+        kms => Some(synveda_crypto::KeyManagement::key_ref(kms).to_owned()),
+    };
+
     // One auth mode, never two (ADR-0010); fail closed when neither is
     // configured (ADR-0008).
     let oidc_issuers =
@@ -130,9 +148,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     issuers = %oidc.issuers().collect::<Vec<_>>().join(", "),
                     "OIDC auth mode (ADR-0010): /v1 accepts IdP-issued bearer tokens"
                 );
-                let flow = Arc::new(
-                    public_url.configure_login(LoginFlow::new(Arc::clone(&oidc), redirect_uri)),
-                );
+                let ledger = Arc::new(PostgresLoginLedger::new(pool.clone(), Arc::clone(&keys)));
+                let flow = Arc::new(public_url.configure_login(LoginFlow::new(
+                    Arc::clone(&oidc),
+                    redirect_uri,
+                    ledger,
+                )));
                 (oidc, Some(flow))
             }
             (None, Some(secret)) => {
@@ -161,25 +182,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .filter(|secs| *secs > 0)
             .ok_or("SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS must be a positive integer")?,
         Err(_) => 3600,
-    };
-
-    // The key plane (TEN-4, ADR-0064). `Kms::Disabled` when no KEK is
-    // configured, which is fail-closed rather than fail-to-boot: `/v1`
-    // bearer traffic never touches a sealed column, so a deployment that has
-    // not set a key keeps serving and the surfaces that need one say which
-    // key is missing.
-    let keys = Arc::new(synveda_store::keys::KeyRing::new(
-        runtime_config::kms_from_env()?,
-    ));
-    let deployment_key_ref = match keys.kms() {
-        synveda_crypto::Kms::Disabled => {
-            tracing::warn!(
-                "no SYNVEDA_KMS_KEY: console sessions and per-tenant secrets are \
-                 unavailable (TEN-4, ADR-0064). `synveda kms keygen` mints one."
-            );
-            None
-        }
-        kms => Some(synveda_crypto::KeyManagement::key_ref(kms).to_owned()),
     };
 
     // Request-time context planning keeps the same explicit embedder identity

@@ -39,8 +39,9 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, ConfiguredLogin, behavior_test_router as router};
+use synveda_gateway::login_ledger::PostgresLoginLedger;
 use synveda_gateway::telemetry;
-use synveda_identity::{LoginFlow, OidcVerifier, parse_issuers};
+use synveda_identity::{LoginFlow, LoginLedger, OidcVerifier, parse_issuers};
 use synveda_types::{TenantId, TenantStatus};
 use tower::ServiceExt;
 
@@ -313,6 +314,10 @@ fn oidc_state(url: &str, issuer: &str) -> AppState {
 }
 
 fn oidc_state_with_scopes(url: &str, issuer: &str, scopes: &[&str]) -> AppState {
+    oidc_state_with_ledger(url, issuer, scopes, false)
+}
+
+fn oidc_state_with_ledger(url: &str, issuer: &str, scopes: &[&str], durable: bool) -> AppState {
     let config = serde_json::to_string(&json!([{
         "issuer": issuer,
         "client_id": CLIENT_ID,
@@ -325,12 +330,23 @@ fn oidc_state_with_scopes(url: &str, issuer: &str, scopes: &[&str]) -> AppState 
             .expect("build verifier")
             .with_refresh_min_interval(Duration::ZERO),
     );
+    let pool = pool(url);
+    let keys = Arc::new(synveda_store::keys::KeyRing::new(
+        synveda_crypto::Kms::Local(
+            synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test").expect("test kek"),
+        ),
+    ));
+    let ledger: Arc<dyn LoginLedger> = if durable {
+        Arc::new(PostgresLoginLedger::new(pool.clone(), Arc::clone(&keys)))
+    } else {
+        Arc::new(synveda_identity::MemoryLoginLedger::new())
+    };
     AppState {
-        pool: pool(url),
+        pool,
         metrics: metrics_handle(),
         verifier: verifier.clone(),
         login: Some(Arc::new(ConfiguredLogin::for_behavior_test(
-            LoginFlow::new(verifier, REDIRECT_URI.to_owned()),
+            LoginFlow::new(verifier, REDIRECT_URI.to_owned(), ledger),
             false,
         ))),
         public_origin: "http://127.0.0.1:8120".to_owned(),
@@ -343,12 +359,7 @@ fn oidc_state_with_scopes(url: &str, issuer: &str, scopes: &[&str]) -> AppState 
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
-        keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
-            synveda_crypto::Kms::Local(
-                synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test")
-                    .expect("test kek"),
-            ),
-        )),
+        keys,
     }
 }
 
@@ -397,11 +408,20 @@ fn query_of(url: &str) -> HashMap<String, String> {
 /// with a loopback return address, the browser hop to the IdP, and the
 /// gateway callback. Returns the loopback URL the gateway redirected to.
 async fn drive_cli_login(app: &Router, redirect_uri: &str, cli_state: &str) -> String {
+    drive_cli_login_between(app, app, redirect_uri, cli_state).await
+}
+
+async fn drive_cli_login_between(
+    start_app: &Router,
+    callback_app: &Router,
+    redirect_uri: &str,
+    cli_state: &str,
+) -> String {
     let start = format!(
         "/auth/login?cli_redirect_uri={}&cli_state={cli_state}",
         urlencoding(redirect_uri)
     );
-    let response = app
+    let response = start_app
         .clone()
         .oneshot(get_request(&start, None))
         .await
@@ -424,7 +444,7 @@ async fn drive_cli_login(app: &Router, redirect_uri: &str, cli_state: &str) -> S
     let callback = url::Url::parse(callback).expect("callback url");
     let callback = format!("/auth/callback?{}", callback.query().expect("query"));
 
-    let response = app
+    let response = callback_app
         .clone()
         .oneshot(get_request(&callback, None))
         .await
@@ -560,6 +580,50 @@ async fn a_cli_login_hands_back_a_code_that_redeems_a_usable_session() {
         StatusCode::OK,
         "the renewed bearer works"
     );
+}
+
+#[tokio::test]
+async fn cli_login_callback_and_redemption_work_on_other_gateways_once() {
+    let _serial = serial().await;
+    let Some((db_url, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id, true).await;
+    let scopes = &["openid", "profile", "email"];
+    let first = oidc_state_with_ledger(&db_url, &idp.issuer, scopes, true);
+    first
+        .keys
+        .provision(&first.pool, synveda_crypto::KeyScope::Deployment)
+        .await
+        .expect("provision shared deployment key");
+    let second = oidc_state_with_ledger(&db_url, &idp.issuer, scopes, true);
+    let third = oidc_state_with_ledger(&db_url, &idp.issuer, scopes, true);
+    let first = router(first);
+    let second = router(second);
+    let third = router(third);
+
+    let loopback = drive_cli_login_between(&first, &second, LOOPBACK, CLI_STATE).await;
+    let code = query_of(&loopback)["code"].clone();
+    let response = third
+        .oneshot(post_json(
+            "/auth/cli/exchange",
+            &json!({ "code": code, "state": CLI_STATE }),
+        ))
+        .await
+        .expect("cross-gateway redemption");
+    assert_eq!(response.status(), StatusCode::OK);
+    let session = body_json(response).await;
+    assert_eq!(session["tenant"]["id"], tenant_id.to_string());
+    assert!(session["refresh_token"].is_string());
+
+    let replay = first
+        .oneshot(post_json(
+            "/auth/cli/exchange",
+            &json!({ "code": code, "state": CLI_STATE }),
+        ))
+        .await
+        .expect("replay response");
+    assert_eq!(replay.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

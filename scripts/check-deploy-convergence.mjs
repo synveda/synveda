@@ -1030,10 +1030,16 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
     "configure_authority_snapshot_connection(&mut authority)",
     begin,
   );
-  const acl = runtimeRole.indexOf("application_acl_fingerprint(&mut authority)", snapshot);
+  const acl = runtimeRole.indexOf(
+    "application_acl_fingerprint(&mut authority, LOGIN_ACL_ROW_COUNT)",
+    snapshot,
+  );
   const routine = runtimeRole.indexOf("let routine_catalog = routine_catalog_fingerprint(", acl);
   const trigger = runtimeRole.indexOf("let trigger_catalog = trigger_catalog_fingerprint(", routine);
-  const rls = runtimeRole.indexOf("rls_catalog_fingerprint(&mut authority)", trigger);
+  const rls = runtimeRole.indexOf(
+    "rls_catalog_fingerprint(&mut authority, LOGIN_RLS_CATALOG_ROW_COUNT)",
+    trigger,
+  );
   const routineCall = runtimeRole.slice(routine, trigger);
   const triggerCall = runtimeRole.slice(trigger, rls);
   const commit = runtimeRole.indexOf(".commit()", rls);

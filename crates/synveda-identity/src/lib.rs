@@ -19,6 +19,7 @@ pub mod console;
 mod context;
 pub mod directory;
 mod flow;
+pub mod login_ledger;
 // The invitation token (CPR-5, ADR-0072 decision 5): the same mint/hash/
 // show-once shape as `scim`, for the same reason — it is a bearer credential
 // that mints access.
@@ -33,6 +34,9 @@ pub use flow::{
     CliHandoff, ConsoleLoginBinding, LoginDestination, LoginFlow, LoginSession, OIDC_LOGINS_TOTAL,
     OIDC_REFRESHES_TOTAL, RefreshedSession, validate_cli_redirect_uri,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use login_ledger::MemoryLoginLedger;
+pub use login_ledger::{ConsumedHandoff, ConsumedPending, LoginLedger};
 pub use mapping::{ADMIN_GROUP, contains_admin_group};
 pub use oidc::{
     IssuerConfig, JWKS_REFRESHES_TOTAL, OIDC_DIAGNOSTICS_TOTAL, OidcVerifier,

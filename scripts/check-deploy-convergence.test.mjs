@@ -2601,6 +2601,14 @@ test("authority fingerprints use one isolated report-only catalogue snapshot", (
         '            "the authority fingerprint reporter requires its exact harness gate"',
     ),
     runtimeRole.replace(
+      "application_acl_fingerprint(&mut authority, LOGIN_ACL_ROW_COUNT)",
+      "application_acl_fingerprint(&mut authority, APPLICATION_ACL_ROW_COUNT)",
+    ),
+    runtimeRole.replace(
+      "rls_catalog_fingerprint(&mut authority, LOGIN_RLS_CATALOG_ROW_COUNT)",
+      "rls_catalog_fingerprint(&mut authority, RLS_CATALOG_ROW_COUNT)",
+    ),
+    runtimeRole.replace(
       '        let roles = live_test_roles().expect("the exact database role contract is required");',
       '        let roles = DatabaseRoles::parse_json("{}").expect("unchecked roles");',
     ),

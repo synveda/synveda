@@ -54,6 +54,7 @@ pub mod knowledge_conflicts;
 pub mod knowledge_freshness;
 pub mod knowledge_lifecycle;
 pub mod knowledge_search;
+pub mod one_time_login;
 pub mod operations;
 pub mod packs;
 pub mod policy_assignments;
@@ -131,6 +132,13 @@ pub async fn check_migration_compatibility(
         match stage {
             epoch::MigrationPreflight::Prior => {
                 runtime_role::verify_v043_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
+            epoch::MigrationPreflight::Forward => {
+                runtime_role::verify_forward_migrator_read_only_connection(
                     &mut compatibility,
                     database_roles,
                 )
@@ -230,6 +238,10 @@ async fn migrate_locked_connection(
             }
             epoch::MigrationPreflight::PendingStampPrior | epoch::MigrationPreflight::Prior => {
                 runtime_role::verify_v043_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampForward | epoch::MigrationPreflight::Forward => {
+                runtime_role::verify_forward_migrator_connection(&mut authority, database_roles)
                     .await?;
             }
             epoch::MigrationPreflight::PendingStampCurrent | epoch::MigrationPreflight::Current => {
