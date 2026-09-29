@@ -38,6 +38,7 @@ use std::time::Duration;
 
 use synveda_gateway::app::{self, AppState, ConfiguredLogin};
 use synveda_gateway::authority::{self, AuthorityGate, AuthorityMonitor, CheckOutcome};
+use synveda_gateway::shutdown::GatewayAdmission;
 use synveda_gateway::{authz, runtime_config, shutdown, telemetry};
 use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, TokenVerifier};
 use synveda_ingest::embedding::Embedder as _;
@@ -225,15 +226,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "synveda-gateway listening");
 
+    let admission = GatewayAdmission::new();
+    let (http_stop_tx, mut http_stop) = tokio::sync::watch::channel(false);
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
-    let mut http_stop = stop_rx.clone();
     let http_gate = gate.clone();
+    let http_admission = admission.clone();
     let mut server = tokio::spawn(async move {
-        axum::serve(listener, app::governed_router(app_state, http_gate))
-            .with_graceful_shutdown(async move {
-                while !*http_stop.borrow() && http_stop.changed().await.is_ok() {}
-            })
-            .await
+        axum::serve(
+            listener,
+            app::governed_router(app_state, http_gate, http_admission),
+        )
+        .with_graceful_shutdown(async move {
+            while !*http_stop.borrow() && http_stop.changed().await.is_ok() {}
+        })
+        .await
     });
     let mut sentinel = tokio::spawn(authority::run_sentinel(authority, stop_rx.clone()));
     let mut background = tokio::spawn(run_gateway_background(
@@ -265,14 +271,37 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         result = &mut server => ExitReason::Server(result),
     };
 
-    let _ = stop_tx.send(true);
+    admission.withdraw();
+    let drain_window = if matches!(&reason, ExitReason::Signal) {
+        shutdown::gateway_probe_drain_window(shutdown_grace)
+    } else {
+        Duration::ZERO
+    };
+    tracing::info!(
+        drain_window_secs = drain_window.as_secs(),
+        "gateway readiness and new request admission withdrawn"
+    );
+    if !drain_window.is_zero() {
+        tokio::time::sleep(drain_window).await;
+    }
+    let _ = http_stop_tx.send(true);
     let mut sentinel_finished = matches!(&reason, ExitReason::Sentinel(_));
     let mut background_finished = matches!(&reason, ExitReason::Background(_));
     let mut pool_monitor_finished = matches!(&reason, ExitReason::Pool);
     let mut server_finished = matches!(&reason, ExitReason::Server(_));
     let mut cleanup_error = None;
-    let cleanup_grace = shutdown_grace.saturating_sub(SHUTDOWN_ABORT_RESERVE);
+    let cleanup_grace = shutdown_grace
+        .saturating_sub(drain_window)
+        .saturating_sub(SHUTDOWN_ABORT_RESERVE);
     let cleanup = tokio::time::timeout(cleanup_grace, async {
+        if !server_finished {
+            match (&mut server).await {
+                Ok(Ok(())) => {}
+                _ => cleanup_error = Some("gateway HTTP supervisor failed during shutdown"),
+            }
+            server_finished = true;
+        }
+        let _ = stop_tx.send(true);
         if !sentinel_finished {
             let _ = (&mut sentinel).await;
             sentinel_finished = true;
@@ -288,17 +317,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let _ = (&mut pool_monitor).await;
             pool_monitor_finished = true;
         }
-        if !server_finished {
-            match (&mut server).await {
-                Ok(Ok(())) => {}
-                _ => cleanup_error = Some("gateway HTTP supervisor failed during shutdown"),
-            }
-            server_finished = true;
-        }
         pool.close().await;
     })
     .await;
     if cleanup.is_err() {
+        let _ = stop_tx.send(true);
         if !sentinel_finished {
             sentinel.abort();
         }

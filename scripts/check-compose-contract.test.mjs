@@ -6949,6 +6949,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
         init: true,
         pids_limit: 1,
         restart: "no",
+        stop_grace_period: "40s",
         environment: {
           DATABASE_URL_FILE: "/run/secrets/database_url",
           SYNVEDA_KMS_KEY_FILE: "/run/secrets/kms_key",
@@ -7343,6 +7344,13 @@ test("model findings reject privilege, port, command and secret regressions", ()
     keycloakPublicGateDir: "/fixture/keycloak-public-gate",
   };
   assert.deepEqual(canonicalComposeFindings(base, expected), []);
+  const shortGatewayGrace = structuredClone(base);
+  shortGatewayGrace.services.gateway.stop_grace_period = "30s";
+  assert.ok(
+    canonicalComposeFindings(shortGatewayGrace, expected).includes(
+      "gateway stop grace must exceed its default shutdown bound by ten seconds",
+    ),
+  );
   const discardWithEgress = structuredClone(base);
   discardWithEgress.services["otel-collector"].networks["telemetry-egress"] = {
     gw_priority: 1,

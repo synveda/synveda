@@ -2967,6 +2967,9 @@ export function canonicalComposeFindings(model, expected) {
   if (services.gateway?.healthcheck?.test?.at(-1) !== "ready") {
     findings.push("gateway health does not use readiness");
   }
+  if (services.gateway?.stop_grace_period !== "40s") {
+    findings.push("gateway stop grace must exceed its default shutdown bound by ten seconds");
+  }
   if (services.worker?.healthcheck?.test?.at(-1) !== "ready") {
     findings.push("worker health does not use readiness");
   }

@@ -27,6 +27,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use crate::auth;
 use crate::authority::AuthorityGate;
 use crate::error::ApiError;
+use crate::shutdown::GatewayAdmission;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
 
@@ -272,18 +273,28 @@ pub fn behavior_test_router(state: AppState) -> Router {
 /// Liveness and private metrics remain available while the gate is closed;
 /// readiness runs the same bounded serialized proof as the process sentinel;
 /// every auth, console, SCIM and `/v1` route is structurally gated.
-pub fn governed_router(state: AppState, gate: AuthorityGate) -> Router {
-    let application = application_routes(&state).route_layer(middleware::from_fn_with_state(
-        gate.clone(),
-        require_authority,
-    ));
+pub fn governed_router(
+    state: AppState,
+    gate: AuthorityGate,
+    admission: GatewayAdmission,
+) -> Router {
+    let application = application_routes(&state)
+        .route_layer(middleware::from_fn_with_state(
+            gate.clone(),
+            require_authority,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            admission.clone(),
+            require_admission,
+        ));
     let ops = Router::new()
         .route("/healthz", get(healthz))
         .route(
             "/readyz",
             get(move || {
                 let gate = gate.clone();
-                async move { governed_readyz(gate).await }
+                let admission = admission.clone();
+                async move { governed_readyz(gate, admission).await }
             }),
         )
         .route("/metrics", get(render_metrics));
@@ -384,6 +395,17 @@ async fn require_authority(
     }
 }
 
+async fn require_admission(
+    State(admission): State<GatewayAdmission>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !admission.is_accepting() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response();
+    }
+    next.run(request).await
+}
+
 /// Liveness: the process is up. No dependencies touched.
 async fn healthz() -> &'static str {
     "ok"
@@ -422,16 +444,85 @@ async fn behavior_test_readyz(State(state): State<AppState>) -> Response {
 
 #[cfg(all(test, feature = "test-support"))]
 mod assembly_tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use axum::body::Body;
+    use axum::http::Request;
+    use tokio::sync::Notify;
+    use tower::ServiceExt;
+
+    use super::*;
+
     #[test]
     fn the_product_entrypoint_uses_only_the_governed_router() {
         let entrypoint = include_str!("main.rs");
         assert!(entrypoint.contains("app::governed_router"));
         assert!(!entrypoint.contains("behavior_test_router"));
     }
+
+    #[tokio::test]
+    async fn withdrawal_fails_readiness_before_new_admission_but_finishes_existing_work() {
+        let admission = GatewayAdmission::new();
+        let gate = AuthorityGate::open_for_test();
+        assert_eq!(
+            governed_readyz(gate.clone(), admission.clone())
+                .await
+                .status(),
+            StatusCode::OK
+        );
+
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let route_started = Arc::clone(&started);
+        let route_release = Arc::clone(&release);
+        let app = Router::new()
+            .route(
+                "/work",
+                get(move || {
+                    let started = Arc::clone(&route_started);
+                    let release = Arc::clone(&route_release);
+                    async move {
+                        started.notify_one();
+                        release.notified().await;
+                        "complete"
+                    }
+                }),
+            )
+            .route_layer(middleware::from_fn_with_state(
+                admission.clone(),
+                require_admission,
+            ));
+        let first_app = app.clone();
+        let first = tokio::spawn(async move {
+            first_app
+                .oneshot(Request::get("/work").body(Body::empty()).expect("request"))
+                .await
+                .expect("first response")
+        });
+        tokio::time::timeout(Duration::from_secs(1), started.notified())
+            .await
+            .expect("first request admitted");
+
+        admission.withdraw();
+        assert_eq!(
+            governed_readyz(gate, admission).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let rejected = app
+            .oneshot(Request::get("/work").body(Body::empty()).expect("request"))
+            .await
+            .expect("second response");
+        assert_eq!(rejected.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        release.notify_one();
+        let completed = first.await.expect("first request joined");
+        assert_eq!(completed.status(), StatusCode::OK);
+    }
 }
 
-async fn governed_readyz(gate: AuthorityGate) -> Response {
-    if gate.is_open() {
+async fn governed_readyz(gate: AuthorityGate, admission: GatewayAdmission) -> Response {
+    if admission.is_accepting() && gate.is_open() {
         (StatusCode::OK, "ready").into_response()
     } else {
         (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response()

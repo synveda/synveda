@@ -140,6 +140,7 @@ if (!productImage || containerImage(worker, "worker") !== productImage) {
 
 requireMarkers("gateway", gateway, [
   "automountServiceAccountToken: false",
+  "terminationGracePeriodSeconds: 40",
   "- name: DATABASE_URL_FILE",
   "value: /run/secrets/synveda-gateway/database_url",
   "- name: SYNVEDA_DATABASE_ROLES_FILE",
@@ -150,6 +151,9 @@ requireMarkers("gateway", gateway, [
   "secretName: synveda-gateway-db",
   "path: /readyz",
 ]);
+if (!/readinessProbe:[\s\S]*?failureThreshold: 1\n\s+volumeMounts:/.test(gateway)) {
+  throw new Error("gateway drain requires one failed readiness probe before volume mounts");
+}
 forbidMarkers("gateway", gateway, [
   "synveda-pg-app",
   "synveda-pg-superuser",

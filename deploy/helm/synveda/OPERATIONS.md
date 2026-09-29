@@ -28,7 +28,16 @@ recovered. Its report counts those failures within a 90-second test bound;
 readiness alone is not a sign-in guarantee. Escalate persistent failures to the
 identity administrator; do not replace credentials or weaken token checks.
 
-Shutdown withdraws worker readiness and cancels supervised tasks. Capture
+Gateway SIGTERM withdraws `/readyz` and refuses new application work first.
+With the default 30-second shutdown bound, it leaves up to ten seconds for
+the next five-second Helm readiness probe to remove the endpoint; Helm accepts
+one failed probe. It then stops HTTP admission, waits for in-flight requests
+while the authority sentinel stays live, stops background tasks and flushes
+telemetry. A conclusive database-authority refusal still cancels affected
+requests immediately. Shorter configured bounds reduce the pre-drain window;
+the single-process source test is not evidence of a rolling upgrade or
+multi-pod availability. Shutdown also withdraws worker readiness and cancels
+supervised tasks. Capture
 cancellation leaves its fenced claim for the existing 60-second lease expiry;
 the next worker retries. A request may reach an external provider more than
 once. Database claim fencing/idempotency does not promise exactly-once external

@@ -151,6 +151,15 @@ maintenance window is qualified. Next run those gates with representative data
 and the OPS-5 recovery set before a supported upgrade claim.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
+
+OPS-7 has a first single-process drain slice under ADR-0124: SIGTERM withdraws
+gateway readiness and new request admission before HTTP stops, preserves the
+authority sentinel until admitted work drains, and exits inside the configured
+bound in an isolated exact-role subprocess test. The chart still pins one
+gateway/worker and Recreate. Durable login, cross-process invalidation,
+multi-worker ownership, in-flight process/load and three-pod rolling acceptance
+remain open in the brief.
+
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open

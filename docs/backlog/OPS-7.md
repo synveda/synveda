@@ -18,10 +18,24 @@ invalidation is process-local in the gateway. Capture, Knowledge indexing,
 directory pull and relaxation expiry now run in a separate supervised core
 worker, but only one worker replica is supported and concurrent-worker recovery
 has not been proved. Worker SIGTERM withdraws readiness and performs a bounded
-cancel/join, while gateway readiness still remains true during graceful request
-shutdown. Claimed-work termination remains unproved. These gaps are recorded in
+cancel/join. Before the source lifecycle slice, gateway readiness remained
+true during graceful request shutdown. Claimed-work termination remains
+unproved. These gaps are recorded in
 [production readiness](../PRODUCTION_READINESS.md) and the one-replica refusal
 is governed by [ADR-0062](../adr/adr-0062-enterprise-profile-and-helm-chart.md).
+
+On 2026-09-29, [ADR-0124](../adr/adr-0124-withdraw-gateway-admission-before-http-shutdown.md)
+added a separate one-way request-admission signal. A normal SIGTERM now
+withdraws `/readyz`, rejects new application requests and keeps the authority
+sentinel alive until the HTTP server drains; only then do supervised tasks stop
+and telemetry flush. Helm's next readiness probe removes the endpoint, and
+Compose has an outer stop margin. A real exact-role gateway subprocess test
+observed 503 readiness while HTTP remained live, refused new work and exited
+inside its configured 15-second bound. A synthetic in-flight request completed
+after admission withdrawal. This is single-process source evidence, not a
+three-pod, load or interrupted-provider drain result. Next design durable
+one-time login and cross-process invalidation, then prove worker ownership and
+the full Kubernetes termination sequence before lifting the chart refusal.
 
 ## Scope
 
