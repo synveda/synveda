@@ -911,7 +911,7 @@ async fn a_pack_too_large_for_the_budget_is_named_rather_than_dropped() {
         "and the section it came from: {composed}"
     );
     assert!(
-        composed.contains("summary only: token budget"),
+        composed.contains("title index only: token budget"),
         "and says why only the authored location was supplied: {composed}"
     );
     assert!(

@@ -11,15 +11,19 @@
 
 pub mod authz;
 pub mod compose;
+pub mod counting;
+pub mod passage;
 
 pub use authz::{
     AuthoredReadInputs, CandidateScope, CompositionPlan, ScopeDecision, composition_plan,
 };
 pub use compose::{
-    AUTHORED_SUMMARY_TOKENS, AdvertisedSkill, COMPOSED_ENTRIES_TOTAL, ChannelWatermark,
+    AUTHORED_INDEX_TOKENS, AdvertisedSkill, COMPOSED_ENTRIES_TOTAL, ChannelWatermark,
     ComposeRequest, ComposeScope, ComposedBlock, ComposedEntry, MAX_ADVERTISED_SKILLS,
-    SKILL_INDEX_TOKENS, compose_authored, estimated_tokens,
+    SKILL_INDEX_TOKENS, compose_authored, estimated_tokens, record_authored_delivery_metrics,
 };
+pub use counting::{CountMethod, MAX_RENDERED_CONTEXT_BYTES, TokenCounter};
+pub use passage::{MAX_PASSAGE_UNITS, SourceSpan, ranked_source_units, task_overlap};
 
 use sqlx::{PgConnection, PgPool};
 use synveda_types::Result;

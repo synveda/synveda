@@ -39,6 +39,7 @@ import type {
   ContextRunDetailView,
   ContextRunListView,
   ContextRunView,
+  ContextPreviewView,
   ContextSelectionView,
   KnowledgeSourceView,
   MeView,
@@ -119,7 +120,7 @@ function ContextWorkbench({ me, projectId }: { me: MeView; projectId: string }) 
             </span>
           </div>
           <p className="muted">
-            {created.tokens} tokens · {created.selection_count} selected revisions · trace {created.trace_retention_mode}
+            {created.tokens} {created.token_count_kind === "exact_encoding" ? "encoding tokens" : "estimated tokens"} · {created.selection_count} selected revisions · trace {created.trace_retention_mode}
           </p>
           <ContextRunDetail contextRunId={created.id} embedded />
         </section>
@@ -148,8 +149,10 @@ function ContextRequestForm({
   const [query, setQuery] = useState("");
   const [budget, setBudget] = useState("");
   const [sensitivity, setSensitivity] = useState("");
+  const [tokenizer, setTokenizer] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ContextPreviewView | null>(null);
   const selected = sessions.find((session) => session.id === sessionId) ?? null;
   const mayRequest = selected ? offersSessionWrite(me, selected) : false;
 
@@ -168,22 +171,44 @@ function ContextRequestForm({
     );
   }
 
+  const requestBody = () => ({
+    ...(query.trim() ? { query: query.trim() } : {}),
+    ...(budget ? { budget_tokens: Number(budget) } : {}),
+    ...(sensitivity ? { max_sensitivity: sensitivity } : {}),
+    ...(tokenizer ? { tokenizer_encoding: tokenizer } : {}),
+  });
+
+  const previewCurrent = async () => {
+    if (!selected || !mayRequest) return;
+    setBusy(true);
+    setError(null);
+    setPreview(null);
+    const answer = await request("preview_context", {
+      path: { session_id: selected.id },
+      body: requestBody(),
+    });
+    setBusy(false);
+    if (answer.kind === "ok") {
+      setPreview(answer.body);
+    } else {
+      setError(answer.kind === "unauthenticated" ? "Your session expired before preview." : answer.message);
+    }
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selected || !mayRequest) return;
     setBusy(true);
     setError(null);
+    setPreview(null);
     const answer = await request("create_context_run", {
       path: { session_id: selected.id },
-      body: {
-        ...(query.trim() ? { query: query.trim() } : {}),
-        ...(budget ? { budget_tokens: Number(budget) } : {}),
-        ...(sensitivity ? { max_sensitivity: sensitivity } : {}),
-      },
+      body: requestBody(),
       idempotencyKey: idempotencyKey(),
     });
     setBusy(false);
     if (answer.kind === "ok") {
+      setPreview(null);
       onCreated(answer.body);
     } else {
       setError(
@@ -198,7 +223,7 @@ function ContextRequestForm({
     <form className="context-request" onSubmit={(event) => void submit(event)}>
       <label>
         <span>Session</span>
-        <select value={sessionId} onChange={(event) => setSessionId(event.target.value)}>
+        <select value={sessionId} disabled={busy} onChange={(event) => { setSessionId(event.target.value); setPreview(null); }}>
           {sessions.map((session) => (
             <option key={session.id} value={session.id}>
               {runTitle(session)} · {statusLabel(session.status)} · {runDescription(session)}
@@ -211,8 +236,9 @@ function ContextRequestForm({
         <textarea
           rows={3}
           value={query}
+          disabled={busy}
           placeholder="What should the agent know for this task?"
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => { setQuery(event.target.value); setPreview(null); }}
         />
       </label>
       <label>
@@ -224,13 +250,21 @@ function ContextRequestForm({
           step={1}
           inputMode="numeric"
           value={budget}
+          disabled={busy}
           placeholder="Governed default"
-          onChange={(event) => setBudget(event.target.value)}
+          onChange={(event) => { setBudget(event.target.value); setPreview(null); }}
         />
       </label>
       <label>
+        <span>Text encoding <span className="muted">(optional)</span></span>
+        <select value={tokenizer} disabled={busy} onChange={(event) => { setTokenizer(event.target.value); setPreview(null); }}>
+          <option value="">Receiving model unknown · estimate</option>
+          <option value="o200k_base">o200k_base · exact local text count</option>
+        </select>
+      </label>
+      <label>
         <span>Maximum sensitivity <span className="muted">(optional)</span></span>
-        <select value={sensitivity} onChange={(event) => setSensitivity(event.target.value)}>
+        <select value={sensitivity} disabled={busy} onChange={(event) => { setSensitivity(event.target.value); setPreview(null); }}>
           <option value="">Governed default</option>
           <option value="public">Public</option>
           <option value="internal">Internal</option>
@@ -239,6 +273,9 @@ function ContextRequestForm({
         </select>
       </label>
       <div className="form-actions wide-field">
+        <button type="button" disabled={busy || !mayRequest} onClick={() => void previewCurrent()}>
+          {busy ? "Planning…" : "Preview context"}
+        </button>
         <button type="submit" disabled={busy || !mayRequest}>
           {busy ? "Requesting…" : "Request context"}
         </button>
@@ -250,6 +287,24 @@ function ContextRequestForm({
         )}
       </div>
       {error ? <div className="banner error wide-field" role="alert">{error}</div> : null}
+      {preview ? (
+        <section className="wide-field" aria-live="polite">
+          <h3>Preview only</h3>
+          <p className="muted">No ContextRun delivery or provider request was recorded.</p>
+          <p>{preview.optimization_mode} · {preview.tokens} {preview.token_count_kind === "exact_encoding" ? "encoding tokens" : "estimated tokens"} / {preview.budget_tokens} budget · {preview.selected.length} visible selected · {preview.omitted.length} visible omitted</p>
+          <p className="muted">{preview.observed_usage_status}. {preview.overhead_note}</p>
+          {preview.policy_exclusion_message ? <p className="muted">{preview.policy_exclusion_message}</p> : null}
+          <details className="technical-details">
+            <summary>Sources, omissions and rendered text</summary>
+            <ul>
+              {preview.selected.map((source, index) => <li key={`selected-${index}`}>{source.knowledge_revision_id ?? source.capture_candidate_id ?? source.source_content_hash} · {source.reason_codes.includes("excerpt") ? "exact excerpt" : "selected"}{source.required ? " · required" : ""}{source.source_body_byte_span ? ` · bytes ${source.source_body_byte_span.join("–")}` : ""}</li>)}
+              {preview.omitted.map((source, index) => <li key={`omitted-${index}`}>{source.knowledge_revision_id ?? source.capture_candidate_id ?? source.source_content_hash} · omitted: {source.omission_reason ?? "reason unavailable"}</li>)}
+              {preview.authored_packs.map((pack) => <li key={pack.chunk_id}>Context pack {pack.chunk_id} · {pack.presentation}</li>)}
+            </ul>
+            <pre className="context-rendered">{preview.rendered}</pre>
+          </details>
+        </section>
+      ) : null}
     </form>
   );
 }
@@ -375,6 +430,17 @@ function RunFacts({ run }: { run: ContextRunView }) {
             : `${requested} requested · ${run.budget_tokens} governed`}
           {` · ${run.tokens} used`}
         </dd>
+        <dt>Optimisation</dt>
+        <dd>{run.optimization_mode}</dd>
+        <dt>Count evidence</dt>
+        <dd>
+          {run.token_count_kind === "exact_encoding" ? "Exact rendered-text encoding count" : "Estimated rendered-text count"}
+          {run.tokenizer_encoding ? ` · ${run.tokenizer_encoding}` : " · receiving model unknown"}
+        </dd>
+        <dt>Accounting boundary</dt>
+        <dd>Synveda-rendered context, including headers, references and provenance. Host history, other tools and output reservation are outside this count.</dd>
+        <dt>Observed provider usage</dt>
+        <dd>Unavailable through this context route.</dd>
         <dt>Visible trace</dt>
         <dd>
           {run.selection_count} selected · {run.candidate_count} candidates · {run.entry_count} rendered entries
@@ -466,6 +532,7 @@ function Selection({
   cacheKey: string;
 }) {
   const revision = revisionOf(selection.revision);
+  const excerptDelivered = selection.reason_codes.includes("excerpt");
   const proposal = selection.unreviewed_candidate;
   const scores = scoresOf(candidate?.scores);
   const title = revision?.title ?? proposal?.content.title ?? `Content ${selection.content_hash.slice(0, 16)}…`;
@@ -477,6 +544,7 @@ function Selection({
         <div>
           <span className="eyebrow">Rank {selection.rank} · {selection.token_count} tokens</span>
           <h4>{title}</h4>
+          {excerptDelivered ? <span className="muted">Exact source excerpt delivered; the full authorised revision is shown below.</span> : null}
         </div>
         <span className={`tag ${state.startsWith("current") ? "done" : "warn"}`}>
           {state}

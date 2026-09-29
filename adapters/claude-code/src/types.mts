@@ -44,6 +44,7 @@ export interface HookOutput {
 export type SessionEventType =
   | "session.started"
   | "session.ended"
+  | "session.compaction_boundary"
   | "message.user"
   | "message.assistant"
   | "tool.invoked"
@@ -121,6 +122,7 @@ export interface AppendEventsResponse {
 export interface ContextRunRequest {
   query?: string;
   budget_tokens?: number;
+  restart?: boolean;
 }
 
 /** `POST /v1/sessions/{id}/context-runs` — the composed block. */

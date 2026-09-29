@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "scope": "Synthetic held-out restart facts; no model task outcome",
+  "budget_tokens": 1400,
+  "encoding": "o200k_base",
+  "tasks": [
+    {
+      "id": "auth-adapter",
+      "query": "AUTH-817 PreCompact credential renewal and replay",
+      "knowledge_title": "AUTH-817 replay contract",
+      "knowledge_fact": "AUTH-817 requires the original event ID on every authenticated retry.",
+      "first_fact": "The failed Claude PreCompact flush used spool envelope retry-817 after a gateway 401.",
+      "second_fact": "Never mint a replacement client_event_id for retry-817; renew the credential first.",
+      "tail_fact": "Resume the pending retry-817 upload only after the new credential is accepted."
+    },
+    {
+      "id": "configuration",
+      "query": "CFG-642 issuer migration and tenant isolation",
+      "knowledge_title": "CFG-642 configuration rule",
+      "knowledge_fact": "CFG-642 keeps rls_enabled = true in the tenant configuration.",
+      "first_fact": "The approved issuer is https://login.example.test/realm/blue for CFG-642.",
+      "second_fact": "The required audience stays synveda-api; do not accept the old audience.",
+      "tail_fact": "Validate the blue issuer and synveda-api audience before activating CFG-642."
+    },
+    {
+      "id": "rust-typescript",
+      "query": "CODE-935 Rust and TypeScript error propagation",
+      "knowledge_title": "CODE-935 cross-language guard",
+      "knowledge_fact": "CODE-935 requires an explicit Denied result before either client sends a retry.",
+      "first_fact": "The Rust path must keep `if !authorized { return Err(Denied); }` intact.",
+      "second_fact": "The TypeScript timeout is exactly `const timeoutMs = 1500;`, not 15000.",
+      "tail_fact": "Run the Rust gateway check and TypeScript adapter test for CODE-935."
+    },
+    {
+      "id": "long-running-resume",
+      "query": "RESUME-208 evidence after repeated compaction",
+      "knowledge_title": "RESUME-208 release constraint",
+      "knowledge_fact": "RESUME-208 forbids resetting the retained interop database.",
+      "first_fact": "The first work period isolated a missing callback in session resume-208.",
+      "second_fact": "The second work period found an unverified test claim; report it as unverified.",
+      "tail_fact": "Next inspect the callback trace for resume-208 and retain the original database."
+    }
+  ]
+}

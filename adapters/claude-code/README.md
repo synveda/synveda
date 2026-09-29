@@ -16,17 +16,24 @@ caller's own bearer, and inherits whatever the PDP allows that identity
 
 | Hook | Mode | What it does |
 | --- | --- | --- |
-| `SessionStart` | `session-start` | Opens or resumes the run, retries the backlog, `POST /v1/sessions/{id}/context-runs`; returns the block as `additionalContext` |
+| `SessionStart` | `session-start` | Opens or resumes the run, retries the backlog, requests a context run (with bounded restart evidence when `source` is `compact`); returns the block as `additionalContext` |
 | `SessionStart` | `skills` | `synveda skill sync` into this plugin's own `skills/`; async, returns nothing |
 | `Stop` | `turn` | Synchronously records the turn into the spool, then returns before credential or network work |
-| `PreCompact` | `turn` | Synchronously records everything the transcript still holds, then returns before compaction rewrites it |
+| `PreCompact` | `turn` | Synchronously records the remaining transcript and a typed boundary in the durable spool, then returns before compaction rewrites it |
 | `SessionEnd` | `turn` | Records the last turn and makes a **bounded** synchronous flush; `/clear` closes the old run |
 
 `SessionStart` is the only one of the four that can contribute context —
 `PreCompact`'s output becomes compaction instructions and its only
 decision control is exit 2, which blocks compaction. Re-injection after a
 compaction is `SessionStart` firing again with `source: "compact"`
-(ADR-0027 decision 2).
+(ADR-0027 decision 2). After the normal spool delivery, Synveda derives a
+checkpoint from admitted redacted events in that exact Session. Restart
+composition can include bounded, source-labelled user excerpts from this and
+earlier checkpoints, later user events and current authorised Knowledge. A
+missing or withheld source makes its derivative unavailable; the original
+permitted event tail remains usable. The checkpoint is working evidence, not
+published Knowledge or a verified summary of the host's full transcript
+(ADR-0119).
 
 Every hook exits 0, always. A dead gateway, an expired login, a
 malformed transcript, or an expired deadline yields a hook that

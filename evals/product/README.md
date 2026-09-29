@@ -5,6 +5,101 @@ required scenario to an exact acceptance test and keeps the eight outcome
 signals separate. `baseline.json` contains the reviewable floors and six
 zero-tolerance trust bounds.
 
+CTX-8 adds two paired off/conservative scenarios to this same disposable
+database run. Their separate `context_optimisation` report section records
+complete Synveda-rendered text tokens with the declared `o200k_base` encoding,
+four exact required-body checks, preview side effects and private-source
+masking. The suite sets zero tolerance for critical-fact loss, private-source
+leakage and preview delivery. It requires one fixed optional-content fixture
+to reduce the rendered block by at least one token. These are deterministic
+source fixtures, not model task-success, provider-usage or cost measurements.
+
+CTX-6 adds a separate four-task synthetic restart corpus in
+`checkpoint-tasks.json`. The exact-role gateway test compares previews with
+restart off and on after two compaction boundaries, under the same Knowledge
+snapshot and 1,400-token `o200k_base` Synveda text budget. It checks 12
+independently declared Session facts, exact required Knowledge, checkpoint and
+tail event attribution, and coverage. Both paths receive one warmup request
+per task; the report records one timed request per mode and a four-sample
+assisted p95. The predeclared local ceiling is 500 ms, with zero tolerance for
+fact or provenance loss. This is a deterministic probe, not a model answer,
+task-success or provider-cost measurement; four samples do not establish a
+production latency distribution.
+
+The shared-budget scenario repeats a checkpoint restart beside exact required
+Knowledge in both governed `off` and `conservative` modes. It verifies the
+checkpoint's source event and the required body under a generous allowance,
+then tightens the allowance and requires the optional restart text to be
+omitted without losing required Knowledge or exposing the omitted source ID.
+
+### Prepared model task-use probe
+
+`context-model-probe.json` fixes eight synthetic factual questions and answer
+fields before any model comparison. The two existing public-API tests can export
+their actual paired ContextRun text only when explicitly asked. The export is
+separate from the content-free product report and belongs under ignored
+`target/`; never use a real tenant in this probe.
+
+```sh
+mkdir -p target/context-model-probe
+SYNVEDA_CONTEXT_OPT_MODEL_INPUT="$PWD/target/context-model-probe/optimisation-input.json" \
+  SYNVEDA_DB_TEST_TASK=workspace bash scripts/db-test.sh -p synveda-gateway \
+    --test context_runs conservative_required_fact_matrix_preserves_exact_task_evidence \
+    -- --exact --test-threads=1
+SYNVEDA_CHECKPOINT_MODEL_INPUT="$PWD/target/context-model-probe/checkpoint-input.json" \
+  SYNVEDA_DB_TEST_TASK=workspace bash scripts/db-test.sh -p synveda-gateway \
+    --test context_runs held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenance \
+    -- --exact --test-threads=1
+node scripts/prepare-context-model-probe.mjs \
+  target/context-model-probe/optimisation-input.json \
+  target/context-model-probe/checkpoint-input.json \
+  target/context-model-probe/prompts.json
+```
+
+`prompts.json` contains 16 paired, synthetic, source-derived prompts and SHA-256
+digests plus checkout revision/dirty state. Its `synthetic_context_preparation_only` label means no model was
+called and no task outcome, provider usage, cost or live Claude hook was
+measured. The answer key stays in the separate source rubric, outside prompts.
+A later bounded provider run must use the same model/settings per pair and
+send only each `prompt` string with tools disabled, then record the served
+model, prompt digest and actual usage. Collect its 16 JSON
+answers as `{"schema_version":1,"model_id":"...","responses":[...]}`;
+each response names `family`, `task_id`, `variant`, the corresponding
+`prompt_sha256`, and an `answer` object with exactly the rubric's fields. Then
+score the fixed rubric with:
+
+```sh
+node scripts/score-context-model-probe.mjs \
+  target/context-model-probe/prompts.json \
+  target/context-model-probe/answers.json \
+  target/context-model-probe/score.json
+```
+
+The scorer rejects missing, repeated or mismatched answers and reports
+per-task regressions. It labels manually imported answers unverified, so even
+its `PASS` is not live provider evidence. This factual task-use probe remains
+narrower than coding-task success or a native compact/resume run.
+
+After an explicit total-spend approval and a locally authenticated Claude Code
+client, the opt-in runner invokes each prompt as a separate no-tools,
+non-persistent print call. It divides the approved cap across 16 calls, checks
+the returned model and per-call usage, and writes private answer and score
+files under `target/`. For a USD $5.00 approval and the `sonnet` CLI selector:
+
+```sh
+SYNVEDA_CONFIRM_MODEL_SPEND=ctx-probe:5.00:16 \
+  node scripts/run-context-model-probe.mjs \
+    target/context-model-probe/prompts.json sonnet 5.00 \
+    target/context-model-probe/live
+```
+
+The runner refuses a stale or dirty prompt manifest, absent confirmation or
+authentication, model drift, missing usage, malformed JSON and a reported
+cost above the per-call cap. It retains a labelled partial result if a later
+call fails. Its final score measures factual answers in this synthetic
+questionnaire only; native hooks, coding-task success, subscription invoices
+and net savings require separate evidence.
+
 Run the definition-only CI gate with:
 
 ```sh
@@ -22,7 +117,7 @@ The runner requires `DATABASE_URL`; it fails if the PulseBoard test skips and
 therefore cannot turn an unavailable database into green evidence. It records
 the exact git revision, retrieval/index/embedding identity, independently
 persisted retrieved/selected/injected/feedback counts, token use, ContextRun
-latencies and every scenario duration.
+latencies, paired CTX-8 and CTX-6 evidence and every scenario duration.
 
 This deterministic suite uses the rule extractor and the test embedder, which
 is lexical-only. `make eval-retrieval` remains the BGE-M3 semantic run;

@@ -23,8 +23,8 @@ use synveda_types::configuration::{
     AdvertisementConfiguration, CaptureConfiguration, ConfigurationArtifact, ConfigurationBinding,
     ConfigurationCommand, ConfigurationContextChannel, ConfigurationDocument,
     ConfigurationMutationOutcome, ConfigurationMutationResult, ConfigurationTemplate,
-    ConfigurationVersion, EffectiveConfiguration, ExternalProvider, FreshnessConfiguration,
-    GraphRetrievalConfiguration, RelaxationConfiguration,
+    ConfigurationVersion, ContextOptimizationMode, EffectiveConfiguration, ExternalProvider,
+    FreshnessConfiguration, GraphRetrievalConfiguration, RelaxationConfiguration,
 };
 use synveda_types::json::canonicalise;
 use synveda_types::relaxation::RelaxationAction;
@@ -67,6 +67,18 @@ fn trace_schema() -> utoipa::openapi::schema::Object {
     crate::workspaces::string_enum(TraceRetentionMode::ALL.iter().map(|value| value.as_str()))
 }
 
+fn optimization_mode_schema() -> utoipa::openapi::schema::Object {
+    crate::workspaces::string_enum(
+        ContextOptimizationMode::ALL
+            .iter()
+            .map(|value| value.as_str()),
+    )
+}
+
+fn default_optimization_mode() -> String {
+    ContextOptimizationMode::Off.as_str().to_owned()
+}
+
 /// Capture and extraction settings in one immutable document.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -83,6 +95,9 @@ pub(crate) struct CaptureConfigurationBody {
 #[serde(deny_unknown_fields)]
 pub(crate) struct ContextConfigurationBody {
     pub token_budget: u32,
+    #[serde(default = "default_optimization_mode")]
+    #[schema(schema_with = optimization_mode_schema)]
+    pub optimization_mode: String,
     /// `current_knowledge`, optionally followed by `unreviewed_candidates`.
     pub channels: Vec<String>,
     #[schema(schema_with = trace_schema)]
@@ -167,6 +182,7 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
             },
             context: synveda_types::configuration::ContextConfiguration {
                 token_budget: value.context.token_budget,
+                optimization_mode: value.context.optimization_mode.parse()?,
                 channels: value
                     .context
                     .channels
@@ -232,6 +248,7 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
             },
             context: ContextConfigurationBody {
                 token_budget: value.context.token_budget,
+                optimization_mode: value.context.optimization_mode.as_str().to_owned(),
                 channels: value
                     .context
                     .channels

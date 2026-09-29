@@ -102,6 +102,8 @@ function run(overrides: Partial<ContextRunView> = {}): ContextRunView {
     block_hash: "rendered-hash",
     tokens: 37,
     budget_tokens: 256,
+    optimization_mode: "off",
+    token_count_kind: "estimated",
     configuration_hash: "configuration-hash",
     configuration_version_id: "configuration-version-1",
     requested_budget_tokens: 300,

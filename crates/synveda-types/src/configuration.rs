@@ -176,6 +176,10 @@ impl CaptureConfiguration {
 pub struct ContextConfiguration {
     /// Maximum estimated-token budget. A request may narrow, never widen it.
     pub token_budget: u32,
+    /// Optional delivery optimisation. Stored documents predating this field
+    /// retain the exact off-mode delivery path.
+    #[serde(default, skip_serializing_if = "ContextOptimizationMode::is_off")]
+    pub optimization_mode: ContextOptimizationMode,
     /// Ordered, duplicate-free content channels.
     pub channels: Vec<ConfigurationContextChannel>,
     /// Diagnostic trace detail retained for a run.
@@ -184,6 +188,33 @@ pub struct ContextConfiguration {
     /// authorised anchors.
     pub graph: GraphRetrievalConfiguration,
 }
+
+/// Governed, closed optimisation modes. A learned/balanced mode is withheld
+/// until a backend has passed its separate quality and security gate.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextOptimizationMode {
+    /// Existing budgeted composition, for comparison and rollback.
+    #[default]
+    Off,
+    /// Local deterministic selection with no model dependency.
+    Conservative,
+}
+
+impl ContextOptimizationMode {
+    /// Keeps the canonical bytes of existing immutable off-mode documents
+    /// unchanged when they are read and hash-checked by the store.
+    #[must_use]
+    pub const fn is_off(&self) -> bool {
+        matches!(self, Self::Off)
+    }
+}
+
+closed_vocabulary!(
+    ContextOptimizationMode,
+    [Off => "off", Conservative => "conservative"],
+    "context optimization mode"
+);
 
 impl ContextConfiguration {
     fn validate(&self) -> Result<()> {
@@ -513,6 +544,7 @@ impl ConfigurationDocument {
             capture,
             context: ContextConfiguration {
                 token_budget: 1_500,
+                optimization_mode: ContextOptimizationMode::Off,
                 channels: vec![ConfigurationContextChannel::CurrentKnowledge],
                 trace_retention: match template {
                     ConfigurationTemplate::Personal => TraceRetentionMode::Full,
@@ -912,6 +944,8 @@ mod tests {
             ConfigurationDocument::fail_safe(),
             ConfigurationDocument::template(ConfigurationTemplate::Enterprise)
         );
+        let encoded = serde_json::to_value(ConfigurationDocument::fail_safe()).unwrap();
+        assert!(encoded["context"].get("optimization_mode").is_none());
     }
 
     #[test]

@@ -11,7 +11,7 @@ use chrono::Utc;
 use sqlx::PgConnection;
 use synveda_store::configuration;
 use synveda_types::configuration::{
-    ConfigurationCommand, ConfigurationDocument, ConfigurationTemplate,
+    ConfigurationCommand, ConfigurationDocument, ConfigurationTemplate, ContextOptimizationMode,
 };
 use synveda_types::{
     AssetKind, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, IdentityId,
@@ -312,6 +312,34 @@ pub async fn set_trace_retention(
         };
     }
     document.context.trace_retention = mode;
+    select_document(tx, tenant, scope_id, binding, document).await
+}
+
+pub async fn set_optimization_mode(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    mode: ContextOptimizationMode,
+) -> Selection {
+    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
+        .await
+        .expect("read Configuration fixture binding")
+        .into_iter()
+        .next()
+        .expect("Configuration fixture binding exists");
+    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
+        .await
+        .expect("read Configuration fixture artifact")
+        .expect("Configuration fixture artifact exists");
+    let selected_id = binding
+        .pinned_version_id
+        .unwrap_or(artifact.current_version_id);
+    let current = configuration::version(tx, tenant, selected_id)
+        .await
+        .expect("read Configuration fixture version")
+        .expect("Configuration fixture version exists");
+    let mut document = current.document;
+    document.context.optimization_mode = mode;
     select_document(tx, tenant, scope_id, binding, document).await
 }
 

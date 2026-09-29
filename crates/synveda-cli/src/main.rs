@@ -26,6 +26,7 @@ mod channel;
 mod client_paths;
 mod configuration;
 mod consumer;
+mod context;
 mod credentials;
 mod database_preflight;
 mod demo;
@@ -383,6 +384,10 @@ enum Command {
     /// select an exact artifact at a governed scope.
     #[command(subcommand)]
     Configuration(ConfigurationCommand),
+    /// Preview and inspect governed context through the authenticated API
+    /// (CTX-8). A preview does not record a model delivery.
+    #[command(subcommand)]
+    Context(ContextCommand),
     /// Open Knowledge Format v0.2 exchange (CPR-28, ADR-0087).
     ///
     /// Validation and inspection are local and use the exact pinned adapter.
@@ -562,6 +567,50 @@ enum RetryReviewCommand {
         /// Print machine-readable evidence.
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ContextCommand {
+    /// Compute current authorised context without recording delivery or usage.
+    Preview {
+        session: synveda_types::SessionId,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
+        budget_tokens: Option<u32>,
+        /// Exact local text encoding, currently `o200k_base` only.
+        #[arg(long)]
+        tokenizer_encoding: Option<String>,
+        /// Include governed compact/restart evidence for a supported Claude Session.
+        #[arg(long)]
+        restart: bool,
+        /// Exact current Knowledge revision to keep in full, as ITEM_ID@REVISION_ID.
+        #[arg(long = "require-knowledge")]
+        required_knowledge_revisions: Vec<String>,
+        #[arg(long)]
+        max_sensitivity: Option<synveda_types::Sensitivity>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Read a recorded delivery with fresh source authorisation.
+    Inspect {
+        run: synveda_types::ContextRunId,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Fetch one exact visible Knowledge revision through the governed history API.
+    Detail {
+        item: synveda_types::KnowledgeItemId,
+        revision: synveda_types::KnowledgeRevisionId,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
@@ -3096,6 +3145,43 @@ async fn run(cli: Cli) -> Result<(), String> {
                 title,
                 profile,
             } => pack::propose(&profile_name(profile)?, &name, scope, title.as_deref()).await,
+        },
+        Command::Context(command) => match command {
+            ContextCommand::Preview {
+                session,
+                query,
+                budget_tokens,
+                tokenizer_encoding,
+                restart,
+                required_knowledge_revisions,
+                max_sensitivity,
+                json,
+                profile,
+            } => {
+                context::preview(
+                    &profile_name(profile)?,
+                    context::PreviewOptions {
+                        session,
+                        query: query.as_deref(),
+                        budget_tokens,
+                        tokenizer_encoding: tokenizer_encoding.as_deref(),
+                        restart,
+                        required_knowledge_revisions: &required_knowledge_revisions,
+                        max_sensitivity,
+                        json,
+                    },
+                )
+                .await
+            }
+            ContextCommand::Inspect { run, json, profile } => {
+                context::inspect(&profile_name(profile)?, run, json).await
+            }
+            ContextCommand::Detail {
+                item,
+                revision,
+                json,
+                profile,
+            } => context::detail(&profile_name(profile)?, item, revision, json).await,
         },
         Command::Session(command) => match command {
             SessionCommand::Flush {

@@ -16,6 +16,7 @@ pub(crate) fn outcome<T>(result: &Result<T>) -> &'static str {
             | Error::PolicyDenied { .. }
             | Error::NotFound { .. }
             | Error::Invalid { .. }
+            | Error::InsufficientBudget { .. }
             | Error::Conflict { .. }
             | Error::RateLimited { .. },
         ) => "rejected",

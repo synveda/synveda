@@ -147,6 +147,7 @@ define_routes! {
     "/v1/sessions/{session_id}/end" => [POST crate::sessions::end],
     "/v1/sessions/{session_id}/timeline" => [GET crate::sessions::timeline],
     "/v1/sessions/{session_id}/context-runs" => [POST crate::context_api::create_context_run],
+    "/v1/sessions/{session_id}/context-preview" => [POST crate::context_api::preview_context],
     "/v1/sessions/{session_id}/knowledge-query" => [POST crate::context_api::knowledge_query],
     "/v1/sessions/{session_id}/knowledge-evaluation" => [POST crate::context_api::knowledge_evaluation],
     "/v1/context-runs" => [GET crate::context_api::list],

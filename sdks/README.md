@@ -77,11 +77,12 @@ generated types, operation bindings, contract metadata and `py.typed`.
 ## Compatibility and release boundary
 
 SDK version **0.1.0** targets API version **0.4.3** and checked OpenAPI SHA-256
-`935ecca14d12adfbd1324d8ae16560698e93286195a8b67ab860618d9f164e32`.
+`2e10e99af913bc5494092f1aed4eb21a36ef453785edc9c9aaf422c60f66c47e`.
 That digest covers the whole API document; the SDK exposes only the 15 selected
-operations. Another server version or contract has no compatibility claim from
-these checks. Regenerate after reviewed contract or package-version changes,
-then rerun the drift, installed-package and applicable gateway acceptance gates.
+operations and 53 reachable schemas. Another server version or contract has no
+compatibility claim from these checks. Regenerate after reviewed contract or
+package-version changes, then rerun the drift, installed-package and applicable
+gateway acceptance gates.
 
 Both public imports expose build facts without a network request:
 

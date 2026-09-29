@@ -119,7 +119,10 @@ export async function sessionStart(
   // 3. The context block.
   if (!configured.inject) return disclosureOnly(input, config);
 
-  const request: { query?: string; budget_tokens?: number } = {};
+  const request: { query?: string; budget_tokens?: number; restart?: boolean } = {};
+  if (input.source === "compact" && (configured.clientName ?? CLIENT_NAME) === CLIENT_NAME) {
+    request.restart = true;
+  }
   const task = deriveTask(input.source, spool.transcript_path, readEntries);
   if (task !== undefined) request.query = task;
   const budget = budgetFor(input.source, config);
