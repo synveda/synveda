@@ -328,13 +328,14 @@ async fn gather_resolved_identity(
     };
     let principal_scopes: Arc<[ScopeNode]> = match own_scope {
         Some(scope_id) => {
-            // The identity pins its scope, so this resolves; a missing row
-            // (mid-transaction archive) just leaves the principal
-            // unanchored — composition rules then read nothing (fail
-            // closed).
-            let Some(scope) = scopes::get(&mut *conn, tenant_id, scope_id).await? else {
-                unreachable!("an identity's scope is pinned by its foreign key")
-            };
+            // A missing scope contradicts the identity/principal lookup in
+            // this transaction. Refuse the decision instead of panicking in
+            // the authorisation path.
+            let scope = scopes::get(&mut *conn, tenant_id, scope_id)
+                .await?
+                .ok_or_else(|| Error::Storage {
+                    message: "the principal scope disappeared during authorisation".to_owned(),
+                })?;
             let sealed = identity.as_ref().is_some_and(Identity::sealed);
             let mut chain = vec![ScopeNode::from_scope(&scope, sealed)];
             for ancestor in scopes::ancestors(&mut *conn, tenant_id, scope_id).await? {
