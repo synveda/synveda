@@ -3,6 +3,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { requiredJobs } from "./ci-result.mjs";
+import { sbomGenerator } from "./rust-image-sbom.mjs";
 
 const read = (path) =>
   readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -290,17 +291,20 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
       outputs: `type=oci,dest=\${{ runner.temp }}/images/${archive}.tar`,
       platforms: "${{ matrix.platform }}",
       provenance: "mode=max",
-      sbom: "true",
+      sbom: ["product", "browser-acceptance"].includes(archive) ? `generator=${sbomGenerator}` : "true",
       labels: "|",
     }))
       require(inputs[key] === value, `${name}: invalid ${key}`);
     require((inputs.target ?? null) === target, `${name}: wrong build target`);
+    require(inputs.tags === `localhost:5000/synveda/${archive}:\${{ inputs.version }}-\${{ matrix.arch }}`,
+      `${name}: named OCI export is required for attestation subjects`);
     require(Object.keys(inputs).every((key) =>
       [
         "context",
         "file",
         "outputs",
         "platforms",
+        "tags",
         "provenance",
         "sbom",
         "labels",

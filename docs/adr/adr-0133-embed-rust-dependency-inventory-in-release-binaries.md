@@ -1,6 +1,6 @@
 # ADR-0133: Embed Rust dependency inventory in release binaries
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-09-30
 - **Feature(s)**: OPS-12
 - **Deciders**: Synveda maintainers
@@ -31,7 +31,7 @@ The [upstream format](https://github.com/rust-secure-code/cargo-auditable/tree/v
 and [Syft cataloger](https://oss.anchore.com/docs/capabilities/rust/) support this
 existing binary-analysis boundary; native target evidence remains mandatory.
 
-The proposed initial pins are `cargo-auditable` 0.7.6 (official Cargo source
+The initial pins are `cargo-auditable` 0.7.6 (official Cargo source
 checksum `26d8fb7a4422b2aea452c301a30bac8528ff54ad89ef300d6ad80dcfb43aef6a`)
 and Syft 1.51.0. For OCI builds, select the existing BuildKit Syft generator by
 immutable digest:
@@ -44,15 +44,29 @@ copied into the distribution. Bind each SBOM/report to its exact artifact,
 source and platform identity. Require expected first-party roots and critical
 runtime packages with versions derived from the locked build; empty Rust
 inventory, absent or wrong-version Cedar/SQLx and foreign artifact subjects must
-fail. Apply this to native client/server archives and Rust-bearing images with
-their existing independent platform reports. Keep the existing compiler,
-installer, image-copy, publisher-verification and deployment gates.
+fail. The first source slice covers the product image (CLI, gateway, core and
+Apalis workers) and browser image (CLI). Read their exported OCI blobs without
+running them: verify every descriptor hash, the native platform, the attestation
+subject and required Cargo packages, then retain the result in the existing
+source-bound candidate report. Give OCI exports their fixed loopback candidate
+image names so BuildKit emits digest-bearing in-toto subjects; refuse nameless
+exports rather than treating the descriptor annotation as a subject substitute. Public copying must preserve the same attestation
+descriptors. Native client/server archive metadata and SBOM gates follow as a
+separate slice. Keep the existing compiler, installer, image-copy,
+publisher-verification and deployment gates.
 
 The previous clean source passed its nonpublishing qualification, recorded in
 [OPS-12 evidence](../../demos/evidence/ops12-source-qualification.json).
-Implementation has not started. Next add build metadata and content validation
-with negative controls before qualifying the changed artifacts. Update this
-ADR to Accepted when that source implementation and its required evidence land.
+The two Rust-bearing OCI targets now use this build contract. Candidate creation
+and release assembly require the hashed Cargo-content reports. Six focused tests
+cover absent/misversioned Cargo content, wrong subjects, missing/ambiguous
+attestations, percent-encoded versions and altered/linked/duplicate blobs.
+[Actual native ARM exports](../../demos/evidence/ops12-oci-rust-sbom.json)
+passed: 351 distinct Cargo name/version pairs in the product and 295 in the browser
+image, including required roots and locked Cedar/SQLx. A named ordinary-binary
+OCI control has a valid subject and SPDX document but fails missing Cargo content.
+The local checkout had build-tooling edits; clean hosted qualification on both
+architectures and the six native archive SBOMs remain open.
 
 ## Options considered
 

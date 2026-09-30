@@ -882,11 +882,55 @@ native archives, bundled JavaScript, charts and third-party notices. A valid
 SPDX envelope alone must not pass that gate. Record the architecture decision
 before implementation; current image and archive coverage claims remain open.
 
-[Proposed ADR-0133](../adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md)
-selects pinned `cargo-auditable` and Syft content checks for packaged Rust
-binaries. The [isolated macOS ARM probe](../../demos/evidence/ops12-rust-sbom-probe.json)
-retained the same 295 CLI Cargo packages, including locked Cedar/SQLx versions,
-before and after stripping; ordinary binary controls yielded zero Cargo packages.
-No release build changed. Next implement the metadata and negative content gates,
-then qualify changed native archives and Rust-bearing images. Other dependency
-families and release-security policies remain separate work.
+### Rust-bearing OCI inventory source increment (2026-09-30)
+
+[ADR-0133](../adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md)
+is Accepted for the first OCI slice. The product Dockerfile builds the dependency
+cache and real CLI/gateway/core-worker/Apalis executables with locked
+`cargo-auditable` 0.7.6. Product and browser final-stage scans use the immutable
+BuildKit Syft 1.12.0 generator (Syft 1.51.0). OCI exports have fixed loopback image
+names so their in-toto statements contain real native manifest subjects; no
+image is pushed by naming an OCI export.
+
+`docker-candidate.mjs` reads actual exported OCI JSON blobs, with regular-member,
+size and SHA-256 checks. It requires one native platform, exact source/version
+configuration, one matching attestation, a digest-bearing SPDX statement and
+locked Synveda/Cedar/SQLx package content. Missing/wrong-version inventory,
+foreign subjects, changed blobs, links and duplicates fail. The report retains
+native/attestation/statement hashes, Cargo entry/identity counts and exact required
+versions. Candidate publication and assembled/qualified release inventories
+require these reports; registry copying retains the original descriptors.
+This gate covers the two Rust-bearing images, not complete SBOM coverage.
+
+The [local native ARM evidence](../../demos/evidence/ops12-oci-rust-sbom.json)
+records actual final-stage exports: product 1,606 Cargo entries representing 351
+distinct name/version pairs, browser 295 entries/identities. Both include the
+expected roots, Cedar 4.11.2 and SQLx 0.8.6. Independent archive hashes and
+attestation subjects pass. A named ordinary Rust OCI control has valid SPDX but
+fails missing runtime content; a nameless control fails empty subjects. These
+are dirty-checkout source candidates from parent `686b75b8`, not clean hosted
+release evidence. No executable/deployment, real client, public registry or
+production-readiness claim follows from this inspection.
+
+For an independent source-checkout inspection, use the OCI archive from its
+native producer and the exact version/source inputs:
+
+```sh
+node scripts/rust-image-sbom.mjs IMAGE.tar arm64 product VERSION SOURCE_SHA
+```
+
+Six focused OCI tests and release/CI integration refusals pass, including
+percent-encoded Cargo versions. Fast/workflow gates, actionlint 1.7.7, release
+parity, chart/starter/portability checks and all deployment-check components pass.
+The aggregate deployment check initially hit the sandbox's denied loopback bind;
+all 44 convergence tests passed with socket access, followed by the remaining
+uninstall/convergence/chart components. Rust formatting and diff checks pass;
+no Rust source, lockfile, product SQL or generated API contract changed.
+
+Next run clean full CI and the nonpublishing release drill on this source
+increment, and independently inspect both native OCI report sets before
+accepting the changed artifact source. Do not transplant the earlier `f433eb17`
+reports. Then extend embedded metadata and artifact-bound SBOM gates to all six
+native client and both server archives, followed by non-Rust dependency coverage,
+third-party notices and vulnerability/incident policy. OPS-12 and the production
+verdict remain open.

@@ -281,7 +281,7 @@ check-rustdoc:
 
 .PHONY: check-ci
 check-ci:
-	node --test scripts/ci.test.mjs scripts/release-pipeline.test.mjs scripts/verify-starter-image-reuse.test.mjs
+	node --test scripts/ci.test.mjs scripts/release-pipeline.test.mjs scripts/verify-starter-image-reuse.test.mjs scripts/rust-image-sbom.test.mjs
 	node scripts/check-workflows.mjs
 
 lint:

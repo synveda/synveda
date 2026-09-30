@@ -345,10 +345,13 @@ establish Rust dependency coverage; archive/chart and bundled JavaScript
 coverage also remain open. OPS-12 must require expected dependency content,
 not just a valid SBOM envelope, before production promotion.
 
-[Proposed ADR-0133](adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md)
-selects pinned embedded Rust metadata and SBOM content gates. The isolated
-macOS ARM CLI probe retained 295 packages through stripping; release build
-implementation and native/image qualification remain open under OPS-12.
+[ADR-0133](adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md)
+now embeds pinned Rust metadata in product/browser images and requires actual
+OCI subject/hash and Cargo-content checks during candidate creation and assembly.
+[Local native ARM evidence](../demos/evidence/ops12-oci-rust-sbom.json)
+contains 351/295 distinct Cargo identities and an ordinary-binary refusal.
+Clean hosted qualification on both architectures, native archive SBOMs and
+broader dependency coverage remain open under OPS-12.
 
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |
 |---|---|---|---|---|---|---|---|---|

@@ -392,6 +392,7 @@ RUN cargo build --release
   );
   assert.equal(suppressesCargoBuildFailure(dockerfile), false);
   assert.equal(suppressesCargoBuildFailure("RUN cargo build --release || true\n"), true);
+  assert.equal(suppressesCargoBuildFailure("RUN cargo auditable build --release || true\n"), true);
 });
 
 test("the product image is role-neutral and non-root", () => {
@@ -400,10 +401,14 @@ test("the product image is role-neutral and non-root", () => {
   assert.ok(current.includes(finalUser));
   assert.deepEqual(productImageFindings(current), []);
   assert.ok(
-    productImageFindings(current.replace("cargo build --locked", "cargo build")).includes(
+    productImageFindings(current.replace("cargo auditable build --locked", "cargo auditable build")).includes(
       "release Cargo builds are not exactly two locked invocations",
     ),
   );
+  assert.ok(productImageFindings(current.replaceAll("cargo auditable build", "cargo build"))
+    .includes("release Cargo builds are not exactly two locked invocations"));
+  assert.ok(productImageFindings(current.replace("--version 0.7.6", "--version 0.0.0"))
+    .includes("release Rust inventory tool is not pinned and locked"));
   assert.deepEqual(
     productImageFindings(current.replace(finalUser, "USER root\nSTOPSIGNAL SIGTERM")),
     ["final runtime user is not an explicit non-zero UID:GID"],
@@ -491,7 +496,7 @@ test("the product image excludes the gateway behavior-test feature", async () =>
   );
   assert.ok(
     productTestSupportFindings(
-      `${current}\nRUN cargo build --release --all-features -p synveda-gateway\n`,
+      `${current}\nRUN cargo auditable build --release --all-features -p synveda-gateway\n`,
       gateway,
       worker,
     ).includes("product image enables gateway test support"),

@@ -8,6 +8,7 @@ import { checkClientRelease } from "./check-client-release.mjs";
 import { candidateIdentity, fileHash } from "./docker-candidate.mjs";
 import { releaseImages, validateRegistryManifest } from "./release-registries.mjs";
 import { noticeHashes } from "./verify-release-images.mjs";
+import { checkRustImageReport, rustImageRoots } from "./rust-image-sbom.mjs";
 
 export const clientTargets = [
   "darwin-arm64",
@@ -76,7 +77,30 @@ export function checkArchiveNotices(directory, version, run = execFileSync) {
     }
   }
 }
+export function checkCandidateRustSboms(directory, version, source) {
+  const read = (kind, arch) => JSON.parse(readFileSync(join(directory, `release-${kind}-${arch}.json`)));
+  for (const arch of ["amd64", "arm64"]) {
+    const platform = `linux/${arch}`;
+    const candidate = read("candidate", arch);
+    candidateIdentity(candidate, version, source, arch);
+    const local = read("local-images", arch);
+    assert.equal(local.source_sha, source);
+    assert.equal(local.release_version, version);
+    assert.equal(local.platform, platform);
+    assert.equal(local.local_candidate, true);
+    assert.equal(local.anonymous_pull, false);
+    for (const name of Object.keys(rustImageRoots)) {
+      const entries = local.images.filter((entry) => entry.name === name);
+      assert.equal(entries.length, 1, "expected one Rust image report");
+      const checked = entries[0];
+      assert.equal(checked.image, `localhost:5000/synveda/${releaseImages[name]}@${candidate.images[name].digest}`);
+      checkRustImageReport(candidate.images[name].rust_sbom, name, version, checked.platforms?.[platform]);
+      assert.deepEqual(checked.rust_sbom, candidate.images[name].rust_sbom, `${name}: candidate Rust SBOM evidence differs`);
+    }
+  }
+}
 export function checkQualification(directory, version, source, inventory) {
+  checkCandidateRustSboms(directory, version, source);
   const read = (kind, arch) =>
     JSON.parse(readFileSync(join(directory, `release-${kind}-${arch}.json`)));
   for (const arch of ["amd64", "arm64"]) {
@@ -201,6 +225,7 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   // Client TAR/ZIP notices are verified by each native candidate before its
   // required, archive-hash-bound report is assembled here.
   checkArchiveNotices(directory, version);
+  if (!qualified) checkCandidateRustSboms(directory, version, source);
   checkClientRelease(
     directory,
     version,

@@ -4917,9 +4917,9 @@ function checkStaticInputs() {
   const product = readFileSync(join(COMPOSE, "product/Dockerfile"), "utf8");
   const productBuilds = product
     .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#") && /\bcargo build\b/.test(line));
+    .filter((line) => !line.trimStart().startsWith("#") && /\bcargo (?:auditable )?build\b/.test(line));
   assert.equal(productBuilds.length, 2);
-  for (const build of productBuilds) assert.match(build, /\bcargo build --locked\b/);
+  for (const build of productBuilds) assert.match(build, /\bcargo auditable build --locked\b/);
   assert.match(
     product,
     /apt-get install --no-install-recommends --yes ca-certificates curl libssl3/,

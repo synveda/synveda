@@ -65,6 +65,11 @@ RUN set -eu; \
     test "$(RUSTUP_TOOLCHAIN="$RUST_VERSION" rustc --version | cut -d ' ' -f 2)" = "$RUST_VERSION"
 ENV RUSTUP_TOOLCHAIN=$RUST_VERSION
 
+# OPS-12 / ADR-0133: final-stage SBOM scanning needs the linked Rust inventory,
+# including after source layers invalidate the dependency cache. This tool is
+# confined to the builder; registry checksums and its locked graph govern install.
+RUN cargo install cargo-auditable --version 0.7.6 --locked
+
 # Dependency layer: the manifests and a stub for every crate in the
 # workspace, so `cargo build` resolves and compiles the dependency graph
 # with none of our code in it. `members = ["crates/*"]` means every
@@ -103,7 +108,7 @@ RUN set -eux; \
 # sqlx macros compile against the committed query cache; this image has no
 # database, exactly like CI.
 ENV SQLX_OFFLINE=true
-RUN cargo build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
+RUN cargo auditable build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
 
 # The real sources. Touching them invalidates only from here down.
 COPY .sqlx .sqlx
@@ -111,7 +116,7 @@ COPY adapters/registry.json adapters/registry.json
 COPY crates crates
 RUN set -eux; \
     find crates -name '*.rs' -newermt '1970-01-01' -exec touch {} +; \
-    cargo build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
+    cargo auditable build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
 
 # Acceptance-only browser fixture. Keeping this as a target in the product
 # Dockerfile lets it copy the exact CLI built above instead of compiling a

@@ -1515,20 +1515,22 @@ export function missingWorkspaceManifestCopies(source, manifests) {
 }
 
 export function suppressesCargoBuildFailure(source) {
-  return /cargo build[^\n]*\|\|\s*true/.test(source);
+  return /cargo (?:auditable )?build[^\n]*\|\|\s*true/.test(source);
 }
 
 export function productImageFindings(source) {
   const findings = [];
   const cargoBuilds = source
     .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#") && /\bcargo build\b/.test(line));
+    .filter((line) => !line.trimStart().startsWith("#") && /\bcargo (?:auditable )?build\b/.test(line));
   if (
     cargoBuilds.length !== 2 ||
-    cargoBuilds.some((line) => !/\bcargo build --locked\b/.test(line))
+    cargoBuilds.some((line) => !/\bcargo auditable build --locked\b/.test(line))
   ) {
     findings.push("release Cargo builds are not exactly two locked invocations");
   }
+  if (!/^RUN cargo install cargo-auditable --version 0\.7\.6 --locked$/m.test(source))
+    findings.push("release Rust inventory tool is not pinned and locked");
   const stages = [...source.matchAll(/^FROM\s+.*$/gim)];
   const finalStage = stages.length > 0 ? source.slice(stages.at(-1).index) : "";
   const finalActive = finalStage.replace(/^[ \t]*#.*(?:\r?\n|$)/gm, "");
@@ -1598,10 +1600,10 @@ export function productTestSupportFindings(dockerfile, gatewayMain, workerMain) 
     findings.push("dependency cache omits the gateway test-support target stub");
   }
   if (
-    /^\s*RUN\b[^\n]*cargo build[^\n]*(?:--all-features|test-support)/im.test(
+    /^\s*RUN\b[^\n]*cargo (?:auditable )?build[^\n]*(?:--all-features|test-support)/im.test(
       dockerfile,
     ) ||
-    /cargo build[^\n]*(?:--all-features|test-support)/i.test(dockerfile)
+    /cargo (?:auditable )?build[^\n]*(?:--all-features|test-support)/i.test(dockerfile)
   ) {
     findings.push("product image enables gateway test support");
   }

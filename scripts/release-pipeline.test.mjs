@@ -27,9 +27,19 @@ import {
   regularAssets,
   checkArchiveNotices,
   checkQualification,
+  checkCandidateRustSboms,
 } from "./check-release-assets.mjs";
 import { noticeHashes } from "./verify-release-images.mjs";
 import { publishRelease, uploadedAssets } from "./publish-release.mjs";
+import { requiredRustPackages, rustImageRoots, sbomGenerator } from "./rust-image-sbom.mjs";
+
+const rustSbomFixture = (name, version, imageManifest) => ({
+  schema_version: 1, scanner: "syft-v1.51.0", spdx_version: "SPDX-2.3",
+  image_manifest: imageManifest, attestation_manifest: `sha256:${"f".repeat(64)}`,
+  statement_sha256: "9".repeat(64), package_count: 100, cargo_package_count: 50, cargo_identity_count: 50,
+  required_packages: requiredRustPackages(name, version),
+});
+
 
 test("workflow refactor retains release, native platform and security boundaries", () => {
   const current = workflowSources();
@@ -132,6 +142,8 @@ test("workflow refactor retains release, native platform and security boundaries
     ],
     ["docker", "          provenance: mode=max", "          provenance: false"],
     ["docker", "          sbom: true", "          sbom: false"],
+    ["docker", `sbom: generator=${sbomGenerator}`, "sbom: true"],
+    ["docker", "tags: localhost:5000/synveda/product:${{ inputs.version }}-${{ matrix.arch }}", "tags: untrusted.example/product:latest"],
     [
       "docker",
       "          file: deploy/helm/postgres/Dockerfile\n",
@@ -244,6 +256,7 @@ test("two registry destinations copy one complete immutable OCI candidate set", 
           archive: `${repository}.tar`,
           digest: `sha256:${"b".repeat(64)}`,
           sha256: "c".repeat(64),
+          ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: rustSbomFixture(name, "0.4.0", `sha256:${"d".repeat(64)}`) } : {}),
         },
       ]),
     ),
@@ -388,6 +401,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
             archive: `${repo}.tar`,
             sha256: "c".repeat(64),
             digest: `sha256:${"a".repeat(64)}`,
+            ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: rustSbomFixture(name, version, inventory.registries.dockerhub.images[name].platforms[platform]) } : {}),
           }],
         )),
       };
@@ -408,6 +422,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
           platforms: { [platform]: inventory.registries.dockerhub.images[name].platforms[platform] },
           executable_checks: 1,
           notice_sha256: noticeHashes,
+          ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: candidate.images[name].rust_sbom } : {}),
         })),
       };
       reports[`release-images-${arch}.json`] = {
@@ -455,10 +470,14 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
       change(changed);
       for (const [file, report] of Object.entries(changed))
         writeFileSync(join(scratch, file), JSON.stringify(report));
+      checkCandidateRustSboms(scratch, version, source);
       checkQualification(scratch, version, source, inventory);
     };
     check();
     for (const change of [
+      (r) => { delete r["release-candidate-arm64.json"].images.product.rust_sbom; },
+      (r) => { delete r["release-local-images-amd64.json"].images[0].rust_sbom; },
+      (r) => { r["release-candidate-arm64.json"].images.product.rust_sbom.required_packages.sqlx = "0.0.0"; },
       (r) => {
         r["release-docker-arm64.json"].source = "c".repeat(40);
       },

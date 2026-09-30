@@ -292,6 +292,12 @@ qualify declared source candidates; they do not establish anonymous public
 installation, real client/issuer acceptance, disaster recovery or production
 readiness. [OPS-12](backlog/OPS-12.md) owns the run evidence and remaining work.
 
+The subsequent ADR-0133 source increment adds embedded Rust inventory and
+actual OCI subject/hash/content gates for product/browser candidates. Local ARM
+exports and ordinary-binary refusals pass; clean hosted evidence for the changed
+source is required separately from the `f433eb17` checkpoint above. Native archive
+and non-Rust coverage remain open. [OPS-12](backlog/OPS-12.md) records the boundary.
+
 ## Manual owner settings
 
 1. **CI Result** (GitHub Actions) is now required in the active main ruleset.

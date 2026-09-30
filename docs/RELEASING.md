@@ -93,6 +93,17 @@ from clean source `f433eb17`, with the original 31-file same-run inventory.
 Every changed release source still requires the full native qualification;
 this `publish=false` checkpoint does not qualify anonymous public pulls.
 
+Under [ADR-0133](adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md),
+product/browser images build Rust executables with locked `cargo-auditable`.
+Their native OCI candidates require actual blob hashes, source/platform and
+in-toto subject bindings, the pinned Syft generator and expected Cargo roots plus
+locked Cedar/SQLx versions. Candidate reports retain statement/manifest hashes
+and required package versions; assembly refuses missing or mismatched reports.
+OCI exports use fixed loopback names to populate subjects without publishing.
+These checks do not establish native archive, non-Rust or full dependency SBOM
+coverage, vulnerability policy or readiness; [OPS-12](backlog/OPS-12.md) records
+local ARM evidence and the required clean hosted follow-up.
+
 ## Owner setup
 
 1. Select a Docker Hub namespace you own. Do not assume `synveda` is available.

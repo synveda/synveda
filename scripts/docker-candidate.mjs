@@ -7,6 +7,7 @@ import { createReadStream, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { releaseImages } from "./release-registries.mjs";
 import { verifyImages } from "./verify-release-images.mjs";
+import { checkRustImageReport, inspectRustImageSbom, rustImageRoots } from "./rust-image-sbom.mjs";
 
 export async function fileHash(path) {
   const hash = createHash("sha256");
@@ -32,6 +33,8 @@ export function candidateIdentity(candidate, version, source, arch) {
     assert.equal(entry.archive, `${releaseImages[name]}.tar`);
     assert.match(entry.sha256, /^[a-f0-9]{64}$/);
     assert.match(entry.digest, /^sha256:[a-f0-9]{64}$/);
+    if (Object.hasOwn(rustImageRoots, name))
+      checkRustImageReport(entry.rust_sbom, name, version, entry.rust_sbom?.image_manifest);
   }
 }
 const run = (command, args, extra = {}) =>
@@ -90,6 +93,9 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
       archive,
       sha256: await fileHash(join(directory, archive)),
       digest: `sha256:${createHash("sha256").update(raw).digest("hex")}`,
+      ...(Object.hasOwn(rustImageRoots, name) ? {
+        rust_sbom: inspectRustImageSbom(join(directory, archive), arch, name, version, source),
+      } : {}),
     };
   }
   candidateIdentity(candidate, version, source, arch);
@@ -132,6 +138,12 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
     undefined,
     true,
   );
+  for (const entry of report.images) {
+    if (!Object.hasOwn(rustImageRoots, entry.name)) continue;
+    const sbom = candidate.images[entry.name].rust_sbom;
+    checkRustImageReport(sbom, entry.name, version, entry.platforms[`linux/${arch}`]);
+    entry.rust_sbom = sbom;
+  }
   writeFileSync(
     join(directory, "image-checks.json"),
     `${JSON.stringify(report, null, 2)}\n`,
