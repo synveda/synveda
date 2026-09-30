@@ -149,9 +149,11 @@ source candidate shares the 0.4.3 version string; no published N, off-host
 PITR, complete Knowledge/audit-prefix continuity, injected-failure or measured
 maintenance window is qualified. Next run those gates with representative data
 and the OPS-5 recovery set before a supported upgrade claim. OPS-7 now appends
-`0003` for one-time login state; the earlier released-byte rehearsal stopped
-at `0002` and must be repeated through this new head before it can support a
-claim about the current source candidate.
+`0003` for one-time login state. The full disposable exact-role database suite
+now passes at `0003`, including serial authority and 25 epoch cases; it found
+and corrected one stale migration-count assertion. The earlier released-byte
+rehearsal stopped at `0002` and must be repeated through this new head before
+it can support a claim about the current source candidate.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 

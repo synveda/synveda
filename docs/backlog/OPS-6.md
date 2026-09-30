@@ -46,11 +46,14 @@ An isolated exact-role PostgreSQL run passed 25 focused epoch tests, including
 an exact published-baseline SQLx prefix, retained tenant data and baseline
 ledger row, exact `0002` advancement, read-only preflight, interrupted-stamp recovery, missing-ledger
 preservation and old-catalogue drift refusal. SQLx generated-metadata
-verification passes on a fresh three-head database. The earlier full isolated
-`bash scripts/db-test.sh` suite passed at `0002`, including serial authority
-tests; the focused 25-case epoch suite has now passed at `0003`. At
-that checkpoint this had not tested a published application binary, populated
-audit/key state or a joint restore.
+verification passes on a fresh three-head database. On 2026-09-30 the full
+isolated `bash scripts/db-test.sh` suite passed at `0003`, including the
+workspace integration tests, serial authority/tamper checks and all 25 epoch
+cases. Its first run exposed a stale two-row count in the concurrent-install
+test; that assertion now compares successful ledger rows to the embedded
+migrator's length. The corrected full rerun passed and removed its disposable
+volumes. This still has not tested a published application binary, populated
+audit/key state or a joint restore at `0003`.
 
 On 2026-09-29, a disposable macOS/OrbStack rehearsal used the published
 v0.4.3 product image at

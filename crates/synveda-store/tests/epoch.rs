@@ -482,7 +482,7 @@ fn concurrent_install_and_stamp_are_one_migration_boundary() {
             .fetch_one(&pool)
             .await
             .expect("one migration ledger");
-        assert_eq!(rows, 2);
+        assert_eq!(rows, synveda_store::MIGRATOR.migrations.len() as i64);
         epoch::verify(&pool).await.expect("complete current marker");
 
         // Cancellation while holding the outer lock must close the dedicated
