@@ -139,6 +139,17 @@ contracts before supporting two worker replicas. Both
 `demos/ops-7-worker-recovery.sh policy-expiry` and
 `demos/ops-7-worker-recovery.sh pod-loss` are repeatable against the isolated
 `kind-synveda-ops7` context and restore the chart's one-replica baseline.
+[ADR-0129](../adr/adr-0129-scale-fenced-capture-with-singleton-maintenance.md)
+chooses a combined singleton plus optional capture-only workers instead of
+scaling the unfenced maintenance loops. The source worker now accepts only
+`combined` (default) or `capture-only`: both retain the same authority and
+policy lifecycle, while capture-only omits maintenance task startup and its
+embedder/KMS configuration. A real subprocess accepts capture-only with an
+invalid maintenance embedder and still closes readiness during a database
+outage; the combined profile refuses that embedder. Helm does not yet render
+capture-only pods. Next wire a bounded optional deployment, prove three
+worker claims, provider outage and pod loss from the source image in Kind,
+and account for all worker database connections before enabling that option.
 
 The first claimed-Capture run exposed a Helm/CNPG defect: after the baseline
 primary promotion,

@@ -196,7 +196,13 @@ ready while the cancelled claim was reclaimed by a different pod. Two attempts
 still produced one candidate after the second provider call completed. This
 qualifies one Capture owner-pod loss only; Knowledge indexing can duplicate
 external embedding calls and directory pull still lacks a cross-worker pass
-owner. The drill also exposed a CNPG chart bootstrap defect: PUBLIC
+owner. ADR-0129 therefore retains one combined worker and adds a closed
+capture-only runtime profile. The source profile runs the same authority and
+policy gates without maintenance tasks or embedder/KMS configuration; focused
+subprocess acceptance passes. The chart has no capture-only deployment yet:
+next bound its pod/database/provider counts and prove three-worker claims,
+provider outage and pod loss from the source image in Kind. The drill also
+exposed a CNPG chart bootstrap defect: PUBLIC
 CONNECT had been revoked on `postgres` without restoring it for CNPG's reserved
 `streaming_replica` role. A retained standby stayed unready after promotion;
 the disposable cluster recovered after a narrow operator grant. The source

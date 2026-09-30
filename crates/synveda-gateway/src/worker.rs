@@ -68,6 +68,44 @@ impl ExecutionProvider {
     }
 }
 
+/// Local task placement; every profile retains the same authority gates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkerProfile {
+    Combined,
+    CaptureOnly,
+}
+
+impl WorkerProfile {
+    fn from_env() -> Result<Self, &'static str> {
+        match std::env::var("SYNVEDA_WORKER_PROFILE") {
+            Ok(value) => Self::parse(&value),
+            Err(std::env::VarError::NotPresent) => Ok(Self::Combined),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err("SYNVEDA_WORKER_PROFILE must be exactly combined or capture-only")
+            }
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, &'static str> {
+        match value {
+            "combined" => Ok(Self::Combined),
+            "capture-only" => Ok(Self::CaptureOnly),
+            _ => Err("SYNVEDA_WORKER_PROFILE must be exactly combined or capture-only"),
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Combined => "combined",
+            Self::CaptureOnly => "capture-only",
+        }
+    }
+
+    const fn runs_maintenance(self) -> bool {
+        matches!(self, Self::Combined)
+    }
+}
+
 /// Initializes telemetry and runs the supervised worker until process
 /// shutdown.
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -106,11 +144,8 @@ async fn run_process(
     );
     let pool = pool_options.connect_lazy_with(connect_options);
     let pdp = Arc::new(Pdp::new()?);
+    let profile = WorkerProfile::from_env()?;
     let extractor = Arc::new(runtime_config::extractor_from_env()?);
-    let embedder = Arc::new(runtime_config::embedder_from_env()?);
-    let keys = Arc::new(synveda_store::keys::KeyRing::new(
-        runtime_config::kms_from_env()?,
-    ));
     let capture_config = runtime_config::capture_config_from_env()?;
     let policy_refresh = runtime_config::bounded_duration_setting(
         "SYNVEDA_POLICY_REFRESH_SECS",
@@ -118,28 +153,57 @@ async fn run_process(
         1,
         runtime_config::POLICY_REFRESH_MAX_SECS,
     )?;
-    let relaxation_interval =
-        runtime_config::bounded_duration_setting("SYNVEDA_RELAXATION_SWEEP_SECS", 60, 1, 3_600)?;
     let shutdown_grace =
         runtime_config::bounded_duration_setting("SYNVEDA_WORKER_SHUTDOWN_SECS", 75, 3, 300)?;
-    let knowledge_config = knowledge_config_from_env()?;
-    let (directory_connectors, directory_config) = directory_config_from_env()?;
-    let execution_provider = ExecutionProvider::from_env()?;
-    if directory_config.is_some()
-        && directory_connectors.is_empty()
-        && matches!(keys.kms(), synveda_crypto::Kms::Disabled)
-    {
-        return Err("SYNVEDA_DIRECTORY_SYNC requires a configured KMS key when no issuer carries a static directory connector".into());
-    }
-    drop(directory_connectors);
+    let maintenance = if profile.runs_maintenance() {
+        let embedder = Arc::new(runtime_config::embedder_from_env()?);
+        let keys = Arc::new(synveda_store::keys::KeyRing::new(
+            runtime_config::kms_from_env()?,
+        ));
+        let knowledge_config = knowledge_config_from_env()?;
+        let relaxation_interval = runtime_config::bounded_duration_setting(
+            "SYNVEDA_RELAXATION_SWEEP_SECS",
+            60,
+            1,
+            3_600,
+        )?;
+        let (directory_connectors, directory_config) = directory_config_from_env()?;
+        if directory_config.is_some()
+            && directory_connectors.is_empty()
+            && matches!(keys.kms(), synveda_crypto::Kms::Disabled)
+        {
+            return Err("SYNVEDA_DIRECTORY_SYNC requires a configured KMS key when no issuer carries a static directory connector".into());
+        }
+        drop(directory_connectors);
+        let execution_provider = ExecutionProvider::from_env()?;
+        Some(MaintenanceRuntime {
+            embedder,
+            keys,
+            knowledge_config,
+            relaxation_interval,
+            directory_config,
+            execution_provider,
+        })
+    } else {
+        None
+    };
+    let (embedder_method, embedding_model) = maintenance
+        .as_ref()
+        .map_or(("disabled", "disabled"), |maintenance| {
+            (maintenance.embedder.method(), maintenance.embedder.model())
+        });
+    let execution_provider_name = maintenance.as_ref().map_or("disabled", |maintenance| {
+        maintenance.execution_provider.as_str()
+    });
 
     tracing::info!(
         extractor = extractor.method(),
-        embedder = embedder.method(),
-        embedding_model = embedder.model(),
+        embedder = embedder_method,
+        embedding_model,
         db.max_connections = max_connections,
         shutdown_grace_secs = shutdown_grace.as_secs(),
-        execution.provider = execution_provider.as_str(),
+        execution.provider = execution_provider_name,
+        worker.profile = profile.as_str(),
         "core worker configuration accepted"
     );
 
@@ -173,14 +237,9 @@ async fn run_process(
         pool: pool.clone(),
         pdp,
         extractor,
-        embedder,
-        keys,
         capture_config,
-        knowledge_config,
         policy_refresh,
-        relaxation_interval,
-        directory_config,
-        native_skill_validation: execution_provider == ExecutionProvider::Postgres,
+        maintenance,
         drain_grace: shutdown_grace
             .saturating_sub(ABORT_JOIN_RESERVE)
             .max(Duration::from_millis(1)),
@@ -428,15 +487,20 @@ struct GenerationRuntime {
     pool: sqlx::PgPool,
     pdp: Arc<Pdp>,
     extractor: Arc<synveda_ingest::extraction::AnyExtractor>,
+    capture_config: synveda_ingest::capture_worker::Config,
+    policy_refresh: Duration,
+    maintenance: Option<MaintenanceRuntime>,
+    drain_grace: Duration,
+}
+
+#[derive(Clone)]
+struct MaintenanceRuntime {
     embedder: Arc<synveda_ingest::embedding::AnyEmbedder>,
     keys: Arc<synveda_store::keys::KeyRing>,
-    capture_config: synveda_ingest::capture_worker::Config,
     knowledge_config: knowledge_index::Config,
-    policy_refresh: Duration,
     relaxation_interval: Duration,
     directory_config: Option<directory_sync::SyncConfig>,
-    native_skill_validation: bool,
-    drain_grace: Duration,
+    execution_provider: ExecutionProvider,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -516,7 +580,11 @@ async fn run_authority_generation(
     }
     health.policy_ready.mark_converged(generation);
 
-    let directory_connectors = if runtime.directory_config.is_some() {
+    let directory_connectors = if runtime
+        .maintenance
+        .as_ref()
+        .is_some_and(|maintenance| maintenance.directory_config.is_some())
+    {
         directory_config_from_env()
             .map_err(|_| "worker directory configuration could not be rebuilt".to_owned())?
             .0
@@ -541,18 +609,6 @@ async fn run_authority_generation(
     );
     spawn_governed_named(
         &mut tasks,
-        "skill-validation",
-        gate.clone(),
-        generation,
-        health.policy_ready.clone(),
-        crate::skill_validation::run(
-            crate::skill_validation::Runtime::new(runtime.pool.clone(), Arc::clone(&runtime.pdp)),
-            runtime.native_skill_validation,
-            work_stop_rx.clone(),
-        ),
-    );
-    spawn_governed_named(
-        &mut tasks,
         "capture",
         gate.clone(),
         generation,
@@ -567,49 +623,66 @@ async fn run_authority_generation(
             work_stop_rx.clone(),
         ),
     );
-    spawn_governed_named(
-        &mut tasks,
-        "knowledge-index",
-        gate.clone(),
-        generation,
-        health.policy_ready.clone(),
-        knowledge_index::run(
-            runtime.pool.clone(),
-            Arc::clone(&runtime.embedder),
-            runtime.knowledge_config.clone(),
-            work_stop_rx.clone(),
-        ),
-    );
-    spawn_governed_named(
-        &mut tasks,
-        "relaxation-expiry",
-        gate.clone(),
-        generation,
-        health.policy_ready.clone(),
-        relaxations::run_expiry_sweep(
-            runtime.pool.clone(),
-            runtime.relaxation_interval,
-            work_stop_rx.clone(),
-        ),
-    );
-    if let Some(config) = runtime.directory_config {
+    if let Some(maintenance) = runtime.maintenance {
         spawn_governed_named(
             &mut tasks,
-            "directory-sync",
+            "skill-validation",
             gate.clone(),
             generation,
             health.policy_ready.clone(),
-            directory_sync::run(
-                DirectoryRuntime::new(
+            crate::skill_validation::run(
+                crate::skill_validation::Runtime::new(
                     runtime.pool.clone(),
                     Arc::clone(&runtime.pdp),
-                    Arc::clone(&runtime.keys),
                 ),
-                directory_connectors,
-                config,
+                maintenance.execution_provider == ExecutionProvider::Postgres,
                 work_stop_rx.clone(),
             ),
         );
+        spawn_governed_named(
+            &mut tasks,
+            "knowledge-index",
+            gate.clone(),
+            generation,
+            health.policy_ready.clone(),
+            knowledge_index::run(
+                runtime.pool.clone(),
+                Arc::clone(&maintenance.embedder),
+                maintenance.knowledge_config.clone(),
+                work_stop_rx.clone(),
+            ),
+        );
+        spawn_governed_named(
+            &mut tasks,
+            "relaxation-expiry",
+            gate.clone(),
+            generation,
+            health.policy_ready.clone(),
+            relaxations::run_expiry_sweep(
+                runtime.pool.clone(),
+                maintenance.relaxation_interval,
+                work_stop_rx.clone(),
+            ),
+        );
+        if let Some(config) = maintenance.directory_config {
+            spawn_governed_named(
+                &mut tasks,
+                "directory-sync",
+                gate.clone(),
+                generation,
+                health.policy_ready.clone(),
+                directory_sync::run(
+                    DirectoryRuntime::new(
+                        runtime.pool.clone(),
+                        Arc::clone(&runtime.pdp),
+                        Arc::clone(&maintenance.keys),
+                    ),
+                    directory_connectors,
+                    config,
+                    work_stop_rx.clone(),
+                ),
+            );
+        }
     }
 
     health.beat();
@@ -1016,6 +1089,26 @@ mod tests {
         }
         assert_eq!(ExecutionProvider::Postgres.as_str(), "postgres");
         assert_eq!(ExecutionProvider::Apalis.as_str(), "apalis");
+    }
+
+    #[test]
+    fn worker_profile_rejects_unknown_task_placements() {
+        assert_eq!(
+            WorkerProfile::parse("combined"),
+            Ok(WorkerProfile::Combined)
+        );
+        assert_eq!(
+            WorkerProfile::parse("capture-only"),
+            Ok(WorkerProfile::CaptureOnly)
+        );
+        for value in ["", "capture", "maintenance", "CAPTURE-ONLY", "combined "] {
+            assert_eq!(
+                WorkerProfile::parse(value),
+                Err("SYNVEDA_WORKER_PROFILE must be exactly combined or capture-only")
+            );
+        }
+        assert!(WorkerProfile::Combined.runs_maintenance());
+        assert!(!WorkerProfile::CaptureOnly.runs_maintenance());
     }
 
     #[test]
