@@ -165,9 +165,10 @@ pending login from a joint database/identity/key set into an empty project.
 The restored gateway opened and consumed it once on an IdP denial, refused
 replay, and still passed fresh browser login/API/logout. The candidate mixed
 local product/browser and published support images; it is not a release pair.
-One exact-role cancellation after early `0002` DDL proved transactional rollback,
-unchanged released ledger/marker/tenant and retry to `0003`; the full isolated
-suite passed with all 26 serial epoch cases. No published N, off-host PITR,
+Exact-role client cancellation and PostgreSQL backend termination during later
+`0002` DDL each proved transactional rollback, unchanged released
+ledger/marker/tenant and retry to `0003`; all 26 serial epoch cases passed on
+the isolated fixture. No published N, off-host PITR,
 production-shaped outage/lock, successful in-flight code exchange or broader
 failure matrix is qualified. OPS-6 stays open for those gates. The published
 v0.4.3 verifier correctly refuses the advanced

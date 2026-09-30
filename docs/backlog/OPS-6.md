@@ -193,18 +193,19 @@ off-host PITR, a published N pair, production-shaped outage or locks. Next
 measure lock/outage on representative data, and
 repeat with an owner-selected off-host OPS-5 set and published compatible pair.
 
-An additional 2026-09-30 exact-role failure-injection test installed the
-published v0.4.3 `0001` prefix and a tenant, then held a read lock on
-`context_candidates` while `0002` had already altered earlier tables. It
-observed the migrator waiting for an access-exclusive DDL lock, cancelled it,
-and verified the earlier `session_context_runs` column was rolled back, the
-SQLx ledger and epoch marker still matched the released prefix, and the
-tenant remained. Retry advanced to `0003` without rewriting the baseline
-ledger row. The full disposable `bash scripts/db-test.sh` gate passed all 26
-serial lifecycle cases and removed its isolated volumes. This tests one
-mid-transaction cancellation and restart; it does not cover every migration
-phase, a production-sized lock, a deployed process crash or the off-host
-restore path.
+An exact-role 2026-09-30 failure-injection case installed the published
+v0.4.3 `0001` prefix and a tenant, then held a read lock on
+`context_candidates` after `0002` had altered earlier tables. It observed
+the later access-exclusive DDL wait and separately cancelled the client task
+and terminated the PostgreSQL migrator backend. Each interruption rolled
+back the earlier `session_context_runs` change, preserved the released SQLx
+ledger, marker and tenant, and retried cleanly to `0003`. The full disposable
+`bash scripts/db-test.sh` gate passed with all 26 serial epoch cases and
+removed its isolated volumes. These two mid-DDL failure points do not measure
+a production dataset, application outage, database pod/process crash or
+off-host restore. Next size the dataset and outage budget with the deployment
+owner, then measure lock waits, migration time and restoration on an isolated
+production-shaped copy.
 
 ## Scope
 
