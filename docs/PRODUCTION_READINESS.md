@@ -345,6 +345,11 @@ establish Rust dependency coverage; archive/chart and bundled JavaScript
 coverage also remain open. OPS-12 must require expected dependency content,
 not just a valid SBOM envelope, before production promotion.
 
+[Proposed ADR-0133](adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md)
+selects pinned embedded Rust metadata and SBOM content gates. The isolated
+macOS ARM CLI probe retained 295 packages through stripping; release build
+implementation and native/image qualification remain open under OPS-12.
+
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |
 |---|---|---|---|---|---|---|---|---|
 | Release/Helm artifact parity and reproducibility | Not ready | P0 | v0.4.3 is the latest complete public release. It passed full native candidate Compose/Helm deployment, anonymous Docker Hub/GHCR execution and OCI chart byte parity; its exact draft was promoted after the post-upload lookup failure. v0.4.1 and v0.4.2 retain incomplete public release states. | `make check-release-parity`; `make chart-lint`; `make check-chart-images`; v0.4.3 tagged native/public reports and signed asset inventory in OPS-12 | Published-registry full deployment was not repeated; the release binds public digests to fully deployed native candidates. Optional CNPG controller-backed use of published bytes, independent image-build reproducibility and per-artifact signature verification remain unproved. | A tagged release publishes the exact chart/reference/six-image set; empty hosts complete login/context and empty clusters boot every accepted chart mode with matching digests. | Qualify optional CNPG and a fresh public v0.4.3 installation from its signed inventory, then test independent image reproducibility and per-artifact signatures. | Operator/cluster authorisation and registry retention. |

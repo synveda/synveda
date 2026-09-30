@@ -55,6 +55,11 @@ Complete artifact SBOMs, vulnerability and publisher incident policy, PR-13's
 support window and third-party notice review remain open under OPS-12/OPS-8.
 This source checkpoint does not change the production verdict.
 
+[Proposed ADR-0133](adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md)
+selects pinned embedded Rust metadata and SBOM content gates. The isolated
+macOS ARM CLI probe retained 295 packages through stripping; release build
+implementation and native/image qualification remain open under OPS-12.
+
 The first implementation sequence is: establish the supported deployment and
 upgrade contract; choose backup destination, retention, encryption/key custody
 and recovery objectives; implement and drill OPS-5; prove an OPS-6 release pair;

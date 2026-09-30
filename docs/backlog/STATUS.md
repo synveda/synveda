@@ -323,6 +323,11 @@ vulnerability and publisher incident policy, OS signing, real issuer/harness
 acceptance and support-window ownership also remain open. The
 [OPS-12 brief](OPS-12.md) owns the exact evidence and next action.
 
+[Proposed ADR-0133](../adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md)
+selects pinned embedded Rust metadata and SBOM content gates. The isolated
+macOS ARM CLI probe retained 295 packages through stripping; release build
+implementation and native/image qualification remain open under OPS-12.
+
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
 - [x] CNSL-5: Console theme and everyday usability — delivered

@@ -881,3 +881,12 @@ require expected runtime dependencies in the SBOM, then extend coverage across
 native archives, bundled JavaScript, charts and third-party notices. A valid
 SPDX envelope alone must not pass that gate. Record the architecture decision
 before implementation; current image and archive coverage claims remain open.
+
+[Proposed ADR-0133](../adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md)
+selects pinned `cargo-auditable` and Syft content checks for packaged Rust
+binaries. The [isolated macOS ARM probe](../../demos/evidence/ops12-rust-sbom-probe.json)
+retained the same 295 CLI Cargo packages, including locked Cedar/SQLx versions,
+before and after stripping; ordinary binary controls yielded zero Cargo packages.
+No release build changed. Next implement the metadata and negative content gates,
+then qualify changed native archives and Rust-bearing images. Other dependency
+families and release-security policies remain separate work.
