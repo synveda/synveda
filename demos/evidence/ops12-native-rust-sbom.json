@@ -1,0 +1,283 @@
+{
+  "schema_version": 1,
+  "feature": "OPS-12",
+  "observed_at": "2026-09-30T23:43:05.207Z",
+  "evidence": "local-native-archive-rust-inventory",
+  "source_parent": "98e7f62bc5e15f78c7cd3c5e2eae9b5ff97de3b0",
+  "source_tree_dirty": true,
+  "source_changes": [
+    ".github/workflows/cli.yml",
+    ".github/workflows/release.yml",
+    "scripts/check-release-assets.mjs",
+    "scripts/check-workflows.mjs",
+    "scripts/release-pipeline.test.mjs",
+    "scripts/rust-image-sbom.mjs",
+    "scripts/rust-image-sbom.test.mjs",
+    "scripts/download-syft.mjs",
+    "scripts/rust-archive-sbom.mjs",
+    "scripts/rust-archive-sbom.test.mjs",
+    "scripts/rust-sbom.mjs",
+    "scripts/syft-runtimes.json"
+  ],
+  "build_inputs": {
+    "Cargo.lock": "b560b4499f4374f6662ade67af69e0d62238e2e486428f7b08d012d45dae7b12",
+    "rust-toolchain.toml": "e59c5da37d1f9f4e0f815bc188cb6056fc7410c9cdaa9673c2d44da557c75d12",
+    ".github/workflows/cli.yml": "328bb9e66b7c0550bd76d34c443839daa0e62e9092c1fce44e64eeb52674b31a",
+    "scripts/rust-sbom.mjs": "cb71145cf37626c4211d8795304699583862f2bde86db3b44304c31921678708",
+    "scripts/rust-archive-sbom.mjs": "5cea94fc702a87ad5fd89505dc5cde895c88b5e6b649d9effeab0460345591f2",
+    "scripts/download-syft.mjs": "73a2ac159475233db842e42a6136a3c9ef7cd59cc57cbee5f04e6ce702e4d646",
+    "scripts/syft-runtimes.json": "a47c9a4efb99abc67c3fa3791340ea35c96fccd081641c4716ed4fc30f83237f"
+  },
+  "tools": {
+    "rust": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "cargo_auditable": "0.7.6",
+    "syft": "1.51.0",
+    "native_target": "darwin-arm64",
+    "scanner_pins": {
+      "version": "1.51.0",
+      "source": "https://github.com/anchore/syft/releases/tag/v1.51.0",
+      "targets": {
+        "darwin-x86_64": {
+          "archive": "syft_1.51.0_darwin_amd64.tar.gz",
+          "bytes": 30017290,
+          "sha256": "cddf9a044145caf0a1a3194d00d1dd51a1666f4814f2919cdb4768a0c062ad95",
+          "binary_sha256": "e9941e46532f53ccca9c431175a95ee781a7437e426ec61bff16fd3b27c65a20",
+          "binary_bytes": 89268644
+        },
+        "darwin-arm64": {
+          "archive": "syft_1.51.0_darwin_arm64.tar.gz",
+          "bytes": 27498100,
+          "sha256": "4f37f4c7fefce0a68e4cf71ba3f5f9829a99e65d89b29f7ee41b8c2c10ea8c59",
+          "binary_sha256": "b1147cee2d7f49d6ea58d9c95b24734985a4cc208fdd3f0f0f1ff950622f0252",
+          "binary_bytes": 83645830
+        },
+        "linux-x86_64": {
+          "archive": "syft_1.51.0_linux_amd64.tar.gz",
+          "bytes": 28743977,
+          "sha256": "2a2e837a2c8d59ec9af5472ee22d3b04ee463c4e44476ecf993fd1e5ab6ebc7f",
+          "binary_sha256": "5a8b71e94f4607973145f02e27e01d50b9f7c7bc41e38d40b39606ad138b43b5",
+          "binary_bytes": 86278306
+        },
+        "linux-arm64": {
+          "archive": "syft_1.51.0_linux_arm64.tar.gz",
+          "bytes": 26261269,
+          "sha256": "6c0466811541ea03add5213a60a1562f0851e4c0b0ecfdee1a694a9455285900",
+          "binary_sha256": "e1e854c616a9bf054a1ee9fe260da91725a3191bf1624bc5783aac482c877ff8",
+          "binary_bytes": 80150690
+        },
+        "windows-x86_64": {
+          "archive": "syft_1.51.0_windows_amd64.zip",
+          "bytes": 29438342,
+          "sha256": "fc5ffaeffb993576ece9c791da5a688fb2c8969a1479bbfe58583672c64da336",
+          "binary_sha256": "75adfff66c266adac51fe8addeca97702f82b4d822d02bf70b79f556c84d3a46",
+          "binary_bytes": 88455680
+        },
+        "windows-arm64": {
+          "archive": "syft_1.51.0_windows_arm64.zip",
+          "bytes": 26473494,
+          "sha256": "3fd075e644e67d1a9ae63fbc67991c510fc623030a67b93f5de9e2fd2da5d3c2",
+          "binary_sha256": "8f8459d1718ea324f544360c29c7d5bf5b40bfaee36897d7e704c2de5ebfdcef",
+          "binary_bytes": 81280000
+        }
+      }
+    }
+  },
+  "archive_reports": [
+    {
+      "schema_version": 1,
+      "evidence": "native-rust-archive-sbom",
+      "kind": "client",
+      "target": "darwin-arm64",
+      "version": "0.4.3",
+      "source_sha": "98e7f62bc5e15f78c7cd3c5e2eae9b5ff97de3b0",
+      "source_tree_dirty": true,
+      "archive_sha256": "55ee659b1376f2cc84100f99adca51a0c0f373b9e9f80960c4f7d6b06486b47f",
+      "archive_bytes": 48432577,
+      "scanner_download": {
+        "version": "1.51.0",
+        "archive": "syft_1.51.0_darwin_arm64.tar.gz",
+        "archive_sha256": "4f37f4c7fefce0a68e4cf71ba3f5f9829a99e65d89b29f7ee41b8c2c10ea8c59",
+        "binary_sha256": "b1147cee2d7f49d6ea58d9c95b24734985a4cc208fdd3f0f0f1ff950622f0252"
+      },
+      "binaries": [
+        {
+          "member": "client/bin/synveda",
+          "platform": {
+            "os": "darwin",
+            "arch": "arm64"
+          },
+          "binary_sha256": "a89e501593e1d38bee6b88acd45221112a61e62e7175624e9a722b38c392e7e0",
+          "binary_bytes": 24050144,
+          "sbom": "synveda-client-0.4.3-darwin-arm64.spdx.json",
+          "sbom_sha256": "97c4975a20e37ee0892911a61286e3bc537aa0c6246e3e363c0de5fce8c10b30",
+          "sbom_bytes": 574342,
+          "inventory": {
+            "scanner": "syft-1.51.0",
+            "spdx_version": "SPDX-2.3",
+            "package_count": 296,
+            "cargo_package_count": 295,
+            "cargo_identity_count": 295,
+            "required_packages": {
+              "synveda-cli": "0.4.3",
+              "cedar-policy": "4.11.2",
+              "cedar-policy-core": "4.11.2",
+              "sqlx": "0.8.6",
+              "sqlx-postgres": "0.8.6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "schema_version": 1,
+      "evidence": "native-rust-archive-sbom",
+      "kind": "server",
+      "target": "darwin-arm64",
+      "version": "0.4.3",
+      "source_sha": "98e7f62bc5e15f78c7cd3c5e2eae9b5ff97de3b0",
+      "source_tree_dirty": true,
+      "archive_sha256": "2a15c5fe43d37a8d234f63175c5a248c25e2cc7160ac308768a8178c6bdf4e08",
+      "archive_bytes": 35585677,
+      "scanner_download": {
+        "version": "1.51.0",
+        "archive": "syft_1.51.0_darwin_arm64.tar.gz",
+        "archive_sha256": "4f37f4c7fefce0a68e4cf71ba3f5f9829a99e65d89b29f7ee41b8c2c10ea8c59",
+        "binary_sha256": "b1147cee2d7f49d6ea58d9c95b24734985a4cc208fdd3f0f0f1ff950622f0252"
+      },
+      "binaries": [
+        {
+          "member": "synveda",
+          "platform": {
+            "os": "darwin",
+            "arch": "arm64"
+          },
+          "binary_sha256": "e7c55592aa745b57c181ea2dc592f91c2d328185b7e95d7bbc8acfbeb055fd25",
+          "binary_bytes": 20322904,
+          "sbom": "synveda-0.4.3-darwin-arm64-synveda.spdx.json",
+          "sbom_sha256": "87954297c1e5d32a7cdc9fedc17dde4dabe40bbb1449b4a1080538347d8fcb5a",
+          "sbom_bytes": 574342,
+          "inventory": {
+            "scanner": "syft-1.51.0",
+            "spdx_version": "SPDX-2.3",
+            "package_count": 296,
+            "cargo_package_count": 295,
+            "cargo_identity_count": 295,
+            "required_packages": {
+              "synveda-cli": "0.4.3",
+              "cedar-policy": "4.11.2",
+              "cedar-policy-core": "4.11.2",
+              "sqlx": "0.8.6",
+              "sqlx-postgres": "0.8.6"
+            }
+          }
+        },
+        {
+          "member": "synveda-gateway",
+          "platform": {
+            "os": "darwin",
+            "arch": "arm64"
+          },
+          "binary_sha256": "a782392f71f88813a677500be6e08f003a0797474aa35e48142df420a10857f5",
+          "binary_bytes": 46913504,
+          "sbom": "synveda-0.4.3-darwin-arm64-synveda-gateway.spdx.json",
+          "sbom_sha256": "2039c58e0ebd7909b02ab513aa5d69329905d00bb55c1161d56439163e365730",
+          "sbom_bytes": 664569,
+          "inventory": {
+            "scanner": "syft-1.51.0",
+            "spdx_version": "SPDX-2.3",
+            "package_count": 328,
+            "cargo_package_count": 327,
+            "cargo_identity_count": 327,
+            "required_packages": {
+              "synveda-gateway": "0.4.3",
+              "cedar-policy": "4.11.2",
+              "cedar-policy-core": "4.11.2",
+              "sqlx": "0.8.6",
+              "sqlx-postgres": "0.8.6"
+            }
+          }
+        },
+        {
+          "member": "synveda-worker",
+          "platform": {
+            "os": "darwin",
+            "arch": "arm64"
+          },
+          "binary_sha256": "8ebb6b46a26370f51b077054707f6eec007221b460a78ca77667f0813a25d650",
+          "binary_bytes": 18743808,
+          "sbom": "synveda-0.4.3-darwin-arm64-synveda-worker.spdx.json",
+          "sbom_sha256": "bc6bb0cbd34ee1165f20ad3538fafe4e351097a1137bd7cb7160b3352a44ed8b",
+          "sbom_bytes": 663581,
+          "inventory": {
+            "scanner": "syft-1.51.0",
+            "spdx_version": "SPDX-2.3",
+            "package_count": 328,
+            "cargo_package_count": 327,
+            "cargo_identity_count": 327,
+            "required_packages": {
+              "synveda-gateway": "0.4.3",
+              "cedar-policy": "4.11.2",
+              "cedar-policy-core": "4.11.2",
+              "sqlx": "0.8.6",
+              "sqlx-postgres": "0.8.6"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "client_execution": {
+    "schema_version": 1,
+    "evidence": "native-client-archive",
+    "target": "darwin-arm64",
+    "version": "0.4.3",
+    "cli_version": "synveda 0.4.3",
+    "source_sha": "98e7f62bc5e15f78c7cd3c5e2eae9b5ff97de3b0",
+    "source_tree_dirty": true,
+    "node": {
+      "version": "24.21.0",
+      "archive": "node-v24.21.0-darwin-arm64.tar.gz",
+      "archive_sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057"
+    },
+    "archive_sha256": "55ee659b1376f2cc84100f99adca51a0c0f373b9e9f80960c4f7d6b06486b47f",
+    "archive_bytes": 48432577,
+    "local_install_ms": 1926,
+    "repeat_install_ms": 1908,
+    "total_ms": 26815,
+    "network_download_measured": false,
+    "real_issuer_login": false,
+    "native_harness_run": false,
+    "checks": [
+      "licence-and-notice-carriage",
+      "native-identity-and-client-only-inventory",
+      "restricted-path-install-cli-and-three-hook-launches",
+      "private-install-without-harness-or-credential-mutation",
+      "repeat-install-preserves-deployment-state",
+      "packaged-authentication-lifecycle",
+      "codex-extracted-lifecycle-replay",
+      "copilot-cli-extracted-lifecycle-replay"
+    ]
+  },
+  "verification_method": [
+    "Hash each official native Syft archive before reading its executable, then record and enforce the executable hash; no foreign-platform scanner was run",
+    "Build the actual CLI/gateway/worker with locked cargo-auditable 0.7.6 and unchanged Rust source",
+    "Package the real client with the reviewed private Node archive; require its manifest and final CLI hash before scanning",
+    "Successfully strip all three server copies, then scan each fixed regular final TAR member separately with the native Cargo-auditable cataloger",
+    "Rehash actual archives and each SPDX sidecar; require its single binary SHA-256 and locked root/Cedar/SQLx content",
+    "Execute the private native client installation/reinstallation, packaged authentication fixtures and extracted Codex/Copilot lifecycle replay",
+    "Require the clean-source assembly gate to refuse both local dirty-checkout reports"
+  ],
+  "limits": [
+    "This is a local dirty-checkout macOS ARM probe, not clean hosted qualification or publication",
+    "Native Linux, macOS x64 and Windows archive metadata/sidecars remain unqualified until the new source passes its own hosted runs",
+    "These Rust-only per-binary documents do not establish Node/JavaScript/C-library/OS/chart or third-party notice completeness",
+    "No real issuer or native harness run, gateway/worker deployment, HA, disaster recovery or production readiness is claimed"
+  ],
+  "scanner_pin_review": {
+    "release": "https://github.com/anchore/syft/releases/tag/v1.51.0",
+    "checksum_inventory": "https://github.com/anchore/syft/releases/download/v1.51.0/syft_1.51.0_checksums.txt",
+    "checksum_inventory_sha256": "3d85f1d0e1266cae4346514124665f10b7cefd9cce815be13921d199917e5581",
+    "archive_and_executable_hashes_verified": 6,
+    "foreign_scanners_executed": false
+  }
+}

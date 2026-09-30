@@ -63,6 +63,12 @@ contains 351/295 distinct Cargo identities and an ordinary-binary refusal.
 Clean hosted qualification on both architectures, native archive SBOMs and
 broader dependency coverage remain open under OPS-12.
 
+The next native archive source increment now requires per-binary Rust SPDX and
+hash-bound reports for six clients and both historical server archives. Local
+macOS ARM packaging and client execution pass; its separate clean hosted drill
+is still required. Non-Rust inventory, third-party notices and vulnerability/
+publisher incident policy follow under OPS-12.
+
 The first implementation sequence is: establish the supported deployment and
 upgrade contract; choose backup destination, retention, encryption/key custody
 and recovery objectives; implement and drill OPS-5; prove an OPS-6 release pair;

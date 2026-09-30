@@ -104,6 +104,42 @@ These checks do not establish native archive, non-Rust or full dependency SBOM
 coverage, vulnerability policy or readiness; [OPS-12](backlog/OPS-12.md) records
 local ARM evidence and the required clean hosted follow-up.
 
+Native archive producers also use pinned `cargo-auditable` 0.7.6, installed in
+private runner storage. [Reviewed Syft 1.51.0 pins](../scripts/syft-runtimes.json)
+cover all six hosts, with both archive and executable hashes checked before
+execution. Each final archived Rust binary is scanned separately using
+`cargo-auditable-binary-cataloger`; server stripping must succeed. The scanner
+and build tool are never packaged into the client.
+
+The six client archives each have an SPDX sidecar and a Rust-inventory report.
+Each of the two historical server archives has separate SPDX sidecars for CLI,
+gateway and worker, plus one report. These 20 required sidecars join the closed
+release inventory: 51 assembled payloads, 53 after public-image qualification,
+and 55 published files including the checksum inventory and its attestation
+bundle. Assembly rehashes the actual archive and SPDX bytes, checks the exact
+source/target/scanner pin and reads each document's Cargo content and single
+binary SHA-256; another binary cannot supply missing metadata. Publisher
+verification covers their checksums through the same signed inventory.
+
+From the exact producer checkout, after native packaging, the inspection is
+runnable with its reviewed native scanner. `OUTPUT` contains the final archive
+and receives its sidecars; `SOURCE_SHA` must equal the checkout's commit:
+
+```sh
+node scripts/download-syft.mjs TARGET PRIVATE_SCANNER_DIRECTORY
+node scripts/rust-archive-sbom.mjs client TARGET VERSION SOURCE_SHA SYFT_PATH OUTPUT
+# Only darwin-arm64 and linux-x86_64 have historical server archives.
+node scripts/rust-archive-sbom.mjs server TARGET VERSION SOURCE_SHA SYFT_PATH OUTPUT
+```
+
+[Local macOS ARM evidence](../demos/evidence/ops12-native-rust-sbom.json)
+passes the actual client and successfully stripped server binaries, plus private
+client install/reinstall, authentication fixtures and extracted hook replay.
+It is a dirty-checkout probe; assembly deliberately refuses its source state.
+Clean hosted archive qualification remains pending. These documents cover
+embedded Rust dependencies, not Node/JavaScript, C libraries, OS/chart inventory,
+third-party notice completeness or vulnerability/incident policy.
+
 ## Owner setup
 
 1. Select a Docker Hub namespace you own. Do not assume `synveda` is available.

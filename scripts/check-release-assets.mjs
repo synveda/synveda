@@ -9,6 +9,7 @@ import { candidateIdentity, fileHash } from "./docker-candidate.mjs";
 import { releaseImages, validateRegistryManifest } from "./release-registries.mjs";
 import { noticeHashes } from "./verify-release-images.mjs";
 import { checkRustImageReport, rustImageRoots } from "./rust-image-sbom.mjs";
+import { checkRustArchiveReport, rustArchiveAssets, rustArchivePlans } from "./rust-archive-sbom.mjs";
 
 export const clientTargets = [
   "darwin-arm64",
@@ -39,7 +40,7 @@ export function releaseAssets(version, qualified = false) {
       assets.push(`release-${kind}-${arch}.json`);
     if (qualified) assets.push(`release-images-${arch}.json`);
   }
-  return assets;
+  return [...assets, ...rustArchiveAssets(version)];
 }
 export function regularAssets(directory, names) {
   return names.map((name) => {
@@ -233,6 +234,7 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
     publish === "true",
     JSON.parse(readFileSync(new URL("./node-runtimes.json", import.meta.url))),
   );
+  for (const plan of rustArchivePlans(version)) checkRustArchiveReport(directory, plan, version, source);
   const inventory = JSON.parse(
     readFileSync(join(directory, `synveda-registry-images-${version}.json`)),
   );

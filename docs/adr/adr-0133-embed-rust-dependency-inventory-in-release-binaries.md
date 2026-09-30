@@ -84,6 +84,16 @@ OCI control has a valid subject and SPDX document but fails missing Cargo conten
 The local checkout had build-tooling edits; clean hosted qualification on both
 architectures and the six native archive SBOMs remain open.
 
+The native archive source slice is implemented with one shared Cargo-content
+validator, checksum-pinned scanner archives/executables and separate per-binary
+SPDX checks. [Local macOS ARM evidence](../../demos/evidence/ops12-native-rust-sbom.json)
+passes the final client CLI (295 Cargo identities) and successfully stripped
+server CLI/gateway/worker (295/327/327). Private client installation,
+authentication fixtures and extracted hook replay pass. The clean-source gate
+refuses both local dirty-checkout reports. Seven focused archive tests and
+workflow/publication refusals pass; clean hosted qualification of the native
+slice remains pending independently of the preceding OCI source.
+
 ## Options considered
 
 1. **Embedded inventory with maintained scanners**: standard ELF/Mach-O/PE data,

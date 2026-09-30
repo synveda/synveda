@@ -4,34 +4,16 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { checkRustContentReport, checkRustSpdx, rustRoots } from "./rust-sbom.mjs";
 
 export const rustImageRoots = {
-  product: ["synveda-cli", "synveda-gateway", "synveda-apalis"],
-  browser_acceptance: ["synveda-cli"],
+  product: rustRoots.product,
+  browser_acceptance: rustRoots.browser_acceptance,
 };
 export const sbomGenerator = "docker.io/docker/buildkit-syft-scanner:1.12.0@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9";
-const scanner = "syft-v1.51.0";
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 const spdxPredicate = "https://spdx.dev/Document";
-const criticalPackages = ["cedar-policy", "cedar-policy-core", "sqlx", "sqlx-postgres"];
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
-
-// Cargo writes this closed package table. Refuse ambiguous critical versions
-// rather than guessing when the locked build changes.
-export function requiredRustPackages(name, version) {
-  assert.ok(Object.hasOwn(rustImageRoots, name), "expected a Rust-bearing image");
-  const lock = readFileSync(new URL("../Cargo.lock", import.meta.url), "utf8");
-  const requirements = Object.fromEntries(rustImageRoots[name].map((root) => [root, version]));
-  for (const name of criticalPackages) {
-    const versions = lock.split("[[package]]").flatMap((block) => {
-      if (!block.includes(`\nname = "${name}"\n`)) return [];
-      return [...block.matchAll(/^version = "([^"\n]+)"$/gm)].map((match) => match[1]);
-    });
-    assert.equal(versions.length, 1, `locked critical package must be unambiguous: ${name}`);
-    requirements[name] = versions[0];
-  }
-  return requirements;
-}
 
 export function checkRustStatement(statement, imageManifest, name, version) {
   assert.match(imageManifest, digestPattern);
@@ -40,35 +22,7 @@ export function checkRustStatement(statement, imageManifest, name, version) {
   assert.ok(Array.isArray(statement.subject) && statement.subject.length > 0 && statement.subject.length <= 8, "expected bounded attestation subjects");
   for (const subject of statement.subject)
     assert.equal(subject.digest?.sha256, imageManifest.slice(7), "SBOM subject differs from the native image");
-  const spdx = statement.predicate;
-  assert.equal(spdx?.spdxVersion, "SPDX-2.3");
-  assert.ok(spdx.creationInfo?.creators?.includes(`Tool: ${scanner}`), "SBOM scanner differs from the reviewed pin");
-  assert.ok(Array.isArray(spdx.packages) && spdx.packages.length > 0 && spdx.packages.length <= 50_000, "expected a bounded SPDX package inventory");
-  const cargo = new Map();
-  let cargoCount = 0;
-  for (const pkg of spdx.packages) {
-    const refs = pkg.externalRefs ?? [];
-    assert.ok(Array.isArray(refs) && refs.length <= 32, "expected bounded package references");
-    let hasCargo = false;
-    for (const ref of refs) {
-      if (ref.referenceType !== "purl" || !ref.referenceLocator?.startsWith("pkg:cargo/")) continue;
-      const match = /^pkg:cargo\/([a-zA-Z0-9_-]+)@([^?/#]+)$/.exec(ref.referenceLocator);
-      assert.ok(match, "invalid Cargo package URL");
-      assert.equal(pkg.name, match[1], "Cargo name and package URL disagree");
-      // Package URLs percent-encode SemVer build metadata (for example +deprecated).
-      assert.equal(pkg.versionInfo, decodeURIComponent(match[2]), "Cargo version and package URL disagree");
-      const versions = cargo.get(pkg.name) ?? new Set();
-      versions.add(pkg.versionInfo);
-      cargo.set(pkg.name, versions);
-      hasCargo = true;
-    }
-    if (hasCargo) cargoCount += 1;
-  }
-  const required = requiredRustPackages(name, version);
-  for (const [pkg, expected] of Object.entries(required))
-    assert.deepEqual([...cargo.get(pkg) ?? []], [expected], `missing or wrong-version runtime Cargo package: ${pkg}`);
-  return { scanner, spdx_version: spdx.spdxVersion, package_count: spdx.packages.length,
-    cargo_package_count: cargoCount, cargo_identity_count: [...cargo.values()].reduce((count, versions) => count + versions.size, 0), required_packages: required };
+  return checkRustSpdx(statement.predicate, name, version);
 }
 
 function readArchiveJson(archive, member, maxBytes) {
@@ -134,13 +88,7 @@ export function checkRustImageReport(report, name, version, imageManifest) {
   assert.equal(report.image_manifest, imageManifest, "Rust SBOM native image binding differs");
   assert.match(report.attestation_manifest, digestPattern);
   assert.match(report.statement_sha256, /^[0-9a-f]{64}$/);
-  assert.equal(report.scanner, scanner);
-  assert.equal(report.spdx_version, "SPDX-2.3");
-  const required = requiredRustPackages(name, version);
-  assert.ok(Number.isSafeInteger(report.package_count) && report.package_count <= 50_000);
-  assert.ok(Number.isSafeInteger(report.cargo_package_count) && report.cargo_package_count >= Object.keys(required).length && report.cargo_package_count <= report.package_count);
-  assert.ok(Number.isSafeInteger(report.cargo_identity_count) && report.cargo_identity_count >= Object.keys(required).length && report.cargo_identity_count <= report.cargo_package_count);
-  assert.deepEqual(report.required_packages, required, "runtime Cargo requirements differ from the source lock");
+  checkRustContentReport(report, name, version);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {

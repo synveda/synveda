@@ -331,6 +331,15 @@ contains 351/295 distinct Cargo identities and an ordinary-binary refusal.
 Clean hosted qualification on both architectures, native archive SBOMs and
 broader dependency coverage remain open under OPS-12.
 
+The following native archive source slice extends the same locked metadata
+contract to all six client and both server archives. Every final Rust executable
+needs its own hash-bound SPDX document; all 20 report/document sidecars are
+required in the release checksum and publisher inventory. Local macOS ARM client
+and stripped server checks pass, including private client execution, while the
+clean-source gate refuses the local dirty reports. Full hosted qualification of
+this new source remains the next action. Non-Rust coverage and release-security
+policy remain open; [OPS-12](OPS-12.md) owns the exact boundary.
+
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
 - [x] CNSL-5: Console theme and everyday usability — delivered

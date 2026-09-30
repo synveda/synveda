@@ -941,5 +941,50 @@ hash-bound producer report per archive, with the reviewed Syft 1.51.0 native
 download for each of the six targets. Release assembly must read the actual
 sidecar content and rehash its archive; a valid envelope or another executable's
 metadata cannot supply the required CLI/gateway/worker inventory. Tools remain
-outside the installed client. Implementation and six-target hosted qualification
-are pending; current OCI runs remain tied to clean source `3beeb1cb`.
+outside the installed client. Current OCI runs remain tied to clean source
+`3beeb1cb` and do not qualify the following native source slice.
+
+### Native archive Rust inventory source increment (2026-10-01)
+
+All six native client builds and both historical server builds now use locked
+`cargo-auditable` 0.7.6 in private runner storage with a distinct cache key.
+Server stripping failures are fatal. The native Syft 1.51.0 downloader checks
+reviewed archive and executable SHA-256 pins before execution on its own host.
+Each final CLI/gateway/worker archive member must be unique and regular with
+the expected ELF/Mach-O/PE architecture. Separate SPDX documents require the
+single scanned binary's SHA-256, expected Cargo root and locked Cedar/SQLx.
+One binary's metadata cannot satisfy another's gate. No scanner or build tool
+is added to client packages or installers.
+
+Assembly requires eight clean source/target-bound archive reports and all twelve
+actual SPDX documents, rehashes their archive/document bytes and reads Cargo
+content before writing the inventory. All 20 sidecars are required producer,
+assembly and final publisher outputs. The assembled inventory now has 51
+payloads; final public qualification has 53 payloads plus the checksum inventory
+and publisher bundle. The existing exact-source OCI/deployment, native client
+execution and publisher-verification boundaries remain required.
+
+[Local macOS ARM evidence](../../demos/evidence/ops12-native-rust-sbom.json)
+binds its dirty-checkout probe to parent `98e7f62b` and tool/input hashes. The
+actual client contains 295 Cargo identities; successfully stripped server
+CLI/gateway/worker contain 295/327/327, each with Cedar 4.11.2 and SQLx 0.8.6.
+Actual archive/SPDX hashes and per-binary checks pass. Private client
+install/reinstall, packaged authentication and extracted Codex/Copilot replay
+pass. The clean-source assembly gate refuses these local reports as intended.
+Seven focused tests cover all six platform headers, regular/unique member
+extraction, missing/misversioned/foreign-binary content, changed source/pins/
+documents and pre-execution scanner download refusal. CI/workflow gates and
+release parity pass. No Rust source, lockfile, SQL or generated API changed.
+The complete deployment aggregate passes, including 173 Compose tests, all 44
+convergence tests and chart/starter/portability gates. Actionlint 1.7.7, Rust
+formatting and diff checks pass. No changed Rust crate requires an additional
+local Clippy run; hosted workspace strict Clippy passed for the preceding OCI
+source, with the native slice still awaiting its own clean qualification.
+
+Next run full CI plus a nonpublishing release drill on this increment's clean
+source. Independently hash the original expanded same-run
+inventory and inspect all eight native report/document sets. Do not transplant
+the preceding `3beeb1cb` native reports, whose ordinary binaries have no new
+archive SBOM contract. Non-Rust dependency coverage, third-party notices,
+vulnerability/incident policy and real issuer/harness use remain open. The
+production verdict and feature state are unchanged.

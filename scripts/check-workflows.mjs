@@ -157,6 +157,8 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     "name: release-assets",
     "assets/synveda-client-*.zip",
     "assets/synveda-client-report-*.json",
+    "assets/synveda-*.spdx.json",
+    "assets/synveda-*.rust-sbom.json",
     "assets/release-candidate-*.json",
     "assets/release-local-images-*.json",
     "assets/release-docker-*.json",
@@ -249,10 +251,31 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     "local_state::windows_tests",
     "spool::tests",
     "--test client_platform",
+    "node scripts/download-syft.mjs",
+    "node scripts/rust-archive-sbom.mjs client",
+    "node scripts/rust-archive-sbom.mjs server",
+    "synveda-*.spdx.json",
+    "synveda-*.rust-sbom.json",
+    "key: cli-auditable-0.7.6-${{ matrix.target }}",
   ])
     require(shared.cli.includes(
       marker,
     ), `native client coverage missing: ${marker}`);
+  require((shared.cli.match(/cargo install cargo-auditable --version 0\.7\.6 --locked --root/g) ?? []).length === 2,
+    "native builds require the pinned private Cargo inventory tool on both OS families");
+  for (const marker of ['--root "$RUNNER_TEMP/synveda-auditable"', '--root "$env:RUNNER_TEMP/synveda-auditable"'])
+    require(shared.cli.includes(marker), "native build tooling must use private runner storage");
+  require((shared.cli.match(/cargo auditable build --release --locked/g) ?? []).length === 3 &&
+    !/cargo build --release/.test(shared.cli), "native CLI and server release builds must all embed Rust inventory");
+  for (const marker of ["node scripts/download-syft.mjs", "node scripts/rust-archive-sbom.mjs client"])
+    require(shared.cli.split(marker).length === 3, `both native OS families must run ${marker}`);
+  for (const [job, name] of [["binaries", "Inspect final archived Rust binaries"], ["windows-clients", "Inspect final archived Rust CLI"]]) {
+    const block = stepBlock(jobBlock(shared.cli, job), name);
+    require(!/^        if:/m.test(block) && !/\|\|\s*true|continue-on-error/.test(block), "native Rust archive inspection cannot be skipped or suppressed");
+    for (const marker of ["node scripts/download-syft.mjs", "node scripts/rust-archive-sbom.mjs client"])
+      require(block.includes(marker), `${job}: missing final Rust archive inspection`);
+  }
+  require(!/\|\|\s*true/.test(stepBlock(jobBlock(shared.cli, "binaries"), "Package")), "server stripping failures cannot be suppressed");
   const plan = [
     ["The product image", "deploy/compose/product/Dockerfile", "product", null],
     ["Postgres", "deploy/compose/postgres/Dockerfile", "postgres", "reference"],

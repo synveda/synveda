@@ -1,3 +1,4 @@
+import { requiredRustPackages } from "./rust-sbom.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
@@ -31,7 +32,7 @@ import {
 } from "./check-release-assets.mjs";
 import { noticeHashes } from "./verify-release-images.mjs";
 import { publishRelease, uploadedAssets } from "./publish-release.mjs";
-import { requiredRustPackages, rustImageRoots, sbomGenerator } from "./rust-image-sbom.mjs";
+import { rustImageRoots, sbomGenerator } from "./rust-image-sbom.mjs";
 
 const rustSbomFixture = (name, version, imageManifest) => ({
   schema_version: 1, scanner: "syft-v1.51.0", spdx_version: "SPDX-2.3",
@@ -116,6 +117,15 @@ test("workflow refactor retains release, native platform and security boundaries
     ["cli", "node scripts/package-client.mjs", "echo skipped"],
     ["cli", "node scripts/check-client-package.mjs", "echo skipped"],
     ["cli", "node scripts/windows-client-candidate.mjs", "echo skipped"],
+    ["cli", "node scripts/rust-archive-sbom.mjs client", "echo skipped"],
+    ["cli", "node scripts/rust-archive-sbom.mjs server", "echo skipped"],
+    ["cli", "node scripts/download-syft.mjs", "echo unpinned scanner"],
+    ["cli", "cargo auditable build --release --locked", "cargo build --release --locked"],
+    ["cli", "cargo-auditable --version 0.7.6", "cargo-auditable --version 0.7.5"],
+    ["cli", '--root "$RUNNER_TEMP/synveda-auditable"', '--root "$HOME"'],
+    ["cli", 'strip "$stage/synveda" "$stage/synveda-gateway" "$stage/synveda-worker"', 'strip "$stage/synveda" "$stage/synveda-gateway" "$stage/synveda-worker" || true'],
+    ["release", "assets/synveda-*.spdx.json", "assets/unrelated-*.spdx.json"],
+    ["release", "assets/synveda-*.rust-sbom.json", "assets/unrelated-*.rust-sbom.json"],
     ["cli", "runner: windows-11-arm", "runner: windows-2025"],
     ["cli", "target: linux-arm64", "target: linux-unsupported"],
     ["cli", "  binaries:\n", "  binaries:\n    continue-on-error: true\n"],
@@ -561,13 +571,13 @@ test("stable publication waits for every expected upload and never includes chec
   try {
     const version = "0.4.0",
       source = "a".repeat(40);
-    assert.equal(releaseAssets(version).length, 31);
+    assert.equal(releaseAssets(version).length, 51);
     const names = [
       ...releaseAssets(version, true),
       "SHA256SUMS",
       "SHA256SUMS.sigstore.json",
     ];
-    assert.equal(names.length, 35);
+    assert.equal(names.length, 55);
     for (const target of [
       "darwin-arm64",
       "darwin-x86_64",
@@ -631,6 +641,7 @@ test("stable publication waits for every expected upload and never includes chec
             if (args[1].includes("/assets?"))
               return JSON.stringify(
                 expected
+                  .filter((entry) => fault !== "sbom" || !entry.name.endsWith(".spdx.json"))
                   .slice(fault === "missing" ? 1 : 0)
                   .map((entry) => ({ ...entry, state: "uploaded" })),
               );
@@ -671,6 +682,7 @@ test("stable publication waits for every expected upload and never includes chec
     for (const fault of [
       "upload",
       "missing",
+      "sbom",
       "tag",
       "source",
       "draft",

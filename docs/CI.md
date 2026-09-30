@@ -298,6 +298,16 @@ exports and ordinary-binary refusals pass; clean hosted evidence for the changed
 source is required separately from the `f433eb17` checkpoint above. Native archive
 and non-Rust coverage remain open. [OPS-12](backlog/OPS-12.md) records the boundary.
 
+The following native archive source slice uses private pinned Cargo/Syft tools
+and a distinct build cache key. Each final Rust binary is scanned separately;
+server stripping failures are fatal. CI retains SPDX bytes and archive-bound
+reports, and release assembly reads their Cargo content and hashes before
+including all 20 sidecars in the checksum/publisher inventory. Seven focused
+archive tests and publication refusals pass locally, with real macOS ARM
+client/server and private client-execution evidence. All six clean native hosted
+targets remain required for this changed source. The preceding OCI runs do not
+supply its native archive qualification.
+
 ## Manual owner settings
 
 1. **CI Result** (GitHub Actions) is now required in the active main ruleset.

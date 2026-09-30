@@ -300,6 +300,8 @@ jobs:
             assets/synveda-*.yaml
             assets/synveda-registry-images-*.json
             assets/synveda-client-report-*.json
+            assets/synveda-*.spdx.json
+            assets/synveda-*.rust-sbom.json
             assets/release-candidate-*.json
             assets/release-local-images-*.json
             assets/release-docker-*.json
@@ -448,6 +450,8 @@ jobs:
             assets/synveda-*.yaml
             assets/synveda-registry-images-*.json
             assets/synveda-client-report-*.json
+            assets/synveda-*.spdx.json
+            assets/synveda-*.rust-sbom.json
             assets/release-*.json
           retention-days: 30
           if-no-files-found: error

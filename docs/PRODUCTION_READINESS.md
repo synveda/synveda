@@ -353,6 +353,14 @@ contains 351/295 distinct Cargo identities and an ordinary-binary refusal.
 Clean hosted qualification on both architectures, native archive SBOMs and
 broader dependency coverage remain open under OPS-12.
 
+The subsequent native archive source slice requires separate per-binary Rust
+SPDX documents and hash-bound reports across all six client and both historical
+server archives. Twenty sidecars join the closed release/publisher inventory.
+Local macOS ARM packaging, successful server stripping and private client
+execution pass; the clean-source gate correctly refuses the local dirty probe.
+Clean hosted qualification of this increment remains pending. It does not
+establish non-Rust inventory, complete notices, vulnerability policy or readiness.
+
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |
 |---|---|---|---|---|---|---|---|---|
 | Release/Helm artifact parity and reproducibility | Not ready | P0 | v0.4.3 is the latest complete public release. It passed full native candidate Compose/Helm deployment, anonymous Docker Hub/GHCR execution and OCI chart byte parity; its exact draft was promoted after the post-upload lookup failure. v0.4.1 and v0.4.2 retain incomplete public release states. | `make check-release-parity`; `make chart-lint`; `make check-chart-images`; v0.4.3 tagged native/public reports and signed asset inventory in OPS-12 | Published-registry full deployment was not repeated; the release binds public digests to fully deployed native candidates. Optional CNPG controller-backed use of published bytes, independent image-build reproducibility and per-artifact signature verification remain unproved. | A tagged release publishes the exact chart/reference/six-image set; empty hosts complete login/context and empty clusters boot every accepted chart mode with matching digests. | Qualify optional CNPG and a fresh public v0.4.3 installation from its signed inventory, then test independent image reproducibility and per-artifact signatures. | Operator/cluster authorisation and registry retention. |

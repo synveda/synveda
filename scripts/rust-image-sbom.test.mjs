@@ -1,3 +1,4 @@
+import { requiredRustPackages } from "./rust-sbom.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -6,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { checkRustImageReport, checkRustStatement, inspectRustImageSbom, requiredRustPackages } from "./rust-image-sbom.mjs";
+import { checkRustImageReport, checkRustStatement, inspectRustImageSbom } from "./rust-image-sbom.mjs";
 
 const source = "a".repeat(40);
 const version = "0.4.3";
@@ -73,7 +74,7 @@ const inspect = (f, arch = "arm64", expectedSource = source) => inspectRustImage
 test("runtime requirements follow the locked Cedar/SQLx graph and image roots", () => {
   assert.deepEqual(requiredRustPackages("product", version), requirements);
   assert.equal(Object.keys(requiredRustPackages("browser_acceptance", version)).length, 5);
-  assert.throws(() => requiredRustPackages("postgres", version), /Rust-bearing image/);
+  assert.throws(() => requiredRustPackages("postgres", version), /Rust-bearing artifact/);
 });
 
 test("actual OCI blobs bind Cargo inventory to the native image and exact source", (t) => {
@@ -100,6 +101,7 @@ test("valid SPDX envelopes cannot hide absent, mismatched or ambiguous runtime C
     (s) => { const p = s.predicate.packages.find((p) => p.name === "sqlx"); p.versionInfo = "0.0.0"; p.externalRefs[0].referenceLocator = "pkg:cargo/sqlx@0.0.0"; },
     (s) => { const p = structuredClone(s.predicate.packages.find((p) => p.name === "cedar-policy")); p.versionInfo = "0.0.0"; p.externalRefs[0].referenceLocator = "pkg:cargo/cedar-policy@0.0.0"; s.predicate.packages.push(p); },
     (s) => { s.predicate.creationInfo.creators = ["Tool: syft-v0.1.0"]; },
+    (s) => { s.predicate.creationInfo.creators = "Tool: syft-v1.51.0"; },
     (s) => { s.subject = []; },
     (s) => { s.subject[0].digest.sha256 = "e".repeat(64); },
     (s) => { s.subject.push({ digest: { sha256: "e".repeat(64) } }); },
