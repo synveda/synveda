@@ -897,6 +897,7 @@ mod tests {
                 provisioning: None,
                 lifetime: Some(Duration::from_secs(60)),
                 credential_class: crate::token::CredentialClass::Interactive,
+                oidc_token: None,
             },
             issuer: "https://idp.example.test".to_owned(),
             access_token: "never-log-access-token".to_owned(),

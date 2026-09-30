@@ -226,6 +226,7 @@ fn tenant_context(tenant: &Tenant, subject: &str) -> TenantContext {
             provisioning: None,
             lifetime: None,
             credential_class: synveda_identity::CredentialClass::PrimaryBearer,
+            oidc_token: None,
         },
     }
 }

@@ -1013,6 +1013,82 @@ async fn assert_successful_console_callback(
 // ── Verification contract (no database) ─────────────────────────────────────
 
 #[tokio::test]
+async fn signed_oidc_identifiers_survive_verification_without_enabling_revocation() {
+    let _serial = serial().await;
+    let tenant = TenantId::new();
+    let idp = MockIdp::spawn(Some(tenant.to_string())).await;
+    let config = format!(
+        r#"[{{"issuer":"{}","client_id":"{CLIENT_ID}","audience":"{API_AUDIENCE}"}}]"#,
+        idp.issuer
+    );
+    let verifier =
+        OidcVerifier::new(parse_issuers(&config).expect("issuer config")).expect("verifier");
+    let issued_at = now_secs();
+    let token = |token_id: Value, session_id: Value| {
+        idp.sign(&json!({
+            "iss": idp.issuer,
+            "sub": SUBJECT,
+            "tid": tenant.to_string(),
+            "aud": API_AUDIENCE,
+            "iat": issued_at,
+            "exp": issued_at + 300,
+            "jti": token_id,
+            "sid": session_id,
+        }))
+    };
+
+    let first_token = token(json!("token-one"), json!("family-one"));
+    let first = verifier
+        .verify(&first_token)
+        .await
+        .expect("signed first bearer");
+    let first_identity = first.oidc_token.expect("OIDC identity");
+    assert_eq!(first_identity.issuer, idp.issuer);
+    assert_eq!(first_identity.token_id.as_deref(), Some("token-one"));
+    assert_eq!(first_identity.session_id.as_deref(), Some("family-one"));
+    assert_eq!(first_identity.issued_at, Some(issued_at));
+    assert_eq!(first_identity.expires_at, issued_at + 300);
+    let rendered = format!("{first_identity:?}");
+    assert!(!rendered.contains("token-one") && !rendered.contains("family-one"));
+
+    let second = verifier
+        .verify(&token(json!("token-two"), json!("family-one")))
+        .await
+        .expect("signed second bearer");
+    let second_identity = second.oidc_token.expect("OIDC identity");
+    assert_eq!(second_identity.token_id.as_deref(), Some("token-two"));
+    assert_eq!(second_identity.session_id, first_identity.session_id);
+
+    // Other issuers remain admissible without these optional claims. The
+    // future enforced profile must reject either missing identifier.
+    let malformed = verifier
+        .verify(&token(json!("x".repeat(257)), json!(17)))
+        .await
+        .expect("unqualified issuer still verifies the signed bearer");
+    let malformed_identity = malformed.oidc_token.expect("OIDC identity");
+    assert_eq!(malformed_identity.token_id, None);
+    assert_eq!(malformed_identity.session_id, None);
+
+    let [header, payload, signature]: [&str; 3] = first_token
+        .split('.')
+        .collect::<Vec<_>>()
+        .try_into()
+        .expect("compact JWT");
+    let mut forged: Value =
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).expect("JWT payload"))
+            .expect("claims object");
+    forged["sid"] = json!("family-two");
+    let forged_payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&forged).expect("claims JSON"));
+    assert!(
+        verifier
+            .verify(&format!("{header}.{forged_payload}.{signature}"))
+            .await
+            .is_err(),
+        "an unsigned identifier change cannot become revocation evidence"
+    );
+}
+
+#[tokio::test]
 async fn oidc_bearer_is_verified_via_jwks_before_storage() {
     let _serial = serial().await;
     let tenant = TenantId::new();

@@ -332,7 +332,10 @@ credential rows in bounded, skip-locked batches with sweep and row counters.
 Each successful sweep now reports the indexed oldest-expired age, but its
 fixed 256-row-per-minute service rate has no proven arrival or retention
 envelope; next measure age under load and bound drain work or admission.
-No AUTH-6 revocation bound or inventory is qualified. Next prove the bundled
-issuer's signed `jti`/stable `sid` and refresh replay behavior, then implement
+The OIDC verifier now carries bounded optional `jti`/`sid`, exact issuer and
+token times after signature verification; a mock-signed fixture covers these
+values and tampering but is not live Keycloak evidence. No AUTH-6 revocation
+bound or inventory is qualified. Next prove the bundled issuer's signed
+`jti`/stable `sid` and refresh replay behavior, then implement
 the additive index, self-session API and fail-closed request-time lookup before
 enforcement and cross-replica acceptance.

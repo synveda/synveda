@@ -12,6 +12,7 @@
 //! header's `alg` is checked against HS256 and never used to select a
 //! scheme, so there is no algorithm-confusion surface.
 
+use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
@@ -87,6 +88,39 @@ pub struct Claims {
     pub lifetime: Option<Duration>,
     /// The verified audience boundary that admitted this credential.
     pub credential_class: CredentialClass,
+    /// Identifiers from a signature-verified OIDC token. Present only for
+    /// OIDC; their presence alone does not enable revocation (AUTH-6).
+    pub oidc_token: Option<OidcTokenIdentity>,
+}
+
+/// Exact issuer and bounded opaque identifiers from a verified OIDC JWT.
+/// Missing or ill-shaped optional identifiers remain `None` until an issuer
+/// profile explicitly requires them. Never log identifier values.
+#[derive(Clone, PartialEq, Eq)]
+pub struct OidcTokenIdentity {
+    /// Exact configured issuer that signed the token.
+    pub issuer: String,
+    /// Bounded `jti`, when the issuer supplied one.
+    pub token_id: Option<String>,
+    /// Bounded `sid`, when the issuer supplied one.
+    pub session_id: Option<String>,
+    /// Numeric `iat`, when present.
+    pub issued_at: Option<u64>,
+    /// Numeric `exp` already checked by the verifier.
+    pub expires_at: u64,
+}
+
+impl fmt::Debug for OidcTokenIdentity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OidcTokenIdentity")
+            .field("issuer", &self.issuer)
+            .field("token_id_present", &self.token_id.is_some())
+            .field("session_id_present", &self.session_id.is_some())
+            .field("issued_at", &self.issued_at)
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 /// What an IdP asserts about a subject beyond its name: the raw material
@@ -254,6 +288,7 @@ impl TokenVerifier for Hs256Verifier {
             provisioning: None,
             lifetime,
             credential_class: CredentialClass::PrimaryBearer,
+            oidc_token: None,
         })
     }
 }

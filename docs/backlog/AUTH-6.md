@@ -45,6 +45,11 @@ verified access-token `jti` for one bearer, `sid` for an interactive session
 family, numeric `iat`/`exp` with at most five minutes of access lifetime,
 rotating refresh tokens with zero reuse, no offline access, and an eight-hour
 maximum SSO session. Revocation evidence for a family remains for 12 hours.
+The OIDC verifier now carries the exact configured issuer, bounded optional
+`jti`/`sid`, and numeric token times only after signature and audience checks.
+A signed mock-issuer fixture covers changed per-token ID with stable family,
+malformed optional identifiers, redacted debug output and signature tampering.
+It does not prove a Keycloak refresh or enable revocation.
 The first product slice is self-only inventory/revoke; administrator access
 remains a separately reviewed authority/disclosure change. Entra, Okta and
 other external issuers retain login support but have no revocation promise
@@ -117,8 +122,8 @@ selected in ADR-0130. EVAL-6 must establish revocation-row capacity and
 cleanup lag. OPS-7 supplies multi-replica acceptance; external issuer
 promotion requires its own live tenant, credentials and claim mapping.
 
-Next: add test-only verified-claim fixtures for `jti`/`sid` continuity and
-refresh rotation against the bundled realm, then append a forward migration
+Next: prove the signed `jti`/`sid` and refresh rotation/replay contract with
+the bundled Synveda Keycloak realm, then append a forward migration
 for the tenant index/revocation ledger, wire atomic console-session creation,
 and add Cedar-governed self inventory/revoke. Promote bearer-family enforcement
 only after the complete Keycloak and cross-replica acceptance passes; missing

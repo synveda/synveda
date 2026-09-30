@@ -43,5 +43,6 @@ pub use oidc::{
     TOKEN_VERIFICATIONS_TOTAL, TenantBinding, parse_issuers,
 };
 pub use token::{
-    Claims, CredentialClass, DisabledVerifier, Hs256Verifier, ProvisioningClaims, TokenVerifier,
+    Claims, CredentialClass, DisabledVerifier, Hs256Verifier, OidcTokenIdentity,
+    ProvisioningClaims, TokenVerifier,
 };
