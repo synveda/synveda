@@ -90,13 +90,21 @@ direct authenticated reads from every pod. It restored one replica afterward.
 The same harness applied two test-pack revisions through the audited CLI under
 an ordinary gateway role and observed each of the three local compiles via
 the closed reload metric: maximum database-timestamp-to-observation lag was
-1.065 and 4.945 seconds. It checked readiness and cleared the pack. These
-are light-load, one-node compile observations, not a decision-level
-mutation bound under sustained traffic or refresh failure. Key rotation
-during login, multi-node loss and a rolling upgrade remain untested. Next
-prove restrictive policy decision visibility and the failed-refresh expiry
-path under load, then exercise claimed work under expiry before lifting
-either replica limit.
+1.065 and 4.945 seconds. It checked readiness and cleared the pack. A further
+one-node run adopted the canonical team Configuration through the public API,
+opened and reviewed a project Configuration with a second identity, and
+selected a uniquely named test pack. Three direct pod requests permitted
+`ScopeUpdate` under revision 1, then each pod refused it with the revision-2
+policy reason; the maximum observed database-timestamp-to-denial lag was
+5.259 seconds. The probe repeated all three denials, disabled the binding
+through the governed API and revoked the disposable review grant. The pack
+and immutable Configuration version remain in this disposable cluster as a
+legal rollback target; deleting the pack would violate the store's history
+constraint. The harness restored one gateway replica. These are light-load,
+one-node observations, not a decision-level mutation bound under sustained
+traffic or refresh failure. Key rotation during login, multi-node loss and a
+rolling upgrade remain untested. Next prove failed-refresh expiry under load,
+then exercise claimed work under expiry before lifting either replica limit.
 
 ## Scope
 

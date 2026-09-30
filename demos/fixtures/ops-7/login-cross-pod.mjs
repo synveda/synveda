@@ -36,7 +36,7 @@ async function identityRequest(url, init = {}) {
   return response;
 }
 
-async function finishIdentityLogin(authorize) {
+async function finishIdentityLogin(authorize, username, secret) {
   const url = new URL(authorize);
   check(url.origin === issuer && url.pathname === "/realms/synveda/protocol/openid-connect/auth", "unexpected authorization endpoint");
   check(url.searchParams.get("code_challenge_method") === "S256", "PKCE S256 missing");
@@ -60,7 +60,7 @@ async function finishIdentityLogin(authorize) {
   check(action.startsWith(`${issuer}/realms/synveda/login-actions/authenticate?`), "identity form action changed");
   const submitted = await identityRequest(action, {
     method: "POST",
-    body: new URLSearchParams({ username: "synveda-demo-admin", password, credentialId: "" }),
+    body: new URLSearchParams({ username, password: secret, credentialId: "" }),
   });
   const callback = submitted.headers.get("location");
   check(callback?.startsWith(`${app}/auth/callback?`), "identity callback missing");
@@ -68,13 +68,13 @@ async function finishIdentityLogin(authorize) {
   return callback;
 }
 
-async function beginLogin(path) {
+async function beginLogin(path, username = "synveda-demo-admin", secret = password) {
   cookies.clear();
   const begun = await podRequest(0, path);
   check(begun.status === 307, `pod A refused login start (${begun.status})`);
   const authorize = begun.headers.get("location");
   check(authorize, "pod A did not redirect to identity provider");
-  return finishIdentityLogin(authorize);
+  return finishIdentityLogin(authorize, username, secret);
 }
 
 const callback = await beginLogin("/auth/login");
@@ -114,3 +114,18 @@ check(cliSession.subject === session.subject, "CLI handoff returned another iden
 const duplicate = await exchange();
 check(duplicate.status >= 400, "pod C redeemed a handoff twice");
 console.log("OPS-7: three distinct pods completed JSON login A→B, CLI handoff A→B→C, replay refusal and per-pod identity reads");
+
+// A second probe in this disposable cluster uses the same authenticated
+// principal; never print or persist its short-lived bearer token.
+export const accessToken = session.access_token;
+
+export async function loginApprover() {
+  const secret = readFileSync("/run/secrets/keycloak_demo_approver_password", "utf8").trimEnd();
+  const callback = await beginLogin("/auth/login", "synveda-demo-approver", secret);
+  const completed = await podRequest(1, pathOf(callback));
+  check(completed.status === 200, `pod B refused approver login (${completed.status})`);
+  const approver = await completed.json();
+  check(typeof approver.access_token === "string" && typeof approver.subject === "string",
+    "approver login omitted session identity");
+  return { token: approver.access_token, subject: approver.subject };
+}

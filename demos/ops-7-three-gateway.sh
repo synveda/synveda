@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OPS-7: disposable cross-pod login acceptance after the OPS-2 Kind install.
+# OPS-7: cross-pod login and policy-decision acceptance after the OPS-2 Kind install.
 # The chart stays pinned to one gateway; this script scales only its isolated
 # Kind deployment and restores that pin on exit.
 set -euo pipefail
@@ -23,8 +23,10 @@ cleanup() {
   trap - EXIT
   kubectl -n "$namespace" delete job/ops7-login --ignore-not-found --wait=true >/dev/null 2>&1 || true
   kubectl -n "$namespace" delete job/ops7-policy-lag --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  kubectl -n "$namespace" delete job/ops7-decision-lag --ignore-not-found --wait=true >/dev/null 2>&1 || true
   kubectl -n "$namespace" delete configmap/ops7-login-script --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$namespace" delete configmap/ops7-policy-scripts --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "$namespace" delete configmap/ops7-decision-scripts --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$namespace" scale deployment/synveda --replicas=1 >/dev/null 2>&1 || true
   exit "$status"
 }
@@ -171,5 +173,83 @@ if kubectl -n "$namespace" wait --for=condition=complete job/ops7-policy-lag --t
 else
   kubectl -n "$namespace" logs job/ops7-policy-lag -c probe >&2 || true
   echo "OPS-7 three-pod policy revision probe failed" >&2
+  exit 1
+fi
+
+kubectl -n "$namespace" create configmap ops7-decision-scripts \
+  --from-file=login-cross-pod.mjs=demos/fixtures/ops-7/login-cross-pod.mjs \
+  --from-file=decision-lag.mjs=demos/fixtures/ops-7/decision-lag.mjs \
+  --from-file=decision-allow.cedar=demos/fixtures/ops-7/decision-allow.cedar \
+  --from-file=decision-deny.cedar=demos/fixtures/ops-7/decision-deny.cedar \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n "$namespace" delete job/ops7-decision-lag --ignore-not-found --wait=true >/dev/null
+cat <<EOF | kubectl -n "$namespace" apply -f - >/dev/null
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ops7-decision-lag
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 180
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: probe
+          image: ghcr.io/synveda/product:$image_tag
+          imagePullPolicy: Never
+          command: ["node", "/scripts/decision-lag.mjs"]
+          env:
+            - name: POD_URLS
+              value: '$pod_urls'
+            - name: DATABASE_URL_FILE
+              value: /run/db/DATABASE_URL
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: login-secret
+              mountPath: /run/secrets
+              readOnly: true
+            - name: gateway-database
+              mountPath: /run/db
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: ops7-decision-scripts
+        - name: login-secret
+          secret:
+            secretName: ops2-keycloak
+            items:
+              - key: keycloak_demo_admin_password
+                path: keycloak_demo_admin_password
+              - key: keycloak_demo_approver_password
+                path: keycloak_demo_approver_password
+        - name: gateway-database
+          secret:
+            secretName: synveda-gateway-db
+            items:
+              - key: DATABASE_URL
+                path: DATABASE_URL
+EOF
+
+if kubectl -n "$namespace" wait --for=condition=complete job/ops7-decision-lag --timeout=190s >/dev/null; then
+  kubectl -n "$namespace" logs job/ops7-decision-lag -c probe
+else
+  kubectl -n "$namespace" logs job/ops7-decision-lag -c probe >&2 || true
+  echo "OPS-7 three-pod authorization decision probe failed" >&2
   exit 1
 fi

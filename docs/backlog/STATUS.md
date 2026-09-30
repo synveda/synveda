@@ -175,11 +175,15 @@ cancellation and bounded join. A one-node Kind Helm drill passed baseline
 database failover and direct three-pod JSON/CLI login handoff with replay
 refusal. Two audited test-pack revisions compiled on all three pods with
 maximum database-timestamp-to-metric lags of 1.065 and 4.945 seconds at
-light load; the chart returned to one gateway. Restrictive decision-level
-latency under load and failed refresh, claimed-worker interruption,
-multi-worker ownership, in-flight process/load and rolling acceptance remain
-open in the brief. Scope, grant,
-identity and Configuration decisions already use fresh
+light load. A public governed Configuration and project-scoped review grant
+then selected a test pack: all three direct pod requests changed from permitted
+`ScopeUpdate` to revision-specific 403 after a restrictive edit, with a
+maximum database-timestamp-to-denial lag of 5.259 seconds; repeat denials
+held, the binding was disabled and the grant revoked. The chart returned to
+one gateway. Restrictive decision-level latency under sustained load and
+failed refresh, claimed-worker interruption, multi-worker ownership,
+in-flight process/load and rolling acceptance remain open in the brief.
+Scope, grant, identity and Configuration decisions already use fresh
 request-time database rows and exact-shape Cedar fragments; a generic
 cross-process entity invalidation bus is not presumed necessary.
 
