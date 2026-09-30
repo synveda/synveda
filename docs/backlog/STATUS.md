@@ -160,7 +160,9 @@ tenant transactions found matching Knowledge/Skill/proposal/context counts,
 and audit rows 1–384 matched by serialized-row checksum and chain hash.
 No published N, off-host PITR, production-shaped outage/lock or injected
 failure is qualified. OPS-6 stays open for those gates and an in-flight
-`0003` joint restore; v0.4.0 remains incompatible.
+`0003` joint restore. That drill needs a head-`0003` candidate recovery bundle;
+the published v0.4.3 verifier correctly refuses the advanced schema.
+v0.4.0 remains incompatible.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 

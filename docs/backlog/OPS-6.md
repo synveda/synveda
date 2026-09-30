@@ -157,6 +157,14 @@ pending login from a joint `0003` set, inject migration failures, measure
 production-shaped locks/outage and run the OPS-5 off-host restore before a
 supported upgrade claim.
 
+The published v0.4.3 consumer recovery launcher pins its released product
+verifier, which correctly refuses a `0003` database. The next pending-login
+joint-restore drill therefore needs a head-`0003` candidate reference bundle:
+park one login, back up the linked database/identity/key set, restore into an
+empty project with that same candidate, then consume the state once and refuse
+replay. Repeating the result with a published compatible N pair remains a
+separate promotion gate.
+
 ## Scope
 
 - Define the first supported schema/application compatibility window.
