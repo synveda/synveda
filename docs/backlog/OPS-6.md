@@ -42,13 +42,13 @@ the read-only candidate check distinguishes exact `0001`, `0002` and current
 crash recovery. This is an implementation candidate, not a published upgrade
 claim.
 
-An isolated exact-role PostgreSQL run passed 25 focused epoch tests, including
+An isolated exact-role PostgreSQL run passed 26 focused epoch tests, including
 an exact published-baseline SQLx prefix, retained tenant data and baseline
 ledger row, exact `0002` advancement, read-only preflight, interrupted-stamp recovery, missing-ledger
 preservation and old-catalogue drift refusal. SQLx generated-metadata
 verification passes on a fresh three-head database. On 2026-09-30 the full
 isolated `bash scripts/db-test.sh` suite passed at `0003`, including the
-workspace integration tests, serial authority/tamper checks and all 25 epoch
+workspace integration tests, serial authority/tamper checks and all 26 epoch
 cases. Its first run exposed a stale two-row count in the concurrent-install
 test; that assertion now compares successful ledger rows to the embedded
 migrator's length. The corrected full rerun passed and removed its disposable
@@ -190,8 +190,21 @@ their installation, database and browser volumes retained; the source also
 retains its linked recovery volume. This proves one-time rejection-path state
 survival through joint logical restore, not successful in-flight code exchange,
 off-host PITR, a published N pair, production-shaped outage or locks. Next
-inject migration failure, measure lock/outage on representative data, and
+measure lock/outage on representative data, and
 repeat with an owner-selected off-host OPS-5 set and published compatible pair.
+
+An additional 2026-09-30 exact-role failure-injection test installed the
+published v0.4.3 `0001` prefix and a tenant, then held a read lock on
+`context_candidates` while `0002` had already altered earlier tables. It
+observed the migrator waiting for an access-exclusive DDL lock, cancelled it,
+and verified the earlier `session_context_runs` column was rolled back, the
+SQLx ledger and epoch marker still matched the released prefix, and the
+tenant remained. Retry advanced to `0003` without rewriting the baseline
+ledger row. The full disposable `bash scripts/db-test.sh` gate passed all 26
+serial lifecycle cases and removed its isolated volumes. This tests one
+mid-transaction cancellation and restart; it does not cover every migration
+phase, a production-sized lock, a deployed process crash or the off-host
+restore path.
 
 ## Scope
 

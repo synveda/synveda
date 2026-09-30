@@ -132,13 +132,15 @@ before/after a committed write and wrong-passphrase refusal. This is database
 mechanics evidence only. Next qualify both source candidates with an
 owner-selected off-host bucket and independent joint application restore; the
 OPS-5 brief owns the exact drill and remaining owner decisions.
+The deployment owner has no operator-owned test bucket yet, so that live gate
+is waiting on a destination and credentials.
 
 - [ ] [OPS-6: Upgrade and rollback discipline](OPS-6.md) — open
 
 OPS-6 / ADR-0121 now keeps the published v0.4.3 `0001` bytes and adds a
 transactional `0002` for CTX-6/CTX-8; OPS-7 appends `0003` for sealed one-time
 login state. Byte pins, exact-prefix guards and the full disposable exact-role
-database suite pass at `0003`, including all 25 epoch cases. A 2026-09-30
+database suite pass at `0003`, including all 26 epoch cases. A 2026-09-30
 isolated released-byte v0.4.3-to-source rehearsal passed linked logical
 database/identity/key backup, old-writer quiescence, read-only old-head
 preflight, `0002`/`0003`, old-binary refusal, source gateway/worker/browser
@@ -163,9 +165,12 @@ pending login from a joint database/identity/key set into an empty project.
 The restored gateway opened and consumed it once on an IdP denial, refused
 replay, and still passed fresh browser login/API/logout. The candidate mixed
 local product/browser and published support images; it is not a release pair.
-No published N, off-host PITR, production-shaped outage/lock, successful
-in-flight code exchange or injected failure is qualified. OPS-6 stays open for
-those gates. The published v0.4.3 verifier correctly refuses the advanced
+One exact-role cancellation after early `0002` DDL proved transactional rollback,
+unchanged released ledger/marker/tenant and retry to `0003`; the full isolated
+suite passed with all 26 serial epoch cases. No published N, off-host PITR,
+production-shaped outage/lock, successful in-flight code exchange or broader
+failure matrix is qualified. OPS-6 stays open for those gates. The published
+v0.4.3 verifier correctly refuses the advanced
 schema, and v0.4.0 remains incompatible.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open

@@ -676,6 +676,116 @@ fn released_v043_prefix_upgrades_without_resetting_tenant_data() {
     });
 }
 
+/// Stop the forward transaction after its first table alterations, while the
+/// later context-candidate DDL waits on a read lock. Cancellation must roll
+/// those earlier alterations back along with SQLx's success row; a retry must
+/// apply both forward migrations without changing the released prefix.
+#[test]
+fn cancelled_forward_ddl_preserves_released_prefix_and_retries_cleanly() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.expect("released baseline connection");
+        released_v043_migrator()
+            .run(&mut *connection)
+            .await
+            .expect("install exact released baseline");
+        epoch::stamp_connection(&mut connection, "0.4.3")
+            .await
+            .expect("stamp released head");
+        drop(connection);
+
+        let tenant = admit_a_tenant(&pool).await;
+        let marker_before = epoch::read(&pool).await.expect("released marker");
+        let ledger_before = migration_ledger(&pool).await;
+        assert_eq!(ledger_before.len(), 1);
+
+        let mut blocker = scratch.options.connect().await.expect("DDL blocker");
+        let mut transaction = blocker.begin().await.expect("begin DDL blocker");
+        sqlx::query("lock table public.context_candidates in access share mode")
+            .execute(&mut *transaction)
+            .await
+            .expect("block the later forward DDL only");
+
+        let migrate_pool = pool.clone();
+        let roles = scratch.roles.clone();
+        let migration =
+            tokio::spawn(async move { synveda_store::migrate(&migrate_pool, &roles).await });
+        let mut waiting_on_forward_ddl = false;
+        for _ in 0..500 {
+            sqlx::query("select pg_stat_clear_snapshot()")
+                .execute(&mut *transaction)
+                .await
+                .expect("refresh DDL wait observation");
+            waiting_on_forward_ddl = sqlx::query_scalar(
+                "select exists (select 1 from pg_stat_activity activity \
+                 join pg_locks held on held.pid = activity.pid \
+                 where activity.datname = current_database() \
+                   and activity.pid <> pg_backend_pid() \
+                   and held.relation = 'public.context_candidates'::regclass \
+                   and held.mode = 'AccessExclusiveLock' \
+                   and not held.granted and activity.wait_event_type = 'Lock')",
+            )
+            .fetch_one(&mut *transaction)
+            .await
+            .expect("observe actual forward DDL wait");
+            if waiting_on_forward_ddl {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        migration.abort();
+        assert!(
+            migration
+                .await
+                .expect_err("migration task cancelled")
+                .is_cancelled()
+        );
+        transaction.rollback().await.expect("release DDL blocker");
+        assert!(
+            waiting_on_forward_ddl,
+            "cancellation must interrupt a later forward DDL statement"
+        );
+
+        assert_eq!(migration_ledger(&pool).await, ledger_before);
+        assert_eq!(
+            epoch::read(&pool).await.expect("unchanged marker"),
+            marker_before
+        );
+        let checkpoint_column: bool = sqlx::query_scalar(
+            "select exists (select 1 from pg_attribute \
+             where attrelid = 'public.session_context_runs'::regclass \
+               and attname = 'checkpoint_event_id' and not attisdropped)",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("check earlier DDL was rolled back");
+        assert!(
+            !checkpoint_column,
+            "the earlier DDL must be atomic with the wait"
+        );
+        assert!(
+            synveda_store::tenants::by_id(&pool, tenant)
+                .await
+                .expect("lookup preserved tenant")
+                .is_some()
+        );
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            synveda_store::migrate(&pool, &scratch.roles),
+        )
+        .await
+        .expect("cancellation released the migration lock")
+        .expect("forward migrations retry cleanly");
+        assert_eq!(epoch::verify(&pool).await.unwrap().migration_head, "0003");
+        assert_eq!(&migration_ledger(&pool).await[..1], &ledger_before[..]);
+        blocker.close().await.expect("close DDL blocker");
+        pool.close().await;
+    });
+}
+
 #[test]
 fn exact_forward_prefix_adds_login_state_without_rewriting_existing_rows() {
     let Some(server) = server() else { return };

@@ -52,6 +52,11 @@ the Compose lifecycle still has no supported physical restore command or
 joint identity/KMS custody. Neither source candidate has off-host or Synveda
 application recovery evidence. Azure and GCS are follow-on qualifications.
 
+As of 2026-09-30, the deployment owner has no operator-owned test bucket
+available. The live off-host PITR and joint application restore gate cannot
+run until that destination and its credentials are supplied; the local
+S3-compatible drill remains the current evidence.
+
 The next action is to choose a real off-host bucket/region, encryption/key
 custody, retention, RPO/RTO and drill owner; install the compatible CNPG/Barman
 plugin in a disposable cluster; create the protected S3-compatible ObjectStore;
