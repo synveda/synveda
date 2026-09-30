@@ -210,6 +210,11 @@ cross-pod propagation or fault injection. The five-second deadline passed in
 that fixture; no owner-selected maximum or admission limit exists, and one
 invalid tenant pack still expires every process lease. Next measure at the
 owner-selected maximum under representative load before changing admission.
+Proposed [ADR-0131](../adr/adr-0131-partition-policy-convergence-by-tenant.md)
+specifies separate process and tenant leases, including in-flight HTTP and
+claimed-worker cancellation. It does not change runtime behavior; ADR-0127/0128
+continue to close the entire process on a failed tenant sweep until the owner
+chooses the envelope and adversarial acceptance covers all three planes.
 The same review found that a transient deployment-key provisioning error was
 not retried until the database authority generation changed. The source gateway
 now retries deployment-key provisioning and unwrap checks with a five-second

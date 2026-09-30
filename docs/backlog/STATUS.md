@@ -185,11 +185,13 @@ supported work limit is yet enforced. A manual exact-role 32 × 4 local probe
 passed the five-second sweep deadline: cold 0.353 seconds, slowest unchanged
 0.026 seconds across five passes, and all-pack revision 0.324 seconds. It had
 no request traffic, cross-pod propagation or fault injection and does not
-qualify a production envelope or isolate a failed tenant. The source gateway
-now retries deployment-key provisioning and unwrap checks within five-second
-attempts, keeps readiness closed until both key and policy convergence succeed,
-and emits content-free
-key-ready/attempt metrics. An exact-role process test proves timeout, retry
+qualify a production envelope or isolate a failed tenant. Proposed ADR-0131
+maps the request, core-worker and Apalis tenant-lease checks needed for safe
+failure isolation; the global ADR-0127/0128 lease remains authoritative. The
+source gateway now retries deployment-key provisioning and unwrap checks
+within five-second attempts, keeps readiness closed until both key and policy
+convergence succeed, and emits content-free key-ready/attempt metrics. An
+exact-role process test proves timeout, retry
 recovery and wrong-KEK refusal. Live OIDC/KMS faults and cross-pod key rotation
 remain unqualified; a disabled KMS still permits bearer-only readiness.
 

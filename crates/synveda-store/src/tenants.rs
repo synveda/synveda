@@ -85,9 +85,9 @@ pub async fn create(
     row.try_into()
 }
 
-/// Lists all active tenants, admission order — the policy pack refresher's
-/// iteration set (AUTHZ-1, ADR-0012 decision 5). Fine at admissible tenant
-/// counts; event-based reload replaces the sweep before this needs paging.
+/// Lists all active tenants, admission order — the current policy-pack
+/// refresher's iteration set (AUTHZ-1, ADR-0012 decision 5). This global
+/// scan is unpaged; OPS-7 has not selected or enforced a tenant work ceiling.
 #[tracing::instrument(name = "store.tenants.active", skip_all, err(Display))]
 pub async fn active(executor: impl PgExecutor<'_>) -> Result<Vec<Tenant>> {
     let rows = sqlx::query_as!(

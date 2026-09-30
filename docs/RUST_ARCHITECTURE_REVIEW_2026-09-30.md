@@ -50,6 +50,8 @@ stored packs: cold 0.353 seconds, unchanged-sweep maximum 0.026 seconds over
 five passes, and full-revision sweep 0.324 seconds. It was idle and local,
 not a traffic, multi-pod or failure-isolation qualification. The owner limit
 and tenant-specific fail-closed boundary remain open.
+Proposed ADR-0131 identifies the request and worker cancellation checks needed
+before tenant-local refresh failures can stop closing unrelated tenants.
 
 ### P2 — CPR-23: Skill directory import has an unbounded traversal and read
 
