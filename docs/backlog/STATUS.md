@@ -180,9 +180,13 @@ then selected a test pack: all three direct pod requests changed from permitted
 `ScopeUpdate` to revision-specific 403 after a restrictive edit, with a
 maximum database-timestamp-to-denial lag of 5.259 seconds; repeat denials
 held, the binding was disabled and the grant revoked. The chart returned to
-one gateway. Restrictive decision-level latency under sustained load and
-failed refresh, claimed-worker interruption, multi-worker ownership,
-in-flight process/load and rolling acceptance remain open in the brief.
+one gateway. A separate audited, test-only invalid Cedar pack left database
+authority ready while all three gateways recorded failed refreshes; 486 paired
+authenticated/readiness samples saw all close by 28.996 seconds and recover by
+45.747 seconds from baseline after pack removal. This is one-node light-load
+evidence, not a production traffic bound. Claimed-worker interruption,
+multi-worker ownership, in-flight process/load, key rotation, multi-node loss
+and rolling acceptance remain open in the brief.
 Scope, grant, identity and Configuration decisions already use fresh
 request-time database rows and exact-shape Cedar fragments; a generic
 cross-process entity invalidation bus is not presumed necessary.

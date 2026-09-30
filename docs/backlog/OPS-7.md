@@ -101,10 +101,21 @@ through the governed API and revoked the disposable review grant. The pack
 and immutable Configuration version remain in this disposable cluster as a
 legal rollback target; deleting the pack would violate the store's history
 constraint. The harness restored one gateway replica. These are light-load,
-one-node observations, not a decision-level mutation bound under sustained
-traffic or refresh failure. Key rotation during login, multi-node loss and a
-rolling upgrade remain untested. Next prove failed-refresh expiry under load,
-then exercise claimed work under expiry before lifting either replica limit.
+one-node observations, not a mutation bound under sustained production traffic.
+A subsequent test-only store helper committed an invalid Cedar pack through an
+ordinary gateway-role tenant transaction with content-free audit, then cleared
+it after 42 seconds. With three gateways serving sustained direct authenticated
+reads, 486 paired request/readiness samples saw all pods close by 28.996 seconds
+and reopen by 45.747 seconds from monitor baseline. Each recorded failed
+policy sweeps while its database-authority gauge remained ready and its
+authority-unavailable count did not change. The same probe restored one gateway
+replica; the core worker was ready afterward. A table-lock experiment was not
+counted as lease evidence because it also closed the database-authority gate.
+The invalid-pack result qualifies the provisional source lease under this
+one-node light load, not a production traffic envelope, claimed-worker
+interruption or cross-AZ behavior. Key rotation during login, multi-node loss
+and a rolling upgrade remain untested. Next exercise claimed work under
+expiry, then pod loss and rolling traffic before lifting either replica limit.
 
 ## Scope
 
