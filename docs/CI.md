@@ -302,7 +302,7 @@ The following native archive source slice uses private pinned Cargo/Syft tools
 and a distinct build cache key. Each final Rust binary is scanned separately;
 server stripping failures are fatal. CI retains SPDX bytes and archive-bound
 reports, and release assembly reads their Cargo content and hashes before
-including all 20 sidecars in the checksum/publisher inventory. Seven focused
+including all 20 sidecars in the checksum/publisher inventory. Eight focused
 archive tests and publication refusals pass locally, with real macOS ARM
 client/server and private client-execution evidence. All six clean native hosted
 targets remain required for this changed source. The preceding OCI runs do not

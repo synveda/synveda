@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { sha256, targetName } from "./client-artifact.mjs";
 import { downloadSyft, syftPins } from "./download-syft.mjs";
@@ -96,6 +97,18 @@ test("ELF, Mach-O and PE headers bind all six native architectures without execu
   const pe = bytesFor("windows-arm64"); pe.writeUInt32LE(0xffffffff, 0x3c);
   assert.throws(() => checkNativeBinary(pe, "windows-arm64"), /offset/);
   assert.throws(() => checkNativeBinary(Buffer.alloc(128), "linux-arm64"), /ELF64/);
+});
+
+test("the actual locked Cargo reader handles Windows CRLF checkouts", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "synveda-lock-reader-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "scripts"));
+  writeFileSync(join(root, "scripts/rust-sbom.mjs"), readFileSync(new URL("./rust-sbom.mjs", import.meta.url)));
+  writeFileSync(join(root, "Cargo.lock"), readFileSync(new URL("../Cargo.lock", import.meta.url), "utf8").replace(/\r?\n/g, "\r\n"));
+  const { requiredRustPackages } = await import(pathToFileURL(join(root, "scripts/rust-sbom.mjs")).href);
+  assert.deepEqual(requiredRustPackages("cli", version), {
+    "synveda-cli": version, "cedar-policy": "4.11.2", "cedar-policy-core": "4.11.2", sqlx: "0.8.6", "sqlx-postgres": "0.8.6",
+  });
 });
 
 test("actual archive members and actual SPDX bytes bind each final executable", (t) => {

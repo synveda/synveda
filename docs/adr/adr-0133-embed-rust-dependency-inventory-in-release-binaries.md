@@ -90,7 +90,7 @@ SPDX checks. [Local macOS ARM evidence](../../demos/evidence/ops12-native-rust-s
 passes the final client CLI (295 Cargo identities) and successfully stripped
 server CLI/gateway/worker (295/327/327). Private client installation,
 authentication fixtures and extracted hook replay pass. The clean-source gate
-refuses both local dirty-checkout reports. Seven focused archive tests and
+refuses both local dirty-checkout reports. Eight focused archive tests and
 workflow/publication refusals pass; clean hosted qualification of the native
 slice remains pending independently of the preceding OCI source.
 

@@ -340,6 +340,13 @@ clean-source gate refuses the local dirty reports. Full hosted qualification of
 this new source remains the next action. Non-Rust coverage and release-security
 policy remain open; [OPS-12](OPS-12.md) owns the exact boundary.
 
+The first native source runs on `c535d4f4` were deliberately cancelled after a
+focused test reproduced a Windows CRLF lockfile-reader defect. The reader now
+normalizes line endings; the lockfile and required versions remain unchanged.
+All 26 CI-tooling tests pass. The next action is exact-source full CI and a
+nonpublishing release rerun, followed by independent expanded-inventory checks;
+cancelled run reports cannot qualify the correction.
+
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
 - [x] CNSL-5: Console theme and everyday usability — delivered

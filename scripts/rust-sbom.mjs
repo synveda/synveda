@@ -17,7 +17,7 @@ const criticalPackages = ["cedar-policy", "cedar-policy-core", "sqlx", "sqlx-pos
 // rather than guessing when the locked build changes.
 export function requiredRustPackages(name, version) {
   assert.ok(Object.hasOwn(rustRoots, name), "expected a Rust-bearing artifact");
-  const lock = readFileSync(new URL("../Cargo.lock", import.meta.url), "utf8");
+  const lock = readFileSync(new URL("../Cargo.lock", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const requirements = Object.fromEntries(rustRoots[name].map((root) => [root, version]));
   for (const name of criticalPackages) {
     const versions = lock.split("[[package]]").flatMap((block) => {
