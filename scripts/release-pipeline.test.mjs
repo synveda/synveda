@@ -542,6 +542,11 @@ test("stable publication waits for every expected upload and never includes chec
         },
       );
     invoke();
+    const notes = readFileSync(join(scratch, "release-notes.md"), "utf8");
+    assert.ok(notes.includes(`SYNVEDA_SOURCE_SHA=${source}`));
+    assert.ok(notes.includes(`-SourceSha ${source}`));
+    assert.ok(notes.includes(`https://raw.githubusercontent.com/synveda/synveda/${source}/scripts/install.sh`));
+    assert.ok(!notes.includes("{{source}}"));
     const create = calls.find(
       ([command, args]) => command === "gh" && args[1] === "create",
     )[1];

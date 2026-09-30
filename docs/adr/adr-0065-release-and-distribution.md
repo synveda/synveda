@@ -2,6 +2,7 @@
 
 - **Status**: Accepted; amended thirteen times. The current Docker deployment
   contract is ADR-0102; the native/client artifact decisions below remain.
+  ADR-0132 adds mandatory publisher verification to source installers.
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8, CPR-39, ADPT-9, OPS-12
 - **Deciders**: sujitn
@@ -36,8 +37,9 @@ of client installations is introduced.
 
 Require native architecture, private-storage and extracted installation reports
 for each Windows candidate. Checksums alone remain integrity evidence; publisher
-attestation enforcement and OS signing are separate. These candidate files do
-not change published v0.4.0 or establish native vendor trust/loading.
+attestation enforcement is now specified by ADR-0132; OS signing is separate.
+These candidate files do not change published v0.4.0 or establish native vendor
+trust/loading.
 
 ## Amendment 12 (2026-09-21): private runtimes and Unix client archives
 
@@ -59,7 +61,8 @@ credentials, spools, deployment state and vendor configuration. Refuse unowned
 or modified destinations; serialize installer mutations with an exclusive lock
 directory, retaining an interrupted lock for explicit inspection. A user-local
 CLI launcher is the default; installation never requires sudo or edits PATH.
-Checksums establish integrity; publisher-attestation enforcement remains open.
+Checksums establish integrity; ADR-0132 adds publisher-attestation enforcement
+before source installers execute downloaded code.
 
 Native release jobs build and exercise macOS/Linux x86_64 and arm64 candidates.
 Their extracted-artifact checks must execute the pinned runtime and installed

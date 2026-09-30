@@ -293,6 +293,20 @@ cross-process entity invalidation bus is not presumed necessary.
 
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open
+
+OPS-12 / ADR-0132 now requires source installers to verify the signed checksum
+inventory with a trusted GitHub CLI, fixed publisher/workflow/tag/runner policy
+and expected source commit before remote code execution. Forty focused tests
+pass. GitHub CLI 2.100.0 verified the published v0.4.3 inventory on macOS arm64,
+rejected a wrong tag, wrong commit and corrupted inventory, and the source
+bootstrap installed its published native client through HTTPS and a signed
+local mirror. A wrong-commit reinstall retained the installed manifest.
+This does not change published tag-bound installers. Native Windows verifier
+policy is a required next-candidate report check but has not run locally; next
+run native Windows and all six archive jobs before publishing this contract.
+Complete artifact SBOMs, vulnerability policy, OS signing and real
+issuer/harness acceptance remain open.
+
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
 - [x] CNSL-5: Console theme and everyday usability — delivered

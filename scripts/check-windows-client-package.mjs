@@ -89,13 +89,58 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
   ]);
   checks.push("native-windows-private-storage-interoperability");
 
-  function refuse(commandArgs = args, diagnostic) {
-    const child = spawnSync(ps, commandArgs, { encoding: "utf8", timeout: 120000, env: installEnv });
+  function refuse(commandArgs = args, diagnostic, commandEnv = installEnv) {
+    const child = spawnSync(ps, commandArgs, { encoding: "utf8", timeout: 120000, env: commandEnv });
     assert.ifError(child.error);
     assert.notEqual(child.status, 0, child.stdout);
     if (diagnostic) assert.match(child.stderr + child.stdout, diagnostic);
   }
   const selection = readFileSync(join(home, "client/current.json"));
+  // Test the bootstrap's verifier policy on native Windows. This executable
+  // records argv and a controlled failure; it does not verify cryptography.
+  const tools = join(scratch, "verifier tools");
+  mkdirSync(tools);
+  const verifier = join(tools, "gh.exe");
+  run(ps, ["-NoProfile", "-NonInteractive", "-Command", `
+$ErrorActionPreference = 'Stop'
+Add-Type -OutputType ConsoleApplication -OutputAssembly $env:SYNVEDA_TEST_VERIFIER -TypeDefinition @'
+using System;
+using System.IO;
+public class VerifierFixture {
+    public static int Main(string[] args) {
+        File.WriteAllLines(Environment.GetEnvironmentVariable("SYNVEDA_TEST_VERIFIER_LOG"), args);
+        return Int32.Parse(Environment.GetEnvironmentVariable("SYNVEDA_TEST_VERIFIER_STATUS"));
+    }
+}
+'@
+`], { env: { ...env, SYNVEDA_TEST_VERIFIER: verifier } });
+  const verifierLog = join(scratch, "verifier-args.txt");
+  const signedEnv = { ...installEnv, PATH: `${tools};${installEnv.PATH}`,
+    SYNVEDA_TEST_VERIFIER_LOG: verifierLog, SYNVEDA_TEST_VERIFIER_STATUS: "1" };
+  const signedArgs = [...args, "-SourceSha", manifest.source_sha];
+  writeFileSync(join(assets, "SHA256SUMS.sigstore.json"), "fixture bundle\n");
+  refuse(signedArgs, /Release publisher verification failed/, signedEnv);
+  assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
+  const verifierArgs = readFileSync(verifierLog, "utf8").trim().split(/\r?\n/);
+  assert.deepEqual(verifierArgs.slice(0, 2), ["attestation", "verify"]);
+  assert.match(verifierArgs[2], /[\\/]SHA256SUMS$/);
+  assert.equal(verifierArgs[3], "--bundle");
+  assert.equal(verifierArgs[4], `${verifierArgs[2]}.sigstore.json`);
+  assert.deepEqual(verifierArgs.slice(5), ["--hostname", "github.com", "--repo", "synveda/synveda",
+    "--signer-workflow", "synveda/synveda/.github/workflows/release.yml", "--source-ref", `refs/tags/v${version}`,
+    "--source-digest", manifest.source_sha, "--cert-oidc-issuer", "https://token.actions.githubusercontent.com",
+    "--predicate-type", "https://slsa.dev/provenance/v1", "--deny-self-hosted-runners"]);
+  signedEnv.SYNVEDA_TEST_VERIFIER_STATUS = "0";
+  run(ps, signedArgs, { env: signedEnv });
+  assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
+  refuse([...args, "-SourceSha", "g".repeat(40)], /40-character lowercase Git commit/);
+  refuse(signedArgs, /trusted GitHub CLI/);
+  const remoteArgs = args.map((value) => value === pathToFileURL(assets).href ? "https://mirror.example/assets" : value);
+  refuse(remoteArgs, /requires SourceSha/);
+  const httpArgs = args.map((value) => value === pathToFileURL(assets).href ? "http://mirror.example/assets" : value);
+  refuse(httpArgs, /HTTPS release URL/);
+  assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
+  checks.push("publisher-policy-and-pre-execution-refusal");
   writeFileSync(join(assets, "SHA256SUMS"), checksum + checksum);
   refuse(args, /Client archive checksum missing, duplicate or mismatched/);
   assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);

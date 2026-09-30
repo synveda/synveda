@@ -3,6 +3,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Version,
+    [string]$SourceSha = "",
     [string]$BaseUrl = "https://github.com/synveda/synveda/releases/download/v$Version",
     [string]$InstallRoot = "$env:LOCALAPPDATA\SynvedaClient",
     [string]$BinDirectory = ""
@@ -11,6 +12,19 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows is required' }
 if ($Version.Length -gt 63 -or $Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') { throw 'Invalid release version' }
+if ($SourceSha -ne '' -and $SourceSha -cnotmatch '^[0-9a-f]{40}$') { throw 'SourceSha must be a 40-character lowercase Git commit' }
+$baseUri = [Uri]$BaseUrl
+$localCandidate = $baseUri.IsAbsoluteUri -and $BaseUrl.StartsWith('file:///') -and -not $baseUri.IsUnc -and $baseUri.Authority -eq ''
+if (-not $localCandidate -and (-not $baseUri.IsAbsoluteUri -or $baseUri.Scheme -ne 'https' -or $baseUri.UserInfo -ne '' -or $baseUri.Fragment -ne '')) {
+    throw 'Use an HTTPS release URL or an absolute local file:/// candidate directory'
+}
+$verifyPublisher = -not $localCandidate -or $SourceSha -ne ''
+$verifier = $null
+if ($verifyPublisher) {
+    if ($SourceSha -eq '') { throw 'Remote installation requires SourceSha from the reviewed release record' }
+    $verifier = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -eq $verifier) { throw 'A trusted GitHub CLI (gh) is required to verify the release publisher' }
+}
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $trusted = @($sid, 'S-1-5-18', 'S-1-5-32-544')
 $trustedInstaller = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
@@ -155,6 +169,41 @@ function Assert-Pe([string]$Path, [int]$Machine) {
     } finally { $reader.Dispose(); $stream.Dispose() }
 }
 
+function Verify-Publisher([string]$Checksums, [string]$Bundle) {
+    $arguments = @('attestation', 'verify', $Checksums, '--bundle', $Bundle,
+        '--hostname', 'github.com', '--repo', 'synveda/synveda',
+        '--signer-workflow', 'synveda/synveda/.github/workflows/release.yml',
+        '--source-ref', "refs/tags/v$Version", '--source-digest', $SourceSha,
+        '--cert-oidc-issuer', 'https://token.actions.githubusercontent.com',
+        '--predicate-type', 'https://slsa.dev/provenance/v1', '--deny-self-hosted-runners')
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo.FileName = $verifier.Source
+    # Private ancestry checks exclude quotes; filenames and policy arguments
+    # have no trailing backslash. No shell interprets these quoted arguments.
+    $process.StartInfo.Arguments = ($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $started = $false
+    try {
+        $started = $process.Start()
+        if (-not $started) { throw 'Could not start the release publisher verifier' }
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(120000)) {
+            $process.Kill()
+            $process.WaitForExit()
+            throw 'Release publisher verification exceeded 120 seconds; installation stopped'
+        }
+        $stdout.GetAwaiter().GetResult() | Out-Null
+        $stderr.GetAwaiter().GetResult() | Out-Null
+        if ($process.ExitCode -ne 0) { throw 'Release publisher verification failed; installation stopped' }
+    } finally {
+        if ($started -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        $process.Dispose()
+    }
+}
+
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.Net.Http
 $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
@@ -175,6 +224,14 @@ try {
     $archive = Join-Path $scratch $asset
     $checksums = Join-Path $scratch 'SHA256SUMS'
     Download ($BaseUrl.TrimEnd('/') + '/SHA256SUMS') $checksums 1048576
+    if ($verifyPublisher) {
+        $bundle = Join-Path $scratch 'SHA256SUMS.sigstore.json'
+        Download ($BaseUrl.TrimEnd('/') + '/SHA256SUMS.sigstore.json') $bundle 4194304
+        Verify-Publisher $checksums $bundle
+        Write-Output "Release publisher verified for v$Version at $SourceSha."
+    } else {
+        Write-Output 'Local development candidate: publisher identity was not verified; checksums validate local bytes only.'
+    }
     Download ($BaseUrl.TrimEnd('/') + '/' + $asset) $archive 268435456
     $checksumLines = @([System.IO.File]::ReadAllLines($checksums) | Where-Object { $_ -cmatch ('^[0-9a-fA-F]{64} [ *]' + [Regex]::Escape($asset) + '$') })
     if ($checksumLines.Count -ne 1 -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ine $checksumLines[0].Substring(0, 64)) { throw 'Client archive checksum missing, duplicate or mismatched' }

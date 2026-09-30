@@ -303,10 +303,17 @@ before extracting it. A checksum from an unauthenticated download does not
 establish publisher identity. Failed or absent attestation is not permission to
 skip verification. GitHub documents [attestation verification](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
-The current installer does not yet enforce this new attestation boundary;
-integrating verification without imposing GitHub CLI or Docker on client-only
-installation remains open. Do not advertise this source installer as an
-authenticated consumer installer. Artifact authentication also does not prove
+The current source installers enforce this boundary under
+[ADR-0132](adr/adr-0132-verify-publisher-before-installing-release-code.md): remote
+installs require a trusted GitHub CLI and an expected source commit, with fixed
+publisher/workflow/tag/runner policy and no checksum-only fallback. Unix uses
+curl for HTTPS redirects. Future release notes render the source commit and
+fetch the inspected bootstrap by that commit. An absolute local asset directory
+without an expected commit remains a clearly labelled development candidate;
+it is not publisher verification. Native Windows and six-platform archive
+qualification are required before publishing this installer contract. The
+published v0.4.3 tag-bound scripts still require the manual verification above.
+Artifact authentication also does not prove
 OS code signing, absence of vulnerabilities or safe data migration. An owner
 incident response must revoke publishing access, identify affected immutable
 digests/tags and publish a reviewed replacement; never silently replace bytes.

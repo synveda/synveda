@@ -28,7 +28,7 @@ try {
   const tools = join(scratch, "tools");
   mkdirSync(tools);
   // GNU tar invokes gzip as a separate program when extracting .tar.gz files.
-  for (const tool of ["sh", "uname", "curl", "tar", "gzip", "awk", "grep", "cut", "mktemp", "rm", "shasum"]) {
+  for (const tool of ["sh", "uname", "curl", "tar", "gzip", "awk", "grep", "cut", "mktemp", "rm", "shasum", "wc"]) {
     const executable = run("/bin/sh", ["-c", `command -v ${tool}`]).trim();
     symlinkSync(executable, join(tools, tool));
   }

@@ -205,6 +205,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.met
     if (windows) console.log(`Native CLI for hooks: ${join(result.current, cliPath)}\nSet SYNVEDA_CLI to this absolute executable. Login with --gateway URL --profile NAME. Windows setup/vendor registration remains manual.`);
     else console.log(`Next: synveda login --gateway URL --profile NAME; then synveda setup --profile NAME.`);
     console.log("Harness registration, observation consent and vendor trust remain explicit. No deployment was downloaded or started.");
-    console.log("Checksums verify integrity; this installer does not enforce publisher attestations. The Synveda CLI has no publisher OS signature/notarization.");
+    console.log("Installed file hashes verify integrity. The Synveda CLI has no OS code signature or notarization.");
   } catch (error) { console.error(`install: ${error.message}`); process.exitCode = 1; }
 }

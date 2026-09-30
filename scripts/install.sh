@@ -10,7 +10,7 @@
 #
 # POSIX sh on purpose — this is the one file that runs before anything of
 # ours does, on a machine we know nothing about, so it uses no bashism and
-# nothing outside coreutils, tar, and curl or wget.
+# coreutils, tar, curl, and a trusted GitHub CLI for signed releases.
 #
 # What it writes, and nothing else:
 #
@@ -45,9 +45,13 @@
 #                     script itself rather than a copy of what it does.
 #                     Requires SYNVEDA_VERSION, since there is no release to
 #                     ask which one is latest.
+#   SYNVEDA_SOURCE_SHA  expected 40-character release source commit. Required
+#                     for remote assets; also enables publisher verification
+#                     for a signed release in a local asset directory.
+#                     Local assets without it are development candidates only.
 set -eu
 
-REPO="${SYNVEDA_REPO:-synveda/synveda}"
+REPO="synveda/synveda"
 HOME_DIR="${SYNVEDA_HOME:-$HOME/.synveda}"
 BIN_DIR="${SYNVEDA_BIN:-/usr/local/bin}"
 INSTALL_MODE="${SYNVEDA_INSTALL_MODE:-reference}"
@@ -56,6 +60,15 @@ bin_dir_explicit=no
 say()  { printf '%s\n' "$*"; }
 step() { printf '==> %s\n' "$*"; }
 die()  { printf 'install: %s\n' "$*" >&2; exit 1; }
+
+[ "${SYNVEDA_REPO:-$REPO}" = "$REPO" ] || die "release publisher must be synveda/synveda"
+SOURCE_SHA="${SYNVEDA_SOURCE_SHA:-}"
+if [ -n "$SOURCE_SHA" ]; then
+  [ "${#SOURCE_SHA}" -eq 40 ] || die "SYNVEDA_SOURCE_SHA must be a 40-character lowercase Git commit"
+  case "$SOURCE_SHA" in
+    *[!0-9a-f]*) die "SYNVEDA_SOURCE_SHA must be a 40-character lowercase Git commit" ;;
+  esac
+fi
 
 case "$INSTALL_MODE" in
   reference) ;;
@@ -178,15 +191,14 @@ if [ "$os" = "Linux" ] && [ ! -e /lib/x86_64-linux-gnu/libc.so.6 ] \
   Build from source, or run the product image and point a CLI at its gateway."
 fi
 
-if command -v curl >/dev/null 2>&1; then
-  fetch() { curl -fsSL "$1" -o "$2"; }
-  fetch_stdout() { curl -fsSL "$1"; }
-elif command -v wget >/dev/null 2>&1; then
-  fetch() { wget -qO "$2" "$1"; }
-  fetch_stdout() { wget -qO- "$1"; }
-else
-  die "neither curl nor wget is on PATH"
-fi
+command -v curl >/dev/null 2>&1 || die "curl is required for assets and verified HTTPS redirects"
+fetch() {
+  curl -q -fsSL --proto '=https,file' --proto-redir '=https' \
+    --connect-timeout 20 --max-time 120 --max-filesize "${3:-268435456}" "$1" -o "$2"
+}
+fetch_stdout() {
+  curl -q -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 120 "$1"
+}
 
 command -v tar >/dev/null 2>&1 || die "tar is not on PATH"
 
@@ -205,15 +217,84 @@ fi
 # Assets are named by the normalized plain version; GitHub tags retain one
 # canonical leading `v`.
 base="${SYNVEDA_BASE_URL:-https://github.com/$REPO/releases/download/$version}"
+case "$base" in
+  file:///*) local_candidate=yes ;;
+  https://*)
+    authority=${base#https://}
+    authority=${authority%%/*}
+    case "$authority" in ''|*@*) die "release URL must name an HTTPS host without credentials" ;; esac
+    local_candidate=no
+    ;;
+  *) die "use an HTTPS release URL or an absolute local file:/// candidate directory" ;;
+esac
+verify_publisher=yes
+if [ "$local_candidate" = yes ] && [ -z "$SOURCE_SHA" ]; then
+  verify_publisher=no
+elif [ -z "$SOURCE_SHA" ]; then
+  die "remote installation requires SYNVEDA_SOURCE_SHA from the reviewed release record"
+fi
+if [ "$verify_publisher" = yes ]; then
+  command -v gh >/dev/null 2>&1 || die "a trusted GitHub CLI (gh) is required to verify the release publisher"
+fi
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT INT TERM
+verifier_pid=""
+watchdog_pid=""
+cleanup() {
+  if [ -n "$verifier_pid" ]; then
+    kill -KILL "$verifier_pid" 2>/dev/null || true
+    wait "$verifier_pid" 2>/dev/null || true
+  fi
+  if [ -n "$watchdog_pid" ]; then
+    kill "$watchdog_pid" 2>/dev/null || true
+    wait "$watchdog_pid" 2>/dev/null || true
+  fi
+  rm -rf "$work"
+}
+trap cleanup EXIT
+trap 'exit 1' INT TERM
+
+fetch "$base/SHA256SUMS" "$work/SHA256SUMS" 1048576 || die "release has no readable SHA256SUMS"
+[ "$(wc -c < "$work/SHA256SUMS")" -le 1048576 ] || die "checksum inventory exceeds its size bound"
+if [ "$verify_publisher" = yes ]; then
+  fetch "$base/SHA256SUMS.sigstore.json" "$work/SHA256SUMS.sigstore.json" 4194304 || die "release has no readable publisher attestation"
+  [ "$(wc -c < "$work/SHA256SUMS.sigstore.json")" -le 4194304 ] || die "publisher attestation exceeds its size bound"
+  step "verifying release publisher, tag and source commit"
+  gh attestation verify "$work/SHA256SUMS" --bundle "$work/SHA256SUMS.sigstore.json" \
+    --hostname github.com --repo "$REPO" \
+    --signer-workflow "$REPO/.github/workflows/release.yml" \
+    --source-ref "refs/tags/$version" --source-digest "$SOURCE_SHA" \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners &
+  verifier_pid=$!
+  # POSIX hosts do not share a timeout utility. Keep the timer's own child
+  # cancellable so successful verification does not leave a sleeping process.
+  (
+    timer_pid=""
+    trap 'if [ -n "$timer_pid" ]; then kill "$timer_pid" 2>/dev/null || true; wait "$timer_pid" 2>/dev/null || true; fi; exit' TERM INT
+    sleep 120 &
+    timer_pid=$!
+    # A failed timer also closes verification rather than leaving it unbounded.
+    wait "$timer_pid" || true
+    kill -KILL "$verifier_pid" 2>/dev/null || true
+  ) &
+  watchdog_pid=$!
+  verification_status=0
+  wait "$verifier_pid" || verification_status=$?
+  verifier_pid=""
+  kill "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+  watchdog_pid=""
+  [ "$verification_status" -eq 0 ] || die "release publisher verification failed or exceeded 120 seconds; installation stopped"
+  say "Release publisher verified for $version at $SOURCE_SHA."
+else
+  say "Local development candidate: publisher identity was not verified; checksums validate local bytes only."
+fi
 
 if [ "$INSTALL_MODE" = client ]; then
   archive="synveda-client-$plain-$target.tar.gz"
   step "downloading client $version ($target)"
   fetch "$base/$archive" "$work/$archive" || die "no client asset $archive in release $version"
-  fetch "$base/SHA256SUMS" "$work/SHA256SUMS" || die "release has no readable SHA256SUMS"
   want="$(awk -v asset="$archive" '$2 == asset { count += 1; digest = $1 } END { if (count != 1) exit 1; print digest }' "$work/SHA256SUMS")" ||
     die "$archive must appear exactly once in SHA256SUMS"
   printf '%s\n' "$want" | grep -Eq '^[0-9a-f]{64}$' || die "invalid client checksum"
@@ -261,12 +342,9 @@ fetch "$base/$plugin"  "$work/$plugin"  || die "no asset $plugin in release $ver
 
 # ── Checksums ────────────────────────────────────────────────────────────
 #
-# These binaries are unsigned (decision 8), so this proves the download
-# arrived intact and does *not* prove who built it. Said plainly at the end
-# rather than implied by a checkmark here.
+# Publisher verification covers this inventory. Unique checksum entries bind
+# each downloaded archive before extraction; OS code signing is separate.
 step "verifying checksums"
-fetch "$base/SHA256SUMS" "$work/SHA256SUMS" 2>/dev/null ||
-  die "release $version has no readable SHA256SUMS"
 if command -v sha256sum >/dev/null 2>&1; then
   checksum() { sha256sum "$1" | cut -d' ' -f1; }
 elif command -v shasum >/dev/null 2>&1; then

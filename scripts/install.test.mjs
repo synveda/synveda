@@ -112,6 +112,7 @@ function installEnv(scratch, assets, releaseVersion = version) {
       SYNVEDA_BIN: bin,
       SYNVEDA_HOME: home,
       SYNVEDA_VERSION: releaseVersion,
+      SYNVEDA_SOURCE_SHA: "",
     },
   };
 }
@@ -493,4 +494,23 @@ test("installer requires the published checksum inventory before mutation", (t) 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /has no readable SHA256SUMS/);
   assert.equal(existsSync(fixture.home), false);
+});
+
+test("reference installation cannot extract code after publisher rejection", (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-install-publisher-"));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const assets = buildAssets(scratch);
+  const fixture = installEnv(scratch, assets);
+  const tools = join(scratch, "tools");
+  mkdirSync(tools);
+  writeFileSync(join(tools, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  writeFileSync(join(assets, "SHA256SUMS.sigstore.json"), "fixture bundle\n");
+  const result = spawnSync("/bin/sh", [installer], {
+    cwd: root, encoding: "utf8", env: { ...fixture.env,
+      PATH: `${tools}:${process.env.PATH}`, SYNVEDA_SOURCE_SHA: sourceSha },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /release publisher verification failed/);
+  assert.equal(existsSync(fixture.home), false);
+  assert.equal(existsSync(fixture.bin), false);
 });

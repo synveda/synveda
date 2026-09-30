@@ -312,7 +312,8 @@ preserves earlier releases, deployment data, credentials, spools and vendor
 configuration. Unowned or modified files fail closed. The CLI discovers the
 client marketplace first and refuses a damaged client link instead of selecting
 a historical plugin. An interrupted installer lock requires inspection; automatic
-client artifact removal and publisher-attestation enforcement remain open.
+client artifact removal remains open. ADR-0132 adds publisher-attestation
+enforcement to the current source bootstrap, with qualification recorded below.
 
 The extracted candidate passed on macOS arm64 using a source debug CLI and the
 official pinned Node archive. It used a private home containing spaces,
@@ -573,8 +574,8 @@ refuse on non-Unix hosts. Native Windows/MSVC remains unavailable locally; the
 macOS PowerShell runtime provides syntax checks only.
 Keep Codex/Copilot registration and hook trust manual until their native installer
 contracts have their own reviewed implementation and execution evidence. Installer
-attestation enforcement and Homebrew/WinGet remain unimplemented; configuration
-of GitHub attestations alone does not authenticate the current shell installer.
+attestation enforcement now follows ADR-0132 in the source bootstrap; its
+next-release platform qualification and Homebrew/WinGet remain open.
 
 The FND-1 / OPS-8 pipeline refactor now shares all six native archive jobs between
 CI and Release and executes the credential-refresh/platform tests against each
@@ -683,7 +684,53 @@ retained. Release CI runs the same gate on both native architectures and require
 its checksummed reports. The first hosted dry run stopped before consumer
 qualification because AMD64 Docker failed; the final hosted run completed it
 on both native architectures. Next OPS-12 work is artifact-based real
-issuer/harness acceptance, installer attestation enforcement, OS
+issuer/harness acceptance, installer attestation qualification, OS
 signing/notarization and a supported platform/version policy. Future releases
 still require exact-source main CI, owner settings and version coordination.
 Do not reuse an unrelated deployment or replace published artifacts.
+
+### Publisher verification source increment (2026-09-30)
+
+[ADR-0132](../adr/adr-0132-verify-publisher-before-installing-release-code.md)
+requires the Unix/Windows source installers to authenticate `SHA256SUMS` before
+fetching or executing release code. Remote assets require a trusted GitHub CLI
+and an expected source commit; repository, release workflow, canonical tag,
+OIDC issuer, SLSA predicate and GitHub-hosted runner policy are fixed. HTTPS
+mirrors retain that identity policy. Missing proof, an unavailable verifier or
+failed verification stops the install. Inventory/bundle size and verification
+time are bounded. Local unsigned candidates are explicitly labelled and have
+no publisher claim. Future release notes render the exact commit and fetch the
+inspected bootstrap script by commit. Published v0.4.3 scripts are unchanged.
+
+Forty focused installer/release tests pass, including strict verifier argv,
+proof-before-code ordering, missing/oversized proof, wrong input policy,
+deadline termination and preservation of the existing client on rejection.
+These invocation stubs do not prove cryptography. A separate real GitHub CLI
+2.100.0 run on macOS arm64 verified the anonymously downloaded v0.4.3 inventory
+for source `2acc66f02625727b2ccdfe223358468bf10eef85`, rejected a wrong tag,
+wrong source and a corrupted inventory, then the source bootstrap installed
+the published macOS arm64 client through both a signed local directory and
+HTTPS. The client archive SHA-256 was
+`d7af41276ba43cea299e318ade0a01a0f058606fde5b8498e2b7708274a513e0`;
+the installed CLI reported `synveda 0.4.3`. A second remote attempt with the
+wrong source failed and retained the installed manifest. All proof directories
+were invocation-owned and removed; no deployment, account, tag or release
+was created or changed.
+
+The Windows candidate gate now tests strict verifier arguments and rejection
+before code execution through a fixture executable, and release assembly
+requires its `publisher-policy-and-pre-execution-refusal` report check.
+Native Windows/MSVC is unavailable locally, so this check is implemented but
+unrun; it is not Windows acceptance. Next run that gate on native x64/ARM64 and
+all six archive jobs before a separately authorized release. Bootstrap inspection,
+complete archive/chart SBOMs, vulnerability remediation/exception policy,
+publisher incident/revocation procedure, OS signing and published real
+issuer/harness acceptance remain open. GitHub CLI may refresh its trusted roots;
+no air-gap qualification is claimed.
+
+Validation also passed `make check-fast check-ci`, `make chart-lint`, shell
+syntax, Rust formatting and diff checks. Every `make check-deploy` component
+passed: its initial aggregate stopped when the sandbox denied the evaluation
+fixture's localhost bind; all 44 deployment-convergence tests passed when
+rerun with socket access, and the remaining uninstall/convergence/chart checks
+completed. No live Docker deployment was part of this validation.

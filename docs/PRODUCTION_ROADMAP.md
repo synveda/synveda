@@ -42,6 +42,12 @@ an open gate, not a pass.
 | Measured capacity and search | [EVAL-6](backlog/EVAL-6.md): mixed public-API workload, noisy-neighbour/fault tests, 24-hour soak, p50/p95/p99, lag and storage growth. [CTX-7](backlog/CTX-7.md) must pass for any dense-search performance promise; a narrower lexical-first contract can be qualified separately. |
 | Release and client support | [OPS-9](backlog/OPS-9.md), [OPS-12](backlog/OPS-12.md) and [CPR-45](backlog/CPR-45.md): independent HTTPS installation, supported-client use from released archives, verified artifact identity/SBOM and a published support/update/security-response window. [ADPT-4](backlog/ADPT-4.md) publishes its explicitly bounded SDK slice if offered. |
 
+[ADR-0132](adr/adr-0132-verify-publisher-before-installing-release-code.md) adds
+source-installer publisher verification for the release gate: remote installs
+require the attested inventory, fixed release workflow/tag and expected commit
+before code execution. Native Windows and next-release archive qualification,
+complete artifact SBOMs and vulnerability policy remain open under OPS-12/OPS-8.
+
 The first implementation sequence is: establish the supported deployment and
 upgrade contract; choose backup destination, retention, encryption/key custody
 and recovery objectives; implement and drill OPS-5; prove an OPS-6 release pair;

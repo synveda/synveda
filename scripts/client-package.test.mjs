@@ -136,7 +136,7 @@ function shellFixture(t) {
   };
   pack();
   const env = { ...process.env, HOME: dirnameForHome(f.home), SYNVEDA_HOME: f.home, SYNVEDA_BIN: f.bin,
-    SYNVEDA_VERSION: version, SYNVEDA_INSTALL_MODE: "client", SYNVEDA_BASE_URL: `file://${assets}` };
+    SYNVEDA_VERSION: version, SYNVEDA_INSTALL_MODE: "client", SYNVEDA_BASE_URL: `file://${assets}`, SYNVEDA_SOURCE_SHA: "" };
   return { ...f, assets, name, pack, env, run: () => spawnSync("/bin/sh", [join(root, "scripts/install.sh")], { env, encoding: "utf8" }) };
 }
 function dirnameForHome(path) { return resolve(path, ".."); }
@@ -147,9 +147,135 @@ test("shell client mode downloads only its archive and checksums", (t) => {
   writeFileSync(join(f.home, "profile/retained"), "unrelated retained deployment");
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Local development candidate: publisher identity was not verified/);
   assert.match(result.stdout, /No deployment was downloaded or started/);
   assert.equal(existsSync(join(f.home, "reference")), false);
   assert.equal(readFileSync(join(f.home, "profile/retained"), "utf8"), "unrelated retained deployment");
+});
+
+function signedShellFixture(t) {
+  const f = shellFixture(t);
+  const tools = join(f.scratch, "tools");
+  mkdirSync(tools);
+  const downloads = join(f.scratch, "downloads");
+  const verification = join(f.scratch, "verification");
+  // These stubs test invocation policy and ordering, not Sigstore cryptography.
+  // Published-bundle verification is a separate live acceptance check.
+  writeFileSync(join(f.assets, "SHA256SUMS.sigstore.json"), "fixture bundle\n");
+  writeFileSync(join(tools, "curl"), `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) output=$2; shift ;;
+    https://*) url=$1 ;;
+  esac
+  shift
+done
+asset=\${url##*/}
+printf '%s\\n' "$asset" >> "$FAKE_DOWNLOAD_LOG"
+exec /bin/cp "$FAKE_ASSETS/$asset" "$output"
+`);
+  writeFileSync(join(tools, "gh"), `#!/bin/sh
+printf '%s\\n' "$@" > "$FAKE_VERIFICATION_LOG"
+exit "\${FAKE_VERIFICATION_STATUS:-0}"
+`);
+  for (const tool of ["curl", "gh"]) chmodSync(join(tools, tool), 0o755);
+  Object.assign(f.env, { PATH: `${tools}:${process.env.PATH}`, SYNVEDA_BASE_URL: "https://mirror.example/releases/v0.4.0",
+    SYNVEDA_SOURCE_SHA: "1".repeat(40), FAKE_ASSETS: f.assets, FAKE_DOWNLOAD_LOG: downloads, FAKE_VERIFICATION_LOG: verification });
+  return { ...f, tools, downloads, verification };
+}
+
+test("remote client installation pins the publisher, workflow, tag, commit and runner before fetching code", (t) => {
+  const f = signedShellFixture(t);
+  f.env.GH_HOST = "untrusted.example";
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  const args = readFileSync(f.verification, "utf8").trim().split("\n");
+  assert.deepEqual(args.slice(0, 2), ["attestation", "verify"]);
+  assert.match(args[2], /\/SHA256SUMS$/);
+  assert.equal(args[3], "--bundle");
+  assert.equal(args[4], `${args[2]}.sigstore.json`);
+  assert.deepEqual(args.slice(5), ["--hostname", "github.com", "--repo", "synveda/synveda",
+    "--signer-workflow", "synveda/synveda/.github/workflows/release.yml", "--source-ref", "refs/tags/v0.4.0",
+    "--source-digest", "1".repeat(40), "--cert-oidc-issuer", "https://token.actions.githubusercontent.com",
+    "--predicate-type", "https://slsa.dev/provenance/v1", "--deny-self-hosted-runners"]);
+  assert.deepEqual(readFileSync(f.downloads, "utf8").trim().split("\n"), ["SHA256SUMS", "SHA256SUMS.sigstore.json", f.name]);
+});
+
+test("publisher rejection preserves the current client and never downloads archive code", (t) => {
+  const f = signedShellFixture(t);
+  const previous = f.install();
+  const current = readlinkSync(previous.current);
+  f.env.FAKE_VERIFICATION_STATUS = "1";
+  const result = f.run();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /release publisher verification failed/);
+  assert.deepEqual(readFileSync(f.downloads, "utf8").trim().split("\n"), ["SHA256SUMS", "SHA256SUMS.sigstore.json"]);
+  assert.equal(readlinkSync(previous.current), current);
+  assert.equal(validateClient(realpathSync(previous.current)).digest, previous.digest);
+});
+
+test("a missing or oversized attestation stops before archive download", (t) => {
+  const f = signedShellFixture(t);
+  const bundle = join(f.assets, "SHA256SUMS.sigstore.json");
+  rmSync(bundle);
+  assert.match(f.run().stderr, /no readable publisher attestation/);
+  assert.equal(existsSync(f.verification), false);
+  writeFileSync(bundle, Buffer.alloc(4194305));
+  assert.match(f.run().stderr, /publisher attestation exceeds its size bound/);
+  assert.equal(existsSync(f.verification), false);
+  assert.equal(existsSync(f.home), false);
+});
+
+test("remote inputs cannot relax source, publisher or URL policy", (t) => {
+  const f = signedShellFixture(t);
+  for (const [changes, diagnostic] of [
+    [{ SYNVEDA_SOURCE_SHA: "" }, /requires SYNVEDA_SOURCE_SHA/],
+    [{ SYNVEDA_SOURCE_SHA: "1".repeat(39) }, /40-character lowercase Git commit/],
+    [{ SYNVEDA_SOURCE_SHA: "g".repeat(40) }, /40-character lowercase Git commit/],
+    [{ SYNVEDA_REPO: "other/publisher" }, /publisher must be synveda\/synveda/],
+    [{ SYNVEDA_BASE_URL: "http://mirror.example/assets" }, /HTTPS release URL/],
+    [{ SYNVEDA_BASE_URL: "file://remote.example/assets" }, /absolute local file:\/\/\//],
+    [{ SYNVEDA_BASE_URL: "https://user:password@mirror.example/assets" }, /without credentials/],
+  ]) {
+    const result = spawnSync("/bin/sh", [join(root, "scripts/install.sh")], {
+      env: { ...f.env, ...changes }, encoding: "utf8",
+    });
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, diagnostic);
+    assert.equal(existsSync(f.downloads), false);
+    assert.equal(existsSync(f.home), false);
+  }
+});
+
+test("a signed local mirror still requires the verifier; no absence fallback exists", (t) => {
+  const f = signedShellFixture(t);
+  rmSync(join(f.tools, "gh"));
+  for (const tool of ["uname", "tar", "grep"]) {
+    const executable = execFileSync("/bin/sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+    symlinkSync(executable, join(f.tools, tool));
+  }
+  f.env.PATH = f.tools;
+  f.env.SYNVEDA_BASE_URL = `file://${f.assets}`;
+  const result = f.run();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /trusted GitHub CLI/);
+  assert.equal(existsSync(f.downloads), false);
+  assert.equal(existsSync(f.home), false);
+});
+
+test("deadline expiry or timer failure kills a blocked verifier before archive download", (t) => {
+  for (const timerStatus of [0, 1]) {
+    const f = signedShellFixture(t);
+    writeFileSync(join(f.tools, "gh"), "#!/bin/sh\nexec /bin/sleep 30\n");
+    // Advance or fail only the watchdog's timer; production has no override.
+    writeFileSync(join(f.tools, "sleep"), `#!/bin/sh\nexit ${timerStatus}\n`, { mode: 0o755 });
+    const result = spawnSync("/bin/sh", [join(root, "scripts/install.sh")], { env: f.env, encoding: "utf8", timeout: 5000 });
+    assert.ifError(result.error);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /failed or exceeded 120 seconds/);
+    assert.deepEqual(readFileSync(f.downloads, "utf8").trim().split("\n"), ["SHA256SUMS", "SHA256SUMS.sigstore.json"]);
+    assert.equal(existsSync(f.home), false);
+  }
 });
 
 test("shell client mode rejects duplicate and mismatched checksums before mutation", (t) => {
@@ -256,7 +382,7 @@ test("Windows release evidence requires both native ZIP reports and installer re
       checks: ["packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
         "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
         "native-windows-private-storage-interoperability", "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
-        "unsafe-zip-and-overlapping-install-root-refusal"] };
+        "unsafe-zip-and-overlapping-install-root-refusal", "publisher-policy-and-pre-execution-refusal"] };
     const path = join(f.scratch, `synveda-client-report-${target}.json`);
     writeFileSync(path, JSON.stringify(report));
     reports.push({ path, report });

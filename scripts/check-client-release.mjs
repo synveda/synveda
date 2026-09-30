@@ -21,7 +21,7 @@ export function checkClientRelease(directory, version, source, publish, lock) {
     for (const check of ["packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
       "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
       ...(windows ? ["native-windows-private-storage-interoperability", "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
-        "unsafe-zip-and-overlapping-install-root-refusal"]
+        "unsafe-zip-and-overlapping-install-root-refusal", "publisher-policy-and-pre-execution-refusal"]
         : ["codex-extracted-lifecycle-replay", "copilot-cli-extracted-lifecycle-replay"])]) {
       if (!report.checks?.includes(check)) throw new Error(`missing native client check ${check}: ${target}`);
     }

@@ -58,6 +58,7 @@ export function publishRelease(
   const notes = template
     .replaceAll("{{version}}", version)
     .replaceAll("{{tag}}", tag)
+    .replaceAll("{{source}}", source)
     .replaceAll("{{repository}}", repository)
     .replaceAll("{{namespace}}", namespace);
   const notesFile = join(directory, "release-notes.md");

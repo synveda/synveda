@@ -33,7 +33,19 @@ directory, download `scripts/install.ps1` from the same tag, inspect it, then
 run it with `-Version` and `-BaseUrl 'file:///C:/verified-synveda-assets'` pointing
 to those files. Follow the Windows ownership and PowerShell requirements below.
 Neither route requires a compiler, Docker, system Node or registry credentials.
-The installer checks checksums; it does not perform the attestation step for you.
+The tag-bound v0.4.3 installer checks checksums; it does not perform the
+attestation step for you. That published installer remains unchanged.
+
+The current source installer follows
+[ADR-0132](adr/adr-0132-verify-publisher-before-installing-release-code.md).
+Remote installs require a trusted GitHub CLI and `SYNVEDA_SOURCE_SHA` (Unix) or
+`-SourceSha` (Windows), naming the expected 40-character source commit from the
+reviewed release record. It verifies `SHA256SUMS.sigstore.json` against the fixed
+publisher, release workflow, tag and commit before fetching or executing code.
+HTTPS mirrors use the same policy. Missing proof or a failed verifier stops
+installation. Future release notes supply the exact commit and an inspected
+bootstrap script fetched by that commit. This is a source candidate; native
+Windows and all six next-release archive checks remain required.
 
 <a id="client-archive-candidate"></a>
 ## Client archive contents and local candidates
@@ -81,9 +93,12 @@ On Linux, GNU tar also needs the host `gzip` utility to extract the archive.
 `SYNVEDA_HOME` selects another installation root and `SYNVEDA_BIN` an explicit
 CLI directory. No sudo, shell-profile edit or harness configuration happens.
 Paths must be absolute, normalized and free of symbolic-link ancestors.
-Checksums detect corruption; this installer does not yet enforce publisher
-attestations. Published v0.4.0 has no client archive, so do not run this mode
-against its public downloads.
+Without an expected source commit, an absolute local asset directory is a
+development candidate: the installer prints that publisher identity was not
+verified. Supplying `SYNVEDA_SOURCE_SHA` instead requires its signed inventory
+and the same publisher verification as remote assets. Local candidates retain
+checksum and archive validation. Published v0.4.0 has no client archive, so do
+not run this mode against its public downloads.
 
 On native Windows x64 or arm64, use the source PowerShell installer with
 **locally built** ZIPs and `SHA256SUMS`. Inspect the script and use a host whose
