@@ -2226,15 +2226,7 @@ pub(crate) async fn create_context_run(
             &headers,
             "session.context_run",
             &principal_id,
-            &json!({
-                "route": "POST /v1/sessions/{session_id}/context-runs",
-                "session_id": session_id,
-                "query": body.query,
-                "budget_tokens": body.budget_tokens,
-                "tokenizer_encoding": body.tokenizer_encoding,
-                "required_knowledge_revisions": body.required_knowledge_revisions,
-                "max_sensitivity": body.max_sensitivity,
-            }),
+            &context_run_request_identity(session_id, &body),
         )?;
         match crate::idempotency::dispatch(&state.pool, tenant_id, &claim).await? {
             Dispatch::Replay(id) => {
@@ -2290,6 +2282,88 @@ pub(crate) async fn create_context_run(
     }
     .await;
     respond(&state, "context.create", result).await
+}
+
+fn context_run_request_identity(session_id: SessionId, body: &CreateContextRunBody) -> Value {
+    // Keep the v0.4.3 digest when newer options are omitted. A released
+    // idempotency key must still replay after the additive schema upgrade.
+    let mut identity = json!({
+        "route": "POST /v1/sessions/{session_id}/context-runs",
+        "session_id": session_id,
+        "query": body.query,
+        "budget_tokens": body.budget_tokens,
+        "max_sensitivity": body.max_sensitivity,
+    });
+    if body.restart {
+        identity["restart"] = json!(true);
+    }
+    if let Some(encoding) = &body.tokenizer_encoding {
+        identity["tokenizer_encoding"] = json!(encoding);
+    }
+    if !body.required_knowledge_revisions.is_empty() {
+        identity["required_knowledge_revisions"] = json!(body.required_knowledge_revisions);
+    }
+    identity
+}
+
+#[cfg(test)]
+mod context_run_identity_tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn omitted_extensions_keep_the_released_digest_and_changed_extensions_do_not() {
+        let session_id = SessionId::new();
+        let mut headers = HeaderMap::new();
+        headers.insert("idempotency-key", HeaderValue::from_static("released-run"));
+        let legacy = json!({
+            "route": "POST /v1/sessions/{session_id}/context-runs",
+            "session_id": session_id,
+            "query": "reviewed retry",
+            "budget_tokens": 768,
+            "max_sensitivity": null,
+        });
+        let body: CreateContextRunBody = serde_json::from_value(json!({
+            "query": "reviewed retry",
+            "budget_tokens": 768,
+        }))
+        .expect("parse legacy request");
+        let released = Claim::from_headers(&headers, "session.context_run", "reviewer", &legacy)
+            .expect("hash released request");
+        let current = Claim::from_headers(
+            &headers,
+            "session.context_run",
+            "reviewer",
+            &context_run_request_identity(session_id, &body),
+        )
+        .expect("hash current request");
+        assert_eq!(current.digest, released.digest);
+
+        for extension in [
+            json!({"restart": true}),
+            json!({"tokenizer_encoding": "o200k_base"}),
+            json!({"required_knowledge_revisions": [{
+                "item_id": KnowledgeItemId::new(),
+                "revision_id": KnowledgeRevisionId::new(),
+            }]}),
+        ] {
+            let mut changed = json!({"query": "reviewed retry", "budget_tokens": 768});
+            changed
+                .as_object_mut()
+                .expect("request object")
+                .extend(extension.as_object().expect("extension object").clone());
+            let body: CreateContextRunBody =
+                serde_json::from_value(changed).expect("parse extended request");
+            let claim = Claim::from_headers(
+                &headers,
+                "session.context_run",
+                "reviewer",
+                &context_run_request_identity(session_id, &body),
+            )
+            .expect("hash extended request");
+            assert_ne!(claim.digest, released.digest);
+        }
+    }
 }
 
 enum ContextPlanOutcome {

@@ -127,12 +127,35 @@ without resubmitting a changed body under the same idempotency key. Its rebuilt
 browser image replayed the v0.4.3 receipt against the migrated source gateway;
 `product-demo.mjs sample` passed and remained `learning_pending`. The sample's
 complete Skill/approval journey was not seeded before backup, so Skill
-continuity remains open. This is a
+continuity was outside that first drill. This is a
 same-host source-candidate drill, not a published N-1/N pair or off-host PITR.
-Next qualify a fully populated Knowledge/Skill/proposal fixture, recover an in-flight pending login
-from a joint `0003` set, inject migration failures, measure production-shaped
-locks/outage and run the OPS-5 off-host restore before a supported upgrade
-claim.
+
+A second isolated v0.4.3 project completed the full four-person demo: reviewed
+Knowledge, a distinctly approved Skill version and binding, provenance-bound
+context, and a verified audit chain. Its released full-seed browser path exposed
+a loopback-origin assumption that the published `sample` path did not have;
+the candidate acceptance client now passes the configured origin through every
+receipt check. A verified linked recovery set was taken before the source
+candidate applied `0002` and `0003`. The upgraded browser read-only receipt
+check passed. A new CLI rerun initially conflicted on the old context-run
+idempotency key: the new gateway had included omitted optional fields in its
+digest. The candidate gateway now preserves the v0.4.3 digest for omitted
+options and includes non-default restart/tokenizer/required-revision options.
+The rerun then verified the same Knowledge revision, Session-event provenance,
+Skill version and binding, context run, and audit chain through public APIs.
+
+An independent restore into an empty project passed the published binary's
+browser/OIDC/API/logout check. Tenant-scoped read-only transactions under the
+ordinary `synveda_app` role found two Knowledge items, one Skill version, one
+binding, six proposals and one context run in both copies. Audit rows 1–384
+matched by serialized-row checksum and chain hash between the restored and
+migrated databases; each copy appended a different row 385 during its own
+post-backup verification. The source and restore volumes and recovery set are retained,
+with all containers stopped. This remains one macOS/OrbStack source-candidate
+drill, not a published N-1/N pair or off-host PITR. Next recover an in-flight
+pending login from a joint `0003` set, inject migration failures, measure
+production-shaped locks/outage and run the OPS-5 off-host restore before a
+supported upgrade claim.
 
 ## Scope
 

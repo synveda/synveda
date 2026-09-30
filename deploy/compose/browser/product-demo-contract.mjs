@@ -706,9 +706,9 @@ export function validateRetryReviewReceipt(value, expectedState = "seeded", expe
   return true;
 }
 
-export function validateRetryReviewRerun(first, second) {
-  validateRetryReviewReceipt(first, "seeded");
-  validateRetryReviewReceipt(second, "seeded");
+export function validateRetryReviewRerun(first, second, expectedGateway) {
+  validateRetryReviewReceipt(first, "seeded", expectedGateway);
+  validateRetryReviewReceipt(second, "seeded", expectedGateway);
   const {
     description: firstDescription,
     revision: firstRevision,
@@ -744,8 +744,8 @@ export function validateRetryReviewRerun(first, second) {
   return true;
 }
 
-export function validateRetryReviewInspection(value, receipt) {
-  validateRetryReviewReceipt(receipt, "seeded");
+export function validateRetryReviewInspection(value, receipt, expectedGateway) {
+  validateRetryReviewReceipt(receipt, "seeded", expectedGateway);
   if (
     !object(value) ||
     value.synthetic !== true ||
@@ -770,8 +770,8 @@ export function validateRetryReviewProposal(value, id) {
   return true;
 }
 
-export function validateRetryReviewVerification(value, receipt) {
-  validateRetryReviewReceipt(receipt, "binding_pending");
+export function validateRetryReviewVerification(value, receipt, expectedGateway) {
+  validateRetryReviewReceipt(receipt, "binding_pending", expectedGateway);
   const resources = receipt.resources;
   const revision = value?.knowledge?.current_revision;
   const sources = value?.provenance?.sources;
@@ -813,11 +813,11 @@ export function validateRetryReviewVerification(value, receipt) {
   return true;
 }
 
-export function validateRetryReviewStatus(value) {
+export function validateRetryReviewStatus(value, expectedGateway) {
   if (!object(value) || !object(value.receipt) || !object(value.live)) {
     refuse("retry-review-status");
   }
-  validateRetryReviewReceipt(value.receipt, "verified");
+  validateRetryReviewReceipt(value.receipt, "verified", expectedGateway);
   const required = [
     "workspace",
     "project",

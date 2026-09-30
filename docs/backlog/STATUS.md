@@ -150,10 +150,17 @@ proposals remained, but the published sample's cross-version rerun conflicted
 on its fixed Configuration idempotency key. The CPR-45 client now validates and
 reuses recorded Configuration and Sessions; a rebuilt browser image resumed
 the v0.4.3 receipt against the migrated gateway and passed `sample` at
-`learning_pending`. Skill continuity was not exercised.
+`learning_pending`. A second isolated v0.4.3 full-seed fixture passed review,
+distinct Skill approvals, binding, context and audit; it upgraded to `0003`
+and the new CLI verified the same governed addresses. The candidate browser
+fixture now uses the configured loopback origin, and the gateway preserves
+released context-run idempotency digests when new options are omitted. A
+distinct released-binary restore passed browser/API checks. Ordinary-role
+tenant transactions found matching Knowledge/Skill/proposal/context counts,
+and audit rows 1–384 matched by serialized-row checksum and chain hash.
 No published N, off-host PITR, production-shaped outage/lock or injected
-failure is qualified. OPS-6 stays open for those gates and a fully populated
-Skill/approval receipt through the current head; v0.4.0 remains incompatible.
+failure is qualified. OPS-6 stays open for those gates and an in-flight
+`0003` joint restore; v0.4.0 remains incompatible.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 
