@@ -50,6 +50,13 @@ The OIDC verifier now carries the exact configured issuer, bounded optional
 A signed mock-issuer fixture covers changed per-token ID with stable family,
 malformed optional identifiers, redacted debug output and signature tampering.
 It does not prove a Keycloak refresh or enable revocation.
+The local 2026-09-30 live-proof preflight found no running Synveda Keycloak
+container. The source Compose hostname check refused because the shared
+`app.synveda.test`/`auth.synveda.test` block belongs to the retained
+`synveda-development-acceptance-interop` project. Keep that block and its
+state intact. Run the proof on a separate supported host or after its operator
+deliberately hands off the hostnames; verify the real Synveda client, not the
+existing master-realm administrator-token projection.
 The first product slice is self-only inventory/revoke; administrator access
 remains a separately reviewed authority/disclosure change. Entra, Okta and
 other external issuers retain login support but have no revocation promise

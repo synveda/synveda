@@ -338,4 +338,7 @@ values and tampering but is not live Keycloak evidence. No AUTH-6 revocation
 bound or inventory is qualified. Next prove the bundled issuer's signed
 `jti`/stable `sid` and refresh replay behavior, then implement
 the additive index, self-session API and fail-closed request-time lookup before
-enforcement and cross-replica acceptance.
+enforcement and cross-replica acceptance. The local 2026-09-30 preflight has
+no running Synveda Keycloak and the development hostname block belongs to the
+retained `synveda-development-acceptance-interop` project; use a separate
+supported host or a deliberate operator handoff for that live proof.
