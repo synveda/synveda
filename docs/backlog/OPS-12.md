@@ -789,3 +789,31 @@ image notices, complete third-party notice/SBOM review, OS signing,
 publisher incident policy, real issuer/harness acceptance and supported
 platform/version lifecycle remain open. Existing published artifacts and
 deployment state are unchanged.
+
+### Hosted roadmap preflight and contract repair (2026-09-30)
+
+The first full [CI dispatch](https://github.com/synveda/synveda/actions/runs/36737915536)
+on clean source `f4d23f32541279cf2ad4c7cabd43cd2fc4587f6f` passed workspace
+Clippy/Rustdoc, TypeScript and deployment/packaging checks, then failed the
+committed-OpenAPI equality test. CPR-44's removal of retired migration citations
+changed two handler descriptions without regenerating the document. Both that
+run and the [nonpublishing Release dispatch](https://github.com/synveda/synveda/actions/runs/36737957139)
+were cancelled before complete platform qualification. They establish no new
+native archive/image acceptance.
+
+The documented generators refreshed only those descriptions and both SDK
+whole-document digests. Console types regenerated unchanged; routes and schemas
+are unchanged. The six OpenAPI tests, SDK drift check, locked TypeScript compile,
+ten wire tests per SDK and ten installed-archive tests per SDK pass. Both packages
+also passed repeated-build byte equality and exact licence/notice checks.
+`make check-fast check-ci`, Rust formatting and diff checks pass. The pnpm shim
+stalled before running SDK tests; the same locked compiler/test commands were
+run directly. Initial sandboxed wire tests refused loopback sockets; the
+complete rerun with socket access passed. Python package dependencies were
+hash-locked, prepared in an owned temporary wheelhouse and installed offline;
+temporary staging was removed. No Rust implementation or schema changed.
+
+Next rerun full CI and the nonpublishing Release dispatch on the corrected
+clean commit, retain all six native archive reports and both native OCI/Compose/
+Helm reports, then inspect assembly. No tag, signing, registry publication or
+new supported-version claim is authorized by this source qualification.

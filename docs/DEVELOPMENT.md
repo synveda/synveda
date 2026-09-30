@@ -151,14 +151,16 @@ These are separate from a basic first contribution; report exactly which tier ra
 
 ## Generated contracts
 
-After intentionally changing public DTOs or routes:
+After changing public DTOs, routes or their Rustdoc descriptions:
 
 ```sh
 SQLX_OFFLINE=true SYNVEDA_WRITE_OPENAPI=1 cargo test -p synveda-gateway --test openapi
 node scripts/generate-api-types.mjs
 ```
 
-For the SDK slice, follow [its generator/check workflow](../sdks/README.md).
+Handler and schema descriptions are part of the emitted OpenAPI document.
+For the SDK slice, follow [its generator/check workflow](../sdks/README.md),
+including its whole-document digest after a description-only change.
 For changed SQL, install the SQLx CLI matching the workspace's SQLx 0.8 series,
 then regenerate against the wrapper's fresh current database:
 

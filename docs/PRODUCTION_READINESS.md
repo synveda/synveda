@@ -170,6 +170,13 @@ match its report. Exact source, native job and arm64 evidence-bundle identities,
 plus x64 local-file timings, are in [OPS-12](backlog/OPS-12.md).
 Windows deployment, setup/vendor writers and diagnostic logs still refuse.
 
+The first hosted roadmap qualification on `f4d23f32` stopped at generated
+OpenAPI description drift; its CI and Release dispatches were cancelled before
+complete native acceptance. Regeneration and focused local checks pass, but
+all native archives/images still require the corrected-source hosted run.
+[OPS-12](backlog/OPS-12.md) records the exact boundary. The readiness verdict
+and published-artifact claims are unchanged.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.

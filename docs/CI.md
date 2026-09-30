@@ -257,6 +257,19 @@ still ran Docker and took 2h15m18s; the nonpublishing Release drill took
 2h04m56s. These are observed wall times on different commits and runners,
 not a controlled speedup measurement.
 
+## Roadmap source qualification (2026-09-30)
+
+The first full [CI dispatch](https://github.com/synveda/synveda/actions/runs/36737915536)
+on `f4d23f32541279cf2ad4c7cabd43cd2fc4587f6f` failed the committed OpenAPI
+equality test after two handler Rustdoc descriptions changed. Clippy/Rustdoc,
+TypeScript and deployment/packaging checks had passed. CI and the same-source
+[Release dispatch](https://github.com/synveda/synveda/actions/runs/36737957139)
+were then cancelled before complete native qualification. The documented
+generators refreshed those descriptions and the SDK document digests; console
+types, routes and schemas are unchanged. Local OpenAPI, SDK drift/wire/installed
+package and fast/workflow checks pass. Full hosted qualification must be repeated
+on the corrected commit; cancelled runs are not acceptance evidence.
+
 ## Manual owner settings
 
 1. **CI Result** (GitHub Actions) is now required in the active main ruleset.

@@ -318,6 +318,14 @@ image candidates in a nonpublishing release drill. Complete third-party
 notice/SBOM review, published qualification and support-window ownership remain
 open; no earlier release bytes changed.
 
+The first full hosted roadmap attempt on `f4d23f32` found two stale generated
+OpenAPI descriptions after Rustdoc edits. CI and the nonpublishing Release
+drill were stopped before complete native qualification. The repository
+generators now refresh those descriptions and both SDK digest fields; the
+six OpenAPI tests, SDK drift/wire/installed-package checks and fast/workflow
+gates pass locally. Next rerun full CI and Release dispatch on the corrected
+clean commit; the [OPS-12 brief](OPS-12.md) owns the run identities and limits.
+
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
 - [x] CNSL-5: Console theme and everyday usability — delivered
