@@ -93,10 +93,42 @@ recovery set, then publish and qualify the pair. No old binary may serve the
 advanced database; rollback restores the verified recovery set.
 
 The released-byte rehearsal above ended at `0002`, before the OPS-7 login
-ledger existed. It is historical evidence for that prefix, not qualification
-of the current `0003` source head. Repeat its joint data/key/identity and
-rollback checks through `0003`, including pending-login key recovery and
-cross-process completion, before using it for a current-source upgrade claim.
+ledger existed. It is historical evidence for that prefix. On 2026-09-30 a
+second isolated macOS/OrbStack rehearsal used the checksum-matched published
+v0.4.3 reference archive (SHA-256
+`ca95e99e98eab2046a223ba870b7d657591f76762aa4ef6a525eb6942415927a`)
+and its pinned product image, then a local source image
+`sha256:89c56dd8d63072be5d4c8210c615eb7031a81d285f664340c04965853f8e670c`.
+The published public-API sample created one Knowledge item/revision, five
+proposals and 52 audit events. A linked PostgreSQL/Keycloak/key recovery set
+was verified before stopping all old writers. The source image's read-only
+check classified exact head `0001` as upgradeable but unable to serve; after
+the declared database/peer bootstrap refreshed its postmaster witness,
+`0002` and `0003` applied and the source check passed. The published binary
+refused the advanced schema. The current gateway and worker became healthy,
+and the released browser fixture passed OIDC, API, logout and post-logout
+refusal. The current recovery verifier opened the original tenant key and
+refused an unrelated key. A pending login was stored as sealed bytes, survived
+a gateway process restart and was consumed once by an IdP-denial callback.
+
+The untouched pre-upgrade recovery set restored into a distinct empty project:
+the published binary accepted head `0001`, the original key opened, a wrong
+key was refused, and the released browser/OIDC/API/logout check passed.
+The SHA-256 digest of all serialized fields of the original 52 audit rows was
+identical on that restored copy and the migrated source
+(`a6e6b4297dd87f870ab8ef5ce58033421361d2bcee73f54c363be3404171ec7a`).
+The source's read-only `retry-review status` found the original Knowledge,
+capture and pending proposal. Re-running the published sample, however, hit
+an idempotency conflict: its fixed `configuration.create` key carried the
+current template document rather than the document submitted before upgrade.
+The sample's complete Skill/approval journey was not seeded before backup, so
+Skill continuity and a cross-version sample rerun remain open. This is a
+same-host source-candidate drill, not a published N-1/N pair or off-host PITR.
+Next qualify a fully populated Knowledge/Skill/proposal fixture, fix or pin the
+sample's cross-version idempotency contract, recover an in-flight pending login
+from a joint `0003` set, inject migration failures, measure production-shaped
+locks/outage and run the OPS-5 off-host restore before a supported upgrade
+claim.
 
 ## Scope
 

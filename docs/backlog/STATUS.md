@@ -136,24 +136,21 @@ OPS-5 brief owns the exact drill and remaining owner decisions.
 - [ ] [OPS-6: Upgrade and rollback discipline](OPS-6.md) — open
 
 OPS-6 / ADR-0121 now keeps the published v0.4.3 `0001` bytes and adds a
-transactional `0002` for CTX-6/CTX-8, with byte pins and a staged migration
-guard. This is a source candidate; v0.4.0 remains incompatible and there is
-still no qualified published N-1/N pair. A 24-case isolated exact-role epoch
-run proves the published `0001` checksum, tenant retention, staged refusal and
-stamp recovery with source `0002`; the full isolated database suite passes. A
-2026-09-29 disposable released-byte v0.4.3-to-source rehearsal passed linked
-logical database/identity/key backup and fresh restore, old-writer quiescence,
-`0002`, old-binary refusal, candidate gateway/worker/browser acceptance,
-key-open/wrong-key checks and a separate release-binary rollback restore. The
-source candidate shares the 0.4.3 version string; no published N, off-host
-PITR, complete Knowledge/audit-prefix continuity, injected-failure or measured
-maintenance window is qualified. Next run those gates with representative data
-and the OPS-5 recovery set before a supported upgrade claim. OPS-7 now appends
-`0003` for one-time login state. The full disposable exact-role database suite
-now passes at `0003`, including serial authority and 25 epoch cases; it found
-and corrected one stale migration-count assertion. The earlier released-byte
-rehearsal stopped at `0002` and must be repeated through this new head before
-it can support a claim about the current source candidate.
+transactional `0002` for CTX-6/CTX-8; OPS-7 appends `0003` for sealed one-time
+login state. Byte pins, exact-prefix guards and the full disposable exact-role
+database suite pass at `0003`, including all 25 epoch cases. A 2026-09-30
+isolated released-byte v0.4.3-to-source rehearsal passed linked logical
+database/identity/key backup, old-writer quiescence, read-only old-head
+preflight, `0002`/`0003`, old-binary refusal, source gateway/worker/browser
+acceptance and wrong-key refusal. A parked login survived a gateway restart
+and was consumed once. A distinct rollback restore passed the published
+binary, original key and browser checks; every field of the original 52 audit
+rows matched the migrated copy by SHA-256. One Knowledge item and five
+proposals remained, but the published sample's cross-version rerun conflicted
+on its fixed Configuration idempotency key; Skill continuity was not exercised.
+No published N, off-host PITR, production-shaped outage/lock or injected
+failure is qualified. OPS-6 stays open for those gates and a fully populated
+client receipt through the current head; v0.4.0 remains incompatible.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 
