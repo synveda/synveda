@@ -373,6 +373,14 @@ async fn expired_console_sessions_are_purged_in_bounded_batches() {
     .await
     .expect("count retained expired sessions");
     assert_eq!(remaining, 1);
+    let oldest_age = synveda_store::console_sessions::oldest_expired_age_seconds(&pool)
+        .await
+        .expect("observe oldest expired custody row")
+        .expect("a backlog remains after the bounded batch");
+    assert!(
+        oldest_age > 3600.0,
+        "the retained row is more than an hour old"
+    );
 
     let second = synveda_store::console_sessions::purge_expired(&pool)
         .await

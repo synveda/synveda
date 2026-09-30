@@ -83,6 +83,9 @@ Measure backlog and age, then drain bounded batches up to a time/work budget
 per tick or set an admission and retention envelope. Keep skip-locked
 coordination and database-time expiry.
 
+Follow-up: AUTH-6 now exposes the indexed oldest-expired age after successful
+sweeps. The fixed service rate and unproven retention bound remain open.
+
 ### P2 — architecture: product SQL remains outside `synveda-store`
 
 The prior review counted 44 production SQLx calls in `synveda-audit` and

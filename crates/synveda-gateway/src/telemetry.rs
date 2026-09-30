@@ -70,6 +70,12 @@ pub const CONSOLE_SESSION_PURGE_SWEEPS_TOTAL: &str = "synveda_console_session_pu
 /// Expired console credential rows removed; no tenant or session labels.
 pub const CONSOLE_SESSION_PURGED_TOTAL: &str = "synveda_console_sessions_purged_total";
 
+/// Age of the oldest expired credential still retained after the last
+/// successful bounded sweep. Zero means none remained at that observation;
+/// purge errors leave the last value in place and increment the error counter.
+pub const CONSOLE_SESSION_OLDEST_EXPIRED_AGE_SECONDS: &str =
+    "synveda_console_session_oldest_expired_age_seconds";
+
 /// Scope admin operations (CPR-7, ADR-0074), labelled by `op`
 /// (`list`/`create`/`get`/`update`/`ancestors`/`descendants`) and
 /// `outcome` (`ok`, `rejected` — the caller's fault, `error` — ours or an

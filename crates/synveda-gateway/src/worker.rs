@@ -742,17 +742,19 @@ async fn run_console_session_expiry_sweep(pool: sqlx::PgPool, mut shutdown: watc
         let result = tokio::select! {
             biased;
             () = shutdown::requested(&mut shutdown) => return,
-            result = tokio::time::timeout(
-                CONSOLE_SESSION_PURGE_TIMEOUT,
-                synveda_store::console_sessions::purge_expired(&pool),
-            ) => result,
-        };
-        match result {
-            Ok(Ok(removed)) => {
-                metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_SWEEPS_TOTAL, "outcome" => "ok")
-                    .increment(1);
+            result = tokio::time::timeout(CONSOLE_SESSION_PURGE_TIMEOUT, async {
+                let removed = synveda_store::console_sessions::purge_expired(&pool).await?;
                 metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGED_TOTAL)
                     .increment(removed);
+                synveda_store::console_sessions::oldest_expired_age_seconds(&pool).await
+            }) => result,
+        };
+        match result {
+            Ok(Ok(oldest_age_seconds)) => {
+                metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_SWEEPS_TOTAL, "outcome" => "ok")
+                    .increment(1);
+                metrics::gauge!(crate::telemetry::CONSOLE_SESSION_OLDEST_EXPIRED_AGE_SECONDS)
+                    .set(oldest_age_seconds.unwrap_or(0.0));
             }
             Ok(Err(error)) => {
                 metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_SWEEPS_TOTAL, "outcome" => "error")

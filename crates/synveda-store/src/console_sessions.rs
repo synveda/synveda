@@ -252,3 +252,27 @@ pub async fn purge_expired(executor: impl PgExecutor<'_>) -> Result<u64> {
     .map_err(storage_error)?;
     Ok(result.rows_affected())
 }
+
+/// Age of the oldest expired credential still retained after a purge. The
+/// expiry index answers one ordered row; this avoids counting an unbounded
+/// deployment-wide table on every maintenance tick.
+#[tracing::instrument(
+    name = "store.console_sessions.oldest_expired_age",
+    skip_all,
+    err(Display)
+)]
+pub async fn oldest_expired_age_seconds(executor: impl PgExecutor<'_>) -> Result<Option<f64>> {
+    sqlx::query_scalar!(
+        r#"
+        select extract(epoch from now() - absolute_expires_at)::double precision
+            as "age_seconds!"
+        from console_sessions
+        where absolute_expires_at <= now()
+        order by absolute_expires_at
+        limit 1
+        "#,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)
+}
