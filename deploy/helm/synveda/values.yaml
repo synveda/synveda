@@ -68,12 +68,10 @@ networkPolicy:
 # ── The gateway ──────────────────────────────────────────────────────────
 gateway:
   # There is no `replicas` key, and setting one is an error rather than a
-  # no-op. One replica is a property of the process, not a starting point:
-  # pending logins remain process-local, and cross-process policy/entity
-  # convergence has no accepted multi-replica bound. OPS-7 must prove login
-  # handoff and authority-mutation visibility before replicas. This is refused
-  # rather than silently accepted; ADR-0062 decision 4 inventories what is
-  # already safe across processes.
+  # no-op. The pending-login ledger passed a one-node cross-pod Kind probe,
+  # but key rotation, loaded policy-pack mutation latency and multi-node loss
+  # have not passed. OPS-7 keeps the one-replica refusal until that evidence
+  # exists; ADR-0062 decision 4 inventories the accepted boundary.
 
   # The externally reachable origin — the ingress host, not the Service.
   # SYNVEDA_PUBLIC_URL is where the gateway builds its /auth/callback

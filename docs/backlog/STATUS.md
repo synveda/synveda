@@ -171,9 +171,11 @@ sweep renews it, while failed/time-out sweeps do not; expiry withdraws HTTP
 admission/readiness and cancels in-flight work. Source route and isolated
 two-engine compilation tests pass. ADR-0128 extends the provisional lease to
 core and optional Apalis workers; synthetic tests cover core readiness,
-cancellation and bounded join. Production-shaped three-pod refresh latency,
-claimed-worker interruption, multi-worker ownership, in-flight process/load
-and three-pod rolling acceptance remain open in the brief. Scope, grant,
+cancellation and bounded join. A one-node Kind Helm drill passed baseline
+database failover and direct three-pod JSON/CLI login handoff with replay
+refusal; the chart returned to one gateway. Loaded three-pod policy refresh
+latency, claimed-worker interruption, multi-worker ownership, in-flight
+process/load and rolling acceptance remain open in the brief. Scope, grant,
 identity and Configuration decisions already use fresh
 request-time database rows and exact-shape Cedar fragments; a generic
 cross-process entity invalidation bus is not presumed necessary.

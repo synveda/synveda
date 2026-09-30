@@ -81,8 +81,16 @@ refuses dispatch and execution, withdraws readiness and exits nonzero for a
 fresh convergence on restart. Synthetic core-worker tests cover readiness,
 in-flight cancellation and bounded join. A real claimed Capture interruption,
 optional Apalis delivery interruption and provider effects have not been
-qualified. Next measure post-commit policy latency and failure on three pods,
-then exercise claimed work under expiry before lifting either replica limit.
+qualified. A disposable one-node Kind run then passed the normal Helm install,
+CloudNativePG primary promotion and post-failover context read. The
+`demos/ops-7-three-gateway.sh` probe temporarily scaled that deployment to
+three ready gateway pods and forced JSON login from pod A to callback on B,
+CLI login from A to callback on B and redemption on C, replay refusals and
+direct authenticated reads from every pod. It restored one replica afterward.
+This proves cross-pod login routing on one node, not loaded policy-mutation
+latency, key rotation during login, multi-node loss or a rolling upgrade.
+Next measure post-commit policy latency and failure on three pods, then
+exercise claimed work under expiry before lifting either replica limit.
 
 ## Scope
 

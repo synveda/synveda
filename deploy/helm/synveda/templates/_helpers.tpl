@@ -112,10 +112,10 @@ silent if the chart rendered it anyway.
 {{- fail "local identity evaluation requires keycloak.enabled; external realms are not seeded" -}}
 {{- end -}}
 
-{{- /* Decision 4. Pending login handoff and authority-mutation visibility do
-       not have accepted multi-replica evidence. OPS-7 lifts this. */ -}}
+{{- /* Decision 4. One-node cross-pod login passed, but loaded policy-mutation
+       visibility and multi-node lifecycle lack acceptance. OPS-7 lifts this. */ -}}
 {{- if or (hasKey .Values.gateway "replicas") (hasKey .Values.gateway "replicaCount") (hasKey .Values "replicaCount") -}}
-{{- fail "gateway replicas are not configurable in this chart (ADR-0062 decision 4).\n  Two things in the gateway lack accepted multi-replica evidence:\n    - pending logins and CLI handoff codes live in memory (LoginFlow), so an\n      /auth/callback that lands on another pod is a 401 for a login the IdP completed;\n    - cross-process policy/entity convergence has no accepted mutation-visibility\n      bound, so a second replica is not yet supported.\n  OPS-7 is the feature that fixes both. Remove the key." -}}
+{{- fail "gateway replicas are not configurable in this chart (ADR-0062 decision 4).\n  One-node Kind cross-pod login and handoff pass, but key rotation during\n  login, loaded policy-pack mutation latency, multi-node loss and rolling\n  acceptance remain unqualified. OPS-7 must pass those deployment checks\n  before lifting this refusal. Remove the key." -}}
 {{- end -}}
 {{- if or (hasKey .Values.worker "replicas") (hasKey .Values.worker "replicaCount") -}}
 {{- fail "worker replicas are not configurable in this chart (CPR-45, ADR-0102).\n  Capture is fenced, but every core maintenance loop has not yet passed concurrent-worker acceptance. Remove the key." -}}

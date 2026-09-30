@@ -19,7 +19,7 @@ renumbered.
 | [ADR-0007](adr-0007-observability-baseline.md) | Tracing, OpenTelemetry and metrics baseline | Current | — |
 | [ADR-0008](adr-0008-tenant-resolution.md) | Token-derived tenant context | Current | — |
 | [ADR-0009](adr-0009-rls-tenant-backstop.md) | Forced-RLS tenant backstop | Current | — |
-| [ADR-0010](adr-0010-oidc-login.md) | OIDC code and PKCE login | Current | — |
+| [ADR-0010](adr-0010-oidc-login.md) | OIDC code and PKCE login | Current (storage amended by ADR-0126) | ADR-0126 replaces bounded in-memory pending-login state with a deployment-key-sealed PostgreSQL ledger. |
 | [ADR-0011](adr-0011-hierarchy-store.md) | Fixed hierarchy closure store | Removed with hierarchy store (ADR-0074/CPR-7) | ADR-0070 and ADR-0074 replace it with the governed scope tree. |
 | [ADR-0012](adr-0012-cedar-pdp-embedded.md) | Cedar facade and policy-pack store | Current | Resource construction is re-cut over governed anchors by ADR-0073. |
 | [ADR-0013](adr-0013-jit-provisioning.md) | JIT identity provisioning | Current (partially superseded by ADR-0074 and ADR-0093) | Mapping/quarantine placement was removed; principal scopes, directory adoption and the administrator grant remain. |
@@ -76,7 +76,7 @@ renumbered.
 | [ADR-0059](adr-0059-scim-directory-sync.md) | SCIM directory projection | Current (partially superseded by ADR-0093) | ADR-0093 replaces the separate SCIM group graph with shared identities, groups and grants. |
 | [ADR-0060](adr-0060-directory-pull-sync.md) | Safe directory pull reconciliation | Current (partially superseded by ADR-0093) | ADR-0093 converges pull and SCIM onto one projection and secret boundary. |
 | [ADR-0061](adr-0061-public-benchmark-adapters.md) | Governed LongMemEval adapter | Current | ADR-0099 separates delivery, use and outcome signals. |
-| [ADR-0062](adr-0062-enterprise-profile-and-helm-chart.md) | Enterprise Helm deployment | Current (partially superseded by ADR-0095 and ADR-0102) | Deployment shapes no longer select product behaviour; governed Configuration does. Compose is now the reference contract and Helm maps it with Kubernetes-native primitives. |
+| [ADR-0062](adr-0062-enterprise-profile-and-helm-chart.md) | Enterprise Helm deployment | Current (partially superseded by ADR-0095, ADR-0102 and ADR-0126) | Deployment shapes no longer select product behaviour; governed Configuration does. Compose is now the reference contract and Helm maps it with Kubernetes-native primitives. ADR-0126 replaces the in-memory login-state rationale; the one-replica refusal awaits OPS-7 deployment evidence. |
 | [ADR-0063](adr-0063-tenant-partitioned-storage.md) | Tenant storage partitioning decision | Current (partially superseded by ADR-0080) | Record-specific benchmark evidence is historical; the unpartitioned pgvector decision remains current for Knowledge. |
 | [ADR-0064](adr-0064-per-tenant-envelope-keys.md) | Per-tenant envelope encryption | Current (partially superseded by ADR-0094) | ADR-0094 adds stable secret identities and durable envelope rotation; amendment 3 defines repairable key-provision evidence. |
 | [ADR-0065](adr-0065-release-and-distribution.md) | Release packaging and distribution | Current (partially superseded by ADR-0102) | Native/plugin/chart packaging remains; private Node and Unix/Windows client archives extend distribution without server downloads. Windows uses protected storage and PowerShell installation. Exact native plugin scope is preserved. The digest-bound reference replaces installed-profile mechanics. |

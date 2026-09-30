@@ -41,7 +41,10 @@ OIDC login now parks its PKCE state and CLI handoff in the same deployment-key
 plane as console sessions. A missing deployment key refuses `/auth/login`
 before redirect; restore the matching key with PostgreSQL so unexpired logins
 can complete after a gateway restart. The isolated cross-process test exercises
-this source path, but the Helm chart still awaits a three-pod drill.
+this source path. An OPS-7 one-node Kind drill used three ready pods to route
+JSON and CLI login across them, refuse replays and read the same identity from
+each pod after baseline database failover. It left the chart at one replica;
+key rotation, loaded policy mutations and multi-node loss remain unqualified.
 
 After a database outage, Kubernetes' Ready status can lag the application's
 current gate. Probe `/readyz` directly, then validate a fresh login and governed
