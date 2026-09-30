@@ -158,12 +158,40 @@ production-shaped locks/outage and run the OPS-5 off-host restore before a
 supported upgrade claim.
 
 The published v0.4.3 consumer recovery launcher pins its released product
-verifier, which correctly refuses a `0003` database. The next pending-login
-joint-restore drill therefore needs a head-`0003` candidate reference bundle:
-park one login, back up the linked database/identity/key set, restore into an
-empty project with that same candidate, then consume the state once and refuse
-replay. Repeating the result with a published compatible N pair remains a
-separate promotion gate.
+verifier, which correctly refuses a `0003` database. A head-`0003` candidate
+reference bundle was therefore needed to park one login, back up the linked
+database/identity/key set, restore into an empty project with that same
+candidate, then consume the state once and refuse replay. Repeating the result
+with a published compatible N pair remains a separate promotion gate.
+
+That source-candidate drill passed on 2026-09-30. An isolated
+`0.4.3-ops6-head3` consumer bundle (archive SHA-256
+`3b7eb0f1f3785d389d1d31c66ddc6c417e3ed87706a2c129f587fe47b82ee89a`)
+used the prior head-`0003` product image
+`sha256:5842486bd6774efa18b56385177e05e51845b044d27b28578cb0a6ef7f442e66`,
+local browser image
+`sha256:8ae942c79ccdbd47184033f3a2b3b8b5a18987bcdda9d83ea88b5ecbd2a70b8f`,
+and the already verified v0.4.3 PostgreSQL, Keycloak and proxy image bytes.
+These are local digest aliases with mixed source provenance, not a published
+single-source release. The fresh project passed browser OIDC/API/logout
+acceptance. A JSON login then left exactly one unexpired 236-byte sealed
+`pending_logins` row when read as `synveda_gateway`.
+
+The candidate recovery launcher quiesced the source, verified the linked
+PostgreSQL/Keycloak/key backup `before-0003-pending`, and restored it into a
+distinct empty project. Recovery verified the five-event audit chain, opened
+the original tenant key and refused a wrong key. The restored gateway-role
+read found one pending row with 286 seconds remaining after the private stack
+became healthy. Its callback opened the sealed state, returned the uniform 401
+for a deliberate IdP `access_denied`, and changed the pending-row count from
+one to zero. Replaying the same opaque state returned 401 and left zero rows;
+a fresh browser OIDC/API/logout flow still passed. Both projects are down with
+their installation, database and browser volumes retained; the source also
+retains its linked recovery volume. This proves one-time rejection-path state
+survival through joint logical restore, not successful in-flight code exchange,
+off-host PITR, a published N pair, production-shaped outage or locks. Next
+inject migration failure, measure lock/outage on representative data, and
+repeat with an owner-selected off-host OPS-5 set and published compatible pair.
 
 ## Scope
 
