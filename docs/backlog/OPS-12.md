@@ -817,3 +817,57 @@ Next rerun full CI and the nonpublishing Release dispatch on the corrected
 clean commit, retain all six native archive reports and both native OCI/Compose/
 Helm reports, then inspect assembly. No tag, signing, registry publication or
 new supported-version claim is authorized by this source qualification.
+
+### Hosted notice, migration and Windows cleanup repairs (2026-09-30)
+
+The second [full CI dispatch](https://github.com/synveda/synveda/actions/runs/36740304844)
+on clean `5db9687e3c1e529f515be60f4ec0dd065919ceb0` passed workspace Rust
+formatting/Clippy/Rustdoc/tests, SDK interop/packages, deployment packaging,
+CNPG install/failover and five native client targets. The corrected generated
+contracts passed. Both OCI candidates failed their isolated UID-65532 notice
+probe: Docker's `COPY --chmod=0444` also sets that mode on missing parent
+directories, making the notices unsearchable. Both Helm operations jobs passed
+shutdown/recovery and repeated load, then failed an obsolete assertion that
+only the baseline migration existed. Windows ARM installed successfully, but
+its third installation's temporary Node executable was locked during cleanup.
+The same-source [Release dispatch](https://github.com/synveda/synveda/actions/runs/36740317429)
+passed all six native client packages, including Windows publisher-policy
+checks, but failed both OCI notice probes. Assembly could not complete; no
+complete source qualification is claimed. The Windows ARM cleanup failure in
+full CI did not recur in this separate run; the new bounded-lock fixture still
+needs execution on the fix commit.
+
+The image recipes now create searchable notice directories before copying
+read-only files; Keycloak restores its normal build user immediately afterward.
+The browser's existing Playwright notice directory receives the same fix.
+An invocation-owned minimal Linux ARM64 image reproduced the unreadable COPY
+and proved the corrected path works as UID 65532 with a read-only filesystem,
+no network and dropped capabilities. Both file hashes matched source bytes.
+This probe is not a rebuild or deployment of the six product candidates.
+The reviewed Keycloak Dockerfile fingerprint was renewed without relaxing
+its security-chain gate.
+
+The Helm drill now requires exactly migrations 1, 2 and 3 with success and
+compares the complete SQLx ledger, including checksums and timestamps, before
+and after both lock-contending reruns. It records the versions and unchanged
+ledger, rather than a historical baseline-only row count. It still observes
+two waiting migrators and requires both actual migration Jobs to complete.
+Windows retries only native sharing/lock violations, at most twenty removal
+attempts with nineteen 250-ms pauses, inside its private download directory.
+Permission and other errors propagate; an exhausted sharing lock also fails.
+No installation lock is automatically cleared. Native Windows qualification
+now executes the actual cleanup function with transient and persistent file
+locks and checks that retained installation state survives; release assembly
+requires this evidence. Native Windows is unavailable locally, so the new
+lock fixtures require hosted execution.
+
+`make check-deploy chart-lint` passed all components, including 173 lifecycle/
+entrypoint tests, 44 convergence tests and the reviewed-chain refusals. The
+24 focused client/release and failover tests, all 77 release-parity tests, all
+51 reviewed Compose contract tests, fast/workflow gates, Rust formatting,
+JavaScript syntax and diff checks passed. These local gates do not establish
+the new native Windows fixture
+or complete OCI/Helm acceptance. Next commit the reviewed fixes, rerun full
+CI and nonpublishing Release, inspect all six native archive and both native
+OCI/Compose/Helm reports, and retain exact-source assembly evidence. No tag,
+public release, registry publication or retained deployment was changed.

@@ -71,6 +71,9 @@ export async function operations(c) {
 
   // Two actual migration commands contend for SQLx's advisory lock. Observe the
   // wait in pg_locks while holding that exact lock in a bounded admin session.
+  const migrationLedger = () => JSON.parse(sql(dbNs, primary(), "synveda", "SELECT json_agg(m ORDER BY version) FROM (SELECT version, description, success, encode(checksum, 'hex') AS checksum, installed_on, execution_time FROM _sqlx_migrations) m"));
+  const ledgerBefore = migrationLedger();
+  assert.deepEqual(ledgerBefore.map(({ version, success }) => [version, success]), [[1, true], [2, true], [3, true]], "installation must have the exact current migration chain");
   const lock = run("python3", ["-c", "import zlib; print(0x3d32ad9e * zlib.crc32(b'synveda'))"]).trim();
   const locker = spawn("kubectl", ["exec", "-n", dbNs, primary(), "--", "psql", "-X", "-qAt", "-U", "postgres", "-d", "synveda", "-c", `SELECT pg_advisory_lock(${lock}); SELECT pg_sleep(25);`], { env, stdio: "ignore" });
   const lockDone = new Promise((resolve, reject) => { locker.on("error", reject); locker.on("close", (code) => code === 0 ? resolve() : reject(new Error("migration lock holder failed"))); });
@@ -88,8 +91,8 @@ export async function operations(c) {
   assert.equal(waiting, 2, "both migrators must wait on the existing SQLx lock");
   await lockDone;
   for (const name of ["migration-a", "migration-b"]) k(["wait", "-n", ns, `job/${name}`, "--for=condition=Complete", "--timeout=120s"], { timeout: 130000 });
-  assert.equal(sql(dbNs, primary(), "synveda", "SELECT count(*) FROM _sqlx_migrations WHERE success"), "1");
-  result.migration = { concurrentWaiters: waiting, completedReruns: 2, baselineRows: 1 };
+  assert.deepEqual(migrationLedger(), ledgerBefore, "concurrent reruns must retain the complete migration ledger");
+  result.migration = { concurrentWaiters: waiting, completedReruns: 2, versions: ledgerBefore.map(({ version }) => version), ledgerUnchanged: true };
 
   // Reuse the workload after reconnection; no application data is inspected
   // with the backup administrator. Mandatory dependency loss closes readiness.

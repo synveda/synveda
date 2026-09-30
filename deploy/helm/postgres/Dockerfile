@@ -47,6 +47,8 @@ RUN /usr/local/bin/assert-build-proxy-closed
 # The base runs as uid 26. Installing Synveda's read-only support files needs
 # root; the image returns to uid 26 before the operator starts it.
 USER root
+RUN mkdir -p /usr/share/licenses/synveda \
+    && chmod 0555 /usr/share/licenses /usr/share/licenses/synveda
 COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 
 RUN set -eux; \

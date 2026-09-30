@@ -46,6 +46,8 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --chmod=0555 deploy/compose/postgres/synveda-database-bootstrap /usr/local/bin/synveda-database-bootstrap
+RUN mkdir -p /usr/share/licenses/synveda \
+    && chmod 0555 /usr/share/licenses /usr/share/licenses/synveda
 COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 COPY --chmod=0555 deploy/compose/postgres/synveda-logical-backup /usr/local/bin/synveda-logical-backup
 COPY --chmod=0555 deploy/compose/postgres/synveda-logical-restore /usr/local/bin/synveda-logical-restore

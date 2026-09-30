@@ -323,8 +323,14 @@ OpenAPI descriptions after Rustdoc edits. CI and the nonpublishing Release
 drill were stopped before complete native qualification. The repository
 generators now refresh those descriptions and both SDK digest fields; the
 six OpenAPI tests, SDK drift/wire/installed-package checks and fast/workflow
-gates pass locally. Next rerun full CI and Release dispatch on the corrected
-clean commit; the [OPS-12 brief](OPS-12.md) owns the run identities and limits.
+gates pass locally. The corrected `5db9687e` full CI passed workspace Rust and
+five native client targets, but image notice checks failed on directory modes,
+both Helm operations drills expected the retired one-row migration ledger,
+and Windows ARM installation hit a temporary executable sharing lock during
+download cleanup. Fixes preserve exact notice hashes and migration history;
+Windows cleanup retries only sharing/lock violations within a fixed bound.
+Next rerun full CI and nonpublishing Release on the clean fix commit; the
+[OPS-12 brief](OPS-12.md) owns the run identities, validation and limits.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered

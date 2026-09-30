@@ -95,6 +95,58 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
   ]);
   checks.push("native-windows-private-storage-interoperability");
 
+  // Exercise the actual bootstrap cleanup function against native file locks,
+  // without executing the installer's download or installation entry point.
+  run(ps, ["-NoProfile", "-NonInteractive", "-Command", `
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:SYNVEDA_TEST_INSTALLER, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw 'Installer PowerShell syntax is invalid' }
+$definition = @($ast.FindAll({ param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Remove-DownloadDirectory'
+}, $false))
+if ($definition.Count -ne 1) { throw 'Expected one download cleanup function' }
+. ([scriptblock]::Create($definition[0].Extent.Text))
+$path = Join-Path $env:SYNVEDA_TEST_ACL_PATH 'cleanup transient'
+New-Item -ItemType Directory -Path $path | Out-Null
+$file = Join-Path $path 'held.exe'
+[System.IO.File]::WriteAllText($file, 'temporary download')
+$ready = Join-Path $env:SYNVEDA_TEST_ACL_PATH 'cleanup lock ready'
+$job = Start-Job -ArgumentList $file, $ready -ScriptBlock {
+  param($file, $ready)
+  $stream = [System.IO.File]::Open($file, 'Open', 'Read', 'None')
+  try { [System.IO.File]::WriteAllText($ready, 'locked'); Start-Sleep -Seconds 2 }
+  finally { $stream.Dispose() }
+}
+try {
+  for ($attempt = 0; $attempt -lt 50 -and -not (Test-Path -LiteralPath $ready); $attempt++) { Start-Sleep -Milliseconds 100 }
+  if (-not (Test-Path -LiteralPath $ready)) { throw 'Transient lock fixture did not start' }
+  Remove-DownloadDirectory $path
+  if (Test-Path -LiteralPath $path) { throw 'Transient sharing lock prevented cleanup' }
+  if ($null -eq (Wait-Job $job -Timeout 10)) { throw 'Transient lock fixture did not finish' }
+  Receive-Job $job -ErrorAction Stop | Out-Null
+} finally { Stop-Job $job; Remove-Job $job -Force }
+$path = Join-Path $env:SYNVEDA_TEST_ACL_PATH 'cleanup persistent'
+New-Item -ItemType Directory -Path $path | Out-Null
+$file = Join-Path $path 'held.exe'
+[System.IO.File]::WriteAllText($file, 'temporary download')
+$stream = [System.IO.File]::Open($file, 'Open', 'Read', 'None')
+$elapsed = [System.Diagnostics.Stopwatch]::StartNew()
+$refused = $false
+try {
+  try { Remove-DownloadDirectory $path }
+  catch [System.IO.IOException] {
+    if (($_.Exception.HResult -band 0xffff) -ne 32) { throw }
+    $refused = $true
+  }
+  if (-not $refused -or $elapsed.ElapsedMilliseconds -lt 4500 -or $elapsed.ElapsedMilliseconds -gt 10000) { throw 'Persistent lock did not fail within the cleanup bound' }
+  if (-not (Test-Path -LiteralPath $file)) { throw 'Persistent lock fixture was unexpectedly removed' }
+} finally { $stream.Dispose() }
+Remove-DownloadDirectory $path
+`], { env: { ...env, SYNVEDA_TEST_INSTALLER: join(root, "scripts/install.ps1") } });
+  assert.equal(readFileSync(join(home, "state/retained"), "utf8"), "retain deployment state");
+  checks.push("bounded-download-sharing-lock-cleanup");
+
   function refuse(commandArgs = args, diagnostic, commandEnv = installEnv) {
     const child = spawnSync(ps, commandArgs, { encoding: "utf8", timeout: 120000, env: commandEnv });
     assert.ifError(child.error);

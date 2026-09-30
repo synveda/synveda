@@ -204,6 +204,21 @@ function Verify-Publisher([string]$Checksums, [string]$Bundle) {
     }
 }
 
+function Remove-DownloadDirectory([string]$Path) {
+    # Windows may briefly retain a sharing lock after the archived Node exits.
+    # Retry only that condition in this invocation's private download directory.
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            return
+        } catch [System.IO.IOException] {
+            $code = $_.Exception.HResult -band 0xffff
+            if ($code -notin @(32, 33) -or $attempt -eq 19) { throw }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
+
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.Net.Http
 $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
@@ -285,5 +300,5 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Client installation refused; prior installation retained' }
 } finally {
     # This random, private, invocation-owned directory contains downloads only.
-    Remove-Item -LiteralPath $scratch -Recurse -Force
+    Remove-DownloadDirectory $scratch
 }

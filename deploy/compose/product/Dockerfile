@@ -140,6 +140,8 @@ RUN pnpm install --frozen-lockfile --prod --filter @synveda/compose-browser-acce
 COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 COPY --chmod=0555 deploy/compose/browser/console-login.mjs deploy/compose/browser/product-demo.mjs deploy/compose/browser/evaluation.mjs deploy/compose/browser/
 COPY --chmod=0444 deploy/compose/browser/console-login-runner.mjs deploy/compose/browser/console-login-contract.mjs deploy/compose/browser/console-product-runner.mjs deploy/compose/browser/product-demo-runner.mjs deploy/compose/browser/product-demo-contract.mjs deploy/compose/browser/
+RUN mkdir -p /usr/share/licenses/synveda /usr/share/licenses/synveda-browser-acceptance \
+    && chmod 0555 /usr/share/licenses /usr/share/licenses/synveda /usr/share/licenses/synveda-browser-acceptance
 COPY --chmod=0444 deploy/compose/browser/PLAYWRIGHT-LICENSE deploy/compose/browser/PLAYWRIGHT-NOTICE deploy/compose/browser/seccomp_profile.NOTICE /usr/share/licenses/synveda-browser-acceptance/
 COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 
@@ -175,6 +177,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=console /usr/local/bin/node /usr/local/bin/node
 COPY --from=console /usr/local/LICENSE /usr/share/licenses/node/LICENSE
+RUN mkdir -p /usr/share/licenses/synveda \
+    && chmod 0555 /usr/share/licenses /usr/share/licenses/synveda
 COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 # Product binaries and no mutable data: the Cedar schema, the base layer and all three
 # product packs are `include_str!`d into synveda-policy, so there is no

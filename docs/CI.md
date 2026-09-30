@@ -270,6 +270,21 @@ types, routes and schemas are unchanged. Local OpenAPI, SDK drift/wire/installed
 package and fast/workflow checks pass. Full hosted qualification must be repeated
 on the corrected commit; cancelled runs are not acceptance evidence.
 
+The second [full CI dispatch](https://github.com/synveda/synveda/actions/runs/36740304844)
+on `5db9687e3c1e529f515be60f4ec0dd065919ceb0` passed workspace Rust and five
+native client targets. Both image jobs refused unreadable notices, both Helm
+operations jobs found a stale one-migration assertion, and Windows ARM failed
+while deleting a locked temporary executable after installation. The same-source
+[nonpublishing Release dispatch](https://github.com/synveda/synveda/actions/runs/36740317429)
+passed all six native client packages but also refused image notices. These
+runs do not qualify the complete source set.
+The fixes pre-create searchable notice directories, compare the exact three-row
+migration ledger before/after concurrent reruns, and bound Windows download
+cleanup retries to sharing/lock violations. Native Windows checks exercise a
+released lock and a persistent lock; assembly requires that report check.
+Rerun full CI and Release dispatch on the clean fix commit before accepting
+the source qualification.
+
 ## Manual owner settings
 
 1. **CI Result** (GitHub Actions) is now required in the active main ruleset.

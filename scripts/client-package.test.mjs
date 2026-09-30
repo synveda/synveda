@@ -382,7 +382,7 @@ test("Windows release evidence requires both native ZIP reports and installer re
       checks: ["licence-and-notice-carriage", "packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
         "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
         "native-windows-private-storage-interoperability", "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
-        "unsafe-zip-and-overlapping-install-root-refusal", "publisher-policy-and-pre-execution-refusal"] };
+        "unsafe-zip-and-overlapping-install-root-refusal", "publisher-policy-and-pre-execution-refusal", "bounded-download-sharing-lock-cleanup"] };
     const path = join(f.scratch, `synveda-client-report-${target}.json`);
     writeFileSync(path, JSON.stringify(report));
     reports.push({ path, report });

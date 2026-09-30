@@ -173,7 +173,11 @@ Windows deployment, setup/vendor writers and diagnostic logs still refuse.
 The first hosted roadmap qualification on `f4d23f32` stopped at generated
 OpenAPI description drift; its CI and Release dispatches were cancelled before
 complete native acceptance. Regeneration and focused local checks pass, but
-all native archives/images still require the corrected-source hosted run.
+all native archives/images still require complete corrected-source hosted
+qualification. The `5db9687e` full CI passed workspace Rust and five native
+client targets, then failed image notice permissions, stale Helm migration
+evidence and Windows ARM temporary-file cleanup. Source fixes are undergoing
+local validation; the complete native matrix must be rerun on their clean commit.
 [OPS-12](backlog/OPS-12.md) records the exact boundary. The readiness verdict
 and published-artifact claims are unchanged.
 
