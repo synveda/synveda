@@ -55,6 +55,22 @@ descriptors. Native client/server archive metadata and SBOM gates follow as a
 separate slice. Keep the existing compiler, installer, image-copy,
 publisher-verification and deployment gates.
 
+For native archives, use the same pinned build wrapper on all six client targets
+and the two historical server targets. Inspect each final archived Rust binary
+separately with the checksum-pinned native Syft release: the client CLI, and the
+server CLI, gateway and worker. Extract only fixed, unique regular members into
+invocation-owned temporary storage, check their executable platform headers and
+scan the extracted bytes without executing them. Each binary needs its own SPDX
+document and required Cargo roots/Cedar/SQLx content; metadata in another binary
+cannot satisfy its gate. Retain the documents as release sidecars, together with
+one report per archive binding source, target, archive hash, binary hashes,
+scanner download pin and document hashes. Assembly rehashes the archive and
+documents, reads the actual SPDX content and compares it with the producer
+report. Include every sidecar in the closed release checksum inventory and
+publisher-verification boundary. Scanner/build tools stay outside client
+packages and installers. Native hosted qualification remains required before
+claiming target support for this metadata contract.
+
 The previous clean source passed its nonpublishing qualification, recorded in
 [OPS-12 evidence](../../demos/evidence/ops12-source-qualification.json).
 The two Rust-bearing OCI targets now use this build contract. Candidate creation

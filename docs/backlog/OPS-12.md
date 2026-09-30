@@ -934,3 +934,12 @@ reports. Then extend embedded metadata and artifact-bound SBOM gates to all six
 native client and both server archives, followed by non-Rust dependency coverage,
 third-party notices and vulnerability/incident policy. OPS-12 and the production
 verdict remain open.
+
+The next native archive slice is specified in ADR-0133 before implementation.
+It requires a separate SPDX document for each final Rust executable and a
+hash-bound producer report per archive, with the reviewed Syft 1.51.0 native
+download for each of the six targets. Release assembly must read the actual
+sidecar content and rehash its archive; a valid envelope or another executable's
+metadata cannot supply the required CLI/gateway/worker inventory. Tools remain
+outside the installed client. Implementation and six-target hosted qualification
+are pending; current OCI runs remain tied to clean source `3beeb1cb`.
