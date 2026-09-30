@@ -109,18 +109,28 @@ if ($definition.Count -ne 1) { throw 'Expected one download cleanup function' }
 . ([scriptblock]::Create($definition[0].Extent.Text))
 $path = Join-Path $env:SYNVEDA_TEST_ACL_PATH 'cleanup transient'
 New-Item -ItemType Directory -Path $path | Out-Null
-$file = Join-Path $path 'held.exe'
+$file = Join-Path $path 'held.dat'
 [System.IO.File]::WriteAllText($file, 'temporary download')
-$ready = Join-Path $env:SYNVEDA_TEST_ACL_PATH 'cleanup lock ready'
-$job = Start-Job -ArgumentList $file, $ready -ScriptBlock {
-  param($file, $ready)
-  $stream = [System.IO.File]::Open($file, 'Open', 'Read', 'None')
-  try { [System.IO.File]::WriteAllText($ready, 'locked'); Start-Sleep -Seconds 2 }
-  finally { $stream.Dispose() }
+# Acquire synchronously, then release on a native thread. PowerShell background
+# job scheduling must not decide whether a two-second lock exceeds the bound.
+Add-Type -TypeDefinition @'
+using System.IO;
+using System.Threading;
+public static class TransientDownloadLock {
+    public static Thread Hold(string path) {
+        FileStream stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
+        Thread thread = new Thread(delegate() {
+            try { Thread.Sleep(2000); }
+            finally { stream.Dispose(); }
+        });
+        thread.IsBackground = true;
+        thread.Start();
+        return thread;
+    }
 }
+'@
+$thread = [TransientDownloadLock]::Hold($file)
 try {
-  for ($attempt = 0; $attempt -lt 50 -and -not (Test-Path -LiteralPath $ready); $attempt++) { Start-Sleep -Milliseconds 100 }
-  if (-not (Test-Path -LiteralPath $ready)) { throw 'Transient lock fixture did not start' }
   try { [System.IO.Directory]::Delete($path, $true); throw 'Transient fixture did not hold a sharing lock' }
   catch [System.IO.IOException] {
     if (($_.Exception.GetBaseException().HResult -band 0xffff) -ne 32) { throw }
@@ -128,16 +138,16 @@ try {
   $transientElapsed = [System.Diagnostics.Stopwatch]::StartNew()
   try { Remove-DownloadDirectory $path }
   catch {
-    [Console]::Error.WriteLine('Transient cleanup failed: native code {0}, elapsed {1} ms', ($_.Exception.GetBaseException().HResult -band 0xffff), $transientElapsed.ElapsedMilliseconds)
+    [Console]::Error.WriteLine('Transient cleanup failed: native code {0}, elapsed {1} ms, release thread alive {2}', ($_.Exception.GetBaseException().HResult -band 0xffff), $transientElapsed.ElapsedMilliseconds, $thread.IsAlive)
     throw
   }
   if (Test-Path -LiteralPath $path) { throw 'Transient sharing lock prevented cleanup' }
-  if ($null -eq (Wait-Job $job -Timeout 10)) { throw 'Transient lock fixture did not finish' }
-  Receive-Job $job -ErrorAction Stop | Out-Null
-} finally { Stop-Job $job; Remove-Job $job -Force }
+} finally {
+  if (-not $thread.Join(10000)) { throw 'Transient lock release thread did not finish' }
+}
 $path = Join-Path $env:SYNVEDA_TEST_ACL_PATH 'cleanup persistent'
 New-Item -ItemType Directory -Path $path | Out-Null
-$file = Join-Path $path 'held.exe'
+$file = Join-Path $path 'held.dat'
 [System.IO.File]::WriteAllText($file, 'temporary download')
 $stream = [System.IO.File]::Open($file, 'Open', 'Read', 'None')
 $elapsed = [System.Diagnostics.Stopwatch]::StartNew()

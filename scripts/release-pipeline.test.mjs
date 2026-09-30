@@ -372,6 +372,9 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
     const evidence = JSON.parse(
       readFileSync("demos/evidence/ops11-bundled.json", "utf8"),
     );
+    // Model the new candidate field without rewriting historical live evidence.
+    for (const item of evidence.cases)
+      item.reinstallTransport = { directGateway: 200, applicationEdge: 200, issuerEdge: 200, recoveredMs: 1, failedProbes: 0 };
     const reports = {};
     for (const arch of ["amd64", "arm64"]) {
       const platform = `linux/${arch}`;
@@ -495,6 +498,24 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
       (r) => {
         r["release-kubernetes-amd64.json"].evidence.cases[0].persistentContent =
           false;
+      },
+      (r) => {
+        delete r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport;
+      },
+      (r) => {
+        r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport.applicationEdge = 502;
+      },
+      (r) => {
+        r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport.recoveredMs = 60_001;
+      },
+      (r) => {
+        r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport.recoveredMs = -1;
+      },
+      (r) => {
+        delete r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport.issuerEdge;
+      },
+      (r) => {
+        r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport.failedProbes = -1;
       },
       (r) => {
         delete r["release-kubernetes-arm64.json"].evidence.cases[0].dayTwo

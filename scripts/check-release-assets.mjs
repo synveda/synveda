@@ -154,6 +154,15 @@ export function checkQualification(directory, version, source, inventory) {
               item.uninstallReinstall === true,
           ),
         );
+        for (const item of report.evidence.cases) {
+          const transport = item.reinstallTransport;
+          assert.ok(transport, `${item.selection}: missing reinstall transport evidence`);
+          for (const name of ["directGateway", "applicationEdge", "issuerEdge"])
+            assert.equal(transport[name], 200, `${item.selection}/${name}: reinstall transport failed`);
+          assert.ok(Number.isInteger(transport.recoveredMs) && transport.recoveredMs >= 0 && transport.recoveredMs <= 60_000,
+            `${item.selection}: reinstall transport exceeded its bound`);
+          assert.ok(Number.isInteger(transport.failedProbes) && transport.failedProbes >= 0);
+        }
         // The existing operations drill covers the two end-to-end ownership
         // modes; the mixed modes independently exercise install and upgrade.
         for (const selection of ["bundled-packaged", "external-external"]) {

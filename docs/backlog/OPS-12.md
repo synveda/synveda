@@ -878,9 +878,9 @@ pushed to `codex/synveda-production-roadmap`. The corrected-source
 and [nonpublishing Release dispatch](https://github.com/synveda/synveda/actions/runs/36745834269)
 passed workspace Rust and deployment gates; both CI image jobs passed
 notice/runtime probes and reached Helm acceptance. CNPG operations and
-install/failover passed. Both Windows ARM jobs refused the deliberately held
-transient file instead of retrying; the PowerShell provider's exception
-prevented native-code classification. Cleanup now calls the direct .NET
+install/failover passed. Both Windows ARM jobs failed the deliberately held
+transient-file fixture. Provider exception wrapping was the first suspected
+cause. The source follow-up calls the direct .NET
 directory API and classifies the base exception, preserving the same narrow
 retry set and bound. The fixture proves the native sharing code before retry,
 retains the persistent-lock refusal and requires immediate failure for a
@@ -911,6 +911,59 @@ formatting and diff checks. The native Windows transient/persistent/non-sharing
 fixtures and the revised live Helm sequences remain pending. Next commit this
 follow-up, cancel the failed obsolete Release dispatch, and run full CI plus
 nonpublishing Release on its clean exact source before inspecting assembly.
+
+The follow-up is committed as `6ae636046f4db56f59d32a2971b3db395ffd6520`
+on the roadmap branch. The obsolete `33ad90ef` Release dispatch was cancelled;
+the completed full CI remains failed. New exact-source
+[full CI](https://github.com/synveda/synveda/actions/runs/36752593429) and
+[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36752621182)
+did not qualify this source. Full CI completed with 18 successful jobs and
+failures in Windows ARM, external-provider operations and both image/Helm jobs;
+the final CI Result also failed. The separate Release Windows ARM job failed;
+its remaining image jobs cannot establish complete qualification or assembly.
+No publication occurred.
+
+### Controlled lock and stateless reinstall reachability (2026-09-30)
+
+The `6ae63604` Windows ARM diagnostics confirmed native sharing code 32 after
+4,882 ms in CI and 4,885 ms in Release. The narrow retry classifier ran, but
+the fixture's supposedly two-second background-job lock outlasted its bound.
+The revised fixture acquires a real exclusive data-file handle synchronously
+and releases it from a native .NET thread after two seconds. It retains the
+initial sharing-code control, persistent-lock exhaustion, immediate non-sharing
+refusal and deployment-state retention. The installer retry set and 20-attempt
+bound are unchanged. Native Windows execution remains required; the cause of
+the background job's late release is not established.
+
+External-only CI and both native four-mode image jobs completed joint restore
+in 33,351, 35,202 and 37,694 ms, then failed HTTP transport after retained
+reinstall. A separate, invocation-owned Kind probe reproduced a direct request
+timeout after Service address replacement and successful routing at 11,782 ms.
+Restarting its proxy produced an immediate connection refusal through the
+Service even after rollout completion. The owned cluster and scratch were
+removed; the retained OPS-7 cluster was untouched. This proves rollout state
+alone is insufficient reachability evidence, not a product authentication bug.
+
+The fixture now requires stateless direct gateway readiness, public console
+and issuer discovery to return 200 within 60 seconds after retained reinstall.
+Only named transient transport errors and HTTP 502/503/504 retry. TLS errors
+and other HTTP statuses fail immediately. The extra proxy restart is removed;
+normal login, tenant denial, content and audit assertions then execute once.
+Every case records its three statuses, elapsed time and failed probe count;
+release qualification refuses missing, failed or out-of-bound evidence.
+Fetch failures preserve their cause and report only endpoint category and
+native code, never callback URLs, credentials or response bodies.
+
+Local verification passed 28 focused client/release/image-reuse tests,
+all 77 release-parity tests,
+fast/workflow gates, the six-mode starter contract and Rust/diff formatting.
+A targeted real HTTP probe exercised temporary 503/socket failure recovery,
+immediate permanent-403 refusal, stateless requests and credential-free error
+diagnostics. Complete native Windows, Compose/Helm reports and assembly remain
+open. Next commit the fixture repair, stop the failed obsolete Release dispatch,
+then run full CI and nonpublishing Release on that exact clean source and
+independently inspect its same-run payload inventory. Repair any further
+required failure before claiming qualification.
 
 ### Published SBOM coverage inspection (2026-09-30)
 

@@ -16,8 +16,22 @@ const marker = "The starter release train leaves on Thursday at 14:00 UTC.";
 const query = "starter release train Thursday";
 let state = phase === "seed" ? { users: {} } : JSON.parse(readFileSync("/work/state.json", "utf8"));
 
+async function fixtureFetch(url, init = {}) {
+  try {
+    return await fetch(url, { ...init, redirect: "manual", signal: init.signal ?? requestSignal() });
+  } catch (error) {
+    if (error.message !== "fetch failed") throw error;
+    const origin = new URL(url).origin;
+    const target = origin === APP ? "application edge" : origin === AUTH ? "issuer edge" : origin === new URL(ADMIN_URL).origin ? "identity administration" : "gateway direct";
+    const code = error.cause?.code;
+    // Native transport codes describe failure without URLs, credentials or bodies.
+    const diagnostic = typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : "unknown";
+    throw new Error(`fetch failed (${target}; native code ${diagnostic})`, { cause: error });
+  }
+}
+
 async function request(url, init = {}, statuses = [200, 201, 204]) {
-  const response = await fetch(url, { ...init, redirect: "manual", signal: requestSignal() });
+  const response = await fixtureFetch(url, init);
   // Never report a body or full URL: either can contain an invitation or credential.
   const route = new URL(url).pathname.replace(/\/invites\/[^/]+\/accept/, "/invites/:token/accept");
   check(statuses.includes(response.status), `unexpected HTTP ${response.status} on ${init.method ?? "GET"} ${route}`);
@@ -38,7 +52,7 @@ async function login(user, consoleFlow = false) {
   // Public origins are configuration, not client-supplied proxy headers. Check
   // the application directly as well as the fixture's existing HTTPS edge.
   const spoofed = { Forwarded: 'host=attacker.invalid;proto=http', "X-Forwarded-Host": "attacker.invalid", "X-Forwarded-Proto": "http" };
-  const direct = await fetch(`${process.env.DIRECT_APP ?? "http://synveda:8120"}/auth/login`, { headers: spoofed, redirect: "manual", signal: requestSignal() });
+  const direct = await fixtureFetch(`${process.env.DIRECT_APP ?? "http://synveda:8120"}/auth/login`, { headers: spoofed });
   check(direct.headers.has("location"), `direct OIDC login has no redirect (HTTP ${direct.status})`);
   const directLocation = new URL(direct.headers.get("location"));
   check(directLocation.origin === AUTH && directLocation.searchParams.get("redirect_uri") === `${APP}/auth/callback`, "untrusted proxy headers changed the canonical origin");
@@ -48,7 +62,7 @@ async function login(user, consoleFlow = false) {
     const jar = jars.get(origin) ?? new Map();
     const headers = new Headers(init.headers);
     if (jar.size) headers.set("Cookie", [...jar].map(([k, v]) => `${k}=${v}`).join("; "));
-    const response = await fetch(url, { ...init, headers, redirect: "manual", signal: requestSignal() });
+    const response = await fixtureFetch(url, { ...init, headers });
     for (const cookie of response.headers.getSetCookie()) {
       const pair = cookie.split(";", 1)[0], at = pair.indexOf("=");
       jar.set(pair.slice(0, at), pair.slice(at + 1));
@@ -139,12 +153,43 @@ async function usableTeam(authenticate = true) {
   check(audit.valid && audit.events > 0, "audit chain verification failed");
 }
 
+async function reinstalledTransport() {
+  // A recreated Service needs DNS and endpoint routing to converge after Helm
+  // reports Ready. Probe only stateless routes; authentication never retries here.
+  const started = Date.now(), deadline = started + 60000;
+  const routes = {
+    directGateway: `${process.env.DIRECT_APP ?? "http://synveda:8120"}/readyz`,
+    applicationEdge: `${APP}/console/`,
+    issuerEdge: `${AUTH}/realms/synveda/.well-known/openid-configuration`,
+  };
+  let states = {}, failedProbes = 0;
+  while (Date.now() < deadline) {
+    states = {};
+    for (const [name, url] of Object.entries(routes)) {
+      try {
+        const response = await fixtureFetch(url, { signal: AbortSignal.timeout(Math.max(1, Math.min(5000, deadline - Date.now()))) });
+        states[name] = response.status;
+        await response.body?.cancel();
+        check(response.status === 200 || [502, 503, 504].includes(response.status), `reinstall transport ${name} returned HTTP ${response.status}`);
+      } catch (error) {
+        const code = error.cause?.cause?.code ?? error.cause?.code;
+        if (error.name !== "TimeoutError" && !["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET"].includes(code)) throw error;
+        states[name] = error.name === "TimeoutError" ? "TimeoutError" : code;
+      }
+    }
+    if (Object.values(states).every((status) => status === 200) && Date.now() <= deadline) return { ...states, recoveredMs: Date.now() - started, failedProbes };
+    failedProbes++;
+    if (Date.now() < deadline) await sleep(Math.min(1000, deadline - Date.now()));
+  }
+  throw new Error(`reinstall transport did not recover within 60 seconds: ${JSON.stringify(states)}`);
+}
+
 try {
   check(APP?.startsWith("https://") && AUTH?.startsWith("https://") && ADMIN_URL?.startsWith("http://keycloak-http."), "fixture endpoints invalid");
   if (phase === "seed") {
     stage = "public administration and management refusal";
     for (const url of [`${APP}/metrics`, `${APP}/healthz`, `${AUTH}/admin/`, `${AUTH}/realms/master`, `${AUTH}/metrics`, `${AUTH}/health`]) {
-      const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(10000) });
+      const response = await fixtureFetch(url, { signal: AbortSignal.timeout(10000) });
       check(response.status === 404, "public route exposed a private endpoint");
     }
     stage = "private administration and empty realm";
@@ -213,6 +258,9 @@ try {
     stage = "all read and denial surfaces";
     await usableTeam();
     console.log(JSON.stringify({ privateEndpointsDenied: true, ownerBootstrap: true, strangerNotAdministrator: true, laterBootstrapGroupDenied: true, consoleCookie: true, memberInvitation: true, viewer: true, governedPublication: true, foreignWorkspaceDenied: true, serviceTokenSeconds: 300, unregisteredServiceDenied: true }));
+  } else if (phase === "reinstall-ready") {
+    stage = "stateless service routing after retained reinstall";
+    console.log(JSON.stringify(await reinstalledTransport()));
   } else if (phase === "verify") {
     stage = "persisted identities and content";
     await usableTeam();

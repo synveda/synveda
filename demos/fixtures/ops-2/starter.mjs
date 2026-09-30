@@ -381,13 +381,11 @@ try {
     assert.deepEqual(JSON.parse(k(["get", "pvc", "-n", ns, "-o", "json"])).items.map((p) => p.metadata.uid).sort(), claimIds);
     helm(ns, values);
     assert.equal(credentialsHash(ns), secretHash, "credentials changed during reinstall");
-    // Reinstall replaces Service addresses while the fixture edge remains up.
-    // Reconnect that owned proxy to the new backend before the public flow.
-    k(["rollout", "restart", "-n", ns, "deployment/proxy"]); wait(ns, "deployment", "proxy");
+    const reinstallTransport = team(ns, "reinstall-ready");
     team(ns, "verify");
     const revoke = team(ns, "revoke");
     await mcp(ns, true);
-    report.cases.push({ selection: selected, seed, workload, revoke, resources, dayTwo, persistentCredentials: true, persistentContent: true, uninstallReinstall: true });
+    report.cases.push({ selection: selected, seed, workload, revoke, resources, dayTwo, reinstallTransport, persistentCredentials: true, persistentContent: true, uninstallReinstall: true });
     console.log(`PASS ${selected}: install, PKCE/team/service/MCP, recreation, upgrade, retained reinstall and revocation`);
     await quiesce(ns, identityNs);
     k(["delete", "namespace", ns, providers, "--wait=true", "--timeout=180s"], { timeout: 200000 });

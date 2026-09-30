@@ -331,15 +331,20 @@ download cleanup. Fixes preserve exact notice hashes and migration history;
 Windows cleanup retries only sharing/lock violations within a fixed bound.
 Full CI and nonpublishing Release on clean fix commit `33ad90ef` passed the
 image notice probes; CNPG operations and failover also passed. Both Windows
-ARM jobs failed the new transient-lock fixture: the PowerShell provider's
-exception prevented native-code classification. Cleanup now uses the direct
-.NET API and unwraps the base exception; the same transient/persistent lock
-and immediate non-sharing-error fixtures must pass on the next clean run.
+ARM jobs failed the new transient-lock fixture. The direct .NET/base-exception
+follow-up preserved native classification; `6ae63604` confirmed code-32 retry
+exhaustion at about 4.88 seconds. The revised fixture uses a synchronous
+exclusive data-file handle and native two-second release thread; persistent
+and non-sharing refusals and the installer bound are unchanged.
 External-provider Helm cases also exposed a Service-routed outage probe and
-a stale fixture proxy after retained reinstall. The observer now probes
-gateway loopback; the owned edge restarts before public verification and
-login errors preserve status-only diagnostics. Complete native reports and
-assembly require the clean follow-up's full matrix. Published product SBOM
+HTTP transport failure after retained reinstall. The observer now probes
+gateway loopback. An isolated Service-replacement probe confirmed rollout
+completion can precede usable routing; every reinstall now requires three
+stateless routes within 60 seconds before unchanged login/authority checks.
+The extra edge restart is removed. `6ae63604` full CI failed Windows ARM and
+three Helm cases; its Release Windows ARM also failed. Local repair checks
+pass, but complete native reports and assembly require the next clean full
+CI and nonpublishing Release matrix. Published product SBOM
 inspection found no identified Cargo, Cedar or SQLx dependencies on either
 Linux architecture, so coverage remains an explicit next gate. The
 [OPS-12 brief](OPS-12.md) owns the run identities, evidence and limits.

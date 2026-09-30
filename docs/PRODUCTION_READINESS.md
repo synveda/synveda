@@ -176,8 +176,13 @@ complete native acceptance. Regeneration and focused local checks pass, but
 all native archives/images still require complete corrected-source hosted
 qualification. The `5db9687e` full CI passed workspace Rust and five native
 client targets, then failed image notice permissions, stale Helm migration
-evidence and Windows ARM temporary-file cleanup. Source fixes are undergoing
-local validation; the complete native matrix must be rerun on their clean commit.
+evidence and Windows ARM temporary-file cleanup. The `6ae63604` follow-up passed
+workspace Rust, five native client targets and CNPG acceptance, but Windows ARM
+exhausted the controlled transient-lock fixture and three Helm cases failed
+transport after successful restore and retained reinstall. Local fixture repairs
+use a native timed lock and bounded stateless Service reachability before
+unchanged authentication/authority checks. Complete native qualification and
+same-run assembly must pass on their next clean source commit.
 [OPS-12](backlog/OPS-12.md) records the exact boundary. The readiness verdict
 and published-artifact claims are unchanged.
 
