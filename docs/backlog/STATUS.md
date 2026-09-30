@@ -173,9 +173,12 @@ two-engine compilation tests pass. ADR-0128 extends the provisional lease to
 core and optional Apalis workers; synthetic tests cover core readiness,
 cancellation and bounded join. A one-node Kind Helm drill passed baseline
 database failover and direct three-pod JSON/CLI login handoff with replay
-refusal; the chart returned to one gateway. Loaded three-pod policy refresh
-latency, claimed-worker interruption, multi-worker ownership, in-flight
-process/load and rolling acceptance remain open in the brief. Scope, grant,
+refusal. Two audited test-pack revisions compiled on all three pods with
+maximum database-timestamp-to-metric lags of 1.065 and 4.945 seconds at
+light load; the chart returned to one gateway. Restrictive decision-level
+latency under load and failed refresh, claimed-worker interruption,
+multi-worker ownership, in-flight process/load and rolling acceptance remain
+open in the brief. Scope, grant,
 identity and Configuration decisions already use fresh
 request-time database rows and exact-shape Cedar fragments; a generic
 cross-process entity invalidation bus is not presumed necessary.

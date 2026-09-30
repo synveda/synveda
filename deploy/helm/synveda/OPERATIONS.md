@@ -44,7 +44,10 @@ can complete after a gateway restart. The isolated cross-process test exercises
 this source path. An OPS-7 one-node Kind drill used three ready pods to route
 JSON and CLI login across them, refuse replays and read the same identity from
 each pod after baseline database failover. It left the chart at one replica;
-key rotation, loaded policy mutations and multi-node loss remain unqualified.
+two audited test-pack revisions then compiled on all three pods within
+5 seconds of their database timestamps at light load. The harness cleared
+its pack and restored one replica. Key rotation, decision-level restrictive
+policy latency under sustained load and multi-node loss remain unqualified.
 
 After a database outage, Kubernetes' Ready status can lag the application's
 current gate. Probe `/readyz` directly, then validate a fresh login and governed

@@ -87,10 +87,16 @@ CloudNativePG primary promotion and post-failover context read. The
 three ready gateway pods and forced JSON login from pod A to callback on B,
 CLI login from A to callback on B and redemption on C, replay refusals and
 direct authenticated reads from every pod. It restored one replica afterward.
-This proves cross-pod login routing on one node, not loaded policy-mutation
-latency, key rotation during login, multi-node loss or a rolling upgrade.
-Next measure post-commit policy latency and failure on three pods, then
-exercise claimed work under expiry before lifting either replica limit.
+The same harness applied two test-pack revisions through the audited CLI under
+an ordinary gateway role and observed each of the three local compiles via
+the closed reload metric: maximum database-timestamp-to-observation lag was
+1.065 and 4.945 seconds. It checked readiness and cleared the pack. These
+are light-load, one-node compile observations, not a decision-level
+mutation bound under sustained traffic or refresh failure. Key rotation
+during login, multi-node loss and a rolling upgrade remain untested. Next
+prove restrictive policy decision visibility and the failed-refresh expiry
+path under load, then exercise claimed work under expiry before lifting
+either replica limit.
 
 ## Scope
 

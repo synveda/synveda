@@ -22,7 +22,9 @@ cleanup() {
   status=$?
   trap - EXIT
   kubectl -n "$namespace" delete job/ops7-login --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  kubectl -n "$namespace" delete job/ops7-policy-lag --ignore-not-found --wait=true >/dev/null 2>&1 || true
   kubectl -n "$namespace" delete configmap/ops7-login-script --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "$namespace" delete configmap/ops7-policy-scripts --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$namespace" scale deployment/synveda --replicas=1 >/dev/null 2>&1 || true
   exit "$status"
 }
@@ -102,5 +104,72 @@ if kubectl -n "$namespace" wait --for=condition=complete job/ops7-login --timeou
 else
   kubectl -n "$namespace" logs job/ops7-login -c probe >&2 || true
   echo "OPS-7 cross-pod login probe failed" >&2
+  exit 1
+fi
+
+image_tag=$(awk -F'"' '/^appVersion:/ { print $2; exit }' deploy/helm/synveda/Chart.yaml)
+[ -n "$image_tag" ] || { echo "chart appVersion is absent" >&2; exit 1; }
+kubectl -n "$namespace" create configmap ops7-policy-scripts \
+  --from-file=policy-lag.mjs=demos/fixtures/ops-7/policy-lag.mjs \
+  --from-file=lag-pack.cedar=demos/fixtures/ops-7/lag-pack.cedar \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n "$namespace" delete job/ops7-policy-lag --ignore-not-found --wait=true >/dev/null
+cat <<EOF | kubectl -n "$namespace" apply -f - >/dev/null
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ops7-policy-lag
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: probe
+          image: ghcr.io/synveda/product:$image_tag
+          imagePullPolicy: Never
+          command: ["node", "/scripts/policy-lag.mjs"]
+          env:
+            - name: POD_URLS
+              value: '$pod_urls'
+            - name: DATABASE_URL_FILE
+              value: /run/db/DATABASE_URL
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: gateway-database
+              mountPath: /run/db
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: ops7-policy-scripts
+        - name: gateway-database
+          secret:
+            secretName: synveda-gateway-db
+            items:
+              - key: DATABASE_URL
+                path: DATABASE_URL
+EOF
+
+if kubectl -n "$namespace" wait --for=condition=complete job/ops7-policy-lag --timeout=150s >/dev/null; then
+  kubectl -n "$namespace" logs job/ops7-policy-lag -c probe
+else
+  kubectl -n "$namespace" logs job/ops7-policy-lag -c probe >&2 || true
+  echo "OPS-7 three-pod policy revision probe failed" >&2
   exit 1
 fi
