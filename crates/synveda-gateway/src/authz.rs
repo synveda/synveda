@@ -46,14 +46,15 @@ use crate::telemetry::{
     SERVICE_TOKEN_REJECTIONS_TOTAL,
 };
 
-/// Source-candidate safety ceiling; deployment configuration cannot widen it.
+/// Source-candidate safety ceiling for every process-local policy compile;
+/// deployment configuration cannot widen it.
 pub const MAX_POLICY_PACK_AGE: Duration = Duration::from_secs(30);
 
 /// The authority generation whose stored policy packs converged locally.
 ///
 /// Database authority may open before the background pack loader finishes.
 /// Keeping this marker separate makes startup and outage recovery refuse
-/// application traffic until the exact new generation has loaded its packs.
+/// governed work until the exact new generation has loaded its packs.
 #[derive(Clone)]
 pub struct PolicyReadyGeneration {
     lease: watch::Sender<PolicyLease>,
@@ -848,7 +849,7 @@ fn empty_chain() -> Arc<[ScopeNode]> {
 /// PDP: install changed packs, drop removed ones, skip unchanged
 /// versions. A pack that fails to compile keeps that pack's last-good
 /// compile (ADR-0012 decision 5), but the sweep as a whole is unsuccessful
-/// and cannot renew the gateway's freshness lease (ADR-0127).
+/// and cannot renew the process's freshness lease (ADR-0127/ADR-0128).
 #[tracing::instrument(name = "authz.refresh_packs", skip_all, err(Display))]
 pub async fn refresh_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
     let mut failed = false;
@@ -967,16 +968,15 @@ async fn refresh_tenant(
 
 /// Runs the process-local policy-pack refresh loop until process shutdown.
 ///
-/// Gateway and worker perform initial convergence before this loop starts.
-/// Only the gateway currently has a freshness lease; the worker's equivalent
-/// expiry remains an OPS-7 acceptance gap. A complete failed sweep keeps
-/// last-good packs but cannot renew the gateway lease.
+/// Gateway and workers perform initial convergence before this loop starts.
+/// A complete failed sweep keeps last-good packs but cannot renew the
+/// process-local freshness lease.
 pub async fn run_pack_refresher(
     pool: PgPool,
     pdp: Arc<Pdp>,
     interval: Duration,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
-    gateway_lease: Option<(PolicyReadyGeneration, u64)>,
+    policy_lease: (PolicyReadyGeneration, u64),
 ) {
     let mut ticker = tokio::time::interval(interval);
     // The initial convergence was explicit; do not immediately duplicate it.
@@ -1002,9 +1002,7 @@ pub async fn run_pack_refresher(
         .await;
         let label = match outcome {
             Ok(Ok(())) => {
-                if let Some((lease, generation)) = &gateway_lease {
-                    lease.mark_refreshed(*generation);
-                }
+                policy_lease.0.mark_refreshed(policy_lease.1);
                 "ok"
             }
             Ok(Err(error)) => {

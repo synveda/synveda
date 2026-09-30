@@ -233,7 +233,9 @@ async fn run_process(
             _result = &mut heartbeat_task => SupervisorEvent::Heartbeat,
         };
         match event {
-            SupervisorEvent::Generation(Ok(Ok(GenerationEnd::AuthorityClosed))) => {
+            SupervisorEvent::Generation(Ok(Ok(
+                GenerationEnd::AuthorityClosed | GenerationEnd::PolicyStale,
+            ))) => {
                 active_task = Some(tokio::spawn(run_authority_generation(
                     generation.clone(),
                     gate.clone(),
@@ -410,7 +412,9 @@ fn generation_cleanup_error(
     result: Result<Result<GenerationEnd, String>, tokio::task::JoinError>,
 ) -> Option<String> {
     match result {
-        Ok(Ok(GenerationEnd::Shutdown | GenerationEnd::AuthorityClosed)) => None,
+        Ok(Ok(
+            GenerationEnd::Shutdown | GenerationEnd::AuthorityClosed | GenerationEnd::PolicyStale,
+        )) => None,
         Ok(Ok(GenerationEnd::AuthorityRefused)) => {
             Some("the worker database authority was conclusively refused".to_owned())
         }
@@ -439,6 +443,7 @@ struct GenerationRuntime {
 enum GenerationEnd {
     AuthorityClosed,
     AuthorityRefused,
+    PolicyStale,
     Shutdown,
 }
 
@@ -509,6 +514,7 @@ async fn run_authority_generation(
             GenerationEnd::AuthorityClosed
         });
     }
+    health.policy_ready.mark_converged(generation);
 
     let directory_connectors = if runtime.directory_config.is_some() {
         directory_config_from_env()
@@ -524,12 +530,13 @@ async fn run_authority_generation(
         "policy-refresh",
         gate.clone(),
         generation,
+        health.policy_ready.clone(),
         authz::run_pack_refresher(
             runtime.pool.clone(),
             Arc::clone(&runtime.pdp),
             runtime.policy_refresh,
             work_stop_rx.clone(),
-            None,
+            (health.policy_ready.clone(), generation),
         ),
     );
     spawn_governed_named(
@@ -537,6 +544,7 @@ async fn run_authority_generation(
         "skill-validation",
         gate.clone(),
         generation,
+        health.policy_ready.clone(),
         crate::skill_validation::run(
             crate::skill_validation::Runtime::new(runtime.pool.clone(), Arc::clone(&runtime.pdp)),
             runtime.native_skill_validation,
@@ -548,6 +556,7 @@ async fn run_authority_generation(
         "capture",
         gate.clone(),
         generation,
+        health.policy_ready.clone(),
         synveda_ingest::capture_worker::run(
             synveda_ingest::capture_worker::Deps {
                 pool: runtime.pool.clone(),
@@ -563,6 +572,7 @@ async fn run_authority_generation(
         "knowledge-index",
         gate.clone(),
         generation,
+        health.policy_ready.clone(),
         knowledge_index::run(
             runtime.pool.clone(),
             Arc::clone(&runtime.embedder),
@@ -575,6 +585,7 @@ async fn run_authority_generation(
         "relaxation-expiry",
         gate.clone(),
         generation,
+        health.policy_ready.clone(),
         relaxations::run_expiry_sweep(
             runtime.pool.clone(),
             runtime.relaxation_interval,
@@ -587,6 +598,7 @@ async fn run_authority_generation(
             "directory-sync",
             gate.clone(),
             generation,
+            health.policy_ready.clone(),
             directory_sync::run(
                 DirectoryRuntime::new(
                     runtime.pool.clone(),
@@ -613,6 +625,7 @@ async fn run_authority_generation(
             }
         }
         () = shutdown::requested(&mut shutdown) => GenerationEnd::Shutdown,
+        () = health.policy_ready.stale_for(generation) => GenerationEnd::PolicyStale,
         result = tasks.join_next() => {
             health.fault();
             let reason = unexpected_task_exit(result);
@@ -623,6 +636,14 @@ async fn run_authority_generation(
     };
     health.waiting();
     let _ = work_stop_tx.send(true);
+    if end == GenerationEnd::PolicyStale {
+        tracing::warn!(
+            authority.generation = generation,
+            "worker policy convergence expired; cancelling governed work"
+        );
+        abort_stale_tasks(&mut tasks, authority::CHECK_TIMEOUT).await?;
+        return Ok(end);
+    }
     finish_generation_drain(&mut tasks, runtime.drain_grace, end).await
 }
 
@@ -662,21 +683,44 @@ fn spawn_governed_named<F>(
     name: &'static str,
     gate: AuthorityGate,
     generation: u64,
+    policy_ready: authz::PolicyReadyGeneration,
     task: F,
 ) where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
     let mut permit = gate.permit();
     tasks.spawn(async move {
-        if permit.is_for(generation) {
+        if permit.is_for(generation) && policy_ready.is_for(generation) {
             tokio::select! {
                 biased;
                 () = permit.revoked() => {}
+                () = policy_ready.stale_for(generation) => {}
                 () = task => {}
             }
         }
         name
     });
+}
+
+async fn abort_stale_tasks(
+    tasks: &mut JoinSet<&'static str>,
+    grace: Duration,
+) -> Result<(), String> {
+    tasks.abort_all();
+    tokio::time::timeout(grace, async {
+        while let Some(result) = tasks.join_next().await {
+            match result {
+                Ok(_) => {}
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => {
+                    return Err(format!("worker task failed during policy expiry: {error}"));
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| "worker tasks did not stop after policy expiry".to_owned())?
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -786,6 +830,7 @@ fn directory_config_from_env()
 #[derive(Clone)]
 struct WorkerHealth {
     authority: AuthorityGate,
+    policy_ready: authz::PolicyReadyGeneration,
     metrics: metrics_exporter_prometheus::PrometheusHandle,
     lifecycle: Arc<AtomicU8>,
     active_generation: Arc<AtomicU64>,
@@ -801,6 +846,7 @@ impl WorkerHealth {
         metrics::gauge!(crate::telemetry::WORKER_READY).set(0.0);
         let state = Self {
             authority,
+            policy_ready: authz::PolicyReadyGeneration::new(),
             metrics,
             lifecycle: Arc::new(AtomicU8::new(STARTING)),
             active_generation: Arc::new(AtomicU64::new(0)),
@@ -855,6 +901,7 @@ impl WorkerHealth {
         self.lifecycle.load(Ordering::Acquire) == RUNNING
             && generation != 0
             && self.authority.open_generation() == Some(generation)
+            && self.policy_ready.is_for(generation)
     }
 }
 
@@ -1029,6 +1076,7 @@ mod tests {
     #[tokio::test]
     async fn draining_withdraws_readiness_before_a_current_unit_finishes() {
         let health = WorkerHealth::new(AuthorityGate::open_for_test(), test_metrics());
+        health.policy_ready.mark_converged(1);
         health.beat();
         health.running(1);
         let (stop_tx, stop_rx) = watch::channel(false);
@@ -1050,6 +1098,51 @@ mod tests {
         drain_tasks(&mut tasks, Duration::from_secs(1))
             .await
             .expect("unit drains");
+    }
+
+    #[tokio::test]
+    async fn stale_policy_withdraws_worker_readiness_and_cancels_a_governed_unit() {
+        let gate = AuthorityGate::open_for_test();
+        let mut health = WorkerHealth::new(gate.clone(), test_metrics());
+        health.policy_ready =
+            authz::PolicyReadyGeneration::with_max_age(Duration::from_millis(200));
+        let generation = gate.open_generation().expect("test authority is open");
+        health.policy_ready.mark_converged(generation);
+        health.running(generation);
+        let (started_tx, started_rx) = oneshot::channel();
+        let mut tasks = JoinSet::new();
+        spawn_governed_named(
+            &mut tasks,
+            "governed-unit",
+            gate,
+            generation,
+            health.policy_ready.clone(),
+            async move {
+                let _ = started_tx.send(());
+                std::future::pending::<()>().await;
+            },
+        );
+        started_rx.await.expect("governed unit started");
+        assert!(health.is_running());
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), tasks.join_next())
+                .await
+                .expect("stale unit was cancelled")
+                .expect("unit completed")
+                .expect("unit did not panic"),
+            "governed-unit"
+        );
+        assert!(!health.is_running());
+    }
+
+    #[tokio::test]
+    async fn expiry_abort_joins_stuck_worker_tasks_within_a_bound() {
+        let mut tasks = JoinSet::new();
+        spawn_named(&mut tasks, "stuck", std::future::pending());
+        abort_stale_tasks(&mut tasks, Duration::from_secs(1))
+            .await
+            .expect("stale task was aborted and joined");
+        assert!(tasks.is_empty());
     }
 
     #[tokio::test]

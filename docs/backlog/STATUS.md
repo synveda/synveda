@@ -169,10 +169,12 @@ gateway instances, and 25 exact-role epoch tests pass. ADR-0127 adds a
 provisional 30-second gateway policy lease: a complete successful bounded
 sweep renews it, while failed/time-out sweeps do not; expiry withdraws HTTP
 admission/readiness and cancels in-flight work. Source route and isolated
-two-engine compilation tests pass. Production-shaped three-pod refresh
-latency, the worker's stale-compile bound, multi-worker ownership,
-in-flight process/load and three-pod rolling acceptance remain open in the
-brief. Scope, grant, identity and Configuration decisions already use fresh
+two-engine compilation tests pass. ADR-0128 extends the provisional lease to
+core and optional Apalis workers; synthetic tests cover core readiness,
+cancellation and bounded join. Production-shaped three-pod refresh latency,
+claimed-worker interruption, multi-worker ownership, in-flight process/load
+and three-pod rolling acceptance remain open in the brief. Scope, grant,
+identity and Configuration decisions already use fresh
 request-time database rows and exact-shape Cedar fragments; a generic
 cross-process entity invalidation bus is not presumed necessary.
 

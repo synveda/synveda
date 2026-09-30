@@ -30,9 +30,12 @@ freshness lease. An incomplete, failed or five-second timed-out sweep cannot
 renew it; expiry withdraws readiness and cancels governed HTTP work. The
 `SYNVEDA_POLICY_REFRESH_SECS` range is 1–15 seconds (default 5). Inspect
 `synveda_policy_pack_refresh_sweeps_total` and
-`synveda_policy_pack_refresh_seconds` when readiness drops. Post-start
-change visibility across multiple gateways and worker policy expiry are not
-yet qualified, so the chart remains single-replica.
+`synveda_policy_pack_refresh_seconds` when readiness drops. The core worker
+uses the same provisional lease: expiry withdraws readiness, cancels governed
+work and retries initial convergence before resuming. An interrupted claim
+still requires a lease/fence recovery check. Post-start change visibility
+across multiple gateways and real claimed-worker expiry remain unqualified,
+so the chart remains single-replica.
 
 OIDC login now parks its PKCE state and CLI handoff in the same deployment-key
 plane as console sessions. A missing deployment key refuses `/auth/login`

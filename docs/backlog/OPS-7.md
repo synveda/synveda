@@ -69,12 +69,20 @@ sweep can reopen the same authority generation. The sweep publishes duration
 and closed outcome metrics. Unit route acceptance covers expiry, in-flight
 cancel and recovery; an exact-role test with two independent policy engines
 in one process covers a stored revision reaching each engine only after its
-own sweep, and a failed compile
-leaving last-good loaded without counting as convergence. This is source
-behavior, not a measured 30-second end-to-end mutation bound under load. The
-worker's use of a last-good compile is still unbounded. Next measure the
-post-commit latency and failure path on three pods, then align worker expiry
-before lifting the chart limit.
+own sweep, and a failed compile leaving last-good loaded without counting as
+convergence. This is source behavior, not a measured 30-second end-to-end
+mutation bound under load.
+
+[ADR-0128](../adr/adr-0128-expire-stale-worker-policy-convergence.md) now
+applies the same provisional lease to the core worker and optional Apalis
+leaf. Core readiness drops at expiry; its supervisor cancels and joins
+governed futures, then retries initial convergence before taking work. Apalis
+refuses dispatch and execution, withdraws readiness and exits nonzero for a
+fresh convergence on restart. Synthetic core-worker tests cover readiness,
+in-flight cancellation and bounded join. A real claimed Capture interruption,
+optional Apalis delivery interruption and provider effects have not been
+qualified. Next measure post-commit policy latency and failure on three pods,
+then exercise claimed work under expiry before lifting either replica limit.
 
 ## Scope
 

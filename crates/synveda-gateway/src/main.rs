@@ -521,7 +521,7 @@ async fn run_gateway_background(
             Arc::clone(&pdp),
             refresh_interval,
             generation_stop_rx,
-            Some((policy_ready.clone(), generation)),
+            (policy_ready.clone(), generation),
         );
         tokio::pin!(refresher);
         let end = tokio::select! {
