@@ -289,6 +289,11 @@
           "minimum": 1,
           "maximum": 64
         },
+        "captureOnlyReplicas": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
         "shutdownSeconds": {
           "type": "integer",
           "minimum": 3,
@@ -308,6 +313,7 @@
         "databaseExistingSecret",
         "databaseUrlSecretKey",
         "databasePasswordSecretKey",
+        "captureOnlyReplicas",
         "dbMaxConnections",
         "shutdownSeconds",
         "logLevel"

@@ -161,7 +161,8 @@ authority sentinel until admitted work drains, and exits inside the configured
 bound in an isolated exact-role subprocess test. ADR-0125 then closes the
 startup/recovery window between database authority and first stored Cedar
 policy-pack convergence by binding readiness and requests to one authority
-generation. The chart still pins one gateway/worker and Recreate. Durable
+generation. The chart still pins one gateway and one combined worker by
+default, with Recreate updates. Durable
 login state is now a source candidate under ADR-0126: additive `0003` stores
 sealed, hash-selected one-time rows with database TTL and atomic consumption;
 isolated mock-IdP tests complete OIDC login and CLI handoff across independent
@@ -199,9 +200,16 @@ external embedding calls and directory pull still lacks a cross-worker pass
 owner. ADR-0129 therefore retains one combined worker and adds a closed
 capture-only runtime profile. The source profile runs the same authority and
 policy gates without maintenance tasks or embedder/KMS configuration; focused
-subprocess acceptance passes. The chart has no capture-only deployment yet:
-next bound its pod/database/provider counts and prove three-worker claims,
-provider outage and pod loss from the source image in Kind. The drill also
+subprocess acceptance passes. The source Helm chart now keeps the combined
+worker singleton and accepts zero to two additional capture-only pods, counting
+each database pool in the bundled/CNPG budget. A source-image, one-node Kind
+run proved three distinct Capture claims across those pods. Deleting one
+capture-only owner cancelled its provider call; two surviving calls completed,
+a different pod reclaimed the expired claim, and all three batches held one
+candidate each after four provider calls. A separate provider 503 retried once
+and completed with one candidate. The harness restores the default chart
+values. This is Capture-only evidence, without a provider-wide quota,
+sustained traffic or cross-node/rolling-upgrade proof. The drill also
 exposed a CNPG chart bootstrap defect: PUBLIC
 CONNECT had been revoked on `postgres` without restoring it for CNPG's reserved
 `streaming_replica` role. A retained standby stayed unready after promotion;

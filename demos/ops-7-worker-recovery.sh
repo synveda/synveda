@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OPS-7: recover a real Capture claim after policy expiry or owner-pod loss.
+# OPS-7: recover real Capture claims after policy expiry or owner-pod loss.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -15,13 +15,13 @@ kind get clusters | grep -qx synveda-ops7 || {
 namespace=synveda-test
 mode=${1:-policy-expiry}
 if [ "$#" -gt 1 ]; then
-  echo "usage: $0 [policy-expiry|pod-loss]" >&2
+  echo "usage: $0 [policy-expiry|pod-loss|capture-scale]" >&2
   exit 78
 fi
 case "$mode" in
-  policy-expiry|pod-loss) ;;
+  policy-expiry|pod-loss|capture-scale) ;;
   *)
-    echo "usage: $0 [policy-expiry|pod-loss]" >&2
+    echo "usage: $0 [policy-expiry|pod-loss|capture-scale]" >&2
     exit 78
     ;;
 esac
@@ -44,6 +44,7 @@ cleanup() {
       --wait --wait-for-jobs --timeout 15m >/dev/null || status=1
     if [ "$(kubectl -n "$namespace" get deployment/synveda -o jsonpath='{.spec.replicas}')" != 1 ] ||
         [ "$(kubectl -n "$namespace" get deployment/synveda-worker -o jsonpath='{.spec.replicas}')" != 1 ] ||
+        kubectl -n "$namespace" get deployment/synveda-capture-worker >/dev/null 2>&1 ||
         ! kubectl -n "$namespace" rollout status deployment/synveda --timeout=120s >/dev/null ||
         ! kubectl -n "$namespace" rollout status deployment/synveda-worker --timeout=120s >/dev/null; then
       status=1
@@ -54,7 +55,7 @@ cleanup() {
     wait "$forward_pid" >/dev/null 2>&1 || true
   fi
   rm -f "$scratch/database-url" "$scratch/port.log" "$scratch/values.json" \
-    "$scratch/before.json" "$scratch/closed.json"
+    "$scratch/before.json" "$scratch/closed.json" "$scratch/stats.json"
   rmdir "$scratch"
   exit "$status"
 }
@@ -104,18 +105,29 @@ if [ "$mode" = policy-expiry ]; then
   OPS7_DATABASE_URL_FILE="$scratch/database-url" "$fault_binary" clear >/dev/null
 fi
 
+upgrade_for_probe() {
+  helm upgrade synveda deploy/helm/synveda -n "$namespace" -f "$scratch/values.json" \
+    --set extractor.kind=vllm --set extractor.model=ops7-interruption \
+    --set extractor.baseUrl=http://ops7-worker-probe:8088 "$@" \
+    --server-side=true --force-conflicts \
+    --wait --wait-for-jobs --timeout 15m >/dev/null
+}
 upgraded=true
-helm upgrade synveda deploy/helm/synveda -n "$namespace" -f "$scratch/values.json" \
-  --set extractor.kind=vllm --set extractor.model=ops7-interruption \
-  --set extractor.baseUrl=http://ops7-worker-probe:8088 \
-  --server-side=true --force-conflicts \
-  --wait --wait-for-jobs --timeout 15m >/dev/null
+if [ "$mode" = capture-scale ]; then
+  upgrade_for_probe --set image.tag=ops7-capture --set image.pullPolicy=Never \
+    --set worker.captureOnlyReplicas=2
+else
+  upgrade_for_probe
+fi
 kubectl -n "$namespace" rollout status deployment/synveda-worker --timeout=120s >/dev/null
 kubectl -n "$namespace" scale deployment/synveda --replicas=3 >/dev/null
 kubectl -n "$namespace" rollout status deployment/synveda --timeout=300s >/dev/null
 if [ "$mode" = pod-loss ]; then
   kubectl -n "$namespace" scale deployment/synveda-worker --replicas=2 >/dev/null
   kubectl -n "$namespace" rollout status deployment/synveda-worker --timeout=300s >/dev/null
+fi
+if [ "$mode" = capture-scale ]; then
+  kubectl -n "$namespace" rollout status deployment/synveda-capture-worker --timeout=300s >/dev/null
 fi
 read -r -a pod_ips <<< "$(kubectl -n "$namespace" get pods \
   -l app.kubernetes.io/component=gateway \
@@ -258,6 +270,92 @@ provider_counts() {
   '
 }
 
+if [ "$mode" = capture-scale ]; then
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node /scripts/claimed-capture.mjs start-three
+  provider_stats >"$scratch/stats.json"
+  read -r owner first_peer combined survivor <<< "$(kubectl -n "$namespace" get pods \
+    -l app.kubernetes.io/instance=synveda -o json | node -e '
+      const fs = require("node:fs");
+      const stats = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      let input = "";
+      process.stdin.on("data", chunk => input += chunk);
+      process.stdin.on("end", () => {
+        const pods = JSON.parse(input).items.filter(pod =>
+          ["worker", "capture-worker"].includes(pod.metadata.labels["app.kubernetes.io/component"]));
+        const peers = stats.peers.map(peer => peer.replace(/^::ffff:/, ""));
+        const captures = pods.filter(pod => pod.metadata.labels["app.kubernetes.io/component"] === "capture-worker");
+        const combined = pods.find(pod => pod.metadata.labels["app.kubernetes.io/component"] === "worker");
+        const owner = captures.find(pod => peers.includes(pod.status.podIP));
+        const survivor = captures.find(pod => pod.metadata.name !== owner?.metadata.name);
+        if (pods.length !== 3 || captures.length !== 2 || !combined || !owner || !survivor ||
+            new Set(peers).size !== 3 ||
+            pods.some(pod => !peers.includes(pod.status.podIP) ||
+              !pod.status.containerStatuses?.[0]?.ready)) process.exit(1);
+        console.log(`${owner.metadata.name} ${owner.status.podIP} ${combined.metadata.name} ${survivor.metadata.name}`);
+      });
+    ' "$scratch/stats.json")"
+  [ -n "$owner" ] && [ -n "$combined" ] && [ -n "$survivor" ] || {
+    echo "three blocked provider peers did not match one combined and two ready capture workers" >&2
+    exit 1
+  }
+  kubectl -n "$namespace" delete "pod/$owner" --wait=false >/dev/null
+  cancelled=false
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    read -r calls active dropped <<< "$(provider_counts)"
+    [ "$calls" = 3 ] || { echo "Capture retried before its owner lease expired" >&2; exit 1; }
+    if [ "$active $dropped" = "2 1" ]; then cancelled=true; break; fi
+    sleep 1
+  done
+  [ "$cancelled" = true ] || { echo "lost capture worker's provider call did not cancel" >&2; exit 1; }
+  for peer_pod in "$combined" "$survivor"; do
+    [ "$(kubectl -n "$namespace" exec "pod/$peer_pod" -- \
+      curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' \
+        http://127.0.0.1:8121/readyz)" = 200 ] || {
+      echo "a surviving worker closed when the capture owner was lost" >&2
+      exit 1
+    }
+  done
+  echo "OPS-7: combined and peer capture workers stayed ready after capture-owner loss"
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node -e "fetch('http://127.0.0.1:8088/release-current',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)})"
+  retried=false
+  for ((attempt = 0; attempt < 120; attempt++)); do
+    read -r calls active dropped <<< "$(provider_counts)"
+    [ "$calls" -le 4 ] || { echo "Capture made more than one recovery call" >&2; exit 1; }
+    if [ "$calls $active $dropped" = "4 1 1" ]; then retried=true; break; fi
+    sleep 1
+  done
+  [ "$retried" = true ] || { echo "Capture did not reclaim its expired owner lease" >&2; exit 1; }
+  last_peer=$(provider_stats | node -e '
+    let input = "";
+    process.stdin.on("data", chunk => input += chunk);
+    process.stdin.on("end", () => {
+      const stats = JSON.parse(input);
+      if (stats.peers?.length !== 4) process.exit(1);
+      console.log(stats.peers[3].replace(/^::ffff:/, ""));
+    });
+  ')
+  [ "$last_peer" != "$first_peer" ] || {
+    echo "the deleted owner made the recovery provider call" >&2
+    exit 1
+  }
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node /scripts/claimed-capture.mjs pre-release-three
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node -e "fetch('http://127.0.0.1:8088/release',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)})"
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node /scripts/claimed-capture.mjs verify-three
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node /scripts/claimed-capture.mjs start-provider-failure
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node /scripts/claimed-capture.mjs pre-release-provider-failure
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node -e "fetch('http://127.0.0.1:8088/release',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)})"
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node /scripts/claimed-capture.mjs verify-provider-failure
+  exit 0
+fi
 kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
   node /scripts/claimed-capture.mjs start
 if [ "$mode" = policy-expiry ]; then

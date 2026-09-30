@@ -120,6 +120,9 @@ silent if the chart rendered it anyway.
 {{- if or (hasKey .Values.worker "replicas") (hasKey .Values.worker "replicaCount") -}}
 {{- fail "worker replicas are not configurable in this chart (CPR-45, ADR-0102).\n  Capture is fenced, but every core maintenance loop has not yet passed concurrent-worker acceptance. Remove the key." -}}
 {{- end -}}
+{{- if or (lt (int .Values.worker.captureOnlyReplicas) 0) (gt (int .Values.worker.captureOnlyReplicas) 2) -}}
+{{- fail "worker.captureOnlyReplicas must be between 0 and 2; only Capture has fenced multi-worker evidence (ADR-0129)" -}}
+{{- end -}}
 
 {{- /* Decision 6. Origin and redirect URI are both derived from this. */ -}}
 {{- if not .Values.gateway.publicUrl -}}
@@ -251,9 +254,10 @@ silent if the chart rendered it anyway.
 {{- if or (lt (int .Values.worker.dbMaxConnections) 1) (gt (int .Values.worker.dbMaxConnections) 64) -}}
 {{- fail "worker.dbMaxConnections must be between 1 and 64, matching the application startup bound" -}}
 {{- end -}}
-{{- $runtimeConnections := add (int .Values.gateway.dbMaxConnections) (int .Values.worker.dbMaxConnections) -}}
-{{- if and (eq .Values.postgres.mode "cnpg") (ge $runtimeConnections (int .Values.postgres.maxConnections)) -}}
-{{- fail (printf "gateway.dbMaxConnections + worker.dbMaxConnections (%d) must be below postgres.maxConnections (%d): the cluster needs headroom for migration, operator and probe connections" $runtimeConnections (int .Values.postgres.maxConnections)) -}}
+{{- $workerConnections := mul (add 1 (int .Values.worker.captureOnlyReplicas)) (int .Values.worker.dbMaxConnections) -}}
+{{- $runtimeConnections := add (int .Values.gateway.dbMaxConnections) $workerConnections -}}
+{{- if and (ne .Values.postgres.mode "external") (ge $runtimeConnections (int .Values.postgres.maxConnections)) -}}
+{{- fail (printf "gateway.dbMaxConnections + (1 + worker.captureOnlyReplicas) * worker.dbMaxConnections (%d) must be below postgres.maxConnections (%d): the cluster needs headroom for migration, operator and probe connections" $runtimeConnections (int .Values.postgres.maxConnections)) -}}
 {{- end -}}
 {{- if or (lt (int .Values.worker.shutdownSeconds) 3) (gt (int .Values.worker.shutdownSeconds) 300) -}}
 {{- fail "worker.shutdownSeconds must be between 3 and 300, preserving cooperative drain and both forced-join windows" -}}

@@ -47,10 +47,16 @@ provider. A retry may repeat an external provider call; the fence guarantees
 one durable candidate set, not exactly-once provider effects.
 
 The first supported scale increment is at most two additional capture-only
-pods, and the chart remains disabled until a direct three-worker claim,
-provider-outage and pod-loss acceptance passes. Do not infer a general worker
-replica count from this mode. Gateway scaling and its own traffic/key-rotation
-acceptance remain separate OPS-7 decisions.
+pods, with zero as the chart default. A source-image, one-node Kind drill now
+proved three distinct Capture claims across the combined worker and two
+capture-only pods. Deleting a capture-only owner cancelled one provider call;
+the two surviving calls completed, a different pod reclaimed the expired
+claim, and each batch retained one candidate. A separate provider 503 was
+retried once and produced one candidate. The chart bounds the pod count and
+bundled/CNPG connection budget. Do not infer a general worker replica count,
+provider-wide quota, multi-node availability or exactly-once external effect
+from this mode. Gateway scaling and its own traffic/key-rotation acceptance
+remain separate OPS-7 decisions.
 
 ## Options considered
 

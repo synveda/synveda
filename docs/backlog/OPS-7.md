@@ -15,17 +15,18 @@ size: L
 Helm pins one gateway replica and Recreate. ADR-0126 moves pending OIDC login
 and CLI handoff state into a deployment-key-sealed PostgreSQL ledger. Stored Cedar
 policy packs are compiled process-locally and refreshed on a timer; ADR-0127
-adds a provisional gateway freshness lease. Cross-replica latency and one
-claimed-worker expiry now have isolated Kind evidence, but production-load and
-multi-worker bounds remain unqualified. Scope ancestry,
+adds a provisional gateway freshness lease. Cross-replica latency and bounded
+Capture-only scaling have one-node Kind evidence, but production-load and
+general worker-family bounds remain unqualified. Scope ancestry,
 identity, grants, groups, assignments and Configuration are already read in
 ordinary request transactions, and cached Cedar fragments compare the exact
 supplied scope shape. Capture, Knowledge indexing,
 directory pull and relaxation expiry now run in a separate supervised core
-worker, but only one worker replica is supported and concurrent-worker recovery
-has not been proved. Worker SIGTERM withdraws readiness and performs a bounded
-cancel/join. A claimed Capture path has been exercised under policy expiry;
-provider exactly-once effects and multi-worker ownership remain unproved.
+worker. One combined worker is supported, with up to two optional capture-only
+pods; other maintenance loops have no concurrent owner. Worker SIGTERM
+withdraws readiness and performs a bounded cancel/join. Claimed Capture has
+one-node policy-expiry, pod-loss and provider-503 recovery evidence; provider
+exactly-once effects and general worker ownership remain unproved.
 These gaps are recorded in
 [production readiness](../PRODUCTION_READINESS.md) and the one-replica refusal
 is governed by [ADR-0062](../adr/adr-0062-enterprise-profile-and-helm-chart.md).
@@ -146,10 +147,21 @@ scaling the unfenced maintenance loops. The source worker now accepts only
 policy lifecycle, while capture-only omits maintenance task startup and its
 embedder/KMS configuration. A real subprocess accepts capture-only with an
 invalid maintenance embedder and still closes readiness during a database
-outage; the combined profile refuses that embedder. Helm does not yet render
-capture-only pods. Next wire a bounded optional deployment, prove three
-worker claims, provider outage and pod loss from the source image in Kind,
-and account for all worker database connections before enabling that option.
+outage; the combined profile refuses that embedder. The source chart renders
+zero to two separate
+capture-only pods while retaining one combined worker. It rejects a third
+extra pod and counts each pool in the bundled/CNPG connection budget. A
+source-image, one-node Kind run made three distinct worker pods hold three
+Capture calls, deleted one capture-only owner, completed the two surviving
+calls, and observed a different pod reclaim the expired claim. Each batch
+completed with one candidate; there were four provider calls, one cancelled,
+and attempt counts `1,1,2`. A separate 503 from the same provider was retried
+once by Capture and completed with one candidate. The repeatable
+`demos/ops-7-worker-recovery.sh capture-scale` restores the default release
+values. This qualifies the bounded Capture-only chart option in a disposable
+one-node cluster. Provider-wide concurrency, sustained load, cross-node pod
+loss, the other maintenance loops and a rolling mixed-version upgrade remain
+open; `worker.replicas` stays refused.
 
 The first claimed-Capture run exposed a Helm/CNPG defect: after the baseline
 primary promotion,
@@ -165,8 +177,9 @@ maintenance CONNECT, and returned to two ready instances after its replica
 was deleted. Contract checks and the operator runbook cover the ACL. A second
 primary promotion and retained-cluster upgrade with the fixed image still
 need acceptance. Key rotation during login, multi-node loss and
-a rolling upgrade also remain untested. Next prove multi-worker ownership and
-pod loss under traffic before lifting either replica limit.
+a rolling upgrade also remain untested. Next prove other worker-family
+ownership and pod loss under traffic before lifting the combined-worker or
+gateway replica refusal.
 
 ## Scope
 
@@ -211,9 +224,10 @@ semantics. Helm owns the separate replica and termination settings.
 - A scope move, grant revoke, identity disable and Configuration/policy change
   become visible to every replica within the documented bound, with no stale
   permit after the bound.
-- Three gateway replicas and separately scaled core-worker replicas produce one
-  durable effect, respect provider concurrency and recover every lease after
-  pod loss.
+- Three gateway replicas and bounded capture-only workers produce one durable
+  Capture candidate set per batch and recover its fenced lease after pod loss.
+  Any future combined-worker replica count must first prove every maintenance
+  loop's ownership; provider concurrency needs an explicit quota.
 - SIGTERM makes the affected process's readiness fail first, drains gateway
   requests, and lets core workers finish or safely release claimed work before
   exiting inside the pod grace period.

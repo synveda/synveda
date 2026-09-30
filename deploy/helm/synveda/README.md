@@ -1,6 +1,7 @@
 # Deploy to Kubernetes
 
-The existing chart runs one gateway/console and one private worker. Select
+The chart runs one gateway/console and one combined private worker by default;
+the source candidate can add up to two capture-only workers. Select
 bundled or existing application PostgreSQL independently of bundled Keycloak
 or existing OIDC. Bundled PostgreSQL is a persistent namespaced StatefulSet;
 CNPG is an explicit alternative requiring an operator you already manage.
@@ -72,8 +73,9 @@ unqualified. Structural API validation is distinct from execution evidence.
   Deployments, StatefulSets, Jobs, Pods/log/exec, Services, ConfigMaps, Secrets,
   ServiceAccounts, PVCs and the selected Ingress/Route/NetworkPolicy resources.
   CNPG mode additionally requires access to its namespaced Cluster resource.
-- Set quota for database/provider pods plus gateway, worker and the temporary
-  installation Job; allow replacement pods/PVC provisioning. See resource
+- Set quota for database/provider pods plus gateway, worker, optional
+  capture-only workers and the temporary installation Job; allow replacement
+  pods/PVC provisioning. See resource
   observations in [OPS-11](../../../docs/backlog/OPS-11.md). The tested engine
   exposed 18 CPUs and 16.8 GB RAM; that is test context, not a minimum.
 - Select a persistent CSI StorageClass supporting PostgreSQL fsync and the

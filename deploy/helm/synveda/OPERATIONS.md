@@ -2,7 +2,8 @@
 
 Use the [installation guide](README.md) and save the exact chart, values,
 immutable image overlays and Secret custody references. This runbook covers
-one gateway and one worker with planned maintenance. It does not establish HA,
+one gateway and one combined worker, with optional capture-only capacity and
+planned maintenance. It does not establish HA,
 WAL/PITR, zero downtime or a promised RPO/RTO. Compose keeps its existing
 [backup/restore/upgrade entry points](../../compose/README.md).
 
@@ -38,8 +39,32 @@ Kind run, a
 claimed Capture request was cancelled on policy expiry, then its fenced second
 attempt committed one candidate after policy recovery. A separate two-worker
 Kind run deleted the pod owning a blocked Capture claim; another pod reclaimed
-it and committed one candidate. Other job families and provider-wide quotas
-still need multi-worker ownership proof, so the chart remains single-replica.
+it and committed one candidate. The chart retains one combined worker;
+capture-only pods may add fenced Capture throughput but do not run the other
+job families. Provider-wide quotas remain operator-owned.
+
+## Optional Capture capacity
+
+The source chart accepts `worker.captureOnlyReplicas: 0..2`; zero is the
+default. It always keeps exactly one combined worker because Knowledge
+indexing and directory pull have no multi-process owner. Each extra pod uses
+the ordinary worker database role, the same authority and policy readiness
+gates, and only the fenced Capture loop. It has no OIDC, KMS or embedder
+Secret mount. `worker.replicas` remains refused. The published v0.4.3 chart
+does not include this source candidate.
+
+Reserve one extractor call and `worker.dbMaxConnections` database connections
+per extra pod, plus enough capacity for a replacement during rollout. The
+chart rejects a bundled/CNPG connection budget that is too small; an external
+database and provider need their own operator-enforced quotas. If using
+NetworkPolicy, `networkPolicy.extraEgress.worker` also applies to capture-only
+pods, so permit the chosen extractor endpoint there. Check each private
+`/readyz` through a pod exec and inspect Capture metrics before increasing
+the count. To roll back, set `worker.captureOnlyReplicas: 0` using the saved
+values and wait for interrupted claims to expire and be reclaimed by the
+combined worker. A repeated external provider call is possible; the attempt
+fence permits one durable candidate set. This is Capture capacity, not
+general maintenance-worker availability or gateway HA.
 
 OIDC login now parks its PKCE state and CLI handoff in the same deployment-key
 plane as console sessions. A missing deployment key refuses `/auth/login`
