@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with expired as (\n            select token_hash\n            from console_sessions\n            where absolute_expires_at <= now()\n            order by absolute_expires_at, token_hash\n            limit 256\n            for update skip locked\n        )\n        delete from console_sessions as session\n        using expired\n        where session.token_hash = expired.token_hash\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "03f3e4069aa97c479bb6f88476755d2aa2ae2f25a626391ed7b160ed81622a52"
+}

@@ -227,13 +227,28 @@ pub async fn delete(executor: impl PgExecutor<'_>, token_hash: &[u8; 32]) -> Res
     Ok(result.rows_affected() > 0)
 }
 
-/// Reaps sessions past their hard cap. Returns how many went, for the
-/// caller's metric.
+/// Reaps at most 256 sessions past their hard cap. The ordered, locked batch
+/// keeps one maintenance pass bounded while concurrent gateways may sign out
+/// other rows. Returns how many went, for the caller's metric.
 #[tracing::instrument(name = "store.console_sessions.purge_expired", skip_all, err(Display))]
 pub async fn purge_expired(executor: impl PgExecutor<'_>) -> Result<u64> {
-    let result = sqlx::query!("delete from console_sessions where absolute_expires_at <= now()")
-        .execute(executor)
-        .await
-        .map_err(storage_error)?;
+    let result = sqlx::query!(
+        r#"
+        with expired as (
+            select token_hash
+            from console_sessions
+            where absolute_expires_at <= now()
+            order by absolute_expires_at, token_hash
+            limit 256
+            for update skip locked
+        )
+        delete from console_sessions as session
+        using expired
+        where session.token_hash = expired.token_hash
+        "#,
+    )
+    .execute(executor)
+    .await
+    .map_err(storage_error)?;
     Ok(result.rows_affected())
 }

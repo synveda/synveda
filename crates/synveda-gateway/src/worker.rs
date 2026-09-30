@@ -34,6 +34,8 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const HEARTBEAT_STALE_AFTER: Duration = Duration::from_secs(5);
 const CONVERGENCE_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const ABORT_JOIN_RESERVE: Duration = Duration::from_secs(1);
+const CONSOLE_SESSION_PURGE_INTERVAL: Duration = Duration::from_secs(60);
+const CONSOLE_SESSION_PURGE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExecutionProvider {
@@ -626,6 +628,14 @@ async fn run_authority_generation(
     if let Some(maintenance) = runtime.maintenance {
         spawn_governed_named(
             &mut tasks,
+            "console-session-expiry",
+            gate.clone(),
+            generation,
+            health.policy_ready.clone(),
+            run_console_session_expiry_sweep(runtime.pool.clone(), work_stop_rx.clone()),
+        );
+        spawn_governed_named(
+            &mut tasks,
             "skill-validation",
             gate.clone(),
             generation,
@@ -718,6 +728,44 @@ async fn run_authority_generation(
         return Ok(end);
     }
     finish_generation_drain(&mut tasks, runtime.drain_grace, end).await
+}
+
+async fn run_console_session_expiry_sweep(pool: sqlx::PgPool, mut shutdown: watch::Receiver<bool>) {
+    let mut ticker = tokio::time::interval(CONSOLE_SESSION_PURGE_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            biased;
+            () = shutdown::requested(&mut shutdown) => return,
+            _ = ticker.tick() => {}
+        }
+        let result = tokio::select! {
+            biased;
+            () = shutdown::requested(&mut shutdown) => return,
+            result = tokio::time::timeout(
+                CONSOLE_SESSION_PURGE_TIMEOUT,
+                synveda_store::console_sessions::purge_expired(&pool),
+            ) => result,
+        };
+        match result {
+            Ok(Ok(removed)) => {
+                metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_SWEEPS_TOTAL, "outcome" => "ok")
+                    .increment(1);
+                metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGED_TOTAL)
+                    .increment(removed);
+            }
+            Ok(Err(error)) => {
+                metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_SWEEPS_TOTAL, "outcome" => "error")
+                    .increment(1);
+                tracing::warn!(%error, "expired console session purge failed");
+            }
+            Err(_) => {
+                metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_SWEEPS_TOTAL, "outcome" => "error")
+                    .increment(1);
+                tracing::warn!("expired console session purge timed out");
+            }
+        }
+    }
 }
 
 async fn finish_generation_drain(

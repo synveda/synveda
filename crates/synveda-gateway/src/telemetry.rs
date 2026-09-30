@@ -62,6 +62,14 @@ pub const WORKER_READY: &str = "synveda_worker_ready";
 /// is process-loop liveness, not progress of every owned task.
 pub const WORKER_HEARTBEAT_AGE_SECONDS: &str = "synveda_worker_heartbeat_age_seconds";
 
+/// Credential-custody expiry sweeps, labelled by the closed `ok|error`
+/// outcome. A successful empty pass still increments, so operators can tell
+/// an idle table from a stalled maintenance task.
+pub const CONSOLE_SESSION_PURGE_SWEEPS_TOTAL: &str = "synveda_console_session_purge_sweeps_total";
+
+/// Expired console credential rows removed; no tenant or session labels.
+pub const CONSOLE_SESSION_PURGED_TOTAL: &str = "synveda_console_sessions_purged_total";
+
 /// Scope admin operations (CPR-7, ADR-0074), labelled by `op`
 /// (`list`/`create`/`get`/`update`/`ancestors`/`descendants`) and
 /// `outcome` (`ok`, `rejected` — the caller's fault, `error` — ours or an

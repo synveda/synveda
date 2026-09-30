@@ -307,8 +307,9 @@ cross-process entity invalidation bus is not presumed necessary.
 
 ADR-0130 proposes a tenant-scoped, credential-free console-session index
 beside the pre-tenant custody row, and issuer/token-ID revocation at the
-existing verification seam. The architecture pass found that expired-session
-purge is currently unused. No AUTH-6 implementation or revocation bound is
-qualified. Next settle issuer identifier/lifetime and administrator visibility,
-then implement the additive index, bounded cleanup and self-session API before
-issuer-specific enforcement and live rotation/replay tests.
+existing verification seam. The combined maintenance worker now purges expired
+credential rows in bounded, skip-locked batches with sweep and row counters.
+No AUTH-6 revocation bound or inventory is qualified. Next settle issuer
+identifier/lifetime and administrator visibility, then implement the additive
+index and self-session API before issuer-specific enforcement and live
+rotation/replay tests.

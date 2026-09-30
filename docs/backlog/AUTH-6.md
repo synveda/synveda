@@ -19,15 +19,18 @@ session inventory/revoke API or tested revocation-within-bound guarantee;
 refresh rotation remains provider-dependent. This P1 gap is recorded in
 [production readiness](../PRODUCTION_READINESS.md).
 
-The 2026-09-30 senior Rust/architecture pass found a concrete lifecycle gap:
-`synveda-store::console_sessions::purge_expired` has no caller. The read path
-refuses expired rows, but retained credential ciphertext can accumulate. It
-also confirmed that ADR-0056 intentionally keeps `console_sessions` without
-tenant/subject columns and re-verifies the bearer on every request. A broad
+The 2026-09-30 senior Rust/architecture pass found that expired console
+credential rows had no cleanup caller. The read path already refused them,
+but retained ciphertext could accumulate. It also confirmed that ADR-0056
+intentionally keeps `console_sessions` without tenant/subject columns and
+re-verifies the bearer on every request. A broad
 inventory scan or treating that row as identity would violate this contract.
 [ADR-0130](../adr/adr-0130-separate-session-inventory-from-credential-custody.md)
 proposes a separate tenant-scoped, credential-free index and request-time
-identifier revocation. No AUTH-6 enforcement or inventory is implemented yet.
+identifier revocation. The combined maintenance worker now deletes at most 256
+expired custody rows per minute with skip-locked coordination across replicas;
+successful/failed sweeps and removed rows have separate content-free counters.
+No AUTH-6 revocation enforcement or inventory is implemented yet.
 
 ## Scope
 
@@ -96,9 +99,8 @@ external tenants and credentials.
 
 Next: settle ADR-0130's issuer identifier/lifetime and administrator-visibility
 choices, then append a forward migration for the tenant index/revocation
-ledger, wire atomic console-session creation and bounded expiry cleanup,
+ledger, wire atomic console-session creation,
 add Cedar-governed self inventory/revoke, and only then enforce verified
 bearer revocation after issuer-specific acceptance. The first slice may use
 self-only inventory and the brief's 30-second bound; it must not advertise
-revocation for tokens without a supported identifier. SQLx metadata must be
-regenerated from a fresh current database.
+revocation for tokens without a supported identifier.

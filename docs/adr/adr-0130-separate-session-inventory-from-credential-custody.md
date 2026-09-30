@@ -12,8 +12,9 @@ subject. A cookie selects a sealed bearer by its random secret hash; the
 gateway verifies that bearer before it knows the tenant. Adding tenant
 authority to that row would weaken the invariant. Scanning and opening every
 token to discover its owner would make inventory unbounded credential work.
-The existing 12-hour cap expires authority, but
-`console_sessions::purge_expired` has no caller, so rows can remain in storage.
+The existing 12-hour cap expires authority. The first AUTH-6 slice adds
+bounded worker cleanup of expired custody rows; it does not provide inventory
+or identifier revocation.
 
 A signature and expiry check cannot discover IdP-side access-token revocation.
 Only a verified issuer/token identifier can name one bearer without storing

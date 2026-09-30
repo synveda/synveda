@@ -220,6 +220,12 @@ the Collector fan-in and publishes its operator UI at
 `http://127.0.0.1:${SYNVEDA_PROMETHEUS_PORT:-9090}`. Smoke requires the gateway
 authority and worker readiness gauges to equal one and the worker heartbeat to
 be no more than five seconds old, all from samples newer than the smoke start.
+The combined worker also reports console credential-custody retention through
+`synveda_console_session_purge_sweeps_total` with `ok` and `error` outcomes, and
+`synveda_console_sessions_purged_total`. A healthy empty table still advances
+the `ok` sweep counter once per minute; rising `error` or a stopped `ok`
+counter warrants worker/database investigation. Each sweep deletes at most
+256 expired rows; it does not change the existing expiry-time refusal.
 The profile applies 72-hour and 1-GB TSDB block-retention thresholds (whichever
 triggers first). WAL, head-block and compaction overhead mean this is not a
 volume or disk quota. The disposable `prometheus-data` volume is not part of
