@@ -423,6 +423,9 @@ async fn run_gateway_background(
         ready: policy_ready,
     } = policy_gate;
     loop {
+        if deployment_key_ref.is_some() {
+            metrics::gauge!(telemetry::GATEWAY_DEPLOYMENT_KEY_READY).set(0.0);
+        }
         let generation = tokio::select! {
             biased;
             () = shutdown::requested(&mut shutdown) => return Ok(()),
@@ -437,6 +440,69 @@ async fn run_gateway_background(
         let mut permit = gate.permit();
         if !permit.is_for(generation) {
             continue;
+        }
+
+        if let Some(key_ref) = deployment_key_ref.as_deref() {
+            loop {
+                let provision = tokio::time::timeout(authority::CHECK_TIMEOUT, async {
+                    let version = keys
+                        .provision(&pool, synveda_crypto::KeyScope::Deployment)
+                        .await?;
+                    // An existing row alone does not prove that this process
+                    // can unwrap it with the configured KEK.
+                    keys.sealing_key(&pool, synveda_crypto::KeyScope::Deployment)
+                        .await?;
+                    Ok::<_, synveda_types::Error>(version)
+                });
+                tokio::pin!(provision);
+                let result = tokio::select! {
+                    biased;
+                    () = permit.revoked() => break,
+                    () = shutdown::requested(&mut shutdown) => return Ok(()),
+                    result = &mut provision => result,
+                };
+                match result {
+                    Ok(Ok(version)) => {
+                        metrics::counter!(telemetry::GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL, "outcome" => "ok")
+                            .increment(1);
+                        metrics::gauge!(telemetry::GATEWAY_DEPLOYMENT_KEY_READY).set(1.0);
+                        tracing::info!(
+                            key.version = version.get(),
+                            kek.ref = key_ref,
+                            authority.generation = generation,
+                            "deployment encryption key ready (TEN-4, ADR-0064)"
+                        );
+                        break;
+                    }
+                    Ok(Err(_)) => {
+                        metrics::counter!(telemetry::GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL, "outcome" => "error")
+                            .increment(1);
+                        tracing::warn!("deployment encryption key provisioning unavailable");
+                    }
+                    Err(_) => {
+                        metrics::counter!(telemetry::GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL, "outcome" => "timeout")
+                            .increment(1);
+                        tracing::warn!(
+                            timeout_ms = authority::CHECK_TIMEOUT.as_millis() as u64,
+                            "deployment encryption key provisioning timed out"
+                        );
+                    }
+                }
+                tokio::select! {
+                    biased;
+                    () = permit.revoked() => break,
+                    () = shutdown::requested(&mut shutdown) => return Ok(()),
+                    () = tokio::time::sleep(BACKGROUND_RETRY_INTERVAL) => {}
+                }
+            }
+            if !permit.is_for(generation) {
+                if gate.is_terminal() {
+                    return Err(
+                        "the gateway database authority was conclusively refused".to_owned()
+                    );
+                }
+                continue;
+            }
         }
 
         loop {
@@ -477,40 +543,6 @@ async fn run_gateway_background(
             "stored policy packs converged for gateway admission"
         );
 
-        if let Some(key_ref) = deployment_key_ref.as_deref() {
-            let provision = tokio::time::timeout(
-                authority::CHECK_TIMEOUT,
-                keys.provision(&pool, synveda_crypto::KeyScope::Deployment),
-            );
-            tokio::pin!(provision);
-            let result = tokio::select! {
-                biased;
-                () = permit.revoked() => None,
-                () = shutdown::requested(&mut shutdown) => return Ok(()),
-                result = &mut provision => Some(result),
-            };
-            match result {
-                None if gate.is_terminal() => {
-                    return Err(
-                        "the gateway database authority was conclusively refused".to_owned()
-                    );
-                }
-                None => continue,
-                Some(Ok(Ok(version))) => tracing::info!(
-                    key.version = version.get(),
-                    kek.ref = key_ref,
-                    authority.generation = generation,
-                    "deployment encryption key ready (TEN-4, ADR-0064)"
-                ),
-                Some(Ok(Err(_))) => {
-                    tracing::warn!("deployment encryption key provisioning unavailable")
-                }
-                Some(Err(_)) => tracing::warn!(
-                    timeout_ms = authority::CHECK_TIMEOUT.as_millis() as u64,
-                    "deployment encryption key provisioning timed out"
-                ),
-            }
-        }
         if !permit.is_for(generation) {
             continue;
         }

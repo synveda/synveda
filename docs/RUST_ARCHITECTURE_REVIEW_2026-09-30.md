@@ -69,6 +69,11 @@ does not provision a missing key. Retry provisioning with bounded backoff and
 give the configured login plane an observable readiness result. Preserve
 bearer-only behavior when the KMS is intentionally disabled.
 
+Follow-up: OPS-7 now retries bounded provision-and-unwrap attempts before
+admission, reports key readiness and attempt outcomes, and passes an exact-role
+timeout/recovery plus wrong-KEK process test. Live OIDC and cross-pod key
+rotation remain open.
+
 ### P2 — AUTH-6: credential cleanup has a fixed service rate without backlog evidence
 
 [`console_sessions::purge_expired`](../crates/synveda-store/src/console_sessions.rs)

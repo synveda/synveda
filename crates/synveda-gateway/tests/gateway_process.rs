@@ -35,8 +35,9 @@ fn free_loopback_addr() -> String {
     addr.to_string()
 }
 
-fn spawn_gateway(database_url_file: &Path, addr: &str) -> ChildGuard {
-    let child = Command::new(env!("CARGO_BIN_EXE_synveda-gateway"))
+fn spawn_gateway(database_url_file: &Path, addr: &str, kms_key: Option<&str>) -> ChildGuard {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_synveda-gateway"));
+    command
         .env_remove("DATABASE_URL")
         .env("DATABASE_URL_FILE", database_url_file)
         .env_remove("SYNVEDA_DATABASE_ROLES")
@@ -58,9 +59,11 @@ fn spawn_gateway(database_url_file: &Path, addr: &str) -> ChildGuard {
         .env("OTEL_BSP_EXPORT_TIMEOUT", "100")
         .env("RUST_LOG", "error")
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn synveda-gateway");
+        .stderr(Stdio::piped());
+    if let Some(key) = kms_key {
+        command.env("SYNVEDA_KMS_KEY", key);
+    }
+    let child = command.spawn().expect("spawn synveda-gateway");
     ChildGuard(child)
 }
 
@@ -98,7 +101,7 @@ async fn sigterm_withdraws_readiness_before_http_stops() {
         "isolated database fixture must supply exact runtime roles"
     );
     let addr = free_loopback_addr();
-    let mut child = spawn_gateway(Path::new(&database_url_file), &addr);
+    let mut child = spawn_gateway(Path::new(&database_url_file), &addr, None);
     let client = reqwest::Client::builder()
         .no_proxy()
         .connect_timeout(Duration::from_millis(200))
@@ -168,4 +171,147 @@ async fn sigterm_withdraws_readiness_before_http_stops() {
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
+}
+
+#[tokio::test]
+async fn deployment_key_failures_keep_admission_closed_until_retry_succeeds() {
+    let Some(database_url_file) = std::env::var_os("SYNVEDA_TEST_DATABASE_URL_FILE") else {
+        eprintln!("skipping gateway key retry: run through `make db-test`");
+        return;
+    };
+    let migrator_url_file = std::env::var_os("SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE")
+        .expect("isolated fixture supplies the migrator URL");
+    let migrator_url = std::fs::read_to_string(migrator_url_file).expect("read fixture URL");
+    let migrator = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(migrator_url.trim())
+        .await
+        .expect("connect isolated migrator");
+    let mut lock = migrator.begin().await.expect("begin lock transaction");
+    sqlx::query("lock table deployment_keys in access exclusive mode")
+        .execute(&mut *lock)
+        .await
+        .expect("hold key table until the first bounded attempt times out");
+
+    let addr = free_loopback_addr();
+    let mut child = spawn_gateway(Path::new(&database_url_file), &addr, Some(&"11".repeat(32)));
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .connect_timeout(Duration::from_millis(200))
+        .timeout(Duration::from_secs(2))
+        .build()
+        .expect("build loopback client");
+    let base = format!("http://{addr}");
+    wait_for_status(
+        &mut child,
+        &client,
+        &format!("{base}/healthz"),
+        StatusCode::OK,
+        Duration::from_secs(10),
+    )
+    .await;
+    let timeout_metric =
+        synveda_gateway::telemetry::GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let response = client
+            .get(format!("{base}/metrics"))
+            .send()
+            .await
+            .expect("read gateway metrics");
+        let exposition = response.text().await.expect("metrics body");
+        if exposition
+            .lines()
+            .any(|line| line.starts_with(timeout_metric) && line.contains("outcome=\"timeout\""))
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "bounded key attempt did not time out"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        client
+            .get(format!("{base}/readyz"))
+            .send()
+            .await
+            .expect("read readiness")
+            .status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    lock.rollback().await.expect("release key table");
+    wait_for_status(
+        &mut child,
+        &client,
+        &format!("{base}/readyz"),
+        StatusCode::OK,
+        Duration::from_secs(15),
+    )
+    .await;
+    let exposition = client
+        .get(format!("{base}/metrics"))
+        .send()
+        .await
+        .expect("read recovered metrics")
+        .text()
+        .await
+        .expect("metrics body");
+    assert!(
+        exposition
+            .lines()
+            .any(|line| { line.starts_with(timeout_metric) && line.contains("outcome=\"ok\"") })
+    );
+    assert!(exposition.lines().any(|line| {
+        line.starts_with(synveda_gateway::telemetry::GATEWAY_DEPLOYMENT_KEY_READY)
+            && line.ends_with(" 1")
+    }));
+
+    // A stored row is not enough: a different KEK cannot unwrap it and must
+    // not make the new process ready merely because provision found a row.
+    drop(child);
+    let wrong_addr = free_loopback_addr();
+    let mut wrong_key = spawn_gateway(
+        Path::new(&database_url_file),
+        &wrong_addr,
+        Some(&"22".repeat(32)),
+    );
+    let wrong_base = format!("http://{wrong_addr}");
+    wait_for_status(
+        &mut wrong_key,
+        &client,
+        &format!("{wrong_base}/healthz"),
+        StatusCode::OK,
+        Duration::from_secs(10),
+    )
+    .await;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let exposition = client
+            .get(format!("{wrong_base}/metrics"))
+            .send()
+            .await
+            .expect("read wrong-key metrics")
+            .text()
+            .await
+            .expect("metrics body");
+        if exposition
+            .lines()
+            .any(|line| line.starts_with(timeout_metric) && line.contains("outcome=\"error\""))
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "wrong KEK was not refused");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        client
+            .get(format!("{wrong_base}/readyz"))
+            .send()
+            .await
+            .expect("wrong-key readiness")
+            .status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
 }

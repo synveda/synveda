@@ -197,9 +197,18 @@ five-second whole-sweep deadline. At a sufficient tenant count, or after one
 invalid pack, the shared 30-second lease closes governed work for unrelated
 tenants. Measure and enforce the supported tenant/pack envelope, then test
 per-tenant failure isolation without allowing a stale Cedar decision. The
-same review found that a transient deployment-key provisioning error is not
-retried until the database authority generation changes; add bounded retry
-and observable login readiness for OIDC-enabled deployments.
+same review found that a transient deployment-key provisioning error was not
+retried until the database authority generation changed. The source gateway
+now retries deployment-key provisioning and unwrap checks with a five-second
+attempt deadline and two-second pause while authority remains open. It marks
+application readiness only after that key and stored policy packs are ready;
+an intentionally disabled KMS retains bearer-only readiness. A disposable
+exact-role process test holds the deployment-key table through one timeout,
+observes closed readiness and then recovery after release. A second process
+with the wrong KEK remains unready despite the stored row. Content-free ready
+and attempt metrics distinguish these outcomes. This is single-process local
+evidence; live OIDC/KMS faults, key rotation and cross-pod behavior remain
+open.
 
 ## Scope
 

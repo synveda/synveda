@@ -39,6 +39,16 @@ pub const GATEWAY_AUTHORITY_READY: &str = "synveda_gateway_authority_ready";
 /// vocabulary `accepted|unavailable|timeout|refused`.
 pub const GATEWAY_AUTHORITY_CHECKS_TOTAL: &str = "synveda_gateway_authority_checks_total";
 
+/// Deployment-key availability for this gateway's current authority
+/// generation. Emitted only when a KMS is configured; zero keeps admission
+/// closed until the key can be unwrapped.
+pub const GATEWAY_DEPLOYMENT_KEY_READY: &str = "synveda_gateway_deployment_key_ready";
+
+/// Bounded deployment-key startup attempts by closed `ok|error|timeout`
+/// outcome. No key reference or credential labels.
+pub const GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL: &str =
+    "synveda_gateway_deployment_key_provision_attempts_total";
+
 /// Worker application-plane authority: 1 only after the complete bounded
 /// database proof accepted and 0 during boot, outage, drain or refusal.
 pub const WORKER_AUTHORITY_READY: &str = "synveda_worker_authority_ready";
@@ -373,6 +383,14 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         HTTP_REQUEST_DURATION_SECONDS,
         metrics::Unit::Seconds,
         "Gateway HTTP request latency"
+    );
+    metrics::describe_gauge!(
+        GATEWAY_DEPLOYMENT_KEY_READY,
+        "Configured deployment key is usable for this gateway authority generation"
+    );
+    metrics::describe_counter!(
+        GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL,
+        "Bounded gateway deployment-key attempts by ok, error or timeout outcome"
     );
     metrics::describe_gauge!(
         WORKER_READY,

@@ -176,12 +176,15 @@ schema, and v0.4.0 remains incompatible.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 
-The 2026-09-30 Rust review adds two unqualified OPS-7 limits: the serial
-all-tenant policy sweep has no enforced tenant/pack envelope within its
-five-second deadline, and a transient deployment-key provisioning failure
-can leave OIDC login unavailable while gateway readiness is open. Next
-measure the sweep at a declared tenant maximum, preserve fail-closed Cedar
-behavior while isolating failures, and retry/probe OIDC key readiness.
+The 2026-09-30 Rust review found no enforced tenant/pack envelope for the
+serial all-tenant policy sweep within its five-second deadline. Next measure
+that sweep at a declared maximum and preserve fail-closed Cedar behavior
+while isolating failures. The source gateway now retries deployment-key
+provisioning and unwrap checks within five-second attempts, keeps readiness
+closed until both key and policy convergence succeed, and emits content-free
+key-ready/attempt metrics. An exact-role process test proves timeout, retry
+recovery and wrong-KEK refusal. Live OIDC/KMS faults and cross-pod key rotation
+remain unqualified; a disabled KMS still permits bearer-only readiness.
 
 OPS-7 has a first single-process drain slice under ADR-0124: SIGTERM withdraws
 gateway readiness and new request admission before HTTP stops, preserves the
