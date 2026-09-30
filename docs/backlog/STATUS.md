@@ -170,6 +170,13 @@ schema, and v0.4.0 remains incompatible.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 
+The 2026-09-30 Rust review adds two unqualified OPS-7 limits: the serial
+all-tenant policy sweep has no enforced tenant/pack envelope within its
+five-second deadline, and a transient deployment-key provisioning failure
+can leave OIDC login unavailable while gateway readiness is open. Next
+measure the sweep at a declared tenant maximum, preserve fail-closed Cedar
+behavior while isolating failures, and retry/probe OIDC key readiness.
+
 OPS-7 has a first single-process drain slice under ADR-0124: SIGTERM withdraws
 gateway readiness and new request admission before HTTP stops, preserves the
 authority sentinel until admitted work drains, and exits inside the configured
@@ -313,6 +320,8 @@ ADR-0130 proposes a tenant-scoped, credential-free console-session index
 beside the pre-tenant custody row, and issuer/token-ID revocation at the
 existing verification seam. The combined maintenance worker now purges expired
 credential rows in bounded, skip-locked batches with sweep and row counters.
+Its fixed 256-row-per-minute service rate has no backlog or oldest-age
+telemetry; next measure retention lag and bound drain work or admission.
 No AUTH-6 revocation bound or inventory is qualified. Next settle issuer
 identifier/lifetime and administrator visibility, then implement the additive
 index and self-session API before issuer-specific enforcement and live

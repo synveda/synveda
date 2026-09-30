@@ -6,6 +6,8 @@ repository gates establishes repeatable behaviour; it does not establish
 availability, recoverability, supportability or a releasable supply chain.
 The [production roadmap](PRODUCTION_ROADMAP.md) proposes the order of work;
 this register owns the current readiness verdict and evidence.
+The [current Rust architecture review](RUST_ARCHITECTURE_REVIEW_2026-09-30.md)
+records source-level risks and limits separately from deployment qualification.
 
 The 2026-09-19 [Kubernetes deployment audit](../deploy/README.md#kubernetes-release-contract)
 defines OPS-11's narrower next release. The portable chart increment implements

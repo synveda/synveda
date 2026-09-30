@@ -31,6 +31,10 @@ identifier revocation. The combined maintenance worker now deletes at most 256
 expired custody rows per minute with skip-locked coordination across replicas;
 successful/failed sweeps and removed rows have separate content-free counters.
 No AUTH-6 revocation enforcement or inventory is implemented yet.
+The [2026-09-30 Rust review](../RUST_ARCHITECTURE_REVIEW_2026-09-30.md)
+also found that one 256-row purge batch per minute has no backlog or
+oldest-expired-age measure. Before claiming bounded credential retention,
+measure that lag and use a bounded drain budget or a proven admission envelope.
 
 ## Scope
 

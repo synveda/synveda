@@ -191,6 +191,16 @@ a rolling upgrade also remain untested. Next prove other worker-family
 ownership and pod loss under traffic before lifting the combined-worker or
 gateway replica refusal.
 
+The [2026-09-30 Rust review](../RUST_ARCHITECTURE_REVIEW_2026-09-30.md)
+found no enforced active-tenant count behind the serial policy sweep's
+five-second whole-sweep deadline. At a sufficient tenant count, or after one
+invalid pack, the shared 30-second lease closes governed work for unrelated
+tenants. Measure and enforce the supported tenant/pack envelope, then test
+per-tenant failure isolation without allowing a stale Cedar decision. The
+same review found that a transient deployment-key provisioning error is not
+retried until the database authority generation changes; add bounded retry
+and observable login readiness for OIDC-enabled deployments.
+
 ## Scope
 
 - Retain the durable one-time login and CLI handoff contract under real
