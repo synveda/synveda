@@ -200,9 +200,18 @@ per-tenant failure isolation without allowing a stale Cedar decision. The
 source now exports unlabeled active-tenant count and per-tenant stored-pack
 count alongside existing sweep duration/outcome metrics. This makes the work
 envelope measurable; it neither enforces a limit nor isolates a failed tenant.
-Next measure at the owner-selected maximum before changing admission. The
-same review found that a transient deployment-key provisioning error was not
-retried until the database authority generation changed. The source gateway
+An ignored, rerunnable exact-role probe sampled a **provisional** 32 active
+tenants × four stored packs on 2026-09-30. Cold convergence took 0.353 seconds,
+the slowest of five unchanged sweeps took 0.026 seconds, and a sweep after all
+128 packs advanced to version 2 took 0.324 seconds. Run it with
+`bash scripts/db-test.sh -p synveda-gateway --test policy_routes ops7_provisional_policy_sweep_capacity_probe -- --ignored --nocapture --test-threads=1`.
+This was one idle local process, without request traffic, worker competition,
+cross-pod propagation or fault injection. The five-second deadline passed in
+that fixture; no owner-selected maximum or admission limit exists, and one
+invalid tenant pack still expires every process lease. Next measure at the
+owner-selected maximum under representative load before changing admission.
+The same review found that a transient deployment-key provisioning error was
+not retried until the database authority generation changed. The source gateway
 now retries deployment-key provisioning and unwrap checks with a five-second
 attempt deadline and two-second pause while authority remains open. It marks
 application readiness only after that key and stored policy packs are ready;

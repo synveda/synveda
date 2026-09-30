@@ -45,6 +45,12 @@ count without tenant or pack labels, alongside existing sweep duration and
 outcome. This is measurement only. The supported envelope and cross-tenant
 failure isolation remain open.
 
+A manual OPS-7 exact-role probe on 2026-09-30 sampled provisional 32 × 4
+stored packs: cold 0.353 seconds, unchanged-sweep maximum 0.026 seconds over
+five passes, and full-revision sweep 0.324 seconds. It was idle and local,
+not a traffic, multi-pod or failure-isolation qualification. The owner limit
+and tenant-specific fail-closed boundary remain open.
+
 ### P2 — CPR-23: Skill directory import has an unbounded traversal and read
 
 [`skill::collect`](../crates/synveda-cli/src/skill.rs) lines 451–502

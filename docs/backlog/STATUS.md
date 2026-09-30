@@ -181,9 +181,14 @@ serial all-tenant policy sweep within its five-second deadline. Next measure
 that sweep at a declared maximum and preserve fail-closed Cedar behavior
 while isolating failures. Active-tenant and per-tenant stored-pack counts are
 now exported without tenant or pack labels beside sweep duration/outcome; no
-supported work limit is yet enforced. The source gateway now retries deployment-key
-provisioning and unwrap checks within five-second attempts, keeps readiness
-closed until both key and policy convergence succeed, and emits content-free
+supported work limit is yet enforced. A manual exact-role 32 × 4 local probe
+passed the five-second sweep deadline: cold 0.353 seconds, slowest unchanged
+0.026 seconds across five passes, and all-pack revision 0.324 seconds. It had
+no request traffic, cross-pod propagation or fault injection and does not
+qualify a production envelope or isolate a failed tenant. The source gateway
+now retries deployment-key provisioning and unwrap checks within five-second
+attempts, keeps readiness closed until both key and policy convergence succeed,
+and emits content-free
 key-ready/attempt metrics. An exact-role process test proves timeout, retry
 recovery and wrong-KEK refusal. Live OIDC/KMS faults and cross-pod key rotation
 remain unqualified; a disabled KMS still permits bearer-only readiness.
