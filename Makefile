@@ -294,6 +294,8 @@ deny:
 
 check-deps:
 	node scripts/check-crate-deps.mjs
+	node --test scripts/check-product-sql.test.mjs
+	node scripts/check-product-sql.mjs
 
 # The frontend's types are generated from the OpenAPI document, and the
 # document is generated from the gateway's own handlers (CPR-4, ADR-0071

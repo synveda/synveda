@@ -102,13 +102,22 @@ sweeps. The fixed service rate and unproven retention bound remain open.
 
 ### P2 — architecture: product SQL remains outside `synveda-store`
 
-The prior review counted 44 production SQLx calls in `synveda-audit` and
-`synveda-vedaflow`. This branch adds no new calls there, but the boundary still
+The prior review reported 44 production SQLx calls in `synveda-audit` and
+`synveda-vedaflow`; a complete recount found 53 macros (15 audit, 38
+VedaFlow). This branch adds no new calls there, but the boundary still
 contradicts `AGENTS.md`'s store-only product SQL rule. `make check-deps`
 verifies crate direction, not SQL placement. Move queries behind narrow store
 APIs when those transactions are next changed; first add a source gate against
 new outside-store product SQL. Preserve tenant transaction, RLS and audit
 atomicity rather than moving text mechanically.
+
+Follow-up: CPR-44 adds a `make check-deps` source gate that pins the path,
+exact SQL literal and multiplicity of the 53 existing production macros. It
+rejects added or altered calls, dynamic SQLx calls and query imports outside
+`synveda-store`, with the documented Apalis transport and test-only CLI
+deployment fixture excluded. The gate does not relocate the 53 queries or
+prove SQL placement against deliberately obscured Rust syntax. Their safe
+migration remains architectural debt.
 
 ### P2 — structure: two authority-heavy functions remain too large to audit locally
 

@@ -102,6 +102,8 @@ forward migrations.
 Run from the repository root. Choose focused checks in addition to the fast
 path; `check-fast` composes existing static gates and does not execute product
 or database behavior.
+`make check-deps` enforces crate direction and pins the legacy SQLx call sites
+outside `synveda-store`; new authoritative product SQL belongs in the store.
 
 | Change | Commands |
 | --- | --- |
