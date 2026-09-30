@@ -147,6 +147,13 @@ These are not evidence of an AI author, but they are misleading architecture
 claims. Replace them with present-tense invariants and run strict Rustdoc in
 the docs gate after the links are repaired.
 
+Follow-up: CPR-44 removed the stale and private Rustdoc links, corrected the
+entity-fragment freshness and embedding comments, and passed strict workspace
+Rustdoc with warnings denied. `make check-rustdoc` now runs in the Rust CI job
+and the local aggregate; the Node-only `check-fast` remains available without
+a Rust toolchain. Historical numbered-migration comments outside these
+corrected paths still need a separate source audit.
+
 ## Positive controls and unused-code assessment
 
 The dependency direction holds for all 14 crates. Product libraries forbid

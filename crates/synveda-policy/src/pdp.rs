@@ -436,7 +436,7 @@ impl Pdp {
     ///
     /// It changes no verdict, which is the property that makes it a
     /// performance mechanism rather than a policy one: see
-    /// [`Self::entities_over`].
+    /// `Self::entities_over`.
     pub fn materialise(
         &self,
         principal: &Principal,
@@ -1290,7 +1290,7 @@ struct RequestContext {
 /// and takes tenant-root authority, which is the same shape `DirectoryManage`
 /// has and for the same reason.
 ///
-/// Sorted and deduplicated, for [`effective_roles_at`]'s reason.
+/// Sorted and deduplicated so a caller sees each role key once.
 #[must_use]
 pub fn effective_role_keys_at(resource: Resource, context: &AuthzContext<'_>) -> Vec<RoleKey> {
     let mut keys: Vec<RoleKey> = Vec::new();

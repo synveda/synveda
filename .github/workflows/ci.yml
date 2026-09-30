@@ -94,6 +94,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: make check-rustdoc
       - run: cargo test --workspace --locked
       - run: cargo build --workspace --locked
       - name: Check executable documentation

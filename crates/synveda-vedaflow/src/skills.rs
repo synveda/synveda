@@ -6,9 +6,9 @@
 //! of `SKILL.md` re-stores one object, FLOW-6's diff renders per file, and
 //! ADR-0032's curator glob gets `code-review/*` to glob over.
 //!
-//! The encoding is [`crate::channels::MemoryAsset`]'s, for its reasons:
-//! canonical JSON with bytewise-sorted keys, human-readable because FLOW-6
-//! renders a diff of it and FLOW-8 exports it into a real git repository.
+//! The encoding is canonical JSON with bytewise-sorted keys. It is
+//! human-readable because FLOW-6 renders a diff of it and FLOW-8 exports it
+//! into a real git repository.
 //!
 //! # "Unmodified" is a property of materialisation, not of storage
 //!

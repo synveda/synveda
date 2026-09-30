@@ -515,7 +515,7 @@ impl AuditAction {
     /// Every action, in declaration order — the vocabulary a query surface
     /// may name (AUD-2, ADR-0045 decision 3).
     ///
-    /// Hand-maintained beside the enum, like [`synveda_types::Role::ALL`]:
+    /// Hand-maintained beside the enum, like [`synveda_types::access::RoleKey::ALL`]:
     /// Rust cannot make an array literal exhaustive, so the guard is the
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant

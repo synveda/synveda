@@ -6,9 +6,9 @@
 //! one ADR-0032's curator glob was written to accept before anything
 //! produced it.
 //!
-//! The encoding is [`crate::channels::MemoryAsset`]'s, for its reasons:
-//! canonical JSON with bytewise-sorted keys, human-readable because FLOW-6
-//! renders a diff of it and FLOW-8 exports it into a real git repository.
+//! The encoding is canonical JSON with bytewise-sorted keys. It is
+//! human-readable because FLOW-6 renders a diff of it and FLOW-8 exports it
+//! into a real git repository.
 //!
 //! # What is in the address, and what is not
 //!

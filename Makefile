@@ -275,6 +275,10 @@ fmt:
 .PHONY: check-fast
 check-fast: check-docs check-backlog check-adr-status check-api-types check-adapters check-context-security check-context-hard-cut check-product-eval check-corpus-licences check-benchmarks
 
+.PHONY: check-rustdoc
+check-rustdoc:
+	RUSTDOCFLAGS="-D warnings" SQLX_OFFLINE=true cargo doc --workspace --no-deps --locked
+
 .PHONY: check-ci
 check-ci:
 	node --test scripts/ci.test.mjs scripts/release-pipeline.test.mjs scripts/verify-starter-image-reuse.test.mjs
@@ -449,4 +453,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-ci check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check sdk-check ts-build plugin-package-check check-npm-licences ts-test
+ci: fmt lint test build check-rustdoc deny check-ci check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check sdk-check ts-build plugin-package-check check-npm-licences ts-test

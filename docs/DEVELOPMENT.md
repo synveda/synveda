@@ -108,7 +108,7 @@ outside `synveda-store`; new authoritative product SQL belongs in the store.
 | Change | Commands |
 | --- | --- |
 | All changes / docs | `make check-fast` and `git diff --check` |
-| Rust crate | `cargo fmt --all --check`; `SQLX_OFFLINE=true cargo clippy -p synveda-types --all-targets -- -D warnings`; `SQLX_OFFLINE=true cargo test -p synveda-types` (replace the crate as appropriate) |
+| Rust crate | `cargo fmt --all --check`; `SQLX_OFFLINE=true cargo clippy -p synveda-types --all-targets -- -D warnings`; `SQLX_OFFLINE=true cargo test -p synveda-types` (replace the crate as appropriate); `make check-rustdoc` for public Rustdoc changes |
 | Console | `pnpm --filter @synveda/console test`; `pnpm --filter @synveda/console build` |
 | Claude hooks | `pnpm --filter @synveda/claude-code-adapter test` |
 | Codex / Copilot hooks | `pnpm --filter @synveda/claude-code-adapter build`, then `pnpm --filter @synveda/codex-adapter test` or `pnpm --filter @synveda/copilot-cli-adapter test` |

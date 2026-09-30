@@ -9,7 +9,7 @@
 //! reconstructed: a client that rebuilds the next page's query is a client
 //! that silently re-reads page one when the vendor changes a parameter.
 //!
-//! [`walk`](EntraConnector::walk) returns what it read *and* the failure that
+//! `EntraConnector::walk` returns what it read *and* the failure that
 //! stopped it, rather than discarding one for the other. That shape is
 //! ADR-0060 decision 3.1 in the small: presence survives an incomplete pass,
 //! and it only survives if the code does not throw away pages one to three on

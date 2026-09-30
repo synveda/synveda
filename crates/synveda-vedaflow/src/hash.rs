@@ -199,7 +199,7 @@ pub fn object_hash(kind: AssetKind, content: &[u8]) -> ObjectHash {
 /// address, in bytewise name order.
 ///
 /// This is a tree hash by another name, and it is separate from
-/// [`tree_hash_from`] on purpose — a `TreeHash` is a thing this product
+/// `tree_hash_from` on purpose — a `TreeHash` is a thing this product
 /// *stores*, with rows and parents and a commit above it, and a bundle
 /// digest is a key computed on the fly from members that may not be a tree
 /// yet. Sharing the type would invite one to be written where the other

@@ -485,7 +485,7 @@ pub struct Frontmatter {
     /// The spec's extension slot, flattened to strings.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
-    /// [`CLIENT_KEYS`] as they were written: parsed, so the document is
+    /// `CLIENT_KEYS` as they were written: parsed, so the document is
     /// unambiguous, and kept, so a review can show what a client will act
     /// on.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

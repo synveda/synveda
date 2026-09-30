@@ -319,7 +319,7 @@ pub fn init(service_name: &'static str) -> Result<Telemetry> {
 
 /// Installs the W3C trace-context propagator, which is what lets an
 /// incoming `traceparent` become the parent of this request's span
-/// (ADR-0007's deferred clause; see [`crate::app::parent_context`]).
+/// (ADR-0007's deferred clause; see `crate::app::parent_context`).
 ///
 /// Global rather than per-request because that is the only shape the OTel
 /// API offers: `global::get_text_map_propagator` is how both the extractor

@@ -18,7 +18,7 @@
 //! `DROP DATABASE` takes an *identifier*,
 //! which no protocol placeholder can carry — there is no parameterised form of
 //! this statement in Postgres. So the name is validated against a deliberately
-//! narrow grammar ([`is_safe_identifier`]), double-quoted, and used; the
+//! narrow grammar (`is_safe_identifier`), double-quoted, and used; the
 //! validation is the check the placeholder would otherwise have been, and it
 //! is stricter than Postgres's own rules because a database name that needs
 //! escaping to be safe is a database name this command declines to destroy.

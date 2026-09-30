@@ -17,7 +17,7 @@
 //! pull run only in `synveda-worker` (CPR-45, ADR-0102). The gateway retains
 //! synchronous request work. Its embedder is selected by `SYNVEDA_EMBEDDER`
 //! (`deterministic` [default] | `tei` —
-//! deliberately no `off`: embed-or-fail is unconditional); `tei`
+//! deliberately no `off`: required indexing fails if embedding fails); `tei`
 //! requires `SYNVEDA_TEI_URL` (the isolated retrieval-evaluation fixture uses
 //! `http://localhost:8110`) and honours `SYNVEDA_EMBEDDER_MODEL`
 //! (default `BAAI/bge-m3`).

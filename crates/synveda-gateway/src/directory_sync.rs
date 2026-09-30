@@ -3,7 +3,7 @@
 //!
 //! The loop is the pack refresher's and relaxation sweep's shape — one pass
 //! immediately, then one per interval, failures logged and never fatal
-//! (ADR-0060 decision 1). It lives in this crate because [`reconcile`] does:
+//! (ADR-0060 decision 1). It lives in this crate because `reconcile` does:
 //! a pull writes the mirror and then calls the same projection the SCIM plane
 //! calls, so joiner, mover and leaver exist once (decision 2).
 //!
@@ -30,7 +30,7 @@
 //! ## What this module does not do
 //!
 //! It does not seal anybody itself. Sealing is `active: false` on the mirror
-//! followed by [`reconcile`], which is AUTH-4's own leaver path — the same
+//! followed by `reconcile`, which is AUTH-4's own leaver path — the same
 //! seal, the same events, the same three layers. A second sealing mechanism
 //! is exactly what ADR-0059 decision 3's single reconciler exists to prevent.
 

@@ -408,7 +408,7 @@ async fn roles_at(
 /// The groups this caller is in — what the PDP materialises `Group` entities
 /// from, so a pack can name one directly.
 ///
-/// Archived groups are absent, for [`granted_scopes`]' reason: a group taken
+/// Archived groups are absent, for `granted_scopes`' reason: a group taken
 /// out of use confers nothing, and a pack rule naming it must stop matching at
 /// the same instant a grant through it stops applying.
 #[tracing::instrument(
