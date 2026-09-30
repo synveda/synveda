@@ -74,7 +74,9 @@ try {
   };
   run("kubectl", ["-n", namespace, "apply", "-f", "-"], { input: JSON.stringify({ apiVersion: "batch/v1", kind: "Job", metadata: { name: "migration-role-refusal" }, spec: { backoffLimit: 0, activeDeadlineSeconds: 90, template: { spec: refusedMigration } } }) });
   k(["wait", "job/migration-role-refusal", "--for=condition=Failed", "--timeout=120s"]);
-  assert.match(k(["logs", "job/migration-role-refusal", "-c", "migrate"]), /role|owner|migrat/i);
+  // The ordinary runtime role must stop at read-only epoch preflight, before DDL.
+  assert.equal(k(["logs", "job/migration-role-refusal", "-c", "migrate"]).trim(),
+    "synveda: storage: the configured database principal cannot read the Synveda schema epoch marker; correct the deployment database grants");
   run("helm", ["upgrade", "--install", "synveda", chart, "-n", namespace, "-f", join(scratch, "candidate.json"), "--wait", "--wait-for-jobs", "--timeout", "15m"], { timeout: 920_000 });
   await forward("synveda", "8120:8120");
   await forward("synveda-keycloak-http", "8081:80");

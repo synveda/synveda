@@ -965,6 +965,38 @@ then run full CI and nonpublishing Release on that exact clean source and
 independently inspect its same-run payload inventory. Repair any further
 required failure before claiming qualification.
 
+The repair is committed as `c78b67a61a5800516d7c152d67799d6e3e4651e4`
+and pushed on the roadmap branch. The obsolete `6ae63604` Release dispatch
+completed cancelled. New exact-source
+[full CI](https://github.com/synveda/synveda/actions/runs/36758774367) and
+[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36758786748)
+did not qualify this source. Full CI completed with 20 successful jobs:
+workspace Rust, all six native client targets, both dedicated operations cases
+and CNPG install/failover passed. Both native image jobs passed notice/runtime
+checks and all four ownership modes, including restored data and retained
+reinstall. They then failed the same later local-evaluation assertion; the final
+CI Result failed. The separate Release completed all six native client jobs,
+but its two image jobs and assembly cannot establish complete qualification.
+
+### Runtime-role refusal diagnostic (2026-09-30)
+
+Both `c78b67a6` native image jobs reached the local port-forward evaluation
+recipe after completing their four-mode matrices. Its intentionally wrong-role
+migration Job failed as required. The CLI reported that the configured database
+principal cannot read the schema epoch marker and needs corrected deployment
+grants. The fixture still expected `/role|owner|migrat/i`, which did not match
+that current diagnostic. The refusal is implemented by
+`SchemaEpochError::Unreadable` before migrations; no runtime grants or product
+code need changing.
+
+The fixture now requires that exact content-free diagnostic, alongside the
+unchanged Failed Job condition, subsequent correct chart reapply and real
+browser login/logout. JavaScript syntax, the six-mode starter contract,
+fast/workflow checks, Rust formatting and diff checks passed locally. Complete
+local-evaluation/browser and same-run assembly evidence still require a new
+clean full CI and nonpublishing Release run after committing this correction.
+Do not combine the earlier source's positive reports with the corrected run.
+
 ### Published SBOM coverage inspection (2026-09-30)
 
 [Read-only evidence](../../demos/evidence/ops12-published-sbom.json) binds

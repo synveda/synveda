@@ -343,8 +343,13 @@ completion can precede usable routing; every reinstall now requires three
 stateless routes within 60 seconds before unchanged login/authority checks.
 The extra edge restart is removed. `6ae63604` full CI failed Windows ARM and
 three Helm cases; its Release Windows ARM also failed. Local repair checks
-pass, but complete native reports and assembly require the next clean full
-CI and nonpublishing Release matrix. Published product SBOM
+pass. `c78b67a6` passed all six native client jobs in CI and Release, both
+dedicated operations cases and all four ownership modes in both CI image jobs.
+Both image jobs then failed a stale local-evaluation diagnostic assertion;
+the wrong runtime-role migration was correctly refused at epoch preflight.
+The fixture now requires that exact diagnostic and retains Failed Job,
+correct reapply and browser checks. Complete qualification and assembly still
+require the next clean full CI and nonpublishing Release matrix. Published product SBOM
 inspection found no identified Cargo, Cedar or SQLx dependencies on either
 Linux architecture, so coverage remains an explicit next gate. The
 [OPS-12 brief](OPS-12.md) owns the run identities, evidence and limits.

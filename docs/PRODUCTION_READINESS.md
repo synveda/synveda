@@ -181,8 +181,13 @@ workspace Rust, five native client targets and CNPG acceptance, but Windows ARM
 exhausted the controlled transient-lock fixture and three Helm cases failed
 transport after successful restore and retained reinstall. Local fixture repairs
 use a native timed lock and bounded stateless Service reachability before
-unchanged authentication/authority checks. Complete native qualification and
-same-run assembly must pass on their next clean source commit.
+unchanged authentication/authority checks. `c78b67a6` passed all six client
+targets in CI and Release, both dedicated operations cases and both native
+four-mode matrices. Its image jobs then failed a stale assertion after the
+wrong-role migration correctly stopped at schema-epoch permission preflight.
+The fixture now requires the exact current diagnostic; correct reapply and
+browser acceptance remain required. Complete qualification and same-run
+assembly must pass on the next clean source commit.
 [OPS-12](backlog/OPS-12.md) records the exact boundary. The readiness verdict
 and published-artifact claims are unchanged.
 
