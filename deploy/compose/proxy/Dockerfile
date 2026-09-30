@@ -19,5 +19,6 @@ RUN /usr/local/bin/assert-build-proxy-closed
 
 RUN setcap -r /usr/bin/caddy \
  && test -z "$(getcap /usr/bin/caddy)"
+COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 
 USER 65532:65532

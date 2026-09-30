@@ -141,6 +141,7 @@ COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 COPY --chmod=0555 deploy/compose/browser/console-login.mjs deploy/compose/browser/product-demo.mjs deploy/compose/browser/evaluation.mjs deploy/compose/browser/
 COPY --chmod=0444 deploy/compose/browser/console-login-runner.mjs deploy/compose/browser/console-login-contract.mjs deploy/compose/browser/console-product-runner.mjs deploy/compose/browser/product-demo-runner.mjs deploy/compose/browser/product-demo-contract.mjs deploy/compose/browser/
 COPY --chmod=0444 deploy/compose/browser/PLAYWRIGHT-LICENSE deploy/compose/browser/PLAYWRIGHT-NOTICE deploy/compose/browser/seccomp_profile.NOTICE /usr/share/licenses/synveda-browser-acceptance/
+COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 
 # Docker populates a new named volume from this sticky, otherwise empty mount
 # point. The fixture can therefore create private per-UID directories without
@@ -174,6 +175,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=console /usr/local/bin/node /usr/local/bin/node
 COPY --from=console /usr/local/LICENSE /usr/share/licenses/node/LICENSE
+COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 # Product binaries and no mutable data: the Cedar schema, the base layer and all three
 # product packs are `include_str!`d into synveda-policy, so there is no
 # policy directory to ship and no way for the image's policy to differ from

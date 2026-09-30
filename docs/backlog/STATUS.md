@@ -307,6 +307,17 @@ run native Windows and all six archive jobs before publishing this contract.
 Complete artifact SBOMs, vulnerability policy, OS signing and real
 issuer/harness acceptance remain open.
 
+OPS-12 / PR-13 also retains the exact first-party `LICENSE`/`NOTICE` in release
+archives, charts, copyable plugin packages and the six Synveda OCI targets.
+Assembly now requires notice-carriage checks from all native client reports,
+regular exact-byte notices in other archives, and source-matching image notice
+hashes. The local macOS arm64 candidate passed notice/install/reinstall,
+installed-CLI authentication/process tests and adapter replay; extracted plugin
+and packaged-chart checks pass. Next run all six native client and both native
+image candidates in a nonpublishing release drill. Complete third-party
+notice/SBOM review, published qualification and support-window ownership remain
+open; no earlier release bytes changed.
+
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
 - [x] CNSL-5: Console theme and everyday usability — delivered

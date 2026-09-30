@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { checkClientRelease } from "./check-client-release.mjs";
 import { candidateIdentity, fileHash } from "./docker-candidate.mjs";
 import { releaseImages, validateRegistryManifest } from "./release-registries.mjs";
+import { noticeHashes } from "./verify-release-images.mjs";
 
 export const clientTargets = [
   "darwin-arm64",
@@ -49,6 +50,32 @@ export function regularAssets(directory, names) {
     return { name, size: stat.size };
   });
 }
+export function checkArchiveNotices(directory, version, run = execFileSync) {
+  const archives = new Map([
+    [`synveda-${version}-darwin-arm64.tar.gz`, ""],
+    [`synveda-${version}-linux-x86_64.tar.gz`, ""],
+    [`synveda-console-${version}.tar.gz`, "console"],
+    [`synveda-reference-${version}.tar.gz`, `synveda-reference-${version}`],
+    [`synveda-plugin-${version}.tar.gz`, "plugin"],
+    [`synveda-${version}.tgz`, "synveda"],
+  ]);
+  const required = releaseAssets(version).filter((name) =>
+    /\.(tar\.gz|tgz)$/.test(name) && !name.startsWith("synveda-client-"));
+  assert.deepEqual([...archives.keys()].sort(), required.sort(), "archive notice policy must cover the release inventory");
+  for (const [archive, directoryPrefix] of archives) {
+    for (const name of ["LICENSE", "NOTICE"]) {
+      const expected = readFileSync(new URL(`../${name}`, import.meta.url));
+      const member = directoryPrefix ? `${directoryPrefix}/${name}` : name;
+      const path = join(directory, archive);
+      const listing = run("tar", ["-tvzf", path, member], {
+        encoding: "utf8", timeout: 60_000, maxBuffer: 16 * 1024, stdio: ["ignore", "pipe", "pipe"],
+      }).trim().split("\n");
+      assert.ok(listing.length === 1 && listing[0].startsWith("-"), `${archive}: ${member} must be one regular file`);
+      const actual = run("tar", ["-xOzf", path, member], { timeout: 60_000, maxBuffer: expected.length + 1, stdio: ["ignore", "pipe", "pipe"] });
+      assert.deepEqual(actual, expected, `${archive}: ${member} differs from the source notice`);
+    }
+  }
+}
 export function checkQualification(directory, version, source, inventory) {
   const read = (kind, arch) =>
     JSON.parse(readFileSync(join(directory, `release-${kind}-${arch}.json`)));
@@ -65,12 +92,15 @@ export function checkQualification(directory, version, source, inventory) {
       assert.equal(result?.platform, platform);
       for (const [name, entry] of Object.entries(
         inventory.registries[registry].images,
-      ))
-        assert.ok(result.images.some((checked) =>
+      )) {
+        const checkedImage = result.images.find((checked) =>
           checked.name === name && checked.image === entry.reference &&
           checked.platforms?.[platform] === entry.platforms[platform] &&
           checked.executable_checks > 0,
-        ));
+        );
+        assert.ok(checkedImage);
+        assert.deepEqual(checkedImage.notice_sha256, noticeHashes, `${registry}/${name}: notice evidence missing or changed`);
+      }
     }
     const candidate = read("candidate", arch);
     candidateIdentity(candidate, version, source, arch);
@@ -90,6 +120,7 @@ export function checkQualification(directory, version, source, inventory) {
       assert.equal(checked?.platforms?.[platform],
         inventory.registries.dockerhub.images[name].platforms[platform]);
       assert.ok(checked?.executable_checks > 0);
+      assert.deepEqual(checked.notice_sha256, noticeHashes, `${name}: candidate notice evidence missing or changed`);
     }
     for (const kind of ["docker", "consumer", "kubernetes"]) {
       const report = read(kind, arch);
@@ -158,6 +189,9 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   const qualified = phase === "qualified";
   const names = releaseAssets(version, qualified);
   regularAssets(directory, names);
+  // Client TAR/ZIP notices are verified by each native candidate before its
+  // required, archive-hash-bound report is assembled here.
+  checkArchiveNotices(directory, version);
   checkClientRelease(
     directory,
     version,

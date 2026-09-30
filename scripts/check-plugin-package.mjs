@@ -20,6 +20,12 @@ function run(command, args, cwd, extra = {}) {
 try {
   run("bash", ["scripts/package-plugin.sh", version, scratch], root);
   run("tar", ["-xzf", join(scratch, `synveda-plugin-${version}.tar.gz`), "-C", scratch], scratch);
+  for (const directory of ["plugin", "plugin/synveda", "plugin/codex", "plugin/copilot-cli",
+    "plugin/codex/node_modules/@synveda/claude-code-adapter", "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter"]) {
+    for (const name of ["LICENSE", "NOTICE"]) {
+      assert.deepEqual(readFileSync(join(scratch, directory, name)), readFileSync(join(root, name)));
+    }
+  }
   const consumer = JSON.parse(readFileSync(join(scratch, "plugin/synveda/consumer-setup.json"), "utf8"));
   assert.equal(consumer.contract, "OPS-12/ADR-0116");
   assert.equal(consumer.version, 1);
@@ -36,6 +42,7 @@ try {
       const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
       assert.equal(manifest.version, version);
       assert.equal(manifest.private, true);
+      assert.equal(manifest.license, "Apache-2.0");
       assert.equal(manifest.devDependencies, undefined);
       assert.equal(manifest.scripts, undefined);
       assert.deepEqual(manifest.dependencies,

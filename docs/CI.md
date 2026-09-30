@@ -284,8 +284,11 @@ not a controlled speedup measurement.
    publisher identity; no signing key or PAT is needed for GitHub publication.
 5. Keep Linux ARM64, macOS Intel/ARM64 and Windows x64/ARM64 hosted runners
    available. A disabled/unavailable runner blocks its required platform; never
-   change it to an allowed failure. Existing OS signing, notarization, installer
-   attestation enforcement and real client issuer/harness gaps remain OPS-12 work.
+   change it to an allowed failure. Source installers now enforce publisher
+   verification under ADR-0132; native qualification remains required. Archive
+   reports require licence/notice carriage, and native image reports require
+   source-matching notice hashes. OS signing, notarization, complete third-party
+   notice/SBOM review and real client issuer/harness gaps remain OPS-12 work.
 
 The [native CLI asset table](RELEASING.md#native-cli-release-artifacts) names
 every required public package. The v0.4.3 release includes all six client-only

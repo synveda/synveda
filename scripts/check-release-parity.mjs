@@ -241,6 +241,13 @@ function packageAndRenderChart(version) {
     if (!firstBytes.equals(secondBytes)) {
       throw new Error("two chart packages from the same source are not byte-identical");
     }
+    for (const notice of ["LICENSE", "NOTICE"]) {
+      const expected = readFileSync(join(ROOT, notice));
+      const packaged = execFileSync("tar", ["-xOzf", join(first, name), `synveda/${notice}`], {
+        timeout: 60_000, maxBuffer: expected.length + 1, stdio: ["ignore", "pipe", "pipe"],
+      });
+      if (!packaged.equals(expected)) throw new Error(`packaged chart ${notice} differs from source`);
+    }
     const metadata = execFileSync("helm", ["show", "chart", join(first, name)], {
       cwd: ROOT,
       encoding: "utf8",

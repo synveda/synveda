@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
+  copyFileSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -22,8 +25,10 @@ import { releaseImages } from "./release-registries.mjs";
 import {
   releaseAssets,
   regularAssets,
+  checkArchiveNotices,
   checkQualification,
 } from "./check-release-assets.mjs";
+import { noticeHashes } from "./verify-release-images.mjs";
 import { publishRelease, uploadedAssets } from "./publish-release.mjs";
 
 test("workflow refactor retains release, native platform and security boundaries", () => {
@@ -291,6 +296,51 @@ test("two registry destinations copy one complete immutable OCI candidate set", 
   }
 });
 
+test("all non-client release archives retain exact regular licence and notice files", (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-release-notices-"));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const version = "0.4.0";
+  const archives = [
+    [`synveda-${version}-darwin-arm64.tar.gz`, ""],
+    [`synveda-${version}-linux-x86_64.tar.gz`, ""],
+    [`synveda-console-${version}.tar.gz`, "console"],
+    [`synveda-reference-${version}.tar.gz`, `synveda-reference-${version}`],
+    [`synveda-plugin-${version}.tar.gz`, "plugin"],
+    [`synveda-${version}.tgz`, "synveda"],
+  ];
+  const stages = archives.map(([archive, prefix], index) => {
+    const stage = join(scratch, `stage-${index}`);
+    const directory = join(stage, prefix);
+    mkdirSync(directory, { recursive: true });
+    for (const name of ["LICENSE", "NOTICE"])
+      copyFileSync(new URL(`../${name}`, import.meta.url), join(directory, name));
+    const pack = (duplicate = false) => execFileSync("tar", ["-czf", join(scratch, archive), "-C", stage,
+      ...(prefix ? [prefix] : readdirSync(stage)), ...(duplicate ? [prefix ? `${prefix}/NOTICE` : "NOTICE"] : [])]);
+    pack();
+    return { directory, pack };
+  });
+  checkArchiveNotices(scratch, version);
+  for (const { directory, pack } of stages) {
+    const notice = join(directory, "NOTICE");
+    const original = readFileSync(notice);
+    for (const damage of [
+      () => rmSync(notice),
+      () => writeFileSync(notice, "changed notice\n"),
+      () => { rmSync(notice); symlinkSync("LICENSE", notice); },
+    ]) {
+      damage();
+      pack();
+      assert.throws(() => checkArchiveNotices(scratch, version));
+      rmSync(notice, { force: true });
+      writeFileSync(notice, original);
+    }
+    pack(true);
+    assert.throws(() => checkArchiveNotices(scratch, version), /one regular file/);
+    pack();
+  }
+  checkArchiveNotices(scratch, version);
+});
+
 test("qualification rejects incomplete, failed or transplanted native reports", () => {
   const scratch = mkdtempSync(join(tmpdir(), "synveda-qualified-reports-"));
   try {
@@ -354,6 +404,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
           image,
           platforms: { [platform]: inventory.registries.dockerhub.images[name].platforms[platform] },
           executable_checks: 1,
+          notice_sha256: noticeHashes,
         })),
       };
       reports[`release-images-${arch}.json`] = {
@@ -372,6 +423,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
                 image: entry.reference,
                 platforms: { [platform]: entry.platforms[platform] },
                 executable_checks: 1,
+                notice_sha256: noticeHashes,
               })),
             },
           ]),
@@ -430,6 +482,12 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
       },
       (r) => {
         r["release-images-arm64.json"].registries.dockerhub.images.pop();
+      },
+      (r) => {
+        delete r["release-local-images-arm64.json"].images[0].notice_sha256;
+      },
+      (r) => {
+        r["release-images-amd64.json"].registries.ghcr.images[0].notice_sha256.NOTICE = "0".repeat(64);
       },
       (r) => {
         r["release-kubernetes-arm64.json"].evidence.cases.pop();

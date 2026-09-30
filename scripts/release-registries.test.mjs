@@ -9,7 +9,7 @@ import {
   assemble, assertUnused, imageNamespace, packageReference, preflight,
   publisherNamespace, releaseImages, validateRegistryManifest,
 } from "./release-registries.mjs";
-import { verifyRegistrySet } from "./verify-release-images.mjs";
+import { noticeHashes, verifyRegistrySet } from "./verify-release-images.mjs";
 
 const version = "0.0.0-local-test";
 const source = "a".repeat(40);
@@ -174,6 +174,8 @@ test("anonymous verification checks both destinations and refuses a synthetic or
       }]);
     }
     if (args[0] === "run" && args.includes("/usr/local/bin/synveda")) return `synveda ${version}`;
+    if (args[0] === "run" && args.at(-1).startsWith("sha256sum "))
+      return Object.entries(noticeHashes).map(([name, hash]) => `${hash}  /usr/share/licenses/synveda/${name}`).join("\n");
     return "";
   };
   const report = verifyRegistrySet(manifest, inventory, "linux/arm64", version, source, run);

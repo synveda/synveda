@@ -80,6 +80,7 @@ RUN /opt/keycloak/bin/assert-build-proxy-closed
 # KC-SERVICES0077 includes the mounted bootstrap identifier at INFO. Retain
 # service warnings/errors without allowing that input into default logs.
 ENV KC_LOG_LEVEL_ORG_KEYCLOAK_SERVICES=warn
+COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
 COPY --from=snapshot-builder --chmod=0555 /opt/synveda-input-snapshot /opt/keycloak/bin/synveda-input-snapshot
 COPY --chmod=0755 deploy/compose/keycloak/keycloak-entrypoint /opt/keycloak/bin/keycloak-entrypoint

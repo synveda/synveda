@@ -2,7 +2,7 @@
 // OPS-8 / CPR-45: immutable image smoke on a native runner. Public verification
 // stays anonymous; only the internal candidate path admits the loopback registry.
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,11 @@ import {
 
 export { validateIndex } from "./release-registries.mjs";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+const noticeFiles = ["LICENSE", "NOTICE"];
+export const noticeHashes = Object.fromEntries(noticeFiles.map((name) => [name,
+  createHash("sha256").update(readFileSync(new URL(`../${name}`, import.meta.url))).digest("hex")]));
+const noticeCommand = ["/bin/sh", "-ec", "sha256sum /usr/share/licenses/synveda/LICENSE /usr/share/licenses/synveda/NOTICE"];
+const expectedNotices = noticeFiles.map((name) => `${noticeHashes[name]}  /usr/share/licenses/synveda/${name}`).join("\n");
 const execute = (args, timeout = 60_000) =>
   execFileSync("docker", args, {
     encoding: "utf8",
@@ -193,7 +198,8 @@ export function verifyImages(
         );
       }
     }
-    for (const command of smokeCommands[name] ?? []) {
+    const commands = [...(smokeCommands[name] ?? []), ...(firstParty ? [noticeCommand] : [])];
+    for (const command of commands) {
       const container = `synveda-release-check-${randomUUID()}`;
       try {
         const output = run([
@@ -226,6 +232,9 @@ export function verifyImages(
             `${name}: compiled CLI version disagrees with the release`,
           );
         }
+        if (command === noticeCommand && output !== expectedNotices) {
+          throw new Error(`${name}: packaged licence/notice hashes disagree with source`);
+        }
       } finally {
         // Bound cleanup even when a Docker client times out after container start.
         try {
@@ -240,7 +249,8 @@ export function verifyImages(
       image,
       platforms: descriptors,
       image_id: local.Id,
-      executable_checks: smokeCommands[name]?.length ?? 0,
+      executable_checks: commands.length,
+      ...(firstParty ? { notice_sha256: noticeHashes } : {}),
     });
   }
   return {

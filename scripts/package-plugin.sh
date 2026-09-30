@@ -75,6 +75,9 @@ cp -R "$adapter/.claude-plugin" "$stage/synveda/.claude-plugin"
 cp "$adapter/.mcp.json" "$stage/synveda/.mcp.json"
 cp -R "$adapter/hooks" "$stage/synveda/hooks"
 cp -R "$adapter/dist" "$stage/synveda/dist"
+for directory in "$stage" "$stage/synveda"; do
+  cp LICENSE NOTICE "$directory/"
+done
 
 # Native managed registration requires the receipt-aware observation runtime.
 # Hash the shipped module so a historical same-version bundle is refused.
@@ -92,6 +95,9 @@ for client in codex copilot-cli; do
   runtime="$stage/$client"
   shared="$runtime/node_modules/@synveda/claude-code-adapter"
   mkdir -p "$runtime/dist" "$shared/dist"
+  # Native registration can copy one package without its enclosing archive.
+  cp LICENSE NOTICE "$runtime/"
+  cp LICENSE NOTICE "$shared/"
   for module in hook transcript; do
     cp "adapters/$client/dist/$module.mjs" "$runtime/dist/$module.mjs"
   done
@@ -103,7 +109,7 @@ for client in codex copilot-cli; do
     const [version, client, runtime, shared] = process.argv.slice(1);
     for (const [source, destination] of [[`adapters/${client}`, runtime], ["adapters/claude-code", shared]]) {
       const sourceManifest = JSON.parse(fs.readFileSync(`${source}/package.json`, "utf8"));
-      const manifest = { name: sourceManifest.name, version, private: true, type: sourceManifest.type };
+      const manifest = { name: sourceManifest.name, version, private: true, type: sourceManifest.type, license: sourceManifest.license };
       if (sourceManifest.exports) manifest.exports = sourceManifest.exports;
       if (sourceManifest.dependencies) manifest.dependencies = { "@synveda/claude-code-adapter": version };
       fs.writeFileSync(`${destination}/package.json`, JSON.stringify(manifest, null, 2) + "\n");

@@ -18,7 +18,11 @@ command -v helm >/dev/null 2>&1 || {
 }
 
 mkdir -p "$outdir"
-helm package deploy/helm/synveda \
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT INT TERM
+cp -R deploy/helm/synveda "$stage/synveda"
+cp LICENSE NOTICE "$stage/synveda/"
+helm package "$stage/synveda" \
   --version "$version" \
   --app-version "$version" \
   --destination "$outdir"

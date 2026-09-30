@@ -26,7 +26,7 @@ const SECRET_SENTINEL = "cpr45-secret-sentinel";
 const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   [
     "keycloak/Dockerfile",
-    "d144d10506d36d42a5df8f38a15814640183e05f5b12b02098cd5acda3299730",
+    "34c424f47fbe5cbf8da6f29d363b1a253d046275137ed60352a2607b6faa6be7",
   ],
   [
     "keycloak/keycloak-entrypoint",

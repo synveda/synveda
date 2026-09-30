@@ -6,7 +6,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { cliPath, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
+import { cliPath, clientNoticeDirectories, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
 import { checkPackagedAuth } from "./check-packaged-auth.mjs";
 
 if (process.platform !== "win32") throw new Error("native Windows execution required");
@@ -37,6 +37,12 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
   const { manifest, digest } = validateClient(join(scratch, "client"));
   assert.equal(manifest.version, version);
   assert.equal(manifest.target, targetName());
+  for (const directory of clientNoticeDirectories) {
+    for (const name of ["LICENSE", "NOTICE"]) {
+      assert.deepEqual(readFileSync(join(scratch, "client", directory, name)), readFileSync(join(root, name)));
+    }
+  }
+  checks.push("licence-and-notice-carriage");
   assert.ok(!Object.keys(manifest.files).some((p) => /synveda-(gateway|worker)|^console\/|^reference\//.test(p)));
   checks.push("native-identity-and-client-only-inventory");
   const assets = join(scratch, "assets");

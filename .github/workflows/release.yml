@@ -117,6 +117,7 @@ jobs:
           stage="$(mktemp -d)"
           mkdir -p "$stage/console"
           cp -R console/dist/. "$stage/console/"
+          cp LICENSE NOTICE "$stage/console/"
           test -f "$stage/console/index.html"
           tar -czf "synveda-console-$version.tar.gz" -C "$stage" console
           tar -tzf "synveda-console-$version.tar.gz" | sed -n '1,3p'

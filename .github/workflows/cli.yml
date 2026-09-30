@@ -68,9 +68,10 @@ jobs:
           out="target/${{ matrix.rust-target }}/release"
           stage="$(mktemp -d)"
           cp "$out/synveda" "$out/synveda-gateway" "$out/synveda-worker" "$stage/"
+          cp LICENSE NOTICE "$stage/"
           strip "$stage/synveda" "$stage/synveda-gateway" "$stage/synveda-worker" || true
           tar -czf "synveda-$version-${{ matrix.target }}.tar.gz" -C "$stage" \
-            synveda synveda-gateway synveda-worker
+            synveda synveda-gateway synveda-worker LICENSE NOTICE
           ls -lh "synveda-$version-${{ matrix.target }}.tar.gz"
       - name: Check the native executable and version
         run: |

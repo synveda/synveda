@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
+import { clientNoticeDirectories, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
 import { checkPackagedAuth } from "./check-packaged-auth.mjs";
 
 const root = resolve(import.meta.dirname, "..");
@@ -23,6 +23,12 @@ try {
   const { manifest, digest } = validateClient(client);
   assert.equal(manifest.version, version);
   assert.equal(manifest.target, targetName());
+  for (const directory of clientNoticeDirectories) {
+    for (const name of ["LICENSE", "NOTICE"]) {
+      assert.deepEqual(readFileSync(join(client, directory, name)), readFileSync(join(root, name)));
+    }
+  }
+  checks.push("licence-and-notice-carriage");
   assert.ok(!Object.keys(manifest.files).some((path) => /synveda-(gateway|worker)|^console\/|^reference\//.test(path)));
   checks.push("native-identity-and-client-only-inventory");
   const tools = join(scratch, "tools");

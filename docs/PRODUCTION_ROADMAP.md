@@ -47,6 +47,12 @@ source-installer publisher verification for the release gate: remote installs
 require the attested inventory, fixed release workflow/tag and expected commit
 before code execution. Native Windows and next-release archive qualification,
 complete artifact SBOMs and vulnerability policy remain open under OPS-12/OPS-8.
+The next source increment retains first-party licences and notices in every
+release archive, copyable plugin package and Synveda image, with byte/hash
+checks in native qualification and release assembly. Local macOS client,
+plugin replay and chart checks pass; the remaining native hosts and newly built
+image reports still require the next nonpublishing release drill. PR-13's
+support window and complete third-party notice review remain open.
 
 The first implementation sequence is: establish the supported deployment and
 upgrade contract; choose backup destination, retention, encryption/key custody

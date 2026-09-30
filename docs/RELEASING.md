@@ -71,6 +71,24 @@ issuer/harness use of these archives and cold network download measurements
 remain open. The two historical server binary archives
 and system-Node plugin archive retain their existing contract.
 
+Source release packaging retains the exact root `LICENSE` and `NOTICE` in
+native server archives, the console, reference bundle, chart and plugin archive.
+Each independently copied adapter package and private shared package also
+retains those files and its Apache-2.0 metadata. Client qualification compares
+every required notice with source bytes, and assembly requires the resulting
+`licence-and-notice-carriage` check from all six native archive reports.
+Assembly separately refuses missing, changed, duplicate or non-regular notices
+in the six other TAR/chart archives. Chart parity checks the real packaged bytes.
+
+The six Synveda OCI images retain those notices at
+`/usr/share/licenses/synveda/`, readable without root. Native candidate and
+anonymous public-image verification run isolated SHA-256 checks and report
+`notice_sha256`; final qualification requires matching source hashes for every
+image in both registries. Upstream images and their terms remain separate.
+These source gates do not change earlier published artifacts or establish a
+complete third-party notice/SBOM review. The next native release drill must
+qualify the new archive and image contents before publication.
+
 ## Owner setup
 
 1. Select a Docker Hub namespace you own. Do not assume `synveda` is available.

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  noticeHashes,
   requireAnonymousConfig,
   validateEnvironment,
   validateIndex,
@@ -68,6 +69,8 @@ function fixture(override = () => undefined) {
       ]);
     if (args[0] === "run" && args.includes("/usr/local/bin/synveda"))
       return `synveda ${version}`;
+    if (args[0] === "run" && args.at(-1).startsWith("sha256sum "))
+      return Object.entries(noticeHashes).map(([name, hash]) => `${hash}  /usr/share/licenses/synveda/${name}`).join("\n");
     return "";
   };
   return { calls, run };
@@ -84,6 +87,10 @@ test("a native pull check covers all six artifacts, upstream pulls and isolated 
   );
   assert.equal(report.images.length, 8);
   assert.equal(report.platform, "linux/arm64");
+  for (const entry of report.images) {
+    assert.deepEqual(entry.notice_sha256,
+      Object.hasOwn(manifest().images, entry.name) ? noticeHashes : undefined);
+  }
   assert.match(report.scope, /no deployment or OIDC acceptance/);
   const pulled = f.calls.filter(([verb]) => verb === "pull");
   assert.deepEqual(
@@ -104,6 +111,15 @@ test("a native pull check covers all six artifacts, upstream pulls and isolated 
     f.calls.some(([verb]) => ["build", "login", "push"].includes(verb)),
     false,
   );
+});
+
+test("missing or changed first-party image notices fail and clean up the verifier container", () => {
+  for (const output of ["", "wrong licence hash"]) {
+    const f = fixture((args) => args[0] === "run" && args.at(-1).startsWith("sha256sum ") ? output : undefined);
+    assert.throws(() => verifyImages(manifest(), "linux/arm64", version, source, f.run), /packaged licence\/notice hashes/);
+    const started = f.calls.find((args) => args[0] === "run" && args.at(-1).startsWith("sha256sum "));
+    assert.deepEqual(f.calls.at(-1), ["rm", "--force", started[started.indexOf("--name") + 1]]);
+  }
 });
 
 test("loopback OCI candidates remain separate from public release verification", () => {

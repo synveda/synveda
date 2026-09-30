@@ -734,3 +734,58 @@ passed: its initial aggregate stopped when the sandbox denied the evaluation
 fixture's localhost bind; all 44 deployment-convergence tests passed when
 rerun with socket access, and the remaining uninstall/convergence/chart checks
 completed. No live Docker deployment was part of this validation.
+
+### Licence and notice carriage source increment (2026-09-30)
+
+PR-13's existing Apache-2.0 distribution contract now has explicit carriage
+checks. Native server and console archives, the staged Helm chart and every
+independently copied plugin/private shared package retain the exact root
+`LICENSE` and `NOTICE`; private package metadata retains Apache-2.0. The
+reference bundle already carried these files. All six Synveda OCI targets copy
+them readably to `/usr/share/licenses/synveda/`. Existing Node and upstream
+notices remain in place; this is first-party carriage, not a complete review
+of third-party obligations or a complete SBOM.
+
+Native client checks compare every packaged notice with source bytes and emit
+`licence-and-notice-carriage`, required from all six archive reports. Assembly
+checks the six other TAR/chart archives for one regular, exact-byte file per
+notice, refusing omissions, changes, links and duplicates. Candidate and public
+image smoke checks compare both notice hashes inside isolated containers;
+final qualification requires `notice_sha256` evidence for every first-party
+image and registry. Upstream Collector/Prometheus images retain their separate
+contracts. Chart parity checks the actual package and repeated-package bytes.
+The client installer retains its existing inventory contract so valid earlier
+installed clients can still be preserved and replaced.
+
+Forty-three focused packaging/release tests passed with no skips. Extracted
+plugin notices and metadata passed, along with four configuration, eight Codex
+and 23 Copilot replay tests. A dirty-source macOS arm64 client candidate from
+parent `2616401bf855fd74175fa3ca41c34805830ee942` used pinned Node 24.21.0,
+reported CLI `synveda 0.4.3` and passed the native notice check, install/reinstall,
+seven installed-CLI process/authentication tests and both adapter replays. Its
+archive had SHA-256
+`64f5e365ad57c3e8be0d8ac50937d2ec359e8895f09ac24c2e4310990e935116`
+and 54,355,007 bytes; local install/reinstall took 2,082/2,118 ms. This was a
+local candidate with no real issuer or native vendor loading, not a released
+artifact or a network-install measurement. Its owned temporary files were
+removed.
+
+`make check-fast check-ci check-release-parity chart-lint`, actionlint 1.7.7
+(`-shellcheck=`), formatting, shell syntax and diff checks passed. Chart checks
+packaged the real source chart and compared notices byte for byte. The cached
+Keycloak image has the existing SHA-256 utility used by the new verifier; no
+new image build or public-image notice acceptance is inferred from that probe.
+All `make check-deploy` components also passed. The aggregate first stopped at
+the reviewed Keycloak Dockerfile hash after its one-line notice-copy addition;
+that exact fingerprint was reviewed and renewed. The static Compose matrix,
+review-lock refusal test and remaining 44 convergence/five uninstall tests then
+passed. The 173 lifecycle/entrypoint tests had already passed. This validation
+did not run a live application deployment or rebuild the six OCI candidates.
+
+Next run the nonpublishing release drill on all six native clients and both
+Linux image architectures, preserving clean exact-source reports before any
+separately authorized publication. Native Windows/other hosts, newly built
+image notices, complete third-party notice/SBOM review, OS signing,
+publisher incident policy, real issuer/harness acceptance and supported
+platform/version lifecycle remain open. Existing published artifacts and
+deployment state are unchanged.
