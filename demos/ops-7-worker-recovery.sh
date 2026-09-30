@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OPS-7: expire a core-worker policy lease while it owns a real Capture claim.
+# OPS-7: recover a real Capture claim after policy expiry or owner-pod loss.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -13,6 +13,18 @@ kind get clusters | grep -qx synveda-ops7 || {
 }
 
 namespace=synveda-test
+mode=${1:-policy-expiry}
+if [ "$#" -gt 1 ]; then
+  echo "usage: $0 [policy-expiry|pod-loss]" >&2
+  exit 78
+fi
+case "$mode" in
+  policy-expiry|pod-loss) ;;
+  *)
+    echo "usage: $0 [policy-expiry|pod-loss]" >&2
+    exit 78
+    ;;
+esac
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/synveda-ops7-claim.XXXXXX")
 chmod 700 "$scratch"
 fault_binary=target/debug/examples/ops7_invalid_policy
@@ -31,7 +43,9 @@ cleanup() {
       -f "$scratch/values.json" --server-side=true --force-conflicts \
       --wait --wait-for-jobs --timeout 15m >/dev/null || status=1
     if [ "$(kubectl -n "$namespace" get deployment/synveda -o jsonpath='{.spec.replicas}')" != 1 ] ||
-        ! kubectl -n "$namespace" rollout status deployment/synveda --timeout=120s >/dev/null; then
+        [ "$(kubectl -n "$namespace" get deployment/synveda-worker -o jsonpath='{.spec.replicas}')" != 1 ] ||
+        ! kubectl -n "$namespace" rollout status deployment/synveda --timeout=120s >/dev/null ||
+        ! kubectl -n "$namespace" rollout status deployment/synveda-worker --timeout=120s >/dev/null; then
       status=1
     fi
   fi
@@ -55,38 +69,40 @@ read -r wanted_instances ready_instances <<< "$(kubectl -n "$namespace" get clus
   exit 78
 }
 helm -n "$namespace" get values synveda -o json >"$scratch/values.json"
-SQLX_OFFLINE=true cargo build -p synveda-gateway --example ops7_invalid_policy >/dev/null
+if [ "$mode" = policy-expiry ]; then
+  SQLX_OFFLINE=true cargo build -p synveda-gateway --example ops7_invalid_policy >/dev/null
 
-kubectl -n "$namespace" port-forward --address 127.0.0.1 svc/synveda-pg-rw :5432 \
-  >"$scratch/port.log" 2>&1 &
-forward_pid=$!
-port=
-for ((attempt = 0; attempt < 40; attempt++)); do
-  port=$(sed -nE 's/^Forwarding from 127\.0\.0\.1:([0-9]+) -> 5432$/\1/p' "$scratch/port.log" | head -1)
-  [ -n "$port" ] && break
-  kill -0 "$forward_pid" 2>/dev/null || break
-  sleep 0.25
-done
-[ -n "$port" ] || { echo "isolated database port-forward did not open" >&2; exit 1; }
+  kubectl -n "$namespace" port-forward --address 127.0.0.1 svc/synveda-pg-rw :5432 \
+    >"$scratch/port.log" 2>&1 &
+  forward_pid=$!
+  port=
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    port=$(sed -nE 's/^Forwarding from 127\.0\.0\.1:([0-9]+) -> 5432$/\1/p' "$scratch/port.log" | head -1)
+    [ -n "$port" ] && break
+    kill -0 "$forward_pid" 2>/dev/null || break
+    sleep 0.25
+  done
+  [ -n "$port" ] || { echo "isolated database port-forward did not open" >&2; exit 1; }
 
-kubectl -n "$namespace" get secret/synveda-gateway-db -o jsonpath='{.data.DATABASE_URL}' | \
-  OPS7_PORT="$port" OPS7_DSN_FILE="$scratch/database-url" node -e '
-    const fs = require("node:fs");
-    let encoded = "";
-    process.stdin.on("data", chunk => encoded += chunk);
-    process.stdin.on("end", () => {
-      if (encoded.length < 10 || encoded.length > 4096) process.exit(1);
-      const url = new URL(Buffer.from(encoded, "base64").toString("utf8"));
-      if (!["postgres:", "postgresql:"].includes(url.protocol) ||
-          url.username !== "synveda_gateway" || url.pathname !== "/synveda") process.exit(1);
-      url.hostname = "127.0.0.1";
-      url.port = process.env.OPS7_PORT;
-      // The isolated Kind database is reached only over this loopback forward.
-      url.searchParams.set("sslmode", "disable");
-      fs.writeFileSync(process.env.OPS7_DSN_FILE, url.toString(), { mode: 0o600, flag: "wx" });
-    });
-  '
-OPS7_DATABASE_URL_FILE="$scratch/database-url" "$fault_binary" clear >/dev/null
+  kubectl -n "$namespace" get secret/synveda-gateway-db -o jsonpath='{.data.DATABASE_URL}' | \
+    OPS7_PORT="$port" OPS7_DSN_FILE="$scratch/database-url" node -e '
+      const fs = require("node:fs");
+      let encoded = "";
+      process.stdin.on("data", chunk => encoded += chunk);
+      process.stdin.on("end", () => {
+        if (encoded.length < 10 || encoded.length > 4096) process.exit(1);
+        const url = new URL(Buffer.from(encoded, "base64").toString("utf8"));
+        if (!["postgres:", "postgresql:"].includes(url.protocol) ||
+            url.username !== "synveda_gateway" || url.pathname !== "/synveda") process.exit(1);
+        url.hostname = "127.0.0.1";
+        url.port = process.env.OPS7_PORT;
+        // The isolated Kind database is reached only over this loopback forward.
+        url.searchParams.set("sslmode", "disable");
+        fs.writeFileSync(process.env.OPS7_DSN_FILE, url.toString(), { mode: 0o600, flag: "wx" });
+      });
+    '
+  OPS7_DATABASE_URL_FILE="$scratch/database-url" "$fault_binary" clear >/dev/null
+fi
 
 upgraded=true
 helm upgrade synveda deploy/helm/synveda -n "$namespace" -f "$scratch/values.json" \
@@ -97,6 +113,10 @@ helm upgrade synveda deploy/helm/synveda -n "$namespace" -f "$scratch/values.jso
 kubectl -n "$namespace" rollout status deployment/synveda-worker --timeout=120s >/dev/null
 kubectl -n "$namespace" scale deployment/synveda --replicas=3 >/dev/null
 kubectl -n "$namespace" rollout status deployment/synveda --timeout=300s >/dev/null
+if [ "$mode" = pod-loss ]; then
+  kubectl -n "$namespace" scale deployment/synveda-worker --replicas=2 >/dev/null
+  kubectl -n "$namespace" rollout status deployment/synveda-worker --timeout=300s >/dev/null
+fi
 read -r -a pod_ips <<< "$(kubectl -n "$namespace" get pods \
   -l app.kubernetes.io/component=gateway \
   -o jsonpath='{range .items[*]}{.status.podIP}{" "}{end}')"
@@ -240,29 +260,30 @@ provider_counts() {
 
 kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
   node /scripts/claimed-capture.mjs start
-[ "$(worker_ready)" = 200 ] || { echo "worker was not ready with claimed Capture" >&2; exit 1; }
-worker_metrics >"$scratch/before.json"
-node -e 'if (require(process.argv[1]).authorityReady !== 1) process.exit(1)' \
-  "$scratch/before.json"
+if [ "$mode" = policy-expiry ]; then
+  [ "$(worker_ready)" = 200 ] || { echo "worker was not ready with claimed Capture" >&2; exit 1; }
+  worker_metrics >"$scratch/before.json"
+  node -e 'if (require(process.argv[1]).authorityReady !== 1) process.exit(1)' \
+    "$scratch/before.json"
 
-OPS7_DATABASE_URL_FILE="$scratch/database-url" "$fault_binary" apply
-fault_start=$SECONDS
-closed=false
-for ((attempt = 0; attempt < 45; attempt++)); do
-  ready=$(worker_ready)
-  read -r calls active cancelled <<< "$(provider_counts)"
-  [ "$calls" = 1 ] || { echo "another provider call began before policy recovery" >&2; exit 1; }
-  if [ "$ready" = 503 ] && [ "$active" = 0 ] && [ "$cancelled" = 1 ]; then
-    closed=true
-    break
-  fi
-  sleep 1
-done
-[ "$closed" = true ] || { echo "worker did not close and cancel claimed Capture" >&2; exit 1; }
-closed_after=$((SECONDS - fault_start))
-[ "$closed_after" -le 36 ] || { echo "worker policy closure exceeded the provisional lease" >&2; exit 1; }
-worker_metrics >"$scratch/closed.json"
-node - "$scratch/before.json" "$scratch/closed.json" <<'JS'
+  OPS7_DATABASE_URL_FILE="$scratch/database-url" "$fault_binary" apply
+  fault_start=$SECONDS
+  closed=false
+  for ((attempt = 0; attempt < 45; attempt++)); do
+    ready=$(worker_ready)
+    read -r calls active cancelled <<< "$(provider_counts)"
+    [ "$calls" = 1 ] || { echo "another provider call began before policy recovery" >&2; exit 1; }
+    if [ "$ready" = 503 ] && [ "$active" = 0 ] && [ "$cancelled" = 1 ]; then
+      closed=true
+      break
+    fi
+    sleep 1
+  done
+  [ "$closed" = true ] || { echo "worker did not close and cancel claimed Capture" >&2; exit 1; }
+  closed_after=$((SECONDS - fault_start))
+  [ "$closed_after" -le 36 ] || { echo "worker policy closure exceeded the provisional lease" >&2; exit 1; }
+  worker_metrics >"$scratch/closed.json"
+  node - "$scratch/before.json" "$scratch/closed.json" <<'JS'
 const fs = require("node:fs");
 const before = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const after = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
@@ -271,23 +292,67 @@ if (after.authorityReady !== 1 || after.authorityUnavailable !== before.authorit
   throw new Error("policy expiry was not isolated from database authority");
 }
 JS
-echo "OPS-7: worker policy-only closure cancelled the claimed extractor after ${closed_after}s"
-while [ $((SECONDS - fault_start)) -lt 42 ]; do
-  [ "$(worker_ready)" = 503 ] || { echo "worker reopened before fault clear" >&2; exit 1; }
-  read -r calls active cancelled <<< "$(provider_counts)"
-  [ "$calls $active $cancelled" = "1 0 1" ] || {
-    echo "worker retried Capture while policy was stale" >&2
+  echo "OPS-7: worker policy-only closure cancelled the claimed extractor after ${closed_after}s"
+  while [ $((SECONDS - fault_start)) -lt 42 ]; do
+    [ "$(worker_ready)" = 503 ] || { echo "worker reopened before fault clear" >&2; exit 1; }
+    read -r calls active cancelled <<< "$(provider_counts)"
+    [ "$calls $active $cancelled" = "1 0 1" ] || {
+      echo "worker retried Capture while policy was stale" >&2
+      exit 1
+    }
+    sleep 1
+  done
+  OPS7_DATABASE_URL_FILE="$scratch/database-url" "$fault_binary" clear
+  recovered=false
+  for ((attempt = 0; attempt < 75; attempt++)); do
+    if [ "$(worker_ready)" = 200 ]; then recovered=true; break; fi
+    sleep 1
+  done
+  [ "$recovered" = true ] || { echo "worker did not recover after policy repair" >&2; exit 1; }
+else
+  first_peer=$(provider_stats | node -e '
+    let input = "";
+    process.stdin.on("data", chunk => input += chunk);
+    process.stdin.on("end", () => {
+      const stats = JSON.parse(input);
+      if (stats.calls !== 1 || stats.active !== 1 || stats.peers?.length !== 1) process.exit(1);
+      console.log(stats.peers[0].replace(/^::ffff:/, ""));
+    });
+  ')
+  read -r owner survivor <<< "$(kubectl -n "$namespace" get pods \
+    -l app.kubernetes.io/component=worker -o json | node -e '
+      let input = "";
+      process.stdin.on("data", chunk => input += chunk);
+      process.stdin.on("end", () => {
+        const pods = JSON.parse(input).items;
+        const owner = pods.find(pod => pod.status.podIP === process.argv[1]);
+        const survivor = pods.find(pod => pod.metadata.name !== owner?.metadata.name);
+        if (pods.length !== 2 || !owner || !survivor ||
+            pods.some(pod => !pod.status.containerStatuses?.[0]?.ready)) process.exit(1);
+        console.log(`${owner.metadata.name} ${survivor.metadata.name}`);
+      });
+    ' "$first_peer")"
+  [ -n "$owner" ] && [ -n "$survivor" ] || {
+    echo "blocked provider peer did not identify one of two ready workers" >&2
     exit 1
   }
-  sleep 1
-done
-OPS7_DATABASE_URL_FILE="$scratch/database-url" "$fault_binary" clear
-recovered=false
-for ((attempt = 0; attempt < 75; attempt++)); do
-  if [ "$(worker_ready)" = 200 ]; then recovered=true; break; fi
-  sleep 1
-done
-[ "$recovered" = true ] || { echo "worker did not recover after policy repair" >&2; exit 1; }
+  kubectl -n "$namespace" delete "pod/$owner" --wait=false >/dev/null
+  cancelled=false
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    read -r calls active dropped <<< "$(provider_counts)"
+    [ "$calls" = 1 ] || { echo "another worker called the provider before the claim expired" >&2; exit 1; }
+    if [ "$active $dropped" = "0 1" ]; then cancelled=true; break; fi
+    sleep 1
+  done
+  [ "$cancelled" = true ] || { echo "lost worker's provider call did not cancel" >&2; exit 1; }
+  [ "$(kubectl -n "$namespace" exec "pod/$survivor" -- \
+    curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' \
+      http://127.0.0.1:8121/readyz)" = 200 ] || {
+    echo "surviving worker was not ready after owner loss" >&2
+    exit 1
+  }
+  echo "OPS-7: one of two ready workers owned Capture; losing that pod cancelled its provider call"
+fi
 retried=false
 for ((attempt = 0; attempt < 120; attempt++)); do
   read -r calls active cancelled <<< "$(provider_counts)"
@@ -296,6 +361,21 @@ for ((attempt = 0; attempt < 120; attempt++)); do
   sleep 1
 done
 [ "$retried" = true ] || { echo "Capture did not reclaim its expired lease" >&2; exit 1; }
+if [ "$mode" = pod-loss ]; then
+  second_peer=$(provider_stats | node -e '
+    let input = "";
+    process.stdin.on("data", chunk => input += chunk);
+    process.stdin.on("end", () => {
+      const stats = JSON.parse(input);
+      if (stats.peers?.length !== 2) process.exit(1);
+      console.log(stats.peers[1].replace(/^::ffff:/, ""));
+    });
+  ')
+  [ "$second_peer" != "$first_peer" ] || {
+    echo "the deleted worker made the retry provider call" >&2
+    exit 1
+  }
+fi
 kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
   node /scripts/claimed-capture.mjs pre-release
 kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \

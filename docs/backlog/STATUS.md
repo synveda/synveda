@@ -190,7 +190,13 @@ withdrawn and the first provider call cancelled after 28 seconds. After pack
 repair and fenced lease reclaim, the second call produced one durable candidate
 in two attempts, with no candidate before the retry completed. This remains
 one-node/one-worker evidence, not multi-worker ownership or exactly-once
-provider effects. The drill also exposed a CNPG chart bootstrap defect: PUBLIC
+provider effects. A second Kind probe temporarily ran two core workers,
+deleted the one owning a blocked Capture claim, and observed the other remain
+ready while the cancelled claim was reclaimed by a different pod. Two attempts
+still produced one candidate after the second provider call completed. This
+qualifies one Capture owner-pod loss only; Knowledge indexing can duplicate
+external embedding calls and directory pull still lacks a cross-worker pass
+owner. The drill also exposed a CNPG chart bootstrap defect: PUBLIC
 CONNECT had been revoked on `postgres` without restoring it for CNPG's reserved
 `streaming_replica` role. A retained standby stayed unready after promotion;
 the disposable cluster recovered after a narrow operator grant. The source
@@ -199,7 +205,7 @@ after CNPG creates it. A fresh chart-rendered two-instance cluster passed
 bootstrap and replica restart with PUBLIC and product maintenance access still
 closed; contract checks and an operator repair note cover retained clusters.
 A second primary promotion and retained-cluster fixed-image upgrade remain open.
-Multi-worker ownership, in-flight process/load, key rotation, multi-node loss
+Other worker-family ownership, in-flight process/load, key rotation, multi-node loss
 and rolling acceptance remain open in the brief.
 Scope, grant, identity and Configuration decisions already use fresh
 request-time database rows and exact-shape Cedar fragments; a generic

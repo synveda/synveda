@@ -33,11 +33,13 @@ renew it; expiry withdraws readiness and cancels governed HTTP work. The
 `synveda_policy_pack_refresh_seconds` when readiness drops. The core worker
 uses the same provisional lease: expiry withdraws readiness, cancels governed
 work and retries initial convergence before resuming. An interrupted claim
-still requires a lease/fence recovery check. In one disposable Kind run, a
+requires a lease/fence recovery check for each job family. In one disposable
+Kind run, a
 claimed Capture request was cancelled on policy expiry, then its fenced second
-attempt committed one candidate after policy recovery. Post-start change
-visibility under production load and multi-worker ownership remain
-unqualified, so the chart remains single-replica.
+attempt committed one candidate after policy recovery. A separate two-worker
+Kind run deleted the pod owning a blocked Capture claim; another pod reclaimed
+it and committed one candidate. Other job families and provider-wide quotas
+still need multi-worker ownership proof, so the chart remains single-replica.
 
 OIDC login now parks its PKCE state and CLI handoff in the same deployment-key
 plane as console sessions. A missing deployment key refuses `/auth/login`

@@ -1,9 +1,10 @@
 // Disposable fault endpoint: hold real Capture work until its worker is stopped.
 import { createServer } from "node:http";
 let blocked = true, calls = 0, cancelled = 0;
+const peers = [];
 const pending = new Set();
 createServer((request, response) => {
-  if (request.url === "/stats") return response.end(JSON.stringify({ blocked, calls, active: pending.size, cancelled }));
+  if (request.url === "/stats") return response.end(JSON.stringify({ blocked, calls, active: pending.size, cancelled, peers }));
   if (request.url === "/release" && request.method === "POST") {
     blocked = false;
     for (const finish of pending) finish();
@@ -14,6 +15,7 @@ createServer((request, response) => {
     response.writeHead(404); return response.end();
   }
   calls++;
+  if (peers.length < 8) peers.push(request.socket.remoteAddress);
   // The fixture never records the incoming Session payload or credentials.
   request.resume();
   const finish = () => response.end(JSON.stringify({ model: "ops11-interruption", choices: [{ message: { content: JSON.stringify({ candidates: [{

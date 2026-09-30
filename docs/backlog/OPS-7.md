@@ -124,8 +124,24 @@ the second blocked call was released, the batch still had zero candidates.
 It then completed with two attempts, two provider calls (one cancelled) and
 exactly one durable candidate. This proves one claimed Capture recovery on
 one node, not provider exactly-once effects or multi-worker ownership.
+A second Kind run temporarily scaled the core worker to two pods. Only one
+worker reached the blocked extractor for a newly claimed Capture batch. The
+probe identified that owner from the provider connection and deleted its pod;
+the call was cancelled while the other worker remained ready. A different pod
+reclaimed the expired claim, with no candidate committed before the second
+provider call finished. The batch again completed in two attempts with one
+candidate and one cancelled provider call. This qualifies Capture's fenced
+claim under one owner-pod loss, not all core-worker jobs or a shared provider
+quota. Knowledge indexing currently permits duplicate external embedding
+calls while its durable insert converges; directory pull has no cross-worker
+pass owner to prevent duplicate absence accounting. Decide those ownership
+contracts before supporting two worker replicas. Both
+`demos/ops-7-worker-recovery.sh policy-expiry` and
+`demos/ops-7-worker-recovery.sh pod-loss` are repeatable against the isolated
+`kind-synveda-ops7` context and restore the chart's one-replica baseline.
 
-The same run exposed a Helm/CNPG defect: after the baseline primary promotion,
+The first claimed-Capture run exposed a Helm/CNPG defect: after the baseline
+primary promotion,
 the restarted standby could not reconnect because the chart's bootstrap had
 revoked PUBLIC CONNECT on the `postgres` maintenance database without granting
 CNPG's reserved `streaming_replica` role CONNECT. The primary and product pods
