@@ -25,6 +25,10 @@ use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use synveda_types::{Error, Result};
 
+/// Maximum rows removed by one locked expiry query. Keep this equal to the
+/// static SQL limit below; the worker uses it to stop a drain pass early.
+pub const PURGE_BATCH_SIZE: u64 = 256;
+
 /// A stored console session. Carries no tenant and no subject on purpose
 /// (ADR-0056 decision 2): both come from verifying the sealed access token.
 #[derive(Clone)]

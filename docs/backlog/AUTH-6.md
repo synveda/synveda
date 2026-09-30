@@ -27,18 +27,21 @@ re-verifies the bearer on every request. A broad
 inventory scan or treating that row as identity would violate this contract.
 [ADR-0130](../adr/adr-0130-separate-session-inventory-from-credential-custody.md)
 selects a separate tenant-scoped, credential-free index and request-time
-identifier revocation. The combined maintenance worker now deletes at most 256
-expired custody rows per minute with skip-locked coordination across replicas;
-successful/failed sweeps and removed rows have separate content-free counters.
+identifier revocation. The combined maintenance worker now drains up to 16
+skip-locked batches of 256 expired custody rows per minute, under a ten-second
+whole-pass deadline; successful/failed sweeps, completed batches, budget hits
+and removed rows have separate content-free counters.
 No AUTH-6 revocation enforcement or inventory is implemented yet.
 The [2026-09-30 Rust review](../RUST_ARCHITECTURE_REVIEW_2026-09-30.md)
 also found that one 256-row purge batch per minute lacked retention-lag
 evidence. Each successful sweep now observes the indexed oldest expired age
 in a deployment-wide gauge (zero when no expired row remains); a failed sweep
-leaves the last observation and increments the error counter. The fixed
-service rate still has no proven arrival envelope or retention bound. Measure
-age under representative load and use a bounded drain budget or a proven
-admission envelope before claiming bounded credential retention.
+leaves the last observation and increments the error counter. The bounded
+catch-up pass can remove at most 4,096 rows per tick, but the ten-second
+deadline may stop it earlier. A 4,097-row exact-role database fixture proves
+the first pass stops at the batch ceiling and the second drains the remainder.
+The arrival envelope and retention bound remain unproved; measure oldest age
+and budget hits under representative load before claiming bounded retention.
 
 The first candidate issuer contract is now the exact bundled Keycloak realm:
 verified access-token `jti` for one bearer, `sid` for an interactive session

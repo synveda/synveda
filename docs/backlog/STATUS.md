@@ -334,9 +334,11 @@ Keycloak profile. Its five-minute access, eight-hour session and rotating
 refresh contract still needs live proof; external issuers have no revocation
 claim. The combined maintenance worker now purges expired
 credential rows in bounded, skip-locked batches with sweep and row counters.
-Each successful sweep now reports the indexed oldest-expired age, but its
-fixed 256-row-per-minute service rate has no proven arrival or retention
-envelope; next measure age under load and bound drain work or admission.
+Each minute it now drains up to 16 batches of 256 rows within a ten-second
+deadline, stopping early on a partial batch. Indexed oldest-expired age and
+budget-hit counters expose lag and saturation; a 4,097-row exact-role fixture
+proves two bounded passes. The arrival and retention envelopes remain unproved;
+next measure age and budget hits under representative load.
 The OIDC verifier now carries bounded optional `jti`/`sid`, exact issuer and
 token times after signature verification; a mock-signed fixture covers these
 values and tampering but is not live Keycloak evidence. No AUTH-6 revocation

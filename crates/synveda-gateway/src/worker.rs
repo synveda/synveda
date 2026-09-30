@@ -36,6 +36,7 @@ const CONVERGENCE_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const ABORT_JOIN_RESERVE: Duration = Duration::from_secs(1);
 const CONSOLE_SESSION_PURGE_INTERVAL: Duration = Duration::from_secs(60);
 const CONSOLE_SESSION_PURGE_TIMEOUT: Duration = Duration::from_secs(10);
+const CONSOLE_SESSION_PURGE_MAX_BATCHES: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExecutionProvider {
@@ -742,12 +743,10 @@ async fn run_console_session_expiry_sweep(pool: sqlx::PgPool, mut shutdown: watc
         let result = tokio::select! {
             biased;
             () = shutdown::requested(&mut shutdown) => return,
-            result = tokio::time::timeout(CONSOLE_SESSION_PURGE_TIMEOUT, async {
-                let removed = synveda_store::console_sessions::purge_expired(&pool).await?;
-                metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGED_TOTAL)
-                    .increment(removed);
-                synveda_store::console_sessions::oldest_expired_age_seconds(&pool).await
-            }) => result,
+            result = tokio::time::timeout(
+                CONSOLE_SESSION_PURGE_TIMEOUT,
+                drain_expired_console_sessions(&pool),
+            ) => result,
         };
         match result {
             Ok(Ok(oldest_age_seconds)) => {
@@ -768,6 +767,26 @@ async fn run_console_session_expiry_sweep(pool: sqlx::PgPool, mut shutdown: watc
             }
         }
     }
+}
+
+/// Catch up after an outage without allowing credential cleanup to monopolise
+/// the worker. The caller also applies a ten-second whole-pass deadline.
+async fn drain_expired_console_sessions(pool: &sqlx::PgPool) -> synveda_types::Result<Option<f64>> {
+    let mut last_batch_full = false;
+    for _ in 0..CONSOLE_SESSION_PURGE_MAX_BATCHES {
+        let removed = synveda_store::console_sessions::purge_expired(pool).await?;
+        metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGED_TOTAL).increment(removed);
+        metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_BATCHES_TOTAL).increment(1);
+        last_batch_full = removed == synveda_store::console_sessions::PURGE_BATCH_SIZE;
+        if !last_batch_full {
+            break;
+        }
+    }
+    let oldest_age = synveda_store::console_sessions::oldest_expired_age_seconds(pool).await?;
+    if last_batch_full && oldest_age.is_some() {
+        metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_BUDGET_HITS_TOTAL).increment(1);
+    }
+    Ok(oldest_age)
 }
 
 async fn finish_generation_drain(
@@ -1120,6 +1139,54 @@ async fn worker_readyz(State(state): State<WorkerHealth>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn expired_console_custody_drain_stops_after_sixteen_batches() {
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("skipping: DATABASE_URL unset (run `make db-test`)");
+            return;
+        };
+        let pool = sqlx::PgPool::connect(&url)
+            .await
+            .expect("connect exact-role test database");
+        let issuer = format!("http://auth6-drain-{}.test", synveda_types::TenantId::new());
+        let sealed = [0_u8; 51];
+        sqlx::query(
+            "insert into console_sessions (token_hash, issuer, access_token_sealed, \
+             created_at, absolute_expires_at) \
+             select decode(md5($1 || n::text) || md5($1 || ':' || n::text), 'hex'), \
+             $1, $2, '2000-01-01 00:00:00+00', \
+             '2000-01-02 00:00:00+00' from generate_series(1, 4097) as n",
+        )
+        .bind(&issuer)
+        .bind(&sealed[..])
+        .execute(&pool)
+        .await
+        .expect("seed more than one bounded drain pass");
+
+        let remaining_age = drain_expired_console_sessions(&pool)
+            .await
+            .expect("drain the first pass");
+        assert!(remaining_age.is_some(), "the capped pass leaves one row");
+        let remaining: i64 =
+            sqlx::query_scalar("select count(*) from console_sessions where issuer = $1")
+                .bind(&issuer)
+                .fetch_one(&pool)
+                .await
+                .expect("count retained expired rows");
+        assert_eq!(remaining, 1);
+
+        drain_expired_console_sessions(&pool)
+            .await
+            .expect("drain the remaining row");
+        let remaining: i64 =
+            sqlx::query_scalar("select count(*) from console_sessions where issuer = $1")
+                .bind(&issuer)
+                .fetch_one(&pool)
+                .await
+                .expect("count retained expired rows");
+        assert_eq!(remaining, 0);
+    }
 
     #[test]
     fn execution_provider_is_closed_and_defaults_are_explicit() {

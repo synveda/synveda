@@ -80,6 +80,13 @@ pub const CONSOLE_SESSION_PURGE_SWEEPS_TOTAL: &str = "synveda_console_session_pu
 /// Expired console credential rows removed; no tenant or session labels.
 pub const CONSOLE_SESSION_PURGED_TOTAL: &str = "synveda_console_sessions_purged_total";
 
+/// Successful database batches used by credential-custody expiry sweeps.
+pub const CONSOLE_SESSION_PURGE_BATCHES_TOTAL: &str = "synveda_console_session_purge_batches_total";
+
+/// Sweeps that used all 16 batches and still observed expired custody rows.
+pub const CONSOLE_SESSION_PURGE_BUDGET_HITS_TOTAL: &str =
+    "synveda_console_session_purge_budget_hits_total";
+
 /// Age of the oldest expired credential still retained after the last
 /// successful bounded sweep. Zero means none remained at that observation;
 /// purge errors leave the last value in place and increment the error counter.
@@ -424,6 +431,27 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         WORKER_HEARTBEAT_AGE_SECONDS,
         metrics::Unit::Seconds,
         "Age of the core worker supervisor scheduler heartbeat; not per-task progress"
+    );
+    metrics::describe_counter!(
+        CONSOLE_SESSION_PURGE_SWEEPS_TOTAL,
+        "Expired console-session custody sweeps by ok or error outcome"
+    );
+    metrics::describe_counter!(
+        CONSOLE_SESSION_PURGED_TOTAL,
+        "Expired console-session custody rows deleted"
+    );
+    metrics::describe_counter!(
+        CONSOLE_SESSION_PURGE_BATCHES_TOTAL,
+        "Successful bounded console-session expiry batches"
+    );
+    metrics::describe_counter!(
+        CONSOLE_SESSION_PURGE_BUDGET_HITS_TOTAL,
+        "Console-session expiry sweeps that exhausted the batch budget with backlog remaining"
+    );
+    metrics::describe_gauge!(
+        CONSOLE_SESSION_OLDEST_EXPIRED_AGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Age of the oldest expired console credential after a successful sweep"
     );
     metrics::describe_counter!(
         synveda_store::operations::OPERATIONS_TOTAL,

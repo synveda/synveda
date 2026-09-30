@@ -363,7 +363,7 @@ async fn expired_console_sessions_are_purged_in_bounded_batches() {
     let first = synveda_store::console_sessions::purge_expired(&pool)
         .await
         .expect("purge first batch");
-    assert_eq!(first, 256);
+    assert_eq!(first, synveda_store::console_sessions::PURGE_BATCH_SIZE);
     let remaining: i64 = sqlx::query_scalar(
         "select count(*) from console_sessions where issuer = $1 \
          and absolute_expires_at <= now()",

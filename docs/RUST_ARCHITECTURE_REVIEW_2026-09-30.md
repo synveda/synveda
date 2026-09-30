@@ -103,7 +103,11 @@ per tick or set an admission and retention envelope. Keep skip-locked
 coordination and database-time expiry.
 
 Follow-up: AUTH-6 now exposes the indexed oldest-expired age after successful
-sweeps. The fixed service rate and unproven retention bound remain open.
+sweeps. A second AUTH-6 slice drains up to 16 skip-locked 256-row batches per
+minute within ten seconds, stops after a partial batch, and counts budget hits
+when expired rows remain. An exact-role 4,097-row test proves the per-pass
+ceiling and subsequent drain. The arrival envelope and measured retention
+bound remain open.
 
 ### P2 — architecture: product SQL remains outside `synveda-store`
 
@@ -188,7 +192,8 @@ those paths.
 - `cargo deny --offline check bans licenses sources`: passed with existing
   duplicate-dependency and unmatched-license-allowance warnings; no new
   licence conclusion beyond those three checks.
-- Strict Rustdoc: failed on broken/private intra-doc links as described above.
-- No database, load or destructive deployment test was run for this
-  review-only change. Prior focused exact-role and Kind results remain
-  recorded in the feature briefs and production-readiness inventory.
+- Strict Rustdoc initially failed on broken/private intra-doc links; the
+  CPR-44 repair passed workspace Rustdoc with warnings denied.
+- The initial review-only change ran no database, load or destructive
+  deployment test. Later focused exact-role follow-ups are recorded above
+  and in the feature briefs; production-load qualification remains open.
