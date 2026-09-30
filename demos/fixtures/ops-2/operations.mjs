@@ -96,7 +96,13 @@ export async function operations(c) {
 
   // Reuse the workload after reconnection; no application data is inspected
   // with the backup administrator. Mandatory dependency loss closes readiness.
-  const queryHealth = (path) => k(["exec", "-n", ns, "team-test", "-c", "node", "--", "node", "-e", `fetch('http://synveda:8120/${path}',{signal:AbortSignal.timeout(5000)}).then(r=>console.log(r.status)).catch(()=>console.log(0))`]).trim();
+  // An unready Pod leaves the Service's endpoints. Inspect its own listener
+  // so Kubernetes traffic withdrawal cannot hide the required 503/200 states.
+  const queryHealth = (path) => {
+    assert.ok(["readyz", "healthz"].includes(path));
+    const response = k(["exec", "-n", ns, "deployment/synveda", "--", "curl", "--silent", "--connect-timeout", "2", "--max-time", "5", "--output", "/dev/null", "--write-out", "%{http_code}", `http://127.0.0.1:8120/${path}`], { allowFailure: true, timeout: 10000 });
+    return response.status === 0 ? response.stdout.trim() : "0";
+  };
   if (database === "external") {
     k(["scale", "-n", providers, "deployment/postgres", "--replicas=0"]);
     k(["wait", "-n", providers, "pod", "-l", "app=postgres", "--for=delete", "--timeout=180s"], { timeout: 190000 });
@@ -119,7 +125,7 @@ export async function operations(c) {
     wait(identityNs, "statefulset", "keycloak");
     const gateRecoveredMs = Date.now() - resumed;
     const publicFlow = team(ns, "reconnect");
-    result.reconnect = { unavailableReadiness: 503, liveDuringOutage: 200, gateRecoveredMs, ...publicFlow, recoveredMs: Date.now() - resumed };
+    result.reconnect = { healthProbeTarget: "gateway loopback", unavailableReadiness: 503, liveDuringOutage: 200, gateRecoveredMs, ...publicFlow, recoveredMs: Date.now() - resumed };
   }
 
   // Ordinary PostgreSQL tools write outside every working PVC. Scratch is a

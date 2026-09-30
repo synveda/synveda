@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "feature": "OPS-12",
+  "observed_at": "2026-09-30T16:49:39.314Z",
+  "release_tag": "v0.4.3",
+  "source_sha": "2acc66f02625727b2ccdfe223358468bf10eef85",
+  "registry_manifest_sha256": "a33669323a99e94dcbff36cafaf587ffb3ade5f9e0420ec92102b0833dafc026",
+  "product_image": "ghcr.io/synveda/product@sha256:071bd209cdd26497c3c928949f38a8f2114c49384bea32eb3196952377ab47f3",
+  "publisher_verification": "GitHub CLI: fixed repository, release workflow, tag, source digest, GitHub OIDC, SLSA v1 and hosted runners; signed checksum inventory verified before reading registry manifest",
+  "sboms": [
+    {
+      "platform": "linux/amd64",
+      "format": "SPDX-2.3",
+      "packages": 108,
+      "cargo_package_urls": 0,
+      "cedar_packages": 0,
+      "sqlx_packages": 0,
+      "creators": [
+        "Organization: Anchore, Inc",
+        "Tool: syft-v1.51.0",
+        "Tool: buildkit-v0.32.2"
+      ],
+      "rendered_json_sha256": "8328e267fa9f14a555a40d95f889e7e7704d0a4e0341ca61bacda239d490f307"
+    },
+    {
+      "platform": "linux/arm64",
+      "format": "SPDX-2.3",
+      "packages": 108,
+      "cargo_package_urls": 0,
+      "cedar_packages": 0,
+      "sqlx_packages": 0,
+      "creators": [
+        "Organization: Anchore, Inc",
+        "Tool: syft-v1.51.0",
+        "Tool: buildkit-v0.32.2"
+      ],
+      "rendered_json_sha256": "eb78efee2280910426a098d49cb8290af5e4912330f96fa816d4ab74f9c5cff6"
+    }
+  ],
+  "limits": [
+    "Published v0.4.3 product image only; no current candidate or archive coverage claim",
+    "Package inventory inspection only; no vulnerability assessment",
+    "Image descriptor presence and first-party notice carriage do not establish complete dependency coverage"
+  ],
+  "publisher_verification_observed_at": "2026-09-30T16:51:20.707Z"
+}

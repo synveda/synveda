@@ -329,8 +329,20 @@ both Helm operations drills expected the retired one-row migration ledger,
 and Windows ARM installation hit a temporary executable sharing lock during
 download cleanup. Fixes preserve exact notice hashes and migration history;
 Windows cleanup retries only sharing/lock violations within a fixed bound.
-Next rerun full CI and nonpublishing Release on the clean fix commit; the
-[OPS-12 brief](OPS-12.md) owns the run identities, validation and limits.
+Full CI and nonpublishing Release on clean fix commit `33ad90ef` passed the
+image notice probes; CNPG operations and failover also passed. Both Windows
+ARM jobs failed the new transient-lock fixture: the PowerShell provider's
+exception prevented native-code classification. Cleanup now uses the direct
+.NET API and unwraps the base exception; the same transient/persistent lock
+and immediate non-sharing-error fixtures must pass on the next clean run.
+External-provider Helm cases also exposed a Service-routed outage probe and
+a stale fixture proxy after retained reinstall. The observer now probes
+gateway loopback; the owned edge restarts before public verification and
+login errors preserve status-only diagnostics. Complete native reports and
+assembly require the clean follow-up's full matrix. Published product SBOM
+inspection found no identified Cargo, Cedar or SQLx dependencies on either
+Linux architecture, so coverage remains an explicit next gate. The
+[OPS-12 brief](OPS-12.md) owns the run identities, evidence and limits.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered

@@ -282,8 +282,23 @@ The fixes pre-create searchable notice directories, compare the exact three-row
 migration ledger before/after concurrent reruns, and bound Windows download
 cleanup retries to sharing/lock violations. Native Windows checks exercise a
 released lock and a persistent lock; assembly requires that report check.
-Rerun full CI and Release dispatch on the clean fix commit before accepting
+The corrected `33ad90ef` [CI](https://github.com/synveda/synveda/actions/runs/36745787061)
+and [Release](https://github.com/synveda/synveda/actions/runs/36745834269)
+attempts passed the image notice probes; CNPG operations and failover passed
+in CI. Both Windows ARM jobs then failed the new transient-lock fixture.
+Cleanup now calls .NET directly and unwraps the base exception before checking
+the native error code; the retry bound and narrow accepted error set remain.
+Rerun full CI and Release dispatch on that clean follow-up before accepting
 the source qualification.
+
+The `33ad90ef` external-only Helm job and ARM64 candidate completed joint
+restore, then failed public login after retained reinstall; direct gateway
+login passed. The owned fixture proxy now restarts after the Service is
+recreated, before the unchanged public-flow assertions. Login failures report
+only HTTP status and location presence. AMD64's outage check also lost its
+Service endpoint once the Pod became unready; the observer now requires the
+same 503 readiness/200 liveness on gateway loopback and retains public
+reconnection acceptance. These fixture repairs need the next clean-source run.
 
 ## Manual owner settings
 

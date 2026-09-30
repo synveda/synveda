@@ -381,6 +381,9 @@ try {
     assert.deepEqual(JSON.parse(k(["get", "pvc", "-n", ns, "-o", "json"])).items.map((p) => p.metadata.uid).sort(), claimIds);
     helm(ns, values);
     assert.equal(credentialsHash(ns), secretHash, "credentials changed during reinstall");
+    // Reinstall replaces Service addresses while the fixture edge remains up.
+    // Reconnect that owned proxy to the new backend before the public flow.
+    k(["rollout", "restart", "-n", ns, "deployment/proxy"]); wait(ns, "deployment", "proxy");
     team(ns, "verify");
     const revoke = team(ns, "revoke");
     await mcp(ns, true);

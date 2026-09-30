@@ -121,7 +121,16 @@ $job = Start-Job -ArgumentList $file, $ready -ScriptBlock {
 try {
   for ($attempt = 0; $attempt -lt 50 -and -not (Test-Path -LiteralPath $ready); $attempt++) { Start-Sleep -Milliseconds 100 }
   if (-not (Test-Path -LiteralPath $ready)) { throw 'Transient lock fixture did not start' }
-  Remove-DownloadDirectory $path
+  try { [System.IO.Directory]::Delete($path, $true); throw 'Transient fixture did not hold a sharing lock' }
+  catch [System.IO.IOException] {
+    if (($_.Exception.GetBaseException().HResult -band 0xffff) -ne 32) { throw }
+  }
+  $transientElapsed = [System.Diagnostics.Stopwatch]::StartNew()
+  try { Remove-DownloadDirectory $path }
+  catch {
+    [Console]::Error.WriteLine('Transient cleanup failed: native code {0}, elapsed {1} ms', ($_.Exception.GetBaseException().HResult -band 0xffff), $transientElapsed.ElapsedMilliseconds)
+    throw
+  }
   if (Test-Path -LiteralPath $path) { throw 'Transient sharing lock prevented cleanup' }
   if ($null -eq (Wait-Job $job -Timeout 10)) { throw 'Transient lock fixture did not finish' }
   Receive-Job $job -ErrorAction Stop | Out-Null
@@ -136,13 +145,17 @@ $refused = $false
 try {
   try { Remove-DownloadDirectory $path }
   catch [System.IO.IOException] {
-    if (($_.Exception.HResult -band 0xffff) -ne 32) { throw }
+    if (($_.Exception.GetBaseException().HResult -band 0xffff) -ne 32) { throw }
     $refused = $true
   }
   if (-not $refused -or $elapsed.ElapsedMilliseconds -lt 4500 -or $elapsed.ElapsedMilliseconds -gt 10000) { throw 'Persistent lock did not fail within the cleanup bound' }
   if (-not (Test-Path -LiteralPath $file)) { throw 'Persistent lock fixture was unexpectedly removed' }
 } finally { $stream.Dispose() }
 Remove-DownloadDirectory $path
+$elapsed.Restart(); $refused = $false
+try { Remove-DownloadDirectory $path }
+catch [System.IO.DirectoryNotFoundException] { $refused = $true }
+if (-not $refused -or $elapsed.ElapsedMilliseconds -gt 2000) { throw 'A non-sharing error was retried or suppressed' }
 `], { env: { ...env, SYNVEDA_TEST_INSTALLER: join(root, "scripts/install.ps1") } });
   assert.equal(readFileSync(join(home, "state/retained"), "utf8"), "retain deployment state");
   checks.push("bounded-download-sharing-lock-cleanup");

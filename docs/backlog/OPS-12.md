@@ -871,3 +871,67 @@ or complete OCI/Helm acceptance. Next commit the reviewed fixes, rerun full
 CI and nonpublishing Release, inspect all six native archive and both native
 OCI/Compose/Helm reports, and retain exact-source assembly evidence. No tag,
 public release, registry publication or retained deployment was changed.
+
+The fix was committed as `33ad90efe10efb86d1fc2deaaf83e3c5151ed7bb` and
+pushed to `codex/synveda-production-roadmap`. The corrected-source
+[full CI dispatch](https://github.com/synveda/synveda/actions/runs/36745787061)
+and [nonpublishing Release dispatch](https://github.com/synveda/synveda/actions/runs/36745834269)
+passed workspace Rust and deployment gates; both CI image jobs passed
+notice/runtime probes and reached Helm acceptance. CNPG operations and
+install/failover passed. Both Windows ARM jobs refused the deliberately held
+transient file instead of retrying; the PowerShell provider's exception
+prevented native-code classification. Cleanup now calls the direct .NET
+directory API and classifies the base exception, preserving the same narrow
+retry set and bound. The fixture proves the native sharing code before retry,
+retains the persistent-lock refusal and requires immediate failure for a
+non-sharing missing-directory error. Windows is unavailable locally; the next
+clean hosted run must execute these unchanged-strength acceptance conditions.
+Complete native reports, Compose/Helm and assembly remain pending. No complete
+source acceptance is claimed from `33ad90ef`.
+
+The completed full CI also found two external-provider fixture races after
+the migration and native restore drills passed. Its external-only case and
+ARM64 four-mode candidate completed joint restore in about 36 seconds, then
+the retained reinstall's direct login succeeded while the public proxy path
+failed the issuer-redirect assertion. Reinstall replaces the application
+Service while the fixture-owned proxy stays alive; the fixture now restarts
+that proxy before public verification, and failures report HTTP status and
+location presence without printing URLs, bodies or credentials. AMD64's
+database-outage probe observed transport failure instead of HTTP 503 through
+the Service after its unready endpoint was withdrawn. The health observer now
+uses the gateway's own loopback listener with bounded curl and kubectl calls;
+it still requires readiness 503, liveness 200 and public-flow recovery.
+These fixes require a fresh same-source matrix; positive partial checks cannot
+be transplanted into a release assembled from another commit.
+
+Local follow-up validation passed 25 client packaging/release, failover and
+image-reuse tests, the
+starter render/contract matrix, JavaScript syntax, fast/workflow gates, Rust
+formatting and diff checks. The native Windows transient/persistent/non-sharing
+fixtures and the revised live Helm sequences remain pending. Next commit this
+follow-up, cancel the failed obsolete Release dispatch, and run full CI plus
+nonpublishing Release on its clean exact source before inspecting assembly.
+
+### Published SBOM coverage inspection (2026-09-30)
+
+[Read-only evidence](../../demos/evidence/ops12-published-sbom.json) binds
+this inspection to the published v0.4.3 source, signed registry inventory and
+immutable GHCR product digest. GitHub CLI verified the checksum attestation
+under ADR-0132's fixed publisher policy; the registry manifest matched its
+unique signed checksum before the image reference was used. No image was run
+or rebuilt. Each architecture's SPDX 2.3 document contains 108 packages, zero
+Cargo package URLs and no packages named Cedar or SQLx. The records identify
+Syft 1.51.0 and BuildKit 0.32.2 and retain hashes of the rendered document bytes.
+This is an inventory-coverage finding, not a vulnerability assessment.
+
+[Docker documents](https://docs.docker.com/build/metadata/attestations/sbom/)
+that default BuildKit scanning covers the final stage. The product currently
+copies plain compiled Rust binaries into that stage without dependency
+metadata. This explains the missing Rust package inventory as an inference
+from the build recipe and inspected output. Image attestation descriptor parity
+therefore does not prove complete dependency coverage. The next release-security
+slice must choose a maintained, pinned dependency-inventory mechanism and
+require expected runtime dependencies in the SBOM, then extend coverage across
+native archives, bundled JavaScript, charts and third-party notices. A valid
+SPDX envelope alone must not pass that gate. Record the architecture decision
+before implementation; current image and archive coverage claims remain open.

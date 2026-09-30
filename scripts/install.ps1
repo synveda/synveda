@@ -209,10 +209,12 @@ function Remove-DownloadDirectory([string]$Path) {
     # Retry only that condition in this invocation's private download directory.
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         try {
-            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            # The provider can replace the native I/O error. The direct API
+            # preserves it; unwrap PowerShell's method-invocation exception.
+            [System.IO.Directory]::Delete($Path, $true)
             return
         } catch [System.IO.IOException] {
-            $code = $_.Exception.HResult -band 0xffff
+            $code = $_.Exception.GetBaseException().HResult -band 0xffff
             if ($code -notin @(32, 33) -or $attempt -eq 19) { throw }
             Start-Sleep -Milliseconds 250
         }

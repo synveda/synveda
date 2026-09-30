@@ -58,7 +58,7 @@ async function login(user, consoleFlow = false) {
   }
   const begin = await hop(`${APP}/auth/login${consoleFlow ? "?console=true" : ""}`, { headers: spoofed });
   const authorize = begin.headers.get("location");
-  check(authorize?.startsWith(`${AUTH}/realms/synveda/protocol/openid-connect/auth?`), "PKCE issuer redirect missing");
+  check(authorize?.startsWith(`${AUTH}/realms/synveda/protocol/openid-connect/auth?`), `PKCE issuer redirect missing (HTTP ${begin.status}, location present: ${authorize !== null})`);
   const params = new URL(authorize).searchParams;
   for (const key of ["state", "nonce", "code_challenge"]) check(params.get(key), `PKCE ${key} missing`);
   check(params.get("code_challenge_method") === "S256" && params.get("redirect_uri") === `${APP}/auth/callback`, "PKCE binding incorrect");
