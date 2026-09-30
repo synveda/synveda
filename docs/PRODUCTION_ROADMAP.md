@@ -45,14 +45,15 @@ an open gate, not a pass.
 [ADR-0132](adr/adr-0132-verify-publisher-before-installing-release-code.md) adds
 source-installer publisher verification for the release gate: remote installs
 require the attested inventory, fixed release workflow/tag and expected commit
-before code execution. Native Windows and next-release archive qualification,
-complete artifact SBOMs and vulnerability policy remain open under OPS-12/OPS-8.
-The next source increment retains first-party licences and notices in every
-release archive, copyable plugin package and Synveda image, with byte/hash
-checks in native qualification and release assembly. Local macOS client,
-plugin replay and chart checks pass; the remaining native hosts and newly built
-image reports still require the next nonpublishing release drill. PR-13's
-support window and complete third-party notice review remain open.
+before code execution. Clean source `f433eb17` passed full CI and the
+nonpublishing release drill on all six native clients and both Linux
+architectures. [Independent evidence](../demos/evidence/ops12-source-qualification.json)
+verifies all 31 same-run assets and source notice carriage in archives, charts,
+plugin packages and images. Native Windows publisher-policy fixtures pass;
+real issuer/harness use and signed future publication remain unqualified.
+Complete artifact SBOMs, vulnerability and publisher incident policy, PR-13's
+support window and third-party notice review remain open under OPS-12/OPS-8.
+This source checkpoint does not change the production verdict.
 
 The first implementation sequence is: establish the supported deployment and
 upgrade contract; choose backup destination, retention, encryption/key custody

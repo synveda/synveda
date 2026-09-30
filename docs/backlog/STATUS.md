@@ -294,65 +294,34 @@ cross-process entity invalidation bus is not presumed necessary.
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open
 
-OPS-12 / ADR-0132 now requires source installers to verify the signed checksum
+OPS-12 / ADR-0132 requires source installers to verify the signed checksum
 inventory with a trusted GitHub CLI, fixed publisher/workflow/tag/runner policy
-and expected source commit before remote code execution. Forty focused tests
-pass. GitHub CLI 2.100.0 verified the published v0.4.3 inventory on macOS arm64,
-rejected a wrong tag, wrong commit and corrupted inventory, and the source
-bootstrap installed its published native client through HTTPS and a signed
-local mirror. A wrong-commit reinstall retained the installed manifest.
-This does not change published tag-bound installers. Native Windows verifier
-policy is a required next-candidate report check but has not run locally; next
-run native Windows and all six archive jobs before publishing this contract.
-Complete artifact SBOMs, vulnerability policy, OS signing and real
-issuer/harness acceptance remain open.
+and expected source commit before remote code execution. Real macOS verification
+of v0.4.3 rejects wrong tag/source and corrupted inventory; wrong-source
+reinstall retains the installed manifest. Native Windows verifier-policy and
+pre-execution refusal fixtures now pass on both hosted architectures. These
+fixtures do not qualify Windows real issuer login or signed future publication.
 
-OPS-12 / PR-13 also retains the exact first-party `LICENSE`/`NOTICE` in release
-archives, charts, copyable plugin packages and the six Synveda OCI targets.
-Assembly now requires notice-carriage checks from all native client reports,
-regular exact-byte notices in other archives, and source-matching image notice
-hashes. The local macOS arm64 candidate passed notice/install/reinstall,
-installed-CLI authentication/process tests and adapter replay; extracted plugin
-and packaged-chart checks pass. Next run all six native client and both native
-image candidates in a nonpublishing release drill. Complete third-party
-notice/SBOM review, published qualification and support-window ownership remain
-open; no earlier release bytes changed.
+Clean source `f433eb1719bc58b5f36b0516bedf71e886d23185` passed all 23 jobs in
+[full CI](https://github.com/synveda/synveda/actions/runs/36765529532) and the
+same-source [nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36765540733)
+(fifteen jobs passed, final publication skipped). All six native clients and
+both native Linux full Compose/Helm drills passed, including four ownership
+modes, three-row migration reruns, outage/reinstall recovery and restricted
+local browser login/logout. First-party notice bytes/hashes pass in native
+archives, charts, plugin packages and all six Synveda image targets.
+[Independent evidence](../../demos/evidence/ops12-source-qualification.json)
+verifies the original assembled checksum inventory, all 31 payloads and every
+same-run native/deployment report; no earlier run supplies evidence. Dry-run
+registry-copy and anonymous public-pull steps were skipped. OPS-11/OPS-12 and
+the production verdict remain open; no tag or release was published.
 
-The first full hosted roadmap attempt on `f4d23f32` found two stale generated
-OpenAPI descriptions after Rustdoc edits. CI and the nonpublishing Release
-drill were stopped before complete native qualification. The repository
-generators now refresh those descriptions and both SDK digest fields; the
-six OpenAPI tests, SDK drift/wire/installed-package checks and fast/workflow
-gates pass locally. The corrected `5db9687e` full CI passed workspace Rust and
-five native client targets, but image notice checks failed on directory modes,
-both Helm operations drills expected the retired one-row migration ledger,
-and Windows ARM installation hit a temporary executable sharing lock during
-download cleanup. Fixes preserve exact notice hashes and migration history;
-Windows cleanup retries only sharing/lock violations within a fixed bound.
-Full CI and nonpublishing Release on clean fix commit `33ad90ef` passed the
-image notice probes; CNPG operations and failover also passed. Both Windows
-ARM jobs failed the new transient-lock fixture. The direct .NET/base-exception
-follow-up preserved native classification; `6ae63604` confirmed code-32 retry
-exhaustion at about 4.88 seconds. The revised fixture uses a synchronous
-exclusive data-file handle and native two-second release thread; persistent
-and non-sharing refusals and the installer bound are unchanged.
-External-provider Helm cases also exposed a Service-routed outage probe and
-HTTP transport failure after retained reinstall. The observer now probes
-gateway loopback. An isolated Service-replacement probe confirmed rollout
-completion can precede usable routing; every reinstall now requires three
-stateless routes within 60 seconds before unchanged login/authority checks.
-The extra edge restart is removed. `6ae63604` full CI failed Windows ARM and
-three Helm cases; its Release Windows ARM also failed. Local repair checks
-pass. `c78b67a6` passed all six native client jobs in CI and Release, both
-dedicated operations cases and all four ownership modes in both CI image jobs.
-Both image jobs then failed a stale local-evaluation diagnostic assertion;
-the wrong runtime-role migration was correctly refused at epoch preflight.
-The fixture now requires that exact diagnostic and retains Failed Job,
-correct reapply and browser checks. Complete qualification and assembly still
-require the next clean full CI and nonpublishing Release matrix. Published product SBOM
-inspection found no identified Cargo, Cedar or SQLx dependencies on either
-Linux architecture, so coverage remains an explicit next gate. The
-[OPS-12 brief](OPS-12.md) owns the run identities, evidence and limits.
+Published v0.4.3 product SBOM inspection found no identified Cargo, Cedar or
+SQLx packages on either Linux architecture. Rust dependency coverage is the
+next release-security gate. Complete third-party notice/SBOM review,
+vulnerability and publisher incident policy, OS signing, real issuer/harness
+acceptance and support-window ownership also remain open. The
+[OPS-12 brief](OPS-12.md) owns the exact evidence and next action.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered

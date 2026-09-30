@@ -1,0 +1,1772 @@
+{
+  "schema_version": 1,
+  "feature": "OPS-12",
+  "observed_at": "2026-09-30T21:54:54.366Z",
+  "source_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+  "version": "0.4.3",
+  "published": false,
+  "ci_run": "https://github.com/synveda/synveda/actions/runs/36765529532",
+  "release_run": "https://github.com/synveda/synveda/actions/runs/36765540733",
+  "checksum_inventory_sha256": "ce97a238c20780b4f1d7b51c6a52537ba3ccc839b2424741e9897774ce330c38",
+  "payloads": [
+    {
+      "name": "synveda-0.4.3-darwin-arm64.tar.gz",
+      "sha256": "1c6005f1b3bb77dfc56e6a3ad891796fa578ccbef12927aaac5efe5b815f0114"
+    },
+    {
+      "name": "synveda-0.4.3-linux-x86_64.tar.gz",
+      "sha256": "a57c71d7854565af9ae3c64ce818f77fa42de3ec6f1a0e98ab6b74711478e968"
+    },
+    {
+      "name": "synveda-console-0.4.3.tar.gz",
+      "sha256": "097302c4a12e28004bfaf7325b687c89ef800b392975cbdd0f711c73734946af"
+    },
+    {
+      "name": "synveda-reference-0.4.3.tar.gz",
+      "sha256": "89c5e6c4bf401b4680651a6d21a4aa055a291d65368b5df776683108b16e6dbb"
+    },
+    {
+      "name": "synveda-plugin-0.4.3.tar.gz",
+      "sha256": "65199eee71e3ee10c96c0f011d53f18e99bf3986b129ca44b1ad85da2ab0aae3"
+    },
+    {
+      "name": "synveda-0.4.3.tgz",
+      "sha256": "dd819ea2a7595bc19bc59928ae8770bfcb1563e478c6b829d63d23d8fee6e1fb"
+    },
+    {
+      "name": "synveda-images-0.4.3.yaml",
+      "sha256": "6582db00ccd1290edb8d4f15966dc3543b58c89dacf14dc07cce19cefb7f7c98"
+    },
+    {
+      "name": "synveda-cnpg-image-0.4.3.yaml",
+      "sha256": "8e677529812ea7348088233a99658f410d91542bde8994c2d0b1f5d86d461703"
+    },
+    {
+      "name": "synveda-registry-images-0.4.3.json",
+      "sha256": "af508bb2fdf101612d7e8ce9595feef707ac5d0c1d262642e3eb917da0d81b78"
+    },
+    {
+      "name": "synveda-client-0.4.3-darwin-arm64.tar.gz",
+      "sha256": "83838b5e23cd2647bf57b789a4951c029eb75c86e6bc725987c37c2771c3c380"
+    },
+    {
+      "name": "synveda-client-report-darwin-arm64.json",
+      "sha256": "e0dbd69243af61f3afa4f56579413b30252d740d1d9a7259cbd96eb04ce82730"
+    },
+    {
+      "name": "synveda-client-0.4.3-darwin-x86_64.tar.gz",
+      "sha256": "75055587970a47d30ae9c3a58631bb92d4fc0a8db4dfaac3509975817eafff15"
+    },
+    {
+      "name": "synveda-client-report-darwin-x86_64.json",
+      "sha256": "23ebd3c1d680dd8151f0000243f8ba95cea64f9712ff72809cce70be6f86d362"
+    },
+    {
+      "name": "synveda-client-0.4.3-linux-arm64.tar.gz",
+      "sha256": "a481835e6beae788d17cefaf8e9794833ee68f481526f30fc01e68b3789f89cc"
+    },
+    {
+      "name": "synveda-client-report-linux-arm64.json",
+      "sha256": "d8b7e91ff8f98e75a0ff6802810011a8a408a5c5a2d20f7b380fe11eab43ecd7"
+    },
+    {
+      "name": "synveda-client-0.4.3-linux-x86_64.tar.gz",
+      "sha256": "84b0a845e844fbe1d43e7239d5435778795c3c9e96a1cab5557d36facc40b811"
+    },
+    {
+      "name": "synveda-client-report-linux-x86_64.json",
+      "sha256": "d6e20af6482b6e80c2a191ab512724485e52534532807b8da3ef30e487e43365"
+    },
+    {
+      "name": "synveda-client-0.4.3-windows-arm64.zip",
+      "sha256": "3825e124e7c12031e8b7ad7d4d2a9e8543decc7d76db4e54b8ca97e13c6c57d2"
+    },
+    {
+      "name": "synveda-client-report-windows-arm64.json",
+      "sha256": "4e71afac1b2a3e26d4f5da2ad456083163dbb4ecf56278b8382c8b4dce973350"
+    },
+    {
+      "name": "synveda-client-0.4.3-windows-x86_64.zip",
+      "sha256": "67375aa165ebf59a2b49dc74c866b12526449069e1f4c6707a51b5df4386e225"
+    },
+    {
+      "name": "synveda-client-report-windows-x86_64.json",
+      "sha256": "7a8e167f62e3727c81b7000e03ad94193e1fde74c89112854070e345ca9212d1"
+    },
+    {
+      "name": "release-candidate-amd64.json",
+      "sha256": "473b1022f45354f8c66e7357c567937b85d203de35c503e0ab055d30f6e4ce16"
+    },
+    {
+      "name": "release-local-images-amd64.json",
+      "sha256": "350493e47034e903ae040a96f6ec4a9daa86148bf3ec52c5ae9380af94f38471"
+    },
+    {
+      "name": "release-docker-amd64.json",
+      "sha256": "4d5b0422024e9829c635ebc110b6849517a5366a3077f93869f8244a972186e8"
+    },
+    {
+      "name": "release-consumer-amd64.json",
+      "sha256": "d11556265bcf84cbb3ff735cbb84518bb5faaa52c5f41b323594481f85434e2a"
+    },
+    {
+      "name": "release-kubernetes-amd64.json",
+      "sha256": "3e025503848093467c7d056d39c58f06997f7412a5d24b61845d3e37868dc550"
+    },
+    {
+      "name": "release-candidate-arm64.json",
+      "sha256": "97220b9283ad61509edd2b5142ebcbb73860c66c4769af5957cdf80cd17a2a9f"
+    },
+    {
+      "name": "release-local-images-arm64.json",
+      "sha256": "3c814d86397634baae0803de213faaf735e67e96735c0ac09a6e7a7e3a9c6d35"
+    },
+    {
+      "name": "release-docker-arm64.json",
+      "sha256": "29e25b75e6dde2665bbdcd8cc13fc289fb4dc766ca33efc3e0826898f632a9eb"
+    },
+    {
+      "name": "release-consumer-arm64.json",
+      "sha256": "c18d8926ce399fd07605a75cd6bbe5ba0029d9820375489ac20e812f491c82a0"
+    },
+    {
+      "name": "release-kubernetes-arm64.json",
+      "sha256": "9c24dc6b4ee1dfff01d44ea56f32f5dd4e12920e890245ce91e364510523569d"
+    }
+  ],
+  "clients": [
+    {
+      "schema_version": 1,
+      "evidence": "native-client-archive",
+      "target": "darwin-arm64",
+      "version": "0.4.3",
+      "cli_version": "synveda 0.4.3",
+      "source_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+      "source_tree_dirty": false,
+      "node": {
+        "version": "24.21.0",
+        "archive": "node-v24.21.0-darwin-arm64.tar.gz",
+        "archive_sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057"
+      },
+      "archive_sha256": "83838b5e23cd2647bf57b789a4951c029eb75c86e6bc725987c37c2771c3c380",
+      "archive_bytes": 48415174,
+      "local_install_ms": 2404,
+      "repeat_install_ms": 1937,
+      "total_ms": 25802,
+      "network_download_measured": false,
+      "real_issuer_login": false,
+      "native_harness_run": false,
+      "checks": [
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "codex-extracted-lifecycle-replay",
+        "copilot-cli-extracted-lifecycle-replay"
+      ]
+    },
+    {
+      "schema_version": 1,
+      "evidence": "native-client-archive",
+      "target": "darwin-x86_64",
+      "version": "0.4.3",
+      "cli_version": "synveda 0.4.3",
+      "source_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+      "source_tree_dirty": false,
+      "node": {
+        "version": "24.21.0",
+        "archive": "node-v24.21.0-darwin-x64.tar.gz",
+        "archive_sha256": "1462cb3b3046b815cf8ea436d3da450ec1a9f11dac7e5a46b0ada5305d7e8097"
+      },
+      "archive_sha256": "75055587970a47d30ae9c3a58631bb92d4fc0a8db4dfaac3509975817eafff15",
+      "archive_bytes": 50318341,
+      "local_install_ms": 6357,
+      "repeat_install_ms": 4414,
+      "total_ms": 52724,
+      "network_download_measured": false,
+      "real_issuer_login": false,
+      "native_harness_run": false,
+      "checks": [
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "codex-extracted-lifecycle-replay",
+        "copilot-cli-extracted-lifecycle-replay"
+      ]
+    },
+    {
+      "schema_version": 1,
+      "evidence": "native-client-archive",
+      "target": "linux-arm64",
+      "version": "0.4.3",
+      "cli_version": "synveda 0.4.3",
+      "source_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+      "source_tree_dirty": false,
+      "node": {
+        "version": "24.21.0",
+        "archive": "node-v24.21.0-linux-arm64.tar.gz",
+        "archive_sha256": "724282c3b43aec998aa9527380465b45d229e021b58035f5f4f63095eabfe5d5"
+      },
+      "archive_sha256": "a481835e6beae788d17cefaf8e9794833ee68f481526f30fc01e68b3789f89cc",
+      "archive_bytes": 54035284,
+      "local_install_ms": 2988,
+      "repeat_install_ms": 3006,
+      "total_ms": 25002,
+      "network_download_measured": false,
+      "real_issuer_login": false,
+      "native_harness_run": false,
+      "checks": [
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "codex-extracted-lifecycle-replay",
+        "copilot-cli-extracted-lifecycle-replay"
+      ]
+    },
+    {
+      "schema_version": 1,
+      "evidence": "native-client-archive",
+      "target": "linux-x86_64",
+      "version": "0.4.3",
+      "cli_version": "synveda 0.4.3",
+      "source_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+      "source_tree_dirty": false,
+      "node": {
+        "version": "24.21.0",
+        "archive": "node-v24.21.0-linux-x64.tar.gz",
+        "archive_sha256": "6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff"
+      },
+      "archive_sha256": "84b0a845e844fbe1d43e7239d5435778795c3c9e96a1cab5557d36facc40b811",
+      "archive_bytes": 55069169,
+      "local_install_ms": 3609,
+      "repeat_install_ms": 3656,
+      "total_ms": 25186,
+      "network_download_measured": false,
+      "real_issuer_login": false,
+      "native_harness_run": false,
+      "checks": [
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "codex-extracted-lifecycle-replay",
+        "copilot-cli-extracted-lifecycle-replay"
+      ]
+    },
+    {
+      "schema_version": 1,
+      "evidence": "native-client-archive",
+      "target": "windows-arm64",
+      "version": "0.4.3",
+      "cli_version": "synveda 0.4.3",
+      "source_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+      "source_tree_dirty": false,
+      "node": {
+        "version": "24.21.0",
+        "archive": "node-v24.21.0-win-arm64.zip",
+        "archive_sha256": "8779b1bde1d39f8d420e3b57aa657b39891af434d3de44a919044cec06785921"
+      },
+      "archive_sha256": "3825e124e7c12031e8b7ad7d4d2a9e8543decc7d76db4e54b8ca97e13c6c57d2",
+      "archive_bytes": 39460482,
+      "local_install_ms": 31025,
+      "repeat_install_ms": 29482,
+      "network_download_measured": false,
+      "real_issuer_login": false,
+      "native_harness_run": false,
+      "checks": [
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "native-windows-private-storage-interoperability",
+        "bounded-download-sharing-lock-cleanup",
+        "publisher-policy-and-pre-execution-refusal",
+        "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
+        "unsafe-zip-and-overlapping-install-root-refusal"
+      ]
+    },
+    {
+      "schema_version": 1,
+      "evidence": "native-client-archive",
+      "target": "windows-x86_64",
+      "version": "0.4.3",
+      "cli_version": "synveda 0.4.3",
+      "source_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+      "source_tree_dirty": false,
+      "node": {
+        "version": "24.21.0",
+        "archive": "node-v24.21.0-win-x64.zip",
+        "archive_sha256": "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541"
+      },
+      "archive_sha256": "67375aa165ebf59a2b49dc74c866b12526449069e1f4c6707a51b5df4386e225",
+      "archive_bytes": 44158722,
+      "local_install_ms": 21097,
+      "repeat_install_ms": 8029,
+      "network_download_measured": false,
+      "real_issuer_login": false,
+      "native_harness_run": false,
+      "checks": [
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "native-windows-private-storage-interoperability",
+        "bounded-download-sharing-lock-cleanup",
+        "publisher-policy-and-pre-execution-refusal",
+        "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
+        "unsafe-zip-and-overlapping-install-root-refusal"
+      ]
+    }
+  ],
+  "candidates": [
+    {
+      "arch": "amd64",
+      "identity": {
+        "version": "0.4.3",
+        "source": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+        "source_dirty": false,
+        "arch": "amd64",
+        "images": {
+          "product": {
+            "archive": "product.tar",
+            "sha256": "2b33a9e8dd0a7a1ee4c268ec587256de0f05cdea4ce92acdc09ee57f45df717d",
+            "digest": "sha256:b60f6c2fd02c523e4ff57e7640de14b4f260c771891bae602765f6af5675f11a"
+          },
+          "postgres": {
+            "archive": "postgres.tar",
+            "sha256": "10de658ca9dc9ec0f7707047bd087d5aed80c9eb5407ccd705d8d66c424cb6fc",
+            "digest": "sha256:6f075e2164f9124c138566f82c5964815cbbca50d06a7ce407f9f28cb3828e0d"
+          },
+          "keycloak": {
+            "archive": "keycloak.tar",
+            "sha256": "a384f85bcc1c19e5e6632b0a9ef083ad819bb3334064c863acb9fa9f6227e381",
+            "digest": "sha256:9ab9ec8e40dd14b37c63ce055712b8b76f7af189fca49a94746f8b9c8b93cbd3"
+          },
+          "proxy": {
+            "archive": "proxy.tar",
+            "sha256": "fac029eb090d70434251c94d0db493b1df4bbf6648c558a98e32b943bd44add8",
+            "digest": "sha256:01454518cb48eb59c4c27945cb42773680ce27e8db26383569f4515be0d63f09"
+          },
+          "browser_acceptance": {
+            "archive": "browser-acceptance.tar",
+            "sha256": "80b4e83c42e9677346cb0477846e215bdcd5eac6b60a5018a5b0e47aff8a8bd2",
+            "digest": "sha256:1751a5a76545bab05966c2351ff3bf8ce1d209bb42c2a4939857b7a8a0e816ff"
+          },
+          "helm_postgres": {
+            "archive": "cnpg-postgres.tar",
+            "sha256": "bafc02ffb2b95827569e6cd721a4d8661c29c06edea5981b45448db7f4741be4",
+            "digest": "sha256:16dbb2bdf8f609b3f1e8a5b80d4b54aaf7c0248982458b5345b7a46ab18df023"
+          }
+        }
+      },
+      "local_images": {
+        "schema_version": 1,
+        "release_version": "0.4.3",
+        "source_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+        "platform": "linux/amd64",
+        "anonymous_pull": false,
+        "local_candidate": true,
+        "checked_at": "2026-09-30T19:51:14.950Z",
+        "scope": "Image pull and isolated executable/asset smoke; no deployment or OIDC acceptance.",
+        "images": [
+          {
+            "name": "product",
+            "image": "localhost:5000/synveda/product@sha256:b60f6c2fd02c523e4ff57e7640de14b4f260c771891bae602765f6af5675f11a",
+            "platforms": {
+              "linux/amd64": "sha256:e7b0be52ae1d0457d0888dac681a1062b55501d0dfa4f7bddb5de5e896521b5c"
+            },
+            "image_id": "sha256:5d642db0050321cb3a061389ec3ddbdb8c97e9a8e62fc118a6841f3da6f35fa0",
+            "executable_checks": 3,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "postgres",
+            "image": "localhost:5000/synveda/postgres@sha256:6f075e2164f9124c138566f82c5964815cbbca50d06a7ce407f9f28cb3828e0d",
+            "platforms": {
+              "linux/amd64": "sha256:9e4364de55e8bde58cf81d42827422de932e121f2631ec3505f667141f857554"
+            },
+            "image_id": "sha256:031cb70633b6c75bb493fdb3aada856aa6809893ed04045659a0855856a1eb78",
+            "executable_checks": 2,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "keycloak",
+            "image": "localhost:5000/synveda/keycloak@sha256:9ab9ec8e40dd14b37c63ce055712b8b76f7af189fca49a94746f8b9c8b93cbd3",
+            "platforms": {
+              "linux/amd64": "sha256:9c5ca53f9ae60ab27d232f300089e060269880d54c41c65139a6d098d6c097ad"
+            },
+            "image_id": "sha256:4dafa0a46d875efc6ac201d1a4d226fa63627401931605ee0b84602e047ad853",
+            "executable_checks": 2,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "proxy",
+            "image": "localhost:5000/synveda/proxy@sha256:01454518cb48eb59c4c27945cb42773680ce27e8db26383569f4515be0d63f09",
+            "platforms": {
+              "linux/amd64": "sha256:f5ed133c457d29de21b64059f563f188646cda418422aac7af882887ae1d0f21"
+            },
+            "image_id": "sha256:e38c338ccbab867b6db0d30102e9fc48630b458a488cc0a6543854b26a3a2007",
+            "executable_checks": 2,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "browser_acceptance",
+            "image": "localhost:5000/synveda/browser-acceptance@sha256:1751a5a76545bab05966c2351ff3bf8ce1d209bb42c2a4939857b7a8a0e816ff",
+            "platforms": {
+              "linux/amd64": "sha256:48befac38ab2a4521df898c3f14c05c3f82b8332442a599603f4b26cbd99b72c"
+            },
+            "image_id": "sha256:85b8a35ab6906bb5e49fc81341065a4ce0015f4dd6889fe881705b5a0a1ef3de",
+            "executable_checks": 3,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "helm_postgres",
+            "image": "localhost:5000/synveda/cnpg-postgres@sha256:16dbb2bdf8f609b3f1e8a5b80d4b54aaf7c0248982458b5345b7a46ab18df023",
+            "platforms": {
+              "linux/amd64": "sha256:72ce9c38ff7dbf32c8baa5e031158a36ece69aad9e6ad28bbb6edeea41dc4f09"
+            },
+            "image_id": "sha256:530572313b632675fca75da7d416d8b4d850cb1350bbc26cf86e2e5d9ffc8ed3",
+            "executable_checks": 2,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "otel_collector",
+            "image": "otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc",
+            "platforms": {
+              "linux/amd64": "sha256:4f4276c07cee9055f2ab630a86330243f85e208c388ee697bea2a44dab896c3f",
+              "linux/arm64": "sha256:64c13b48dd3c4bab8b54b0acf8af0d92b5d80a3b4558b8aeb1d1f11f7fdc9970"
+            },
+            "image_id": "sha256:e11c83206a71a0ac3125aa162205dcd8f6b0c27f4ad20799e20c9f4ad2da4d24",
+            "executable_checks": 0
+          },
+          {
+            "name": "prometheus",
+            "image": "prom/prometheus:v3.13.3-distroless@sha256:2e9a8ad75536755572d703e645fcc39c8104d9f0215d49d613db35194b0d8bc2",
+            "platforms": {
+              "linux/amd64": "sha256:cee031fd02e61bf5111f2c533d63de4b813b1fce8964eb609ae5cc56b26b992c",
+              "linux/arm64": "sha256:4119301ce1014957933197e43b41015fabd3874286778316406376e04a5e370c"
+            },
+            "image_id": "sha256:700a0616a58da97ed125e353bfc31c30460425c1c9009c55af4788956e9798b0",
+            "executable_checks": 0
+          }
+        ]
+      },
+      "reports": {
+        "docker": {
+          "checks": {
+            "concurrentPreparationPreservesSecrets": true,
+            "missingCredentialRefusedAndRetryRecovered": true,
+            "emptyConsoleLoginLogout": true,
+            "optInSampleAndRepeat": true,
+            "recreationPreservesKeysIdentityAndReceipt": true,
+            "pairedDatabaseRestoreAndUsableAccess": true,
+            "noPasswordsOrEncryptionKeyInServiceLogs": true
+          },
+          "tools": {
+            "docker": "28.0.4",
+            "compose": "2.38.2",
+            "architecture": "x64",
+            "platform": "linux"
+          },
+          "preparation_ms": 360,
+          "fresh_state_startup_ms": 770570,
+          "retained_state_startup_ms": 586628,
+          "image_download_ms": null
+        },
+        "consumer": {
+          "checks": {
+            "freshOrdinaryComposeStartup": true,
+            "repeatedInitializationPreservesSecrets": true,
+            "missingKeyRefusedAndOriginalRestored": true,
+            "lostInstallationVolumeRefusedBesideRetainedPostgres": true,
+            "initializationRefusedDuringRecovery": true,
+            "browserIssuerPkceLoginApiLogout": true,
+            "optInSampleAndIdempotentRepeat": true,
+            "deliberateCredentialRetrievalAndNoSecretsInLogs": true,
+            "recreationPreservesKeysIdentityAndSample": true,
+            "quiescedPairedBackup": true,
+            "damagedArchiveRefusedAndOriginalPreserved": true,
+            "backupOverwriteRefused": true,
+            "restoreRequiresExactProjectConfirmation": true,
+            "restoredTenantAuditKeyAndWrongKeyRefusal": true,
+            "originalSealedSecretsBrowserIdentityAndSampleRestored": true,
+            "restoredProxyRemainsPrivate": true,
+            "retainedRestoreTargetRefused": true,
+            "noSecretsInRestoredLogs": true,
+            "exactProjectStoppedWithVolumesRetained": true,
+            "restoredProjectStoppedWithVolumesRetained": true
+          },
+          "tools": {
+            "host": "linux/x64",
+            "engine": "linux/amd64 28.0.4",
+            "engineOS": "Ubuntu 24.04.5 LTS",
+            "compose": "2.38.2"
+          },
+          "timings_ms": {
+            "freshStateStartup": 781772,
+            "browserLoginOperationLogout": 2879,
+            "retainedStateStartup": 609777,
+            "pairedBackup": 22408,
+            "pairedRestore": 588258
+          },
+          "all_images_cached_before_start": true,
+          "image_download_bytes": null,
+          "image_download_ms": null
+        },
+        "kubernetes": {
+          "cases": [
+            {
+              "selection": "bundled-packaged",
+              "reinstall_transport": {
+                "directGateway": 200,
+                "applicationEdge": 200,
+                "issuerEdge": 200,
+                "recoveredMs": 105,
+                "failedProbes": 0
+              }
+            },
+            {
+              "selection": "external-packaged",
+              "reinstall_transport": {
+                "directGateway": 200,
+                "applicationEdge": 200,
+                "issuerEdge": 200,
+                "recoveredMs": 121,
+                "failedProbes": 0
+              }
+            },
+            {
+              "selection": "bundled-external",
+              "reinstall_transport": {
+                "directGateway": 200,
+                "applicationEdge": 200,
+                "issuerEdge": 200,
+                "recoveredMs": 99,
+                "failedProbes": 0
+              }
+            },
+            {
+              "selection": "external-external",
+              "reinstall_transport": {
+                "directGateway": 200,
+                "applicationEdge": 200,
+                "issuerEdge": 200,
+                "recoveredMs": 4124,
+                "failedProbes": 4
+              }
+            }
+          ],
+          "operations": {
+            "bundled-packaged": {
+              "interruptedJob": {
+                "completed": true,
+                "attempts": 2,
+                "candidates": 1,
+                "duplicateDatabaseEffects": 0,
+                "exactlyOnceProviderEffects": false,
+                "recoveryMs": 59686,
+                "providerCalls": 2,
+                "cancelledProviderRequests": 1,
+                "exitCode": 0,
+                "readinessWithdrawn": true
+              },
+              "gatewayShutdown": {
+                "exitCode": 0,
+                "restartedReadyMs": 12765,
+                "inFlightHttpDrainTested": false
+              },
+              "repeatedWorkload": {
+                "rounds": [
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13750
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13684
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 14008
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13957
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13957
+                  }
+                ],
+                "durationMs": 76236
+              },
+              "migration": {
+                "concurrentWaiters": 2,
+                "completedReruns": 2,
+                "versions": [
+                  1,
+                  2,
+                  3
+                ],
+                "ledgerUnchanged": true
+              },
+              "recoveryPoint": {
+                "recordedAt": "2026-09-30T21:25:56.917Z",
+                "auditEvents": 2389,
+                "auditHead": "fd743d3d9c38ce18012ecbf51ab45dcf8084f0e2205b073d2d4e07e9c87cd62e",
+                "durableSession": true,
+                "sealedConsoleSession": true
+              },
+              "backup": {
+                "quiesced": true,
+                "durationMs": 12103,
+                "archives": [
+                  {
+                    "database": "synveda",
+                    "bytes": 1546742,
+                    "sha256": "86b71ce4900bc0b9525ecf33297bbdba4df5582e3993bb1c3dace0148c0484c6"
+                  },
+                  {
+                    "database": "keycloak",
+                    "bytes": 268978,
+                    "sha256": "1a9705536394ee727fb3e30d6d3810e2514e3bf501ea182d4cdcf727a58d217a"
+                  }
+                ],
+                "offPvc": true,
+                "encryptedOffHostCopy": false
+              },
+              "restore": {
+                "freshLogin": true,
+                "stableSubjects": true,
+                "membershipAndIsolation": true,
+                "knowledgeAndRetrieval": true,
+                "durablePayload": true,
+                "sealedSessionOpened": true,
+                "auditValid": true,
+                "frozenAuditPrefixPreserved": true,
+                "minimumAuditEvents": 2389,
+                "durationMs": 37353,
+                "target": "fresh namespace; independent PostgreSQL; packaged Keycloak",
+                "issuerPreserved": true,
+                "sourceDataRetained": true
+              }
+            },
+            "external-external": {
+              "interruptedJob": {
+                "completed": true,
+                "attempts": 2,
+                "candidates": 1,
+                "duplicateDatabaseEffects": 0,
+                "exactlyOnceProviderEffects": false,
+                "recoveryMs": 60580,
+                "providerCalls": 2,
+                "cancelledProviderRequests": 1,
+                "exitCode": 0,
+                "readinessWithdrawn": true
+              },
+              "gatewayShutdown": {
+                "exitCode": 0,
+                "restartedReadyMs": 12774,
+                "inFlightHttpDrainTested": false
+              },
+              "repeatedWorkload": {
+                "rounds": [
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13776
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13807
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13640
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13918
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13942
+                  }
+                ],
+                "durationMs": 76203
+              },
+              "migration": {
+                "concurrentWaiters": 2,
+                "completedReruns": 2,
+                "versions": [
+                  1,
+                  2,
+                  3
+                ],
+                "ledgerUnchanged": true
+              },
+              "reconnect": {
+                "healthProbeTarget": "gateway loopback",
+                "unavailableReadiness": 503,
+                "liveDuringOutage": 200,
+                "gateRecoveredMs": 9982,
+                "freshLogin": true,
+                "stableSubjects": true,
+                "persistentContent": true,
+                "authorizedRecall": true,
+                "failedLoginAttempts": 0,
+                "loginRecoveryMs": 1182,
+                "recoveredMs": 11302
+              },
+              "recoveryPoint": {
+                "recordedAt": "2026-09-30T21:41:23.858Z",
+                "auditEvents": 2424,
+                "auditHead": "5a5ba3bfd8882fe0016d15fee36fd4323bf1ac85b5fe02679b9ed714d38166df",
+                "durableSession": true,
+                "sealedConsoleSession": true
+              },
+              "backup": {
+                "quiesced": true,
+                "durationMs": 11967,
+                "archives": [
+                  {
+                    "database": "synveda",
+                    "bytes": 1555252,
+                    "sha256": "5a40fc5a6798e4d59a74497befc84d85358961583d7b1e07fdd7a76e0061267b"
+                  },
+                  {
+                    "database": "keycloak",
+                    "bytes": 270529,
+                    "sha256": "37c0d1e685f111a3fd469763c46fd9e8ca904a5471a106697056433d1e123ad5"
+                  }
+                ],
+                "offPvc": true,
+                "encryptedOffHostCopy": false
+              },
+              "restore": {
+                "freshLogin": true,
+                "stableSubjects": true,
+                "membershipAndIsolation": true,
+                "knowledgeAndRetrieval": true,
+                "durablePayload": true,
+                "sealedSessionOpened": true,
+                "auditValid": true,
+                "frozenAuditPrefixPreserved": true,
+                "minimumAuditEvents": 2424,
+                "durationMs": 34986,
+                "target": "fresh namespace; independent PostgreSQL; packaged Keycloak",
+                "issuerPreserved": true,
+                "sourceDataRetained": true
+              }
+            }
+          },
+          "local_evaluation": {
+            "at": "2026-09-30T21:46:52.363Z",
+            "startupMs": 40872,
+            "versions": {
+              "helm": "v4.2.3+g43e8b7f",
+              "kubernetes": "v1.36.1",
+              "kubectl": "v1.36.1"
+            },
+            "restrictedAdmission": true,
+            "assignedUid": 1000900000,
+            "assignedUidProcesses": [
+              "gateway",
+              "install",
+              "keycloak",
+              "postgres",
+              "worker"
+            ],
+            "runtimeRoleMigrationRefused": true,
+            "reapplyAfterRefusal": true,
+            "openShiftScc": "NOT RUN: no OpenShift cluster",
+            "portForward": "127.0.0.1 only",
+            "browserLoginLogout": true,
+            "images": {
+              "product": "synveda/release-product:0.4.3",
+              "postgres": "synveda/release-postgres:0.4.3",
+              "keycloak": "synveda/release-keycloak:0.4.3"
+            },
+            "clusterWideInstall": false
+          }
+        }
+      }
+    },
+    {
+      "arch": "arm64",
+      "identity": {
+        "version": "0.4.3",
+        "source": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+        "source_dirty": false,
+        "arch": "arm64",
+        "images": {
+          "product": {
+            "archive": "product.tar",
+            "sha256": "f0cae2a26f491aff99fcdfb2b236e13e3d8c755f8934d86ac9d2403d6cb400cf",
+            "digest": "sha256:0fb70fbfa01a23965cc4fcca68850efe92feb84dda6a8c2ba5eaa84b074a48bd"
+          },
+          "postgres": {
+            "archive": "postgres.tar",
+            "sha256": "478bf16fafc584165b0ee5bbcf6583d31f24fc6ec079a4da6fc7d5c76e00b245",
+            "digest": "sha256:ee7b5d0e84628e38bec60614ceba9b15957e6c52597ea4bd34f805130b3b9b85"
+          },
+          "keycloak": {
+            "archive": "keycloak.tar",
+            "sha256": "02bf14e1f627d3dd9cbcfb17e66d94b305303c8d12e19ac10c4aface1e1e0992",
+            "digest": "sha256:954880143c425a7d63881ac848b10b6bea7f731afb3e2d3655f1b58072d60929"
+          },
+          "proxy": {
+            "archive": "proxy.tar",
+            "sha256": "af01552430ec1e47aad9744c0dcfc767f71a3596b94160e01adaa23ed9216f9e",
+            "digest": "sha256:5b0e308987575e246017beb88e152e1842c965b9d12ca7564e5de210cac6a048"
+          },
+          "browser_acceptance": {
+            "archive": "browser-acceptance.tar",
+            "sha256": "a00bd67faa08d2f98f07aa512e7c4da357d65c62e72831bcb862788a5c3d6610",
+            "digest": "sha256:3de6bc53508aa8d23095e5a9e8010aacdda56f6272c7dde680eb594388f9cb30"
+          },
+          "helm_postgres": {
+            "archive": "cnpg-postgres.tar",
+            "sha256": "894ad8ccbc969c66b509c5573808d64e6d335df7f6ae6e0bf05059a1db864d81",
+            "digest": "sha256:8f38a88b53941aa5cd4d9208e49b237f8ea4d6e3a9f36acc74df1eb149273876"
+          }
+        }
+      },
+      "local_images": {
+        "schema_version": 1,
+        "release_version": "0.4.3",
+        "source_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+        "platform": "linux/arm64",
+        "anonymous_pull": false,
+        "local_candidate": true,
+        "checked_at": "2026-09-30T19:49:09.922Z",
+        "scope": "Image pull and isolated executable/asset smoke; no deployment or OIDC acceptance.",
+        "images": [
+          {
+            "name": "product",
+            "image": "localhost:5000/synveda/product@sha256:0fb70fbfa01a23965cc4fcca68850efe92feb84dda6a8c2ba5eaa84b074a48bd",
+            "platforms": {
+              "linux/arm64": "sha256:5e0342faea48b3be6dc48c59d582f349ff1cc643e46a927eceabcc9b9ec50989"
+            },
+            "image_id": "sha256:a69d4b4de8858b496197451fb4d6daa682841edb8eb6fbb5e0fa78ad4e95052b",
+            "executable_checks": 3,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "postgres",
+            "image": "localhost:5000/synveda/postgres@sha256:ee7b5d0e84628e38bec60614ceba9b15957e6c52597ea4bd34f805130b3b9b85",
+            "platforms": {
+              "linux/arm64": "sha256:efb1f664ea4f7c47366f34719a4c9fafabdc8f6e19edc9da4a65253fbe8dca80"
+            },
+            "image_id": "sha256:2b8330da5e718c5e200bfefcbd888ff8e9d7870c6a4ae65b692b60ac1c575d3a",
+            "executable_checks": 2,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "keycloak",
+            "image": "localhost:5000/synveda/keycloak@sha256:954880143c425a7d63881ac848b10b6bea7f731afb3e2d3655f1b58072d60929",
+            "platforms": {
+              "linux/arm64": "sha256:f3b310db6e051baaf2ecece8a5fa25952e59ab114cad05828c6bc6f4b9f496ac"
+            },
+            "image_id": "sha256:9a6dc6311595fe8053a7da35c9a1b58a51b96e6098c07db4211bfec160d0806c",
+            "executable_checks": 2,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "proxy",
+            "image": "localhost:5000/synveda/proxy@sha256:5b0e308987575e246017beb88e152e1842c965b9d12ca7564e5de210cac6a048",
+            "platforms": {
+              "linux/arm64": "sha256:a4423a6acddc3196b3c14155fd3d6ac5172b335c6377e98914c2f6f93afc71fc"
+            },
+            "image_id": "sha256:e91c74148a6c1ea03a200aab9b77a4c3e2eda3b863860f061366e1195ef911d4",
+            "executable_checks": 2,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "browser_acceptance",
+            "image": "localhost:5000/synveda/browser-acceptance@sha256:3de6bc53508aa8d23095e5a9e8010aacdda56f6272c7dde680eb594388f9cb30",
+            "platforms": {
+              "linux/arm64": "sha256:ad0683f53cea12763dcf24aa293cc3ea0851d2bc61b0caf6f75653114ea310c0"
+            },
+            "image_id": "sha256:598062bc55c23457cc27f67d1b77a2d79abfda8d40547c1b59403f00565f5a22",
+            "executable_checks": 3,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "helm_postgres",
+            "image": "localhost:5000/synveda/cnpg-postgres@sha256:8f38a88b53941aa5cd4d9208e49b237f8ea4d6e3a9f36acc74df1eb149273876",
+            "platforms": {
+              "linux/arm64": "sha256:be278678b6378ccfaddd6e7db58c2df19c2978b172a7ff85ccb289b164ea524f"
+            },
+            "image_id": "sha256:e7444cbb6ad26b8a786a7cb43d8910e6c40cc61023172685b9225e736fafcdd6",
+            "executable_checks": 2,
+            "notice_sha256": {
+              "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+            }
+          },
+          {
+            "name": "otel_collector",
+            "image": "otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc",
+            "platforms": {
+              "linux/amd64": "sha256:4f4276c07cee9055f2ab630a86330243f85e208c388ee697bea2a44dab896c3f",
+              "linux/arm64": "sha256:64c13b48dd3c4bab8b54b0acf8af0d92b5d80a3b4558b8aeb1d1f11f7fdc9970"
+            },
+            "image_id": "sha256:613bf64429919e7d8896f36a5afcab0963a1636c41237fcae4481ee32e8ec2c9",
+            "executable_checks": 0
+          },
+          {
+            "name": "prometheus",
+            "image": "prom/prometheus:v3.13.3-distroless@sha256:2e9a8ad75536755572d703e645fcc39c8104d9f0215d49d613db35194b0d8bc2",
+            "platforms": {
+              "linux/amd64": "sha256:cee031fd02e61bf5111f2c533d63de4b813b1fce8964eb609ae5cc56b26b992c",
+              "linux/arm64": "sha256:4119301ce1014957933197e43b41015fabd3874286778316406376e04a5e370c"
+            },
+            "image_id": "sha256:12187591047f8e11fa0e32e40e01b3457049673fc11a93d64f299740a4fee69e",
+            "executable_checks": 0
+          }
+        ]
+      },
+      "reports": {
+        "docker": {
+          "checks": {
+            "concurrentPreparationPreservesSecrets": true,
+            "missingCredentialRefusedAndRetryRecovered": true,
+            "emptyConsoleLoginLogout": true,
+            "optInSampleAndRepeat": true,
+            "recreationPreservesKeysIdentityAndReceipt": true,
+            "pairedDatabaseRestoreAndUsableAccess": true,
+            "noPasswordsOrEncryptionKeyInServiceLogs": true
+          },
+          "tools": {
+            "docker": "28.0.4",
+            "compose": "2.38.2",
+            "architecture": "arm64",
+            "platform": "linux"
+          },
+          "preparation_ms": 479,
+          "fresh_state_startup_ms": 572145,
+          "retained_state_startup_ms": 435107,
+          "image_download_ms": null
+        },
+        "consumer": {
+          "checks": {
+            "freshOrdinaryComposeStartup": true,
+            "repeatedInitializationPreservesSecrets": true,
+            "missingKeyRefusedAndOriginalRestored": true,
+            "lostInstallationVolumeRefusedBesideRetainedPostgres": true,
+            "initializationRefusedDuringRecovery": true,
+            "browserIssuerPkceLoginApiLogout": true,
+            "optInSampleAndIdempotentRepeat": true,
+            "deliberateCredentialRetrievalAndNoSecretsInLogs": true,
+            "recreationPreservesKeysIdentityAndSample": true,
+            "quiescedPairedBackup": true,
+            "damagedArchiveRefusedAndOriginalPreserved": true,
+            "backupOverwriteRefused": true,
+            "restoreRequiresExactProjectConfirmation": true,
+            "restoredTenantAuditKeyAndWrongKeyRefusal": true,
+            "originalSealedSecretsBrowserIdentityAndSampleRestored": true,
+            "restoredProxyRemainsPrivate": true,
+            "retainedRestoreTargetRefused": true,
+            "noSecretsInRestoredLogs": true,
+            "exactProjectStoppedWithVolumesRetained": true,
+            "restoredProjectStoppedWithVolumesRetained": true
+          },
+          "tools": {
+            "host": "linux/arm64",
+            "engine": "linux/arm64 28.0.4",
+            "engineOS": "Ubuntu 24.04.5 LTS",
+            "compose": "2.38.2"
+          },
+          "timings_ms": {
+            "freshStateStartup": 592428,
+            "browserLoginOperationLogout": 2654,
+            "retainedStateStartup": 445353,
+            "pairedBackup": 21757,
+            "pairedRestore": 455102
+          },
+          "all_images_cached_before_start": true,
+          "image_download_bytes": null,
+          "image_download_ms": null
+        },
+        "kubernetes": {
+          "cases": [
+            {
+              "selection": "bundled-packaged",
+              "reinstall_transport": {
+                "directGateway": 200,
+                "applicationEdge": 200,
+                "issuerEdge": 200,
+                "recoveredMs": 124,
+                "failedProbes": 0
+              }
+            },
+            {
+              "selection": "external-packaged",
+              "reinstall_transport": {
+                "directGateway": 200,
+                "applicationEdge": 200,
+                "issuerEdge": 200,
+                "recoveredMs": 93,
+                "failedProbes": 0
+              }
+            },
+            {
+              "selection": "bundled-external",
+              "reinstall_transport": {
+                "directGateway": 200,
+                "applicationEdge": 200,
+                "issuerEdge": 200,
+                "recoveredMs": 117,
+                "failedProbes": 0
+              }
+            },
+            {
+              "selection": "external-external",
+              "reinstall_transport": {
+                "directGateway": 200,
+                "applicationEdge": 200,
+                "issuerEdge": 200,
+                "recoveredMs": 4130,
+                "failedProbes": 4
+              }
+            }
+          ],
+          "operations": {
+            "bundled-packaged": {
+              "interruptedJob": {
+                "completed": true,
+                "attempts": 2,
+                "candidates": 1,
+                "duplicateDatabaseEffects": 0,
+                "exactlyOnceProviderEffects": false,
+                "recoveryMs": 59560,
+                "providerCalls": 2,
+                "cancelledProviderRequests": 1,
+                "exitCode": 0,
+                "readinessWithdrawn": true
+              },
+              "gatewayShutdown": {
+                "exitCode": 0,
+                "restartedReadyMs": 12672,
+                "inFlightHttpDrainTested": false
+              },
+              "repeatedWorkload": {
+                "rounds": [
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 14046
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 12795
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13746
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 14033
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 14160
+                  }
+                ],
+                "durationMs": 75888
+              },
+              "migration": {
+                "concurrentWaiters": 2,
+                "completedReruns": 2,
+                "versions": [
+                  1,
+                  2,
+                  3
+                ],
+                "ledgerUnchanged": true
+              },
+              "recoveryPoint": {
+                "recordedAt": "2026-09-30T21:02:17.977Z",
+                "auditEvents": 2388,
+                "auditHead": "b263f13250b3aa4c8290c4edf54bd55be0bc47789fca327f6cecb0000cc15ee9",
+                "durableSession": true,
+                "sealedConsoleSession": true
+              },
+              "backup": {
+                "quiesced": true,
+                "durationMs": 11755,
+                "archives": [
+                  {
+                    "database": "synveda",
+                    "bytes": 1546271,
+                    "sha256": "c81a8a53ae364f52f4d6cf4bb94155cfa4198aefb9cf5372a1902bf53244591e"
+                  },
+                  {
+                    "database": "keycloak",
+                    "bytes": 268957,
+                    "sha256": "c45bf3a28f8f7f5bfae82ae9b31070cc2ba762c70d5ab4cbc3cf967b0399deb4"
+                  }
+                ],
+                "offPvc": true,
+                "encryptedOffHostCopy": false
+              },
+              "restore": {
+                "freshLogin": true,
+                "stableSubjects": true,
+                "membershipAndIsolation": true,
+                "knowledgeAndRetrieval": true,
+                "durablePayload": true,
+                "sealedSessionOpened": true,
+                "auditValid": true,
+                "frozenAuditPrefixPreserved": true,
+                "minimumAuditEvents": 2388,
+                "durationMs": 35743,
+                "target": "fresh namespace; independent PostgreSQL; packaged Keycloak",
+                "issuerPreserved": true,
+                "sourceDataRetained": true
+              }
+            },
+            "external-external": {
+              "interruptedJob": {
+                "completed": true,
+                "attempts": 2,
+                "candidates": 1,
+                "duplicateDatabaseEffects": 0,
+                "exactlyOnceProviderEffects": false,
+                "recoveryMs": 60632,
+                "providerCalls": 2,
+                "cancelledProviderRequests": 1,
+                "exitCode": 0,
+                "readinessWithdrawn": true
+              },
+              "gatewayShutdown": {
+                "exitCode": 0,
+                "restartedReadyMs": 13726,
+                "inFlightHttpDrainTested": false
+              },
+              "repeatedWorkload": {
+                "rounds": [
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13856
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13934
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13920
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 13873
+                  },
+                  {
+                    "concurrentAgents": 4,
+                    "sessions": 4,
+                    "events": 400,
+                    "contextRuns": 80,
+                    "capturedSessions": 4,
+                    "capturedEvents": 400,
+                    "candidates": 256,
+                    "durationMs": 12905
+                  }
+                ],
+                "durationMs": 75567
+              },
+              "migration": {
+                "concurrentWaiters": 2,
+                "completedReruns": 2,
+                "versions": [
+                  1,
+                  2,
+                  3
+                ],
+                "ledgerUnchanged": true
+              },
+              "reconnect": {
+                "healthProbeTarget": "gateway loopback",
+                "unavailableReadiness": 503,
+                "liveDuringOutage": 200,
+                "gateRecoveredMs": 13185,
+                "freshLogin": true,
+                "stableSubjects": true,
+                "persistentContent": true,
+                "authorizedRecall": true,
+                "failedLoginAttempts": 0,
+                "loginRecoveryMs": 1206,
+                "recoveredMs": 14510
+              },
+              "recoveryPoint": {
+                "recordedAt": "2026-09-30T21:17:10.131Z",
+                "auditEvents": 2418,
+                "auditHead": "704923e33ee965a276c4a6971493eac7be7761a1b10e16f48b4e8a6c5d634e3a",
+                "durableSession": true,
+                "sealedConsoleSession": true
+              },
+              "backup": {
+                "quiesced": true,
+                "durationMs": 11660,
+                "archives": [
+                  {
+                    "database": "synveda",
+                    "bytes": 1554277,
+                    "sha256": "548d3dbee122aaf64a6fd0f697473c4ada40556232c54b3d255cb9a0476788f5"
+                  },
+                  {
+                    "database": "keycloak",
+                    "bytes": 270569,
+                    "sha256": "8c828c2e07d2fe5f3b90eb93b3a2e34f180963d488633f35622449cb5230e333"
+                  }
+                ],
+                "offPvc": true,
+                "encryptedOffHostCopy": false
+              },
+              "restore": {
+                "freshLogin": true,
+                "stableSubjects": true,
+                "membershipAndIsolation": true,
+                "knowledgeAndRetrieval": true,
+                "durablePayload": true,
+                "sealedSessionOpened": true,
+                "auditValid": true,
+                "frozenAuditPrefixPreserved": true,
+                "minimumAuditEvents": 2418,
+                "durationMs": 40624,
+                "target": "fresh namespace; independent PostgreSQL; packaged Keycloak",
+                "issuerPreserved": true,
+                "sourceDataRetained": true
+              }
+            }
+          },
+          "local_evaluation": {
+            "at": "2026-09-30T21:22:40.758Z",
+            "startupMs": 35830,
+            "versions": {
+              "helm": "v4.2.3+g43e8b7f",
+              "kubernetes": "v1.36.1",
+              "kubectl": "v1.36.1"
+            },
+            "restrictedAdmission": true,
+            "assignedUid": 1000900000,
+            "assignedUidProcesses": [
+              "gateway",
+              "install",
+              "keycloak",
+              "postgres",
+              "worker"
+            ],
+            "runtimeRoleMigrationRefused": true,
+            "reapplyAfterRefusal": true,
+            "openShiftScc": "NOT RUN: no OpenShift cluster",
+            "portForward": "127.0.0.1 only",
+            "browserLoginLogout": true,
+            "images": {
+              "product": "synveda/release-product:0.4.3",
+              "postgres": "synveda/release-postgres:0.4.3",
+              "keycloak": "synveda/release-keycloak:0.4.3"
+            },
+            "clusterWideInstall": false
+          }
+        }
+      }
+    }
+  ],
+  "limits": [
+    "Nonpublishing workflow_dispatch; unsigned candidate inventory, no registry or release publication",
+    "Dry-run public registry coordinates are synthetic and cannot establish installed artifact identity",
+    "No real issuer or native harness acceptance from client archive checks",
+    "Not a released N-1 upgrade, off-host PITR drill, capacity qualification or enterprise/HA certification",
+    "Complete dependency SBOMs, third-party notice review, OS signing and support policy remain open"
+  ],
+  "workflows": {
+    "ci": {
+      "conclusion": "success",
+      "created_at": "2026-09-30T19:25:09Z",
+      "event": "workflow_dispatch",
+      "head_branch": "codex/synveda-production-roadmap",
+      "head_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+      "html_url": "https://github.com/synveda/synveda/actions/runs/36765529532",
+      "id": 36765529532,
+      "path": ".github/workflows/ci.yml",
+      "run_attempt": 1,
+      "status": "completed",
+      "updated_at": "2026-09-30T20:07:05Z",
+      "jobs": [
+        {
+          "conclusion": "success",
+          "id": 110058626306,
+          "name": "Check \u2014 dependency policy",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058626703,
+          "name": "Check",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058626720,
+          "name": "Select checks",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693557,
+          "name": "Test \u2014 product walkthrough",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693569,
+          "name": "Build and Test \u2014 TypeScript",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693604,
+          "name": "Test \u2014 SDKs (24, 3.14, false)",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693678,
+          "name": "Build and Test \u2014 Rust",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693695,
+          "name": "Test \u2014 Claude replay",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693701,
+          "name": "Test \u2014 deterministic evaluation",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693744,
+          "name": "Check \u2014 deployment and packaging",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693780,
+          "name": "Helm \u2014 operations (external-external)",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693826,
+          "name": "Helm \u2014 operations (cnpg-packaged)",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693869,
+          "name": "Test \u2014 SDKs (22, 3.11, true)",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058693916,
+          "name": "Helm \u2014 CNPG install and failover",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058694029,
+          "name": "CLI / windows-x86_64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058694184,
+          "name": "Docker / amd64 \u2014 Docker and Helm",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058694247,
+          "name": "CLI / linux-arm64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058694254,
+          "name": "CLI / windows-arm64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058694284,
+          "name": "Docker / arm64 \u2014 Docker and Helm",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058694286,
+          "name": "CLI / darwin-x86_64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058694337,
+          "name": "CLI / linux-x86_64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110058694405,
+          "name": "CLI / darwin-arm64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110074836682,
+          "name": "CI Result",
+          "status": "completed",
+          "step": null
+        }
+      ]
+    },
+    "release": {
+      "conclusion": "success",
+      "created_at": "2026-09-30T19:25:15Z",
+      "event": "workflow_dispatch",
+      "head_branch": "codex/synveda-production-roadmap",
+      "head_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+      "html_url": "https://github.com/synveda/synveda/actions/runs/36765540733",
+      "id": 36765540733,
+      "path": ".github/workflows/release.yml",
+      "run_attempt": 1,
+      "status": "completed",
+      "updated_at": "2026-09-30T21:48:35Z",
+      "jobs": [
+        {
+          "conclusion": "success",
+          "id": 110063059693,
+          "name": "Check release source",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110063144633,
+          "name": "Build release bundles",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110063144853,
+          "name": "Build and Test native CLI / darwin-x86_64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110063144880,
+          "name": "Build and Test native CLI / darwin-arm64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110063144882,
+          "name": "Build and Test Docker and Helm candidates / amd64 \u2014 Docker and Helm",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110063144913,
+          "name": "Build and Test Docker and Helm candidates / arm64 \u2014 Docker and Helm",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110063144938,
+          "name": "Build and Test native CLI / windows-arm64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110063144993,
+          "name": "Build and Test native CLI / linux-x86_64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110063145028,
+          "name": "Build and Test native CLI / windows-x86_64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110063145248,
+          "name": "Build and Test native CLI / linux-arm64",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110113063430,
+          "name": "Publish Docker candidates (amd64)",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110113063492,
+          "name": "Publish Docker candidates (arm64)",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110113145429,
+          "name": "Assemble release assets",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110113366513,
+          "name": "Test published Docker and Helm artifacts (amd64, linux/amd64, ubuntu-latest)",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "success",
+          "id": 110113366526,
+          "name": "Test published Docker and Helm artifacts (arm64, linux/arm64, ubuntu-24.04-arm)",
+          "status": "completed",
+          "step": null
+        },
+        {
+          "conclusion": "skipped",
+          "id": 110113503400,
+          "name": "Publish verified release",
+          "status": "completed",
+          "step": null
+        }
+      ],
+      "publication_mode": {
+        "version": "0.4.3",
+        "published": false,
+        "job": 110063059693,
+        "selector_log": "2026-09-30T19:36:41.8211129Z building 0.4.3 (publish=false)"
+      }
+    }
+  },
+  "verification_method": [
+    "Require both completed exact-source workflow_dispatch runs at attempt 1, with all required jobs successful and final publication skipped",
+    "Verify the downloaded original SHA256SUMS before invoking the repository assembly validator; require byte-identical regenerated inventory",
+    "Hash all 31 regular payloads; require the exact closed inventory with no extra paths",
+    "Apply the stricter clean-source/version/native-runtime-pin client checks read-only",
+    "Validate six native first-party candidate references, notice hashes and executable checks, plus the two pinned upstream platform-inspection entries",
+    "Require every Compose/consumer check, four Helm ownership modes, both operational sequences, exact migration ledger versions and bounded stateless reinstall recovery",
+    "Require local browser evaluation, wrong-runtime-role migration refusal, correct reapply, restricted admission and assigned identities",
+    "Compare all five ARM producer report hashes with the same-run assembled payloads"
+  ],
+  "arm_producer_reports_verified": {
+    "release-candidate-arm64.json": "97220b9283ad61509edd2b5142ebcbb73860c66c4769af5957cdf80cd17a2a9f",
+    "release-consumer-arm64.json": "c18d8926ce399fd07605a75cd6bbe5ba0029d9820375489ac20e812f491c82a0",
+    "release-docker-arm64.json": "29e25b75e6dde2665bbdcd8cc13fc289fb4dc766ca33efc3e0826898f632a9eb",
+    "release-kubernetes-arm64.json": "9c24dc6b4ee1dfff01d44ea56f32f5dd4e12920e890245ce91e364510523569d",
+    "release-local-images-arm64.json": "3c814d86397634baae0803de213faaf735e67e96735c0ac09a6e7a7e3a9c6d35"
+  }
+}

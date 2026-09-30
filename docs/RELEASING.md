@@ -86,8 +86,12 @@ anonymous public-image verification run isolated SHA-256 checks and report
 `notice_sha256`; final qualification requires matching source hashes for every
 image in both registries. Upstream images and their terms remain separate.
 These source gates do not change earlier published artifacts or establish a
-complete third-party notice/SBOM review. The next native release drill must
-qualify the new archive and image contents before publication.
+complete third-party notice/SBOM review. The
+[2026-09-30 source drill](../demos/evidence/ops12-source-qualification.json)
+verified carriage on all six native clients and both Linux image architectures
+from clean source `f433eb17`, with the original 31-file same-run inventory.
+Every changed release source still requires the full native qualification;
+this `publish=false` checkpoint does not qualify anonymous public pulls.
 
 ## Owner setup
 

@@ -259,46 +259,38 @@ not a controlled speedup measurement.
 
 ## Roadmap source qualification (2026-09-30)
 
-The first full [CI dispatch](https://github.com/synveda/synveda/actions/runs/36737915536)
-on `f4d23f32541279cf2ad4c7cabd43cd2fc4587f6f` failed the committed OpenAPI
-equality test after two handler Rustdoc descriptions changed. Clippy/Rustdoc,
-TypeScript and deployment/packaging checks had passed. CI and the same-source
-[Release dispatch](https://github.com/synveda/synveda/actions/runs/36737957139)
-were then cancelled before complete native qualification. The documented
-generators refreshed those descriptions and the SDK document digests; console
-types, routes and schemas are unchanged. Local OpenAPI, SDK drift/wire/installed
-package and fast/workflow checks pass. Full hosted qualification must be repeated
-on the corrected commit; cancelled runs are not acceptance evidence.
+Clean source `f433eb1719bc58b5f36b0516bedf71e886d23185` passed all 23 jobs in
+[full CI](https://github.com/synveda/synveda/actions/runs/36765529532), including
+all six native client targets and both native four-mode image/Helm matrices.
+The same-source [nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36765540733)
+completed successfully with fifteen jobs passed and final publication skipped.
+Both native architectures passed full launcher and plain-Compose recovery,
+four ownership modes, day-two operations and local browser acceptance.
+[Retained evidence](../demos/evidence/ops12-source-qualification.json) records
+independent verification of the original checksum inventory and all 31 same-run
+payloads, all six native reports and both deployment report sets. No report is
+borrowed from an earlier source or run. This is a `publish=false` qualification;
+registry copying and anonymous public-pull steps did not run.
 
-The second [full CI dispatch](https://github.com/synveda/synveda/actions/runs/36740304844)
-on `5db9687e3c1e529f515be60f4ec0dd065919ceb0` passed workspace Rust and five
-native client targets. Both image jobs refused unreadable notices, both Helm
-operations jobs found a stale one-migration assertion, and Windows ARM failed
-while deleting a locked temporary executable after installation. The same-source
-[nonpublishing Release dispatch](https://github.com/synveda/synveda/actions/runs/36740317429)
-passed all six native client packages but also refused image notices. These
-runs do not qualify the complete source set.
-The fixes pre-create searchable notice directories, compare the exact three-row
-migration ledger before/after concurrent reruns, and bound Windows download
-cleanup retries to sharing/lock violations. Native Windows checks exercise a
-released lock and a persistent lock; assembly requires that report check.
-The corrected `33ad90ef` [CI](https://github.com/synveda/synveda/actions/runs/36745787061)
-and [Release](https://github.com/synveda/synveda/actions/runs/36745834269)
-attempts passed the image notice probes; CNPG operations and failover passed
-in CI. Both Windows ARM jobs then failed the new transient-lock fixture.
-Cleanup now calls .NET directly and unwraps the base exception before checking
-the native error code; the retry bound and narrow accepted error set remain.
-Rerun full CI and Release dispatch on that clean follow-up before accepting
-the source qualification.
+Native archive reports require exact source, target, archive and private-Node
+identity, installation/authentication checks and first-party notice carriage.
+Windows additionally exercises the actual download cleanup helper with a
+synchronously acquired exclusive handle released by a native thread, persistent
+sharing-lock exhaustion and immediate non-sharing refusal. Cleanup retries only
+sharing/lock codes 32 and 33, at most twenty attempts with nineteen 250-ms pauses.
+Installation locks and retained state remain separately protected.
 
-The `33ad90ef` external-only Helm job and ARM64 candidate completed joint
-restore, then failed public login after retained reinstall; direct gateway
-login passed. The owned fixture proxy now restarts after the Service is
-recreated, before the unchanged public-flow assertions. Login failures report
-only HTTP status and location presence. AMD64's outage check also lost its
-Service endpoint once the Pod became unready; the observer now requires the
-same 503 readiness/200 liveness on gateway loopback and retains public
-reconnection acceptance. These fixture repairs need the next clean-source run.
+Image qualification requires readable source-matching notices and native
+runtime probes. Helm operations compare the complete three-row migration ledger
+before and after concurrent reruns. The outage observer requires gateway-loopback
+readiness 503 and liveness 200, then public recovery. Retained reinstall requires
+three stateless routes to recover within 60 seconds before single-execution
+login/authority assertions; only named transient transport errors and HTTP
+502/503/504 retry. The local-evaluation case requires the exact runtime-role
+epoch-preflight refusal, correct reapply and browser login/logout. These gates
+qualify declared source candidates; they do not establish anonymous public
+installation, real client/issuer acceptance, disaster recovery or production
+readiness. [OPS-12](backlog/OPS-12.md) owns the run evidence and remaining work.
 
 ## Manual owner settings
 
@@ -328,7 +320,8 @@ reconnection acceptance. These fixture repairs need the next clean-source run.
 5. Keep Linux ARM64, macOS Intel/ARM64 and Windows x64/ARM64 hosted runners
    available. A disabled/unavailable runner blocks its required platform; never
    change it to an allowed failure. Source installers now enforce publisher
-   verification under ADR-0132; native qualification remains required. Archive
+   verification under ADR-0132; the recorded source drill passed its native
+   fixture gates. Every changed release source requires new qualification. Archive
    reports require licence/notice carriage, and native image reports require
    source-matching notice hashes. OS signing, notarization, complete third-party
    notice/SBOM review and real client issuer/harness gaps remain OPS-12 work.

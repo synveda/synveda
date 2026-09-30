@@ -720,9 +720,10 @@ was created or changed.
 The Windows candidate gate now tests strict verifier arguments and rejection
 before code execution through a fixture executable, and release assembly
 requires its `publisher-policy-and-pre-execution-refusal` report check.
-Native Windows/MSVC is unavailable locally, so this check is implemented but
-unrun; it is not Windows acceptance. Next run that gate on native x64/ARM64 and
-all six archive jobs before a separately authorized release. Bootstrap inspection,
+Native Windows/MSVC is unavailable locally; the hosted source qualification
+below now records that fixture passing on native x64/ARM64 and all six archive
+jobs. This does not establish real Windows issuer or signed-install acceptance.
+Bootstrap inspection,
 complete archive/chart SBOMs, vulnerability remediation/exception policy,
 publisher incident/revocation procedure, OS signing and published real
 issuer/harness acceptance remain open. GitHub CLI may refresh its trusted roots;
@@ -782,220 +783,80 @@ review-lock refusal test and remaining 44 convergence/five uninstall tests then
 passed. The 173 lifecycle/entrypoint tests had already passed. This validation
 did not run a live application deployment or rebuild the six OCI candidates.
 
-Next run the nonpublishing release drill on all six native clients and both
-Linux image architectures, preserving clean exact-source reports before any
-separately authorized publication. Native Windows/other hosts, newly built
-image notices, complete third-party notice/SBOM review, OS signing,
-publisher incident policy, real issuer/harness acceptance and supported
-platform/version lifecycle remain open. Existing published artifacts and
-deployment state are unchanged.
+The hosted checkpoint below qualifies notice carriage on all six native clients
+and both Linux image architectures from one clean source and release run.
+Complete third-party notice/SBOM review, OS signing, publisher incident policy,
+real issuer/harness acceptance and supported platform/version lifecycle remain
+open. Earlier published artifacts and retained deployment state are unchanged.
 
-### Hosted roadmap preflight and contract repair (2026-09-30)
+### Hosted source qualification (2026-09-30)
 
-The first full [CI dispatch](https://github.com/synveda/synveda/actions/runs/36737915536)
-on clean source `f4d23f32541279cf2ad4c7cabd43cd2fc4587f6f` passed workspace
-Clippy/Rustdoc, TypeScript and deployment/packaging checks, then failed the
-committed-OpenAPI equality test. CPR-44's removal of retired migration citations
-changed two handler descriptions without regenerating the document. Both that
-run and the [nonpublishing Release dispatch](https://github.com/synveda/synveda/actions/runs/36737957139)
-were cancelled before complete platform qualification. They establish no new
-native archive/image acceptance.
+Clean source `f433eb1719bc58b5f36b0516bedf71e886d23185` on
+`codex/synveda-production-roadmap` passed all 23 jobs in
+[full CI](https://github.com/synveda/synveda/actions/runs/36765529532), including
+workspace Rust, all six native client targets, both native four-mode image/Helm
+matrices, both dedicated operations cases and CNPG install/failover.
+The same-source [nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36765540733)
+completed successfully with fifteen jobs passed and final publication skipped.
+Both native Linux architectures passed full launcher and plain-Compose consumer
+recovery, all four ownership modes, both day-two operations cases and local
+browser acceptance. Both workflows identify the exact source at attempt 1.
+[Retained evidence](../../demos/evidence/ops12-source-qualification.json)
+records independent verification of the original assembled checksum inventory
+and all 31 payloads, six native reports and both complete deployment report sets.
+The five ARM producer-report hashes also match their assembled payloads.
+Earlier failed or cancelled runs do not supply reports for this candidate.
 
-The documented generators refreshed only those descriptions and both SDK
-whole-document digests. Console types regenerated unchanged; routes and schemas
-are unchanged. The six OpenAPI tests, SDK drift check, locked TypeScript compile,
-ten wire tests per SDK and ten installed-archive tests per SDK pass. Both packages
-also passed repeated-build byte equality and exact licence/notice checks.
-`make check-fast check-ci`, Rust formatting and diff checks pass. The pnpm shim
-stalled before running SDK tests; the same locked compiler/test commands were
-run directly. Initial sandboxed wire tests refused loopback sockets; the
-complete rerun with socket access passed. Python package dependencies were
-hash-locked, prepared in an owned temporary wheelhouse and installed offline;
-temporary staging was removed. No Rust implementation or schema changed.
+Required native evidence binds the archive, source, target and private Node pin,
+installed authentication/process behavior and exact first-party notices.
+Windows exercises the actual cleanup helper with native sharing code 32 and a
+synchronously acquired exclusive data-file handle released by a .NET thread
+after two seconds. Persistent sharing-lock exhaustion, immediate non-sharing
+refusal and installation-state retention remain required. Production cleanup
+accepts only sharing/lock codes 32 and 33, with twenty attempts and nineteen
+250-ms pauses; installation locks are never automatically cleared.
 
-Next rerun full CI and the nonpublishing Release dispatch on the corrected
-clean commit, retain all six native archive reports and both native OCI/Compose/
-Helm reports, then inspect assembly. No tag, signing, registry publication or
-new supported-version claim is authorized by this source qualification.
+OCI evidence requires searchable notice directories, exact source notice hashes
+and isolated native runtime probes for all six images. Helm operations require
+successful migrations 1, 2 and 3 and complete ledger equality before/after both
+lock-contending reruns. During database outage, gateway-loopback readiness must
+be 503 and liveness 200; the public flow must recover afterward. Retained
+reinstall requires direct gateway readiness, public console and issuer discovery
+to return 200 within 60 seconds before login, isolation, content and audit
+assertions run once. Only named transient transport errors and HTTP 502/503/504
+retry; TLS and other HTTP failures are immediate. Release reports bind all three
+statuses, elapsed time and failed probe count. The local-evaluation case requires
+the exact runtime-role epoch-preflight refusal, correct chart reapply and browser
+login/logout under restricted admission and assigned identities.
 
-### Hosted notice, migration and Windows cleanup repairs (2026-09-30)
+A separate invocation-owned Kind probe observed a direct request timeout after
+Service replacement and routing recovery at 11,782 ms. Proxy restart also
+produced a connection refusal after rollout completion. This proves rollout
+state alone is insufficient reachability evidence, not a product authentication
+failure or a production latency bound. Its cluster/scratch were removed; retained
+OPS-7 state was untouched. Targeted real HTTP probes passed temporary 503/socket
+recovery, immediate 403 refusal and credential-free causal diagnostics.
 
-The second [full CI dispatch](https://github.com/synveda/synveda/actions/runs/36740304844)
-on clean `5db9687e3c1e529f515be60f4ec0dd065919ceb0` passed workspace Rust
-formatting/Clippy/Rustdoc/tests, SDK interop/packages, deployment packaging,
-CNPG install/failover and five native client targets. The corrected generated
-contracts passed. Both OCI candidates failed their isolated UID-65532 notice
-probe: Docker's `COPY --chmod=0444` also sets that mode on missing parent
-directories, making the notices unsearchable. Both Helm operations jobs passed
-shutdown/recovery and repeated load, then failed an obsolete assertion that
-only the baseline migration existed. Windows ARM installed successfully, but
-its third installation's temporary Node executable was locked during cleanup.
-The same-source [Release dispatch](https://github.com/synveda/synveda/actions/runs/36740317429)
-passed all six native client packages, including Windows publisher-policy
-checks, but failed both OCI notice probes. Assembly could not complete; no
-complete source qualification is claimed. The Windows ARM cleanup failure in
-full CI did not recur in this separate run; the new bounded-lock fixture still
-needs execution on the fix commit.
+Local validation passed 28 focused client/release/image-reuse tests, all 77
+release-parity tests, fast/workflow gates, the six-mode starter contract,
+JavaScript syntax and Rust/diff formatting. No Rust, schema or generated
+contract changed in the final fixture correction. Independent verification
+rehashed the original 31-file inventory before invoking repository validators,
+then required the regenerated inventory to remain byte-identical. It checked
+exact source/platform/image bindings, notice hashes, all seven launcher and
+twenty consumer checks, migration-ledger retention and bounded route recovery.
+Both local-evaluation reports passed restricted admission, assigned UID,
+runtime-role preflight refusal, correct reapply and browser login/logout.
 
-The image recipes now create searchable notice directories before copying
-read-only files; Keycloak restores its normal build user immediately afterward.
-The browser's existing Playwright notice directory receives the same fix.
-An invocation-owned minimal Linux ARM64 image reproduced the unreadable COPY
-and proved the corrected path works as UID 65532 with a read-only filesystem,
-no network and dropped capabilities. Both file hashes matched source bytes.
-This probe is not a rebuild or deployment of the six product candidates.
-The reviewed Keycloak Dockerfile fingerprint was renewed without relaxing
-its security-chain gate.
-
-The Helm drill now requires exactly migrations 1, 2 and 3 with success and
-compares the complete SQLx ledger, including checksums and timestamps, before
-and after both lock-contending reruns. It records the versions and unchanged
-ledger, rather than a historical baseline-only row count. It still observes
-two waiting migrators and requires both actual migration Jobs to complete.
-Windows retries only native sharing/lock violations, at most twenty removal
-attempts with nineteen 250-ms pauses, inside its private download directory.
-Permission and other errors propagate; an exhausted sharing lock also fails.
-No installation lock is automatically cleared. Native Windows qualification
-now executes the actual cleanup function with transient and persistent file
-locks and checks that retained installation state survives; release assembly
-requires this evidence. Native Windows is unavailable locally, so the new
-lock fixtures require hosted execution.
-
-`make check-deploy chart-lint` passed all components, including 173 lifecycle/
-entrypoint tests, 44 convergence tests and the reviewed-chain refusals. The
-24 focused client/release and failover tests, all 77 release-parity tests, all
-51 reviewed Compose contract tests, fast/workflow gates, Rust formatting,
-JavaScript syntax and diff checks passed. These local gates do not establish
-the new native Windows fixture
-or complete OCI/Helm acceptance. Next commit the reviewed fixes, rerun full
-CI and nonpublishing Release, inspect all six native archive and both native
-OCI/Compose/Helm reports, and retain exact-source assembly evidence. No tag,
-public release, registry publication or retained deployment was changed.
-
-The fix was committed as `33ad90efe10efb86d1fc2deaaf83e3c5151ed7bb` and
-pushed to `codex/synveda-production-roadmap`. The corrected-source
-[full CI dispatch](https://github.com/synveda/synveda/actions/runs/36745787061)
-and [nonpublishing Release dispatch](https://github.com/synveda/synveda/actions/runs/36745834269)
-passed workspace Rust and deployment gates; both CI image jobs passed
-notice/runtime probes and reached Helm acceptance. CNPG operations and
-install/failover passed. Both Windows ARM jobs failed the deliberately held
-transient-file fixture. Provider exception wrapping was the first suspected
-cause. The source follow-up calls the direct .NET
-directory API and classifies the base exception, preserving the same narrow
-retry set and bound. The fixture proves the native sharing code before retry,
-retains the persistent-lock refusal and requires immediate failure for a
-non-sharing missing-directory error. Windows is unavailable locally; the next
-clean hosted run must execute these unchanged-strength acceptance conditions.
-Complete native reports, Compose/Helm and assembly remain pending. No complete
-source acceptance is claimed from `33ad90ef`.
-
-The completed full CI also found two external-provider fixture races after
-the migration and native restore drills passed. Its external-only case and
-ARM64 four-mode candidate completed joint restore in about 36 seconds, then
-the retained reinstall's direct login succeeded while the public proxy path
-failed the issuer-redirect assertion. Reinstall replaces the application
-Service while the fixture-owned proxy stays alive; the fixture now restarts
-that proxy before public verification, and failures report HTTP status and
-location presence without printing URLs, bodies or credentials. AMD64's
-database-outage probe observed transport failure instead of HTTP 503 through
-the Service after its unready endpoint was withdrawn. The health observer now
-uses the gateway's own loopback listener with bounded curl and kubectl calls;
-it still requires readiness 503, liveness 200 and public-flow recovery.
-These fixes require a fresh same-source matrix; positive partial checks cannot
-be transplanted into a release assembled from another commit.
-
-Local follow-up validation passed 25 client packaging/release, failover and
-image-reuse tests, the
-starter render/contract matrix, JavaScript syntax, fast/workflow gates, Rust
-formatting and diff checks. The native Windows transient/persistent/non-sharing
-fixtures and the revised live Helm sequences remain pending. Next commit this
-follow-up, cancel the failed obsolete Release dispatch, and run full CI plus
-nonpublishing Release on its clean exact source before inspecting assembly.
-
-The follow-up is committed as `6ae636046f4db56f59d32a2971b3db395ffd6520`
-on the roadmap branch. The obsolete `33ad90ef` Release dispatch was cancelled;
-the completed full CI remains failed. New exact-source
-[full CI](https://github.com/synveda/synveda/actions/runs/36752593429) and
-[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36752621182)
-did not qualify this source. Full CI completed with 18 successful jobs and
-failures in Windows ARM, external-provider operations and both image/Helm jobs;
-the final CI Result also failed. The separate Release Windows ARM job failed;
-its remaining image jobs cannot establish complete qualification or assembly.
-No publication occurred.
-
-### Controlled lock and stateless reinstall reachability (2026-09-30)
-
-The `6ae63604` Windows ARM diagnostics confirmed native sharing code 32 after
-4,882 ms in CI and 4,885 ms in Release. The narrow retry classifier ran, but
-the fixture's supposedly two-second background-job lock outlasted its bound.
-The revised fixture acquires a real exclusive data-file handle synchronously
-and releases it from a native .NET thread after two seconds. It retains the
-initial sharing-code control, persistent-lock exhaustion, immediate non-sharing
-refusal and deployment-state retention. The installer retry set and 20-attempt
-bound are unchanged. Native Windows execution remains required; the cause of
-the background job's late release is not established.
-
-External-only CI and both native four-mode image jobs completed joint restore
-in 33,351, 35,202 and 37,694 ms, then failed HTTP transport after retained
-reinstall. A separate, invocation-owned Kind probe reproduced a direct request
-timeout after Service address replacement and successful routing at 11,782 ms.
-Restarting its proxy produced an immediate connection refusal through the
-Service even after rollout completion. The owned cluster and scratch were
-removed; the retained OPS-7 cluster was untouched. This proves rollout state
-alone is insufficient reachability evidence, not a product authentication bug.
-
-The fixture now requires stateless direct gateway readiness, public console
-and issuer discovery to return 200 within 60 seconds after retained reinstall.
-Only named transient transport errors and HTTP 502/503/504 retry. TLS errors
-and other HTTP statuses fail immediately. The extra proxy restart is removed;
-normal login, tenant denial, content and audit assertions then execute once.
-Every case records its three statuses, elapsed time and failed probe count;
-release qualification refuses missing, failed or out-of-bound evidence.
-Fetch failures preserve their cause and report only endpoint category and
-native code, never callback URLs, credentials or response bodies.
-
-Local verification passed 28 focused client/release/image-reuse tests,
-all 77 release-parity tests,
-fast/workflow gates, the six-mode starter contract and Rust/diff formatting.
-A targeted real HTTP probe exercised temporary 503/socket failure recovery,
-immediate permanent-403 refusal, stateless requests and credential-free error
-diagnostics. Complete native Windows, Compose/Helm reports and assembly remain
-open. Next commit the fixture repair, stop the failed obsolete Release dispatch,
-then run full CI and nonpublishing Release on that exact clean source and
-independently inspect its same-run payload inventory. Repair any further
-required failure before claiming qualification.
-
-The repair is committed as `c78b67a61a5800516d7c152d67799d6e3e4651e4`
-and pushed on the roadmap branch. The obsolete `6ae63604` Release dispatch
-completed cancelled. New exact-source
-[full CI](https://github.com/synveda/synveda/actions/runs/36758774367) and
-[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36758786748)
-did not qualify this source. Full CI completed with 20 successful jobs:
-workspace Rust, all six native client targets, both dedicated operations cases
-and CNPG install/failover passed. Both native image jobs passed notice/runtime
-checks and all four ownership modes, including restored data and retained
-reinstall. They then failed the same later local-evaluation assertion; the final
-CI Result failed. The separate Release completed all six native client jobs,
-but its two image jobs and assembly cannot establish complete qualification.
-
-### Runtime-role refusal diagnostic (2026-09-30)
-
-Both `c78b67a6` native image jobs reached the local port-forward evaluation
-recipe after completing their four-mode matrices. Its intentionally wrong-role
-migration Job failed as required. The CLI reported that the configured database
-principal cannot read the schema epoch marker and needs corrected deployment
-grants. The fixture still expected `/role|owner|migrat/i`, which did not match
-that current diagnostic. The refusal is implemented by
-`SchemaEpochError::Unreadable` before migrations; no runtime grants or product
-code need changing.
-
-The fixture now requires that exact content-free diagnostic, alongside the
-unchanged Failed Job condition, subsequent correct chart reapply and real
-browser login/logout. JavaScript syntax, the six-mode starter contract,
-fast/workflow checks, Rust formatting and diff checks passed locally. Complete
-local-evaluation/browser and same-run assembly evidence still require a new
-clean full CI and nonpublishing Release run after committing this correction.
-Do not combine the earlier source's positive reports with the corrected run.
+This source is qualified at `publish=false`, version assertion 0.4.3. Registry
+copying and anonymous public-pull steps did not run; the final publisher was
+skipped. No tag, public release or registry publication occurred. Native reports
+explicitly leave real issuer login and harness use unqualified. Same-host logical
+recovery does not establish encrypted off-host PITR; one-node Kubernetes,
+restricted admission and an assigned UID do not establish HA or OpenShift SCC
+support. The readiness verdict remains Not ready and OPS-11/OPS-12 stay open.
+The next source slice addresses Rust SBOM content, followed by the remaining
+release-security, published-client and support-policy gates.
 
 ### Published SBOM coverage inspection (2026-09-30)
 
