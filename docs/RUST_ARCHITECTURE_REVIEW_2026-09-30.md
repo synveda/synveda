@@ -55,6 +55,15 @@ count directories and entries, cap actual bytes before UTF-8 decoding, and
 retain the bundle-character limit. Include empty-tree, deep-tree, oversized
 file and changing-file cases.
 
+Follow-up: CPR-23 now walks directories with a bounded worklist, counts empty
+entries within the maximum implied by 64 files and four path segments, and
+caps each read at one byte beyond the largest valid UTF-8 encoding before
+decoding. Focused tests cover flat empty trees, deep trees, oversized files,
+growth after metadata inspection and four-byte Unicode scalars at the
+character limit. This closes the local importer availability finding; it does
+not claim protection from an adversary mutating the directory between path
+inspection and open.
+
 ### P2 — OPS-7: transient deployment-key provisioning is not retried
 
 The gateway marks policy readiness at
