@@ -22,7 +22,7 @@
 //! A session names a workspace and optionally a project; the governed scope it
 //! is decided at is the project's scope when there is a project, and the
 //! workspace's when there is not. That is a database fact — composite foreign
-//! keys hold it (migration `0044`) — rather than a value a client sends,
+//! keys hold it in the epoch-3 schema — rather than a value a client sends,
 //! because a client that could name the scope could name a scope the workspace
 //! is not in.
 //!
@@ -161,7 +161,7 @@ impl SessionStatus {
     ///
     /// Forward only: `active` may begin closing or close outright, `ending`
     /// may close, and a closed session never reopens or changes how it closed.
-    /// Enforced here **and** by a trigger in migration `0044`, because a rule
+    /// Enforced here **and** by the session transition trigger, because a rule
     /// that lives only in a function holds only for callers who went through
     /// that function.
     #[must_use]

@@ -148,7 +148,7 @@ impl TryFrom<PromptRow> for StoredPrompt {
 ///
 /// An overwrite is the authoring act, not a conflict — a draft is the
 /// document you change your mind in. What cannot change is its identity:
-/// migration 0029's trigger refuses a moved scope or a renamed prompt, so
+/// the `prompts_transition` trigger refuses a moved scope or a renamed prompt, so
 /// this statement's `on conflict` can only ever rewrite content.
 #[tracing::instrument(
     name = "store.prompts.upsert",

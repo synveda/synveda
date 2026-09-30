@@ -40,7 +40,7 @@ use crate::directory::UserRow;
 /// Maps a sqlx error at the storage boundary into the shared taxonomy.
 fn storage_error(err: sqlx::Error) -> Error {
     if let sqlx::Error::Database(db) = &err {
-        // 23514 check_violation: migration 0037's invariants — a half-reset
+        // 23514 check_violation: the directory-pass invariants — a half-reset
         // absence, an incomplete pass claiming the completeness proof, or a
         // partial seal authorisation. Each is a caller bug rather than a
         // storage failure, so it surfaces as `Invalid` and not `Storage`.

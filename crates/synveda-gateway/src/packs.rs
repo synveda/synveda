@@ -164,7 +164,7 @@ pub(crate) struct PackView {
 /// documents named in the request.
 ///
 /// An overwrite is the authoring act rather than a conflict; what cannot
-/// change is the pack's identity, which migration 0030's triggers enforce
+/// change is the pack's identity, which `context_packs_transition` enforces
 /// below this handler. Documents *not* named in the request are left
 /// alone — a bundle is edited a file at a time, and a request that dropped
 /// the rest would make every save a full re-upload.

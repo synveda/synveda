@@ -173,7 +173,7 @@ pub(crate) struct PromptView {
 /// of the one that is there.
 ///
 /// An overwrite is the authoring act rather than a conflict; what cannot
-/// change is the prompt's identity, which migration 0029's trigger
+/// change is the prompt's identity, which the `prompts_transition` trigger
 /// enforces below this handler.
 #[utoipa::path(
     post,

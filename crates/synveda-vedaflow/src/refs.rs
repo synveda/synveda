@@ -27,7 +27,7 @@ use crate::storage_error;
 /// Counts ref updates, labelled by outcome.
 pub const REF_UPDATES_TOTAL: &str = "synveda_vedaflow_ref_updates_total";
 
-/// The longest ref name migration 0018 accepts.
+/// The longest ref name `vedaflow_refs_name_check` accepts.
 const MAX_REF_NAME: usize = 200;
 
 /// A ref as stored.

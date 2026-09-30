@@ -196,8 +196,8 @@ pub async fn services(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Res
 }
 
 /// Deletes a service identity row. Deliberately keyed on
-/// `kind = 'service'`: user rows have no delete path until AUTH-4/5 own
-/// leavers (migration 0007's note). Returns whether a row was deleted.
+/// `kind = 'service'`: user rows follow the directory and account lifecycle.
+/// Returns whether a row was deleted.
 /// The caller deletes the personal node in the same transaction
 /// (ADR-0018 decision 2).
 ///

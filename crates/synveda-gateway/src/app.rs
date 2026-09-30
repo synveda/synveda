@@ -175,10 +175,9 @@ impl AppState {
     /// (TEN-4, ADR-0064 decision 5).
     ///
     /// The deployment scope rather than a tenant one because the row this
-    /// belongs to has no tenant, on purpose: a session is read before the
-    /// tenant exists, so there is nothing to select a per-tenant key by. See
-    /// migration 0034's header for why that column is absent and migration
-    /// 0038's for why that makes a second key scope rather than an exemption.
+    /// belongs to has no tenant, on purpose: a session is read before its
+    /// token identifies the tenant, so there is no per-tenant key to select.
+    /// `deployment_keys` is the separate key scope for this custody row.
     ///
     /// Bound to the session's own `token_hash`, so a sealed token moved to
     /// another session's row does not open.

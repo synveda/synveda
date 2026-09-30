@@ -58,7 +58,7 @@ const PENDING_LOGIN_MAX_SECS: i64 = 10 * 60;
 
 /// The console session's hard cap — 12 hours, one working day. A refresh
 /// token an IdP never rotates would otherwise make the session immortal;
-/// this is the ceiling migration 0034's `absolute_expires_at` enforces, and
+/// login records this ceiling in `console_sessions.absolute_expires_at`, and
 /// past it the operator logs in again.
 const CONSOLE_SESSION_MAX_SECS: i64 = 12 * 60 * 60;
 

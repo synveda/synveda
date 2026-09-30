@@ -151,8 +151,11 @@ Follow-up: CPR-44 removed the stale and private Rustdoc links, corrected the
 entity-fragment freshness and embedding comments, and passed strict workspace
 Rustdoc with warnings denied. `make check-rustdoc` now runs in the Rust CI job
 and the local aggregate; the Node-only `check-fast` remains available without
-a Rust toolchain. Historical numbered-migration comments outside these
-corrected paths still need a separate source audit.
+a Rust toolchain. A subsequent CPR-44 source sweep replaced 42 lines citing
+retired pre-baseline migration numbers with current schema objects or accepted
+decisions. It also corrected the disclosure-index comment: the partial GIN
+index covers three actions, while the current disclosure query selects one.
+No SQL or runtime behavior changed in that sweep.
 
 ## Positive controls and unused-code assessment
 

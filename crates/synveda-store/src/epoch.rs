@@ -295,7 +295,7 @@ pub async fn read_connection(
     }
 
     // Validated here as well as by the CHECK constraints, because the
-    // constraints only bind a table migration 0039 created. A marker that
+    // constraints only bind the marker table. A marker that
     // arrived some other way reaches exactly this code.
     //
     // The epoch itself is deliberately *not* range-checked here. Any integer

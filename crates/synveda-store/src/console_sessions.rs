@@ -9,14 +9,14 @@
 //! Since TEN-4 the two token columns are **sealed** (ADR-0064 decision 5),
 //! and this module handles only the envelopes: it neither seals nor opens.
 //! The key is the *deployment's*, not a tenant's, and the reason is the
-//! reason this table has no `tenant_id` — a session is read before the
-//! tenant exists, so there is no tenant to select a key by. Sealing lives in
+//! reason this table has no `tenant_id` — a session is read before its token
+//! identifies the tenant, so there is no per-tenant key to select. Sealing lives in
 //! the gateway, which is the one crate that may depend on both the key ring
 //! and this module; `synveda-identity` is this crate's sibling and cannot
 //! reach a `KeyRing` at all.
 //!
-//! Deliberately not tenant-scoped: see migration 0034's header. A session
-//! row carries no tenant because the tenant comes from verifying the access
+//! Deliberately not tenant-scoped: a session row carries no tenant because
+//! the tenant comes from verifying the access
 //! token it holds, which is what makes ADR-0056 decision 2's invariant —
 //! *the session's authority is the token's authority* — a property of the
 //! schema rather than of the code that reads it.

@@ -16,7 +16,7 @@ use crate::Error;
 
 /// A quarantined session event's review state (MEM-2, ADR-0021
 /// decision 5). Review is one-shot: `pending → released | rejected`,
-/// schema-enforced by the transition trigger in migration 0046.
+/// schema-enforced by `synveda_session_event_quarantine_transition`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum QuarantineState {

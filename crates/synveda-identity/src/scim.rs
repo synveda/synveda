@@ -31,7 +31,7 @@
 //! This amends ADR-0059 decision 13's "there is no tenant-selecting
 //! parameter on the wire" — there is one, it is inside the credential, and
 //! the alternative was a credential table that held tenant data with no
-//! tenant policy over it (migration 0036, amendment 1).
+//! tenant policy over it (ADR-0059 decision 13 as amended by AUTH-4).
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;

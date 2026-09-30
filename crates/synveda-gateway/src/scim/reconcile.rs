@@ -414,7 +414,7 @@ async fn place(
         .unwrap_or_else(|| user.id.to_string());
     // **A rehire's anchor collides with its former self's, on purpose —
     // and has to be broken on purpose too.** `principal_id` is unique per
-    // tenant and immutable (`scopes_principal_id_check`, migration 0043):
+    // tenant and immutable (`scopes_principal_id_check`):
     // one anchor names one scope for that scope's whole life. `place` is
     // reached only when no *live* identity matched (`reconcile`'s
     // sealed-filter above), which for the same directory resource

@@ -85,7 +85,7 @@ impl KeyManagement for Kms {
 
     fn key_ref(&self) -> &str {
         match self {
-            // Empty, and migration 0038's `kek_ref` check refuses it — but
+            // Empty, and the `deployment_keys_kek_ref_check` refuses it — but
             // `wrap_key` fails first, so no row ever reaches that constraint.
             Kms::Disabled => "",
             Kms::Local(inner) => inner.key_ref(),

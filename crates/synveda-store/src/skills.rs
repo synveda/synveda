@@ -1,5 +1,5 @@
 //! Stable Agent Skill aggregates, immutable versions and scope bindings
-//! (CPR-23, ADR-0085; migration 0052).
+//! (CPR-23, ADR-0085).
 //!
 //! Bundle bytes remain in the VedaFlow object store. This module projects
 //! approved versions and their active bindings; it never authors a mutable

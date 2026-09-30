@@ -327,7 +327,7 @@ pub enum AuditAction {
     /// ref itself carries who and when and nothing else.
     ChannelPinned,
     /// A standing pin was released and the channel serves its head again.
-    /// The one ref deletion the schema permits (migration 0021).
+    /// The one ref deletion the `vedaflow_refs` guard permits.
     ChannelUnpinned,
     /// A proposal was opened against a scope's published channel
     /// (FLOW-3, ADR-0032 decision 18). Payload carries the target, asset
@@ -847,7 +847,7 @@ mod tests {
 
     #[test]
     fn every_actor_kind_matches_the_column_constraint() {
-        // migration 0011 + 0014: the CHECK accepts exactly these three.
+        // The audit actor-kind CHECK accepts exactly these three.
         for (kind, expected) in [
             (ActorKind::Subject, "subject"),
             (ActorKind::BreakGlass, "break_glass"),

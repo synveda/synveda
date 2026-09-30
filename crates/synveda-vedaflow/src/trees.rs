@@ -16,7 +16,7 @@ use crate::{Written, storage_error};
 /// Counts tree writes, labelled by whether the tree was already present.
 pub const TREES_WRITTEN_TOTAL: &str = "synveda_vedaflow_trees_written_total";
 
-/// The largest entry name migration 0018 accepts.
+/// The largest entry name `vedaflow_tree_entries` accepts.
 const MAX_ENTRY_NAME: usize = 255;
 
 /// What a tree entry points at.

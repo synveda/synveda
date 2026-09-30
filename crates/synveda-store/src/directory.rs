@@ -13,7 +13,7 @@
 //! [`crate::rls::begin_tenant_tx`]. That includes the credential lookup,
 //! which is why the presented token names its tenant — the caller names it,
 //! the secret proves it, and the row is found under that tenant's own
-//! policy or not at all (migration 0036's amendment to decision 13).
+//! policy or not at all (AUTH-4's amendment to ADR-0059 decision 13).
 //!
 //! Nothing here is governed material. Identity and access projection is the
 //! gateway reconciler's seam, and all resulting authority is decided through
@@ -646,7 +646,7 @@ pub async fn credential_by_hash(
 /// Stamps a credential as used, on a coarse cadence: only when the
 /// recorded instant is more than `stale_secs` old. A provisioning agent
 /// polls, and a row written on every poll turns the directory plane's read
-/// path into a write path (migration 0034's rule, applied again).
+/// path into a write path (the console-session cadence rule, applied again).
 #[tracing::instrument(
     name = "store.directory.touch_credential",
     skip_all,

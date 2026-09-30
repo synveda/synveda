@@ -49,7 +49,7 @@ pub enum AssetKind {
 
 impl AssetKind {
     /// All asset kinds. Kept in the same order as the `vedaflow_objects.kind`
-    /// CHECK constraint (migration 0018).
+    /// CHECK constraint in the epoch-3 schema.
     pub const ALL: [AssetKind; 7] = [
         AssetKind::Knowledge,
         AssetKind::Prompt,
