@@ -321,13 +321,16 @@ cross-process entity invalidation bus is not presumed necessary.
 
 - [ ] [AUTH-6: Session & token hygiene](AUTH-6.md) — open
 
-ADR-0130 proposes a tenant-scoped, credential-free console-session index
-beside the pre-tenant custody row, and issuer/token-ID revocation at the
-existing verification seam. The combined maintenance worker now purges expired
+ADR-0130 now accepts a tenant-scoped, credential-free console-session index
+beside the pre-tenant custody row, self-only inventory/revoke, and distinct
+per-token `jti` and session-family `sid` revocation for a candidate bundled-
+Keycloak profile. Its five-minute access, eight-hour session and rotating
+refresh contract still needs live proof; external issuers have no revocation
+claim. The combined maintenance worker now purges expired
 credential rows in bounded, skip-locked batches with sweep and row counters.
 Its fixed 256-row-per-minute service rate has no backlog or oldest-age
 telemetry; next measure retention lag and bound drain work or admission.
-No AUTH-6 revocation bound or inventory is qualified. Next settle issuer
-identifier/lifetime and administrator visibility, then implement the additive
-index and self-session API before issuer-specific enforcement and live
-rotation/replay tests.
+No AUTH-6 revocation bound or inventory is qualified. Next prove the bundled
+issuer's signed `jti`/stable `sid` and refresh replay behavior, then implement
+the additive index, self-session API and fail-closed request-time lookup before
+enforcement and cross-replica acceptance.

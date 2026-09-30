@@ -26,7 +26,7 @@ intentionally keeps `console_sessions` without tenant/subject columns and
 re-verifies the bearer on every request. A broad
 inventory scan or treating that row as identity would violate this contract.
 [ADR-0130](../adr/adr-0130-separate-session-inventory-from-credential-custody.md)
-proposes a separate tenant-scoped, credential-free index and request-time
+selects a separate tenant-scoped, credential-free index and request-time
 identifier revocation. The combined maintenance worker now deletes at most 256
 expired custody rows per minute with skip-locked coordination across replicas;
 successful/failed sweeps and removed rows have separate content-free counters.
@@ -36,10 +36,21 @@ also found that one 256-row purge batch per minute has no backlog or
 oldest-expired-age measure. Before claiming bounded credential retention,
 measure that lag and use a bounded drain budget or a proven admission envelope.
 
+The first candidate issuer contract is now the exact bundled Keycloak realm:
+verified access-token `jti` for one bearer, `sid` for an interactive session
+family, numeric `iat`/`exp` with at most five minutes of access lifetime,
+rotating refresh tokens with zero reuse, no offline access, and an eight-hour
+maximum SSO session. Revocation evidence for a family remains for 12 hours.
+The first product slice is self-only inventory/revoke; administrator access
+remains a separately reviewed authority/disclosure change. Entra, Okta and
+other external issuers retain login support but have no revocation promise
+until their exact token and refresh contracts pass live acceptance. None of
+the Keycloak revocation behavior is implemented or qualified yet.
+
 ## Scope
 
-- Inventory active Synveda console sessions for the current principal and
-  authorised administrators without exposing bearer or refresh material.
+- Inventory active Synveda console sessions for the current principal without
+  exposing bearer or refresh material; defer administrator inventory/revoke.
 - Revoke one or all sessions and audit the action.
 - Persist bounded revocation evidence for verifiable issuer/token identifiers
   and enforce it in the existing credential-verification path using database
@@ -66,8 +77,9 @@ cleanup is TTL-bounded and safe across replicas.
 
 ## Acceptance criteria
 
-- A revoked console session and revocable user/service token fail every public
-  API within 30 seconds or a stricter owner-approved bound.
+- A revoked console session and a token in the enforced bundled-Keycloak
+  profile fail every public API within 30 seconds of commit under a healthy
+  database; no external issuer inherits this claim.
 - Reusing a rotated refresh credential fails where the IdP contract supports
   rotation, and the result is distinguishable from transient provider outage.
 - Session inventory reveals only safe device/client/time metadata and never
@@ -96,15 +108,15 @@ back to observe-only.
 
 ## Dependencies
 
-Identity/security owners must choose the revocation bound, supported issuer
-claims, administrator visibility, device-binding scope and incident override.
-OPS-7 supplies multi-replica acceptance; live Entra/Okta evidence requires
-external tenants and credentials.
+The first candidate claim/lifetime/session contract and self-only scope are
+selected in ADR-0130. EVAL-6 must establish revocation-row capacity and
+cleanup lag. OPS-7 supplies multi-replica acceptance; external issuer
+promotion requires its own live tenant, credentials and claim mapping.
 
-Next: settle ADR-0130's issuer identifier/lifetime and administrator-visibility
-choices, then append a forward migration for the tenant index/revocation
-ledger, wire atomic console-session creation,
-add Cedar-governed self inventory/revoke, and only then enforce verified
-bearer revocation after issuer-specific acceptance. The first slice may use
-self-only inventory and the brief's 30-second bound; it must not advertise
-revocation for tokens without a supported identifier.
+Next: add test-only verified-claim fixtures for `jti`/`sid` continuity and
+refresh rotation against the bundled realm, then append a forward migration
+for the tenant index/revocation ledger, wire atomic console-session creation,
+and add Cedar-governed self inventory/revoke. Promote bearer-family enforcement
+only after the complete Keycloak and cross-replica acceptance passes; missing
+required claims must fail closed in that profile. Measure the 30-second target
+and ledger capacity before advertising revocation.
