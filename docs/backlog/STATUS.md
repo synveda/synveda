@@ -304,3 +304,11 @@ cross-process entity invalidation bus is not presumed necessary.
 ## Unscheduled — not listed in the Sequencing section
 
 - [ ] [AUTH-6: Session & token hygiene](AUTH-6.md) — open
+
+ADR-0130 proposes a tenant-scoped, credential-free console-session index
+beside the pre-tenant custody row, and issuer/token-ID revocation at the
+existing verification seam. The architecture pass found that expired-session
+purge is currently unused. No AUTH-6 implementation or revocation bound is
+qualified. Next settle issuer identifier/lifetime and administrator visibility,
+then implement the additive index, bounded cleanup and self-session API before
+issuer-specific enforcement and live rotation/replay tests.
