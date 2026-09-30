@@ -1,11 +1,11 @@
 # Feature inventory
 
-149 features in this index. This file owns feature identity and delivered/open
+150 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-114 delivered; 35 open. CI checks the counts, IDs and open-brief contract.
+114 delivered; 36 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
 is available for self-hosted evaluation. [Production readiness](../PRODUCTION_READINESS.md)
@@ -176,6 +176,7 @@ schema, and v0.4.0 remains incompatible.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 - [ ] [OPS-13: Capture retry and provider backpressure](OPS-13.md) — open
+- [ ] [OPS-14: Request limits and tenant usage budgets](OPS-14.md) — open
 
 OPS-13 owns PR-05's persisted Capture retry schedule, terminal inspection,
 queue-age evidence and provider-wide concurrency bound. Existing five-attempt
@@ -183,6 +184,11 @@ fencing and the three-pod Capture-only drill protect durable candidates, but a
 failed nonterminal batch returns directly to `pending` and may retry on the
 next claim. The provider quota, retry-age objective and manual-retry policy
 need owner choices and an ADR before new state is implemented.
+
+OPS-14 owns PR-07's request-frequency/concurrency and tenant-usage bounds.
+The existing 429 taxonomy does not enforce a budget. The first slice needs
+owner-selected operation classes and one-gateway limits; cluster-wide fairness
+requires a chosen distributed limiter store and OPS-7 cross-pod evidence.
 
 The 2026-09-30 Rust review found no enforced tenant/pack envelope for the
 serial all-tenant policy sweep within its five-second deadline. Next measure
