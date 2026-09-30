@@ -121,11 +121,15 @@ The source's read-only `retry-review status` found the original Knowledge,
 capture and pending proposal. Re-running the published sample, however, hit
 an idempotency conflict: its fixed `configuration.create` key carried the
 current template document rather than the document submitted before upgrade.
-The sample's complete Skill/approval journey was not seeded before backup, so
-Skill continuity and a cross-version sample rerun remain open. This is a
+The CPR-45 client now reads and validates the recorded Configuration and
+Sessions before resuming, preserving their original version and ownership
+without resubmitting a changed body under the same idempotency key. Its rebuilt
+browser image replayed the v0.4.3 receipt against the migrated source gateway;
+`product-demo.mjs sample` passed and remained `learning_pending`. The sample's
+complete Skill/approval journey was not seeded before backup, so Skill
+continuity remains open. This is a
 same-host source-candidate drill, not a published N-1/N pair or off-host PITR.
-Next qualify a fully populated Knowledge/Skill/proposal fixture, fix or pin the
-sample's cross-version idempotency contract, recover an in-flight pending login
+Next qualify a fully populated Knowledge/Skill/proposal fixture, recover an in-flight pending login
 from a joint `0003` set, inject migration failures, measure production-shaped
 locks/outage and run the OPS-5 off-host restore before a supported upgrade
 claim.

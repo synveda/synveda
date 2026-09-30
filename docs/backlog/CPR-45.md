@@ -369,6 +369,15 @@ approver through workspace-scoped grants; it does not lower approval policy.
 Chromium's private temporary storage and Keycloak's convergence health window
 are bounded to accommodate the observed real execution.
 
+The resumed demo client checks its recorded Configuration and Sessions through
+the public API before reuse. This preserves the original idempotent create
+bodies across a later template or CLI-version change while refusing a changed
+Configuration version, scope or Session identity. In the OPS-6 local rehearsal,
+a rebuilt client resumed a published v0.4.3 receipt against the source gateway
+at migration `0003`; `product-demo.mjs sample` passed with the same pending
+learning proposal. Complete Skill/approval continuity was not part of that
+rehearsal.
+
 The full deployment gate passes, including all 169 combined lifecycle/recovery
 tests and the Compose render matrix. All 251 console tests, the production
 build, all 189 CLI tests, strict CLI Clippy, all 77 policy tests, six OpenAPI

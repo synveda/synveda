@@ -147,10 +147,13 @@ and was consumed once. A distinct rollback restore passed the published
 binary, original key and browser checks; every field of the original 52 audit
 rows matched the migrated copy by SHA-256. One Knowledge item and five
 proposals remained, but the published sample's cross-version rerun conflicted
-on its fixed Configuration idempotency key; Skill continuity was not exercised.
+on its fixed Configuration idempotency key. The CPR-45 client now validates and
+reuses recorded Configuration and Sessions; a rebuilt browser image resumed
+the v0.4.3 receipt against the migrated gateway and passed `sample` at
+`learning_pending`. Skill continuity was not exercised.
 No published N, off-host PITR, production-shaped outage/lock or injected
 failure is qualified. OPS-6 stays open for those gates and a fully populated
-client receipt through the current head; v0.4.0 remains incompatible.
+Skill/approval receipt through the current head; v0.4.0 remains incompatible.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 
