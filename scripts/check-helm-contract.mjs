@@ -116,6 +116,7 @@ requireMarkers("CloudNativePG Cluster", cluster, [
   "create database synveda with owner synveda_migrator template template0 encoding 'UTF8' allow_connections false",
 ]);
 forbidMarkers("CloudNativePG Cluster", cluster, [
+  "grant connect on database postgres to streaming_replica",
   "postInitApplicationSQL:",
   "create extension if not exists vector",
   "create extension if not exists btree_gin",
@@ -215,6 +216,8 @@ requireMarkers("database bootstrap", bootstrap, [
   'cp -- "$source" "$destination"',
   'chmod 0600 "$destination"',
   "exec /usr/local/bin/synveda-database-bootstrap synveda",
+  "name: SYNVEDA_POSTGRES_CNPG_CLUSTER",
+  'value: "true"',
   "name: SYNVEDA_DATABASE_BOOTSTRAP_PRIVATE_DIR",
   "value: /run/secrets",
   "name: synveda-pg-superuser",

@@ -33,9 +33,11 @@ renew it; expiry withdraws readiness and cancels governed HTTP work. The
 `synveda_policy_pack_refresh_seconds` when readiness drops. The core worker
 uses the same provisional lease: expiry withdraws readiness, cancels governed
 work and retries initial convergence before resuming. An interrupted claim
-still requires a lease/fence recovery check. Post-start change visibility
-across multiple gateways and real claimed-worker expiry remain unqualified,
-so the chart remains single-replica.
+still requires a lease/fence recovery check. In one disposable Kind run, a
+claimed Capture request was cancelled on policy expiry, then its fenced second
+attempt committed one candidate after policy recovery. Post-start change
+visibility under production load and multi-worker ownership remain
+unqualified, so the chart remains single-replica.
 
 OIDC login now parks its PKCE state and CLI handoff in the same deployment-key
 plane as console sessions. A missing deployment key refuses `/auth/login`
@@ -92,6 +94,34 @@ kubectl -n synveda port-forward service/synveda 8120:8120
 curl --fail --silent http://127.0.0.1:8120/readyz
 curl --fail --silent http://127.0.0.1:8120/metrics
 ```
+
+## CNPG replica maintenance access
+
+The packaged CNPG bootstrap closes PUBLIC access to the `postgres` and
+`template1` databases. CNPG also uses its reserved `streaming_replica` role
+for a certificate-authenticated connection to `postgres`; see the
+[CNPG 1.30 security contract](https://cloudnative-pg.io/docs/1.30/security/).
+CNPG creates that role after its initial `postInitSQL` PUBLIC revoke. The
+required administrator bootstrap Job grants the reserved role CONNECT on
+`postgres` only and verifies the remaining restrictions. A fresh
+chart-rendered two-instance cluster passed bootstrap and replica restart in
+an isolated Kind run. An older retained cluster without this grant can leave
+a restarted replica unready with `permission denied for database "postgres"`,
+even while the primary and Synveda processes serve requests.
+
+Check `kubectl -n synveda get cluster/synveda-pg -o wide` and the unready
+replica's `postgres` container logs. If that exact error appears, have the
+database operator connect locally as `postgres` on the *current primary* and
+run `GRANT CONNECT ON DATABASE postgres TO streaming_replica;`. Before and
+after the repair, verify `has_database_privilege` on `postgres`: the reserved
+replica role should change from false to true, while `synveda_gateway` and
+`synveda_worker` remain false. Wait for the CNPG Cluster to report every
+instance ready before treating Helm `--wait` or failover as healthy. Do not
+grant CONNECT to PUBLIC or any product role. Include this ACL in restore
+verification. The fixed bootstrap Job converges a retained cluster when an
+upgrade uses an image containing the fix; the previously published v0.4.3
+image does not. Repair the existing ACL before an upgrade that waits for all
+replicas, or first use the fixed image with a controlled upgrade sequence.
 
 Keep logs at `info` initially. Do not log HTTP authorization/cookie headers,
 Secret manifests, credential URLs or Session/Knowledge bodies. Backup files and

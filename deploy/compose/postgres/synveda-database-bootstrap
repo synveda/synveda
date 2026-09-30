@@ -368,6 +368,15 @@ case "$bundled_cluster" in
         ;;
 esac
 export SYNVEDA_POSTGRES_BUNDLED_CLUSTER=$bundled_cluster
+cnpg_cluster=${SYNVEDA_POSTGRES_CNPG_CLUSTER:-false}
+case "$cnpg_cluster" in
+    true|false) ;;
+    *)
+        echo "database-bootstrap: SYNVEDA_POSTGRES_CNPG_CLUSTER must be true or false" >&2
+        exit 78
+        ;;
+esac
+export SYNVEDA_POSTGRES_CNPG_CLUSTER=$cnpg_cluster
 
 role_contract_file=${SYNVEDA_DATABASE_ROLES_FILE:-}
 [ "$role_contract_file" = /run/secrets/database_roles.json ] || {
@@ -1445,6 +1454,7 @@ select 1 / case when exists (
 ) then 1 else 0 end;
 select pg_catalog.pg_advisory_lock(pg_catalog.hashtext('synveda.compose.bootstrap.cluster'));
 \getenv bundled_cluster SYNVEDA_POSTGRES_BUNDLED_CLUSTER
+\getenv cnpg_cluster SYNVEDA_POSTGRES_CNPG_CLUSTER
 \getenv synveda_bootstrap_database SYNVEDA_POSTGRES_BOOTSTRAP_DATABASE
 \getenv btree_gin_present SYNVEDA_BOOTSTRAP_BTREE_GIN_PRESENT
 \getenv vector_present SYNVEDA_BOOTSTRAP_VECTOR_PRESENT
@@ -2144,6 +2154,29 @@ commit;
 select 'revoke connect, temporary on database postgres, template1 from public'
 where :'bundled_cluster' = 'true'
 \gexec
+-- CNPG creates its reserved replication role *after* postInitSQL. Only the
+-- chart's later administrator bootstrap can restore its maintenance CONNECT.
+-- Product roles remain forbidden on postgres/template1 by the shared proof.
+select 1 / case when :'cnpg_cluster' <> 'true' or exists (
+  select 1 from pg_catalog.pg_roles
+   where rolname = 'streaming_replica'
+     and rolcanlogin and rolreplication
+     and not (rolsuper or rolcreatedb or rolcreaterole or rolbypassrls)
+) then 1 else 0 end;
+select 'grant connect on database postgres to streaming_replica'
+where :'cnpg_cluster' = 'true'
+\gexec
+select 1 / case when :'cnpg_cluster' <> 'true' or (
+  pg_catalog.has_database_privilege('streaming_replica', 'postgres', 'CONNECT')
+  and not pg_catalog.has_database_privilege('streaming_replica', 'postgres', 'TEMPORARY')
+  and not pg_catalog.has_database_privilege('streaming_replica', 'template1', 'CONNECT')
+  and not exists (
+    select 1 from pg_catalog.pg_database database,
+      lateral pg_catalog.aclexplode(database.datacl) acl
+     where database.datname = 'postgres'
+       and acl.grantee = 0 and acl.privilege_type = 'CONNECT'
+  )
+) then 1 else 0 end;
 
 select 1 / case when not exists (
   select 1

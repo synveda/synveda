@@ -15,17 +15,18 @@ size: L
 Helm pins one gateway replica and Recreate. ADR-0126 moves pending OIDC login
 and CLI handoff state into a deployment-key-sealed PostgreSQL ledger. Stored Cedar
 policy packs are compiled process-locally and refreshed on a timer; ADR-0127
-adds a provisional gateway freshness lease, while cross-replica latency and
-worker expiry remain unqualified. Scope ancestry,
+adds a provisional gateway freshness lease. Cross-replica latency and one
+claimed-worker expiry now have isolated Kind evidence, but production-load and
+multi-worker bounds remain unqualified. Scope ancestry,
 identity, grants, groups, assignments and Configuration are already read in
 ordinary request transactions, and cached Cedar fragments compare the exact
 supplied scope shape. Capture, Knowledge indexing,
 directory pull and relaxation expiry now run in a separate supervised core
 worker, but only one worker replica is supported and concurrent-worker recovery
 has not been proved. Worker SIGTERM withdraws readiness and performs a bounded
-cancel/join. Before the source lifecycle slice, gateway readiness remained
-true during graceful request shutdown. Claimed-work termination remains
-unproved. These gaps are recorded in
+cancel/join. A claimed Capture path has been exercised under policy expiry;
+provider exactly-once effects and multi-worker ownership remain unproved.
+These gaps are recorded in
 [production readiness](../PRODUCTION_READINESS.md) and the one-replica refusal
 is governed by [ADR-0062](../adr/adr-0062-enterprise-profile-and-helm-chart.md).
 
@@ -112,10 +113,33 @@ authority-unavailable count did not change. The same probe restored one gateway
 replica; the core worker was ready afterward. A table-lock experiment was not
 counted as lease evidence because it also closed the database-authority gate.
 The invalid-pack result qualifies the provisional source lease under this
-one-node light load, not a production traffic envelope, claimed-worker
-interruption or cross-AZ behavior. Key rotation during login, multi-node loss
-and a rolling upgrade remain untested. Next exercise claimed work under
-expiry, then pod loss and rolling traffic before lifting either replica limit.
+one-node light load, not a production traffic envelope or cross-AZ behavior.
+A follow-on Kind drill kept a real Capture batch claimed inside a deliberately
+blocked extractor, then applied the invalid pack. The core worker's private
+readiness fell and the first provider socket was cancelled 28 seconds after
+the fault, while its database-authority gauge stayed ready and failed-policy
+sweep counters rose. No second provider call began while policy remained stale.
+After the pack was cleared, the worker reclaimed the expired claim; before
+the second blocked call was released, the batch still had zero candidates.
+It then completed with two attempts, two provider calls (one cancelled) and
+exactly one durable candidate. This proves one claimed Capture recovery on
+one node, not provider exactly-once effects or multi-worker ownership.
+
+The same run exposed a Helm/CNPG defect: after the baseline primary promotion,
+the restarted standby could not reconnect because the chart's bootstrap had
+revoked PUBLIC CONNECT on the `postgres` maintenance database without granting
+CNPG's reserved `streaming_replica` role CONNECT. The primary and product pods
+served, but CNPG reported only one of two instances ready and a Helm upgrade
+waited. A narrow grant on the disposable primary restored both instances;
+the source chart now grants the reserved role during the required administrator
+bootstrap Job, after CNPG creates it. A fresh chart-rendered two-instance
+cluster passed that bootstrap, proved PUBLIC and product roles still lacked
+maintenance CONNECT, and returned to two ready instances after its replica
+was deleted. Contract checks and the operator runbook cover the ACL. A second
+primary promotion and retained-cluster upgrade with the fixed image still
+need acceptance. Key rotation during login, multi-node loss and
+a rolling upgrade also remain untested. Next prove multi-worker ownership and
+pod loss under traffic before lifting either replica limit.
 
 ## Scope
 

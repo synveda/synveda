@@ -238,6 +238,8 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: synveda-pg-superuser
+            - name: SYNVEDA_POSTGRES_CNPG_CLUSTER
+              value: "true"
         - name: database-preflight
           command: ["/usr/local/bin/synveda-container database-preflight"]
           env:
@@ -296,7 +298,7 @@ test("the Helm database authority matrix fails closed", () => {
         "        - revoke connect, temporary on database postgres, template1 from public;",
         "        - revoke connect, temporary on database postgres, template1 from public;\n      postInitApplicationSQL:\n        - create extension if not exists vector;",
       ),
-      "CloudNativePG does not close maintenance-database access and create the application database closed before handoff, or still creates extensions as the application owner",
+      "CloudNativePG does not close PUBLIC maintenance access and create the application database closed before handoff, or mutates roles before CNPG creates them",
     ],
     [
       "application database closed before it exists",
@@ -304,7 +306,20 @@ test("the Helm database authority matrix fails closed", () => {
         "        - create database synveda with owner synveda_migrator template template0 encoding 'UTF8' allow_connections false;",
         "        - alter database synveda allow_connections false;",
       ),
-      "CloudNativePG does not close maintenance-database access and create the application database closed before handoff, or still creates extensions as the application owner",
+      "CloudNativePG does not close PUBLIC maintenance access and create the application database closed before handoff, or mutates roles before CNPG creates them",
+    ],
+    [
+      "replica grant runs before CNPG creates its role",
+      HELM_DATABASE_CONTRACT.replace(
+        "        - revoke connect, temporary on database postgres, template1 from public;",
+        "        - revoke connect, temporary on database postgres, template1 from public;\n        - grant connect on database postgres to streaming_replica;",
+      ),
+      "CloudNativePG does not close PUBLIC maintenance access and create the application database closed before handoff, or mutates roles before CNPG creates them",
+    ],
+    [
+      "replica grant omitted from administrator bootstrap",
+      HELM_DATABASE_CONTRACT.replace("SYNVEDA_POSTGRES_CNPG_CLUSTER", "OMITTED_CNPG_FLAG"),
+      "CNPG install bootstrap does not enable reserved replica CONNECT convergence",
     ],
     [
       "gateway app credential",

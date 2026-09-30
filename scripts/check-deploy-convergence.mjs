@@ -1902,11 +1902,14 @@ export function helmContractFindings(rendered) {
       publicRevoke < closedApplicationDatabase &&
       applicationInit === -1
     ) ||
-    /create extension if not exists (?:vector|btree_gin)/.test(cluster ?? "")
+    /create extension if not exists (?:vector|btree_gin)|grant connect on database postgres to streaming_replica/.test(cluster ?? "")
   ) {
     findings.push(
-      "CloudNativePG does not close maintenance-database access and create the application database closed before handoff, or still creates extensions as the application owner",
+      "CloudNativePG does not close PUBLIC maintenance access and create the application database closed before handoff, or mutates roles before CNPG creates them",
     );
+  }
+  if (cluster && !install?.includes("SYNVEDA_POSTGRES_CNPG_CLUSTER")) {
+    findings.push("CNPG install bootstrap does not enable reserved replica CONNECT convergence");
   }
   if (!gateway) findings.push("gateway Deployment is missing");
   if (!worker) findings.push("worker Deployment is missing");

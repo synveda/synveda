@@ -184,8 +184,22 @@ one gateway. A separate audited, test-only invalid Cedar pack left database
 authority ready while all three gateways recorded failed refreshes; 486 paired
 authenticated/readiness samples saw all close by 28.996 seconds and recover by
 45.747 seconds from baseline after pack removal. This is one-node light-load
-evidence, not a production traffic bound. Claimed-worker interruption,
-multi-worker ownership, in-flight process/load, key rotation, multi-node loss
+evidence, not a production traffic bound. A further live claimed-Capture drill
+held the extractor, expired the worker's policy-only lease and saw readiness
+withdrawn and the first provider call cancelled after 28 seconds. After pack
+repair and fenced lease reclaim, the second call produced one durable candidate
+in two attempts, with no candidate before the retry completed. This remains
+one-node/one-worker evidence, not multi-worker ownership or exactly-once
+provider effects. The drill also exposed a CNPG chart bootstrap defect: PUBLIC
+CONNECT had been revoked on `postgres` without restoring it for CNPG's reserved
+`streaming_replica` role. A retained standby stayed unready after promotion;
+the disposable cluster recovered after a narrow operator grant. The source
+chart now grants only that reserved role in the required administrator Job,
+after CNPG creates it. A fresh chart-rendered two-instance cluster passed
+bootstrap and replica restart with PUBLIC and product maintenance access still
+closed; contract checks and an operator repair note cover retained clusters.
+A second primary promotion and retained-cluster fixed-image upgrade remain open.
+Multi-worker ownership, in-flight process/load, key rotation, multi-node loss
 and rolling acceptance remain open in the brief.
 Scope, grant, identity and Configuration decisions already use fresh
 request-time database rows and exact-shape Cedar fragments; a generic
