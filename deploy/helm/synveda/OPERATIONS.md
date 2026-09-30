@@ -148,7 +148,15 @@ grant CONNECT to PUBLIC or any product role. Include this ACL in restore
 verification. The fixed bootstrap Job converges a retained cluster when an
 upgrade uses an image containing the fix; the previously published v0.4.3
 image does not. Repair the existing ACL before an upgrade that waits for all
-replicas, or first use the fixed image with a controlled upgrade sequence.
+replicas, or first use the fixed image with a controlled upgrade sequence. A
+retained one-node Kind release upgraded to the fixed source image and passed
+bootstrap with two ready instances. In a subsequent loss drill, a normal
+primary Pod delete remained in CNPG's 30-minute termination grace while
+failover waited for WAL receivers to stop; an intentional crash-style deletion
+in that disposable cluster allowed promotion, two ready instances and fresh
+three-gateway login/authorization. This does not establish a planned
+switchover procedure, node-loss tolerance or a recovery-time target. Separate
+planned maintenance from crash drills in the operator runbook.
 
 Keep logs at `info` initially. Do not log HTTP authorization/cookie headers,
 Secret manifests, credential URLs or Session/Knowledge bodies. Backup files and

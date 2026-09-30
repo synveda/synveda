@@ -218,8 +218,14 @@ chart now grants only that reserved role in the required administrator Job,
 after CNPG creates it. A fresh chart-rendered two-instance cluster passed
 bootstrap and replica restart with PUBLIC and product maintenance access still
 closed; contract checks and an operator repair note cover retained clusters.
-A second primary promotion and retained-cluster fixed-image upgrade remain open.
-Other worker-family ownership, in-flight process/load, key rotation, multi-node loss
+The retained release then upgraded to the fixed source image and completed its
+administrator bootstrap with two ready CNPG instances. A crash-style second
+primary loss promoted the other instance and recovered 2/2 readiness; the
+three-gateway login, policy-reload and restrictive-decision probe passed after
+promotion, then exact saved Helm values restored the published image baseline.
+A normal pod delete had first waited under CNPG's 30-minute termination grace
+with failover pending, so this does not qualify planned switchover or timed
+recovery. Other worker-family ownership, in-flight process/load, key rotation, multi-node loss
 and rolling acceptance remain open in the brief.
 Scope, grant, identity and Configuration decisions already use fresh
 request-time database rows and exact-shape Cedar fragments; a generic

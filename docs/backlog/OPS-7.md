@@ -174,9 +174,19 @@ the source chart now grants the reserved role during the required administrator
 bootstrap Job, after CNPG creates it. A fresh chart-rendered two-instance
 cluster passed that bootstrap, proved PUBLIC and product roles still lacked
 maintenance CONNECT, and returned to two ready instances after its replica
-was deleted. Contract checks and the operator runbook cover the ACL. A second
-primary promotion and retained-cluster upgrade with the fixed image still
-need acceptance. Key rotation during login, multi-node loss and
+was deleted. Contract checks and the operator runbook cover the ACL. A
+retained-cluster Helm upgrade to the fixed source image passed its bootstrap
+Job with two ready CNPG instances. In a second primary-loss drill, a graceful
+pod delete left the old primary terminating under CNPG's 30-minute grace and
+promotion pending while its WAL receiver remained active. A crash-style
+deletion of that disposable pod let CNPG promote the other instance and return
+to two ready instances. The three-gateway probe then passed cross-pod JSON and
+CLI login with replay refusal, two policy-pack revisions reaching all pods in
+3.917 and 4.937 seconds, and `ScopeUpdate` changing from 200 to a
+revision-specific 403 on all three pods within 5.249 seconds. The saved Helm
+values and one-gateway/one-worker image baseline were restored. These are
+one-node observations without a timed recovery objective or planned
+switchover qualification. Key rotation during login, multi-node loss and
 a rolling upgrade also remain untested. Next prove other worker-family
 ownership and pod loss under traffic before lifting the combined-worker or
 gateway replica refusal.
