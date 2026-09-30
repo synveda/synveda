@@ -126,6 +126,14 @@ pub const POLICY_PACK_REFRESH_SWEEPS_TOTAL: &str = "synveda_policy_pack_refresh_
 /// Full stored-policy sweep duration, including failed and timed-out sweeps.
 pub const POLICY_PACK_REFRESH_SECONDS: &str = "synveda_policy_pack_refresh_seconds";
 
+/// Active tenants in the last successfully enumerated policy sweep. No tenant
+/// identifier is exported (OPS-7, ADR-0127).
+pub const POLICY_PACK_ACTIVE_TENANTS: &str = "synveda_policy_pack_active_tenants";
+
+/// Stored policy sources read for each tenant during convergence or refresh,
+/// without a tenant or pack label (OPS-7).
+pub const POLICY_PACK_SOURCES_PER_TENANT: &str = "synveda_policy_pack_sources_per_tenant";
+
 /// Policy-source catalogue operations (AUTHZ-2, CPR-30), labelled by `op`
 /// (`packs`) and `outcome` (`ok`, `rejected`, `error`). Runtime selection is
 /// measured separately by the Configuration plane.
@@ -488,6 +496,14 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_histogram!(
         POLICY_PACK_REFRESH_SECONDS,
         "Complete stored-policy sweep duration in seconds by outcome"
+    );
+    metrics::describe_gauge!(
+        POLICY_PACK_ACTIVE_TENANTS,
+        "Active tenants in the last successful policy-sweep enumeration"
+    );
+    metrics::describe_histogram!(
+        POLICY_PACK_SOURCES_PER_TENANT,
+        "Stored policy sources per tenant during convergence or refresh"
     );
     // AUTHZ-2 counters (ADR-0014): policy-source catalogue reads;
     // fail-safe resolution in synveda-policy.

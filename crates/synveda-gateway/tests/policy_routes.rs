@@ -338,6 +338,19 @@ async fn separate_gateway_compiles_converge_and_a_bad_pack_does_not_renew_freshn
     authz::refresh_packs_once(&second.pool, &second.pdp)
         .await
         .expect("second gateway refresh");
+    let metrics = metrics_handle().render();
+    assert!(
+        metrics
+            .lines()
+            .any(|line| line.starts_with("synveda_policy_pack_active_tenants ")),
+        "active-tenant sweep count is absent:\n{metrics}"
+    );
+    assert!(
+        metrics
+            .lines()
+            .any(|line| line.starts_with("synveda_policy_pack_sources_per_tenant_count ")),
+        "per-tenant pack count is absent:\n{metrics}"
+    );
     assert!(
         first
             .pdp

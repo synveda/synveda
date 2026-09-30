@@ -197,6 +197,10 @@ five-second whole-sweep deadline. At a sufficient tenant count, or after one
 invalid pack, the shared 30-second lease closes governed work for unrelated
 tenants. Measure and enforce the supported tenant/pack envelope, then test
 per-tenant failure isolation without allowing a stale Cedar decision. The
+source now exports unlabeled active-tenant count and per-tenant stored-pack
+count alongside existing sweep duration/outcome metrics. This makes the work
+envelope measurable; it neither enforces a limit nor isolates a failed tenant.
+Next measure at the owner-selected maximum before changing admission. The
 same review found that a transient deployment-key provisioning error was not
 retried until the database authority generation changed. The source gateway
 now retries deployment-key provisioning and unwrap checks with a five-second

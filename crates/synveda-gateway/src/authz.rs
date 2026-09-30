@@ -42,8 +42,8 @@ use tokio::time::Instant;
 
 use crate::app::AppState;
 use crate::telemetry::{
-    POLICY_PACK_REFRESH_SECONDS, POLICY_PACK_REFRESH_SWEEPS_TOTAL, POLICY_PACK_RELOADS_TOTAL,
-    SERVICE_TOKEN_REJECTIONS_TOTAL,
+    POLICY_PACK_ACTIVE_TENANTS, POLICY_PACK_REFRESH_SECONDS, POLICY_PACK_REFRESH_SWEEPS_TOTAL,
+    POLICY_PACK_RELOADS_TOTAL, POLICY_PACK_SOURCES_PER_TENANT, SERVICE_TOKEN_REJECTIONS_TOTAL,
 };
 
 /// Source-candidate safety ceiling for every process-local policy compile;
@@ -853,7 +853,9 @@ fn empty_chain() -> Arc<[ScopeNode]> {
 #[tracing::instrument(name = "authz.refresh_packs", skip_all, err(Display))]
 pub async fn refresh_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
     let mut failed = false;
-    for tenant in tenants::active(pool).await? {
+    let active = tenants::active(pool).await?;
+    metrics::gauge!(POLICY_PACK_ACTIVE_TENANTS).set(active.len() as f64);
+    for tenant in active {
         failed |= refresh_tenant_packs(pool, pdp, tenant.id).await == "error";
     }
     if failed {
@@ -872,7 +874,9 @@ pub async fn refresh_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
 /// background plane cannot start until every active tenant has been read and
 /// compiled once.
 pub async fn converge_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
-    for tenant in tenants::active(pool).await? {
+    let active = tenants::active(pool).await?;
+    metrics::gauge!(POLICY_PACK_ACTIVE_TENANTS).set(active.len() as f64);
+    for tenant in active {
         let outcomes = refresh_tenant(pool, pdp, tenant.id).await?;
         if record_refresh_outcomes(&outcomes) == "error" {
             return Err(Error::Invalid {
@@ -924,6 +928,7 @@ async fn refresh_tenant(
 ) -> Result<Vec<&'static str>> {
     let mut tx = rls::begin_tenant_tx(pool, tenant_id).await?;
     let stored = policy_packs::stored(&mut *tx, tenant_id).await?;
+    metrics::histogram!(POLICY_PACK_SOURCES_PER_TENANT).record(stored.len() as f64);
     // Read-only transaction; dropping it rolls back, GUC included.
     drop(tx);
     let installed = pdp.installed_versions(tenant_id);

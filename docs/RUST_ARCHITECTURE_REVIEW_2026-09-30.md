@@ -40,6 +40,11 @@ failed tenant generations while preserving fail-closed decisions for that
 tenant. Any different authority boundary needs an ADR and adversarial tests;
 simply extending the lease or timeout would weaken the current guarantee.
 
+Follow-up: OPS-7 now exports the active-tenant count and per-tenant stored-pack
+count without tenant or pack labels, alongside existing sweep duration and
+outcome. This is measurement only. The supported envelope and cross-tenant
+failure isolation remain open.
+
 ### P2 — CPR-23: Skill directory import has an unbounded traversal and read
 
 [`skill::collect`](../crates/synveda-cli/src/skill.rs) lines 451–502

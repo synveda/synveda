@@ -179,7 +179,9 @@ schema, and v0.4.0 remains incompatible.
 The 2026-09-30 Rust review found no enforced tenant/pack envelope for the
 serial all-tenant policy sweep within its five-second deadline. Next measure
 that sweep at a declared maximum and preserve fail-closed Cedar behavior
-while isolating failures. The source gateway now retries deployment-key
+while isolating failures. Active-tenant and per-tenant stored-pack counts are
+now exported without tenant or pack labels beside sweep duration/outcome; no
+supported work limit is yet enforced. The source gateway now retries deployment-key
 provisioning and unwrap checks within five-second attempts, keeps readiness
 closed until both key and policy convergence succeed, and emits content-free
 key-ready/attempt metrics. An exact-role process test proves timeout, retry
