@@ -1055,7 +1055,7 @@ existing checks. The setting is confined to these builds. No Rust crate,
 runtime configuration or generated contract changed. The `aea91758` native runs
 were deliberately cancelled after this correction; they cannot qualify it.
 
-Current qualification source is transport correction
+Transport correction
 `1edb62557c7407cbf55aff22201fa0c04913ce89`: full CI
 [`36798188473`](https://github.com/synveda/synveda/actions/runs/36798188473) and
 independent nonpublishing Release
@@ -1064,10 +1064,13 @@ Both trigger SHAs were checked. All 27 CI-tooling tests, fast checks, actionlint
 Rust formatting and diff checks pass locally. Both Windows x64 jobs passed all
 11 packaged-client checks, then correctly refused an SPDX file entry without
 the required SHA-256 checksum. Native filename and required Cargo-content
-checks were reached; binary binding remains unqualified. The other hosted jobs
-were still completing at this checkpoint. These failures cannot qualify the
-subsequent correction. The preceding `3beeb1cb` OCI qualification is retained
-separately and cannot supply native archive SBOM evidence.
+checks were reached; binary binding remains unqualified. Both Windows ARM jobs
+subsequently failed with the same missing SHA-256 checksum. CI completed with
+20 successful jobs and the required result gate refusing the native failures.
+The nonpublishing Release was deliberately cancelled after the correction was
+committed. None of these reports qualify the correction. The preceding
+`3beeb1cb` OCI qualification is retained separately and cannot supply native
+archive SBOM evidence.
 
 The [pinned scanner options](https://github.com/anchore/syft/blob/v1.51.0/cmd/syft/internal/options/file.go)
 default to hashing package-owned file coordinates. The
@@ -1093,14 +1096,24 @@ report refuse. This control does not reproduce the Windows resolver defect on
 macOS or qualify a clean source. Eleven focused archive tests cover both Windows
 spellings and all six root contracts. All 29 CI-tooling and 77 release-parity
 tests, fast checks, pinned actionlint, Rust formatting and diff checks pass
-locally. No Rust source, dependency lock or generated contract changed. Next
-commit the correction, replace the failed native qualification with full CI and
-an independent nonpublishing Release from that exact source, then independently verify its original
-51-payload inventory, six client reports, eight archive reports, twelve SPDX
-documents and both complete OCI/deployment report sets before retaining proof.
-An active thread continuation follows this canonical checkpoint and proceeds
-to non-Rust inventory/notices after qualification. Production readiness remains
-unclaimed.
+locally. No Rust source, dependency lock or generated contract changed.
+
+Current native qualification source is file-metadata correction
+`02023908ce95df5dc83991dbde6f9ed31b89e4cd`: full CI
+[`36802763712`](https://github.com/synveda/synveda/actions/runs/36802763712) and
+independent nonpublishing Release
+[`36802769936`](https://github.com/synveda/synveda/actions/runs/36802769936).
+Both dispatch trigger SHAs were independently checked. The Release branch
+`codex/ops12-native-sbom-qualification` was advanced without force; remove it
+after retaining this source's proof. Next inspect these runs, retry transient
+failures on the same source and correct actual defects before starting another
+qualification. Independently verify the original 51-payload checksum inventory,
+six client reports, eight archive reports, twelve SPDX documents and both
+complete OCI/deployment report sets from this single source/run before retaining
+proof. The preceding OCI source is already retained separately; do not repeat or
+transplant that qualification. An active thread continuation follows this
+canonical checkpoint and proceeds to non-Rust inventory/notices after
+qualification. Production readiness remains unclaimed.
 
 ### Next non-Rust mechanism probe (2026-10-01)
 
