@@ -74,15 +74,18 @@ and system-Node plugin archive retain their existing contract.
 The source candidate in ADR-0135 also pins each private Node executable and its
 complete upstream licence bytes, preserving Windows CRLF. Its existing manifest
 and native report carry the reported dependency versions and notice hashes;
-assembly rechecks the actual archive members. Supplementary nbytes MIT and
-SQLite copyright-disclaimer files stay beside the full upstream licence.
-The product image carries the same supplementary notices beside its Node 22
-licence. The native image verifier reads the actual executable and notices
+assembly rechecks the actual archive members. Supplementary nbytes, SQLite,
+Abseil, FP16, rapidhash and V8-zlib notices stay beside the full upstream licence;
+Node 24 clients also carry Highway's notice. The product image carries its
+reviewed Node 22 notice set. The native image verifier reads the actual executable
+and notices
 before isolated metadata execution; local and both-registry assembly require
 the pinned inventory in existing reports. Local macOS ARM client and Linux ARM
 product candidates pass; these are not changes to published v0.4.3 or clean
 hosted qualification. Reported versions do not establish complete transitive
-native-library coverage.
+native-library coverage. The [source review](../demos/evidence/ops12-node-source-notice-review.json)
+retains exact source/archive hashes and Windows static imports; ncrypto and
+fast_float provenance and conditional V8 coverage remain open.
 
 Source release packaging retains the exact root `LICENSE` and `NOTICE` in
 native server archives, the console, reference bundle, chart and plugin archive.

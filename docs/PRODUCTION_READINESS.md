@@ -232,6 +232,17 @@ import metadata, unreported static Node/V8 components and production report
 gates remain pending. This probe does not qualify another source or change
 readiness.
 
+The [pinned Node/V8 source review](../demos/evidence/ops12-node-source-notice-review.json)
+adds complete Abseil, FP16, rapidhash and separate V8-zlib notices to both Node
+versions, plus Highway to Node 24 clients, using the existing pins and readers.
+[Actual local carriage](../demos/evidence/ops12-node-helper-notices-candidate.json)
+passes the seven product and eight client notices, nine macOS client checks and
+same-image console binding; coherently altered/truncated notices refuse. Static
+LLVM inspection supplies the two original Windows import lists without execution
+or host-version claims. Ncrypto/fast_float provenance, conditional V8 selection,
+installed-package report gates and complete third-party coverage remain open.
+This dirty source candidate changes neither hosted qualification nor readiness.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.

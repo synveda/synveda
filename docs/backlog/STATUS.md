@@ -460,8 +460,24 @@ choice for installed-package/raw-notice checks in existing image/SBOM reports.
 Official source downloads and the branch push currently fail with TLS connection
 timeouts/reset; retry after GitHub access recovers. Then continue plugin/chart
 and other-image coverage before vulnerability and publisher incident policy.
-The saved automation remains paused. The native Windows scanner blocker and
-OPS-12's open state remain unchanged; its brief owns the exact next action.
+The [pinned source review](../../demos/evidence/ops12-node-source-notice-review.json)
+now verifies both official source archives and identifies missing V8 helper
+notices. The existing pins/readers carry four additional complete notices in
+both Node versions, plus Highway in private Node 24 clients. Installed LLVM
+reads both original Windows import lists; this is static metadata only.
+[Actual local carriage](../../demos/evidence/ops12-node-helper-notices-candidate.json)
+passes seven product notices, eight client notices, same-image console checks
+and all nine macOS client checks. Coherently changed/truncated new notices refuse;
+owned controls are removed. All 54 focused, 44 CI-tooling and 84 release-parity
+checks pass, together with deployment/chart, formatting and fast/diff checks.
+No new scanner, report format, release sidecar or clean hosted qualification is
+introduced. Ncrypto/fast_float provenance and conditional V8 selection remain
+open; GitHub source reads and branch push remain transport-blocked. Next resolve
+those exact upstream gaps and independently record the narrow installed-package
+and raw-notice report choice before implementation, then plugin/chart/other-image
+coverage and security policies. The saved automation remains paused. The native
+Windows scanner blocker and OPS-12's open state remain unchanged; its brief owns
+the exact next action.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered

@@ -98,6 +98,31 @@
       "bytes": 297,
       "sha256": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755",
       "source_path": "deps/sqlite/sqlite3.h"
+    },
+    "v8-abseil-LICENSE": {
+      "bytes": 11361,
+      "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+      "source_path": "deps/v8/third_party/abseil-cpp/LICENSE"
+    },
+    "v8-fp16-LICENSE": {
+      "bytes": 1158,
+      "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d",
+      "source_path": "deps/v8/third_party/fp16/LICENSE"
+    },
+    "v8-rapidhash-LICENSE": {
+      "bytes": 1705,
+      "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0",
+      "source_path": "deps/v8/third_party/rapidhash-v8/LICENSE"
+    },
+    "v8-zlib-LICENSE": {
+      "bytes": 910,
+      "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c",
+      "source_path": "deps/v8/third_party/zlib/LICENSE"
+    },
+    "v8-highway-LICENSE": {
+      "bytes": 11356,
+      "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+      "source_path": "deps/v8/third_party/highway/LICENSE"
     }
   },
   "product": {
@@ -137,6 +162,26 @@
         "bytes": 297,
         "sha256": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755",
         "source_path": "deps/sqlite/sqlite3.h"
+      },
+      "v8-abseil-LICENSE": {
+        "bytes": 11361,
+        "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+        "source_path": "deps/v8/third_party/abseil-cpp/LICENSE"
+      },
+      "v8-fp16-LICENSE": {
+        "bytes": 1158,
+        "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d",
+        "source_path": "deps/v8/third_party/fp16/LICENSE"
+      },
+      "v8-rapidhash-LICENSE": {
+        "bytes": 1705,
+        "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0",
+        "source_path": "deps/v8/third_party/rapidhash-v8/LICENSE"
+      },
+      "v8-zlib-LICENSE": {
+        "bytes": 910,
+        "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c",
+        "source_path": "deps/v8/third_party/zlib/LICENSE"
       }
     },
     "targets": {

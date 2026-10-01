@@ -47,9 +47,26 @@ owns that aggregate; Synveda only validates its copied bytes and supplies the
 identified omissions. Inventory readers remain build/release tools, outside
 client installers and hook execution.
 
+The 2026-10-01 source review extends that same notice contract to Abseil, FP16,
+rapidhash and V8's separate zlib copy in both pinned distributions, plus Highway
+in Node 24. Preserve their complete upstream licence files with their original
+bytes, source paths and hashes in the existing supplementary-notice pins.
+Use the existing client copy loop, image reader and independent assembly checks;
+the product copies only its Node 22 notice set. No report format or new discovery
+tool is needed for this correction.
+
+Bind the review to checksum-verified official source archives and the previously
+verified release-tag commits. Source build references identify components for
+notice review; they do not supply missing binary library versions. Keep ncrypto
+and fast_float notice provenance and other conditional components open until
+their upstream terms and actual build selection are verified. The installed
+LLVM tool can inspect the two original Windows import tables without executing
+foreign code; that local probe does not select a new production scanner or
+qualify Windows execution.
+
 For the product follow-up, extend the existing native image verifier with one
 invocation-owned stopped container whose fixed entry point is the pinned Node
-metadata command. Read the executable and three notice files through bounded
+metadata command. Read the executable and version-specific complete notices through bounded
 Docker TAR streams and the existing unique-regular-member reader. Only after
 byte/platform checks pass, attach to that container's short native metadata
 execution. Keep its network disabled, filesystem read-only, privileges dropped,

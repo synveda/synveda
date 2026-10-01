@@ -15,6 +15,7 @@ import {
 
 import { consolePackageFixture } from "./fixtures/console-package.mjs";
 import { nodeImageFixture } from "./fixtures/node-image.mjs";
+import { nodePins } from "./node-runtime-inventory.mjs";
 
 const version = "0.3.0-rc.1";
 const source = "a".repeat(40);
@@ -132,7 +133,7 @@ test("a native pull check covers all six artifacts, upstream pulls and isolated 
 test("Node inspection verifies stopped bytes before isolated metadata execution and cleanup", t => {
   const f = fixture(t);
   assert.deepEqual(inspectNodeImage(digest, "linux/arm64", f.run, f.root), f.node.report);
-  assert.deepEqual(f.calls.map(args => args[0]), ["create", "cp", "cp", "cp", "cp", "start", "rm"]);
+  assert.deepEqual(f.calls.map(args => args[0]), ["create", ...Array(f.node.files.size).fill("cp"), "start", "rm"]);
   const create = f.calls[0], container = create[create.indexOf("--name") + 1];
   for (const value of ["--pull=never", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--env=NODE_OPTIONS=", "--env=NODE_PATH="])
     assert.ok(create.includes(value));
@@ -142,7 +143,7 @@ test("Node inspection verifies stopped bytes before isolated metadata execution 
 });
 
 test("changed Node bytes, truncated notices and duplicate streams refuse before execution", t => {
-  for (const name of ["node", "LICENSE", "nbytes-LICENSE", "sqlite-NOTICE"]) {
+  for (const name of ["node", "LICENSE", ...Object.keys(nodePins.product.supplementary_notices)]) {
     const f = fixture(t); const bytes = Buffer.from(f.node.files.get(name)); bytes[bytes.length - 1] ^= 1; f.node.files.set(name, bytes);
     assert.throws(() => inspectNodeImage(digest, "linux/arm64", f.run, f.root), /hash differs/);
     assert.equal(f.calls.some(args => args[0] === "start"), false); assert.equal(f.calls.at(-1)[0], "rm");

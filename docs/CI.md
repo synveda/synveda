@@ -275,7 +275,8 @@ registry copying and anonymous public-pull steps did not run.
 Native archive reports require exact source, target, archive and private-Node
 identity, installation/authentication checks and first-party notice carriage.
 ADR-0135 additionally requires the checksum-pinned Node executable, complete
-platform-specific upstream licence and supplementary nbytes/SQLite notices.
+platform-specific upstream licence and the complete supplementary notices pinned
+for that Node version, including reviewed V8 helpers.
 Native jobs check Node's reported dependency versions and reviewed linkage flags;
 assembly independently reads those actual archive members and the embedded
 manifest, refusing coherent report/content substitutions. The inventory remains
@@ -288,7 +289,7 @@ Installation locks and retained state remain separately protected.
 
 Image qualification requires readable source-matching notices and native
 runtime probes. ADR-0135 also checks the product's actual Node executable and
-three complete notice files in a stopped, immutable image before running its
+seven complete notice files in a stopped, immutable image before running its
 isolated native metadata command. Existing local and both-registry reports
 retain the pinned dependency/notice inventory; assembly independently checks
 its reviewed platform, executable, notice and dependency values. Console

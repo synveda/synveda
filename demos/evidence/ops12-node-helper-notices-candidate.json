@@ -1,0 +1,285 @@
+{
+  "schema_version": 1,
+  "feature_id": "OPS-12",
+  "evidence": "local-node-helper-notice-carriage-candidate",
+  "source_sha": "c66242cca819c2cf622634ff7303fad02076abb5",
+  "source_tree_dirty": true,
+  "source_inputs": {
+    "docs/adr/adr-0135-bind-bundled-node-runtime-inventories.md": "0136c5877ae8dc634dfbe78a4a4524abbf5938ea11992c26633e5d1d32ef1909",
+    "scripts/node-runtimes.json": "7e9dc1a62afcf430d3ff9f322ab72eec0262eebe30e7542b2d9ba2a484ea21d3",
+    "scripts/package-client.mjs": "adcbbb0ec9022d9ff847d4604eba6768907a2894fdc296477da8f64facb7d474",
+    "scripts/node-runtime-inventory.mjs": "e0f9cfd3306d1838bf895179f5e0800f49cc13537fa47dafaa7c73fd14c139d4",
+    "scripts/verify-release-images.mjs": "7572a222a8fad7bea263d32ef04721a24f38fc521e7505950671f47099a121c6",
+    "scripts/check-release-assets.mjs": "ed36748a4aac79dd787fdcde4d3690ed0c62417fda73fee0519469b4e982ef6c",
+    "scripts/check-client-package.mjs": "b32c55dcd702d66a19ef1d043a18fb4e2d466ae0f2b275f19116a0624d86c7e8",
+    "scripts/client-artifact.mjs": "b389ebd8ba81dc01f03b72efec47d9345cf85db5e75598ca8dced2c84fb33060",
+    "deploy/compose/product/Dockerfile": "cf744a34f83a1e3528a137529174d741f248a653ab02b6c0856be4ef8427f19d",
+    "demos/evidence/ops12-node-source-notice-review.json": "a4c07d1a5b7c792d8556742309a110a608dac22fae6a0928b56d85e42bdb230d",
+    "assets/licenses/node/nbytes-LICENSE": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2",
+    "assets/licenses/node/sqlite-NOTICE": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755",
+    "assets/licenses/node/v8-abseil-LICENSE": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+    "assets/licenses/node/v8-fp16-LICENSE": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d",
+    "assets/licenses/node/v8-highway-LICENSE": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+    "assets/licenses/node/v8-rapidhash-LICENSE": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0",
+    "assets/licenses/node/v8-zlib-LICENSE": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c",
+    ".gitattributes": "a8796d337340c263272c007da362c4c84dd6fcea88cc71d1db76f67457a49e0c"
+  },
+  "scope": "Actual macOS ARM client and native Linux ARM product carriage of the additional reviewed helper notices. No clean hosted, six-target, Cargo/OCI SPDX, registry, deployment or complete dependency/notice qualification.",
+  "client": {
+    "cli_profile": "existing unchanged-source dev-profile CLI; not Cargo SBOM qualification",
+    "cli_binary_sha256": "d8872645299ad6af0e8c2a2c90f62847ed7fb11e88ea4ab117b4b612144af2f2",
+    "native_report": {
+      "schema_version": 1,
+      "evidence": "native-client-archive",
+      "target": "darwin-arm64",
+      "version": "0.4.3",
+      "cli_version": "synveda 0.4.3",
+      "source_sha": "c66242cca819c2cf622634ff7303fad02076abb5",
+      "source_tree_dirty": true,
+      "node": {
+        "version": "24.21.0",
+        "archive": "node-v24.21.0-darwin-arm64.tar.gz",
+        "archive_sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057",
+        "inventory": {
+          "schema_version": 1,
+          "target": "darwin-arm64",
+          "upstream_source_sha": "955266bfdd854cd280dffd47548673914484e4c0",
+          "binary_bytes": 122129232,
+          "binary_sha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+          "notices": {
+            "LICENSE": {
+              "bytes": 157609,
+              "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace"
+            },
+            "nbytes-LICENSE": {
+              "bytes": 1064,
+              "sha256": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2"
+            },
+            "sqlite-NOTICE": {
+              "bytes": 297,
+              "sha256": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755"
+            },
+            "v8-abseil-LICENSE": {
+              "bytes": 11361,
+              "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747"
+            },
+            "v8-fp16-LICENSE": {
+              "bytes": 1158,
+              "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d"
+            },
+            "v8-rapidhash-LICENSE": {
+              "bytes": 1705,
+              "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0"
+            },
+            "v8-zlib-LICENSE": {
+              "bytes": 910,
+              "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c"
+            },
+            "v8-highway-LICENSE": {
+              "bytes": 11356,
+              "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"
+            }
+          },
+          "dependencies": {
+            "acorn": "8.18.0",
+            "ada": "4.0.0",
+            "amaro": "1.1.11",
+            "ares": "1.34.8",
+            "brotli": "1.2.0",
+            "icu": "78.3",
+            "llhttp": "9.4.3",
+            "merve": "1.2.2",
+            "nbytes": "0.1.4",
+            "ncrypto": "0.0.1",
+            "nghttp2": "1.70.0",
+            "openssl": "3.5.8",
+            "simdjson": "4.6.7",
+            "simdutf": "6.4.0",
+            "sqlite": "3.53.4",
+            "undici": "7.29.1",
+            "uv": "1.52.1",
+            "uvwasi": "0.0.23",
+            "v8": "13.6.233.17-node.53",
+            "zlib": "1.3.2.1-motley-8002e91",
+            "zstd": "1.5.7"
+          },
+          "shared_libraries": {
+            "ada": false,
+            "brotli": false,
+            "cares": false,
+            "libuv": false,
+            "nghttp2": false,
+            "openssl": false,
+            "simdjson": false,
+            "simdutf": false,
+            "sqlite": false,
+            "uvwasi": false,
+            "zlib": false,
+            "zstd": false
+          }
+        }
+      },
+      "archive_sha256": "97a03902e9cbd955dec49c9a06812439537f0c7f9dea9de5aae44de6cedb1231",
+      "archive_bytes": 54356188,
+      "local_install_ms": 2460,
+      "repeat_install_ms": 2331,
+      "total_ms": 31230,
+      "network_download_measured": false,
+      "real_issuer_login": false,
+      "native_harness_run": false,
+      "checks": [
+        "pinned-node-dependency-and-notice-inventory",
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "codex-extracted-lifecycle-replay",
+        "copilot-cli-extracted-lifecycle-replay"
+      ]
+    },
+    "coherent_archive_controls": [
+      {
+        "control": "truncated-helper-notice",
+        "archive_sha256": "c3581e4d153de168d26ace12cc009a6792991c8c0bcf2f698a3326294a726263",
+        "manifest_inventory_valid": true,
+        "report_updated_coherently": true,
+        "refusal": "Node notice size differs from upstream pin"
+      }
+    ],
+    "control_storage_removed": true
+  },
+  "product": {
+    "build": {
+      "dockerfile": "deploy/compose/product/Dockerfile",
+      "platform": "linux/arm64",
+      "release_version": "0.4.3",
+      "native_engine": "linux/aarch64",
+      "source_labels": {
+        "org.opencontainers.image.revision": "c66242cca819c2cf622634ff7303fad02076abb5",
+        "org.opencontainers.image.source": "https://github.com/synveda/synveda",
+        "org.opencontainers.image.version": "0.4.3"
+      },
+      "inspected_image_id": "sha256:dad63d1841b06612131606693a1600525013fb5b0e89e983820932a4f5e838ca"
+    },
+    "node_inventory": {
+      "schema_version": 1,
+      "target": "linux-arm64",
+      "upstream_source_sha": "aa4c77582be995286fc6e00aaf530dc7ade102a9",
+      "binary_bytes": 122159120,
+      "binary_sha256": "1a638b0fe2b68da0489276aca95526c5122fc61ba54d6a2d0d00c1c92ab7b876",
+      "notices": {
+        "LICENSE": {
+          "bytes": 145485,
+          "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4"
+        },
+        "nbytes-LICENSE": {
+          "bytes": 1064,
+          "sha256": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2"
+        },
+        "sqlite-NOTICE": {
+          "bytes": 297,
+          "sha256": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755"
+        },
+        "v8-abseil-LICENSE": {
+          "bytes": 11361,
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747"
+        },
+        "v8-fp16-LICENSE": {
+          "bytes": 1158,
+          "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d"
+        },
+        "v8-rapidhash-LICENSE": {
+          "bytes": 1705,
+          "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0"
+        },
+        "v8-zlib-LICENSE": {
+          "bytes": 910,
+          "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c"
+        }
+      },
+      "dependencies": {
+        "acorn": "8.16.0",
+        "ada": "2.9.2",
+        "amaro": "1.1.8",
+        "ares": "1.34.6",
+        "brotli": "1.1.0",
+        "cjs_module_lexer": "2.2.0",
+        "icu": "78.2",
+        "llhttp": "9.4.3",
+        "nbytes": "0.1.3",
+        "ncrypto": "0.0.1",
+        "nghttp2": "1.69.0",
+        "openssl": "3.5.7",
+        "simdjson": "4.5.0",
+        "simdutf": "6.4.2",
+        "sqlite": "3.51.3",
+        "undici": "6.28.0",
+        "uv": "1.51.0",
+        "uvwasi": "0.0.23",
+        "v8": "12.4.254.21-node.56",
+        "zlib": "1.3.1-e00f703",
+        "zstd": "1.5.7"
+      },
+      "shared_libraries": {
+        "ada": false,
+        "brotli": false,
+        "cares": false,
+        "libuv": false,
+        "nghttp2": false,
+        "openssl": false,
+        "simdjson": false,
+        "simdutf": false,
+        "sqlite": false,
+        "uvwasi": false,
+        "zlib": false,
+        "zstd": false
+      },
+      "runtime_version": "22.23.2"
+    },
+    "console_inventory": {
+      "packages": [
+        {
+          "name": "react",
+          "version": "19.2.8"
+        },
+        {
+          "name": "react-dom",
+          "version": "19.2.8"
+        },
+        {
+          "name": "scheduler",
+          "version": "0.27.0"
+        }
+      ],
+      "files": 12,
+      "inventory_sha256": "64e043c49277b9d892eadd89b5cc26045ac91e8cc854caf12cbe22938c8b3a92",
+      "sbom_sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962",
+      "notices_sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709",
+      "source_sha": "c66242cca819c2cf622634ff7303fad02076abb5",
+      "version": "0.4.3"
+    },
+    "actual_image_controls": [
+      {
+        "control": "truncated-notice",
+        "image_id": "sha256:2d4cbd5dfc9ed7f676a9f414dcaec2095a1dbd20f3401094581ee6f45ba4d8b6",
+        "source_labels_preserved": true,
+        "refusal": "Node notice size differs from upstream pin",
+        "metadata_execution_started": false
+      }
+    ],
+    "inspection_containers_removed": true,
+    "control_images_and_storage_removed": true
+  },
+  "unrelated_deployments_changed": false,
+  "remaining": {
+    "node_notice_provenance": [
+      "ncrypto",
+      "fast_float"
+    ],
+    "complete_conditional_v8_selection": false,
+    "installed_package_report_gates": false,
+    "native_rust_qualification": "awaits an official Syft distribution with the Windows resolver fix and native probes"
+  }
+}

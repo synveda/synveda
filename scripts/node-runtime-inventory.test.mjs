@@ -21,7 +21,7 @@ test("final TAR and actual ZIP readers bind all six Node targets and complete no
 
 test("coherently changed runtime bytes or notices refuse the original upstream pins", (t) => {
   for (const target of ["darwin-arm64", "windows-x86_64", "windows-arm64"]) {
-    for (const name of ["node", "LICENSE", "nbytes-LICENSE", "sqlite-NOTICE"]) {
+    for (const name of ["node", "LICENSE", ...Object.keys(nodePins.supplementary_notices)]) {
       const f = clientNodeFixture(directory(t), target, version, source);
       const path = join(f.runtime, name === "node" ? f.binaryName : name);
       const bytes = readFileSync(path); bytes[bytes.length - 1] ^= 1; writeFileSync(path, bytes);
@@ -93,5 +93,12 @@ test("the reviewed pins and supplementary notice bytes match the retained upstre
       const bytes = readFileSync(new URL(`../assets/licenses/node/${name}`, import.meta.url));
       assert.equal(sha256(bytes), pin.sha256); assert.equal(bytes.length, pin.bytes);
     }
+  }
+  const review = JSON.parse(readFileSync(new URL("../demos/evidence/ops12-node-source-notice-review.json", import.meta.url)));
+  for (const lock of [nodePins, nodePins.product]) {
+    const reviewed = review.node_sources[lock.version];
+    assert.equal(lock.source_sha, reviewed.source_sha);
+    for (const [name, pin] of Object.entries(reviewed.additional_notices))
+      assert.deepEqual(lock.supplementary_notices[name], pin);
   }
 });

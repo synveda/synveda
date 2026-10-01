@@ -1515,3 +1515,52 @@ commits remain retained. These transport failures are separate from product
 failures and the unchanged Syft Windows qualification blocker. The saved
 automation remains paused; no new native source/run, merge, tag or publication
 is authorized by this probe.
+
+### Pinned Node/V8 notice correction (2026-10-01)
+
+The [source review](../../demos/evidence/ops12-node-source-notice-review.json)
+verifies both official Node source archives against their distribution checksums
+and the previously verified release-tag commits. The Node/V8 build files select
+Abseil, FP16, rapidhash and a separate V8 zlib copy in both distributions, plus
+Highway in Node 24. Their complete upstream licence files now join the existing
+supplementary-notice pins. ADR-0135 was amended before implementation; the client
+copy loop and existing archive/image/report readers require those original
+bytes without a new scanner, report format or release sidecar. The product
+copies only its Node 22 set. No library version is inferred from a notice or
+source directory. The installed Apple LLVM 21 tool also reads eleven imports
+from each original Windows Node executable; original hashes and analysis hashes
+are retained. This resolves the static import-list gap, without identifying host
+versions or qualifying Windows execution.
+
+[Actual candidate evidence](../../demos/evidence/ops12-node-helper-notices-candidate.json)
+binds dirty parent `c66242cca819c2cf622634ff7303fad02076abb5`, source-input hashes
+and the complete native ARM product build. Its seven Node notices and all twelve
+console files pass. The macOS ARM client archive
+`97a03902e9cbd955dec49c9a06812439537f0c7f9dea9de5aae44de6cedb1231`
+has eight Node notices and passes all nine native client checks. It uses the
+unchanged-source dev-profile CLI, not a Cargo SBOM-qualified release executable.
+A coherently changed client Abseil notice and truncated product FP16 notice
+refuse the original pins; the image refuses before metadata execution. Owned
+controls and inspection containers were removed. No retained deployment changed.
+This is local notice carriage, not clean hosted, six-target, Cargo/OCI SPDX,
+registry, deployment or complete native coverage qualification.
+
+All 54 focused archive/client/image checks, 44 CI-tooling and 84 release-parity
+tests pass. Fast, deployment/chart, formatting and diff checks pass. No Rust,
+SQL, generated public contract, workflow or publication gate changes.
+
+Next resolve the pinned ncrypto and fast_float notice provenance when GitHub
+access returns; both official source archives omit a separate ncrypto licence,
+and Node 24's fast_float headers lack their full upstream licence. Absence does
+not establish terms, and conditional GN components are not automatically Node
+GYP build dependencies. Independently record the narrow installed-package and
+raw-notice report choice from the retained Syft probe before implementing it.
+Then continue plugin/chart and remaining image coverage, followed by vulnerability
+and publisher incident policy. GitHub source reads time out and the feature-branch
+push again failed with a connection reset; completed commits remain local pending
+transport recovery. The saved automation stays paused. The native Rust Windows
+scanner, operator S3 bucket and real issuer/harness credentials remain separate
+blockers. No new qualification source/run is selected; preserve the original
+51-payload same-run inventory and separate OCI proof, never resume cancelled
+`ef6d61db`, and remove the temporary validation branch only after corrected
+native proof is retained.

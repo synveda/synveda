@@ -186,7 +186,9 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=console /usr/local/bin/node /usr/local/bin/node
 COPY --from=console /usr/local/LICENSE /usr/share/licenses/node/LICENSE
-COPY --chmod=0444 assets/licenses/node/nbytes-LICENSE assets/licenses/node/sqlite-NOTICE /usr/share/licenses/node/
+COPY --chmod=0444 assets/licenses/node/nbytes-LICENSE assets/licenses/node/sqlite-NOTICE \
+    assets/licenses/node/v8-abseil-LICENSE assets/licenses/node/v8-fp16-LICENSE \
+    assets/licenses/node/v8-rapidhash-LICENSE assets/licenses/node/v8-zlib-LICENSE /usr/share/licenses/node/
 RUN mkdir -p /usr/share/licenses/synveda \
     && chmod 0555 /usr/share/licenses /usr/share/licenses/synveda
 COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
