@@ -1034,9 +1034,19 @@ nonpublishing Release
 bound to that exact source. The superseded `668a3f96` CI and independent Release
 were deliberately cancelled; they supply no qualification for the correction.
 Local CI tooling (27 tests), fast checks, actionlint, Rust formatting and diff
-checks pass. No Rust crate or generated contract changed. Hosted completion,
-original-inventory hashing and independent per-binary/document checks remain
-pending; source qualification and production readiness are not claimed.
+checks pass. This CI again failed during registry transfers: CNPG's builder
+could not download `windows-link` for pinned cargo-auditable, and macOS ARM
+could not fetch `bumpalo` before native CLI tests. Both reported HTTP/2 framing
+errors, following the earlier same-job transfer failures on different packages.
+Native build jobs and the product image builder now set
+`CARGO_HTTP_MULTIPLEXING=false`; [Cargo's supported configuration](https://doc.rust-lang.org/cargo/reference/config.html#httpmultiplexing)
+selects HTTP/1.1 while retaining TLS verification, locked dependencies and
+existing checks. The setting is confined to these builds. No Rust crate,
+runtime configuration or generated contract changed. Next supersede the native
+runs with full CI and a nonpublishing Release on the transport correction,
+then independently verify its original 51-payload inventory and each binary's
+document before retaining qualification. Preserve the independent `3beeb1cb`
+OCI drill. Hosted completion and production readiness remain unclaimed.
 
 ### Next non-Rust mechanism probe (2026-10-01)
 

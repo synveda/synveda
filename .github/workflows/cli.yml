@@ -40,6 +40,8 @@ jobs:
     timeout-minutes: 75
     env:
       SQLX_OFFLINE: "true"
+      # Registry transfers use HTTP/1.1 to avoid failing multiplexed connections.
+      CARGO_HTTP_MULTIPLEXING: "false"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -150,6 +152,7 @@ jobs:
     timeout-minutes: 75
     env:
       SQLX_OFFLINE: "true"
+      CARGO_HTTP_MULTIPLEXING: "false"
       RUSTUP_TOOLCHAIN: 1.96.0-${{ matrix.rust-host }}
       SYNVEDA_CLIENT_VERSION: ${{ inputs.version }}
       SYNVEDA_CLIENT_TARGET: ${{ matrix.target }}

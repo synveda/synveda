@@ -65,6 +65,9 @@ RUN set -eu; \
     test "$(RUSTUP_TOOLCHAIN="$RUST_VERSION" rustc --version | cut -d ' ' -f 2)" = "$RUST_VERSION"
 ENV RUSTUP_TOOLCHAIN=$RUST_VERSION
 
+# Registry transfers use HTTP/1.1 to avoid failing multiplexed connections.
+ENV CARGO_HTTP_MULTIPLEXING=false
+
 # OPS-12 / ADR-0133: final-stage SBOM scanning needs the linked Rust inventory,
 # including after source layers invalidate the dependency cache. This tool is
 # confined to the builder; registry checksums and its locked graph govern install.
