@@ -79,7 +79,10 @@ export function checkNativeRustSpdx(spdx, binaryHash, binary, version) {
   assert.match(binaryHash, hashPattern);
   const content = checkRustSpdx(spdx, binary.kind, version, nativeRustScanner);
   assert.ok(Array.isArray(spdx.files) && spdx.files.length === 1, "native Rust SBOM must describe exactly one binary");
-  assert.equal(spdx.files[0].fileName, binary.member.split("/").at(-1), "native SBOM file differs from the archived binary");
+  // Pinned Syft names a Windows file relative to its synthetic root. Exact
+  // spelling preserves member identity without normalizing arbitrary paths.
+  const fileName = binary.member === "client/bin/synveda.exe" ? "\\synveda.exe" : binary.member.split("/").at(-1);
+  assert.equal(spdx.files[0].fileName, fileName, "native SBOM file differs from the archived binary");
   const sums = spdx.files[0].checksums;
   assert.ok(Array.isArray(sums) && sums.length <= 8, "expected bounded binary checksums");
   assert.deepEqual(sums.filter((sum) => sum.algorithm === "SHA256").map((sum) => sum.checksumValue), [binaryHash], "native SBOM binary hash differs");

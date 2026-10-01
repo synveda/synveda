@@ -340,12 +340,16 @@ clean-source gate refuses the local dirty reports. Full hosted qualification of
 this new source remains the next action. Non-Rust coverage and release-security
 policy remain open; [OPS-12](OPS-12.md) owns the exact boundary.
 
-The first native source runs on `c535d4f4` were deliberately cancelled after a
-focused test reproduced a Windows CRLF lockfile-reader defect. The reader now
-normalizes line endings; the lockfile and required versions remain unchanged.
-All 26 CI-tooling tests pass. The next action is exact-source full CI and a
-nonpublishing release rerun, followed by independent expanded-inventory checks;
-cancelled run reports cannot qualify the correction.
+Native source qualification remains open. The `c535d4f4` runs were cancelled
+after a regression test reproduced a Windows CRLF lockfile-reader defect.
+Correction `668a3f96` passed native Linux archive checks, but its Windows x64
+SBOM check refused pinned Syft's actual `\synveda.exe` file spelling after all
+11 packaged-client checks passed. The validator now requires that exact Windows
+root-relative name, while retaining the single-file SHA-256 and Cargo checks;
+foreign, nested and drive-qualified paths refuse. All 27 CI-tooling tests pass.
+The next action is full CI and a nonpublishing release drill on this correction,
+then independent verification of all 51 same-run payloads. Superseded reports
+cannot qualify the new source; the `3beeb1cb` OCI drill remains independent.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered

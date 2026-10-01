@@ -358,7 +358,10 @@ SPDX documents and hash-bound reports across all six client and both historical
 server archives. Twenty sidecars join the closed release/publisher inventory.
 Local macOS ARM packaging, successful server stripping and private client
 execution pass; the clean-source gate correctly refuses the local dirty probe.
-Clean hosted qualification of this increment remains pending. It does not
+Windows x64 passed packaged execution before the new validator refused pinned
+Syft's root-relative filename; a failing-then-passing regression now pins the
+exact Windows spelling and retains file/hash/content refusals. Clean hosted
+qualification of the correction remains pending. It does not
 establish non-Rust inventory, complete notices, vulnerability policy or readiness.
 
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |

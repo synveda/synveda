@@ -111,6 +111,27 @@ test("the actual locked Cargo reader handles Windows CRLF checkouts", async (t) 
   });
 });
 
+test("pinned Windows Syft filenames bind only the root-relative scanned executable", () => {
+  for (const target of ["windows-arm64", "windows-x86_64"]) {
+    const binary = rustArchivePlan("client", target, version).binaries[0];
+    const binaryHash = sha256(bytesFor(target));
+    const doc = spdxFor(binary, binaryHash);
+    doc.files[0].fileName = "\\synveda.exe";
+    assert.equal(checkNativeRustSpdx(doc, binaryHash, binary, version).required_packages["synveda-cli"], version);
+    for (const fileName of ["synveda.exe", "/synveda.exe", "\\\\synveda.exe", "\\other\\synveda.exe", "C:\\synveda.exe", "\\synveda-gateway.exe"]) {
+      const damaged = structuredClone(doc);
+      damaged.files[0].fileName = fileName;
+      assert.throws(() => checkNativeRustSpdx(damaged, binaryHash, binary, version), /file differs/);
+    }
+    assert.throws(() => checkNativeRustSpdx(doc, "b".repeat(64), binary, version), /hash differs/);
+  }
+  const binary = rustArchivePlan("client", "linux-arm64", version).binaries[0];
+  const binaryHash = sha256(bytesFor("linux-arm64"));
+  const doc = spdxFor(binary, binaryHash);
+  doc.files[0].fileName = "\\synveda";
+  assert.throws(() => checkNativeRustSpdx(doc, binaryHash, binary, version), /file differs/);
+});
+
 test("actual archive members and actual SPDX bytes bind each final executable", (t) => {
   for (const kind of ["client", "server"]) {
     const f = fixture(t, kind);

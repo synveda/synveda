@@ -971,7 +971,7 @@ CLI/gateway/worker contain 295/327/327, each with Cedar 4.11.2 and SQLx 0.8.6.
 Actual archive/SPDX hashes and per-binary checks pass. Private client
 install/reinstall, packaged authentication and extracted Codex/Copilot replay
 pass. The clean-source assembly gate refuses these local reports as intended.
-Eight focused tests cover all six platform headers, regular/unique member
+Nine focused tests cover all six platform headers, regular/unique member
 extraction, missing/misversioned/foreign-binary content, changed source/pins/
 documents and pre-execution scanner download refusal. CI/workflow gates and
 release parity pass. No Rust source, lockfile, SQL or generated API changed.
@@ -998,6 +998,30 @@ the new reader's LF-only assumption; no report from either run qualifies the
 corrected source. The reader now normalizes TOML line endings before selecting
 the same locked package tables. All 26 CI-tooling tests pass, including the new
 real-module CRLF case and existing content/source/hash refusals. The repository
-lockfile and runtime requirements are unchanged. Next rerun full CI and the
-nonpublishing drill on the correction commit, retaining the preceding `3beeb1cb`
-OCI drill independently.
+lockfile and runtime requirements are unchanged.
+
+Correction `668a3f96` started full CI
+[`36793829307`](https://github.com/synveda/synveda/actions/runs/36793829307).
+Both native Linux client/SBOM jobs passed. Independent ARM inspection rehashed
+the actual archived CLI and its SPDX document: 295 Cargo identities, with the
+required root, Cedar 4.11.2 and SQLx 0.8.6, matching its client-execution report.
+The CNPG and macOS ARM jobs failed during crates.io transfers before their
+changed gates. Windows x64 passed all 11 packaged-client checks, then refused
+Syft 1.51.0's actual `\synveda.exe` filename; the validator had assumed a bare
+POSIX-style name. The regression test reproduced that refusal before the fix.
+It now requires the exact pinned Windows root-relative spelling, with nested,
+drive-qualified, foreign and POSIX-style names refused. Binary hashes, Cargo
+content and all POSIX filename checks remain required. All 27 CI-tooling tests
+pass, including both Windows architecture fixtures and a foreign-hash refusal.
+
+The queued same-source Release
+[`36793836009`](https://github.com/synveda/synveda/actions/runs/36793836009) was
+replaced by independent nonpublishing Release
+[`36795598062`](https://github.com/synveda/synveda/actions/runs/36795598062) on
+`codex/ops12-native-sbom-qualification`, also at `668a3f96`. These native runs are
+superseded by the filename correction and cannot qualify its source. Next run
+full CI and a nonpublishing drill on the correction commit, independently check
+all 51 same-run payloads and eight archive/SPDX sets, and retain the preceding
+`3beeb1cb` OCI drill separately. The temporary validation branch avoids serialized
+drills without changing source or skipping gates; remove it after its retained
+qualification. Non-Rust work follows this qualification.
