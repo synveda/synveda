@@ -1025,3 +1025,38 @@ all 51 same-run payloads and eight archive/SPDX sets, and retain the preceding
 `3beeb1cb` OCI drill separately. The temporary validation branch avoids serialized
 drills without changing source or skipping gates; remove it after its retained
 qualification. Non-Rust work follows this qualification.
+
+The Windows filename correction is committed as
+`aea91758eb7ce8fe20c7fff5525154138b4398ec`. Full CI
+[`36796653523`](https://github.com/synveda/synveda/actions/runs/36796653523) and
+nonpublishing Release
+[`36796662979`](https://github.com/synveda/synveda/actions/runs/36796662979) are
+bound to that exact source. The superseded `668a3f96` CI and independent Release
+were deliberately cancelled; they supply no qualification for the correction.
+Local CI tooling (27 tests), fast checks, actionlint, Rust formatting and diff
+checks pass. No Rust crate or generated contract changed. Hosted completion,
+original-inventory hashing and independent per-binary/document checks remain
+pending; source qualification and production readiness are not claimed.
+
+### Next non-Rust mechanism probe (2026-10-01)
+
+[Local evidence](../../demos/evidence/ops12-console-sbom-probe.json) binds an
+in-memory Vite comparison to unchanged console/lockfile/font inputs from
+`668a3f96`. Both builds reproduced the existing console JavaScript chunk hash.
+Pinned Syft's JavaScript package scan found zero npm identities in the built
+directory. Independent rendered-module inspection identified React 19.2.8,
+React DOM 19.2.8 and scheduler 0.27.0. The isolated `rollup-plugin-sbom` 3.2.2
+probe produced the same three identities, their dependency edges and complete
+MIT licence bytes matching the installed packages' hashes.
+
+[Syft's catalogue](https://oss.anchore.com/docs/capabilities/javascript/)
+documents its package/lockfile evidence; [Rollup's output hook](https://rollupjs.org/plugin-development/#generatebundle)
+exposes emitted chunks and module information. The
+[upstream plugin](https://github.com/janbiasi/rollup-plugin-sbom/tree/v3.2.2)
+is a candidate build-time reuse boundary. No project dependency or production
+pin was added. Review the maintained release, helper attribution, complete
+notice carriage and artifact/source/hash binding, then record the decision
+before implementation. The probe's optional bundler tool auto-registration
+warned because its disposable installation had no peer packages; component and
+licence collection passed. Generated helpers, fonts, Node/native libraries,
+charts and upstream image contents remain separate coverage requirements.

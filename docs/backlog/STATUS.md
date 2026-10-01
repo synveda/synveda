@@ -347,9 +347,14 @@ SBOM check refused pinned Syft's actual `\synveda.exe` file spelling after all
 11 packaged-client checks passed. The validator now requires that exact Windows
 root-relative name, while retaining the single-file SHA-256 and Cargo checks;
 foreign, nested and drive-qualified paths refuse. All 27 CI-tooling tests pass.
-The next action is full CI and a nonpublishing release drill on this correction,
-then independent verification of all 51 same-run payloads. Superseded reports
-cannot qualify the new source; the `3beeb1cb` OCI drill remains independent.
+Correction `aea91758` is running
+[full CI](https://github.com/synveda/synveda/actions/runs/36796653523) and an
+independent [nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36796662979).
+Next resolve any failures and independently verify all 51 same-run payloads,
+eight native archive reports and twelve SPDX documents before retaining proof.
+Superseded reports cannot qualify the new source; the `3beeb1cb` OCI drill
+remains independent. Non-Rust inventory and notices follow; a local console
+mechanism probe is retained in [OPS-12](OPS-12.md), without a production pin.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
