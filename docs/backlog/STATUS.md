@@ -514,13 +514,18 @@ recovers, then complete other-image coverage before security policies. No clean
 hosted or six-target qualification follows; all external blockers and the paused
 automation remain unchanged.
 
-Completed slices are retained locally as `4ff8e6ac` and `fe3e1e4f`. Automatic
-approval review rejected the attempted feature-branch push as repository code
-egress without explicit push authorization; no push ran. Owner approval is
-required before sending the pending branch commits to GitHub `synveda/synveda`
-on `codex/synveda-production-roadmap`. This approval block is separate from the
-earlier transport failures and product qualification gaps; the implementation
-order above remains current.
+Completed slices are retained locally as `4ff8e6ac` and `fe3e1e4f`. The owner
+explicitly authorized the pending feature-branch commits and checkpoint with
+`push it`, resolving the earlier automatic approval rejection. The HTTPS push
+through `98e007a2` timed out; independent GitHub HTTPS/API TLS probes also failed.
+The verified SSH endpoint responds but refuses existing credentials, including
+the `github.com` host configuration. No successful push or remote HEAD check is
+confirmed. Restore GitHub HTTPS access or existing SSH authentication, retry the
+already-authorized push to `synveda/synveda` on
+`codex/synveda-production-roadmap`, and verify remote HEAD; no further push
+approval is required. This access blocker remains separate from product
+qualification gaps. The implementation order above and paused automation remain
+current; the OPS-12 brief owns the exact continuation checkpoint.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
