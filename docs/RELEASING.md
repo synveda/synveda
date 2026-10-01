@@ -94,7 +94,9 @@ retains those files and its Apache-2.0 metadata. Client qualification compares
 every required notice with source bytes, and assembly requires the resulting
 `licence-and-notice-carriage` check from all six native archive reports.
 Assembly separately refuses missing, changed, duplicate or non-regular notices
-in the six other TAR/chart archives. Chart parity checks the real packaged bytes.
+in the six other TAR/chart archives. Chart parity checks the real packaged bytes
+across clock seconds. The packager fixes timestamps only in its private staging
+copies; original chart and complete notice bytes remain intact.
 
 The six Synveda OCI images retain those notices at
 `/usr/share/licenses/synveda/`, readable without root. Native candidate and
@@ -119,6 +121,18 @@ OCI exports use fixed loopback names to populate subjects without publishing.
 These checks do not establish native archive, non-Rust or full dependency SBOM
 coverage, vulnerability policy or readiness; [OPS-12](backlog/OPS-12.md) records
 local ARM evidence and the required clean hosted follow-up.
+
+[ADR-0136](adr/adr-0136-verify-product-system-packages-and-notices.md) extends the
+same product SPDX report with installed Debian identities, supporting copyright
+paths, all recognized raw copyright/common-licence hashes, the package database
+and reviewed OpenSSL/libc/C++ file hashes and owners. Stopped-image inspection
+independently corroborates database identities, original bytes and native ELF
+headers. The raw notices remain in the product. Existing local and both-registry
+image reports retain the actual file sizes/hashes, and assembly requires their
+exact candidate inventory. Public verification reads the checksummed
+`release-candidate-ARCH.json` beside its required registry inventory before
+inspection. No new scanner or release payload is added. Other images, remaining
+native components, plugins/chart terms and security policies remain open.
 
 Native archive producers also use pinned `cargo-auditable` 0.7.6, installed in
 private runner storage. [Reviewed Syft 1.51.0 pins](../scripts/syft-runtimes.json)

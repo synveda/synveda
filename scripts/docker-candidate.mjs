@@ -34,7 +34,7 @@ export function candidateIdentity(candidate, version, source, arch) {
     assert.match(entry.sha256, /^[a-f0-9]{64}$/);
     assert.match(entry.digest, /^sha256:[a-f0-9]{64}$/);
     if (Object.hasOwn(rustImageRoots, name))
-      checkRustImageReport(entry.rust_sbom, name, version, entry.rust_sbom?.image_manifest);
+      checkRustImageReport(entry.rust_sbom, name, version, entry.rust_sbom?.image_manifest, `linux/${arch}`);
   }
 }
 const run = (command, args, extra = {}) =>
@@ -137,11 +137,13 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
     source,
     undefined,
     true,
+    undefined,
+    candidate.images.product.rust_sbom.debian_inventory,
   );
   for (const entry of report.images) {
     if (!Object.hasOwn(rustImageRoots, entry.name)) continue;
     const sbom = candidate.images[entry.name].rust_sbom;
-    checkRustImageReport(sbom, entry.name, version, entry.platforms[`linux/${arch}`]);
+    checkRustImageReport(sbom, entry.name, version, entry.platforms[`linux/${arch}`], `linux/${arch}`);
     entry.rust_sbom = sbom;
   }
   writeFileSync(

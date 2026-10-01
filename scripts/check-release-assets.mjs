@@ -12,6 +12,7 @@ import { checkRustImageReport, rustImageRoots } from "./rust-image-sbom.mjs";
 import { checkRustArchiveReport, rustArchiveAssets, rustArchivePlans } from "./rust-archive-sbom.mjs";
 import { checkConsoleImageReport, checkConsolePackage } from "./check-console-package.mjs";
 import { checkProductNodeReport } from "./node-runtime-inventory.mjs";
+import { checkProductPackageImageReport } from "./product-package-inventory.mjs";
 
 export const clientTargets = [
   "darwin-arm64",
@@ -97,11 +98,12 @@ export function checkCandidateImageReports(directory, version, source, consoleRe
       assert.equal(entries.length, 1, "expected one Rust image report");
       const checked = entries[0];
       assert.equal(checked.image, `localhost:5000/synveda/${releaseImages[name]}@${candidate.images[name].digest}`);
-      checkRustImageReport(candidate.images[name].rust_sbom, name, version, checked.platforms?.[platform]);
+      checkRustImageReport(candidate.images[name].rust_sbom, name, version, checked.platforms?.[platform], platform);
       assert.deepEqual(checked.rust_sbom, candidate.images[name].rust_sbom, `${name}: candidate Rust SBOM evidence differs`);
       if (name === "product") {
         checkConsoleImageReport(checked.console_inventory, consoleReport, version, source);
         checkProductNodeReport(checked.node_inventory, platform);
+        checkProductPackageImageReport(checked.package_inventory, candidate.images.product.rust_sbom.debian_inventory, platform, checked.platforms?.[platform]);
       }
     }
   }
@@ -112,6 +114,7 @@ export function checkQualification(directory, version, source, inventory, consol
     JSON.parse(readFileSync(join(directory, `release-${kind}-${arch}.json`)));
   for (const arch of ["amd64", "arm64"]) {
     const platform = `linux/${arch}`;
+    const expectedPackages = read("candidate", arch).images.product.rust_sbom.debian_inventory;
     const image = read("images", arch);
     assert.equal(image.release_version, version);
     assert.equal(image.source_sha, source);
@@ -134,6 +137,7 @@ export function checkQualification(directory, version, source, inventory, consol
         if (name === "product") {
           checkConsoleImageReport(checkedImage.console_inventory, consoleReport, version, source);
           checkProductNodeReport(checkedImage.node_inventory, platform);
+          checkProductPackageImageReport(checkedImage.package_inventory, expectedPackages, platform, checkedImage.platforms[platform]);
         }
       }
     }

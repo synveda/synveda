@@ -479,6 +479,25 @@ coverage and security policies. The saved automation remains paused. The native
 Windows scanner blocker and OPS-12's open state remain unchanged; its brief owns
 the exact next action.
 
+ADR-0136 now extends the existing product SPDX and image reports with installed
+Debian identities, complete notice hashes and native-library ownership. Independent
+stopped-image reads corroborate the database, actual bytes and native ELF target;
+assembly requires matching local and both-registry evidence inside the unchanged
+51-payload plan. [Actual ARM evidence](../../demos/evidence/ops12-product-package-inventory-candidate.json)
+binds a new clean `7d1ab12e` product artifact to the dirty reader candidate:
+106 packages, 119 full notices, four native libraries and the database pass.
+Two real changed-image controls refuse and are removed. This is local candidate
+evidence, not clean hosted qualification. A chart packaging defect exposed by
+the unchanged reproducibility gate is fixed by stable private staging timestamps;
+notice bytes remain intact. All 44 focused, 53 CI-tooling and 85 release-parity
+tests pass, with fast, deployment/chart, Rust formatting and diff checks.
+Next resolve the pinned ncrypto/fast_float provenance and remaining Node/native
+coverage, then plugin/chart/other-image inventory and notices before security
+policies. GitHub source reads and the feature push remain transport-blocked;
+retry when access returns. The saved automation stays paused. The Windows
+scanner, operator bucket and real issuer/harness blockers remain separate;
+the OPS-12 brief owns the exact continuation checkpoint.
+
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
 - [x] CNSL-5: Console theme and everyday usability — delivered

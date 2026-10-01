@@ -1564,3 +1564,56 @@ blockers. No new qualification source/run is selected; preserve the original
 51-payload same-run inventory and separate OCI proof, never resume cancelled
 `ef6d61db`, and remove the temporary validation branch only after corrected
 native proof is retained.
+
+### Product system package and full-notice gate (2026-10-01)
+
+[ADR-0136](../adr/adr-0136-verify-product-system-packages-and-notices.md) was
+accepted before implementation. The existing hashed native product SPDX now
+supplies installed Debian name/version/architecture/source identities, complete
+notice paths and hashes, database provenance and four native-library hashes and
+owners. Independent bounded stopped-image reads corroborate every installed
+identity against the actual database, every selected raw file against its
+original SPDX hash and each library's native ELF target. Local and both-registry
+image reports retain that evidence; assembly requires its exact candidate
+inventory. No scanner, service, formatter, workflow or release sidecar is added.
+The original 51-payload and Cargo/console/Node/publication gates remain intact.
+
+[Retained local evidence](../../demos/evidence/ops12-product-package-inventory-candidate.json)
+binds the dirty reader candidate based on `7d1ab12e61fab348c49a5727ae2a2affc6b2c442`
+to a newly built clean product artifact from that same commit:
+
+- Native ARM manifest: `sha256:00018d7824029e1c3f0328652c2eeaadd4b1335604b4587326312e60e7acfe03`.
+- Attestation manifest: `sha256:afa8f37a3f82f7f4642dbb0f153b32a9bc5c991687e25f45468024a34afe1221`.
+- Original SPDX statement: `dcd1a03bd318d465602ada4c57b30f624897cda9056b909014e24bfc774e8a7a`.
+
+All 106 Debian packages, 119 complete copyright/common-licence files, four
+native libraries and the package database pass actual same-image reads. The
+same image passes all twelve console files and seven pinned Node notices. A
+truncated libssl copyright refuses its original hash. A changed glibc source in
+the actual database still refuses after the control coherently updates that
+file's expected digest. Owned control images and inspection containers are
+removed; no unrelated retained deployment changes. This is local candidate
+validation, not clean hosted, AMD64, six-client, registry, deployment or complete
+third-party qualification. No full qualification source/run is selected.
+
+The final unchanged release-parity gate exposed a real chart defect: Helm retained
+wall-clock timestamps from private staging copies. Two packages across different
+seconds had identical contents but different archive hashes. The packager now
+fixes only private staged file timestamps; a real two-package regression checks
+byte identity and complete LICENSE/NOTICE carriage. All 44 focused, 53 CI-tooling
+and 85 release-parity tests pass. Fast, required deployment/chart, Rust formatting,
+actionlint and diff checks pass. No Rust, SQL or generated public contract changes.
+
+Current next action supersedes the preceding implementation checkpoint: resolve
+pinned ncrypto/fast_float provenance and remaining Node/native coverage, then
+plugin/chart and other-image inventories/full notices, followed by vulnerability
+and publisher incident policy. Exact GitHub source reads still time out; the
+bounded HTTP/1.1 feature-branch push also timed out. Retain local commits and retry
+transport when it recovers, without inferring terms from current upstream heads.
+The saved automation remains paused. The native Windows scanner, unavailable
+operator S3 bucket and real issuer/harness credentials remain separate blockers.
+When a fixed official scanner distribution passes actual native path/hash probes,
+record the corrected source and dispatch fresh full CI/nonpublishing Release;
+verify the original same-run 51-payload inventory before assembly. Preserve the
+separate `3beeb1cb` OCI proof, never resume cancelled `ef6d61db` runs, and remove
+the temporary qualification branch only after corrected native proof is retained.

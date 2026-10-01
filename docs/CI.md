@@ -294,6 +294,16 @@ isolated native metadata command. Existing local and both-registry reports
 retain the pinned dependency/notice inventory; assembly independently checks
 its reviewed platform, executable, notice and dependency values. Console
 byte/source binding and the original 51-payload inventory remain required.
+ADR-0136 also derives installed Debian identities, supporting complete notices,
+package database and reviewed native-library hashes/owners from the original
+product SPDX. Independent stopped-image reads compare the database identities,
+full raw bytes and native ELF target before product execution. File count,
+per-file size, total copied bytes and the 180-second inspection deadline are
+bounded; failed inspection or owned cleanup cannot retain passing evidence.
+Existing local and both-registry reports carry the observed sizes and hashes;
+assembly compares them to the native-image-bound candidate inventory. This
+extends existing reports without changing the 51-payload inventory or claiming
+complete native/third-party coverage.
 Helm operations compare the complete three-row migration ledger
 before and after concurrent reruns. The outage observer requires gateway-loopback
 readiness 503 and liveness 200, then public recovery. Retained reinstall requires

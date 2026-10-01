@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { checkRustImageReport, checkRustStatement, inspectRustImageSbom } from "./rust-image-sbom.mjs";
+import { productPackageFixture } from "./fixtures/product-packages.mjs";
 
 const source = "a".repeat(40);
 const version = "0.4.3";
@@ -45,6 +46,10 @@ function fixture(t, mutate = () => {}) {
     "org.opencontainers.image.revision": source, "org.opencontainers.image.version": version,
   } } };
   const doc = statement();
+  const packages = productPackageFixture();
+  doc.predicate.packages.push(...packages.spdx.packages);
+  doc.predicate.files = packages.spdx.files;
+  doc.predicate.relationships = packages.spdx.relationships;
   const native = { schemaVersion: 2, layers: [] };
   const attestation = { schemaVersion: 2, layers: [] };
   const index = { schemaVersion: 2, manifests: [] };

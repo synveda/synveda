@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { checkRustContentReport, checkRustSpdx, rustRoots } from "./rust-sbom.mjs";
+import { checkProductPackagePlan, productPackageInventory } from "./product-package-inventory.mjs";
 
 export const rustImageRoots = {
   product: rustRoots.product,
@@ -78,10 +79,11 @@ export function inspectRustImageSbom(archive, arch, name, version, source) {
   const statement = readBlob(archive, sboms[0]);
   const content = checkRustStatement(statement.json, native[0].digest, name, version);
   return { schema_version: 1, image_manifest: native[0].digest, attestation_manifest: attestations[0].digest,
-    statement_sha256: hash(statement.bytes), ...content };
+    statement_sha256: hash(statement.bytes), ...content,
+    ...(name === "product" ? { debian_inventory: productPackageInventory(statement.json.predicate, `linux/${arch}`, native[0].digest) } : {}) };
 }
 
-export function checkRustImageReport(report, name, version, imageManifest) {
+export function checkRustImageReport(report, name, version, imageManifest, platform) {
   assert.equal(report?.schema_version, 1, "missing Rust SBOM evidence");
   assert.match(report.image_manifest, digestPattern);
   assert.match(imageManifest ?? "", digestPattern, "missing native image binding");
@@ -89,6 +91,7 @@ export function checkRustImageReport(report, name, version, imageManifest) {
   assert.match(report.attestation_manifest, digestPattern);
   assert.match(report.statement_sha256, /^[0-9a-f]{64}$/);
   checkRustContentReport(report, name, version);
+  if (name === "product") checkProductPackagePlan(report.debian_inventory, platform, imageManifest);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {

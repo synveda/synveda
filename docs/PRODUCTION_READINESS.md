@@ -243,6 +243,18 @@ or host-version claims. Ncrypto/fast_float provenance, conditional V8 selection,
 installed-package report gates and complete third-party coverage remain open.
 This dirty source candidate changes neither hosted qualification nor readiness.
 
+ADR-0136 implements the product package/notice report gate using the existing
+hashed OCI SPDX and stopped-image readers. The [local ARM candidate](../demos/evidence/ops12-product-package-inventory-candidate.json)
+checks all 106 installed Debian identities against the actual database, 119
+complete notice files and four owned native ELF library files against original
+SPDX hashes. Changed notice bytes and a coherently rehashed foreign database
+source refuse; owned controls are removed. Local and both-registry reports and
+assembly require the same native image inventory without a new scanner or
+release sidecar. Private chart staging timestamps now preserve reproducible
+packaging across clock seconds and complete notice bytes. Clean hosted/AMD64
+evidence, remaining native and other-artifact coverage and security policies
+remain pending; the readiness verdict is unchanged.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.

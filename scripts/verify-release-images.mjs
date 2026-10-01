@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   digestPattern, imageNamespace, indexDescriptors, platforms,
@@ -15,7 +15,10 @@ import {
 import { readConsoleArchive } from "./check-console-package.mjs";
 import { checkConsoleFiles } from "../console/build/dependency-contract.mjs";
 import { checkNodeFiles, nodeInventory, nodeMetadataArguments } from "./node-runtime-inventory.mjs";
-import { readArchiveMember } from "./rust-archive-sbom.mjs";
+import { checkNativeBinary, readArchiveMember } from "./rust-archive-sbom.mjs";
+import { checkProductPackageImageReport, checkProductPackagePlan, checkInstalledPackageDatabase, packageDatabase } from "./product-package-inventory.mjs";
+import { checkRustImageReport } from "./rust-image-sbom.mjs";
+import { sha256 } from "./client-artifact.mjs";
 
 export { validateIndex } from "./release-registries.mjs";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -91,6 +94,46 @@ export function inspectNodeImage(imageId, platform, run = execute, root = reposi
     assert.ok(typeof metadata === "string" && Buffer.byteLength(metadata) <= 64 * 1024, "Node image metadata exceeds its bound");
     const observed = JSON.parse(metadata);
     report = { ...nodeInventory(files, observed, target, lock), runtime_version: observed.versions.node };
+  } catch (error) { failure = error; }
+  try { run(["rm", "--force", "--volumes", container], 15_000); } catch (error) { failure ??= error; }
+  try { rmSync(scratch, { recursive: true }); } catch (error) { failure ??= error; }
+  if (failure) throw failure;
+  return report;
+}
+
+export function inspectProductPackages(imageId, platform, expected, run = execute) {
+  assert.match(imageId, digestPattern);
+  checkProductPackagePlan(expected, platform);
+  const container = `synveda-packages-check-${randomUUID()}`;
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-product-packages-"));
+  const deadline = Date.now() + 180_000;
+  let report, failure, copied = 0;
+  try {
+    const id = run(["create", "--name", container, "--pull=never", "--platform", platform,
+      "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+      "--user=65532:65532", "--pids-limit=64", "--memory=128m", "--cpus=1",
+      "--entrypoint", "/usr/local/bin/synveda", imageId, "--version"]);
+    assert.match(id, /^[0-9a-f]{64}$/, "expected one stopped package inspection container");
+    const files = [];
+    for (const [i, file] of expected.files.entries()) {
+      const remaining = deadline - Date.now();
+      assert.ok(remaining > 0, "product package inspection deadline exceeded");
+      const limit = file.kind === "notice" ? 1024 * 1024 : file.kind === "database" ? 4 * 1024 * 1024 : 32 * 1024 * 1024;
+      const bytes = run(["cp", `${container}:${file.path}`, "-"], Math.min(60_000, remaining), true, limit + 2 * 1024 * 1024);
+      assert.ok(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= limit + 2 * 1024 * 1024, "product package stream exceeds its bound");
+      copied += bytes.length;
+      assert.ok(copied <= 64 * 1024 * 1024, "product package streams exceed their total bound");
+      const archive = join(scratch, `${i}.tar`);
+      writeFileSync(archive, bytes, { flag: "wx", mode: 0o600 });
+      const actual = readArchiveMember(archive, file.path.split("/").at(-1), limit);
+      assert.equal(sha256(actual), file.sha256, "actual product package file hash differs from OCI SPDX");
+      if (file.path === packageDatabase) checkInstalledPackageDatabase(actual, expected);
+      if (file.kind === "library") checkNativeBinary(actual, platform === "linux/arm64" ? "linux-arm64" : "linux-x86_64");
+      files.push({ ...file, bytes: actual.length });
+    }
+    assert.ok(Date.now() <= deadline, "product package inspection deadline exceeded");
+    report = { ...expected, files };
+    checkProductPackageImageReport(report, expected, platform, expected.image_manifest);
   } catch (error) { failure = error; }
   try { run(["rm", "--force", "--volumes", container], 15_000); } catch (error) { failure ??= error; }
   try { rmSync(scratch, { recursive: true }); } catch (error) { failure ??= error; }
@@ -214,6 +257,7 @@ export function verifyImages(
   run = execute,
   localCandidate = false,
   root = repository,
+  productPackages,
 ) {
   validateEnvironment(manifest, version, sourceSha, localCandidate);
   if (!platforms.includes(platform))
@@ -271,6 +315,8 @@ export function verifyImages(
         );
       }
     }
+    if (name === "product") checkProductPackagePlan(productPackages, platform, descriptors[platform]);
+    const packageInventory = name === "product" ? inspectProductPackages(local.Id, platform, productPackages, run) : undefined;
     const commands = [...(smokeCommands[name] ?? []), ...(firstParty ? [noticeCommand] : [])];
     for (const command of commands) {
       const container = `synveda-release-check-${randomUUID()}`;
@@ -326,6 +372,7 @@ export function verifyImages(
       ...(firstParty ? { notice_sha256: noticeHashes } : {}),
       ...(name === "product" ? { console_inventory: inspectConsoleImage(local.Id, platform, version, sourceSha, run, root) } : {}),
       ...(name === "product" ? { node_inventory: inspectNodeImage(local.Id, platform, run, root) } : {}),
+      ...(name === "product" ? { package_inventory: packageInventory } : {}),
     });
   }
   return {
@@ -337,12 +384,12 @@ export function verifyImages(
     ...(localCandidate ? { local_candidate: true } : {}),
     checked_at: new Date().toISOString(),
     scope:
-      "Image pull, actual console/Node inventory and isolated executable/asset smoke; no deployment or OIDC acceptance.",
+      "Image pull, actual console/Node/package inventory and isolated executable/asset smoke; no deployment or OIDC acceptance.",
     images,
   };
 }
 
-export function verifyRegistrySet(manifest, inventory, platform, version, sourceSha, run = execute, root = repository) {
+export function verifyRegistrySet(manifest, inventory, platform, version, sourceSha, run = execute, root = repository, productPackages) {
   validateEnvironment(manifest, version, sourceSha);
   validateRegistryManifest(inventory, version, sourceSha);
   if (!inventory.published) throw new Error("dry-run registry inventory is not installable");
@@ -363,7 +410,7 @@ export function verifyRegistrySet(manifest, inventory, platform, version, source
       }
       return raw;
     };
-    registries[registry] = verifyImages({ ...manifest, image_namespace: target.namespace, images }, platform, version, sourceSha, inspect, false, root);
+    registries[registry] = verifyImages({ ...manifest, image_namespace: target.namespace, images }, platform, version, sourceSha, inspect, false, root, productPackages);
   }
   return { ...registries.dockerhub, registries };
 }
@@ -375,9 +422,9 @@ if (
   try {
     const [bundle, platform, version, sourceSha, report, inventoryPath, ...extra] =
       process.argv.slice(2);
-    if (!report || extra.length)
+    if (!report || !inventoryPath || extra.length)
       throw new Error(
-        "usage: verify-release-images.mjs BUNDLE PLATFORM VERSION SOURCE_SHA REPORT [REGISTRY_INVENTORY]",
+        "usage: verify-release-images.mjs BUNDLE PLATFORM VERSION SOURCE_SHA REPORT REGISTRY_INVENTORY",
       );
     requireAnonymousConfig(process.env.DOCKER_CONFIG);
     if (
@@ -387,9 +434,13 @@ if (
       throw new Error("archive identity does not match the workflow");
     }
     const manifest = readJson(join(bundle, "environment.json"));
-    const result = inventoryPath
-      ? verifyRegistrySet(manifest, readJson(inventoryPath), platform, version, sourceSha)
-      : verifyImages(manifest, platform, version, sourceSha);
+    assert.ok(platforms.includes(platform), "expected a native Linux platform");
+    const candidate = readJson(join(dirname(inventoryPath), `release-candidate-${platform.split("/")[1]}.json`));
+    assert.equal(candidate.source, sourceSha); assert.equal(candidate.version, version); assert.equal(candidate.arch, platform.split("/")[1]);
+    assert.equal(candidate.source_dirty, false, "package inspection requires clean candidate evidence");
+    const sbom = candidate.images?.product?.rust_sbom;
+    checkRustImageReport(sbom, "product", version, sbom?.image_manifest, platform);
+    const result = verifyRegistrySet(manifest, readJson(inventoryPath), platform, version, sourceSha, undefined, undefined, sbom.debian_inventory);
     writeFileSync(report, `${JSON.stringify(result, null, 2)}\n`);
     console.log(
       `Verified ${result.images.length} anonymous digest pulls per registry on ${platform}; report: ${report}`,

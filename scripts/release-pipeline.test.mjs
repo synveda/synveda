@@ -37,12 +37,14 @@ import { rustImageRoots, sbomGenerator } from "./rust-image-sbom.mjs";
 import { checkConsolePackage } from "./check-console-package.mjs";
 import { consolePackageFixture } from "./fixtures/console-package.mjs";
 import { productNodeReport } from "./fixtures/node-image.mjs";
+import { productPackageFixture } from "./fixtures/product-packages.mjs";
 
-const rustSbomFixture = (name, version, imageManifest) => ({
+const rustSbomFixture = (name, version, imageManifest, platform = "linux/arm64") => ({
   schema_version: 1, scanner: "syft-v1.51.0", spdx_version: "SPDX-2.3",
   image_manifest: imageManifest, attestation_manifest: `sha256:${"f".repeat(64)}`,
   statement_sha256: "9".repeat(64), package_count: 100, cargo_package_count: 50, cargo_identity_count: 50,
   required_packages: requiredRustPackages(name, version),
+  ...(name === "product" ? { debian_inventory: productPackageFixture(platform.split("/")[1], imageManifest).plan } : {}),
 });
 
 
@@ -423,7 +425,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
             archive: `${repo}.tar`,
             sha256: "c".repeat(64),
             digest: `sha256:${"a".repeat(64)}`,
-            ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: rustSbomFixture(name, version, inventory.registries.dockerhub.images[name].platforms[platform]) } : {}),
+            ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: rustSbomFixture(name, version, inventory.registries.dockerhub.images[name].platforms[platform], platform) } : {}),
           }],
         )),
       };
@@ -446,6 +448,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
           notice_sha256: noticeHashes,
           ...(name === "product" ? { console_inventory: consoleEvidence } : {}),
           ...(name === "product" ? { node_inventory: productNodeReport(platform) } : {}),
+          ...(name === "product" ? { package_inventory: productPackageFixture(arch, candidate.images.product.rust_sbom.image_manifest).report } : {}),
           ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: candidate.images[name].rust_sbom } : {}),
         })),
       };
@@ -468,6 +471,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
                 notice_sha256: noticeHashes,
                 ...(name === "product" ? { console_inventory: consoleEvidence } : {}),
                 ...(name === "product" ? { node_inventory: productNodeReport(platform) } : {}),
+                ...(name === "product" ? { package_inventory: productPackageFixture(arch, entry.platforms[platform]).report } : {}),
               })),
             },
           ]),
@@ -501,6 +505,12 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
     };
     check();
     for (const change of [
+      r => { delete r["release-candidate-arm64.json"].images.product.rust_sbom.debian_inventory; },
+      r => { delete r["release-local-images-amd64.json"].images[0].package_inventory; },
+      r => { r["release-local-images-arm64.json"].images[0].package_inventory.files[0].sha256 = "f".repeat(64); },
+      r => { r["release-local-images-amd64.json"].images[0].package_inventory.packages[0].version = "0"; },
+      r => { delete r["release-images-arm64.json"].registries.dockerhub.images[0].package_inventory; },
+      r => { r["release-images-amd64.json"].registries.ghcr.images[0].package_inventory.files.pop(); },
       r => { delete r["release-local-images-arm64.json"].images[0].node_inventory; },
       r => { r["release-local-images-amd64.json"].images[0].node_inventory.binary_sha256 = "0".repeat(64); },
       r => { r["release-local-images-arm64.json"].images[0].node_inventory.dependencies.openssl = "0.0.0"; },

@@ -22,6 +22,9 @@ stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT INT TERM
 cp -R deploy/helm/synveda "$stage/synveda"
 cp LICENSE NOTICE "$stage/synveda/"
+# OPS-12: Helm preserves file mtimes. The private copies need a fixed epoch
+# so packaging the same source does not depend on the copy's wall-clock second.
+find "$stage/synveda" -type f -exec env TZ=UTC touch -t 197001010000.00 {} +
 helm package "$stage/synveda" \
   --version "$version" \
   --app-version "$version" \

@@ -16,6 +16,7 @@ import {
 import { consolePackageFixture } from "./fixtures/console-package.mjs";
 import { nodeImageFixture } from "./fixtures/node-image.mjs";
 import { nodePins } from "./node-runtime-inventory.mjs";
+import { productPackageFixture } from "./fixtures/product-packages.mjs";
 
 const version = "0.3.0-rc.1";
 const source = "a".repeat(40);
@@ -51,6 +52,7 @@ const index = () => ({
 function fixture(t, override = () => undefined) {
   const console = consolePackageFixture(t, { source, version });
   const node = nodeImageFixture(console.root);
+  const packages = productPackageFixture("arm64", digest);
   const calls = [];
   const run = (args, _timeout, binary) => {
     calls.push(args);
@@ -59,6 +61,8 @@ function fixture(t, override = () => undefined) {
     if (args[0] === "create") return "c".repeat(64);
     if (args[0] === "cp") {
       assert.equal(binary, true);
+      const path = args[1].split(":")[1];
+      if (packages.bytes.has(path)) return packages.tar(path);
       return args[1].endsWith("/console") ? console.imageTar() : node.tar(args[1].split("/").at(-1));
     }
     if (args[0] === "start") return JSON.stringify(node.metadata);
@@ -87,7 +91,7 @@ function fixture(t, override = () => undefined) {
       return Object.entries(noticeHashes).map(([name, hash]) => `${hash}  /usr/share/licenses/synveda/${name}`).join("\n");
     return "";
   };
-  return { calls, run, root: console.root, console, node };
+  return { calls, run, root: console.root, console, node, packages };
 }
 
 test("a native pull check covers all six artifacts, upstream pulls and isolated runtime smoke", t => {
@@ -97,7 +101,7 @@ test("a native pull check covers all six artifacts, upstream pulls and isolated 
     "linux/arm64",
     version,
     source,
-    f.run, false, f.root,
+    f.run, false, f.root, f.packages.plan,
   );
   assert.equal(report.images.length, 8);
   assert.equal(report.platform, "linux/arm64");
@@ -107,6 +111,7 @@ test("a native pull check covers all six artifacts, upstream pulls and isolated 
     assert.deepEqual(entry.console_inventory, entry.name === "product"
       ? { ...f.console.check(), source_sha: source, version } : undefined);
     assert.deepEqual(entry.node_inventory, entry.name === "product" ? f.node.report : undefined);
+    assert.deepEqual(entry.package_inventory, entry.name === "product" ? f.packages.report : undefined);
   }
   assert.match(report.scope, /no deployment or OIDC acceptance/);
   const pulled = f.calls.filter(([verb]) => verb === "pull");
@@ -235,7 +240,7 @@ test("inspection cleanup cannot turn a failure into a pass or obscure its origin
 test("missing or changed first-party image notices fail and clean up the verifier container", t => {
   for (const output of ["", "wrong licence hash"]) {
     const f = fixture(t, (args) => args[0] === "run" && args.at(-1).startsWith("sha256sum ") ? output : undefined);
-    assert.throws(() => verifyImages(manifest(), "linux/arm64", version, source, f.run, false, f.root), /packaged licence\/notice hashes/);
+    assert.throws(() => verifyImages(manifest(), "linux/arm64", version, source, f.run, false, f.root, f.packages.plan), /packaged licence\/notice hashes/);
     const started = f.calls.find((args) => args[0] === "run" && args.at(-1).startsWith("sha256sum "));
     assert.deepEqual(f.calls.at(-1), ["rm", "--force", started[started.indexOf("--name") + 1]]);
   }
@@ -254,14 +259,14 @@ test("loopback OCI candidates remain separate from public release verification",
     "vnd.docker.reference.digest": digest,
   };
   const f = fixture(t, (args) => args[0] === "buildx" && args.at(-1).startsWith("localhost:") ? JSON.stringify(single) : undefined);
-  const report = verifyImages(candidate, "linux/arm64", version, source, f.run, true, f.root);
+  const report = verifyImages(candidate, "linux/arm64", version, source, f.run, true, f.root, f.packages.plan);
   assert.equal(report.local_candidate, true);
   assert.equal(report.anonymous_pull, false);
   const unattested = fixture(t, (args) => args[0] === "buildx" ? JSON.stringify({ manifests: [single.manifests[0]] }) : undefined);
-  assert.throws(() => verifyImages(candidate, "linux/arm64", version, source, unattested.run, true, unattested.root), /attestation descriptor/);
+  assert.throws(() => verifyImages(candidate, "linux/arm64", version, source, unattested.run, true, unattested.root, unattested.packages.plan), /attestation descriptor/);
   for (const manifests of [[], index().manifests, [{ digest, platform: { os: "linux", architecture: "amd64" } }]]) {
     const broken = fixture(t, (args) => args[0] === "buildx" ? JSON.stringify({ manifests }) : undefined);
-    assert.throws(() => verifyImages(candidate, "linux/arm64", version, source, broken.run, true, broken.root), /exactly the native image/);
+    assert.throws(() => verifyImages(candidate, "linux/arm64", version, source, broken.run, true, broken.root, broken.packages.plan), /exactly the native image/);
   }
   candidate.image_namespace = "untrusted.example/team";
   assert.throws(() => validateEnvironment(candidate, version, source, true), /image namespace/);
@@ -293,7 +298,7 @@ test("missing artifacts, mutable tags and mismatched release identity fail befor
     mutate(value);
     const f = fixture(t);
     assert.throws(() =>
-      verifyImages(value, "linux/arm64", version, source, f.run, false, f.root),
+      verifyImages(value, "linux/arm64", version, source, f.run, false, f.root, f.packages.plan),
     );
     assert.equal(f.calls.length, 0);
   }
@@ -326,7 +331,7 @@ test("wrong engine, private image and runtime failures propagate; started contai
   );
   assert.throws(
     () =>
-      verifyImages(manifest(), "linux/arm64", version, source, wrongEngine.run, false, wrongEngine.root),
+      verifyImages(manifest(), "linux/arm64", version, source, wrongEngine.run, false, wrongEngine.root, wrongEngine.packages.plan),
     /native/,
   );
   assert.equal(wrongEngine.calls.length, 1);
@@ -340,7 +345,7 @@ test("wrong engine, private image and runtime failures propagate; started contai
         "linux/arm64",
         version,
         source,
-        privateImage.run, false, privateImage.root,
+        privateImage.run, false, privateImage.root, privateImage.packages.plan,
       ),
     /denied/,
   );
@@ -358,7 +363,7 @@ test("wrong engine, private image and runtime failures propagate; started contai
         "linux/arm64",
         version,
         source,
-        runtimeFailure.run, false, runtimeFailure.root,
+        runtimeFailure.run, false, runtimeFailure.root, runtimeFailure.packages.plan,
       ),
     /executable failed/,
   );
@@ -390,7 +395,7 @@ test("wrong image metadata, lost digests and stale compiled binaries block verif
       return JSON.stringify([value]);
     });
     assert.throws(() =>
-      verifyImages(manifest(), "linux/arm64", version, source, f.run, false, f.root),
+      verifyImages(manifest(), "linux/arm64", version, source, f.run, false, f.root, f.packages.plan),
     );
     assert.equal(
       f.calls.some(([verb]) => verb === "run"),
@@ -401,7 +406,7 @@ test("wrong image metadata, lost digests and stale compiled binaries block verif
     args[0] === "run" ? "synveda 0.2.0" : undefined,
   );
   assert.throws(
-    () => verifyImages(manifest(), "linux/arm64", version, source, stale.run, false, stale.root),
+    () => verifyImages(manifest(), "linux/arm64", version, source, stale.run, false, stale.root, stale.packages.plan),
     /compiled CLI/,
   );
 });

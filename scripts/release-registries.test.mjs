@@ -13,6 +13,7 @@ import { noticeHashes, verifyRegistrySet } from "./verify-release-images.mjs";
 
 import { consolePackageFixture } from "./fixtures/console-package.mjs";
 import { nodeImageFixture } from "./fixtures/node-image.mjs";
+import { productPackageFixture } from "./fixtures/product-packages.mjs";
 
 const version = "0.0.0-local-test";
 const source = "a".repeat(40);
@@ -150,6 +151,7 @@ test("anonymous verification checks both destinations and refuses a synthetic or
   const node = nodeImageFixture(console.root);
   const f = registry();
   const inventory = assemble(version, source, "owner-team", true, f.run);
+  const packages = productPackageFixture("arm64", inventory.registries.dockerhub.images.product.platforms["linux/arm64"]);
   const manifest = {
     schema_version: 1, release_version: version, source_sha: source, deployment_contract: "CPR-45/ADR-0102",
     image_namespace: inventory.registries.dockerhub.namespace,
@@ -161,6 +163,8 @@ test("anonymous verification checks both destinations and refuses a synthetic or
     calls.push(args);
     if (args[0] === "create") return "c".repeat(64);
     if (args[0] === "cp") {
+      const path = args[1].split(":")[1];
+      if (packages.bytes.has(path)) return packages.tar(path);
       assert.equal(binary, true); return args[1].endsWith("/console") ? console.imageTar() : node.tar(args[1].split("/").at(-1));
     }
     if (args[0] === "start") return JSON.stringify(node.metadata);
@@ -188,7 +192,7 @@ test("anonymous verification checks both destinations and refuses a synthetic or
       return Object.entries(noticeHashes).map(([name, hash]) => `${hash}  /usr/share/licenses/synveda/${name}`).join("\n");
     return "";
   };
-  const report = verifyRegistrySet(manifest, inventory, "linux/arm64", version, source, run, console.root);
+  const report = verifyRegistrySet(manifest, inventory, "linux/arm64", version, source, run, console.root, packages.plan);
   assert.deepEqual(Object.keys(report.registries), ["dockerhub", "ghcr"]);
   assert.equal(calls.filter((args) => args[0] === "pull").length, 16);
   for (const mutate of [
