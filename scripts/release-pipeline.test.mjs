@@ -28,11 +28,14 @@ import {
   regularAssets,
   checkArchiveNotices,
   checkQualification,
-  checkCandidateRustSboms,
+  checkCandidateImageReports,
 } from "./check-release-assets.mjs";
 import { noticeHashes } from "./verify-release-images.mjs";
 import { publishRelease, uploadedAssets } from "./publish-release.mjs";
 import { rustImageRoots, sbomGenerator } from "./rust-image-sbom.mjs";
+
+import { checkConsolePackage } from "./check-console-package.mjs";
+import { consolePackageFixture } from "./fixtures/console-package.mjs";
 
 const rustSbomFixture = (name, version, imageManifest) => ({
   schema_version: 1, scanner: "syft-v1.51.0", spdx_version: "SPDX-2.3",
@@ -367,7 +370,7 @@ test("all non-client release archives retain exact regular licence and notice fi
   checkArchiveNotices(scratch, version);
 });
 
-test("qualification rejects incomplete, failed or transplanted native reports", () => {
+test("qualification rejects incomplete, failed or transplanted native reports", t => {
   const scratch = mkdtempSync(join(tmpdir(), "synveda-qualified-reports-"));
   try {
     const version = "0.4.0",
@@ -393,6 +396,11 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
         ]),
       ),
     };
+    const console = consolePackageFixture(t, { version, source });
+    console.pack();
+    const consoleReport = checkConsolePackage(console.archive, version, source, console.root);
+    const consoleEvidence = { ...consoleReport };
+    delete consoleEvidence.archive_sha256;
     // The retained operator fixture has day-two evidence for the two complete
     // ownership modes and install/upgrade evidence for all four combinations.
     const evidence = JSON.parse(
@@ -435,6 +443,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
           platforms: { [platform]: inventory.registries.dockerhub.images[name].platforms[platform] },
           executable_checks: 1,
           notice_sha256: noticeHashes,
+          ...(name === "product" ? { console_inventory: consoleEvidence } : {}),
           ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: candidate.images[name].rust_sbom } : {}),
         })),
       };
@@ -455,6 +464,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
                 platforms: { [platform]: entry.platforms[platform] },
                 executable_checks: 1,
                 notice_sha256: noticeHashes,
+                ...(name === "product" ? { console_inventory: consoleEvidence } : {}),
               })),
             },
           ]),
@@ -483,11 +493,16 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
       change(changed);
       for (const [file, report] of Object.entries(changed))
         writeFileSync(join(scratch, file), JSON.stringify(report));
-      checkCandidateRustSboms(scratch, version, source);
-      checkQualification(scratch, version, source, inventory);
+      checkCandidateImageReports(scratch, version, source, consoleReport);
+      checkQualification(scratch, version, source, inventory, consoleReport);
     };
     check();
     for (const change of [
+      r => { delete r["release-local-images-arm64.json"].images[0].console_inventory; },
+      r => { r["release-local-images-amd64.json"].images[0].console_inventory.inventory_sha256 = "0".repeat(64); },
+      r => { r["release-local-images-arm64.json"].images[0].console_inventory.source_sha = "b".repeat(40); },
+      r => { r["release-images-amd64.json"].registries.ghcr.images[0].console_inventory.notices_sha256 = "0".repeat(64); },
+      r => { delete r["release-images-arm64.json"].registries.dockerhub.images[0].console_inventory; },
       (r) => { delete r["release-candidate-arm64.json"].images.product.rust_sbom; },
       (r) => { delete r["release-local-images-amd64.json"].images[0].rust_sbom; },
       (r) => { r["release-candidate-arm64.json"].images.product.rust_sbom.required_packages.sqlx = "0.0.0"; },
@@ -562,7 +577,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
     check();
     rmSync(join(scratch, "release-consumer-arm64.json"));
     assert.throws(() =>
-      checkQualification(scratch, version, source, inventory),
+      checkQualification(scratch, version, source, inventory, consoleReport),
     );
   } finally {
     rmSync(scratch, { recursive: true, force: true });

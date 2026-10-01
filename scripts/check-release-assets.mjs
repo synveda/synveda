@@ -10,7 +10,7 @@ import { releaseImages, validateRegistryManifest } from "./release-registries.mj
 import { noticeHashes } from "./verify-release-images.mjs";
 import { checkRustImageReport, rustImageRoots } from "./rust-image-sbom.mjs";
 import { checkRustArchiveReport, rustArchiveAssets, rustArchivePlans } from "./rust-archive-sbom.mjs";
-import { checkConsolePackage } from "./check-console-package.mjs";
+import { checkConsoleImageReport, checkConsolePackage } from "./check-console-package.mjs";
 
 export const clientTargets = [
   "darwin-arm64",
@@ -79,7 +79,7 @@ export function checkArchiveNotices(directory, version, run = execFileSync) {
     }
   }
 }
-export function checkCandidateRustSboms(directory, version, source) {
+export function checkCandidateImageReports(directory, version, source, consoleReport) {
   const read = (kind, arch) => JSON.parse(readFileSync(join(directory, `release-${kind}-${arch}.json`)));
   for (const arch of ["amd64", "arm64"]) {
     const platform = `linux/${arch}`;
@@ -98,11 +98,12 @@ export function checkCandidateRustSboms(directory, version, source) {
       assert.equal(checked.image, `localhost:5000/synveda/${releaseImages[name]}@${candidate.images[name].digest}`);
       checkRustImageReport(candidate.images[name].rust_sbom, name, version, checked.platforms?.[platform]);
       assert.deepEqual(checked.rust_sbom, candidate.images[name].rust_sbom, `${name}: candidate Rust SBOM evidence differs`);
+      if (name === "product") checkConsoleImageReport(checked.console_inventory, consoleReport, version, source);
     }
   }
 }
-export function checkQualification(directory, version, source, inventory) {
-  checkCandidateRustSboms(directory, version, source);
+export function checkQualification(directory, version, source, inventory, consoleReport) {
+  checkCandidateImageReports(directory, version, source, consoleReport);
   const read = (kind, arch) =>
     JSON.parse(readFileSync(join(directory, `release-${kind}-${arch}.json`)));
   for (const arch of ["amd64", "arm64"]) {
@@ -126,6 +127,7 @@ export function checkQualification(directory, version, source, inventory) {
         );
         assert.ok(checkedImage);
         assert.deepEqual(checkedImage.notice_sha256, noticeHashes, `${registry}/${name}: notice evidence missing or changed`);
+        if (name === "product") checkConsoleImageReport(checkedImage.console_inventory, consoleReport, version, source);
       }
     }
     const candidate = read("candidate", arch);
@@ -227,8 +229,8 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   // Client TAR/ZIP notices are verified by each native candidate before its
   // required, archive-hash-bound report is assembled here.
   checkArchiveNotices(directory, version);
-  checkConsolePackage(join(directory, `synveda-console-${version}.tar.gz`), version, source);
-  if (!qualified) checkCandidateRustSboms(directory, version, source);
+  const consoleReport = checkConsolePackage(join(directory, `synveda-console-${version}.tar.gz`), version, source);
+  if (!qualified) checkCandidateImageReports(directory, version, source, consoleReport);
   checkClientRelease(
     directory,
     version,
@@ -244,7 +246,7 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   assert.equal(inventory.published, publish === "true");
   if (qualified) {
     assert.equal(publish, "true");
-    checkQualification(directory, version, source, inventory);
+    checkQualification(directory, version, source, inventory, consoleReport);
   }
   const sums = [];
   for (const name of names)

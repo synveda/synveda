@@ -1240,11 +1240,61 @@ with socket access passed. The optional unused Rolldown auto-registration warns;
 all required tool metadata is checked. No Rust, SQL or public generated contract
 changed. This is a source candidate, not a clean hosted/full release qualification.
 
-Next inspect and require the console inventory/notices in actual product-image
-bytes using the existing native candidate reader/verifier, then inventory bundled
-Node/native libraries, plugin/chart and remaining image dependencies/notices.
-Vulnerability and publisher incident policy follow dependency coverage. Preserve
-the native scanner blocker and prior OCI proof separately; inspect a fixed
-upstream release before any new native qualification. Do not dispatch or resume
-failed `ef6d61db` runs, remove sidecars or relax gates. No tag, main merge,
-public release or registry publication is authorized.
+The product-image console follow-up below owns the next action. Preserve the
+native scanner blocker and prior OCI proof separately; inspect a fixed upstream
+release before any new native qualification. Do not dispatch or resume failed
+`ef6d61db` runs, remove sidecars or relax gates. No tag, main merge, public release
+or registry publication is authorized.
+
+### Product-image console content source increment (2026-10-01)
+
+ADR-0134 was amended before implementation. The existing native image verifier
+creates a stopped invocation-owned container from the inspected immutable
+product image ID and reads its fixed console directory through Docker's bounded
+TAR stream. The shared archive reader refuses duplicate, linked, foreign,
+unsafe and oversized members; the same source/file/SBOM/full-notice validator
+checks the actual bytes. No candidate code runs during that inspection. Failure
+paths attempt removal of only the owned container and temporary stream,
+preserve the first cause and cannot retain passing evidence after a cleanup failure.
+
+Archive and image reports now carry the inventory SHA-256, which binds every
+output file. Assembly requires equal console evidence in the standalone archive
+and both native local-image reports; published qualification also requires it
+for each registry and architecture. No sidecar is added and all 51 same-run
+payloads remain required. Earlier OCI or native reports cannot qualify this
+changed source.
+
+[Local actual-image evidence](../../demos/evidence/ops12-console-image-candidate.json)
+binds a full native Linux ARM product build to dirty parent
+`334369effb0288e0e7046b9919dbc35052cc1606`, its source inputs, validator hashes
+and inspected image ID. All 12 console files match the independent macOS ARM
+archive; inventory SHA-256 is
+`ff566eda988b3612e009e33b923b6dc6d7bf57e49e3a692c0eb888f4db053788`.
+An actual image with altered HTML refuses the inventory check. A second control
+updates HTML and its inventory coherently, retaining the same source/SBOM/notices:
+internal inspection passes, but the production archive-binding validator refuses
+it. Both control images and all inspection containers were removed; the task-owned
+baseline image remains available for the next inventory probe. No retained
+deployment was changed.
+
+All 38 CI-tooling and 81 release-parity tests pass, including stopped-container,
+actual TAR/content/source, resource-bound, cleanup and both-registry refusals.
+All 258 console tests, deployment checks and strict chart lint pass, along with
+Rust formatting, pinned actionlint and fast/diff checks. A sandboxed pnpm launcher
+first failed registry signature verification because its registry fetches were
+denied, before any tests started; the unchanged rerun with network access passed.
+No signature or test gate was disabled. The local evidence is
+console carriage only, not clean hosted/native/OCI or deployment qualification.
+No Rust, SQL, public generated contract, runtime authority or publication gate
+was changed.
+
+Next probe actual bundled Node dependencies and complete upstream notices in the
+product and six private client runtimes, and identify native C-library gaps left
+by Cargo inventory. Review a maintained mechanism and record the architecture
+choice before implementing its artifact/source/target/hash checks. Plugin/chart
+and remaining upstream-image inventories/notices follow, then vulnerability and
+publisher incident policy. The fixed Syft Windows distribution, operator S3
+bucket and real issuer/harness credentials remain external blockers. Do not
+resume failed `ef6d61db` runs, combine old proof with this source, weaken gates or
+publish. Remove the temporary native qualification branch only after corrected
+native proof is independently retained.

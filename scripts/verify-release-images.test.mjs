@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  inspectConsoleImage,
   noticeHashes,
   requireAnonymousConfig,
   validateEnvironment,
   validateIndex,
   verifyImages,
 } from "./verify-release-images.mjs";
+
+import { consolePackageFixture } from "./fixtures/console-package.mjs";
 
 const version = "0.3.0-rc.1";
 const source = "a".repeat(40);
@@ -42,12 +45,15 @@ const index = () => ({
   ],
 });
 
-function fixture(override = () => undefined) {
+function fixture(t, override = () => undefined) {
+  const console = consolePackageFixture(t, { source, version });
   const calls = [];
-  const run = (args) => {
+  const run = (args, _timeout, binary) => {
     calls.push(args);
     const result = override(args);
     if (result !== undefined) return result;
+    if (args[0] === "create") return "c".repeat(64);
+    if (args[0] === "cp") { assert.equal(binary, true); return console.imageTar(); }
     if (args[0] === "info") return "linux/aarch64";
     if (args[0] === "buildx") return JSON.stringify(index());
     if (args[0] === "image")
@@ -73,23 +79,25 @@ function fixture(override = () => undefined) {
       return Object.entries(noticeHashes).map(([name, hash]) => `${hash}  /usr/share/licenses/synveda/${name}`).join("\n");
     return "";
   };
-  return { calls, run };
+  return { calls, run, root: console.root, console };
 }
 
-test("a native pull check covers all six artifacts, upstream pulls and isolated runtime smoke", () => {
-  const f = fixture();
+test("a native pull check covers all six artifacts, upstream pulls and isolated runtime smoke", t => {
+  const f = fixture(t);
   const report = verifyImages(
     manifest(),
     "linux/arm64",
     version,
     source,
-    f.run,
+    f.run, false, f.root,
   );
   assert.equal(report.images.length, 8);
   assert.equal(report.platform, "linux/arm64");
   for (const entry of report.images) {
     assert.deepEqual(entry.notice_sha256,
       Object.hasOwn(manifest().images, entry.name) ? noticeHashes : undefined);
+    assert.deepEqual(entry.console_inventory, entry.name === "product"
+      ? { ...f.console.check(), source_sha: source, version } : undefined);
   }
   assert.match(report.scope, /no deployment or OIDC acceptance/);
   const pulled = f.calls.filter(([verb]) => verb === "pull");
@@ -113,16 +121,73 @@ test("a native pull check covers all six artifacts, upstream pulls and isolated 
   );
 });
 
-test("missing or changed first-party image notices fail and clean up the verifier container", () => {
+test("console inspection reads a stopped immutable image and removes only its own container", t => {
+  const f = fixture(t);
+  assert.deepEqual(inspectConsoleImage(digest, "linux/arm64", version, source, f.run, f.root),
+    { ...f.console.check(), source_sha: source, version });
+  assert.deepEqual(f.calls.map(args => args[0]), ["create", "cp", "rm"]);
+  const created = f.calls[0], container = created[created.indexOf("--name") + 1];
+  for (const required of ["--pull=never", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges"])
+    assert.ok(created.includes(required));
+  assert.equal(created.some(arg => /^(--volume|--mount|--env)/.test(arg)), false);
+  assert.deepEqual(created.slice(-2), [digest, "--version"]);
+  assert.deepEqual(f.calls[1], ["cp", `${container}:/usr/share/synveda/console`, "-"]);
+  assert.deepEqual(f.calls[2], ["rm", "--force", "--volumes", container]);
+  assert.throws(() => inspectConsoleImage("product:latest", "linux/arm64", version, source, f.run, f.root));
+  assert.equal(f.calls.length, 3);
+});
+
+test("actual image TAR content cannot omit metadata, alter output or transplant the source", t => {
+  for (const mutate of [
+    c => c.files.delete("sbom.cdx.json"),
+    c => c.files.set("assets/index.js", Buffer.from("changed image JavaScript")),
+    c => { c.files.set("THIRD-PARTY-NOTICES.txt", Buffer.from("truncated notices")); c.seal(); },
+    c => { c.inventory.source_sha = "b".repeat(40); c.seal(); },
+  ]) {
+    const f = fixture(t); mutate(f.console);
+    assert.throws(() => inspectConsoleImage(digest, "linux/arm64", version, source, f.run, f.root));
+    assert.equal(f.calls.at(-1)[0], "rm");
+    assert.equal(f.calls.some(args => ["run", "start", "exec"].includes(args[0])), false);
+  }
+  const f = fixture(t); f.console.pack(["console/index.html"], true);
+  const duplicate = readFileSync(f.console.archive);
+  const run = (args, timeout, binary) => args[0] === "cp" ? duplicate : f.run(args, timeout, binary);
+  assert.throws(() => inspectConsoleImage(digest, "linux/arm64", version, source, run, f.root), /duplicate/);
+  assert.equal(f.calls.at(-1)[0], "rm");
+});
+
+test("invalid or over-budget Docker streams fail before inspection and still remove the container", t => {
+  for (const bytes of ["not a binary stream", Buffer.alloc(0), Buffer.alloc(34 * 1024 * 1024 + 1)]) {
+    const f = fixture(t, args => args[0] === "cp" ? bytes : undefined);
+    assert.throws(() => inspectConsoleImage(digest, "linux/arm64", version, source, f.run, f.root), /stream exceeds its bound/);
+    assert.equal(f.calls.at(-1)[0], "rm");
+  }
+});
+
+test("inspection cleanup cannot turn a failure into a pass or obscure its original cause", t => {
+  const cleanup = new Error("container cleanup failed"), original = new Error("Docker copy failed");
+  const f = fixture(t, args => { if (args[0] === "rm") throw cleanup; });
+  assert.throws(() => inspectConsoleImage(digest, "linux/arm64", version, source, f.run, f.root), error => error === cleanup);
+  for (const stage of ["create", "cp"]) {
+    const broken = fixture(t, args => {
+      if (args[0] === stage) throw original;
+      if (args[0] === "rm") throw cleanup;
+    });
+    assert.throws(() => inspectConsoleImage(digest, "linux/arm64", version, source, broken.run, broken.root), error => error === original);
+    assert.equal(broken.calls.at(-1)[0], "rm");
+  }
+});
+
+test("missing or changed first-party image notices fail and clean up the verifier container", t => {
   for (const output of ["", "wrong licence hash"]) {
-    const f = fixture((args) => args[0] === "run" && args.at(-1).startsWith("sha256sum ") ? output : undefined);
-    assert.throws(() => verifyImages(manifest(), "linux/arm64", version, source, f.run), /packaged licence\/notice hashes/);
+    const f = fixture(t, (args) => args[0] === "run" && args.at(-1).startsWith("sha256sum ") ? output : undefined);
+    assert.throws(() => verifyImages(manifest(), "linux/arm64", version, source, f.run, false, f.root), /packaged licence\/notice hashes/);
     const started = f.calls.find((args) => args[0] === "run" && args.at(-1).startsWith("sha256sum "));
     assert.deepEqual(f.calls.at(-1), ["rm", "--force", started[started.indexOf("--name") + 1]]);
   }
 });
 
-test("loopback OCI candidates remain separate from public release verification", () => {
+test("loopback OCI candidates remain separate from public release verification", t => {
   const candidate = manifest();
   candidate.image_namespace = "localhost:5000/synveda";
   candidate.images = Object.fromEntries(Object.entries(candidate.images).map(([name, image]) => [name, image.replace("ghcr.io/synveda", candidate.image_namespace)]));
@@ -134,21 +199,21 @@ test("loopback OCI candidates remain separate from public release verification",
     "vnd.docker.reference.type": "attestation-manifest",
     "vnd.docker.reference.digest": digest,
   };
-  const f = fixture((args) => args[0] === "buildx" && args.at(-1).startsWith("localhost:") ? JSON.stringify(single) : undefined);
-  const report = verifyImages(candidate, "linux/arm64", version, source, f.run, true);
+  const f = fixture(t, (args) => args[0] === "buildx" && args.at(-1).startsWith("localhost:") ? JSON.stringify(single) : undefined);
+  const report = verifyImages(candidate, "linux/arm64", version, source, f.run, true, f.root);
   assert.equal(report.local_candidate, true);
   assert.equal(report.anonymous_pull, false);
-  const unattested = fixture((args) => args[0] === "buildx" ? JSON.stringify({ manifests: [single.manifests[0]] }) : undefined);
-  assert.throws(() => verifyImages(candidate, "linux/arm64", version, source, unattested.run, true), /attestation descriptor/);
+  const unattested = fixture(t, (args) => args[0] === "buildx" ? JSON.stringify({ manifests: [single.manifests[0]] }) : undefined);
+  assert.throws(() => verifyImages(candidate, "linux/arm64", version, source, unattested.run, true, unattested.root), /attestation descriptor/);
   for (const manifests of [[], index().manifests, [{ digest, platform: { os: "linux", architecture: "amd64" } }]]) {
-    const broken = fixture((args) => args[0] === "buildx" ? JSON.stringify({ manifests }) : undefined);
-    assert.throws(() => verifyImages(candidate, "linux/arm64", version, source, broken.run, true), /exactly the native image/);
+    const broken = fixture(t, (args) => args[0] === "buildx" ? JSON.stringify({ manifests }) : undefined);
+    assert.throws(() => verifyImages(candidate, "linux/arm64", version, source, broken.run, true, broken.root), /exactly the native image/);
   }
   candidate.image_namespace = "untrusted.example/team";
   assert.throws(() => validateEnvironment(candidate, version, source, true), /image namespace/);
 });
 
-test("missing artifacts, mutable tags and mismatched release identity fail before Docker", () => {
+test("missing artifacts, mutable tags and mismatched release identity fail before Docker", t => {
   const mutants = [
     (m) => {
       delete m.images.browser_acceptance;
@@ -172,9 +237,9 @@ test("missing artifacts, mutable tags and mismatched release identity fail befor
   for (const mutate of mutants) {
     const value = manifest();
     mutate(value);
-    const f = fixture();
+    const f = fixture(t);
     assert.throws(() =>
-      verifyImages(value, "linux/arm64", version, source, f.run),
+      verifyImages(value, "linux/arm64", version, source, f.run, false, f.root),
     );
     assert.equal(f.calls.length, 0);
   }
@@ -201,17 +266,17 @@ test("multi-platform indexes require both architectures exactly once and tolerat
   assert.throws(() => validateIndex({ layers: [] }, "image"), /multi-platform/);
 });
 
-test("wrong engine, private image and runtime failures propagate; started containers are cleaned up", () => {
-  const wrongEngine = fixture((args) =>
+test("wrong engine, private image and runtime failures propagate; started containers are cleaned up", t => {
+  const wrongEngine = fixture(t, (args) =>
     args[0] === "info" ? "linux/amd64" : undefined,
   );
   assert.throws(
     () =>
-      verifyImages(manifest(), "linux/arm64", version, source, wrongEngine.run),
+      verifyImages(manifest(), "linux/arm64", version, source, wrongEngine.run, false, wrongEngine.root),
     /native/,
   );
   assert.equal(wrongEngine.calls.length, 1);
-  const privateImage = fixture((args) => {
+  const privateImage = fixture(t, (args) => {
     if (args[0] === "pull") throw new Error("denied");
   });
   assert.throws(
@@ -221,7 +286,7 @@ test("wrong engine, private image and runtime failures propagate; started contai
         "linux/arm64",
         version,
         source,
-        privateImage.run,
+        privateImage.run, false, privateImage.root,
       ),
     /denied/,
   );
@@ -229,7 +294,7 @@ test("wrong engine, private image and runtime failures propagate; started contai
     privateImage.calls.some(([verb]) => verb === "run"),
     false,
   );
-  const runtimeFailure = fixture((args) => {
+  const runtimeFailure = fixture(t, (args) => {
     if (args[0] === "run") throw new Error("executable failed");
   });
   assert.throws(
@@ -239,7 +304,7 @@ test("wrong engine, private image and runtime failures propagate; started contai
         "linux/arm64",
         version,
         source,
-        runtimeFailure.run,
+        runtimeFailure.run, false, runtimeFailure.root,
       ),
     /executable failed/,
   );
@@ -251,7 +316,7 @@ test("wrong engine, private image and runtime failures propagate; started contai
   ]);
 });
 
-test("wrong image metadata, lost digests and stale compiled binaries block verification", () => {
+test("wrong image metadata, lost digests and stale compiled binaries block verification", t => {
   for (const mutate of [
     (i) => {
       i.Architecture = "amd64";
@@ -263,26 +328,26 @@ test("wrong image metadata, lost digests and stale compiled binaries block verif
       i.RepoDigests = [];
     },
   ]) {
-    const normal = fixture();
-    const f = fixture((args) => {
+    const normal = fixture(t);
+    const f = fixture(t, (args) => {
       if (args[0] !== "image") return;
       const [value] = JSON.parse(normal.run(args));
       mutate(value);
       return JSON.stringify([value]);
     });
     assert.throws(() =>
-      verifyImages(manifest(), "linux/arm64", version, source, f.run),
+      verifyImages(manifest(), "linux/arm64", version, source, f.run, false, f.root),
     );
     assert.equal(
       f.calls.some(([verb]) => verb === "run"),
       false,
     );
   }
-  const stale = fixture((args) =>
+  const stale = fixture(t, (args) =>
     args[0] === "run" ? "synveda 0.2.0" : undefined,
   );
   assert.throws(
-    () => verifyImages(manifest(), "linux/arm64", version, source, stale.run),
+    () => verifyImages(manifest(), "linux/arm64", version, source, stale.run, false, stale.root),
     /compiled CLI/,
   );
 });

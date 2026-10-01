@@ -2,14 +2,18 @@
 // OPS-8 / CPR-45: immutable image smoke on a native runner. Public verification
 // stays anonymous; only the internal candidate path admits the loopback registry.
 import { execFileSync } from "node:child_process";
+import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   digestPattern, imageNamespace, indexDescriptors, platforms,
   releaseImages as repositories, validateIndex, validateRegistryManifest,
 } from "./release-registries.mjs";
+import { readConsoleArchive } from "./check-console-package.mjs";
+import { checkConsoleFiles } from "../console/build/dependency-contract.mjs";
 
 export { validateIndex } from "./release-registries.mjs";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -18,13 +22,42 @@ export const noticeHashes = Object.fromEntries(noticeFiles.map((name) => [name,
   createHash("sha256").update(readFileSync(new URL(`../${name}`, import.meta.url))).digest("hex")]));
 const noticeCommand = ["/bin/sh", "-ec", "sha256sum /usr/share/licenses/synveda/LICENSE /usr/share/licenses/synveda/NOTICE"];
 const expectedNotices = noticeFiles.map((name) => `${noticeHashes[name]}  /usr/share/licenses/synveda/${name}`).join("\n");
-const execute = (args, timeout = 60_000) =>
-  execFileSync("docker", args, {
-    encoding: "utf8",
+const repository = fileURLToPath(new URL("../", import.meta.url));
+const maxConsoleStream = 34 * 1024 * 1024;
+const execute = (args, timeout = 60_000, binary = false) => {
+  const output = execFileSync("docker", args, {
+    encoding: binary ? undefined : "utf8",
     timeout,
-    maxBuffer: 8 * 1024 * 1024,
+    maxBuffer: binary ? maxConsoleStream : 8 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+  });
+  return binary ? output : output.trim();
+};
+
+export function inspectConsoleImage(imageId, platform, version, source, run = execute, root = repository) {
+  assert.match(imageId, digestPattern);
+  assert.ok(platforms.includes(platform), "expected a native Linux platform");
+  const container = `synveda-console-check-${randomUUID()}`;
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-console-image-"));
+  let report, failure;
+  try {
+    const id = run(["create", "--name", container, "--pull=never", "--platform", platform,
+      "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+      "--user=65532:65532", "--pids-limit=64", "--memory=128m", "--cpus=1",
+      "--entrypoint", "/usr/local/bin/synveda", imageId, "--version"]);
+    assert.match(id, /^[0-9a-f]{64}$/, "expected one stopped inspection container");
+    const bytes = run(["cp", `${container}:/usr/share/synveda/console`, "-"], 60_000, true);
+    assert.ok(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= maxConsoleStream, "console image stream exceeds its bound");
+    const archive = join(scratch, "console.tar");
+    writeFileSync(archive, bytes, { flag: "wx", mode: 0o600 });
+    report = { ...checkConsoleFiles(readConsoleArchive(archive, false), root, version, source), source_sha: source, version };
+  } catch (error) { failure = error; }
+  // Remove only this invocation's container/storage; preserve the inspection cause.
+  try { run(["rm", "--force", "--volumes", container], 15_000); } catch (error) { failure ??= error; }
+  try { rmSync(scratch, { recursive: true }); } catch (error) { failure ??= error; }
+  if (failure) throw failure;
+  return report;
+}
 
 export function validateEnvironment(manifest, version, sourceSha, local = false) {
   if (
@@ -141,6 +174,7 @@ export function verifyImages(
   sourceSha,
   run = execute,
   localCandidate = false,
+  root = repository,
 ) {
   validateEnvironment(manifest, version, sourceSha, localCandidate);
   if (!platforms.includes(platform))
@@ -251,6 +285,7 @@ export function verifyImages(
       image_id: local.Id,
       executable_checks: commands.length,
       ...(firstParty ? { notice_sha256: noticeHashes } : {}),
+      ...(name === "product" ? { console_inventory: inspectConsoleImage(local.Id, platform, version, sourceSha, run, root) } : {}),
     });
   }
   return {
@@ -262,12 +297,12 @@ export function verifyImages(
     ...(localCandidate ? { local_candidate: true } : {}),
     checked_at: new Date().toISOString(),
     scope:
-      "Image pull and isolated executable/asset smoke; no deployment or OIDC acceptance.",
+      "Image pull, actual console content and isolated executable/asset smoke; no deployment or OIDC acceptance.",
     images,
   };
 }
 
-export function verifyRegistrySet(manifest, inventory, platform, version, sourceSha, run = execute) {
+export function verifyRegistrySet(manifest, inventory, platform, version, sourceSha, run = execute, root = repository) {
   validateEnvironment(manifest, version, sourceSha);
   validateRegistryManifest(inventory, version, sourceSha);
   if (!inventory.published) throw new Error("dry-run registry inventory is not installable");
@@ -278,8 +313,8 @@ export function verifyRegistrySet(manifest, inventory, platform, version, source
   const registries = {};
   for (const [registry, target] of Object.entries(inventory.registries)) {
     const images = Object.fromEntries(Object.entries(target.images).map(([name, entry]) => [name, entry.reference]));
-    const inspect = (args, timeout) => {
-      const raw = run(args, timeout);
+    const inspect = (args, timeout, binary) => {
+      const raw = run(args, timeout, binary);
       if (args[0] === "buildx") {
         const expected = Object.values(target.images).find((entry) => entry.reference === args.at(-1));
         if (expected && JSON.stringify(indexDescriptors(JSON.parse(raw))) !== JSON.stringify(expected.descriptors)) {
@@ -288,7 +323,7 @@ export function verifyRegistrySet(manifest, inventory, platform, version, source
       }
       return raw;
     };
-    registries[registry] = verifyImages({ ...manifest, image_namespace: target.namespace, images }, platform, version, sourceSha, inspect);
+    registries[registry] = verifyImages({ ...manifest, image_namespace: target.namespace, images }, platform, version, sourceSha, inspect, false, root);
   }
   return { ...registries.dockerhub, registries };
 }

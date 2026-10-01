@@ -11,6 +11,8 @@ import {
 } from "./release-registries.mjs";
 import { noticeHashes, verifyRegistrySet } from "./verify-release-images.mjs";
 
+import { consolePackageFixture } from "./fixtures/console-package.mjs";
+
 const version = "0.0.0-local-test";
 const source = "a".repeat(40);
 const hash = (value) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -142,7 +144,8 @@ test("consumer archives and Helm overlays carry the chosen destination's own dig
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 });
 
-test("anonymous verification checks both destinations and refuses a synthetic or transplanted bundle", () => {
+test("anonymous verification checks both destinations and refuses a synthetic or transplanted bundle", t => {
+  const console = consolePackageFixture(t, { source, version });
   const f = registry();
   const inventory = assemble(version, source, "owner-team", true, f.run);
   const manifest = {
@@ -152,8 +155,10 @@ test("anonymous verification checks both destinations and refuses a synthetic or
     external_images: { otel_collector: `upstream/otel:1@${hash("otel")}`, prometheus: `upstream/prom:1@${hash("prom")}` },
   };
   const calls = [];
-  const run = (args) => {
+  const run = (args, _timeout, binary) => {
     calls.push(args);
+    if (args[0] === "create") return "c".repeat(64);
+    if (args[0] === "cp") { assert.equal(binary, true); return console.imageTar(); }
     if (args[0] === "info") return "linux/aarch64";
     if (args[0] === "buildx") {
       const expected = Object.values(inventory.registries).flatMap((entry) => Object.values(entry.images)).find((entry) => entry.reference === args.at(-1));
@@ -178,7 +183,7 @@ test("anonymous verification checks both destinations and refuses a synthetic or
       return Object.entries(noticeHashes).map(([name, hash]) => `${hash}  /usr/share/licenses/synveda/${name}`).join("\n");
     return "";
   };
-  const report = verifyRegistrySet(manifest, inventory, "linux/arm64", version, source, run);
+  const report = verifyRegistrySet(manifest, inventory, "linux/arm64", version, source, run, console.root);
   assert.deepEqual(Object.keys(report.registries), ["dockerhub", "ghcr"]);
   assert.equal(calls.filter((args) => args[0] === "pull").length, 16);
   for (const mutate of [

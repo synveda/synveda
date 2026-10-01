@@ -326,8 +326,20 @@ node scripts/check-console-package.mjs CONSOLE_ARCHIVE VERSION SOURCE_SHA
 or helper change must pass that review rather than silently adding missing
 content. The plugin's optional Rolldown auto-registration warns on this
 Vite/Rollup build; the required Vite, Rollup and SBOM-tool entries are validated.
-Local macOS ARM and native Linux ARM file sets match; clean hosted qualification,
-actual product OCI extraction and broader non-Rust coverage remain separate.
+The native image verifier also creates a stopped container from the inspected
+immutable product image ID and reads its fixed console directory through Docker's
+bounded TAR stream. It reuses the archive path/type/duplicate/size refusals and
+complete content/source validator, starts no candidate code, and removes only
+its own container and temporary stream. Cleanup failure refuses passing evidence.
+The archive and image reports include the inventory's SHA-256, binding all output
+bytes. Assembly requires equal console evidence for both local native image
+reports; published qualification requires it at both registries and architectures.
+Equal source/SBOM/notice fields cannot substitute for the output inventory hash.
+
+Local macOS ARM and native Linux ARM file sets match; an actual Linux ARM product
+image matches the independently built archive. Both stale and coherently changed
+image-content controls refuse qualification. These dirty source candidates do
+not establish clean hosted qualification or broader non-Rust coverage.
 
 ## Manual owner settings
 

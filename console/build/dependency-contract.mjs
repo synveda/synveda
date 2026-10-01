@@ -190,5 +190,6 @@ export function checkConsoleFiles(files, root, version, source, requireSource = 
   assert.equal(fonts[0].sha256, sha256(sourceBytes(root, "assets/brand/fonts/InterVariable.woff2", maxFileBytes)), "console font differs");
   assert.deepEqual(read(noticesName), consoleNotices(document, policy, read(helperNoticeName), read("assets/Inter-OFL.txt")),
     "console third-party notice carriage differs");
-  return { packages: identities, files: actual.length + 1, sbom_sha256: sha256(read(sbomName)), notices_sha256: sha256(read(noticesName)) };
+  return { packages: identities, files: actual.length + 1, inventory_sha256: sha256(read(inventoryName)),
+    sbom_sha256: sha256(read(sbomName)), notices_sha256: sha256(read(noticesName)) };
 }

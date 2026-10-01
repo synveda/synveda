@@ -415,11 +415,17 @@ and actual console archive source/file hashes. [Local candidate evidence](../../
 records identical 12-file outputs on macOS ARM and native Linux ARM with unchanged
 JavaScript. Eight focused refusal tests, 38 CI-tooling, 77 release-parity and
 258 console tests, deployment checks and strict chart lint pass; no clean hosted
-qualification follows from the dirty candidate. Next validate console carriage
-in actual product-image bytes, then
-Node/native libraries and remaining artifact notices before vulnerability and
-publisher incident policy. The native Windows scanner blocker and OPS-12's open
-state remain unchanged; its brief owns the exact next action.
+qualification follows from the dirty candidate. The follow-up ADR-0134 reader now
+checks actual stopped product-image console bytes and binds their entire output
+inventory to the archive. [Actual Linux ARM evidence](../../demos/evidence/ops12-console-image-candidate.json)
+matches all 12 files to the independent macOS ARM archive; stale and coherently
+changed image-content controls refuse. All 38 CI-tooling, 81 release-parity and
+258 console tests, deployment/chart checks, formatting, pinned actionlint and
+fast/diff checks pass.
+Next probe bundled Node/native library inventories and full notices, then
+remaining plugin/chart/upstream-image coverage before vulnerability and publisher
+incident policy. The native Windows scanner blocker and OPS-12's open state
+remain unchanged; its brief owns the exact next action.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered

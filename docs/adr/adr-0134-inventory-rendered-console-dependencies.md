@@ -73,6 +73,24 @@ existing first-party notices, archive/member bounds, publisher verification,
 Rust inventory and all deployment gates. The console inventory stays inside
 the archive and its signed checksum boundary; it adds no release payload.
 
+For product-image carriage, extend the existing native image verifier. After
+its immutable pull, platform and source-label checks, create a stopped
+invocation-owned container from the inspected image ID. Read the fixed console
+directory through Docker's bounded TAR stream; do not start the container,
+extract arbitrary files onto the host or implement OCI layer reconstruction.
+Reuse the console archive reader's path/type/duplicate/size refusals and the
+same complete file/SBOM/notice/source validator. Bound and remove the temporary
+stream and container, including failure paths; cleanup failure cannot yield
+passing evidence. Preserve the first inspection error if cleanup also fails.
+
+Include the inventory's SHA-256 in archive and product-image results. It binds
+all output bytes, so assembly requires identical console evidence in the actual
+archive and both native local-image reports. Published qualification also
+requires it for both native architectures at each registry. Source identity,
+SBOM and notice hashes alone cannot establish matching JavaScript or CSS.
+Retain these fields in existing reports and the existing 51-payload inventory;
+do not add a duplicate image SBOM service or a sidecar solely for this check.
+
 ## Options considered
 
 1. **Maintained bundler plugin with independent checks**: captures the actual

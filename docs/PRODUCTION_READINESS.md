@@ -198,10 +198,13 @@ ADR-0134 adds a console source candidate with independently checked rendered npm
 identities, complete MIT/Vite-helper/Inter notices and actual archived output
 hashes. [Local evidence](../demos/evidence/ops12-console-inventory-candidate.json)
 records identical 12-file outputs on macOS ARM and native Linux ARM with
-unchanged JavaScript. This dirty-checkout build is separate from clean hosted
-qualification; product OCI extraction, Node/native libraries and broader
-third-party coverage remain open. Native Rust's Windows blocker and the readiness
-verdict are unchanged.
+unchanged JavaScript. [Actual product-image evidence](../demos/evidence/ops12-console-image-candidate.json)
+checks the stopped native Linux ARM image and matches all 12 files to the
+independently built console archive. A coherently changed image inventory with
+unchanged source/SBOM/notices still fails the archive binding. These dirty source
+candidates are separate from clean hosted qualification; Node/native libraries
+and broader third-party coverage remain open. Native Rust's Windows blocker and
+the readiness verdict are unchanged.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
