@@ -1042,11 +1042,21 @@ Native build jobs and the product image builder now set
 `CARGO_HTTP_MULTIPLEXING=false`; [Cargo's supported configuration](https://doc.rust-lang.org/cargo/reference/config.html#httpmultiplexing)
 selects HTTP/1.1 while retaining TLS verification, locked dependencies and
 existing checks. The setting is confined to these builds. No Rust crate,
-runtime configuration or generated contract changed. Next supersede the native
-runs with full CI and a nonpublishing Release on the transport correction,
-then independently verify its original 51-payload inventory and each binary's
-document before retaining qualification. Preserve the independent `3beeb1cb`
-OCI drill. Hosted completion and production readiness remain unclaimed.
+runtime configuration or generated contract changed. The `aea91758` native runs
+were deliberately cancelled after this correction; they cannot qualify it.
+
+Current qualification source is transport correction
+`1edb62557c7407cbf55aff22201fa0c04913ce89`: full CI
+[`36798188473`](https://github.com/synveda/synveda/actions/runs/36798188473) and
+independent nonpublishing Release
+[`36798194065`](https://github.com/synveda/synveda/actions/runs/36798194065).
+Both trigger SHAs were checked. All 27 CI-tooling tests, fast checks, actionlint,
+Rust formatting and diff checks pass locally. Hosted completion remains the
+current blocker. Next resolve any run failures, then independently verify its
+original 51-payload inventory and each binary's document before retaining
+qualification. Preserve the independent `3beeb1cb` OCI drill. An active thread
+continuation follows this canonical checkpoint and proceeds to non-Rust
+inventory/notices after qualification. Production readiness remains unclaimed.
 
 ### Next non-Rust mechanism probe (2026-10-01)
 
