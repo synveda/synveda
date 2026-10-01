@@ -366,15 +366,21 @@ digests, placeholders, foreign hashes and extra entries refuse. The
 passes all three unchanged stripped members and refuses dirty producer evidence;
 eleven archive tests cover all six root contracts. Both Windows ARM jobs
 subsequently refused the same omitted checksum. The failed CI completed; its
-nonpublishing Release was cancelled after the correction was committed. Current
-native qualification source `02023908` is bound to
+nonpublishing Release was cancelled after the correction was committed. Source
+`02023908` started
 [full CI](https://github.com/synveda/synveda/actions/runs/36802763712) and
 [nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36802769936).
 Both trigger SHAs were independently checked. All 29 CI-tooling and 77
 release-parity tests, fast checks, pinned actionlint, Rust formatting and diff
-checks pass locally. Next inspect these runs and independently verify all 51
-same-run payloads, eight native archive reports and twelve SPDX documents before
-retaining proof. An active thread continuation follows this checkpoint.
+checks pass locally. Its Windows x64 CI job passed native Rust/private-state
+tests and packaged-client execution, then refused the actual empty synthetic
+root filename. Corrected fixtures reproduce that refusal before the fix and
+reject the wrongly assumed backslash root. The root now requires the exact
+empty name on all targets, retaining the executable's Windows spelling and
+actual SHA-256 checks. Next commit this correction, replace the obsolete native
+runs, and independently verify all 51 same-run payloads, eight native archive
+reports and twelve SPDX documents before retaining proof. An active thread
+continuation follows this checkpoint.
 Superseded reports cannot qualify the new source; the preceding `3beeb1cb` OCI
 qualification is retained separately. Non-Rust inventory and notices follow;
 a local console mechanism probe is retained in [OPS-12](OPS-12.md), without a

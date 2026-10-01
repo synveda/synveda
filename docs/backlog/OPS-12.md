@@ -1098,22 +1098,37 @@ spellings and all six root contracts. All 29 CI-tooling and 77 release-parity
 tests, fast checks, pinned actionlint, Rust formatting and diff checks pass
 locally. No Rust source, dependency lock or generated contract changed.
 
-Current native qualification source is file-metadata correction
+File-metadata correction
 `02023908ce95df5dc83991dbde6f9ed31b89e4cd`: full CI
 [`36802763712`](https://github.com/synveda/synveda/actions/runs/36802763712) and
 independent nonpublishing Release
 [`36802769936`](https://github.com/synveda/synveda/actions/runs/36802769936).
 Both dispatch trigger SHAs were independently checked. The Release branch
-`codex/ops12-native-sbom-qualification` was advanced without force; remove it
-after retaining this source's proof. Next inspect these runs, retry transient
-failures on the same source and correct actual defects before starting another
-qualification. Independently verify the original 51-payload checksum inventory,
-six client reports, eight archive reports, twelve SPDX documents and both
-complete OCI/deployment report sets from this single source/run before retaining
-proof. The preceding OCI source is already retained separately; do not repeat or
-transplant that qualification. An active thread continuation follows this
-canonical checkpoint and proceeds to non-Rust inventory/notices after
-qualification. Production readiness remains unclaimed.
+`codex/ops12-native-sbom-qualification` was advanced without force. These runs
+are superseded by the root-spelling correction below and cannot qualify it.
+The preceding OCI source is already retained separately; do not repeat or
+transplant that qualification.
+
+That source's Windows x64 CI job `110180571304` passed native Rust tests,
+private-state checks and packaged-client execution, then refused the synthetic
+root filename: Syft emitted an empty string, while the new Windows fixture
+assumed `\`. The two-entry count and Cargo-content checks passed before this
+refusal. Corrected fixtures reproduce that exact refusal before the validator
+change, and also catch the formerly accepted backslash root. The validator now
+requires the empty root on every target; the Windows executable still requires
+exact `\synveda.exe` spelling and its actual, single SHA-256 digest. Root type,
+placeholder isolation, extra-file, Cargo-content, scanner/source and publication
+checks are unchanged. All 29 CI-tooling and 77 release-parity tests, fast checks,
+Rust formatting, pinned actionlint and diff checks pass. Actual retained macOS
+ARM CLI/gateway/worker archive and SPDX bytes pass the corrected validator,
+while dirty-source refusal holds. No Rust source or generated contract changed.
+Next commit this narrow root-spelling correction, replace
+the obsolete `02023908` native runs with full CI and nonpublishing Release from
+that exact source, and independently verify its original 51-payload inventory
+and every required native/OCI/deployment report before retaining qualification.
+An active thread continuation follows this canonical checkpoint and proceeds to
+non-Rust inventory/notices after qualification. Production readiness remains
+unclaimed.
 
 ### Next non-Rust mechanism probe (2026-10-01)
 

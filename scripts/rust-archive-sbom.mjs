@@ -84,7 +84,7 @@ export function checkNativeRustSpdx(spdx, binaryHash, binary, version) {
   const windows = binary.member === "client/bin/synveda.exe";
   // Full file metadata includes this directory, which has no bytes to hash.
   // Its exact placeholder is permitted only here, never as executable binding.
-  assert.equal(spdx.files[0].fileName, windows ? "\\" : "", "native SBOM synthetic root differs");
+  assert.equal(spdx.files[0].fileName, "", "native SBOM synthetic root differs");
   assert.deepEqual(spdx.files[0].fileTypes, ["OTHER"], "native SBOM synthetic root type differs");
   assert.deepEqual(spdx.files[0].checksums, [{ algorithm: "SHA1", checksumValue: "0".repeat(40) }], "native SBOM synthetic root checksum differs");
   const fileName = windows ? "\\synveda.exe" : binary.member.split("/").at(-1);

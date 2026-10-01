@@ -66,7 +66,7 @@ cannot satisfy its gate. Select all file metadata within that single-file source
 so its digest does not depend on package-ownership discovery. The pinned
 single-file resolver indexes its parent directory too: require exactly that
 synthetic root entry and the expected executable. The root's filename is empty
-on POSIX or `\` on Windows, its type is `OTHER`, and its sole checksum is Syft's
+on every target, its type is `OTHER`, and its sole checksum is Syft's
 zero SHA-1 placeholder for non-regular files. That entry cannot supply binary
 binding. Require the executable's actual, unambiguous SHA-256 file checksum;
 missing digests, placeholders in the executable entry and additional files fail.
@@ -110,9 +110,12 @@ jobs reached the Cargo-content gate but correctly refused omitted file digests.
 uses the original committed validator to reproduce an omitted-digest refusal
 and the extra root from full metadata selection. The corrected producer passes
 all three unchanged stripped macOS ARM members, with foreign-hash and executable
-placeholder refusals. Eleven focused archive tests and workflow/publication
-refusals pass; fresh native hosted qualification remains pending independently
-of the preceding OCI source.
+placeholder refusals. Hosted Windows x64 then exposed an incorrect fixture
+assumption about the directory name; corrected fixtures reproduce the empty-root
+refusal before the validator fix and reject the formerly accepted backslash
+root. Eleven focused archive tests and workflow/publication refusals pass;
+fresh native hosted qualification remains pending independently of the
+preceding OCI source.
 
 ## Options considered
 

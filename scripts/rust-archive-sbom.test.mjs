@@ -31,7 +31,7 @@ const bytesFor = (target) => {
 const spdxFor = (binary, binaryHash) => ({
   spdxVersion: "SPDX-2.3", creationInfo: { creators: ["Tool: syft-1.51.0"] },
   files: [
-    { fileName: binary.member.endsWith(".exe") ? "\\" : "", fileTypes: ["OTHER"], checksums: [{ algorithm: "SHA1", checksumValue: "0".repeat(40) }] },
+    { fileName: "", fileTypes: ["OTHER"], checksums: [{ algorithm: "SHA1", checksumValue: "0".repeat(40) }] },
     { fileName: binary.member.endsWith(".exe") ? "\\synveda.exe" : binary.member.split("/").at(-1), checksums: [{ algorithm: "SHA256", checksumValue: binaryHash }] },
   ],
   packages: Object.entries({ [binary.kind === "cli" ? "synveda-cli" : "synveda-gateway"]: version,
@@ -173,7 +173,7 @@ test("only the pinned non-regular root can accompany the hashed executable", () 
       (d) => { d.files.shift(); },
       (d) => { d.files.push(structuredClone(d.files[0])); },
       (d) => { d.files[0].fileName = "other"; },
-      (d) => { d.files[0].fileName = target.startsWith("windows-") ? "" : "\\"; },
+      (d) => { d.files[0].fileName = "\\"; },
       (d) => { d.files[0].fileTypes = ["BINARY"]; },
       (d) => { d.files[0].checksums = d.files[1].checksums; },
       (d) => { d.files[0].checksums[0].checksumValue = "1".repeat(40); },
