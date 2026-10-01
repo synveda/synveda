@@ -377,10 +377,16 @@ tests and packaged-client execution, then refused the actual empty synthetic
 root filename. Corrected fixtures reproduce that refusal before the fix and
 reject the wrongly assumed backslash root. The root now requires the exact
 empty name on all targets, retaining the executable's Windows spelling and
-actual SHA-256 checks. Next commit this correction, replace the obsolete native
-runs, and independently verify all 51 same-run payloads, eight native archive
-reports and twelve SPDX documents before retaining proof. An active thread
-continuation follows this checkpoint.
+actual SHA-256 checks. Current native qualification source `ef6d61db` is bound to
+[full CI](https://github.com/synveda/synveda/actions/runs/36805252052) and
+[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36805260636);
+both trigger SHAs were independently checked. The obsolete Release is cancelled
+and CI cancellation was requested. All 29 CI-tooling and 77 release-parity tests,
+fast checks, Rust formatting, pinned actionlint and diff checks pass for the
+correction. Actual retained macOS archive/SPDX bytes still verify, with dirty
+source refusal. Next independently verify all 51 same-run payloads, eight native
+archive reports and twelve SPDX documents before retaining proof. An active
+thread continuation follows this checkpoint.
 Superseded reports cannot qualify the new source; the preceding `3beeb1cb` OCI
 qualification is retained separately. Non-Rust inventory and notices follow;
 a local console mechanism probe is retained in [OPS-12](OPS-12.md), without a

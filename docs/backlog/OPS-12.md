@@ -1122,13 +1122,23 @@ checks are unchanged. All 29 CI-tooling and 77 release-parity tests, fast checks
 Rust formatting, pinned actionlint and diff checks pass. Actual retained macOS
 ARM CLI/gateway/worker archive and SPDX bytes pass the corrected validator,
 while dirty-source refusal holds. No Rust source or generated contract changed.
-Next commit this narrow root-spelling correction, replace
-the obsolete `02023908` native runs with full CI and nonpublishing Release from
-that exact source, and independently verify its original 51-payload inventory
-and every required native/OCI/deployment report before retaining qualification.
-An active thread continuation follows this canonical checkpoint and proceeds to
-non-Rust inventory/notices after qualification. Production readiness remains
-unclaimed.
+
+Current native qualification source is root-spelling correction
+`ef6d61dbf4183dcc39a02e549822cb8f76243d42`: full CI
+[`36805252052`](https://github.com/synveda/synveda/actions/runs/36805252052) and
+independent nonpublishing Release
+[`36805260636`](https://github.com/synveda/synveda/actions/runs/36805260636).
+Both dispatch trigger SHAs were independently checked. The obsolete
+`02023908` Release is cancelled; CI cancellation was requested and its cleanup
+was still completing at this checkpoint. Neither run supplies qualification for
+the correction. The task-created Release branch was advanced without force;
+remove it after retaining the current source's proof. Next inspect these runs,
+retry transient failures on the same source, and independently verify the
+original 51-payload inventory, six client reports, eight archive reports, twelve
+SPDX documents and both complete OCI/Compose/Helm report sets before retaining
+qualification. An active thread continuation follows this canonical checkpoint
+and proceeds to non-Rust inventory/notices after qualification. Production
+readiness remains unclaimed.
 
 ### Next non-Rust mechanism probe (2026-10-01)
 
