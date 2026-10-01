@@ -432,7 +432,14 @@ carriage still omits a separate nbytes MIT notice. This is local mechanism
 evidence, not six native executions or new source qualification.
 ADR-0135 selects reuse of Node's built-in metadata and existing manifests/reports,
 with exact executable/licence pins and supplementary upstream notices.
-Next implement those packaging and final archive/image checks; retain the
+The client source increment now implements six exact executable/licence pins,
+supplementary nbytes/SQLite notices and 21 reported dependencies in the existing
+manifest/native report. Assembly reads actual archive bytes independently.
+[Actual macOS ARM evidence](../../demos/evidence/ops12-client-node-inventory-candidate.json)
+passes all nine native archive checks; coherently changed runtime/notice controls
+refuse. Six-target TAR/ZIP fixtures pass; this dirty dev-profile candidate is not
+Cargo SBOM or clean hosted qualification. Next apply the same contract to actual
+product Node bytes/notices and existing image reports; retain the
 unreported/transitive native gaps for the remaining artifact coverage. Then
 continue plugin/chart/upstream-image coverage before vulnerability and publisher
 incident policy. The native Windows scanner blocker and OPS-12's open state

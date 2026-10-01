@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cliPath, inventory, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
+import { checkNodeFiles, nodeInventory, nodeMetadataArguments, readNodeFile } from "./node-runtime-inventory.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const windows = process.platform === "win32";
@@ -14,7 +15,7 @@ if (!/^[0-9a-f]{40}$/.test(sourceSha)) throw new Error("invalid source SHA");
 const lock = JSON.parse(readFileSync(join(root, "scripts/node-runtimes.json")));
 const pin = lock.targets[target];
 if (!pin || target !== targetName()) throw new Error("client packaging requires its native host target");
-const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=normal", "--", "scripts", "crates", "adapters", "docs", ".github", "Cargo.toml", "Cargo.lock"],
+const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=normal", "--", "scripts", "crates", "adapters", "docs", ".github", "assets/licenses/node", ".gitattributes", "Cargo.toml", "Cargo.lock"],
   { cwd: root, encoding: "utf8" }).trim().length > 0;
 for (const file of [binary, runtimeArchive]) {
   const info = lstatSync(file);
@@ -44,8 +45,13 @@ try {
   const runtimeNode = windows ? "node.exe" : "node";
   copyFileSync(join(scratch, upstreamRoot, upstreamNode), join(runtime, runtimeNode));
   copyFileSync(join(scratch, upstreamRoot, "LICENSE"), join(runtime, "LICENSE"));
+  for (const name of Object.keys(lock.supplementary_notices)) copyFileSync(join(root, "assets/licenses/node", name), join(runtime, name));
+  const nodeFiles = checkNodeFiles(readNodeFile(join(runtime, runtimeNode), 256 * 1024 * 1024),
+    Object.fromEntries(["LICENSE", ...Object.keys(lock.supplementary_notices)].map((name) => [name, readNodeFile(join(runtime, name), 1024 * 1024)])), target, lock);
   if (!windows) chmodSync(join(runtime, runtimeNode), 0o755);
   if (run(join(runtime, runtimeNode), ["--version"]).trim() !== `v${lock.version}`) throw new Error("private Node version mismatch");
+  const runtimeInventory = nodeInventory(nodeFiles,
+    JSON.parse(run(join(runtime, runtimeNode), nodeMetadataArguments, { maxBuffer: 64 * 1024 })), target, lock);
   for (const relative of ["plugin/synveda/hooks/hooks.json", "plugin/synveda/.mcp.json"]) {
     const path = join(client, relative);
     const manifest = JSON.parse(readFileSync(path));
@@ -65,7 +71,7 @@ try {
   mkdirSync(join(client, "lib"));
   for (const file of ["client-install.mjs", "client-artifact.mjs"]) copyFileSync(join(root, "scripts", file), join(client, "lib", file));
   writeFileSync(join(client, "client.json"), `${JSON.stringify({ schema_version: 1, version, source_sha: sourceSha,
-    target, source_tree_dirty: dirty, cli_version: cliVersion, node: { version: lock.version, archive: pin.archive, archive_sha256: pin.sha256 },
+    target, source_tree_dirty: dirty, cli_version: cliVersion, node: { version: lock.version, archive: pin.archive, archive_sha256: pin.sha256, inventory: runtimeInventory },
     files: inventory(client) }, null, 2)}\n`);
   validateClient(client);
   for (const adapter of ["synveda", "codex", "copilot-cli"]) {

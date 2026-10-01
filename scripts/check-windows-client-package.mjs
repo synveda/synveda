@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cliPath, clientNoticeDirectories, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
+import { checkClientNodeArchive, checkNodeMetadata, nodeMetadataArguments } from "./node-runtime-inventory.mjs";
 import { checkPackagedAuth } from "./check-packaged-auth.mjs";
 
 if (process.platform !== "win32") throw new Error("native Windows execution required");
@@ -37,6 +38,10 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
   const { manifest, digest } = validateClient(join(scratch, "client"));
   assert.equal(manifest.version, version);
   assert.equal(manifest.target, targetName());
+  checkClientNodeArchive(archive, manifest.node, manifest.target, version, manifest.source_sha);
+  checkNodeMetadata(JSON.parse(run(join(scratch, "client", nodePath), nodeMetadataArguments,
+    { maxBuffer: 64 * 1024, env: { ...process.env, NODE_OPTIONS: "", NODE_PATH: "" } })), manifest.target);
+  checks.push("pinned-node-dependency-and-notice-inventory");
   for (const directory of clientNoticeDirectories) {
     for (const name of ["LICENSE", "NOTICE"]) {
       assert.deepEqual(readFileSync(join(scratch, "client", directory, name)), readFileSync(join(root, name)));

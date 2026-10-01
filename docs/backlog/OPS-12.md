@@ -1353,3 +1353,55 @@ Independent retained-evidence checks rehash all eight downloaded distributions,
 their actual executable/licence files and the reviewed upstream source files.
 `make check-fast`, Rust formatting and diff checks pass. No production code,
 workflow, dependency, generated contract or deployment was changed in this probe.
+
+### Private-client Node inventory source increment (2026-10-01)
+
+ADR-0135 preceded implementation. Existing runtime pins now include exact
+executable sizes/hashes and full platform-specific licence sizes/hashes for all
+six targets. The packager validates those actual bytes before executing Node,
+copies the supplementary upstream nbytes MIT notice and SQLite copyright
+disclaimer, then checks 21 reported dependency versions and twelve reviewed
+shared-library flags. ABI/data values and empty optional versions do not become
+library claims. Notice source bytes stay LF across checkouts; the full upstream
+Windows licence remains its original CRLF. No runtime dependency or release
+sidecar is added.
+
+The existing `client.json` and native report retain the inventory. Both native
+execution paths require the new dependency/notice check. Assembly independently
+reads the final archive's unique regular Node, three notice files and manifest,
+validates the executable platform, and checks actual bytes against reviewed pins
+and dependencies. It reuses the existing bounded libarchive reader; the Rust
+producer/validator retain that same reader and all Cargo/hash gates. Inventory
+tools remain outside the client installer and hooks.
+
+[Actual candidate evidence](../../demos/evidence/ops12-client-node-inventory-candidate.json)
+binds dirty parent `f0681edb684c318e1436bbd263ef1cd833d415c6`, source-input hashes
+and macOS ARM archive SHA-256
+`9936a34e18e12d9e8afad3b491f3abd1bb415f7715aedfe9f03ddc6217630e7a`.
+The CLI was built from unchanged Rust source using the local dev profile; this
+is Node carriage/installation evidence, not Rust Cargo SBOM qualification.
+All nine native archive checks pass, including isolated install/reinstall,
+packaged authentication and extracted Codex/Copilot lifecycle replay. Actual
+controls coherently alter a runtime byte or truncate its licence, updating both
+manifest inventory and Node report: their internal client inventory is valid,
+but the independent production archive checker refuses the original upstream
+pin. Both controls were removed. Six-target fixtures exercise actual TAR/ZIP
+readers and missing/truncated/duplicate/linked notices, foreign identities,
+dependency substitutions and changed linkage; no foreign runtime is executed.
+
+All 44 CI-tooling and 81 release-parity tests pass, together with 39 focused
+Node/client/Rust-archive tests, fast checks, Rust formatting and diff checks.
+No Rust, SQL, public generated contract, deployment or publication gate changed.
+The local candidate does not qualify all six native targets, clean hosted source
+or complete transitive native coverage. Native Rust remains externally blocked.
+
+Next implement the ADR-0135 product follow-up: add the two reviewed Linux
+Node 22.23.2 executable/licence pins, carry the supplementary notices, inspect
+actual stopped-image Node/notice bytes before native metadata execution, and
+require the existing image reports to retain the result through assembly and
+both-registry qualification. Preserve console content, Cargo content, cleanup
+and the original 51-payload gates. Then continue unreported/transitive native,
+plugin/chart/upstream-image coverage before vulnerability and publisher incident
+policy. The fixed Syft distribution, S3 bucket and real issuer/harness credentials
+remain separate blockers; no new native qualification source/run is selected.
+Never resume cancelled `ef6d61db`, borrow old proof, weaken gates or publish.

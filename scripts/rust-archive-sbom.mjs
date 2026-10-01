@@ -39,14 +39,14 @@ function regularBytes(path, limit) {
   return readFileSync(path);
 }
 
-function archiveMember(archive, member, limit) {
+export function readArchiveMember(archive, member, limit) {
   const options = { timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] };
   // Linux's GNU tar cannot read the Windows ZIPs assembled on this host.
   const reader = process.platform === "linux" && archive.endsWith(".zip") ? "bsdtar" : "tar";
   const listing = execFileSync(reader, ["-tvf", archive, member], { ...options, encoding: "utf8", maxBuffer: 32 * 1024 }).trim().split("\n");
-  assert.ok(listing.length === 1 && listing[0].startsWith("-"), "Rust archive member must be one regular file");
+  assert.ok(listing.length === 1 && listing[0].startsWith("-"), "archive member must be one regular file");
   const bytes = execFileSync(reader, ["-xOf", archive, member], { ...options, maxBuffer: limit });
-  assert.ok(bytes.length > 0 && bytes.length <= limit, "Rust archive member exceeds its bound");
+  assert.ok(bytes.length > 0 && bytes.length <= limit, "archive member exceeds its bound");
   return bytes;
 }
 
@@ -73,7 +73,7 @@ export function checkNativeBinary(bytes, target) {
 
 export function readRustBinary(archive, member, target) {
   assert.ok(["client/bin/synveda", "client/bin/synveda.exe", "synveda", "synveda-gateway", "synveda-worker"].includes(member), "unreviewed Rust archive member");
-  const bytes = archiveMember(archive, member, maxBinary);
+  const bytes = readArchiveMember(archive, member, maxBinary);
   return { bytes, platform: checkNativeBinary(bytes, target) };
 }
 
@@ -172,7 +172,7 @@ export function produceRustArchiveSbom(kind, target, version, source, scanner, d
   const archive = join(directory, plan.archive);
   const archiveBytes = regularBytes(archive, 512 * 1024 * 1024);
   if (kind === "client") {
-    const manifest = JSON.parse(archiveMember(archive, "client/client.json", 256 * 1024));
+    const manifest = JSON.parse(readArchiveMember(archive, "client/client.json", 256 * 1024));
     assert.equal(manifest.version, version);
     assert.equal(manifest.cli_version, `synveda ${version}`);
     assert.equal(manifest.source_sha, source);

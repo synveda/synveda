@@ -274,6 +274,12 @@ registry copying and anonymous public-pull steps did not run.
 
 Native archive reports require exact source, target, archive and private-Node
 identity, installation/authentication checks and first-party notice carriage.
+ADR-0135 additionally requires the checksum-pinned Node executable, complete
+platform-specific upstream licence and supplementary nbytes/SQLite notices.
+Native jobs check Node's reported dependency versions and reviewed linkage flags;
+assembly independently reads those actual archive members and the embedded
+manifest, refusing coherent report/content substitutions. The inventory remains
+in `client.json` and the existing native report, inside the 51-payload plan.
 Windows additionally exercises the actual download cleanup helper with a
 synchronously acquired exclusive handle released by a native thread, persistent
 sharing-lock exhaustion and immediate non-sharing refusal. Cleanup retries only

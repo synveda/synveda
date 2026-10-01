@@ -212,8 +212,10 @@ The preceding local ARM product's Node and complete licence match upstream
 bytes. Generic binary scanning misses embedded library versions and both
 original Windows Node identities. ADR-0135 selects a small packaging/report
 increment using native Node metadata, exact executable/licence pins and missing
-upstream notices. Implementation and native qualification remain pending;
-reported versions do not establish complete transitive native coverage or
+upstream notices. The [client source candidate](../demos/evidence/ops12-client-node-inventory-candidate.json)
+now passes actual macOS ARM packaging/installation and coherent-substitution
+refusals; product-image implementation and six-target native qualification remain
+pending. Reported versions do not establish complete transitive native coverage or
 change the readiness verdict.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and

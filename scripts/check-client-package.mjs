@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { clientNoticeDirectories, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
 import { checkPackagedAuth } from "./check-packaged-auth.mjs";
+import { checkClientNodeArchive, checkNodeMetadata, nodeMetadataArguments } from "./node-runtime-inventory.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const [version, archiveArgument, report] = process.argv.slice(2);
@@ -23,6 +24,9 @@ try {
   const { manifest, digest } = validateClient(client);
   assert.equal(manifest.version, version);
   assert.equal(manifest.target, targetName());
+  checkClientNodeArchive(archive, manifest.node, manifest.target, version, manifest.source_sha);
+  checkNodeMetadata(JSON.parse(run(join(client, nodePath), nodeMetadataArguments, { maxBuffer: 64 * 1024 })), manifest.target);
+  checks.push("pinned-node-dependency-and-notice-inventory");
   for (const directory of clientNoticeDirectories) {
     for (const name of ["LICENSE", "NOTICE"]) {
       assert.deepEqual(readFileSync(join(client, directory, name)), readFileSync(join(root, name)));

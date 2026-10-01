@@ -9,6 +9,7 @@ import { gzipSync } from "node:zlib";
 import { inventory, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
 import { installClient } from "./client-install.mjs";
 import { checkClientRelease } from "./check-client-release.mjs";
+import { clientNodeFixture } from "./fixtures/client-node.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const version = "0.4.0";
@@ -344,18 +345,15 @@ test("native runtime pins cover four Unix and two Windows candidates with immuta
 test("release verification rejects missing checks, changed archives and stale identities", (t) => {
   const f = fixture(t);
   const target = targetName();
-  const bytes = Buffer.from("test archive bytes");
-  const node = { version: "24.21.0", archive: "node-fixture.tar.gz", archive_sha256: "2".repeat(64) };
-  const lock = { version: node.version, targets: { [target]: { archive: node.archive, sha256: node.archive_sha256 } } };
-  const archive = join(f.scratch, `synveda-client-${version}-${target}.tar.gz`);
+  const { node, lock, archive } = clientNodeFixture(f.scratch, target, version, "1".repeat(40));
+  const bytes = readFileSync(archive);
   const path = join(f.scratch, `synveda-client-report-${target}.json`);
   const report = { schema_version: 1, evidence: "native-client-archive", target, version, source_sha: "1".repeat(40),
     source_tree_dirty: false, cli_version: `synveda ${version}`, node, archive_sha256: sha256(bytes), archive_bytes: bytes.length,
-    checks: ["licence-and-notice-carriage", "packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
+    checks: ["licence-and-notice-carriage", "pinned-node-dependency-and-notice-inventory", "packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
       "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
       "codex-extracted-lifecycle-replay", "copilot-cli-extracted-lifecycle-replay"] };
   const check = () => checkClientRelease(f.scratch, version, "1".repeat(40), true, lock);
-  writeFileSync(archive, bytes);
   writeFileSync(path, JSON.stringify(report));
   check();
   for (const changed of [{ source_tree_dirty: true }, { source_sha: "3".repeat(40) }, { target: "linux-mips" },
@@ -373,13 +371,15 @@ test("Windows release evidence requires both native ZIP reports and installer re
   const lock = { version: "24.21.0", targets: {} };
   const reports = [];
   for (const target of ["windows-x86_64", "windows-arm64"]) {
-    const bytes = Buffer.from(`fixture ${target}`);
-    const node = { version: lock.version, archive: `node-${target}.zip`, archive_sha256: "2".repeat(64) };
-    lock.targets[target] = { platform: "win32", archive: node.archive, sha256: node.archive_sha256 };
-    writeFileSync(join(f.scratch, `synveda-client-${version}-${target}.zip`), bytes);
+    const candidate = clientNodeFixture(f.scratch, target, version, "1".repeat(40));
+    const { node } = candidate;
+    const bytes = readFileSync(candidate.archive);
+    lock.source_sha = candidate.lock.source_sha; lock.dependencies = candidate.lock.dependencies;
+    lock.supplementary_notices = candidate.lock.supplementary_notices;
+    lock.targets[target] = candidate.lock.targets[target];
     const report = { schema_version: 1, evidence: "native-client-archive", target, version, source_sha: "1".repeat(40),
       source_tree_dirty: false, cli_version: `synveda ${version}`, node, archive_sha256: sha256(bytes), archive_bytes: bytes.length,
-      checks: ["licence-and-notice-carriage", "packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
+      checks: ["licence-and-notice-carriage", "pinned-node-dependency-and-notice-inventory", "packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
         "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
         "native-windows-private-storage-interoperability", "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
         "unsafe-zip-and-overlapping-install-root-refusal", "publisher-policy-and-pre-execution-refusal", "bounded-download-sharing-lock-cleanup"] };
