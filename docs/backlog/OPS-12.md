@@ -1458,3 +1458,60 @@ source/run is selected. Never resume cancelled `ef6d61db` runs, borrow old OCI
 proof, weaken gates or publish; retain the original same-run inventory before
 future assembly validation and remove the temporary native qualification branch
 only after corrected native proof is independently retained.
+
+### Remaining native package/notice mechanism probe (2026-10-01)
+
+[Retained probe](../../demos/evidence/ops12-native-package-notice-probe.json)
+uses clean source `2fa50422dbc1ee9db476d6ffe2664fa1a87d5d9a` to inspect the
+preceding task-owned product image from dirty parent `05f25252`. Image labels,
+native configuration and every layer diff ID agree with that retained artifact;
+the probe records the exported bytes/hash and scanner output hashes. This is
+not qualification of the probe source or reuse of an earlier qualification.
+
+The independently hash-verified existing Syft 1.51.0 dpkg and ELF catalogers
+identify 106 installed Debian packages, including `libssl3`/OpenSSL
+`3.0.20-1~deb12u2`, and the five Rust executables' dynamic `libssl.so.3` and
+`libcrypto.so.3` imports. This distinguishes actual C-library identity from
+Cargo's Rust binding version. The maintained file-content selection captures
+104 package-root copyright documents, one shipped example copyright document
+and fourteen common licence files. All 119 complete files, four actual C-library
+files and the dpkg database match independent fixed stopped-image reads. Every
+installed package maps to verified notice bytes, and all notice SHA-256 values
+match the same scan's SPDX files. The container and temporary streams were
+removed; no candidate code ran or retained deployment changed.
+
+Parsed SPDX licence identifiers and extracted licence blocks do not retain
+every full Debian copyright document. Preserve the original raw files and
+their hashes; mixed source copyright sections cannot establish which compiled
+library licence applies. The [maintained mechanism](https://oss.anchore.com/docs/capabilities/dpkg/)
+and [file-content controls](https://oss.anchore.com/docs/reference/syft/configuration/)
+can support a small follow-up in the existing image/SBOM reports. No scanner,
+service, formatter, production dependency or release sidecar is added by this
+probe, and no architecture choice for the production increment is recorded yet.
+
+Six separate static probes recheck every private Node executable's platform,
+size and original hash. Maintained metadata exposes macOS system/framework and
+Linux C/C++ runtime imports. Both PE scans return no imported-library list;
+this is missing evidence, not proof of zero Windows dependencies. No foreign
+executable runs, host-library version is inferred or native target is qualified.
+Unreported static Node/V8 components and ncrypto notice provenance remain open.
+
+Independent evidence checks verify the original exported configuration blob,
+source-input/scanner/configuration hashes, all 124 fixed image files and the six
+original private executables. Fast checks, Rust formatting and diff checks pass.
+This slice changes evidence and canonical status only; no production code,
+dependency, workflow, generated contract or deployment changes.
+
+Next retry official source reads after GitHub connectivity recovers, review the
+pinned Node 24 and 22 build/notice sources and the Windows import-metadata gap,
+then record only the necessary narrow choice before extending existing product
+image/SBOM reports with installed-package identities, full raw-notice hashes and
+dynamic-library checks. Keep the implementation in existing packaging/readers.
+Plugin/chart and remaining upstream-image coverage follow, then vulnerability
+and publisher incident policy. Two pinned source-tree downloads failed with TLS
+connection timeouts; feature-branch push failed with a connection reset and its
+bounded HTTP/1.1 retry also timed out. Retry that push when access returns; local
+commits remain retained. These transport failures are separate from product
+failures and the unchanged Syft Windows qualification blocker. The saved
+automation remains paused; no new native source/run, merge, tag or publication
+is authorized by this probe.

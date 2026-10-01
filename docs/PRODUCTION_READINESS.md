@@ -222,6 +222,16 @@ Clean hosted and six-target native qualification remain pending. Reported
 versions do not establish complete transitive native coverage or change the
 readiness verdict.
 
+The [native package/notice mechanism probe](../demos/evidence/ops12-native-package-notice-probe.json)
+uses existing Syft catalogers on the retained local product image. Its 106
+installed Debian packages map to independently checked complete notices;
+119 copyright/common-licence files, four C-library files and the package database
+match actual stopped-image bytes. Static metadata confirms the Rust executables'
+OpenSSL imports and private Node's macOS/Linux host-library imports. Windows
+import metadata, unreported static Node/V8 components and production report
+gates remain pending. This probe does not qualify another source or change
+readiness.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.

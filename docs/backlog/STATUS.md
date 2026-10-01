@@ -448,12 +448,20 @@ passes all three complete notice checks, 21 reported dependencies and same-image
 console validation. Altered executable and truncated-notice images refuse
 before Node starts; owned controls and inspection containers were removed.
 This dirty source candidate is separate from clean hosted qualification.
-Next probe unreported/transitive native dependencies and notice provenance,
-then plugin/chart/upstream-image coverage before vulnerability and publisher
-incident policy. Reuse maintained mechanisms and existing artifact reports;
-record only necessary architecture changes before implementing them. The native
-Windows scanner blocker and OPS-12's open state remain unchanged; its brief
-owns the exact next action.
+The [native package/notice probe](../../demos/evidence/ops12-native-package-notice-probe.json)
+now uses existing Syft catalogers on that retained image: 106 installed Debian
+packages, 119 complete copyright/common-licence files and four native-library
+files match independent stopped-image reads. All installed package notices map
+to verified bytes; SPDX file hashes match. Six static private-Node probes expose
+macOS/Linux host-library imports, but PE import lists remain unavailable.
+This selects no new production mechanism and qualifies no new source or target.
+Next finish the pinned Node/V8 source and notice review, then record the narrow
+choice for installed-package/raw-notice checks in existing image/SBOM reports.
+Official source downloads and the branch push currently fail with TLS connection
+timeouts/reset; retry after GitHub access recovers. Then continue plugin/chart
+and other-image coverage before vulnerability and publisher incident policy.
+The saved automation remains paused. The native Windows scanner blocker and
+OPS-12's open state remain unchanged; its brief owns the exact next action.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
