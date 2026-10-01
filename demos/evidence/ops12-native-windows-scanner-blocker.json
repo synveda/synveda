@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "evidence": "native-windows-scanner-blocker",
+  "observed_at": "2026-10-01T03:00:21.834Z",
+  "classification": "Upstream native file-resolver defect; Synveda native archive qualification remains failed",
+  "synveda": {
+    "failed_source_sha": "ef6d61dbf4183dcc39a02e549822cb8f76243d42",
+    "assembly_correction_sha": "3198006925d972bb65e138f28794ff565b790cb8",
+    "native_windows_x64_failures": [
+      {
+        "kind": "ci",
+        "run_id": 36805252052,
+        "job_id": 110188331648,
+        "url": "https://github.com/synveda/synveda/actions/runs/36805252052/job/110188331648",
+        "source_sha": "ef6d61dbf4183dcc39a02e549822cb8f76243d42",
+        "conclusion": "failure",
+        "private_state_checks": 5,
+        "packaged_archive_execution_checks": 11,
+        "scanner_failure": "native SBOM binary hash differs",
+        "found_executable_sha256_digests": [],
+        "producer_expected_binary_sha256": "4375aa66bfc734f998a892622d8a8e57d0ad2b117a6b2a7c5668ccf555930f82",
+        "log_sha256": "ac5a4cc4518e239da68ab8b27fefb557676fd783dee140c51143f74caf671608"
+      },
+      {
+        "kind": "release",
+        "run_id": 36805260636,
+        "job_id": 110188115206,
+        "url": "https://github.com/synveda/synveda/actions/runs/36805260636/job/110188115206",
+        "source_sha": "ef6d61dbf4183dcc39a02e549822cb8f76243d42",
+        "conclusion": "failure",
+        "private_state_checks": 5,
+        "packaged_archive_execution_checks": 11,
+        "scanner_failure": "native SBOM binary hash differs",
+        "found_executable_sha256_digests": [],
+        "producer_expected_binary_sha256": "303c4aa1665e2062aed053c518bf62a033a50459fb901448ca57b4f4de343ce7",
+        "log_sha256": "a8f6234db2b163119e35574ed43d81a6113ea254a546e84ed171e59e4a32efe7"
+      }
+    ],
+    "qualification_retained": false
+  },
+  "scanner": {
+    "pinned_native_version": "1.51.0",
+    "latest_released": {
+      "draft": false,
+      "html_url": "https://github.com/anchore/syft/releases/tag/v1.52.0",
+      "prerelease": false,
+      "published_at": "2026-09-17T14:38:17Z",
+      "tag_name": "v1.52.0"
+    },
+    "upstream_fix": {
+      "head_sha": "ad87362158fb6a2eff1554525aff075a82b1608b",
+      "html_url": "https://github.com/anchore/syft/pull/5341",
+      "merge_commit_sha": "6ac7afb439c950ec2fc169103c4850c6dfe74c5a",
+      "merged": true,
+      "merged_at": "2026-09-30T13:08:15Z",
+      "number": 5341,
+      "state": "closed",
+      "title": "Fix missing file hashes when running on windows system"
+    },
+    "affected_source": {
+      "path": "syft/internal/fileresolver/filetree_resolver.go",
+      "sha256_v1_51_0": "ac675184cb8fdc69834ac9bbc3be5b53cda8f7c7a4a5d28a794e726d1b815a2d",
+      "sha256_v1_52_0": "ac675184cb8fdc69834ac9bbc3be5b53cda8f7c7a4a5d28a794e726d1b815a2d",
+      "sha256_merged_fix": "bf29b36217899f53ed2859938b2b913c621499af246ee13e4cf88144179765bc",
+      "released_files_identical": true
+    },
+    "primary_sources": [
+      "https://github.com/anchore/syft/issues/5325",
+      "https://github.com/anchore/syft/pull/5341",
+      "https://github.com/anchore/syft/blob/v1.51.0/syft/internal/fileresolver/filetree_resolver.go",
+      "https://github.com/anchore/syft/blob/v1.52.0/syft/internal/fileresolver/filetree_resolver.go",
+      "https://github.com/anchore/syft/blob/6ac7afb439c950ec2fc169103c4850c6dfe74c5a/syft/internal/fileresolver/filetree_resolver.go"
+    ],
+    "diagnosis": "The file tree is keyed by POSIX volume-encoded paths. Released native Windows FilesByPath searches that tree with a native path before conversion. The digest cataloger resolves each regular file by path, so it silently receives no location. The merged fix converts request paths before lookup.",
+    "upstream_validation": {
+      "run_id": 36719488210,
+      "source_sha": "6ac7afb439c950ec2fc169103c4850c6dfe74c5a",
+      "url": "https://github.com/anchore/syft/actions/runs/36719488210",
+      "jobs": [
+        {
+          "completed_at": "2026-09-30T13:12:40Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/anchore/syft/actions/runs/36719488210/job/109900628792",
+          "id": 109900628792,
+          "name": "Unit tests (Windows)",
+          "started_at": "2026-09-30T13:08:20Z",
+          "status": "completed"
+        },
+        {
+          "completed_at": "2026-09-30T13:20:56Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/anchore/syft/actions/runs/36719488210/job/109900628798",
+          "id": 109900628798,
+          "name": "Unit tests (Linux)",
+          "started_at": "2026-09-30T13:08:44Z",
+          "status": "completed"
+        },
+        {
+          "completed_at": "2026-09-30T13:21:03Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/anchore/syft/actions/runs/36719488210/job/109905739574",
+          "id": 109905739574,
+          "name": "Unit tests",
+          "started_at": "2026-09-30T13:20:59Z",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  "preserved_contract": [
+    "Actual archived executable SHA-256, size and platform required during assembly",
+    "SPDX executable SHA-256 must match those bytes; root placeholders cannot bind a binary",
+    "Locked Cargo roots, Cedar and SQLx required for every executable",
+    "Scanner release archive/executable checksums remain pinned before execution",
+    "No qualification can combine sources or hosted runs"
+  ],
+  "limits": [
+    "Failed Windows jobs did not retain their SPDX bytes; omission is established by their executable-digest gate failures and the matching upstream source defect",
+    "The merged upstream source is not a released native scanner or Synveda qualification",
+    "No source-pinned scanner build or native Synveda probe of the merged fix was performed",
+    "No scanner pin, native SPDX path contract, Rust product source or publication gate changed"
+  ],
+  "next_action": "Await the user choice: continue independent non-Rust inventory/notices with native qualification explicitly blocked; qualify a reviewed source-pinned upstream scanner build; or wait for a fixed scanner release. A new tool must pass native Windows file-name/digest probes before full exact-source CI and nonpublishing Release. Verify all original 51 payloads before assembly validation and retain complete same-run proof."
+}

@@ -392,9 +392,17 @@ rehashes the actual unique regular executable and verifies its platform and
 size before SPDX; real ZIP fixtures and Linux libarchive provisioning cover
 Windows archives. All 30 CI-tooling / 77 release-parity tests, fast checks,
 formatting, actionlint and diff checks pass. Downloaded same-run Linux ARM bytes
-pass the stricter check, but no full native source is qualified. Next diagnose
-the native Windows digest omission, fix it without weakening checksum gates,
-and dispatch one corrected clean source. Independently verify all 51 same-run
+pass the stricter check, but no full native source is qualified. Both failed
+`ef6d61db` runs are cancelled. [Retained blocker evidence](../../demos/evidence/ops12-native-windows-scanner-blocker.json)
+identifies Syft's native Windows path lookup defect: upstream fix 5341 merged
+as `6ac7afb4`, while latest released 1.52.0 still has pinned 1.51.0's faulty
+resolver bytes. A fixed scanner must pass native path/digest probes before a
+new clean-source qualification. The user choice is pending: continue the
+independent inventory/notices slice, qualify a reviewed upstream source build,
+or wait for a fixed release. The requested order is retained and continuation
+is paused pending that choice or fixed distribution. No new source/run is
+selected, and the temporary validation branch still points at failed
+`ef6d61db`; do not resume its runs. Independently verify all 51 same-run
 payloads, eight archive reports and twelve SPDX documents before retaining
 proof. The open brief owns the exact failures and next action.
 Superseded reports cannot qualify the new source; the preceding `3beeb1cb` OCI

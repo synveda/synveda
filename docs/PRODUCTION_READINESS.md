@@ -183,6 +183,17 @@ missing reports. Registry copying and anonymous public pulls did not run at
 `publish=false`; real client issuer/harness use, off-host PITR, HA and broader
 platform support remain open. The readiness verdict is unchanged.
 
+The subsequent native archive Rust SBOM contract requires each archived
+executable's actual SHA-256, size and platform, plus its own SPDX Cargo content.
+Assembly correction `31980069` closes a coherent report/SPDX digest substitution
+gap; focused checks pass. Native qualification remains blocked by Syft's
+Windows file lookup defect: its merged upstream fix has no released binary at
+this checkpoint, and latest release 1.52.0 retains the faulty resolver. The
+[blocker evidence](../demos/evidence/ops12-native-windows-scanner-blocker.json)
+records both native x64 gate failures and exact upstream source comparison.
+Failed reports provide no target qualification; a fixed scanner needs native
+probes and a fresh complete same-source drill. OPS-12 and the verdict remain open.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.

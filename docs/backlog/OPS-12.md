@@ -1136,10 +1136,10 @@ remove it after retaining the corrected source's proof. Both Windows x64 jobs
 (`110188331648` in CI and `110188115206` in Release) again correctly refused an
 executable without SHA-256, despite full file-metadata selection. Native
 execution, expected file spelling and Cargo-content checks passed before that
-refusal. This source is not qualified; preserve its failure rather than retrying
-the unresolved scanner defect.
+refusal. This source is not qualified. Both runs are now deliberately cancelled;
+preserve their failures rather than retrying the unresolved scanner defect.
 
-Independent review also reproduced an assembly gap: coherent changes to a
+Assembly correction `31980069` follows review of a gap: coherent changes to a
 producer's binary digest and SPDX file digest passed against an unchanged
 archive. Assembly now re-extracts every required unique regular member and
 checks its actual platform, size and SHA-256 before reading SPDX. Actual ZIP
@@ -1152,10 +1152,33 @@ identities, correct CLI/Cedar/SQLx roots and its actual archived executable hash
 That partial producer inspection is not full qualification or evidence for a
 future source.
 
-Next investigate the pinned scanner's native Windows digest omission, reproduce
-the failure with bounded native diagnostics and correct the actual defect
-without supplying or relaxing SPDX checksums. Then dispatch full CI and a
-nonpublishing Release on one clean corrected source and record their exact IDs.
+[Retained blocker evidence](../../demos/evidence/ops12-native-windows-scanner-blocker.json)
+binds both Windows x64 failures, the official upstream source comparison and
+upstream Windows/Linux unit results. [Syft issue 5325](https://github.com/anchore/syft/issues/5325)
+and [merged fix 5341](https://github.com/anchore/syft/pull/5341) identify the cause:
+the file tree has POSIX volume-encoded keys, but native Windows path lookup
+searched it before conversion. The digest cataloger silently found no location.
+The exact merged upstream source is
+`6ac7afb439c950ec2fc169103c4850c6dfe74c5a`; its Windows unit job passed. The
+latest released scanner, 1.52.0, still has the same faulty resolver bytes as
+pinned 1.51.0. No fixed release or prerelease was available at this checkpoint.
+The upstream change also normalizes reported paths, so a new scanner needs
+actual native filename/digest probes before changing the closed SPDX contract.
+Do not manufacture SPDX checksums, remove Windows sidecars, widen accepted
+paths or borrow POSIX evidence.
+
+Native qualification is blocked on a fixed scanner distribution. The user
+choice is pending: proceed with independent non-Rust inventory/notices while
+retaining this blocker; first qualify a reviewed scanner build pinned to the
+merged upstream source; or wait for a fixed release. The requested order puts
+native qualification first, so independent implementation awaits that choice.
+No new qualification source/run has been selected. The task-created validation
+branch remains at failed `ef6d61db` until a corrected source is ready; no run
+should resume from it. The continuation is paused at this checkpoint until the
+choice or a fixed scanner release permits progress. Next inspect the selected
+tool's immutable source/distribution and native path/digest behavior, preserve
+all gates, then dispatch full CI and a nonpublishing Release on one clean
+corrected source and record their exact IDs.
 Before retaining qualification, independently verify its original 51-payload
 inventory, six client reports, eight archive reports, twelve SPDX documents and
 both complete OCI/Compose/Helm report sets. No earlier report can qualify that
