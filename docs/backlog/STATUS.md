@@ -527,6 +527,14 @@ as needed rather than assuming their earlier TLS failures persist. The
 implementation order above and paused automation remain current; the OPS-12
 brief owns the exact continuation checkpoint.
 
+[Draft PR #67](https://github.com/synveda/synveda/pull/67) now reviews the branch.
+Its initial CI `36908968804` packaging job failed a ZIP fixture because Linux
+`bsdtar` was absent. The job now installs the existing ADR-0133
+`libarchive-tools` prerequisite; 53 CI-tooling and 21 client-package tests and
+pinned actionlint pass. Next verify the corrected PR job, then resume the
+documented inventory order. Production qualification and external blockers
+remain open; the automation remains paused.
+
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
 - [x] CNSL-5: Console theme and everyday usability — delivered

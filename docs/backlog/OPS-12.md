@@ -1698,3 +1698,20 @@ the exact pinned upstream notice downloads as needed; the earlier TLS failures
 do not establish their current availability. The scanner, notice-provenance,
 operator bucket and real issuer/harness gaps remain separate. The saved
 automation stays paused; no merge, tag or public release is authorized.
+
+### Draft PR and Linux packaging prerequisite (2026-10-01)
+
+[Draft PR #67](https://github.com/synveda/synveda/pull/67) reviews this branch
+against `main`. At initial PR head `aba43f11899d8f347119f61fd244ebc189bb792a`,
+[CI 36908968804](https://github.com/synveda/synveda/actions/runs/36908968804)
+deployment job `110526648564` failed the Windows ZIP evidence fixture with
+`spawnSync bsdtar ENOENT`. The general check and release assembly install the
+ADR-0133 Linux `libarchive-tools` prerequisite; the separate packaging job did
+not. It now installs that same package before the unchanged deployment gates.
+All 53 CI-tooling and 21 client-package tests and pinned actionlint 1.7.7 pass.
+
+Next verify the corrected Linux packaging job on the PR, then continue the
+plugin/chart inventory choice above. PR CI does not replace the pending clean
+native/archive and nonpublishing Release qualification. The Windows scanner,
+notice provenance, operator bucket and real issuer/harness gates remain open;
+the separate OCI proof and paused automation remain unchanged.

@@ -268,6 +268,10 @@ jobs:
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
         with:
           version: v4.2.3
+      - name: Install ZIP reader for cross-platform archive checks
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libarchive-tools
       - run: make check-deploy chart-lint
 
       - name: Install pinned Kubernetes schema checker
