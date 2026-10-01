@@ -78,12 +78,18 @@ export function readRustBinary(archive, member, target) {
 export function checkNativeRustSpdx(spdx, binaryHash, binary, version) {
   assert.match(binaryHash, hashPattern);
   const content = checkRustSpdx(spdx, binary.kind, version, nativeRustScanner);
-  assert.ok(Array.isArray(spdx.files) && spdx.files.length === 1, "native Rust SBOM must describe exactly one binary");
+  assert.ok(Array.isArray(spdx.files) && spdx.files.length === 2, "native Rust SBOM must describe only its root and one binary");
   // Pinned Syft names a Windows file relative to its synthetic root. Exact
   // spelling preserves member identity without normalizing arbitrary paths.
-  const fileName = binary.member === "client/bin/synveda.exe" ? "\\synveda.exe" : binary.member.split("/").at(-1);
-  assert.equal(spdx.files[0].fileName, fileName, "native SBOM file differs from the archived binary");
-  const sums = spdx.files[0].checksums;
+  const windows = binary.member === "client/bin/synveda.exe";
+  // Full file metadata includes this directory, which has no bytes to hash.
+  // Its exact placeholder is permitted only here, never as executable binding.
+  assert.equal(spdx.files[0].fileName, windows ? "\\" : "", "native SBOM synthetic root differs");
+  assert.deepEqual(spdx.files[0].fileTypes, ["OTHER"], "native SBOM synthetic root type differs");
+  assert.deepEqual(spdx.files[0].checksums, [{ algorithm: "SHA1", checksumValue: "0".repeat(40) }], "native SBOM synthetic root checksum differs");
+  const fileName = windows ? "\\synveda.exe" : binary.member.split("/").at(-1);
+  assert.equal(spdx.files[1].fileName, fileName, "native SBOM file differs from the archived binary");
+  const sums = spdx.files[1].checksums;
   assert.ok(Array.isArray(sums) && sums.length <= 8, "expected bounded binary checksums");
   assert.deepEqual(sums.filter((sum) => sum.algorithm === "SHA256").map((sum) => sum.checksumValue), [binaryHash], "native SBOM binary hash differs");
   return content;
@@ -130,8 +136,11 @@ function scanBinary(scanner, archive, binary, target, version, directory, scratc
   writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
   // Select only the embedded Rust cataloger. No enrichment or registry source
   // participates, and ambient scanner configuration/credentials are excluded.
+  // Hash the single input independently of package ownership; absent file
+  // digests otherwise become SPDX placeholder checksums in the pinned scanner.
   const env = { PATH: process.env.PATH, HOME: scratch, USERPROFILE: scratch, XDG_CACHE_HOME: scratch,
-    TMPDIR: scratch, TMP: scratch, TEMP: scratch, SYFT_CHECK_FOR_APP_UPDATE: "false", SYFT_CACHE_DIR: scratch };
+    TMPDIR: scratch, TMP: scratch, TEMP: scratch, SYFT_CHECK_FOR_APP_UPDATE: "false", SYFT_CACHE_DIR: scratch,
+    SYFT_FILE_METADATA_SELECTION: "all" };
   if (process.platform === "win32") env.SystemRoot = process.env.SystemRoot;
   const spdx = execFileSync(scanner, ["scan", `file:${path}`, "--override-default-catalogers", "cargo-auditable-binary-cataloger", "--output", "spdx-json"],
     { cwd: scratch, env, timeout: 120_000, maxBuffer: maxSpdx, stdio: ["ignore", "pipe", "pipe"] });

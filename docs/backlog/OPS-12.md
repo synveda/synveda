@@ -1065,14 +1065,42 @@ Rust formatting and diff checks pass locally. Both Windows x64 jobs passed all
 11 packaged-client checks, then correctly refused an SPDX file entry without
 the required SHA-256 checksum. Native filename and required Cargo-content
 checks were reached; binary binding remains unqualified. The other hosted jobs
-are still completing. Next inspect pinned Syft's Windows file-hashing behavior,
-reproduce the checksum omission, correct the scan configuration without relaxing
-validation, and rerun the correction's exact-source gates. Independently verify
-its original 51-payload inventory and each binary's document before retaining
-qualification. The preceding `3beeb1cb` OCI qualification is retained separately
-and cannot supply native archive SBOM evidence. An active thread
-continuation follows this canonical checkpoint and proceeds to non-Rust
-inventory/notices after qualification. Production readiness remains unclaimed.
+were still completing at this checkpoint. These failures cannot qualify the
+subsequent correction. The preceding `3beeb1cb` OCI qualification is retained
+separately and cannot supply native archive SBOM evidence.
+
+The [pinned scanner options](https://github.com/anchore/syft/blob/v1.51.0/cmd/syft/internal/options/file.go)
+default to hashing package-owned file coordinates. The
+[single-file indexer](https://github.com/anchore/syft/blob/v1.51.0/syft/internal/fileresolver/file_indexer.go)
+indexes the source and its parent, and the
+[SPDX encoder](https://github.com/anchore/syft/blob/v1.51.0/syft/format/common/spdxhelpers/to_format_model.go)
+inserts a zero SHA-1 placeholder when file digests are absent. The correction
+selects all file metadata within that single-file source, independently of
+package ownership. It requires exactly the pinned synthetic directory root and
+the expected executable. Only the root can contain its exact `OTHER` type and
+zero SHA-1 placeholder; the executable still needs its actual, single SHA-256
+checksum. Extra entries, foreign hashes, alternate root names/types and an
+executable placeholder refuse. No SPDX bytes are rewritten or checksums supplied
+by the validator.
+
+[Local correction evidence](../../demos/evidence/ops12-native-file-digests-probe.json)
+reuses the earlier dirty macOS ARM archive, reproduces both original-validator
+refusals with actual pinned-scanner output, and runs the corrected production
+producer on all three stripped CLI/gateway/worker members. Their binary hashes
+and Cargo identities (295/327/327) are unchanged; each document binds its actual
+member hash. Foreign hashes, executable placeholders and the dirty producer
+report refuse. This control does not reproduce the Windows resolver defect on
+macOS or qualify a clean source. Eleven focused archive tests cover both Windows
+spellings and all six root contracts. All 29 CI-tooling and 77 release-parity
+tests, fast checks, pinned actionlint, Rust formatting and diff checks pass
+locally. No Rust source, dependency lock or generated contract changed. Next
+commit the correction, replace the failed native qualification with full CI and
+an independent nonpublishing Release from that exact source, then independently verify its original
+51-payload inventory, six client reports, eight archive reports, twelve SPDX
+documents and both complete OCI/deployment report sets before retaining proof.
+An active thread continuation follows this canonical checkpoint and proceeds
+to non-Rust inventory/notices after qualification. Production readiness remains
+unclaimed.
 
 ### Next non-Rust mechanism probe (2026-10-01)
 

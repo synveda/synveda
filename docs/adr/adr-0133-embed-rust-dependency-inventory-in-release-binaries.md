@@ -62,7 +62,15 @@ server CLI, gateway and worker. Extract only fixed, unique regular members into
 invocation-owned temporary storage, check their executable platform headers and
 scan the extracted bytes without executing them. Each binary needs its own SPDX
 document and required Cargo roots/Cedar/SQLx content; metadata in another binary
-cannot satisfy its gate. Retain the documents as release sidecars, together with
+cannot satisfy its gate. Select all file metadata within that single-file source
+so its digest does not depend on package-ownership discovery. The pinned
+single-file resolver indexes its parent directory too: require exactly that
+synthetic root entry and the expected executable. The root's filename is empty
+on POSIX or `\` on Windows, its type is `OTHER`, and its sole checksum is Syft's
+zero SHA-1 placeholder for non-regular files. That entry cannot supply binary
+binding. Require the executable's actual, unambiguous SHA-256 file checksum;
+missing digests, placeholders in the executable entry and additional files fail.
+Retain the documents as release sidecars, together with
 one report per archive binding source, target, archive hash, binary hashes,
 scanner download pin and document hashes. Assembly rehashes the archive and
 documents, reads the actual SPDX content and compares it with the producer
@@ -96,9 +104,15 @@ SPDX checks. [Local macOS ARM evidence](../../demos/evidence/ops12-native-rust-s
 passes the final client CLI (295 Cargo identities) and successfully stripped
 server CLI/gateway/worker (295/327/327). Private client installation,
 authentication fixtures and extracted hook replay pass. The clean-source gate
-refuses both local dirty-checkout reports. Nine focused archive tests and
-workflow/publication refusals pass; clean hosted qualification of the native
-slice remains pending independently of the preceding OCI source.
+refuses both local dirty-checkout reports. The subsequent hosted Windows x64
+jobs reached the Cargo-content gate but correctly refused omitted file digests.
+[The file-metadata correction probe](../../demos/evidence/ops12-native-file-digests-probe.json)
+uses the original committed validator to reproduce an omitted-digest refusal
+and the extra root from full metadata selection. The corrected producer passes
+all three unchanged stripped macOS ARM members, with foreign-hash and executable
+placeholder refusals. Eleven focused archive tests and workflow/publication
+refusals pass; fresh native hosted qualification remains pending independently
+of the preceding OCI source.
 
 ## Options considered
 

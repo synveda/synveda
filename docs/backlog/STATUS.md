@@ -354,14 +354,20 @@ foreign, nested and drive-qualified paths refuse. All 27 CI-tooling tests pass.
 The `aea91758` CI again failed on Cargo registry HTTP/2 transfers before
 CNPG/native tests; its native runs were cancelled after the transport correction.
 Native jobs and the product builder now select Cargo's HTTP/1.1 transport,
-preserving TLS and locked dependency checks. Current qualification source
+preserving TLS and locked dependency checks. Failed qualification source
 `1edb6255` is bound to [full CI](https://github.com/synveda/synveda/actions/runs/36798188473)
 and an independent [nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36798194065).
 Both Windows x64 jobs passed 11 packaged-client checks, then refused an SPDX
-file entry without the required SHA-256 checksum. Next reproduce and correct
-the pinned scanner's file-hashing behavior, rerun exact-source gates and verify
-all 51 same-run payloads, eight native archive reports and twelve SPDX documents
-before retaining proof. An active thread continuation follows this checkpoint.
+file entry without the required SHA-256 checksum. The correction selects all
+metadata within the single-file source and requires exactly its pinned synthetic
+root plus the expected executable's actual SHA-256 digest. Missing executable
+digests, placeholders, foreign hashes and extra entries refuse. The
+[local macOS ARM probe](../../demos/evidence/ops12-native-file-digests-probe.json)
+passes all three unchanged stripped members and refuses dirty producer evidence;
+eleven archive tests cover all six root contracts. Next commit the correction,
+rerun exact-source gates and verify all 51 same-run payloads, eight native archive
+reports and twelve SPDX documents before retaining proof. An active thread
+continuation follows this checkpoint.
 Superseded reports cannot qualify the new source; the preceding `3beeb1cb` OCI
 qualification is retained separately. Non-Rust inventory and notices follow;
 a local console mechanism probe is retained in [OPS-12](OPS-12.md), without a

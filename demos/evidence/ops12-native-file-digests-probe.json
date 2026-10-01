@@ -1,0 +1,254 @@
+{
+  "schema_version": 1,
+  "feature": "OPS-12",
+  "observed_at": "2026-10-01T01:42:02.967Z",
+  "evidence": "local-native-file-digest-selection",
+  "source_parent": "a5be1af5f7686388dc703734dbaf7b29694b186b",
+  "source_tree_dirty": true,
+  "scanner_configuration": {
+    "cataloger": "cargo-auditable-binary-cataloger",
+    "file_metadata_selection": "all",
+    "ambient_configuration_excluded": true
+  },
+  "code_inputs": {
+    "scripts/rust-archive-sbom.mjs": "d55aa01dc14d05945f7558a5d4e718e0c02118c9e9866f279a548e6acfbe4727",
+    "scripts/rust-archive-sbom.test.mjs": "b7716cf95699e269e27d4e5419a09dab3e66e909f630e03a0ae7099e54485345",
+    "scripts/rust-sbom.mjs": "207811cdace89df6d88ca4f3c6137b2c150c53c5b7b8a95b7d9960a593377119",
+    "scripts/download-syft.mjs": "73a2ac159475233db842e42a6136a3c9ef7cd59cc57cbee5f04e6ce702e4d646",
+    "scripts/syft-runtimes.json": "a47c9a4efb99abc67c3fa3791340ea35c96fccd081641c4716ed4fc30f83237f"
+  },
+  "binary_provenance": {
+    "evidence": "demos/evidence/ops12-native-rust-sbom.json",
+    "source_parent": "98e7f62bc5e15f78c7cd3c5e2eae9b5ff97de3b0",
+    "source_tree_dirty": true,
+    "archive": "synveda-0.4.3-darwin-arm64.tar.gz",
+    "archive_sha256": "2a15c5fe43d37a8d234f63175c5a248c25e2cc7160ac308768a8178c6bdf4e08",
+    "archive_bytes": 35585677,
+    "reused_unchanged_stripped_binaries": true
+  },
+  "scanner_download": {
+    "version": "1.51.0",
+    "archive": "syft_1.51.0_darwin_arm64.tar.gz",
+    "archive_sha256": "4f37f4c7fefce0a68e4cf71ba3f5f9829a99e65d89b29f7ee41b8c2c10ea8c59",
+    "binary_sha256": "b1147cee2d7f49d6ea58d9c95b24734985a4cc208fdd3f0f0f1ff950622f0252"
+  },
+  "controls": {
+    "metadata_none": {
+      "spdx_sha256": "275ed4c47ffc96c47b456f6bf4331c327ec87644d343a931ae9672b1c26604b1",
+      "files": [
+        {
+          "fileName": "synveda",
+          "checksums": [
+            {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+            }
+          ]
+        }
+      ],
+      "original_validator_refused_missing_sha256": true
+    },
+    "metadata_all_original_validator": {
+      "spdx_sha256": "dffdac3698afa72f01f0bc1a90fa0599907c68142923242b49def6267a4021f5",
+      "original_validator_refused_synthetic_root": true
+    },
+    "clean_source_validator_refused_dirty_report": true
+  },
+  "documents": [
+    {
+      "member": "synveda",
+      "platform": {
+        "os": "darwin",
+        "arch": "arm64"
+      },
+      "binary_sha256": "e7c55592aa745b57c181ea2dc592f91c2d328185b7e95d7bbc8acfbeb055fd25",
+      "binary_bytes": 20322904,
+      "sbom": "synveda-0.4.3-darwin-arm64-synveda.spdx.json",
+      "sbom_sha256": "747c0bf1364011dc11aedf2469dd5f483337b847a1190d35b5882347e4793d40",
+      "sbom_bytes": 574616,
+      "inventory": {
+        "scanner": "syft-1.51.0",
+        "spdx_version": "SPDX-2.3",
+        "package_count": 296,
+        "cargo_package_count": 295,
+        "cargo_identity_count": 295,
+        "required_packages": {
+          "synveda-cli": "0.4.3",
+          "cedar-policy": "4.11.2",
+          "cedar-policy-core": "4.11.2",
+          "sqlx": "0.8.6",
+          "sqlx-postgres": "0.8.6"
+        }
+      },
+      "files": [
+        {
+          "fileName": "",
+          "fileTypes": [
+            "OTHER"
+          ],
+          "checksums": [
+            {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+            }
+          ]
+        },
+        {
+          "fileName": "synveda",
+          "fileTypes": [
+            "APPLICATION",
+            "BINARY"
+          ],
+          "checksums": [
+            {
+              "algorithm": "SHA1",
+              "checksumValue": "7c35d08f437e2bc3168472da1f807f890b386d8f"
+            },
+            {
+              "algorithm": "SHA256",
+              "checksumValue": "e7c55592aa745b57c181ea2dc592f91c2d328185b7e95d7bbc8acfbeb055fd25"
+            }
+          ]
+        }
+      ],
+      "foreign_hash_refused": true,
+      "executable_placeholder_refused": true
+    },
+    {
+      "member": "synveda-gateway",
+      "platform": {
+        "os": "darwin",
+        "arch": "arm64"
+      },
+      "binary_sha256": "a782392f71f88813a677500be6e08f003a0797474aa35e48142df420a10857f5",
+      "binary_bytes": 46913504,
+      "sbom": "synveda-0.4.3-darwin-arm64-synveda-gateway.spdx.json",
+      "sbom_sha256": "c8ae33a594016c5548863997f4d68766b054fcbb06f44e67e0c491f25ba37f77",
+      "sbom_bytes": 664843,
+      "inventory": {
+        "scanner": "syft-1.51.0",
+        "spdx_version": "SPDX-2.3",
+        "package_count": 328,
+        "cargo_package_count": 327,
+        "cargo_identity_count": 327,
+        "required_packages": {
+          "synveda-gateway": "0.4.3",
+          "cedar-policy": "4.11.2",
+          "cedar-policy-core": "4.11.2",
+          "sqlx": "0.8.6",
+          "sqlx-postgres": "0.8.6"
+        }
+      },
+      "files": [
+        {
+          "fileName": "",
+          "fileTypes": [
+            "OTHER"
+          ],
+          "checksums": [
+            {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+            }
+          ]
+        },
+        {
+          "fileName": "synveda-gateway",
+          "fileTypes": [
+            "APPLICATION",
+            "BINARY"
+          ],
+          "checksums": [
+            {
+              "algorithm": "SHA1",
+              "checksumValue": "9ab90a3df5df64695f215cf9f50217ffdb43d8d4"
+            },
+            {
+              "algorithm": "SHA256",
+              "checksumValue": "a782392f71f88813a677500be6e08f003a0797474aa35e48142df420a10857f5"
+            }
+          ]
+        }
+      ],
+      "foreign_hash_refused": true,
+      "executable_placeholder_refused": true
+    },
+    {
+      "member": "synveda-worker",
+      "platform": {
+        "os": "darwin",
+        "arch": "arm64"
+      },
+      "binary_sha256": "8ebb6b46a26370f51b077054707f6eec007221b460a78ca77667f0813a25d650",
+      "binary_bytes": 18743808,
+      "sbom": "synveda-0.4.3-darwin-arm64-synveda-worker.spdx.json",
+      "sbom_sha256": "81e7ae19b073651372bd6e8de592119cd0ccb69d305f9f45c73a42c646da06cd",
+      "sbom_bytes": 663855,
+      "inventory": {
+        "scanner": "syft-1.51.0",
+        "spdx_version": "SPDX-2.3",
+        "package_count": 328,
+        "cargo_package_count": 327,
+        "cargo_identity_count": 327,
+        "required_packages": {
+          "synveda-gateway": "0.4.3",
+          "cedar-policy": "4.11.2",
+          "cedar-policy-core": "4.11.2",
+          "sqlx": "0.8.6",
+          "sqlx-postgres": "0.8.6"
+        }
+      },
+      "files": [
+        {
+          "fileName": "",
+          "fileTypes": [
+            "OTHER"
+          ],
+          "checksums": [
+            {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+            }
+          ]
+        },
+        {
+          "fileName": "synveda-worker",
+          "fileTypes": [
+            "APPLICATION",
+            "BINARY"
+          ],
+          "checksums": [
+            {
+              "algorithm": "SHA1",
+              "checksumValue": "78245e7c8a075405a3759eb8fe021fbff0304bf4"
+            },
+            {
+              "algorithm": "SHA256",
+              "checksumValue": "8ebb6b46a26370f51b077054707f6eec007221b460a78ca77667f0813a25d650"
+            }
+          ]
+        }
+      ],
+      "foreign_hash_refused": true,
+      "executable_placeholder_refused": true
+    }
+  ],
+  "verification_method": [
+    "Use the exact original Git-committed validator on real pinned-scanner output to reproduce omitted-digest and synthetic-root refusals",
+    "Run the corrected production archive producer on all three actual stripped macOS ARM members from the preceding local probe",
+    "Independently rehash each archived binary and SPDX sidecar; require unchanged locked root/Cedar/SQLx inventories and the exact two-entry file contract",
+    "Reject a foreign executable hash, an executable placeholder and the dirty producer report"
+  ],
+  "primary_sources": [
+    "https://github.com/anchore/syft/blob/v1.51.0/cmd/syft/internal/options/file.go",
+    "https://github.com/anchore/syft/blob/v1.51.0/syft/internal/fileresolver/file_indexer.go",
+    "https://github.com/anchore/syft/blob/v1.51.0/syft/file/cataloger/filedigest/cataloger.go",
+    "https://github.com/anchore/syft/blob/v1.51.0/syft/format/common/spdxhelpers/to_format_model.go"
+  ],
+  "limits": [
+    "This macOS ARM scanner-configuration probe reuses existing local dirty-checkout executables; they were not rebuilt or qualified from this parent",
+    "The omitted-digest control reproduces validator refusal without claiming to reproduce the Windows resolver defect on macOS",
+    "Native Windows and all other target reports require fresh hosted qualification from the correction source",
+    "No publication, complete non-Rust SBOM, third-party notice, production deployment or readiness claim follows"
+  ]
+}

@@ -30,7 +30,10 @@ const bytesFor = (target) => {
 };
 const spdxFor = (binary, binaryHash) => ({
   spdxVersion: "SPDX-2.3", creationInfo: { creators: ["Tool: syft-1.51.0"] },
-  files: [{ fileName: binary.member.split("/").at(-1), checksums: [{ algorithm: "SHA256", checksumValue: binaryHash }] }],
+  files: [
+    { fileName: binary.member.endsWith(".exe") ? "\\" : "", fileTypes: ["OTHER"], checksums: [{ algorithm: "SHA1", checksumValue: "0".repeat(40) }] },
+    { fileName: binary.member.endsWith(".exe") ? "\\synveda.exe" : binary.member.split("/").at(-1), checksums: [{ algorithm: "SHA256", checksumValue: binaryHash }] },
+  ],
   packages: Object.entries({ [binary.kind === "cli" ? "synveda-cli" : "synveda-gateway"]: version,
     "cedar-policy": "4.11.2", "cedar-policy-core": "4.11.2", sqlx: "0.8.6", "sqlx-postgres": "0.8.6" }).map(([name, versionInfo]) => ({
     name, versionInfo, externalRefs: [{ referenceType: "purl", referenceLocator: `pkg:cargo/${name}@${versionInfo}` }],
@@ -116,11 +119,10 @@ test("pinned Windows Syft filenames bind only the root-relative scanned executab
     const binary = rustArchivePlan("client", target, version).binaries[0];
     const binaryHash = sha256(bytesFor(target));
     const doc = spdxFor(binary, binaryHash);
-    doc.files[0].fileName = "\\synveda.exe";
     assert.equal(checkNativeRustSpdx(doc, binaryHash, binary, version).required_packages["synveda-cli"], version);
     for (const fileName of ["synveda.exe", "/synveda.exe", "\\\\synveda.exe", "\\other\\synveda.exe", "C:\\synveda.exe", "\\synveda-gateway.exe"]) {
       const damaged = structuredClone(doc);
-      damaged.files[0].fileName = fileName;
+      damaged.files[1].fileName = fileName;
       assert.throws(() => checkNativeRustSpdx(damaged, binaryHash, binary, version), /file differs/);
     }
     assert.throws(() => checkNativeRustSpdx(doc, "b".repeat(64), binary, version), /hash differs/);
@@ -128,7 +130,7 @@ test("pinned Windows Syft filenames bind only the root-relative scanned executab
   const binary = rustArchivePlan("client", "linux-arm64", version).binaries[0];
   const binaryHash = sha256(bytesFor("linux-arm64"));
   const doc = spdxFor(binary, binaryHash);
-  doc.files[0].fileName = "\\synveda";
+  doc.files[1].fileName = "\\synveda";
   assert.throws(() => checkNativeRustSpdx(doc, binaryHash, binary, version), /file differs/);
 });
 
@@ -139,6 +141,50 @@ test("actual archive members and actual SPDX bytes bind each final executable", 
     for (const binary of f.plan.binaries) assert.equal(sha256(readRustBinary(f.archive, binary.member, f.plan.target).bytes),
       f.report.binaries.find((entry) => entry.member === binary.member).binary_sha256);
     assert.throws(() => check(f, "b".repeat(40)), /strictly equal/);
+  }
+});
+
+test("SPDX placeholders and ambiguous file digests cannot bind a native binary", () => {
+  for (const target of ["windows-arm64", "windows-x86_64"]) {
+    const binary = rustArchivePlan("client", target, version).binaries[0];
+    const binaryHash = sha256(bytesFor(target));
+    const doc = spdxFor(binary, binaryHash);
+    for (const checksums of [
+      [{ algorithm: "SHA1", checksumValue: "0".repeat(40) }],
+      [],
+      [{ algorithm: "SHA256", checksumValue: "0".repeat(64) }],
+      [...doc.files[1].checksums, ...doc.files[1].checksums],
+    ]) {
+      const damaged = structuredClone(doc);
+      damaged.files[1].checksums = checksums;
+      assert.throws(() => checkNativeRustSpdx(damaged, binaryHash, binary, version), /hash differs/);
+    }
+    doc.files[1].checksums.unshift({ algorithm: "SHA1", checksumValue: "1".repeat(40) });
+    assert.equal(checkNativeRustSpdx(doc, binaryHash, binary, version).required_packages["synveda-cli"], version);
+  }
+});
+
+test("only the pinned non-regular root can accompany the hashed executable", () => {
+  for (const target of Object.keys(syftPins.targets)) {
+    const binary = rustArchivePlan("client", target, version).binaries[0];
+    const binaryHash = sha256(bytesFor(target));
+    const doc = spdxFor(binary, binaryHash);
+    for (const damage of [
+      (d) => { d.files.shift(); },
+      (d) => { d.files.push(structuredClone(d.files[0])); },
+      (d) => { d.files[0].fileName = "other"; },
+      (d) => { d.files[0].fileName = target.startsWith("windows-") ? "" : "\\"; },
+      (d) => { d.files[0].fileTypes = ["BINARY"]; },
+      (d) => { d.files[0].checksums = d.files[1].checksums; },
+      (d) => { d.files[0].checksums[0].checksumValue = "1".repeat(40); },
+      (d) => { d.files[0].checksums.push(d.files[0].checksums[0]); },
+      (d) => { d.files.reverse(); },
+      (d) => { d.files[1].checksums = d.files[0].checksums; },
+    ]) {
+      const damaged = structuredClone(doc); damage(damaged);
+      assert.throws(() => checkNativeRustSpdx(damaged, binaryHash, binary, version));
+    }
+    assert.equal(checkNativeRustSpdx(doc, binaryHash, binary, version).required_packages["synveda-cli"], version);
   }
 });
 
@@ -158,8 +204,8 @@ test("another binary cannot satisfy missing, wrong-version or foreign-hash Cargo
     (doc) => { doc.packages = doc.packages.filter((pkg) => pkg.name !== "cedar-policy"); },
     (doc) => { doc.packages.find((pkg) => pkg.name === "sqlx").versionInfo = "0.0.0"; },
     (doc) => { doc.packages.forEach((pkg) => { pkg.externalRefs = []; }); },
-    (doc) => { doc.files[0].checksums[0].checksumValue = "b".repeat(64); },
-    (doc) => { doc.files[0].fileName = "synveda-gateway"; },
+    (doc) => { doc.files[1].checksums[0].checksumValue = "b".repeat(64); },
+    (doc) => { doc.files[1].fileName = "synveda-gateway"; },
     (doc) => { doc.files.push(doc.files[0]); },
     (doc) => { doc.creationInfo.creators = ["Tool: syft-v1.51.0"]; },
     (doc) => { doc.creationInfo.creators = "Tool: syft-1.51.0"; },
