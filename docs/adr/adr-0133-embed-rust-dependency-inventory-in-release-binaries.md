@@ -81,8 +81,14 @@ attestations, percent-encoded versions and altered/linked/duplicate blobs.
 passed: 351 distinct Cargo name/version pairs in the product and 295 in the browser
 image, including required roots and locked Cedar/SQLx. A named ordinary-binary
 OCI control has a valid subject and SPDX document but fails missing Cargo content.
-The local checkout had build-tooling edits; clean hosted qualification on both
-architectures and the six native archive SBOMs remain open.
+The local checkout had build-tooling edits. Subsequent clean OCI source
+`3beeb1cb` passed full CI and its nonpublishing Release on both architectures.
+[Retained qualification](../../demos/evidence/ops12-oci-source-qualification.json)
+binds the original 31-payload inventory and both producer/image/deployment report
+sets to that exact source and run. The product reports 354/351 Cargo identities
+and browser 297/295 on AMD64/ARM64. Native archive SBOM qualification remains
+open on the following source increment; these ordinary archive reports cannot
+qualify its new metadata contract.
 
 The native archive source slice is implemented with one shared Cargo-content
 validator, checksum-pinned scanner archives/executables and separate per-binary

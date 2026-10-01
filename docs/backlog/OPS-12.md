@@ -927,13 +927,23 @@ all 44 convergence tests passed with socket access, followed by the remaining
 uninstall/convergence/chart components. Rust formatting and diff checks pass;
 no Rust source, lockfile, product SQL or generated API contract changed.
 
-Next run clean full CI and the nonpublishing release drill on this source
-increment, and independently inspect both native OCI report sets before
-accepting the changed artifact source. Do not transplant the earlier `f433eb17`
-reports. Then extend embedded metadata and artifact-bound SBOM gates to all six
-native client and both server archives, followed by non-Rust dependency coverage,
-third-party notices and vulnerability/incident policy. OPS-12 and the production
-verdict remain open.
+Clean OCI source `3beeb1cbf88c492265e677e253b833c6b08609e3` passed all 23 jobs in
+[full CI](https://github.com/synveda/synveda/actions/runs/36787337125) and its
+[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36787341370)
+(15 jobs passed; final publication skipped). [Retained qualification](../../demos/evidence/ops12-oci-source-qualification.json)
+hashes the original 31-payload inventory before the source-specific validator;
+its regenerated checksum inventory is byte-identical. All six ordinary native
+client archives, both image report sets and complete Compose/Helm evidence pass.
+All five producer reports per architecture match their assembled bytes. The
+product images report 354/351 Cargo identities on AMD64/ARM64; browser images
+report 297/295, including expected roots, Cedar 4.11.2 and SQLx 0.8.6. Native
+producers inspected exported OCI bytes and embedded SPDX content; independent
+retention revalidated report bindings and content summaries without downloading
+the large exports again. No earlier run supplies evidence. No image/chart copy,
+anonymous public pull, tag or release publication ran. This qualifies the OCI
+source slice only; native archive SBOM qualification follows on its own source,
+then non-Rust dependency coverage, notices and vulnerability/incident policy.
+OPS-12 and the production verdict remain open.
 
 The next native archive slice is specified in ADR-0133 before implementation.
 It requires a separate SPDX document for each final Rust executable and a
@@ -1051,10 +1061,16 @@ Current qualification source is transport correction
 independent nonpublishing Release
 [`36798194065`](https://github.com/synveda/synveda/actions/runs/36798194065).
 Both trigger SHAs were checked. All 27 CI-tooling tests, fast checks, actionlint,
-Rust formatting and diff checks pass locally. Hosted completion remains the
-current blocker. Next resolve any run failures, then independently verify its
-original 51-payload inventory and each binary's document before retaining
-qualification. Preserve the independent `3beeb1cb` OCI drill. An active thread
+Rust formatting and diff checks pass locally. Both Windows x64 jobs passed all
+11 packaged-client checks, then correctly refused an SPDX file entry without
+the required SHA-256 checksum. Native filename and required Cargo-content
+checks were reached; binary binding remains unqualified. The other hosted jobs
+are still completing. Next inspect pinned Syft's Windows file-hashing behavior,
+reproduce the checksum omission, correct the scan configuration without relaxing
+validation, and rerun the correction's exact-source gates. Independently verify
+its original 51-payload inventory and each binary's document before retaining
+qualification. The preceding `3beeb1cb` OCI qualification is retained separately
+and cannot supply native archive SBOM evidence. An active thread
 continuation follows this canonical checkpoint and proceeds to non-Rust
 inventory/notices after qualification. Production readiness remains unclaimed.
 

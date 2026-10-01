@@ -1,6 +1,6 @@
 # Production readiness
 
-Assessment baseline: 2026-09-24; source claims reconciled 2026-09-30. Scope:
+Assessment baseline: 2026-09-24; source claims reconciled 2026-10-01. Scope:
 the current context-platform checkout as a self-hosted service. Passing
 repository gates establishes repeatable behaviour; it does not establish
 availability, recoverability, supportability or a releasable supply chain.
@@ -350,8 +350,12 @@ now embeds pinned Rust metadata in product/browser images and requires actual
 OCI subject/hash and Cargo-content checks during candidate creation and assembly.
 [Local native ARM evidence](../demos/evidence/ops12-oci-rust-sbom.json)
 contains 351/295 distinct Cargo identities and an ordinary-binary refusal.
-Clean hosted qualification on both architectures, native archive SBOMs and
-broader dependency coverage remain open under OPS-12.
+The [clean OCI source qualification](../demos/evidence/ops12-oci-source-qualification.json)
+binds source `3beeb1cb` to all 23 successful CI jobs, 15 successful nonpublishing
+Release jobs, the original 31-payload inventory and both native image/deployment
+report sets. It qualifies required Rust image coverage on that source only;
+native archive SBOM qualification and broader dependency coverage remain open
+under OPS-12. No public distribution or production-readiness claim follows.
 
 The subsequent native archive source slice requires separate per-binary Rust
 SPDX documents and hash-bound reports across all six client and both historical
