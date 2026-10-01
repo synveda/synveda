@@ -1685,12 +1685,16 @@ IPv4 and verified TLS 1.2 probes also timed out. GitHub's SSH endpoint on port
 Authentication with existing credentials, including the `github.com` host
 configuration, is refused with `Permission denied (publickey)`. A temporary
 pinned host-key file was used; no credentials, account or permanent SSH/remote
-configuration changed. No successful push or remote HEAD verification is
-confirmed. Local commits remain retained.
+configuration changed. These attempts did not confirm a successful push.
 
-Next retry the already-authorized push to the same feature branch after GitHub
-HTTPS access or existing SSH authentication is restored, then verify remote HEAD
-against local HEAD. Do not request push approval again. The plugin/chart
-inventory choice remains the next implementation task; the scanner,
-notice-provenance, operator bucket and real issuer/harness gaps remain separate.
-The saved automation stays paused; no merge, tag or public release is authorized.
+The owner's subsequent requested retry succeeded over HTTPS: all seven pending
+commits through `e665d486c85a39e951b302858cbe23372a1a1c52` reached the same feature
+branch. An independent `git ls-remote` read confirmed that exact remote HEAD
+matches local HEAD. The feature-branch push blocker is resolved; this establishes
+no new product or hosted qualification.
+
+The plugin/chart inventory choice remains the next implementation task. Retry
+the exact pinned upstream notice downloads as needed; the earlier TLS failures
+do not establish their current availability. The scanner, notice-provenance,
+operator bucket and real issuer/harness gaps remain separate. The saved
+automation stays paused; no merge, tag or public release is authorized.

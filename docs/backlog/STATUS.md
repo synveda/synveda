@@ -514,18 +514,18 @@ recovers, then complete other-image coverage before security policies. No clean
 hosted or six-target qualification follows; all external blockers and the paused
 automation remain unchanged.
 
-Completed slices are retained locally as `4ff8e6ac` and `fe3e1e4f`. The owner
+Completed slices are committed as `4ff8e6ac` and `fe3e1e4f`. The owner
 explicitly authorized the pending feature-branch commits and checkpoint with
-`push it`, resolving the earlier automatic approval rejection. The HTTPS push
-through `98e007a2` timed out; independent GitHub HTTPS/API TLS probes also failed.
-The verified SSH endpoint responds but refuses existing credentials, including
-the `github.com` host configuration. No successful push or remote HEAD check is
-confirmed. Restore GitHub HTTPS access or existing SSH authentication, retry the
-already-authorized push to `synveda/synveda` on
-`codex/synveda-production-roadmap`, and verify remote HEAD; no further push
-approval is required. This access blocker remains separate from product
-qualification gaps. The implementation order above and paused automation remain
-current; the OPS-12 brief owns the exact continuation checkpoint.
+`push it`, resolving the earlier automatic approval rejection. After the initial
+HTTPS/TLS failures and refused SSH authentication, the requested HTTPS retry
+succeeded: all seven pending commits through
+`e665d486c85a39e951b302858cbe23372a1a1c52` reached `synveda/synveda` on
+`codex/synveda-production-roadmap`. An independent `git ls-remote` read confirmed
+the exact remote/local HEAD match. The push blocker is resolved; no new product
+or hosted qualification follows. Retry the exact pinned upstream notice reads
+as needed rather than assuming their earlier TLS failures persist. The
+implementation order above and paused automation remain current; the OPS-12
+brief owns the exact continuation checkpoint.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
