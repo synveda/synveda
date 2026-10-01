@@ -117,6 +117,10 @@ outside `synveda-store`; new authoritative product SQL belongs in the store.
 | Deployment / packaging | `make check-deploy chart-lint` (Docker Compose and Helm installed; no live application implied) |
 | CI / release automation | `make check-ci`; `actionlint -shellcheck=` with actionlint 1.7.7; then the affected packaging checks in the [CI/release guide](CI.md) |
 
+On Linux, `make check-ci` and native release assembly need `bsdtar` from
+`libarchive-tools` to inspect the Windows ZIP members. macOS and Windows use
+their existing libarchive `tar`; no foreign executable runs during inspection.
+
 The following checks need real local services, but no proprietary client or
 model credential:
 

@@ -1123,7 +1123,7 @@ Rust formatting, pinned actionlint and diff checks pass. Actual retained macOS
 ARM CLI/gateway/worker archive and SPDX bytes pass the corrected validator,
 while dirty-source refusal holds. No Rust source or generated contract changed.
 
-Current native qualification source is root-spelling correction
+The latest hosted native qualification source is root-spelling correction
 `ef6d61dbf4183dcc39a02e549822cb8f76243d42`: full CI
 [`36805252052`](https://github.com/synveda/synveda/actions/runs/36805252052) and
 independent nonpublishing Release
@@ -1132,13 +1132,34 @@ Both dispatch trigger SHAs were independently checked. The obsolete
 `02023908` Release is cancelled; CI cancellation was requested and its cleanup
 was still completing at this checkpoint. Neither run supplies qualification for
 the correction. The task-created Release branch was advanced without force;
-remove it after retaining the current source's proof. Next inspect these runs,
-retry transient failures on the same source, and independently verify the
-original 51-payload inventory, six client reports, eight archive reports, twelve
-SPDX documents and both complete OCI/Compose/Helm report sets before retaining
-qualification. An active thread continuation follows this canonical checkpoint
-and proceeds to non-Rust inventory/notices after qualification. Production
-readiness remains unclaimed.
+remove it after retaining the corrected source's proof. Both Windows x64 jobs
+(`110188331648` in CI and `110188115206` in Release) again correctly refused an
+executable without SHA-256, despite full file-metadata selection. Native
+execution, expected file spelling and Cargo-content checks passed before that
+refusal. This source is not qualified; preserve its failure rather than retrying
+the unresolved scanner defect.
+
+Independent review also reproduced an assembly gap: coherent changes to a
+producer's binary digest and SPDX file digest passed against an unchanged
+archive. Assembly now re-extracts every required unique regular member and
+checks its actual platform, size and SHA-256 before reading SPDX. Actual ZIP
+fixtures cover both Windows targets; Linux verification uses libarchive rather
+than GNU tar's unsupported ZIP reader. Twelve archive tests and all 30
+CI-tooling / 77 release-parity tests pass, together with fast checks, Rust
+formatting, pinned actionlint and diff checks. The downloaded same-run Linux ARM
+client passes the stricter archive and client-execution checks: 295 Cargo
+identities, correct CLI/Cedar/SQLx roots and its actual archived executable hash.
+That partial producer inspection is not full qualification or evidence for a
+future source.
+
+Next investigate the pinned scanner's native Windows digest omission, reproduce
+the failure with bounded native diagnostics and correct the actual defect
+without supplying or relaxing SPDX checksums. Then dispatch full CI and a
+nonpublishing Release on one clean corrected source and record their exact IDs.
+Before retaining qualification, independently verify its original 51-payload
+inventory, six client reports, eight archive reports, twelve SPDX documents and
+both complete OCI/Compose/Helm report sets. No earlier report can qualify that
+source. Non-Rust inventory/notices follow; production readiness remains unclaimed.
 
 ### Next non-Rust mechanism probe (2026-10-01)
 

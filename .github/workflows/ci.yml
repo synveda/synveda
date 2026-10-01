@@ -57,6 +57,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      - name: Install ZIP reader for cross-platform archive checks
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libarchive-tools
       - name: Check documentation, generated contracts and security boundaries
         run: make check-fast check-deps check-ci
       - name: Install pinned workflow linter

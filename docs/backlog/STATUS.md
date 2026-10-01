@@ -377,16 +377,26 @@ tests and packaged-client execution, then refused the actual empty synthetic
 root filename. Corrected fixtures reproduce that refusal before the fix and
 reject the wrongly assumed backslash root. The root now requires the exact
 empty name on all targets, retaining the executable's Windows spelling and
-actual SHA-256 checks. Current native qualification source `ef6d61db` is bound to
+actual SHA-256 checks. Latest hosted native source `ef6d61db` is bound to
 [full CI](https://github.com/synveda/synveda/actions/runs/36805252052) and
 [nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36805260636);
 both trigger SHAs were independently checked. The obsolete Release is cancelled
 and CI cancellation was requested. All 29 CI-tooling and 77 release-parity tests,
 fast checks, Rust formatting, pinned actionlint and diff checks pass for the
 correction. Actual retained macOS archive/SPDX bytes still verify, with dirty
-source refusal. Next independently verify all 51 same-run payloads, eight native
-archive reports and twelve SPDX documents before retaining proof. An active
-thread continuation follows this checkpoint.
+source refusal. Both Windows x64 jobs again refused the missing executable
+SHA-256 despite full file-metadata selection; this is an unresolved scanner
+defect, not a transient download failure. Independent review reproduced a
+separate assembly gap with coherently changed report/SPDX digests. Assembly now
+rehashes the actual unique regular executable and verifies its platform and
+size before SPDX; real ZIP fixtures and Linux libarchive provisioning cover
+Windows archives. All 30 CI-tooling / 77 release-parity tests, fast checks,
+formatting, actionlint and diff checks pass. Downloaded same-run Linux ARM bytes
+pass the stricter check, but no full native source is qualified. Next diagnose
+the native Windows digest omission, fix it without weakening checksum gates,
+and dispatch one corrected clean source. Independently verify all 51 same-run
+payloads, eight archive reports and twelve SPDX documents before retaining
+proof. The open brief owns the exact failures and next action.
 Superseded reports cannot qualify the new source; the preceding `3beeb1cb` OCI
 qualification is retained separately. Non-Rust inventory and notices follow;
 a local console mechanism probe is retained in [OPS-12](OPS-12.md), without a

@@ -41,9 +41,11 @@ function regularBytes(path, limit) {
 
 function archiveMember(archive, member, limit) {
   const options = { timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] };
-  const listing = execFileSync("tar", ["-tvf", archive, member], { ...options, encoding: "utf8", maxBuffer: 32 * 1024 }).trim().split("\n");
+  // Linux's GNU tar cannot read the Windows ZIPs assembled on this host.
+  const reader = process.platform === "linux" && archive.endsWith(".zip") ? "bsdtar" : "tar";
+  const listing = execFileSync(reader, ["-tvf", archive, member], { ...options, encoding: "utf8", maxBuffer: 32 * 1024 }).trim().split("\n");
   assert.ok(listing.length === 1 && listing[0].startsWith("-"), "Rust archive member must be one regular file");
-  const bytes = execFileSync("tar", ["-xOf", archive, member], { ...options, maxBuffer: limit });
+  const bytes = execFileSync(reader, ["-xOf", archive, member], { ...options, maxBuffer: limit });
   assert.ok(bytes.length > 0 && bytes.length <= limit, "Rust archive member exceeds its bound");
   return bytes;
 }
@@ -115,7 +117,10 @@ export function checkRustArchiveReport(directory, plan, version, source) {
     const checked = report.binaries[i];
     assert.match(checked.binary_sha256, hashPattern);
     assert.ok(Number.isSafeInteger(checked.binary_bytes) && checked.binary_bytes >= 64 && checked.binary_bytes <= maxBinary);
-    assert.deepEqual(checked.platform, { os: plan.target.split("-")[0], arch: plan.target.split("-")[1] });
+    const { bytes, platform } = readRustBinary(join(directory, plan.archive), binary.member, plan.target);
+    assert.equal(checked.binary_sha256, sha256(bytes), "archived Rust binary hash differs");
+    assert.equal(checked.binary_bytes, bytes.length, "archived Rust binary size differs");
+    assert.deepEqual(checked.platform, platform);
     assert.equal(checked.sbom, binary.sbom);
     const spdx = regularBytes(join(directory, binary.sbom), maxSpdx);
     assert.equal(checked.sbom_sha256, sha256(spdx), "native Rust SPDX hash differs");

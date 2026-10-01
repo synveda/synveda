@@ -58,7 +58,9 @@ function fixture(t, kind = "server", target = "darwin-arm64") {
       sbom: binary.sbom, sbom_sha256: sha256(spdx), sbom_bytes: spdx.length, inventory: checkNativeRustSpdx(doc, binaryHash, binary, version) };
   });
   const archive = join(directory, plan.archive);
-  const pack = (extra = []) => execFileSync("tar", ["-czf", archive, "-C", stage, ...plan.binaries.map((binary) => binary.member), ...extra]);
+  const zip = target.startsWith("windows-");
+  const packer = zip && process.platform === "linux" ? "bsdtar" : "tar";
+  const pack = (extra = []) => execFileSync(packer, [...(zip ? ["--format=zip", "-cf"] : ["-czf"]), archive, "-C", stage, ...plan.binaries.map((binary) => binary.member), ...extra]);
   pack();
   const pin = syftPins.targets[target];
   const report = { schema_version: 1, evidence: "native-rust-archive-sbom", kind, target, version, source_sha: source, source_tree_dirty: false,
@@ -135,12 +137,40 @@ test("pinned Windows Syft filenames bind only the root-relative scanned executab
 });
 
 test("actual archive members and actual SPDX bytes bind each final executable", (t) => {
-  for (const kind of ["client", "server"]) {
-    const f = fixture(t, kind);
+  for (const plan of rustArchivePlans(version)) {
+    const f = fixture(t, plan.kind, plan.target);
+    assert.equal(readFileSync(f.archive).subarray(0, 2).toString("hex"), plan.target.startsWith("windows-") ? "504b" : "1f8b");
     assert.deepEqual(check(f), f.report);
     for (const binary of f.plan.binaries) assert.equal(sha256(readRustBinary(f.archive, binary.member, f.plan.target).bytes),
       f.report.binaries.find((entry) => entry.member === binary.member).binary_sha256);
     assert.throws(() => check(f, "b".repeat(40)), /strictly equal/);
+  }
+});
+
+test("coherent producer and SPDX changes cannot replace archived binary evidence", (t) => {
+  for (const kind of ["client", "server"]) {
+    for (const [damage, refusal] of [
+      [(f, i) => {
+        f.report.binaries[i].binary_sha256 = "b".repeat(64);
+        f.docs[i].files[1].checksums[0].checksumValue = "b".repeat(64);
+        f.writeDoc(i);
+      }, /archived Rust binary hash differs/],
+      [(f, i) => { f.report.binaries[i].binary_bytes++; f.write(); }, /archived Rust binary size differs/],
+      [(f, i) => {
+        const bytes = bytesFor("darwin-x86_64");
+        writeFileSync(join(f.stage, f.plan.binaries[i].member), bytes);
+        f.pack();
+        f.report.archive_sha256 = sha256(readFileSync(f.archive));
+        f.report.archive_bytes = readFileSync(f.archive).length;
+        f.report.binaries[i].binary_sha256 = sha256(bytes);
+        f.docs[i].files[1].checksums[0].checksumValue = sha256(bytes);
+        f.writeDoc(i);
+      }, /Mach-O architecture differs/],
+    ]) {
+      const f = fixture(t, kind);
+      damage(f, f.plan.binaries.length - 1);
+      assert.throws(() => check(f), refusal);
+    }
   }
 });
 
@@ -193,6 +223,12 @@ test("linked, duplicate, missing and foreign-platform archive members fail", (t)
   assert.throws(() => readRustBinary(duplicate.archive, "synveda-worker", duplicate.plan.target), /one regular file/);
   const linked = fixture(t); rmSync(join(linked.stage, "synveda-worker")); symlinkSync("synveda", join(linked.stage, "synveda-worker")); linked.pack();
   assert.throws(() => readRustBinary(linked.archive, "synveda-worker", linked.plan.target), /one regular file/);
+  for (const f of [duplicate, linked]) {
+    f.report.archive_sha256 = sha256(readFileSync(f.archive));
+    f.report.archive_bytes = readFileSync(f.archive).length;
+    f.write();
+    assert.throws(() => check(f), /one regular file/);
+  }
   const missing = fixture(t); assert.throws(() => readRustBinary(missing.archive, "client/bin/synveda", missing.plan.target));
   assert.throws(() => readRustBinary(missing.archive, "synveda", "linux-arm64"), /ELF64/);
   assert.throws(() => readRustBinary(missing.archive, "../../file", missing.plan.target), /unreviewed/);

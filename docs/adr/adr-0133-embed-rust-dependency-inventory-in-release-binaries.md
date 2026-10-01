@@ -73,10 +73,14 @@ missing digests, placeholders in the executable entry and additional files fail.
 Retain the documents as release sidecars, together with
 one report per archive binding source, target, archive hash, binary hashes,
 scanner download pin and document hashes. Assembly rehashes the archive and
-documents, reads the actual SPDX content and compares it with the producer
-report. Include every sidecar in the closed release checksum inventory and
-publisher-verification boundary. Scanner/build tools stay outside client
-packages and installers. Native hosted qualification remains required before
+documents, re-extracts each fixed unique regular executable, validates its
+platform header and compares its actual size and SHA-256 with the producer
+report. It then binds the SPDX file digest to those same bytes and verifies
+the required Cargo content. Use the existing libarchive reader for Windows ZIP
+members too; Linux assembly and its tests install `libarchive-tools` rather
+than introducing a custom ZIP parser. Include every sidecar in the closed
+release checksum inventory and publisher-verification boundary. Scanner/build
+tools stay outside client packages and installers. Native hosted qualification remains required before
 claiming target support for this metadata contract.
 
 The previous clean source passed its nonpublishing qualification, recorded in
