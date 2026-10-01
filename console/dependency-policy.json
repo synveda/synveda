@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "runtime_packages": ["react", "react-dom", "scheduler"],
+  "runtime_license": "MIT",
+  "runtime_license_sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+  "helper_provider": "vite",
+  "helper_notice_sha256": "008938a3441801ca3960f8e3ccb4c0738e7996442a53063141d57d3769a7344d"
+}

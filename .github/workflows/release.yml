@@ -108,6 +108,8 @@ jobs:
           version: v4.2.3
       - run: corepack enable
       - name: The console bundle
+        env:
+          SYNVEDA_BUILD_SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           version="${{ needs.version.outputs.version }}"
@@ -120,6 +122,7 @@ jobs:
           cp LICENSE NOTICE "$stage/console/"
           test -f "$stage/console/index.html"
           tar -czf "synveda-console-$version.tar.gz" -C "$stage" console
+          node scripts/check-console-package.mjs "synveda-console-$version.tar.gz" "$version" "$SYNVEDA_BUILD_SOURCE_SHA"
           tar -tzf "synveda-console-$version.tar.gz" | sed -n '1,3p'
       - name: The Helm chart
         run: sh scripts/package-chart.sh "${{ needs.version.outputs.version }}" .

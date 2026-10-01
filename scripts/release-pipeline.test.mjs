@@ -70,6 +70,9 @@ test("workflow refactor retains release, native platform and security boundaries
       'SYNVEDA_PACKAGE_CONSUMER_CANDIDATE: "0"',
     ],
     ["release", "node scripts/check-release-assets.mjs", "echo incomplete"],
+    ["release", "node scripts/check-console-package.mjs", "echo skipped console inventory"],
+    ["release", "SYNVEDA_BUILD_SOURCE_SHA: ${{ github.sha }}", "SYNVEDA_BUILD_SOURCE_SHA: obsolete"],
+    ["docker", "build-args: SYNVEDA_BUILD_SOURCE_SHA=${{ github.sha }}", "build-args: SYNVEDA_BUILD_SOURCE_SHA=obsolete"],
     ["release", "subject-path: assets/SHA256SUMS", "subject-path: unrelated"],
     [
       "release",

@@ -40,6 +40,15 @@ const BUILD_EXCEPTIONS = {
   // to decide which transforms Babel applies, and none of it is emitted
   // into the bundle. Added with CNSL-1.
   "caniuse-lite": ["CC-BY-4.0"],
+  // OPS-12 / ADR-0134: lru-cache 11.5.3 is used only by the SBOM tool's
+  // package normalizer. Its upstream Blue Oak notice remains in the build
+  // installation; neither its code nor the inventory tool reaches a client.
+  "lru-cache": ["BlueOak-1.0.0"],
+  // SPDX identifier datasets used only while generating CycloneDX. The
+  // exception dataset's README retains Linux Foundation CC-BY-3.0 attribution;
+  // license-ids declares CC0. These are not shipped runtime dependencies.
+  "spdx-exceptions": ["CC-BY-3.0"],
+  "spdx-license-ids": ["CC0-1.0"],
 };
 
 function licences(prodOnly) {

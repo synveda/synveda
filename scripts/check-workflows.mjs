@@ -319,6 +319,8 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     }))
       require(inputs[key] === value, `${name}: invalid ${key}`);
     require((inputs.target ?? null) === target, `${name}: wrong build target`);
+    require((inputs["build-args"] ?? null) === (archive === "product" ? "SYNVEDA_BUILD_SOURCE_SHA=${{ github.sha }}" : null),
+      `${name}: console source binding or build override differs`);
     require(inputs.tags === `localhost:5000/synveda/${archive}:\${{ inputs.version }}-\${{ matrix.arch }}`,
       `${name}: named OCI export is required for attestation subjects`);
     require(Object.keys(inputs).every((key) =>
@@ -334,6 +336,7 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
         "target",
         "cache-from",
         "cache-to",
+        "build-args",
       ].includes(key),
     ), `${name}: unexpected build override`);
     require(!/^        if:/m.test(
@@ -346,6 +349,12 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     ])
       require(block.includes(marker), `${name}: source identity label missing`);
   }
+  const consoleBundle = stepBlock(jobs.bundles, "The console bundle");
+  for (const marker of [
+    "SYNVEDA_BUILD_SOURCE_SHA: ${{ github.sha }}",
+    'node scripts/check-console-package.mjs "synveda-console-$version.tar.gz" "$version" "$SYNVEDA_BUILD_SOURCE_SHA"',
+  ]) require(consoleBundle.includes(marker), `console release inventory gate missing: ${marker}`);
+  require(!/^        if:/m.test(consoleBundle) && !/\|\|\s*true/.test(consoleBundle), "console inventory gate cannot be skipped or suppressed");
   for (const marker of [
     "127.0.0.1:5000:5000",
     "node scripts/docker-candidate.mjs",

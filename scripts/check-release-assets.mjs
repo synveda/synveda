@@ -10,6 +10,7 @@ import { releaseImages, validateRegistryManifest } from "./release-registries.mj
 import { noticeHashes } from "./verify-release-images.mjs";
 import { checkRustImageReport, rustImageRoots } from "./rust-image-sbom.mjs";
 import { checkRustArchiveReport, rustArchiveAssets, rustArchivePlans } from "./rust-archive-sbom.mjs";
+import { checkConsolePackage } from "./check-console-package.mjs";
 
 export const clientTargets = [
   "darwin-arm64",
@@ -226,6 +227,7 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   // Client TAR/ZIP notices are verified by each native candidate before its
   // required, archive-hash-bound report is assembled here.
   checkArchiveNotices(directory, version);
+  checkConsolePackage(join(directory, `synveda-console-${version}.tar.gz`), version, source);
   if (!qualified) checkCandidateRustSboms(directory, version, source);
   checkClientRelease(
     directory,

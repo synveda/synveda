@@ -1167,22 +1167,22 @@ actual native filename/digest probes before changing the closed SPDX contract.
 Do not manufacture SPDX checksums, remove Windows sidecars, widen accepted
 paths or borrow POSIX evidence.
 
-Native qualification is blocked on a fixed scanner distribution. The user
-choice is pending: proceed with independent non-Rust inventory/notices while
-retaining this blocker; first qualify a reviewed scanner build pinned to the
-merged upstream source; or wait for a fixed release. The requested order puts
-native qualification first, so independent implementation awaits that choice.
+Native qualification is blocked on a fixed scanner distribution. The owner's
+subsequent `continue` resumes the recommended independent non-Rust inventory/
+notices slice while retaining this blocker. Official latest release remains
+1.52.0 at the 2026-10-01 recheck. No custom upstream build is selected.
 No new qualification source/run has been selected. The task-created validation
 branch remains at failed `ef6d61db` until a corrected source is ready; no run
-should resume from it. The continuation is paused at this checkpoint until the
-choice or a fixed scanner release permits progress. Next inspect the selected
+should resume from it. When a fixed scanner is released, inspect the selected
 tool's immutable source/distribution and native path/digest behavior, preserve
 all gates, then dispatch full CI and a nonpublishing Release on one clean
 corrected source and record their exact IDs.
 Before retaining qualification, independently verify its original 51-payload
 inventory, six client reports, eight archive reports, twelve SPDX documents and
 both complete OCI/Compose/Helm report sets. No earlier report can qualify that
-source. Non-Rust inventory/notices follow; production readiness remains unclaimed.
+source. The active independent slice is the console contract in ADR-0134;
+Node/native libraries, other artifacts and security policy follow it.
+Production readiness remains unclaimed.
 
 ### Next non-Rust mechanism probe (2026-10-01)
 
@@ -1206,3 +1206,45 @@ before implementation. The probe's optional bundler tool auto-registration
 warned because its disposable installation had no peer packages; component and
 licence collection passed. Generated helpers, fonts, Node/native libraries,
 charts and upstream image contents remain separate coverage requirements.
+
+### Console dependency inventory source increment (2026-10-01)
+
+The owner's continuation resumes the independent non-Rust slice while the native
+Rust qualification remains blocked. ADR-0134 was recorded before implementation.
+Exact build-only `rollup-plugin-sbom` 4.0.0 emits CycloneDX 1.6 and complete
+package licence evidence in the existing Vite build. Independent positive
+rendered-module checks require locked React 19.2.8, React DOM 19.2.8 and scheduler
+0.27.0; omitted, duplicated, misversioned or foreign content refuses. Known
+module-preload/CommonJS helpers carry the complete reviewed Vite notice, and the
+emitted font/OFL must match source. Three named build-only licence exceptions are
+recorded in ADR-0134; the shipped allowlist is unchanged.
+
+The console carries its SBOM, complete notices and a source/input/hash-bound
+inventory inside the existing archive and product-image directory. Release
+preparation and assembly inspect the actual TAR, reject duplicate/linked/unsafe
+members and rehash every output before checksum creation. Normal local builds
+without a release source remain refused. No release payload is added; the
+original expanded native source inventory still requires all 51 same-run payloads.
+
+[Local source evidence](../../demos/evidence/ops12-console-inventory-candidate.json)
+records actual macOS ARM and native Linux ARM Node 22.23.2 builds from the dirty
+checkout at parent `2edfb4f8`. Both actual archives pass all content/source checks,
+and all 12 built files match byte-for-byte across builders. JavaScript remains
+491,865 bytes with SHA-256 `2b1f4f1030f5556068d0761916b2ad96644674d0784f1040ecac18e1983b4d7d`.
+Eight focused refusal tests, all 38 CI-tooling and 77 release-parity tests,
+258 console tests, the frozen build and npm licence gates pass. Formatting,
+pinned actionlint and fast/diff checks pass. Deployment checks and strict chart
+lint pass, including all 44 convergence and five uninstall tests. One convergence
+fixture initially hit the sandbox's loopback socket denial; its unchanged rerun
+with socket access passed. The optional unused Rolldown auto-registration warns;
+all required tool metadata is checked. No Rust, SQL or public generated contract
+changed. This is a source candidate, not a clean hosted/full release qualification.
+
+Next inspect and require the console inventory/notices in actual product-image
+bytes using the existing native candidate reader/verifier, then inventory bundled
+Node/native libraries, plugin/chart and remaining image dependencies/notices.
+Vulnerability and publisher incident policy follow dependency coverage. Preserve
+the native scanner blocker and prior OCI proof separately; inspect a fixed
+upstream release before any new native qualification. Do not dispatch or resume
+failed `ef6d61db` runs, remove sidecars or relax gates. No tag, main merge,
+public release or registry publication is authorized.

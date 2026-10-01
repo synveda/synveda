@@ -1,6 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { readFileSync } from "node:fs";
+import sbom from "rollup-plugin-sbom";
+import { consoleInventoryPlugin } from "./build/dependency-plugin.mjs";
 
 // The console is served by the gateway under /console/ (ADR-0056
 // decision 1), so every emitted asset URL has to be written for that
@@ -11,6 +13,17 @@ export default defineConfig({
   base: "/console/",
   plugins: [
     react(),
+    sbom({
+      specVersion: "1.6",
+      outDir: "",
+      outFilename: "sbom.cdx",
+      outFormats: ["json"],
+      collectLicenseEvidence: true,
+      saveTimestamp: false,
+      generateSerial: false,
+      includeWellKnown: false,
+    }),
+    consoleInventoryPlugin(),
     {
       name: "brand-font-licence",
       generateBundle() {

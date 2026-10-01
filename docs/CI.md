@@ -308,6 +308,27 @@ client/server and private client-execution evidence. All six clean native hosted
 targets remain required for this changed source. The preceding OCI runs do not
 supply its native archive qualification.
 
+ADR-0134 inventories the console during its existing Vite build with pinned
+build-only `rollup-plugin-sbom` 4.0.0. The generated CycloneDX 1.6 file, full
+third-party notices and closed file inventory stay inside the console archive
+and product image. Independent build checks require the positively rendered
+React/React DOM/scheduler versions and complete MIT bytes, known Vite helpers
+with its full upstream notice, and the source Inter font/OFL. Release preparation
+and assembly rehash the actual regular archive members and compare source input
+bindings; the closed 51-payload plan is unchanged. A normal local build can have
+no release source and remains refused by assembly. To inspect a candidate:
+
+```sh
+node scripts/check-console-package.mjs CONSOLE_ARCHIVE VERSION SOURCE_SHA
+```
+
+`console/dependency-policy.json` pins reviewed package/notice coverage; a lockfile
+or helper change must pass that review rather than silently adding missing
+content. The plugin's optional Rolldown auto-registration warns on this
+Vite/Rollup build; the required Vite, Rollup and SBOM-tool entries are validated.
+Local macOS ARM and native Linux ARM file sets match; clean hosted qualification,
+actual product OCI extraction and broader non-Rust coverage remain separate.
+
 ## Manual owner settings
 
 1. **CI Result** (GitHub Actions) is now required in the active main ruleset.

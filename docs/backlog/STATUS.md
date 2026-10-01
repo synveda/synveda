@@ -397,18 +397,29 @@ pass the stricter check, but no full native source is qualified. Both failed
 identifies Syft's native Windows path lookup defect: upstream fix 5341 merged
 as `6ac7afb4`, while latest released 1.52.0 still has pinned 1.51.0's faulty
 resolver bytes. A fixed scanner must pass native path/digest probes before a
-new clean-source qualification. The user choice is pending: continue the
-independent inventory/notices slice, qualify a reviewed upstream source build,
-or wait for a fixed release. The requested order is retained and continuation
-is paused pending that choice or fixed distribution. No new source/run is
+new clean-source qualification. The owner's subsequent `continue` resumes the
+recommended independent inventory/notices work under ADR-0134 while retaining
+the native scanner blocker. Latest upstream release remains 1.52.0; no custom
+scanner build is selected. No new qualification source/run is
 selected, and the temporary validation branch still points at failed
 `ef6d61db`; do not resume its runs. Independently verify all 51 same-run
 payloads, eight archive reports and twelve SPDX documents before retaining
 proof. The open brief owns the exact failures and next action.
 Superseded reports cannot qualify the new source; the preceding `3beeb1cb` OCI
-qualification is retained separately. Non-Rust inventory and notices follow;
-a local console mechanism probe is retained in [OPS-12](OPS-12.md), without a
-production pin.
+qualification is retained separately. The independent non-Rust slice follows
+below; its earlier mechanism probe remains separately retained in [OPS-12](OPS-12.md).
+
+ADR-0134 now pins the maintained build-only SBOM tool and requires independent
+rendered React/React DOM/scheduler identities, full package/helper/font notices
+and actual console archive source/file hashes. [Local candidate evidence](../../demos/evidence/ops12-console-inventory-candidate.json)
+records identical 12-file outputs on macOS ARM and native Linux ARM with unchanged
+JavaScript. Eight focused refusal tests, 38 CI-tooling, 77 release-parity and
+258 console tests, deployment checks and strict chart lint pass; no clean hosted
+qualification follows from the dirty candidate. Next validate console carriage
+in actual product-image bytes, then
+Node/native libraries and remaining artifact notices before vulnerability and
+publisher incident policy. The native Windows scanner blocker and OPS-12's open
+state remain unchanged; its brief owns the exact next action.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered

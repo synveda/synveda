@@ -60,6 +60,7 @@ jobs:
           context: .
           outputs: type=oci,dest=${{ runner.temp }}/images/product.tar
           file: deploy/compose/product/Dockerfile
+          build-args: SYNVEDA_BUILD_SOURCE_SHA=${{ github.sha }}
           platforms: ${{ matrix.platform }}
           tags: localhost:5000/synveda/product:${{ inputs.version }}-${{ matrix.arch }}
           provenance: mode=max
