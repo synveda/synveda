@@ -69,6 +69,18 @@ function checkNodeInventory(report, files, target, lock = nodePins) {
   assert.deepEqual(report, expected, "Node inventory differs from actual bytes or reviewed dependencies");
 }
 
+export function checkProductNodeReport(report, platform) {
+  assert.ok(["linux/arm64", "linux/amd64"].includes(platform), "unreviewed product Node platform");
+  const target = platform === "linux/arm64" ? "linux-arm64" : "linux-x86_64";
+  const lock = nodePins.product;
+  const pin = lock.targets[target];
+  const notices = { LICENSE: { bytes: pin.license_bytes, sha256: pin.license_sha256 },
+    ...Object.fromEntries(Object.entries(lock.supplementary_notices).map(([name, notice]) => [name, { bytes: notice.bytes, sha256: notice.sha256 }])) };
+  const { runtime_version, ...inventory } = report ?? {};
+  assert.equal(runtime_version, lock.version, "product Node runtime version differs");
+  checkNodeInventory(inventory, { binary_bytes: pin.binary_bytes, binary_sha256: pin.binary_sha256, notices }, target, lock);
+}
+
 export function checkClientNodeArchive(archive, report, target, version, source, lock = nodePins) {
   const pin = lock.targets[target];
   assert.ok(pin, "unreviewed Node target");

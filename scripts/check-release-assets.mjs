@@ -11,6 +11,7 @@ import { noticeHashes } from "./verify-release-images.mjs";
 import { checkRustImageReport, rustImageRoots } from "./rust-image-sbom.mjs";
 import { checkRustArchiveReport, rustArchiveAssets, rustArchivePlans } from "./rust-archive-sbom.mjs";
 import { checkConsoleImageReport, checkConsolePackage } from "./check-console-package.mjs";
+import { checkProductNodeReport } from "./node-runtime-inventory.mjs";
 
 export const clientTargets = [
   "darwin-arm64",
@@ -98,7 +99,10 @@ export function checkCandidateImageReports(directory, version, source, consoleRe
       assert.equal(checked.image, `localhost:5000/synveda/${releaseImages[name]}@${candidate.images[name].digest}`);
       checkRustImageReport(candidate.images[name].rust_sbom, name, version, checked.platforms?.[platform]);
       assert.deepEqual(checked.rust_sbom, candidate.images[name].rust_sbom, `${name}: candidate Rust SBOM evidence differs`);
-      if (name === "product") checkConsoleImageReport(checked.console_inventory, consoleReport, version, source);
+      if (name === "product") {
+        checkConsoleImageReport(checked.console_inventory, consoleReport, version, source);
+        checkProductNodeReport(checked.node_inventory, platform);
+      }
     }
   }
 }
@@ -127,7 +131,10 @@ export function checkQualification(directory, version, source, inventory, consol
         );
         assert.ok(checkedImage);
         assert.deepEqual(checkedImage.notice_sha256, noticeHashes, `${registry}/${name}: notice evidence missing or changed`);
-        if (name === "product") checkConsoleImageReport(checkedImage.console_inventory, consoleReport, version, source);
+        if (name === "product") {
+          checkConsoleImageReport(checkedImage.console_inventory, consoleReport, version, source);
+          checkProductNodeReport(checkedImage.node_inventory, platform);
+        }
       }
     }
     const candidate = read("candidate", arch);

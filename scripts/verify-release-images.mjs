@@ -14,6 +14,8 @@ import {
 } from "./release-registries.mjs";
 import { readConsoleArchive } from "./check-console-package.mjs";
 import { checkConsoleFiles } from "../console/build/dependency-contract.mjs";
+import { checkNodeFiles, nodeInventory, nodeMetadataArguments } from "./node-runtime-inventory.mjs";
+import { readArchiveMember } from "./rust-archive-sbom.mjs";
 
 export { validateIndex } from "./release-registries.mjs";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -24,11 +26,11 @@ const noticeCommand = ["/bin/sh", "-ec", "sha256sum /usr/share/licenses/synveda/
 const expectedNotices = noticeFiles.map((name) => `${noticeHashes[name]}  /usr/share/licenses/synveda/${name}`).join("\n");
 const repository = fileURLToPath(new URL("../", import.meta.url));
 const maxConsoleStream = 34 * 1024 * 1024;
-const execute = (args, timeout = 60_000, binary = false) => {
+const execute = (args, timeout = 60_000, binary = false, maxBytes = binary ? maxConsoleStream : 8 * 1024 * 1024) => {
   const output = execFileSync("docker", args, {
     encoding: binary ? undefined : "utf8",
     timeout,
-    maxBuffer: binary ? maxConsoleStream : 8 * 1024 * 1024,
+    maxBuffer: maxBytes,
     stdio: ["ignore", "pipe", "pipe"],
   });
   return binary ? output : output.trim();
@@ -53,6 +55,43 @@ export function inspectConsoleImage(imageId, platform, version, source, run = ex
     report = { ...checkConsoleFiles(readConsoleArchive(archive, false), root, version, source), source_sha: source, version };
   } catch (error) { failure = error; }
   // Remove only this invocation's container/storage; preserve the inspection cause.
+  try { run(["rm", "--force", "--volumes", container], 15_000); } catch (error) { failure ??= error; }
+  try { rmSync(scratch, { recursive: true }); } catch (error) { failure ??= error; }
+  if (failure) throw failure;
+  return report;
+}
+
+export function inspectNodeImage(imageId, platform, run = execute, root = repository) {
+  assert.match(imageId, digestPattern);
+  assert.ok(platforms.includes(platform), "expected a native Linux platform");
+  const target = platform === "linux/arm64" ? "linux-arm64" : "linux-x86_64";
+  const lock = readJson(join(root, "scripts/node-runtimes.json")).product;
+  const container = `synveda-node-check-${randomUUID()}`;
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-node-image-"));
+  let report, failure;
+  try {
+    const id = run(["create", "--name", container, "--pull=never", "--platform", platform,
+      "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+      "--user=65532:65532", "--pids-limit=64", "--memory=256m", "--cpus=1",
+      "--env=NODE_OPTIONS=", "--env=NODE_PATH=", "--entrypoint", "/usr/local/bin/node", imageId, ...nodeMetadataArguments]);
+    assert.match(id, /^[0-9a-f]{64}$/, "expected one stopped Node inspection container");
+    const read = (path, member, limit) => {
+      const maxStream = limit + 2 * 1024 * 1024;
+      const bytes = run(["cp", `${container}:${path}`, "-"], 60_000, true, maxStream);
+      assert.ok(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= maxStream, "Node image stream exceeds its bound");
+      const archive = join(scratch, `${member}.tar`);
+      writeFileSync(archive, bytes, { flag: "wx", mode: 0o600 });
+      return readArchiveMember(archive, member, limit);
+    };
+    const binary = read("/usr/local/bin/node", "node", 256 * 1024 * 1024);
+    const notices = Object.fromEntries(["LICENSE", ...Object.keys(lock.supplementary_notices)].map((name) =>
+      [name, read(`/usr/share/licenses/node/${name}`, name, 1024 * 1024)]));
+    const files = checkNodeFiles(binary, notices, target, lock);
+    const metadata = run(["start", "--attach", container], 30_000, false, 64 * 1024);
+    assert.ok(typeof metadata === "string" && Buffer.byteLength(metadata) <= 64 * 1024, "Node image metadata exceeds its bound");
+    const observed = JSON.parse(metadata);
+    report = { ...nodeInventory(files, observed, target, lock), runtime_version: observed.versions.node };
+  } catch (error) { failure = error; }
   try { run(["rm", "--force", "--volumes", container], 15_000); } catch (error) { failure ??= error; }
   try { rmSync(scratch, { recursive: true }); } catch (error) { failure ??= error; }
   if (failure) throw failure;
@@ -286,6 +325,7 @@ export function verifyImages(
       executable_checks: commands.length,
       ...(firstParty ? { notice_sha256: noticeHashes } : {}),
       ...(name === "product" ? { console_inventory: inspectConsoleImage(local.Id, platform, version, sourceSha, run, root) } : {}),
+      ...(name === "product" ? { node_inventory: inspectNodeImage(local.Id, platform, run, root) } : {}),
     });
   }
   return {
@@ -297,7 +337,7 @@ export function verifyImages(
     ...(localCandidate ? { local_candidate: true } : {}),
     checked_at: new Date().toISOString(),
     scope:
-      "Image pull, actual console content and isolated executable/asset smoke; no deployment or OIDC acceptance.",
+      "Image pull, actual console/Node inventory and isolated executable/asset smoke; no deployment or OIDC acceptance.",
     images,
   };
 }
@@ -313,8 +353,8 @@ export function verifyRegistrySet(manifest, inventory, platform, version, source
   const registries = {};
   for (const [registry, target] of Object.entries(inventory.registries)) {
     const images = Object.fromEntries(Object.entries(target.images).map(([name, entry]) => [name, entry.reference]));
-    const inspect = (args, timeout, binary) => {
-      const raw = run(args, timeout, binary);
+    const inspect = (args, timeout, binary, maxBytes) => {
+      const raw = run(args, timeout, binary, maxBytes);
       if (args[0] === "buildx") {
         const expected = Object.values(target.images).find((entry) => entry.reference === args.at(-1));
         if (expected && JSON.stringify(indexDescriptors(JSON.parse(raw))) !== JSON.stringify(expected.descriptors)) {

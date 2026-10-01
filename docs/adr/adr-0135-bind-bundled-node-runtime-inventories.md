@@ -47,6 +47,18 @@ owns that aggregate; Synveda only validates its copied bytes and supplies the
 identified omissions. Inventory readers remain build/release tools, outside
 client installers and hook execution.
 
+For the product follow-up, extend the existing native image verifier with one
+invocation-owned stopped container whose fixed entry point is the pinned Node
+metadata command. Read the executable and three notice files through bounded
+Docker TAR streams and the existing unique-regular-member reader. Only after
+byte/platform checks pass, attach to that container's short native metadata
+execution. Keep its network disabled, filesystem read-only, privileges dropped,
+ambient Node options cleared and resources bounded. Always attempt owned
+container/stream cleanup; cleanup failure cannot retain passing evidence and
+must preserve the first inspection cause. Require the resulting inventory in
+existing local and both-registry image reports through assembly. Keep the
+console's separate 34 MiB stream bound unchanged.
+
 This is an inventory of the pinned Node distribution and its reported
 dependencies, not a claim of complete transitive native coverage. Unversioned
 embedded helpers, V8's internal dependencies, other native libraries and

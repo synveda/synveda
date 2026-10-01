@@ -99,5 +99,67 @@
       "sha256": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755",
       "source_path": "deps/sqlite/sqlite3.h"
     }
+  },
+  "product": {
+    "version": "22.23.2",
+    "source": "https://nodejs.org/dist/v22.23.2/SHASUMS256.txt",
+    "source_sha": "aa4c77582be995286fc6e00aaf530dc7ade102a9",
+    "dependencies": {
+      "acorn": "8.16.0",
+      "ada": "2.9.2",
+      "amaro": "1.1.8",
+      "ares": "1.34.6",
+      "brotli": "1.1.0",
+      "cjs_module_lexer": "2.2.0",
+      "icu": "78.2",
+      "llhttp": "9.4.3",
+      "nbytes": "0.1.3",
+      "ncrypto": "0.0.1",
+      "nghttp2": "1.69.0",
+      "openssl": "3.5.7",
+      "simdjson": "4.5.0",
+      "simdutf": "6.4.2",
+      "sqlite": "3.51.3",
+      "undici": "6.28.0",
+      "uv": "1.51.0",
+      "uvwasi": "0.0.23",
+      "v8": "12.4.254.21-node.56",
+      "zlib": "1.3.1-e00f703",
+      "zstd": "1.5.7"
+    },
+    "supplementary_notices": {
+      "nbytes-LICENSE": {
+        "bytes": 1064,
+        "sha256": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2",
+        "source_path": "deps/nbytes/LICENSE"
+      },
+      "sqlite-NOTICE": {
+        "bytes": 297,
+        "sha256": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755",
+        "source_path": "deps/sqlite/sqlite3.h"
+      }
+    },
+    "targets": {
+      "linux-arm64": {
+        "archive": "node-v22.23.2-linux-arm64.tar.gz",
+        "sha256": "013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30",
+        "platform": "linux",
+        "arch": "arm64",
+        "binary_bytes": 122159120,
+        "binary_sha256": "1a638b0fe2b68da0489276aca95526c5122fc61ba54d6a2d0d00c1c92ab7b876",
+        "license_bytes": 145485,
+        "license_sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4"
+      },
+      "linux-x86_64": {
+        "archive": "node-v22.23.2-linux-x64.tar.gz",
+        "sha256": "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a",
+        "platform": "linux",
+        "arch": "x64",
+        "binary_bytes": 124836408,
+        "binary_sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+        "license_bytes": 145485,
+        "license_sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4"
+      }
+    }
   }
 }

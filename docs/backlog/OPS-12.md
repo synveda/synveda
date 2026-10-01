@@ -1405,3 +1405,56 @@ plugin/chart/upstream-image coverage before vulnerability and publisher incident
 policy. The fixed Syft distribution, S3 bucket and real issuer/harness credentials
 remain separate blockers; no new native qualification source/run is selected.
 Never resume cancelled `ef6d61db`, borrow old proof, weaken gates or publish.
+
+### Product Node inventory source increment (2026-10-01)
+
+The ADR-0135 amendment preceded implementation. Both reviewed Linux Node
+22.23.2 distributions now have executable/full-licence pins; the product carries
+the supplementary nbytes MIT notice and SQLite copyright disclaimer. The
+existing image verifier reads actual executable/notice files from an
+invocation-owned stopped container through bounded TAR streams. Platform,
+executable and complete notice bytes must pass before its isolated native Node
+metadata command starts. Network, filesystem, privilege, ambient options and
+resource limits remain explicit; cleanup failure cannot retain passing evidence
+and preserves the original cause.
+
+Existing local and both-registry image reports carry the inventory. Assembly
+checks the reviewed upstream source, target, executable/notice hashes, 21
+dependency versions and twelve linkage flags independently. No scanner, service,
+package manager, SBOM formatter or release sidecar is added. Console content,
+Cargo content, the separate 34 MiB console bound and original 51-payload checksum
+gates remain required.
+
+[Actual product candidate evidence](../../demos/evidence/ops12-product-node-inventory-candidate.json)
+binds dirty parent `05f252527f4e381db35e4c557f9c753c43d29aef`, source-input hashes,
+full native Linux ARM product build and immutable image ID. The actual Node
+executable matches upstream SHA-256
+`1a638b0fe2b68da0489276aca95526c5122fc61ba54d6a2d0d00c1c92ab7b876`;
+all three complete notices, 21 dependency versions and linkage flags pass.
+The same image's twelve console files pass their own current source contract.
+Two actual control images preserve source labels but alter the Node executable
+or truncate its nbytes notice; both refuse before metadata execution. All owned
+inspection containers, control images and control storage were removed. No
+retained deployment was changed. This is local Node/console carriage evidence,
+not clean hosted, both-architecture, Cargo/OCI SPDX, registry or deployment
+qualification. Reported Node versions do not prove complete transitive coverage.
+
+All 44 CI-tooling and 84 release-parity tests pass. The six focused Node checks
+also bind both product pins to the retained upstream probe. Deployment checks,
+all 44 convergence and five uninstall tests, strict chart lint, fast checks,
+Rust formatting, pinned actionlint and diff checks pass. One unchanged
+convergence fixture initially hit the sandbox's loopback listener denial; its
+rerun with socket access passed. No Rust, SQL, public generated contract or
+publication path changed.
+
+Next probe unreported/transitive native dependencies and full notice provenance
+in the pinned Node distributions and actual product, then plugin/chart and
+remaining upstream-image inventories/notices. Review maintained metadata before
+choosing any necessary implementation; keep this inside existing packaging and
+reports. Vulnerability and publisher incident policy follow that coverage work.
+The Syft Windows distribution, operator S3 bucket and real issuer/harness
+credentials remain separate external blockers. No new native qualification
+source/run is selected. Never resume cancelled `ef6d61db` runs, borrow old OCI
+proof, weaken gates or publish; retain the original same-run inventory before
+future assembly validation and remove the temporary native qualification branch
+only after corrected native proof is independently retained.

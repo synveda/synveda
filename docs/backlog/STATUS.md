@@ -438,12 +438,22 @@ manifest/native report. Assembly reads actual archive bytes independently.
 [Actual macOS ARM evidence](../../demos/evidence/ops12-client-node-inventory-candidate.json)
 passes all nine native archive checks; coherently changed runtime/notice controls
 refuse. Six-target TAR/ZIP fixtures pass; this dirty dev-profile candidate is not
-Cargo SBOM or clean hosted qualification. Next apply the same contract to actual
-product Node bytes/notices and existing image reports; retain the
-unreported/transitive native gaps for the remaining artifact coverage. Then
-continue plugin/chart/upstream-image coverage before vulnerability and publisher
-incident policy. The native Windows scanner blocker and OPS-12's open state
-remain unchanged; its brief owns the exact next action.
+Cargo SBOM or clean hosted qualification.
+The product follow-up now pins both reviewed Linux Node 22 distributions,
+carries supplementary notices and checks actual stopped-image bytes before
+isolated native metadata execution. Existing local and both-registry image
+reports retain that inventory; assembly independently refuses substitutions.
+[Actual Linux ARM evidence](../../demos/evidence/ops12-product-node-inventory-candidate.json)
+passes all three complete notice checks, 21 reported dependencies and same-image
+console validation. Altered executable and truncated-notice images refuse
+before Node starts; owned controls and inspection containers were removed.
+This dirty source candidate is separate from clean hosted qualification.
+Next probe unreported/transitive native dependencies and notice provenance,
+then plugin/chart/upstream-image coverage before vulnerability and publisher
+incident policy. Reuse maintained mechanisms and existing artifact reports;
+record only necessary architecture changes before implementing them. The native
+Windows scanner blocker and OPS-12's open state remain unchanged; its brief
+owns the exact next action.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered

@@ -214,9 +214,13 @@ original Windows Node identities. ADR-0135 selects a small packaging/report
 increment using native Node metadata, exact executable/licence pins and missing
 upstream notices. The [client source candidate](../demos/evidence/ops12-client-node-inventory-candidate.json)
 now passes actual macOS ARM packaging/installation and coherent-substitution
-refusals; product-image implementation and six-target native qualification remain
-pending. Reported versions do not establish complete transitive native coverage or
-change the readiness verdict.
+refusals. The [product source candidate](../demos/evidence/ops12-product-node-inventory-candidate.json)
+passes stopped-image byte/notice checks and native Linux ARM metadata execution;
+altered executable and truncated-notice images refuse before execution.
+Existing assembly gates require that inventory without adding a sidecar.
+Clean hosted and six-target native qualification remain pending. Reported
+versions do not establish complete transitive native coverage or change the
+readiness verdict.
 
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a

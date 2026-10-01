@@ -12,6 +12,7 @@ import {
 import { noticeHashes, verifyRegistrySet } from "./verify-release-images.mjs";
 
 import { consolePackageFixture } from "./fixtures/console-package.mjs";
+import { nodeImageFixture } from "./fixtures/node-image.mjs";
 
 const version = "0.0.0-local-test";
 const source = "a".repeat(40);
@@ -146,6 +147,7 @@ test("consumer archives and Helm overlays carry the chosen destination's own dig
 
 test("anonymous verification checks both destinations and refuses a synthetic or transplanted bundle", t => {
   const console = consolePackageFixture(t, { source, version });
+  const node = nodeImageFixture(console.root);
   const f = registry();
   const inventory = assemble(version, source, "owner-team", true, f.run);
   const manifest = {
@@ -158,7 +160,10 @@ test("anonymous verification checks both destinations and refuses a synthetic or
   const run = (args, _timeout, binary) => {
     calls.push(args);
     if (args[0] === "create") return "c".repeat(64);
-    if (args[0] === "cp") { assert.equal(binary, true); return console.imageTar(); }
+    if (args[0] === "cp") {
+      assert.equal(binary, true); return args[1].endsWith("/console") ? console.imageTar() : node.tar(args[1].split("/").at(-1));
+    }
+    if (args[0] === "start") return JSON.stringify(node.metadata);
     if (args[0] === "info") return "linux/aarch64";
     if (args[0] === "buildx") {
       const expected = Object.values(inventory.registries).flatMap((entry) => Object.values(entry.images)).find((entry) => entry.reference === args.at(-1));

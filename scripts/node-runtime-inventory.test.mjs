@@ -81,8 +81,17 @@ test("the reviewed pins and supplementary notice bytes match the retained upstre
     assert.equal(pin.binary_sha256, entry.binary.sha256); assert.equal(pin.binary_bytes, entry.binary.bytes);
     assert.equal(pin.license_sha256, entry.licence.sha256); assert.equal(pin.license_bytes, entry.licence.bytes);
   }
-  for (const [name, pin] of Object.entries(nodePins.supplementary_notices)) {
-    const bytes = readFileSync(new URL(`../assets/licenses/node/${name}`, import.meta.url));
-    assert.equal(sha256(bytes), pin.sha256); assert.equal(bytes.length, pin.bytes);
+  assert.equal(nodePins.product.source_sha, probe.node_sources[nodePins.product.version].node_source_sha);
+  for (const entry of probe.product.upstream) {
+    const pin = nodePins.product.targets[entry.target];
+    assert.equal(pin.archive, entry.archive); assert.equal(pin.sha256, entry.archive_sha256);
+    assert.equal(pin.binary_sha256, entry.binary.sha256); assert.equal(pin.binary_bytes, entry.binary.bytes);
+    assert.equal(pin.license_sha256, entry.licence.sha256); assert.equal(pin.license_bytes, entry.licence.bytes);
+  }
+  for (const lock of [nodePins, nodePins.product]) {
+    for (const [name, pin] of Object.entries(lock.supplementary_notices)) {
+      const bytes = readFileSync(new URL(`../assets/licenses/node/${name}`, import.meta.url));
+      assert.equal(sha256(bytes), pin.sha256); assert.equal(bytes.length, pin.bytes);
+    }
   }
 });

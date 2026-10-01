@@ -36,6 +36,7 @@ import { rustImageRoots, sbomGenerator } from "./rust-image-sbom.mjs";
 
 import { checkConsolePackage } from "./check-console-package.mjs";
 import { consolePackageFixture } from "./fixtures/console-package.mjs";
+import { productNodeReport } from "./fixtures/node-image.mjs";
 
 const rustSbomFixture = (name, version, imageManifest) => ({
   schema_version: 1, scanner: "syft-v1.51.0", spdx_version: "SPDX-2.3",
@@ -444,6 +445,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
           executable_checks: 1,
           notice_sha256: noticeHashes,
           ...(name === "product" ? { console_inventory: consoleEvidence } : {}),
+          ...(name === "product" ? { node_inventory: productNodeReport(platform) } : {}),
           ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: candidate.images[name].rust_sbom } : {}),
         })),
       };
@@ -465,6 +467,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
                 executable_checks: 1,
                 notice_sha256: noticeHashes,
                 ...(name === "product" ? { console_inventory: consoleEvidence } : {}),
+                ...(name === "product" ? { node_inventory: productNodeReport(platform) } : {}),
               })),
             },
           ]),
@@ -498,6 +501,11 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
     };
     check();
     for (const change of [
+      r => { delete r["release-local-images-arm64.json"].images[0].node_inventory; },
+      r => { r["release-local-images-amd64.json"].images[0].node_inventory.binary_sha256 = "0".repeat(64); },
+      r => { r["release-local-images-arm64.json"].images[0].node_inventory.dependencies.openssl = "0.0.0"; },
+      r => { r["release-images-arm64.json"].registries.ghcr.images[0].node_inventory.notices["nbytes-LICENSE"].sha256 = "0".repeat(64); },
+      r => { delete r["release-images-amd64.json"].registries.dockerhub.images[0].node_inventory; },
       r => { delete r["release-local-images-arm64.json"].images[0].console_inventory; },
       r => { r["release-local-images-amd64.json"].images[0].console_inventory.inventory_sha256 = "0".repeat(64); },
       r => { r["release-local-images-arm64.json"].images[0].console_inventory.source_sha = "b".repeat(40); },

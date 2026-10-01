@@ -287,7 +287,13 @@ sharing/lock codes 32 and 33, at most twenty attempts with nineteen 250-ms pause
 Installation locks and retained state remain separately protected.
 
 Image qualification requires readable source-matching notices and native
-runtime probes. Helm operations compare the complete three-row migration ledger
+runtime probes. ADR-0135 also checks the product's actual Node executable and
+three complete notice files in a stopped, immutable image before running its
+isolated native metadata command. Existing local and both-registry reports
+retain the pinned dependency/notice inventory; assembly independently checks
+its reviewed platform, executable, notice and dependency values. Console
+byte/source binding and the original 51-payload inventory remain required.
+Helm operations compare the complete three-row migration ledger
 before and after concurrent reruns. The outage observer requires gateway-loopback
 readiness 503 and liveness 200, then public recovery. Retained reinstall requires
 three stateless routes to recover within 60 seconds before single-execution

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   inspectConsoleImage,
+  inspectNodeImage,
   noticeHashes,
   requireAnonymousConfig,
   validateEnvironment,
@@ -13,6 +14,7 @@ import {
 } from "./verify-release-images.mjs";
 
 import { consolePackageFixture } from "./fixtures/console-package.mjs";
+import { nodeImageFixture } from "./fixtures/node-image.mjs";
 
 const version = "0.3.0-rc.1";
 const source = "a".repeat(40);
@@ -47,13 +49,18 @@ const index = () => ({
 
 function fixture(t, override = () => undefined) {
   const console = consolePackageFixture(t, { source, version });
+  const node = nodeImageFixture(console.root);
   const calls = [];
   const run = (args, _timeout, binary) => {
     calls.push(args);
     const result = override(args);
     if (result !== undefined) return result;
     if (args[0] === "create") return "c".repeat(64);
-    if (args[0] === "cp") { assert.equal(binary, true); return console.imageTar(); }
+    if (args[0] === "cp") {
+      assert.equal(binary, true);
+      return args[1].endsWith("/console") ? console.imageTar() : node.tar(args[1].split("/").at(-1));
+    }
+    if (args[0] === "start") return JSON.stringify(node.metadata);
     if (args[0] === "info") return "linux/aarch64";
     if (args[0] === "buildx") return JSON.stringify(index());
     if (args[0] === "image")
@@ -79,7 +86,7 @@ function fixture(t, override = () => undefined) {
       return Object.entries(noticeHashes).map(([name, hash]) => `${hash}  /usr/share/licenses/synveda/${name}`).join("\n");
     return "";
   };
-  return { calls, run, root: console.root, console };
+  return { calls, run, root: console.root, console, node };
 }
 
 test("a native pull check covers all six artifacts, upstream pulls and isolated runtime smoke", t => {
@@ -98,6 +105,7 @@ test("a native pull check covers all six artifacts, upstream pulls and isolated 
       Object.hasOwn(manifest().images, entry.name) ? noticeHashes : undefined);
     assert.deepEqual(entry.console_inventory, entry.name === "product"
       ? { ...f.console.check(), source_sha: source, version } : undefined);
+    assert.deepEqual(entry.node_inventory, entry.name === "product" ? f.node.report : undefined);
   }
   assert.match(report.scope, /no deployment or OIDC acceptance/);
   const pulled = f.calls.filter(([verb]) => verb === "pull");
@@ -119,6 +127,51 @@ test("a native pull check covers all six artifacts, upstream pulls and isolated 
     f.calls.some(([verb]) => ["build", "login", "push"].includes(verb)),
     false,
   );
+});
+
+test("Node inspection verifies stopped bytes before isolated metadata execution and cleanup", t => {
+  const f = fixture(t);
+  assert.deepEqual(inspectNodeImage(digest, "linux/arm64", f.run, f.root), f.node.report);
+  assert.deepEqual(f.calls.map(args => args[0]), ["create", "cp", "cp", "cp", "cp", "start", "rm"]);
+  const create = f.calls[0], container = create[create.indexOf("--name") + 1];
+  for (const value of ["--pull=never", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--env=NODE_OPTIONS=", "--env=NODE_PATH="])
+    assert.ok(create.includes(value));
+  assert.equal(create[create.indexOf("--entrypoint") + 1], "/usr/local/bin/node");
+  assert.deepEqual(f.calls.at(-2), ["start", "--attach", container]);
+  assert.deepEqual(f.calls.at(-1), ["rm", "--force", "--volumes", container]);
+});
+
+test("changed Node bytes, truncated notices and duplicate streams refuse before execution", t => {
+  for (const name of ["node", "LICENSE", "nbytes-LICENSE", "sqlite-NOTICE"]) {
+    const f = fixture(t); const bytes = Buffer.from(f.node.files.get(name)); bytes[bytes.length - 1] ^= 1; f.node.files.set(name, bytes);
+    assert.throws(() => inspectNodeImage(digest, "linux/arm64", f.run, f.root), /hash differs/);
+    assert.equal(f.calls.some(args => args[0] === "start"), false); assert.equal(f.calls.at(-1)[0], "rm");
+  }
+  const f = fixture(t);
+  const run = (args, timeout, binary) => args[0] === "cp" && args[1].endsWith("/LICENSE")
+    ? f.node.tar("LICENSE", ["LICENSE"]) : f.run(args, timeout, binary);
+  assert.throws(() => inspectNodeImage(digest, "linux/arm64", run, f.root), /one regular file/);
+  assert.equal(f.calls.some(args => args[0] === "start"), false);
+});
+
+test("Node stream/metadata bounds and every failure path retain their cause and clean up", t => {
+  const original = new Error("Node inspection failed"), cleanup = new Error("Node cleanup failed");
+  for (const stage of ["create", "cp", "start"]) {
+    const f = fixture(t, args => { if (args[0] === stage) throw original; if (args[0] === "rm") throw cleanup; });
+    assert.throws(() => inspectNodeImage(digest, "linux/arm64", f.run, f.root), error => error === original);
+    assert.equal(f.calls.at(-1)[0], "rm");
+  }
+  const f = fixture(t, args => { if (args[0] === "rm") throw cleanup; });
+  assert.throws(() => inspectNodeImage(digest, "linux/arm64", f.run, f.root), error => error === cleanup);
+  for (const value of ["invalid stream", Buffer.alloc(0)]) {
+    const f = fixture(t, args => args[0] === "cp" ? value : undefined);
+    assert.throws(() => inspectNodeImage(digest, "linux/arm64", f.run, f.root), /stream exceeds/);
+    assert.equal(f.calls.some(args => args[0] === "start"), false);
+  }
+  const large = fixture(t, args => args[0] === "start" ? "x".repeat(64 * 1024 + 1) : undefined);
+  assert.throws(() => inspectNodeImage(digest, "linux/arm64", large.run, large.root), /metadata exceeds/);
+  const changed = fixture(t); changed.node.metadata.versions.openssl = "0.0.0";
+  assert.throws(() => inspectNodeImage(digest, "linux/arm64", changed.run, changed.root), /dependency versions/);
 });
 
 test("console inspection reads a stopped immutable image and removes only its own container", t => {

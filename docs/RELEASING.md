@@ -76,9 +76,13 @@ complete upstream licence bytes, preserving Windows CRLF. Its existing manifest
 and native report carry the reported dependency versions and notice hashes;
 assembly rechecks the actual archive members. Supplementary nbytes MIT and
 SQLite copyright-disclaimer files stay beside the full upstream licence.
-This contract is locally checked on macOS ARM, not a change to published v0.4.3
-or new six-target hosted qualification. Reported versions do not establish
-complete transitive native-library coverage.
+The product image carries the same supplementary notices beside its Node 22
+licence. The native image verifier reads the actual executable and notices
+before isolated metadata execution; local and both-registry assembly require
+the pinned inventory in existing reports. Local macOS ARM client and Linux ARM
+product candidates pass; these are not changes to published v0.4.3 or clean
+hosted qualification. Reported versions do not establish complete transitive
+native-library coverage.
 
 Source release packaging retains the exact root `LICENSE` and `NOTICE` in
 native server archives, the console, reference bundle, chart and plugin archive.
