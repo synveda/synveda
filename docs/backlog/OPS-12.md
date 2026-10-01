@@ -1664,3 +1664,21 @@ No new full qualification source/run is selected. Preserve the separate `3beeb1c
 OCI proof and original same-run 51-payload gates; native Windows scanner, operator
 bucket and real issuer/harness blockers remain unchanged. Remove the temporary
 qualification branch only after corrected native proof is retained.
+
+### Feature-branch push approval checkpoint (2026-10-01)
+
+The package/full-notice gate is committed as `4ff8e6ac`; the runtime cleanup and
+plugin/chart probe are committed as `fe3e1e4f`. Their validation and next product
+slice are recorded above. The worktree is clean before this checkpoint.
+
+Automatic approval review rejected the subsequent bounded push before execution:
+sending repository code to the remote requires explicit owner authorization,
+which the commit request did not provide. No push ran. The verified destination
+is GitHub `synveda/synveda`, branch `codex/synveda-production-roadmap`; only the
+pending feature-branch commits and this checkpoint are proposed for push. Obtain
+explicit owner approval before retrying. Preserve local commits; do not bypass
+the review through another tool or destination. This is a push approval block,
+separate from earlier GitHub transport failures and the unchanged scanner,
+notice-provenance, operator bucket and real issuer/harness gaps. The plugin/chart
+inventory choice remains the next implementation task; no merge, tag or public
+release is authorized.

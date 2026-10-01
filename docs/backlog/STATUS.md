@@ -514,6 +514,14 @@ recovers, then complete other-image coverage before security policies. No clean
 hosted or six-target qualification follows; all external blockers and the paused
 automation remain unchanged.
 
+Completed slices are retained locally as `4ff8e6ac` and `fe3e1e4f`. Automatic
+approval review rejected the attempted feature-branch push as repository code
+egress without explicit push authorization; no push ran. Owner approval is
+required before sending the pending branch commits to GitHub `synveda/synveda`
+on `codex/synveda-production-roadmap`. This approval block is separate from the
+earlier transport failures and product qualification gaps; the implementation
+order above remains current.
+
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
 - [x] CNSL-5: Console theme and everyday usability — delivered
