@@ -206,6 +206,16 @@ candidates are separate from clean hosted qualification; Node/native libraries
 and broader third-party coverage remain open. Native Rust's Windows blocker and
 the readiness verdict are unchanged.
 
+The [Node mechanism probe](../demos/evidence/ops12-node-runtime-probe.json) checks
+all six official client distributions and both product Linux distributions.
+The preceding local ARM product's Node and complete licence match upstream
+bytes. Generic binary scanning misses embedded library versions and both
+original Windows Node identities. ADR-0135 selects a small packaging/report
+increment using native Node metadata, exact executable/licence pins and missing
+upstream notices. Implementation and native qualification remain pending;
+reported versions do not establish complete transitive native coverage or
+change the readiness verdict.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.

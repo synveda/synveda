@@ -1298,3 +1298,58 @@ bucket and real issuer/harness credentials remain external blockers. Do not
 resume failed `ef6d61db` runs, combine old proof with this source, weaken gates or
 publish. Remove the temporary native qualification branch only after corrected
 native proof is independently retained.
+
+### Bundled Node mechanism probe (2026-10-01)
+
+[Retained probe](../../demos/evidence/ops12-node-runtime-probe.json) uses clean
+source `19ca39982b45d6ad64a1a64b43230f5fa9166d65`. It independently downloads and
+checks all six already-pinned Node 24.21.0 distributions against both repository
+pins and official checksums, then reads only their fixed unique regular
+executables and complete licences. All executable headers match their target.
+POSIX licence bytes match upstream source; Windows carries the same complete
+text with exact CRLF bytes. No foreign executable is run.
+
+Both official Linux Node 22.23.2 distributions are also checksummed and inspected.
+The preceding task-owned native ARM product image from dirty parent `334369ef`
+contains byte-identical upstream Node and complete licence files. Its source
+label does not qualify the current probe source. The stopped inspection container
+and isolated execution container were removed; no retained deployment changed.
+
+The independently hash-verified Syft 1.51.0 binary classifier identifies Node
+on POSIX but no embedded library versions. The original two Windows `node.exe`
+filenames yield no Node package identity. Native macOS ARM Node 24.21.0 and the
+actual isolated Linux ARM product runtime expose public dependency versions and
+shared-library flags through Node's maintained API. ABI/data fields and empty
+optional versions must not become software package claims. The upstream licence
+builder includes runtime and build-tool notices, so its aggregate cannot itself
+prove which packages ship. Both aggregate licences omit `deps/nbytes/LICENSE`;
+that exact MIT notice is identical across the two upstream source commits.
+SQLite's embedded upstream source disclaims copyright. Other unreported helpers
+and transitive native components remain explicit coverage gaps.
+
+Selected normal/build Cargo trees show non-vendored `openssl-sys` on Linux.
+Its Rust binding version is not the C OpenSSL version. `libsqlite3-sys` appears
+in the lockfile but is absent from the selected release dependency tree; do not
+report it as shipped. These source observations are not platform execution or
+complete C-library qualification.
+
+ADR-0135 records the architecture choice before implementation: reuse Node's
+built-in metadata, existing client manifest/native reports and image reports.
+Next add reviewed executable/full-licence pins, carry the supplementary upstream
+notices, check actual native metadata and independently inspect final archived
+and stopped-image bytes. Keep the implementation inside the existing packaging
+and verification path; no new scanner, service, package manager, formatter or
+release sidecar is selected. Record runnable refusals and actual local acceptance
+before committing the source increment. Then continue the remaining native,
+plugin/chart/upstream-image coverage and security policy in the documented order.
+
+This probe does not qualify six native client executions or a clean hosted
+release. The fixed Syft Windows distribution, operator S3 bucket and real
+issuer/harness credentials remain separate external blockers. No new native
+qualification source/run is selected; never resume cancelled `ef6d61db` runs,
+combine preceding OCI proof with this source, weaken gates or publish.
+
+Independent retained-evidence checks rehash all eight downloaded distributions,
+their actual executable/licence files and the reviewed upstream source files.
+`make check-fast`, Rust formatting and diff checks pass. No production code,
+workflow, dependency, generated contract or deployment was changed in this probe.

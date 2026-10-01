@@ -422,8 +422,19 @@ matches all 12 files to the independent macOS ARM archive; stale and coherently
 changed image-content controls refuse. All 38 CI-tooling, 81 release-parity and
 258 console tests, deployment/chart checks, formatting, pinned actionlint and
 fast/diff checks pass.
-Next probe bundled Node/native library inventories and full notices, then
-remaining plugin/chart/upstream-image coverage before vulnerability and publisher
+The [Node mechanism probe](../../demos/evidence/ops12-node-runtime-probe.json)
+checks all six pinned client upstream distributions, both product Linux
+distributions and the preceding task-owned product ARM image. Actual product
+Node/licence bytes match official upstream content. Syft identifies no embedded
+library versions and no Node identity from the original Windows filenames.
+Native Node metadata exposes reported dependencies; complete upstream licence
+carriage still omits a separate nbytes MIT notice. This is local mechanism
+evidence, not six native executions or new source qualification.
+ADR-0135 selects reuse of Node's built-in metadata and existing manifests/reports,
+with exact executable/licence pins and supplementary upstream notices.
+Next implement those packaging and final archive/image checks; retain the
+unreported/transitive native gaps for the remaining artifact coverage. Then
+continue plugin/chart/upstream-image coverage before vulnerability and publisher
 incident policy. The native Windows scanner blocker and OPS-12's open state
 remain unchanged; its brief owns the exact next action.
 
