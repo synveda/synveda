@@ -255,6 +255,17 @@ packaging across clock seconds and complete notice bytes. Clean hosted/AMD64
 evidence, remaining native and other-artifact coverage and security policies
 remain pending; the readiness verdict is unchanged.
 
+The [plugin/chart probe](../demos/evidence/ops12-plugin-chart-inventory-probe.json)
+also exposes unused test/mock/driver and filesystem-metadata files in the plugin.
+The packager now selects only runtime modules, and native clients use that same
+payload. All 35 extracted configuration/hook replay tests, 21 client-package
+tests and nine actual macOS ARM client checks pass. All 28 locked upstream chart
+members and its retained complete licence match packaged bytes. Explicit Syft
+installed-package cataloging identifies four first-party npm occurrences;
+initial empty scans, the uncatalogued Claude plugin manifest and zero Helm
+components cannot establish complete third-party coverage. The narrow component
+inventory/report choice and upstream notice provenance remain open.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.

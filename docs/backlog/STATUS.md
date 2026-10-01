@@ -498,6 +498,22 @@ retry when access returns. The saved automation stays paused. The Windows
 scanner, operator bucket and real issuer/harness blockers remain separate;
 the OPS-12 brief owns the exact continuation checkpoint.
 
+The [plugin/chart inventory probe](../../demos/evidence/ops12-plugin-chart-inventory-probe.json)
+now identifies unused test/mock/driver outputs in Claude's broad copy. ADR-0065
+amendment 14 closes that payload to the existing runtime module list; native
+clients reuse it without a separate filter, and Darwin tar metadata is excluded.
+All 73 retained plugin files preserve original runtime/notice bytes. Three actual
+controls refuse; 35 archive replay tests, 21 client-package tests and nine actual
+macOS ARM client checks pass. All 28 original locked chart members and its retained
+complete licence match packaged bytes. Explicit Syft installed-package cataloging
+finds four first-party npm occurrences; its initial empty scans and missing
+Claude/Helm component identities cannot establish complete coverage. Next record
+the narrow metadata/notice inventory choice before implementing existing-artifact
+source/hash gates, resolve pinned Node notice provenance when GitHub access
+recovers, then complete other-image coverage before security policies. No clean
+hosted or six-target qualification follows; all external blockers and the paused
+automation remain unchanged.
+
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered
 - [x] CNSL-5: Console theme and everyday usability — delivered

@@ -1617,3 +1617,50 @@ record the corrected source and dispatch fresh full CI/nonpublishing Release;
 verify the original same-run 51-payload inventory before assembly. Preserve the
 separate `3beeb1cb` OCI proof, never resume cancelled `ef6d61db` runs, and remove
 the temporary qualification branch only after corrected native proof is retained.
+
+### Plugin runtime closure and chart inventory probe (2026-10-01)
+
+The [retained probe](../../demos/evidence/ops12-plugin-chart-inventory-probe.json)
+checks actual plugin and chart packages at parent
+`4ff8e6ac14788378ba56ac7b8537377835c4ade4`. It exposed tests, mock/driver modules,
+declarations/maps and Darwin filesystem metadata in Claude's broad dist copy.
+ADR-0065 amendment 14 was recorded before the correction: reuse the existing
+shared list plus hook/MCP/skills as ordinary runtime files, and let native clients
+consume that same payload without a second filtering path. All 73 retained plugin
+files preserve their original bytes and every complete notice. Existing archive
+checks inspect shipped files before adding private replay helpers. A broad-copy
+control refuses the new gate; linked and missing runtime files refuse packaging.
+All owned controls are removed.
+
+Thirty-five configuration and Codex/Copilot replay tests and 21 client-package
+tests pass. The actual dirty macOS ARM client archive
+`7cbe6c6da318d8de9758cb5e69ccb20f34fffb52543a54164a28584a358ea170`
+passes all nine native checks with the unchanged-source dev-profile CLI and
+private pinned Node. This is not Rust SBOM, clean hosted, six-target, registry or
+real issuer/harness qualification. Fast, 53 CI-tooling and 85 release-parity checks
+pass; formatting/diff checks pass. The initial package-manager signature lookup
+could not reach its registry in the sandbox; the network-enabled retry verifies
+and builds all three adapters without ignoring signature checks.
+
+The independently rehashed maintained Syft 1.51.0 probe finds zero packages from
+its initial archive/directory modes. Explicit installed-package cataloging reads
+four first-party npm occurrences, corroborated against their actual manifests.
+It still does not identify the separate Claude plugin manifest or Helm components;
+empty results cannot establish zero dependencies. All 28 locked `keycloakx` 7.3.2
+members, its retained complete Apache licence and the chart's root notices match
+actual packaged bytes. The upstream notice's version provenance and a complete
+component/report contract remain open. No new production scanner, dependency,
+workflow, report format or release sidecar is introduced by this probe/correction.
+
+Current continuation: use this probe to record the smallest plugin/chart metadata
+and full-notice inventory choice before implementing artifact/source/hash gates.
+Resolve pinned ncrypto/fast_float notice provenance when exact GitHub byte access
+returns, then remaining image inventory/notices before vulnerability and publisher
+incident policy. A cached primary fast_float licence text is readable; the exact
+raw-file download still times out and supplies no byte pin. Do not reconstruct
+upstream notice bytes or infer ncrypto terms from current repository heads.
+The feature push remains transport-blocked, and the saved automation stays paused.
+No new full qualification source/run is selected. Preserve the separate `3beeb1cb`
+OCI proof and original same-run 51-payload gates; native Windows scanner, operator
+bucket and real issuer/harness blockers remain unchanged. Remove the temporary
+qualification branch only after corrected native proof is retained.

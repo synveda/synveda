@@ -51,7 +51,7 @@ adapter="adapters/claude-code"
 # Keep the existing shared runtime's artifact closure explicit. Extracted
 # lifecycle tests catch missing modules; no workspace symlink reaches users.
 shared_modules="client config credentials deliver events git install-id log paths private-state session-runtime session-start spool transcript turn"
-for module in $shared_modules; do
+for module in $shared_modules hook mcp-server skills; do
   [ -f "$adapter/dist/$module.mjs" ] && [ ! -L "$adapter/dist/$module.mjs" ] || {
     echo "package-plugin: shared runtime module $module is not built as a regular file" >&2
     exit 1
@@ -74,7 +74,10 @@ cp "$adapter/marketplace.json" "$stage/.claude-plugin/marketplace.json"
 cp -R "$adapter/.claude-plugin" "$stage/synveda/.claude-plugin"
 cp "$adapter/.mcp.json" "$stage/synveda/.mcp.json"
 cp -R "$adapter/hooks" "$stage/synveda/hooks"
-cp -R "$adapter/dist" "$stage/synveda/dist"
+mkdir -p "$stage/synveda/dist"
+for module in $shared_modules hook mcp-server skills; do
+  cp "$adapter/dist/$module.mjs" "$stage/synveda/dist/$module.mjs"
+done
 for directory in "$stage" "$stage/synveda"; do
   cp LICENSE NOTICE "$directory/"
 done
@@ -155,7 +158,8 @@ node -e '
 # output directory as the host in a remote archive specification.
 (
   cd "$outdir"
-  tar -czf "synveda-plugin-$version.tar.gz" plugin
+  # Darwin's filesystem metadata must not become extra archive members.
+  COPYFILE_DISABLE=1 tar -czf "synveda-plugin-$version.tar.gz" plugin
 )
 rm -rf "$stage"
 echo "packaged $outdir/synveda-plugin-$version.tar.gz"

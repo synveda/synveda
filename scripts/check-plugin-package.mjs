@@ -19,6 +19,8 @@ function run(command, args, cwd, extra = {}) {
 
 try {
   run("bash", ["scripts/package-plugin.sh", version, scratch], root);
+  const members = run("tar", ["-tzf", join(scratch, `synveda-plugin-${version}.tar.gz`)], scratch).trim().split("\n");
+  assert.ok(members.every((name) => !name.split("/").some((part) => part.startsWith("._"))), "archive must not carry filesystem metadata members");
   run("tar", ["-xzf", join(scratch, `synveda-plugin-${version}.tar.gz`), "-C", scratch], scratch);
   for (const directory of ["plugin", "plugin/synveda", "plugin/codex", "plugin/copilot-cli",
     "plugin/codex/node_modules/@synveda/claude-code-adapter", "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter"]) {
@@ -30,6 +32,18 @@ try {
   assert.equal(consumer.contract, "OPS-12/ADR-0116");
   assert.equal(consumer.version, 1);
   assert.equal(consumer.config_sha256, createHash("sha256").update(readFileSync(join(scratch, "plugin/synveda/dist/config.mjs"))).digest("hex"));
+  const claude = join(scratch, "plugin/synveda/dist");
+  const claudeFiles = readdirSync(claude, { withFileTypes: true });
+  assert.ok(claudeFiles.every((file) => file.isFile() && file.name.endsWith(".mjs") &&
+    !file.name.includes(".test.") && !["mock-gateway.mjs", "driver.mjs", "types.mjs"].includes(file.name)),
+  "Claude must carry ordinary runtime modules only");
+  for (const file of claudeFiles) {
+    assert.deepEqual(readFileSync(join(claude, file.name)), readFileSync(join(root, "adapters/claude-code/dist", file.name)));
+  }
+  assert.equal(run(process.execPath, [join(claude, "hook.mjs")], scratch, { input: "{}" }), "");
+  // Add the test only after checking the shipped set; its imports still resolve
+  // to the actual extracted runtime modules.
+  cpSync(join(root, "adapters/claude-code/dist/config.test.mjs"), join(claude, "config.test.mjs"));
   process.stdout.write(run(process.execPath, ["--test", "dist/config.test.mjs"], join(scratch, "plugin/synveda")));
   const runtimes = [];
   for (const client of ["codex", "copilot-cli"]) {

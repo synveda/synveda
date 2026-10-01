@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // OPS-12: package the existing CLI and adapters with a checksum-pinned runtime.
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cliPath, inventory, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
 import { checkNodeFiles, nodeInventory, nodeMetadataArguments, readNodeFile } from "./node-runtime-inventory.mjs";
@@ -26,17 +26,11 @@ mkdirSync(output, { recursive: true });
 const scratch = mkdtempSync(join(resolve(output), ".client-package-"));
 const client = join(scratch, "client");
 const run = (command, args, extra = {}) => execFileSync(command, args, { encoding: "utf8", timeout: 120_000,
-  maxBuffer: 8 * 1024 * 1024, env: { ...process.env, NODE_OPTIONS: "", NODE_PATH: "" }, ...extra });
+  maxBuffer: 8 * 1024 * 1024, env: { ...process.env, NODE_OPTIONS: "", NODE_PATH: "", COPYFILE_DISABLE: "1" }, ...extra });
 try {
   mkdirSync(client);
   run("bash", [join(root, "scripts/package-plugin.sh").replaceAll("\\", "/"), version, scratch.replaceAll("\\", "/")]);
   run("tar", ["-xzf", join(scratch, `synveda-plugin-${version}.tar.gz`), "-C", client]);
-  // Claude's source package also carries test outputs; consumers need only the
-  // existing executable module closure. Codex/Copilot are already closed lists.
-  const dist = join(client, "plugin/synveda/dist");
-  for (const file of readdirSync(dist)) {
-    if (!file.endsWith(".mjs") || file.includes(".test.") || file === "mock-gateway.mjs") rmSync(join(dist, file));
-  }
   const upstreamRoot = pin.archive.replace(/\.(?:tar\.gz|zip)$/, "");
   const upstreamNode = windows ? "node.exe" : "bin/node";
   run("tar", ["-xf", resolve(runtimeArchive), "-C", scratch, `${upstreamRoot}/${upstreamNode}`, `${upstreamRoot}/LICENSE`]);

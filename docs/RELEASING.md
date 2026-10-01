@@ -111,6 +111,14 @@ from clean source `f433eb17`, with the original 31-file same-run inventory.
 Every changed release source still requires the full native qualification;
 this `publish=false` checkpoint does not qualify anonymous public pulls.
 
+The plugin packager copies only the existing executable module set; native
+clients use that same payload. Tests, mock/driver modules, declarations, source
+maps and Darwin filesystem metadata are excluded. Archive checks inspect the
+original shipped files before adding private helpers for configuration/lifecycle
+replays. The [plugin/chart probe](../demos/evidence/ops12-plugin-chart-inventory-probe.json)
+records actual component and full-notice bytes and the maintained scanner's
+coverage gaps; it does not establish a complete plugin/chart SBOM.
+
 Under [ADR-0133](adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md),
 product/browser images build Rust executables with locked `cargo-auditable`.
 Their native OCI candidates require actual blob hashes, source/platform and

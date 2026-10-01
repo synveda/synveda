@@ -1,11 +1,23 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted; amended thirteen times. The current Docker deployment
+- **Status**: Accepted; amended fourteen times. The current Docker deployment
   contract is ADR-0102; the native/client artifact decisions below remain.
   ADR-0132 adds mandatory publisher verification to source installers.
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8, CPR-39, ADPT-9, OPS-12
 - **Deciders**: sujitn
+
+## Amendment 14 (2026-10-01): package only the adapter runtime
+
+OPS-12's actual plugin inventory exposed test outputs, mock/driver modules,
+declarations and source maps in Claude's broad `dist` copy. Reuse the existing
+shared module list plus hook, MCP and skills entry points as a closed ordinary
+file set. Codex/Copilot keep their existing closed lists. The native client uses
+that same plugin payload without a second filtering path. Suppress Darwin tar's
+AppleDouble metadata members; source executable and complete notice bytes stay
+unchanged. Archive checks inspect the shipped files before adding private test
+helpers for the existing configuration and lifecycle replays. This narrows
+packaging under the current contract; it adds no scanner, dependency or sidecar.
 
 ## Amendment 13 (2026-09-21): Windows client installation candidate
 
