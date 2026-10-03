@@ -186,13 +186,14 @@ platform support remain open. The readiness verdict is unchanged.
 The subsequent native archive Rust SBOM contract requires each archived
 executable's actual SHA-256, size and platform, plus its own SPDX Cargo content.
 Assembly correction `31980069` closes a coherent report/SPDX digest substitution
-gap; focused checks pass. Native qualification remains blocked by Syft's
-Windows file lookup defect: its merged upstream fix has no released binary at
-this checkpoint, and latest release 1.52.0 retains the faulty resolver. The
+gap; focused checks pass. The native Windows file lookup defect is fixed in
+the official Syft 1.54.0 release. Its six native distributions are independently
+checksum/header reviewed; actual Windows filename/digest probes and fresh
+complete qualification remain pending. The
 [blocker evidence](../demos/evidence/ops12-native-windows-scanner-blocker.json)
 records both native x64 gate failures and exact upstream source comparison.
-Failed reports provide no target qualification; a fixed scanner needs native
-probes and a fresh complete same-source drill. OPS-12 and the verdict remain open.
+Failed reports provide no target qualification. PR CI repair does not replace
+the complete same-source drill. OPS-12 and the verdict remain open.
 
 ADR-0134 adds a console source candidate with independently checked rendered npm
 identities, complete MIT/Vite-helper/Inter notices and actual archived output

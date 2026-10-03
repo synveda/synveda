@@ -1715,3 +1715,42 @@ plugin/chart inventory choice above. PR CI does not replace the pending clean
 native/archive and nonpublishing Release qualification. The Windows scanner,
 notice provenance, operator bucket and real issuer/harness gates remain open;
 the separate OCI proof and paused automation remain unchanged.
+
+### PR CI repair and fixed native scanner (2026-10-03)
+
+PR #67 is now ready for review. At source
+`854bc77fb6619385c2cfa651ff7e73c781137815`,
+[CI 36919629883](https://github.com/synveda/synveda/actions/runs/36919629883)
+passed the corrected Linux packaging job `110562237345` and all other required
+jobs except Windows x64 `110562237690` and ARM64 `110562237816`. Both native
+client execution paths passed, then the unchanged archive gate refused the
+scanner's missing executable SHA-256. This is the retained Syft resolver defect,
+not a transient failure or a Rust implementation error.
+
+The official immutable
+[Syft 1.54.0 release](https://github.com/anchore/syft/releases/tag/v1.54.0),
+published 2026-10-01, now contains fix 5341: tag source
+`cc326e45a6213360266dda4b30cc68095946d676` descends from merged
+`6ac7afb439c950ec2fc169103c4850c6dfe74c5a`. All six archives match both the
+official asset digests and checksum list. Extracted executables have independent
+hashes/sizes and correct ELF/Mach-O/PE platform headers; ADR-0133 records the
+native pin choice before implementation. OCI scanning remains separately pinned.
+
+Current action: a temporary diagnostic in the existing PR Windows jobs scans
+the reviewed official tool copied as `synveda.exe`, using the production
+single-file/cataloger/full-metadata options. It checks actual byte/digest binding
+and prints exact filenames. This tool fixture cannot establish product Cargo
+coverage. Review both native outputs before changing the closed filename
+contract, remove the diagnostic, then require corrected PR CI. No scanner
+checksum injection, custom build, path widening, archive-content or publication
+gate exception is selected. Automatic approval review rejected the proposed
+separate remote probe branch; no commit or push occurred there.
+
+Full clean-source native/archive and nonpublishing Release qualification remains
+pending. Do not resume `ef6d61db` or borrow reports from another source/run;
+independently verify the original 51-payload inventory before assembly and all
+six client reports, eight archive reports, twelve SPDX documents and both full
+OCI/Compose/Helm sets before retaining proof. Preserve the separate `3beeb1cb`
+OCI qualification and temporary qualification branch until that corrected proof
+is retained. The plugin/chart slice follows this CI repair; external operator,
+issuer and notice-provenance gaps remain separate. Automation stays paused.

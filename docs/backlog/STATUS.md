@@ -527,13 +527,23 @@ as needed rather than assuming their earlier TLS failures persist. The
 implementation order above and paused automation remain current; the OPS-12
 brief owns the exact continuation checkpoint.
 
-[Draft PR #67](https://github.com/synveda/synveda/pull/67) now reviews the branch.
+[PR #67](https://github.com/synveda/synveda/pull/67) now reviews the branch.
 Its initial CI `36908968804` packaging job failed a ZIP fixture because Linux
 `bsdtar` was absent. The job now installs the existing ADR-0133
 `libarchive-tools` prerequisite; 53 CI-tooling and 21 client-package tests and
-pinned actionlint pass. Next verify the corrected PR job, then resume the
-documented inventory order. Production qualification and external blockers
-remain open; the automation remains paused.
+pinned actionlint pass. Corrected source `854bc77f` passed that job in
+[CI 36919629883](https://github.com/synveda/synveda/actions/runs/36919629883);
+only both native Windows SBOM jobs failed the missing executable SHA-256 gate.
+The official immutable Syft 1.54.0 release now contains upstream fix 5341.
+ADR-0133 records the reviewed native pin upgrade; all six archives, extracted
+executable hashes/sizes and platform headers were independently checked.
+Next inspect native Windows path/digest probes in the existing PR jobs before
+replacing their exact filename expectation, remove the temporary diagnostic,
+then verify corrected PR CI. Complete same-source native/archive and
+nonpublishing Release qualification remains separate and pending; do not resume
+the obsolete `ef6d61db` runs. The documented inventory order follows the CI fix.
+Production qualification and the operator/issuer blockers remain open; the
+automation remains paused.
 
 - [ ] [CNSL-3: Audit temporal and disclosure views](CNSL-3.md) — open
 - [x] CNSL-4: Knowledge browser — delivered

@@ -10,7 +10,7 @@ export const rustRoots = {
   worker: ["synveda-gateway"],
 };
 export const rustScanner = "syft-v1.51.0";
-export const nativeRustScanner = "syft-1.51.0";
+export const nativeRustScanner = "syft-1.54.0";
 const criticalPackages = ["cedar-policy", "cedar-policy-core", "sqlx", "sqlx-postgres"];
 
 // Cargo writes this closed package table. Refuse ambiguous critical versions

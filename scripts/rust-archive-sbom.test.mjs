@@ -29,7 +29,7 @@ const bytesFor = (target) => {
   return bytes;
 };
 const spdxFor = (binary, binaryHash) => ({
-  spdxVersion: "SPDX-2.3", creationInfo: { creators: ["Tool: syft-1.51.0"] },
+  spdxVersion: "SPDX-2.3", creationInfo: { creators: ["Tool: syft-1.54.0"] },
   files: [
     { fileName: "", fileTypes: ["OTHER"], checksums: [{ algorithm: "SHA1", checksumValue: "0".repeat(40) }] },
     { fileName: binary.member.endsWith(".exe") ? "\\synveda.exe" : binary.member.split("/").at(-1), checksums: [{ algorithm: "SHA256", checksumValue: binaryHash }] },
@@ -65,7 +65,7 @@ function fixture(t, kind = "server", target = "darwin-arm64") {
   const pin = syftPins.targets[target];
   const report = { schema_version: 1, evidence: "native-rust-archive-sbom", kind, target, version, source_sha: source, source_tree_dirty: false,
     archive_sha256: sha256(readFileSync(archive)), archive_bytes: readFileSync(archive).length,
-    scanner_download: { version: "1.51.0", archive: pin.archive, archive_sha256: pin.sha256, binary_sha256: pin.binary_sha256 }, binaries };
+    scanner_download: { version: "1.54.0", archive: pin.archive, archive_sha256: pin.sha256, binary_sha256: pin.binary_sha256 }, binaries };
   const write = () => writeFileSync(join(directory, plan.report), JSON.stringify(report));
   const writeDoc = (i) => {
     const bytes = Buffer.from(JSON.stringify(docs[i]));
@@ -244,7 +244,8 @@ test("another binary cannot satisfy missing, wrong-version or foreign-hash Cargo
     (doc) => { doc.files[1].fileName = "synveda-gateway"; },
     (doc) => { doc.files.push(doc.files[0]); },
     (doc) => { doc.creationInfo.creators = ["Tool: syft-v1.51.0"]; },
-    (doc) => { doc.creationInfo.creators = "Tool: syft-1.51.0"; },
+    (doc) => { doc.creationInfo.creators = ["Tool: syft-1.51.0"]; },
+    (doc) => { doc.creationInfo.creators = "Tool: syft-1.54.0"; },
   ]) {
     const f = fixture(t); damage(f.docs[2]); f.writeDoc(2);
     assert.throws(() => check(f));

@@ -39,6 +39,17 @@ immutable digest:
 That index has native Linux AMD64 and ARM64 manifests and uses Syft 1.51.0.
 Native scanner downloads need reviewed release hashes before execution.
 
+Native scanning now selects the official immutable
+[Syft 1.54.0 release](https://github.com/anchore/syft/releases/tag/v1.54.0), source
+`cc326e45a6213360266dda4b30cc68095946d676`. It contains upstream Windows resolver
+fix [5341](https://github.com/anchore/syft/pull/5341), which restores digest lookup
+and normalizes reported paths. All six downloaded archives match the official
+release asset digests and checksum list; their extracted executables are
+independently hashed, sized and checked for native platform headers before
+replacing the download pins. The closed filename contract must follow actual
+native path/digest output before it changes; missing hashes still fail. The
+existing OCI scanner remains independently pinned to Syft 1.51.0.
+
 Validate the packaged binary or final image rather than a source `Cargo.lock`
 copied into the distribution. Bind each SBOM/report to its exact artifact,
 source and platform identity. Require expected first-party roots and critical
