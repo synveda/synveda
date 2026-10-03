@@ -1498,6 +1498,88 @@ test("development uses one exact browser and container issuer port", () => {
   }
 });
 
+test("PITR overlay grants S3 egress and repository secret only to PostgreSQL", () => {
+  const fixture = makeComposeFixture();
+  try {
+    const config = join(fixture.scratch, "synveda-development", "pgbackrest.conf");
+    const output = join(fixture.scratch, "pitr.json");
+    writeFileSync(
+      config,
+      `[global]
+repo1-type=s3
+repo1-path=/synveda/render-test
+repo1-s3-bucket=backup-bucket
+repo1-s3-endpoint=s3.example.test
+repo1-s3-region=eu-west-2
+repo1-s3-key=id
+repo1-s3-key-secret=private-key-sentinel
+repo1-cipher-type=aes-256-cbc
+repo1-cipher-pass=${"a".repeat(48)}
+repo1-storage-verify-tls=y
+[synveda]
+pg1-path=/var/lib/postgresql/data
+`,
+      { mode: 0o600 },
+    );
+    chmodSync(config, 0o600);
+    const result = spawnSync(WRAPPER, ["config", "--output", output], {
+      cwd: ROOT,
+      env: composeEnvironment(fixture, { SYNVEDA_PITR_ENABLED: "true" }),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const model = JSON.parse(readFileSync(output, "utf8"));
+    const postgres = model.services.postgres;
+    assert.deepEqual(postgres.entrypoint, ["/usr/local/bin/synveda-pgbackrest-entrypoint"]);
+    assert.equal(postgres.networks["application-egress"].gw_priority, 1);
+    assert.equal(model.services["database-bootstrap"].build.target, "pitr");
+    assert.ok(postgres.secrets.some((secret) => secret.source === "pgbackrest_conf"));
+    for (const [name, service] of Object.entries(model.services)) {
+      if (name !== "postgres") {
+        assert.ok(
+          !(service.secrets ?? []).some((secret) => secret.source === "pgbackrest_conf"),
+          `${name} received repository credentials`,
+        );
+      }
+    }
+    assert.match(postgres.command.join(" "), /archive-push %p/);
+    assert.doesNotMatch(readFileSync(output, "utf8"), /private-key-sentinel/);
+
+    const ca = join(fixture.scratch, "synveda-development", "pgbackrest-ca.pem");
+    writeFileSync(ca, readFileSync(join(fixture.secrets, "tls_cert")), {
+      mode: 0o600,
+    });
+    chmodSync(ca, 0o600);
+    writeFileSync(
+      config,
+      readFileSync(config, "utf8").replace(
+        "repo1-storage-verify-tls=y\n",
+        "repo1-storage-verify-tls=y\nrepo1-storage-ca-file=/var/run/postgresql/pgbackrest-ca.pem\n",
+      ),
+    );
+    const caOutput = join(fixture.scratch, "pitr-ca.json");
+    const withCa = spawnSync(WRAPPER, ["config", "--output", caOutput], {
+      cwd: ROOT,
+      env: composeEnvironment(fixture, { SYNVEDA_PITR_ENABLED: "true" }),
+      encoding: "utf8",
+    });
+    assert.equal(withCa.status, 0, withCa.stderr);
+    const caModel = JSON.parse(readFileSync(caOutput, "utf8"));
+    assert.ok(caModel.services.postgres.secrets.some(
+      (secret) => secret.source === "pgbackrest_ca",
+    ));
+    for (const [name, service] of Object.entries(caModel.services)) {
+      if (name !== "postgres") {
+        assert.ok(!(service.secrets ?? []).some(
+          (secret) => secret.source === "pgbackrest_ca",
+        ), `${name} received repository CA`);
+      }
+    }
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
 test("browser acceptance renders one sandboxed secret-minimal fixture", () => {
   const fixture = makeComposeFixture();
   try {
@@ -6867,6 +6949,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
         init: true,
         pids_limit: 1,
         restart: "no",
+        stop_grace_period: "40s",
         environment: {
           DATABASE_URL_FILE: "/run/secrets/database_url",
           SYNVEDA_KMS_KEY_FILE: "/run/secrets/kms_key",
@@ -7261,6 +7344,13 @@ test("model findings reject privilege, port, command and secret regressions", ()
     keycloakPublicGateDir: "/fixture/keycloak-public-gate",
   };
   assert.deepEqual(canonicalComposeFindings(base, expected), []);
+  const shortGatewayGrace = structuredClone(base);
+  shortGatewayGrace.services.gateway.stop_grace_period = "30s";
+  assert.ok(
+    canonicalComposeFindings(shortGatewayGrace, expected).includes(
+      "gateway stop grace must exceed its default shutdown bound by ten seconds",
+    ),
+  );
   const discardWithEgress = structuredClone(base);
   discardWithEgress.services["otel-collector"].networks["telemetry-egress"] = {
     gw_priority: 1,

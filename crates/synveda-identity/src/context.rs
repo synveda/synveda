@@ -72,6 +72,7 @@ mod tests {
                 provisioning: None,
                 lifetime: None,
                 credential_class: crate::token::CredentialClass::PrimaryBearer,
+                oidc_token: None,
             },
             tenant,
         }

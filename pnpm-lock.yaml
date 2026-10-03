@@ -64,6 +64,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.3.4
         version: 4.7.0(vite@6.4.3(@types/node@22.20.1))
+      rollup-plugin-sbom:
+        specifier: 4.0.0
+        version: 4.0.0(rollup@4.62.4)(vite@6.4.3(@types/node@22.20.1))
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -185,6 +188,33 @@ packages:
   '@babel/types@7.29.8':
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
+
+  '@cyclonedx/cyclonedx-library@10.1.0':
+    resolution: {integrity: sha512-4yq0KTQIA32UHJwFMDeY5xj2asp3Mk5lzx4JRVXLOb0YE8w1KeR61c1m/gJ4sjMXpiiEDfaITVQu8BLUuy7t3A==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      ajv: ^8.12.0
+      ajv-formats: ^3.0.1
+      ajv-formats-draft2019: ^1.6.1
+      libxmljs2: ^0.35||^0.37
+      packageurl-js: '*'
+      spdx-expression-parse: '*'
+      xmlbuilder2: ^3.0.2||^4.0.0
+    peerDependenciesMeta:
+      ajv:
+        optional: true
+      ajv-formats:
+        optional: true
+      ajv-formats-draft2019:
+        optional: true
+      libxmljs2:
+        optional: true
+      packageurl-js:
+        optional: true
+      spdx-expression-parse:
+        optional: true
+      xmlbuilder2:
+        optional: true
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -635,6 +665,10 @@ packages:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
 
+  hosted-git-info@10.1.1:
+    resolution: {integrity: sha512-DeOnSPAvOndYKfw075gt8yZzQ7S2hNztw34zBTfhIzLhmBTswIBg5/y+pqu/VD5cYWm5goAFTusDmUEmKZ0PEQ==}
+    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
+
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
@@ -647,6 +681,10 @@ packages:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
     hasBin: true
+
+  lru-cache@11.5.3:
+    resolution: {integrity: sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg==}
+    engines: {node: 20 || >=22}
 
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
@@ -662,6 +700,13 @@ packages:
   node-releases@2.0.51:
     resolution: {integrity: sha512-wRNIrw4DmVLKQlbgOMdkMx27Wrpzes2hh5Jtbi2bjPd+4wJstWIqP5A+lscnqbm0xxmT5Bpg8Lec5ItEBwx6BQ==}
     engines: {node: '>=18'}
+
+  normalize-package-data@9.0.0:
+    resolution: {integrity: sha512-la34cHOCAT6itNOYCvPi40XP8r0y6OHuNkooOfnfFUHdgy5MBw665qq5xsuS02AEC7WPQvhwvb7E9PI1gipplw==}
+    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
+
+  packageurl-js@2.0.1:
+    resolution: {integrity: sha512-N5ixXjzTy4QDQH0Q9YFjqIWd6zH6936Djpl2m9QNFmDv5Fum8q8BjkpAcHNMzOFE0IwQrFhJWex3AN6kS0OSwg==}
 
   pako@0.2.9:
     resolution: {integrity: sha512-NUcwaKxUxWrZLpDG+z/xZaCgQITkA/Dv4V/T6bw7VON6l1Xz/VnrBqrYjZQ12TamKHzITTfOEIYUj48y2KXImA==}
@@ -708,6 +753,24 @@ packages:
     resolution: {integrity: sha512-9aZLIrhRaD97sgVhtJOW6ckOEh6/GnvQtdVNfdZ6s67+3/XwLS9lBcQYzEEhYVeUowN7pRzMLsyGhK2i/xvWbw==}
     engines: {node: '>= 0.8.15'}
 
+  rollup-plugin-sbom@4.0.0:
+    resolution: {integrity: sha512-WwAq3ZZRv4He27yyExeV8WWZh4QeSqVnIahpMBGfsDX97bjDh2aBgbFLWp1COuYiBP9iHjeB3oaPMk8V8Dmpjg==}
+    engines: {node: '>=22.9.0'}
+    peerDependencies:
+      rolldown: ^1
+      rollup: ^4
+      vite: ^6 || ^7 || ^8
+      xmlbuilder2: ^3 || ^4
+    peerDependenciesMeta:
+      rolldown:
+        optional: true
+      rollup:
+        optional: true
+      vite:
+        optional: true
+      xmlbuilder2:
+        optional: true
+
   rollup@4.62.4:
     resolution: {integrity: sha512-RXOqwaPsBGjMNMa4sQjDjHieHEZDFoj/Rdr46l2MU5DfEs16wHJPC2RPTPHWhNl+M3aI472LLqFkFKut4SblOg==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
@@ -720,9 +783,29 @@ packages:
     resolution: {integrity: sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA==}
     hasBin: true
 
+  semver@7.8.5:
+    resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
+    engines: {node: '>=10'}
+    hasBin: true
+
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
+
+  spdx-correct@3.2.0:
+    resolution: {integrity: sha512-kN9dJbvnySHULIluDHy32WHRUu3Og7B9sbY7tsFLctQkIqnMh3hErYgdMjTYuqmcXX+lK5T1lnUt3G7zNswmZA==}
+
+  spdx-exceptions@2.5.0:
+    resolution: {integrity: sha512-PiU42r+xO4UbUS1buo3LPJkjlO7430Xn5SVAhdpzzsPHsjbYVflnnFdATgabnLude+Cqu25p6N+g2lw/PFsa4w==}
+
+  spdx-expression-parse@3.0.1:
+    resolution: {integrity: sha512-cbqHunsQWnJNE6KhVSMsMeH5H/L9EpymbzqTQ3uLwNCLZ1Q481oWaofqH7nO6V07xlXwY6PhQdQ2IedWx/ZK4Q==}
+
+  spdx-expression-parse@5.0.0:
+    resolution: {integrity: sha512-vngmw3Rgn+o2arXNbnZaj5UtOEBuWBfvaI+Wc8GFfykIhA5/vdK9/Sp/XkLv63dykz2rxKDvKEHupF5P0FORcQ==}
+
+  spdx-license-ids@3.0.24:
+    resolution: {integrity: sha512-cLS9TtWkIQFyLkJ3/5aFQAOHOSKTlOs/7WDut/XPSdjom1fJhUdkepeJAKXa9Y05+FabHd0sti+Et559vDtkpQ==}
 
   stackblur-canvas@2.7.0:
     resolution: {integrity: sha512-yf7OENo23AGJhBriGx0QivY5JP6Y1HbrrDI6WLt6C5auYZXlQrheoY8hD4ibekFKz1HOfE48Ww8kMWMnJD/zcQ==}
@@ -761,6 +844,9 @@ packages:
     hasBin: true
     peerDependencies:
       browserslist: '>= 4.21.0'
+
+  validate-npm-package-license@3.0.4:
+    resolution: {integrity: sha512-DpKm2Ui/xN7/HQKCtpZxoRWBhZ9Z0kqtygG8XCgNQ8ZlDnxuQmWhj566j8fN4Cu3/JmbhsDo7fcAJq4s9h27Ew==}
 
   vite@6.4.3:
     resolution: {integrity: sha512-NTKlcQjlAK7MlQoyb6LgaqHc8sso/pVyUJYWMws3jg21uTJw/LddqIFPcPqP6PzpgbIcZyKI85sFE4HBrQDA8A==}
@@ -918,6 +1004,11 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@cyclonedx/cyclonedx-library@10.1.0(packageurl-js@2.0.1)(spdx-expression-parse@5.0.0)':
+    optionalDependencies:
+      packageurl-js: 2.0.1
+      spdx-expression-parse: 5.0.0
 
   '@esbuild/aix-ppc64@0.25.12':
     optional: true
@@ -1251,11 +1342,17 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
+  hosted-git-info@10.1.1:
+    dependencies:
+      lru-cache: 11.5.3
+
   js-tokens@4.0.0: {}
 
   jsesc@3.1.0: {}
 
   json5@2.2.3: {}
+
+  lru-cache@11.5.3: {}
 
   lru-cache@5.1.1:
     dependencies:
@@ -1266,6 +1363,14 @@ snapshots:
   nanoid@3.3.16: {}
 
   node-releases@2.0.51: {}
+
+  normalize-package-data@9.0.0:
+    dependencies:
+      hosted-git-info: 10.1.1
+      semver: 7.8.5
+      validate-npm-package-license: 3.0.4
+
+  packageurl-js@2.0.1: {}
 
   pako@0.2.9: {}
 
@@ -1299,6 +1404,21 @@ snapshots:
   restructure@3.0.2: {}
 
   rgbcolor@1.0.1: {}
+
+  rollup-plugin-sbom@4.0.0(rollup@4.62.4)(vite@6.4.3(@types/node@22.20.1)):
+    dependencies:
+      '@cyclonedx/cyclonedx-library': 10.1.0(packageurl-js@2.0.1)(spdx-expression-parse@5.0.0)
+      normalize-package-data: 9.0.0
+      packageurl-js: 2.0.1
+      spdx-expression-parse: 5.0.0
+    optionalDependencies:
+      rollup: 4.62.4
+      vite: 6.4.3(@types/node@22.20.1)
+    transitivePeerDependencies:
+      - ajv
+      - ajv-formats
+      - ajv-formats-draft2019
+      - libxmljs2
 
   rollup@4.62.4:
     dependencies:
@@ -1336,7 +1456,28 @@ snapshots:
 
   semver@6.3.1: {}
 
+  semver@7.8.5: {}
+
   source-map-js@1.2.1: {}
+
+  spdx-correct@3.2.0:
+    dependencies:
+      spdx-expression-parse: 3.0.1
+      spdx-license-ids: 3.0.24
+
+  spdx-exceptions@2.5.0: {}
+
+  spdx-expression-parse@3.0.1:
+    dependencies:
+      spdx-exceptions: 2.5.0
+      spdx-license-ids: 3.0.24
+
+  spdx-expression-parse@5.0.0:
+    dependencies:
+      spdx-exceptions: 2.5.0
+      spdx-license-ids: 3.0.24
+
+  spdx-license-ids@3.0.24: {}
 
   stackblur-canvas@2.7.0: {}
 
@@ -1370,6 +1511,11 @@ snapshots:
       browserslist: 4.28.7
       escalade: 3.2.0
       picocolors: 1.1.1
+
+  validate-npm-package-license@3.0.4:
+    dependencies:
+      spdx-correct: 3.2.0
+      spdx-expression-parse: 3.0.1
 
   vite@6.4.3(@types/node@22.20.1):
     dependencies:

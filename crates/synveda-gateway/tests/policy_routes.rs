@@ -6,7 +6,7 @@
 mod tenant_fixture;
 
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::Body;
@@ -303,6 +303,248 @@ async fn immutable_configuration_selects_policy_per_scope() {
         let (status, _) = api(&app, method, &path, &token, None).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "old route survived: {path}");
     }
+}
+
+#[tokio::test]
+async fn separate_gateway_compiles_converge_and_a_bad_pack_does_not_renew_freshness() {
+    let _guard = serial().await;
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("skipping cross-gateway policy refresh test: DATABASE_URL is not set");
+        return;
+    };
+    let first = state(&url);
+    let second = state(&url);
+    synveda_store::epoch::verify(&first.pool)
+        .await
+        .expect("apply migrations");
+    let (tenant, _, _, _) = admitted(&first.pool, "authz2-refresh").await;
+
+    let mut tx = rls::begin_tenant_tx(&first.pool, tenant)
+        .await
+        .expect("begin policy transaction");
+    policy_packs::apply(
+        &mut *tx,
+        tenant,
+        "authz2-reload",
+        FROZEN_PACK,
+        &PackConfig::default(),
+    )
+    .await
+    .expect("store first policy revision");
+    tx.commit().await.expect("commit first revision");
+    authz::refresh_packs_once(&first.pool, &first.pdp)
+        .await
+        .expect("first gateway refresh");
+    authz::refresh_packs_once(&second.pool, &second.pdp)
+        .await
+        .expect("second gateway refresh");
+    let metrics = metrics_handle().render();
+    assert!(
+        metrics
+            .lines()
+            .any(|line| line.starts_with("synveda_policy_pack_active_tenants ")),
+        "active-tenant sweep count is absent:\n{metrics}"
+    );
+    assert!(
+        metrics
+            .lines()
+            .any(|line| line.starts_with("synveda_policy_pack_sources_per_tenant_count ")),
+        "per-tenant pack count is absent:\n{metrics}"
+    );
+    assert!(
+        first
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 1))
+    );
+    assert!(
+        second
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 1))
+    );
+
+    let mut tx = rls::begin_tenant_tx(&first.pool, tenant)
+        .await
+        .expect("begin policy update");
+    policy_packs::apply(
+        &mut *tx,
+        tenant,
+        "authz2-reload",
+        FROZEN_PACK,
+        &PackConfig::default(),
+    )
+    .await
+    .expect("store second policy revision");
+    tx.commit().await.expect("commit second revision");
+    authz::refresh_packs_once(&first.pool, &first.pdp)
+        .await
+        .expect("first gateway sees update");
+    assert!(
+        first
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 2))
+    );
+    assert!(
+        second
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 1)),
+        "another gateway stays on its own compile until its sweep"
+    );
+    authz::refresh_packs_once(&second.pool, &second.pdp)
+        .await
+        .expect("second gateway sees update");
+    assert!(
+        second
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 2))
+    );
+
+    let mut tx = rls::begin_tenant_tx(&first.pool, tenant)
+        .await
+        .expect("begin bad policy update");
+    policy_packs::apply(
+        &mut *tx,
+        tenant,
+        "authz2-reload",
+        "permit (",
+        &PackConfig::default(),
+    )
+    .await
+    .expect("store a deliberately invalid test pack");
+    tx.commit().await.expect("commit bad revision");
+    assert!(
+        authz::refresh_packs_once(&second.pool, &second.pdp)
+            .await
+            .is_err()
+    );
+    assert!(
+        second
+            .pdp
+            .installed_versions(tenant)
+            .contains(&("authz2-reload".to_owned(), 2)),
+        "a failed compile keeps last-good but cannot renew the lease"
+    );
+
+    let mut tx = rls::begin_tenant_tx(&first.pool, tenant)
+        .await
+        .expect("begin bad-pack cleanup");
+    policy_packs::clear(&mut tx, tenant, "authz2-reload")
+        .await
+        .expect("remove invalid test pack");
+    tx.commit().await.expect("commit cleanup");
+}
+
+/// Manual capacity evidence only: the roadmap has not selected a supported
+/// tenant/pack ceiling, and a disposable local database is not production load.
+#[tokio::test]
+#[ignore = "manual OPS-7 policy-sweep capacity probe"]
+async fn ops7_provisional_policy_sweep_capacity_probe() {
+    const TENANTS: usize = 32;
+    const PACKS_PER_TENANT: usize = 4;
+    const DEADLINE: Duration = Duration::from_secs(5);
+
+    let _guard = serial().await;
+    let url = std::env::var("DATABASE_URL").expect("run with the isolated db-test fixture");
+    let state = state(&url);
+    synveda_store::epoch::verify(&state.pool)
+        .await
+        .expect("current schema");
+    let mut ids = Vec::with_capacity(TENANTS);
+    for _ in 0..TENANTS {
+        let id = TenantId::new();
+        tenant_fixture::create(
+            &state.pool,
+            id,
+            &format!("ops7-probe-{}", id.as_uuid().simple()),
+            "OPS-7 disposable sweep probe",
+            synveda_types::TenantStatus::Active,
+        )
+        .await
+        .expect("admit test tenant");
+        let mut tx = rls::begin_tenant_tx(&state.pool, id)
+            .await
+            .expect("begin ordinary tenant transaction");
+        for pack in 0..PACKS_PER_TENANT {
+            policy_packs::apply(
+                &mut *tx,
+                id,
+                &format!("ops7-probe-{pack}"),
+                FROZEN_PACK,
+                &PackConfig::default(),
+            )
+            .await
+            .expect("store test pack");
+        }
+        tx.commit().await.expect("commit test packs");
+        ids.push(id);
+    }
+
+    let cold_started = Instant::now();
+    tokio::time::timeout(
+        DEADLINE,
+        authz::converge_packs_once(&state.pool, &state.pdp),
+    )
+    .await
+    .expect("cold convergence exceeded the process deadline")
+    .expect("cold convergence failed");
+    let cold = cold_started.elapsed();
+    for id in &ids {
+        assert_eq!(state.pdp.installed_versions(*id).len(), PACKS_PER_TENANT);
+    }
+
+    let mut warm_max = Duration::ZERO;
+    for _ in 0..5 {
+        let started = Instant::now();
+        tokio::time::timeout(DEADLINE, authz::refresh_packs_once(&state.pool, &state.pdp))
+            .await
+            .expect("unchanged sweep exceeded the process deadline")
+            .expect("unchanged sweep failed");
+        warm_max = warm_max.max(started.elapsed());
+    }
+
+    for id in &ids {
+        let mut tx = rls::begin_tenant_tx(&state.pool, *id)
+            .await
+            .expect("begin test revision transaction");
+        for pack in 0..PACKS_PER_TENANT {
+            policy_packs::apply(
+                &mut *tx,
+                *id,
+                &format!("ops7-probe-{pack}"),
+                FROZEN_PACK,
+                &PackConfig::default(),
+            )
+            .await
+            .expect("revise test pack");
+        }
+        tx.commit().await.expect("commit test revisions");
+    }
+    let revised_started = Instant::now();
+    tokio::time::timeout(DEADLINE, authz::refresh_packs_once(&state.pool, &state.pdp))
+        .await
+        .expect("revised sweep exceeded the process deadline")
+        .expect("revised sweep failed");
+    let revised = revised_started.elapsed();
+    for id in &ids {
+        assert!(
+            state
+                .pdp
+                .installed_versions(*id)
+                .iter()
+                .all(|(_, version)| *version == 2),
+            "every test pack revision must compile"
+        );
+    }
+    eprintln!(
+        "OPS-7 provisional {TENANTS}x{PACKS_PER_TENANT}: cold={:.3}s warm_max={:.3}s revised={:.3}s (5s deadline, local exact-role fixture)",
+        cold.as_secs_f64(),
+        warm_max.as_secs_f64(),
+        revised.as_secs_f64()
+    );
 }
 
 #[tokio::test]

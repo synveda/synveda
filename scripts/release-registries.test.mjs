@@ -9,7 +9,11 @@ import {
   assemble, assertUnused, imageNamespace, packageReference, preflight,
   publisherNamespace, releaseImages, validateRegistryManifest,
 } from "./release-registries.mjs";
-import { verifyRegistrySet } from "./verify-release-images.mjs";
+import { noticeHashes, verifyRegistrySet } from "./verify-release-images.mjs";
+
+import { consolePackageFixture } from "./fixtures/console-package.mjs";
+import { nodeImageFixture } from "./fixtures/node-image.mjs";
+import { productPackageFixture } from "./fixtures/product-packages.mjs";
 
 const version = "0.0.0-local-test";
 const source = "a".repeat(40);
@@ -142,9 +146,12 @@ test("consumer archives and Helm overlays carry the chosen destination's own dig
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 });
 
-test("anonymous verification checks both destinations and refuses a synthetic or transplanted bundle", () => {
+test("anonymous verification checks both destinations and refuses a synthetic or transplanted bundle", t => {
+  const console = consolePackageFixture(t, { source, version });
+  const node = nodeImageFixture(console.root);
   const f = registry();
   const inventory = assemble(version, source, "owner-team", true, f.run);
+  const packages = productPackageFixture("arm64", inventory.registries.dockerhub.images.product.platforms["linux/arm64"]);
   const manifest = {
     schema_version: 1, release_version: version, source_sha: source, deployment_contract: "CPR-45/ADR-0102",
     image_namespace: inventory.registries.dockerhub.namespace,
@@ -152,8 +159,15 @@ test("anonymous verification checks both destinations and refuses a synthetic or
     external_images: { otel_collector: `upstream/otel:1@${hash("otel")}`, prometheus: `upstream/prom:1@${hash("prom")}` },
   };
   const calls = [];
-  const run = (args) => {
+  const run = (args, _timeout, binary) => {
     calls.push(args);
+    if (args[0] === "create") return "c".repeat(64);
+    if (args[0] === "cp") {
+      const path = args[1].split(":")[1];
+      if (packages.bytes.has(path)) return packages.tar(path);
+      assert.equal(binary, true); return args[1].endsWith("/console") ? console.imageTar() : node.tar(args[1].split("/").at(-1));
+    }
+    if (args[0] === "start") return JSON.stringify(node.metadata);
     if (args[0] === "info") return "linux/aarch64";
     if (args[0] === "buildx") {
       const expected = Object.values(inventory.registries).flatMap((entry) => Object.values(entry.images)).find((entry) => entry.reference === args.at(-1));
@@ -174,9 +188,11 @@ test("anonymous verification checks both destinations and refuses a synthetic or
       }]);
     }
     if (args[0] === "run" && args.includes("/usr/local/bin/synveda")) return `synveda ${version}`;
+    if (args[0] === "run" && args.at(-1).startsWith("sha256sum "))
+      return Object.entries(noticeHashes).map(([name, hash]) => `${hash}  /usr/share/licenses/synveda/${name}`).join("\n");
     return "";
   };
-  const report = verifyRegistrySet(manifest, inventory, "linux/arm64", version, source, run);
+  const report = verifyRegistrySet(manifest, inventory, "linux/arm64", version, source, run, console.root, packages.plan);
   assert.deepEqual(Object.keys(report.registries), ["dockerhub", "ghcr"]);
   assert.equal(calls.filter((args) => args[0] === "pull").length, 16);
   for (const mutate of [

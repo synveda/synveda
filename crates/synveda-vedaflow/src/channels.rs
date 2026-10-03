@@ -712,7 +712,7 @@ pub async fn pin(
 /// it serving its head either way.
 ///
 /// This is the one ref deletion the schema permits, narrowed to names
-/// beginning `pin/` by migration 0021's restrictive policy and trigger.
+/// beginning `pin/` by the `vedaflow_refs` policy and delete guard.
 #[tracing::instrument(
     name = "vedaflow.unpin_channel",
     skip_all,
@@ -1210,7 +1210,7 @@ mod tests {
         for asset in AssetKind::CHANNELLED {
             for channel in Channel::ALL {
                 let pin = ChannelRef::new(asset, channel).pin_name();
-                assert!(pin.starts_with("pin/"), "migration 0021 would refuse {pin}");
+                assert!(pin.starts_with("pin/"), "schema would refuse {pin}");
                 assert!(
                     pin.chars().count() <= 200,
                     "{pin} is longer than vedaflow_refs.name accepts"

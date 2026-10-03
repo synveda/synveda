@@ -369,6 +369,25 @@ approver through workspace-scoped grants; it does not lower approval policy.
 Chromium's private temporary storage and Keycloak's convergence health window
 are bounded to accommodate the observed real execution.
 
+The resumed demo client checks its recorded Configuration and Sessions through
+the public API before reuse. This preserves the original idempotent create
+bodies across a later template or CLI-version change while refusing a changed
+Configuration version, scope or Session identity. In the OPS-6 local rehearsal,
+a rebuilt client resumed a published v0.4.3 receipt against the source gateway
+at migration `0003`; `product-demo.mjs sample` passed with the same pending
+learning proposal. Complete Skill/approval continuity was not part of that
+rehearsal.
+
+The follow-up full-fixture drill found that the released browser's `seed`
+checks assumed `app.synveda.test` even when the reference origin was loopback.
+The candidate passes the configured origin to each receipt check. Against an
+isolated published v0.4.3 gateway, the corrected browser acceptance completed
+the four-person review and Skill approval flow; after the source `0003` upgrade,
+its read-only verification passed. The candidate CLI and gateway also replayed
+the original context-run key after preserving the released digest for omitted
+new options. This is a local source-candidate result, not a new published
+reference qualification.
+
 The full deployment gate passes, including all 169 combined lifecycle/recovery
 tests and the Compose render matrix. All 251 console tests, the production
 build, all 189 CLI tests, strict CLI Clippy, all 77 policy tests, six OpenAPI

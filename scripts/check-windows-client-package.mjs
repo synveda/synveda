@@ -6,7 +6,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { cliPath, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
+import { cliPath, clientNoticeDirectories, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
+import { checkClientNodeArchive, checkNodeMetadata, nodeMetadataArguments } from "./node-runtime-inventory.mjs";
 import { checkPackagedAuth } from "./check-packaged-auth.mjs";
 
 if (process.platform !== "win32") throw new Error("native Windows execution required");
@@ -37,6 +38,16 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
   const { manifest, digest } = validateClient(join(scratch, "client"));
   assert.equal(manifest.version, version);
   assert.equal(manifest.target, targetName());
+  checkClientNodeArchive(archive, manifest.node, manifest.target, version, manifest.source_sha);
+  checkNodeMetadata(JSON.parse(run(join(scratch, "client", nodePath), nodeMetadataArguments,
+    { maxBuffer: 64 * 1024, env: { ...process.env, NODE_OPTIONS: "", NODE_PATH: "" } })), manifest.target);
+  checks.push("pinned-node-dependency-and-notice-inventory");
+  for (const directory of clientNoticeDirectories) {
+    for (const name of ["LICENSE", "NOTICE"]) {
+      assert.deepEqual(readFileSync(join(scratch, "client", directory, name)), readFileSync(join(root, name)));
+    }
+  }
+  checks.push("licence-and-notice-carriage");
   assert.ok(!Object.keys(manifest.files).some((p) => /synveda-(gateway|worker)|^console\/|^reference\//.test(p)));
   checks.push("native-identity-and-client-only-inventory");
   const assets = join(scratch, "assets");
@@ -89,13 +100,133 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
   ]);
   checks.push("native-windows-private-storage-interoperability");
 
-  function refuse(commandArgs = args, diagnostic) {
-    const child = spawnSync(ps, commandArgs, { encoding: "utf8", timeout: 120000, env: installEnv });
+  // Exercise the actual bootstrap cleanup function against native file locks,
+  // without executing the installer's download or installation entry point.
+  run(ps, ["-NoProfile", "-NonInteractive", "-Command", `
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:SYNVEDA_TEST_INSTALLER, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw 'Installer PowerShell syntax is invalid' }
+$definition = @($ast.FindAll({ param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Remove-DownloadDirectory'
+}, $false))
+if ($definition.Count -ne 1) { throw 'Expected one download cleanup function' }
+. ([scriptblock]::Create($definition[0].Extent.Text))
+$path = Join-Path $env:SYNVEDA_TEST_ACL_PATH 'cleanup transient'
+New-Item -ItemType Directory -Path $path | Out-Null
+$file = Join-Path $path 'held.dat'
+[System.IO.File]::WriteAllText($file, 'temporary download')
+# Acquire synchronously, then release on a native thread. PowerShell background
+# job scheduling must not decide whether a two-second lock exceeds the bound.
+Add-Type -TypeDefinition @'
+using System.IO;
+using System.Threading;
+public static class TransientDownloadLock {
+    public static Thread Hold(string path) {
+        FileStream stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
+        Thread thread = new Thread(delegate() {
+            try { Thread.Sleep(2000); }
+            finally { stream.Dispose(); }
+        });
+        thread.IsBackground = true;
+        thread.Start();
+        return thread;
+    }
+}
+'@
+$thread = [TransientDownloadLock]::Hold($file)
+try {
+  try { [System.IO.Directory]::Delete($path, $true); throw 'Transient fixture did not hold a sharing lock' }
+  catch [System.IO.IOException] {
+    if (($_.Exception.GetBaseException().HResult -band 0xffff) -ne 32) { throw }
+  }
+  $transientElapsed = [System.Diagnostics.Stopwatch]::StartNew()
+  try { Remove-DownloadDirectory $path }
+  catch {
+    [Console]::Error.WriteLine('Transient cleanup failed: native code {0}, elapsed {1} ms, release thread alive {2}', ($_.Exception.GetBaseException().HResult -band 0xffff), $transientElapsed.ElapsedMilliseconds, $thread.IsAlive)
+    throw
+  }
+  if (Test-Path -LiteralPath $path) { throw 'Transient sharing lock prevented cleanup' }
+} finally {
+  if (-not $thread.Join(10000)) { throw 'Transient lock release thread did not finish' }
+}
+$path = Join-Path $env:SYNVEDA_TEST_ACL_PATH 'cleanup persistent'
+New-Item -ItemType Directory -Path $path | Out-Null
+$file = Join-Path $path 'held.dat'
+[System.IO.File]::WriteAllText($file, 'temporary download')
+$stream = [System.IO.File]::Open($file, 'Open', 'Read', 'None')
+$elapsed = [System.Diagnostics.Stopwatch]::StartNew()
+$refused = $false
+try {
+  try { Remove-DownloadDirectory $path }
+  catch [System.IO.IOException] {
+    if (($_.Exception.GetBaseException().HResult -band 0xffff) -ne 32) { throw }
+    $refused = $true
+  }
+  if (-not $refused -or $elapsed.ElapsedMilliseconds -lt 4500 -or $elapsed.ElapsedMilliseconds -gt 10000) { throw 'Persistent lock did not fail within the cleanup bound' }
+  if (-not (Test-Path -LiteralPath $file)) { throw 'Persistent lock fixture was unexpectedly removed' }
+} finally { $stream.Dispose() }
+Remove-DownloadDirectory $path
+$elapsed.Restart(); $refused = $false
+try { Remove-DownloadDirectory $path }
+catch [System.IO.DirectoryNotFoundException] { $refused = $true }
+if (-not $refused -or $elapsed.ElapsedMilliseconds -gt 2000) { throw 'A non-sharing error was retried or suppressed' }
+`], { env: { ...env, SYNVEDA_TEST_INSTALLER: join(root, "scripts/install.ps1") } });
+  assert.equal(readFileSync(join(home, "state/retained"), "utf8"), "retain deployment state");
+  checks.push("bounded-download-sharing-lock-cleanup");
+
+  function refuse(commandArgs = args, diagnostic, commandEnv = installEnv) {
+    const child = spawnSync(ps, commandArgs, { encoding: "utf8", timeout: 120000, env: commandEnv });
     assert.ifError(child.error);
     assert.notEqual(child.status, 0, child.stdout);
     if (diagnostic) assert.match(child.stderr + child.stdout, diagnostic);
   }
   const selection = readFileSync(join(home, "client/current.json"));
+  // Test the bootstrap's verifier policy on native Windows. This executable
+  // records argv and a controlled failure; it does not verify cryptography.
+  const tools = join(scratch, "verifier tools");
+  mkdirSync(tools);
+  const verifier = join(tools, "gh.exe");
+  run(ps, ["-NoProfile", "-NonInteractive", "-Command", `
+$ErrorActionPreference = 'Stop'
+Add-Type -OutputType ConsoleApplication -OutputAssembly $env:SYNVEDA_TEST_VERIFIER -TypeDefinition @'
+using System;
+using System.IO;
+public class VerifierFixture {
+    public static int Main(string[] args) {
+        File.WriteAllLines(Environment.GetEnvironmentVariable("SYNVEDA_TEST_VERIFIER_LOG"), args);
+        return Int32.Parse(Environment.GetEnvironmentVariable("SYNVEDA_TEST_VERIFIER_STATUS"));
+    }
+}
+'@
+`], { env: { ...env, SYNVEDA_TEST_VERIFIER: verifier } });
+  const verifierLog = join(scratch, "verifier-args.txt");
+  const signedEnv = { ...installEnv, PATH: `${tools};${installEnv.PATH}`,
+    SYNVEDA_TEST_VERIFIER_LOG: verifierLog, SYNVEDA_TEST_VERIFIER_STATUS: "1" };
+  const signedArgs = [...args, "-SourceSha", manifest.source_sha];
+  writeFileSync(join(assets, "SHA256SUMS.sigstore.json"), "fixture bundle\n");
+  refuse(signedArgs, /Release publisher verification failed/, signedEnv);
+  assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
+  const verifierArgs = readFileSync(verifierLog, "utf8").trim().split(/\r?\n/);
+  assert.deepEqual(verifierArgs.slice(0, 2), ["attestation", "verify"]);
+  assert.match(verifierArgs[2], /[\\/]SHA256SUMS$/);
+  assert.equal(verifierArgs[3], "--bundle");
+  assert.equal(verifierArgs[4], `${verifierArgs[2]}.sigstore.json`);
+  assert.deepEqual(verifierArgs.slice(5), ["--hostname", "github.com", "--repo", "synveda/synveda",
+    "--signer-workflow", "synveda/synveda/.github/workflows/release.yml", "--source-ref", `refs/tags/v${version}`,
+    "--source-digest", manifest.source_sha, "--cert-oidc-issuer", "https://token.actions.githubusercontent.com",
+    "--predicate-type", "https://slsa.dev/provenance/v1", "--deny-self-hosted-runners"]);
+  signedEnv.SYNVEDA_TEST_VERIFIER_STATUS = "0";
+  run(ps, signedArgs, { env: signedEnv });
+  assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
+  refuse([...args, "-SourceSha", "g".repeat(40)], /40-character lowercase Git commit/);
+  refuse(signedArgs, /trusted GitHub CLI/);
+  const remoteArgs = args.map((value) => value === pathToFileURL(assets).href ? "https://mirror.example/assets" : value);
+  refuse(remoteArgs, /requires SourceSha/);
+  const httpArgs = args.map((value) => value === pathToFileURL(assets).href ? "http://mirror.example/assets" : value);
+  refuse(httpArgs, /HTTPS release URL/);
+  assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
+  checks.push("publisher-policy-and-pre-execution-refusal");
   writeFileSync(join(assets, "SHA256SUMS"), checksum + checksum);
   refuse(args, /Client archive checksum missing, duplicate or mismatched/);
   assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);

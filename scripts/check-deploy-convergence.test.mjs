@@ -238,6 +238,8 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: synveda-pg-superuser
+            - name: SYNVEDA_POSTGRES_CNPG_CLUSTER
+              value: "true"
         - name: database-preflight
           command: ["/usr/local/bin/synveda-container database-preflight"]
           env:
@@ -296,7 +298,7 @@ test("the Helm database authority matrix fails closed", () => {
         "        - revoke connect, temporary on database postgres, template1 from public;",
         "        - revoke connect, temporary on database postgres, template1 from public;\n      postInitApplicationSQL:\n        - create extension if not exists vector;",
       ),
-      "CloudNativePG does not close maintenance-database access and create the application database closed before handoff, or still creates extensions as the application owner",
+      "CloudNativePG does not close PUBLIC maintenance access and create the application database closed before handoff, or mutates roles before CNPG creates them",
     ],
     [
       "application database closed before it exists",
@@ -304,7 +306,20 @@ test("the Helm database authority matrix fails closed", () => {
         "        - create database synveda with owner synveda_migrator template template0 encoding 'UTF8' allow_connections false;",
         "        - alter database synveda allow_connections false;",
       ),
-      "CloudNativePG does not close maintenance-database access and create the application database closed before handoff, or still creates extensions as the application owner",
+      "CloudNativePG does not close PUBLIC maintenance access and create the application database closed before handoff, or mutates roles before CNPG creates them",
+    ],
+    [
+      "replica grant runs before CNPG creates its role",
+      HELM_DATABASE_CONTRACT.replace(
+        "        - revoke connect, temporary on database postgres, template1 from public;",
+        "        - revoke connect, temporary on database postgres, template1 from public;\n        - grant connect on database postgres to streaming_replica;",
+      ),
+      "CloudNativePG does not close PUBLIC maintenance access and create the application database closed before handoff, or mutates roles before CNPG creates them",
+    ],
+    [
+      "replica grant omitted from administrator bootstrap",
+      HELM_DATABASE_CONTRACT.replace("SYNVEDA_POSTGRES_CNPG_CLUSTER", "OMITTED_CNPG_FLAG"),
+      "CNPG install bootstrap does not enable reserved replica CONNECT convergence",
     ],
     [
       "gateway app credential",
@@ -377,6 +392,7 @@ RUN cargo build --release
   );
   assert.equal(suppressesCargoBuildFailure(dockerfile), false);
   assert.equal(suppressesCargoBuildFailure("RUN cargo build --release || true\n"), true);
+  assert.equal(suppressesCargoBuildFailure("RUN cargo auditable build --release || true\n"), true);
 });
 
 test("the product image is role-neutral and non-root", () => {
@@ -385,10 +401,14 @@ test("the product image is role-neutral and non-root", () => {
   assert.ok(current.includes(finalUser));
   assert.deepEqual(productImageFindings(current), []);
   assert.ok(
-    productImageFindings(current.replace("cargo build --locked", "cargo build")).includes(
+    productImageFindings(current.replace("cargo auditable build --locked", "cargo auditable build")).includes(
       "release Cargo builds are not exactly two locked invocations",
     ),
   );
+  assert.ok(productImageFindings(current.replaceAll("cargo auditable build", "cargo build"))
+    .includes("release Cargo builds are not exactly two locked invocations"));
+  assert.ok(productImageFindings(current.replace("--version 0.7.6", "--version 0.0.0"))
+    .includes("release Rust inventory tool is not pinned and locked"));
   assert.deepEqual(
     productImageFindings(current.replace(finalUser, "USER root\nSTOPSIGNAL SIGTERM")),
     ["final runtime user is not an explicit non-zero UID:GID"],
@@ -476,7 +496,7 @@ test("the product image excludes the gateway behavior-test feature", async () =>
   );
   assert.ok(
     productTestSupportFindings(
-      `${current}\nRUN cargo build --release --all-features -p synveda-gateway\n`,
+      `${current}\nRUN cargo auditable build --release --all-features -p synveda-gateway\n`,
       gateway,
       worker,
     ).includes("product image enables gateway test support"),
@@ -2601,12 +2621,28 @@ test("authority fingerprints use one isolated report-only catalogue snapshot", (
         '            "the authority fingerprint reporter requires its exact harness gate"',
     ),
     runtimeRole.replace(
+      "application_acl_fingerprint(&mut authority, LOGIN_ACL_ROW_COUNT)",
+      "application_acl_fingerprint(&mut authority, APPLICATION_ACL_ROW_COUNT)",
+    ),
+    runtimeRole.replace(
+      "rls_catalog_fingerprint(&mut authority, LOGIN_RLS_CATALOG_ROW_COUNT)",
+      "rls_catalog_fingerprint(&mut authority, RLS_CATALOG_ROW_COUNT)",
+    ),
+    runtimeRole.replace(
       '        let roles = live_test_roles().expect("the exact database role contract is required");',
       '        let roles = DatabaseRoles::parse_json("{}").expect("unchecked roles");',
     ),
     runtimeRole.replace(
       '            "authority-fingerprints baseline_revision={} application_acl={application_acl} routine_catalog={routine_catalog} trigger_catalog={trigger_catalog} forced_rls={forced_rls}",',
       '            "authority-fingerprints baseline_revision={}",',
+    ),
+    runtimeRole.replace(
+      "let routine_catalog = routine_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            ROUTINE_CATALOG_ROW_COUNT,",
+      "let routine_catalog = routine_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            V043_ROUTINE_CATALOG_ROW_COUNT,",
+    ),
+    runtimeRole.replace(
+      "let trigger_catalog = trigger_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            TRIGGER_CATALOG_ROW_COUNT,",
+      "let trigger_catalog = trigger_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            V043_TRIGGER_CATALOG_ROW_COUNT,",
     ),
   ]) {
     assert.notDeepEqual(authorityFingerprintFixtureFindings(dbTest, mutated), []);

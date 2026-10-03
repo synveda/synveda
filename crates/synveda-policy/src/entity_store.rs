@@ -5,10 +5,8 @@
 //! A fragment is valid exactly for the chain it was built from, checked
 //! by *shape* — the ordered entity-relevant rows `(id, parent_id,
 //! tenant_id, kind)` — never by a second invalidation protocol. Chains
-//! arrive from the caller already carrying ADR-0016's transactional
-//! freshness (the scope-chain cache is flushed post-commit at every
-//! hierarchy-mutating seam), so a committed move changes the supplied
-//! chain's shape and a stale fragment can never be served; a racing
+//! are resolved by the caller in its transaction, so a committed move changes
+//! the supplied chain's shape and a stale fragment can never be served; a racing
 //! request that reinserts pre-move data merely loses the next shape
 //! comparison and is rebuilt. Display fields (`name`, `slug`, `path`,
 //! `depth`) never reach Cedar entities (ADR-0011), so renames keep every

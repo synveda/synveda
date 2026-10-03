@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "feature": "OPS-12",
+  "evidence": "console-product-image-source-candidate",
+  "checked_at": "2026-10-01T05:44:12.382Z",
+  "source": {
+    "parent_commit": "334369effb0288e0e7046b9919dbc35052cc1606",
+    "source_tree_dirty": true,
+    "inputs": [
+      {
+        "path": "console/package.json",
+        "bytes": 769,
+        "sha256": "d08ff88424f3aefddd4044109c6ef6a211b16f0041fce8d4d5aadaeb20c95232"
+      },
+      {
+        "path": "pnpm-lock.yaml",
+        "bytes": 48754,
+        "sha256": "d0fbb7abc57bb9de6231e2eb68aec24ea4bb275df81065765100faed4d557099"
+      },
+      {
+        "path": "console/vite.config.ts",
+        "bytes": 1825,
+        "sha256": "2b79c0dffa773463ead4494953720bda450045563392cf0279d96a818a407fe9"
+      },
+      {
+        "path": "console/dependency-policy.json",
+        "bytes": 332,
+        "sha256": "3ef51aa81ebdf57c50d1740d0d054dfcb9e6524152274de9a4a99bdc7c357494"
+      },
+      {
+        "path": "console/build/dependency-contract.mjs",
+        "bytes": 11292,
+        "sha256": "478c5d91589a8152961d83489198ff71b6b867022e4e0a4bb3ebf6ac7ab3da7e"
+      },
+      {
+        "path": "console/build/dependency-plugin.mjs",
+        "bytes": 6658,
+        "sha256": "07bb7ef4d0ad618f6e3bd7c05c44a13bae9d0bdd02510ab3fb71e8f5e012efec"
+      }
+    ],
+    "validators": [
+      {
+        "path": "console/build/dependency-contract.mjs",
+        "sha256": "478c5d91589a8152961d83489198ff71b6b867022e4e0a4bb3ebf6ac7ab3da7e"
+      },
+      {
+        "path": "scripts/check-console-package.mjs",
+        "sha256": "b0bc4fed810a1782e009f5799a4833e9e10b1d00b100c5a4db74c340dee1bfa5"
+      },
+      {
+        "path": "scripts/verify-release-images.mjs",
+        "sha256": "acc78b2fb3cb0f9d23a84df12abdc15da8aaabb9ba1f617861ecbff67bfd3a3d"
+      },
+      {
+        "path": "scripts/check-release-assets.mjs",
+        "sha256": "a6d7f3cb4b1af919e1f1d990a4e4fb28b1f4cc3a87c48b6238f2a77984435dd4"
+      }
+    ]
+  },
+  "native_engine": "linux/aarch64",
+  "product": {
+    "image_id": "sha256:4e389a6e7f2da6773491f9292a84460ac7d86a88455d428567dfb71ba1975e92",
+    "platform": "linux/arm64",
+    "revision": "334369effb0288e0e7046b9919dbc35052cc1606",
+    "version": "0.4.3",
+    "console_inventory": {
+      "packages": [
+        {
+          "name": "react",
+          "version": "19.2.8"
+        },
+        {
+          "name": "react-dom",
+          "version": "19.2.8"
+        },
+        {
+          "name": "scheduler",
+          "version": "0.27.0"
+        }
+      ],
+      "files": 12,
+      "inventory_sha256": "ff566eda988b3612e009e33b923b6dc6d7bf57e49e3a692c0eb888f4db053788",
+      "sbom_sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962",
+      "notices_sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709",
+      "source_sha": "334369effb0288e0e7046b9919dbc35052cc1606",
+      "version": "0.4.3"
+    },
+    "container_started": false
+  },
+  "standalone_archive": {
+    "platform": "darwin/arm64",
+    "node_version": "24.18.0",
+    "bytes": 530616,
+    "packages": [
+      {
+        "name": "react",
+        "version": "19.2.8"
+      },
+      {
+        "name": "react-dom",
+        "version": "19.2.8"
+      },
+      {
+        "name": "scheduler",
+        "version": "0.27.0"
+      }
+    ],
+    "files": 12,
+    "inventory_sha256": "ff566eda988b3612e009e33b923b6dc6d7bf57e49e3a692c0eb888f4db053788",
+    "sbom_sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962",
+    "notices_sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709",
+    "archive_sha256": "1cee2a47bc75c8a715f770216e6e8f6e6af94bf45a23c78dbf75cb0adf3a016f",
+    "source_sha": "334369effb0288e0e7046b9919dbc35052cc1606",
+    "version": "0.4.3"
+  },
+  "matching_output": [
+    {
+      "path": "assets/favicon-Bqc7NBR_.svg",
+      "bytes": 802,
+      "sha256": "547c2f0cbf2296323fbbe96ed9f36dedc8956abcc547f0a3db63b9f21322a315"
+    },
+    {
+      "path": "assets/index-CU2NIDBT.js",
+      "bytes": 491865,
+      "sha256": "2b1f4f1030f5556068d0761916b2ad96644674d0784f1040ecac18e1983b4d7d"
+    },
+    {
+      "path": "assets/index-DOFsoE20.css",
+      "bytes": 28444,
+      "sha256": "81fce3eab69b349a6f4ea3879b5a42a41c14c04f51127c0f2745a8f97a47f726"
+    },
+    {
+      "path": "assets/Inter-OFL.txt",
+      "bytes": 4380,
+      "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+    },
+    {
+      "path": "assets/InterVariable-DiVDrmQJ.woff2",
+      "bytes": 352240,
+      "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3"
+    },
+    {
+      "path": "assets/synveda-lockup-CWbR4xLc.svg",
+      "bytes": 4181,
+      "sha256": "bfa0e6cbcd166722469c97b7035673b9159022b97587e27d2bc4e10de1a3e276"
+    },
+    {
+      "path": "assets/synveda-lockup-dark-DB6LV7sd.svg",
+      "bytes": 4181,
+      "sha256": "1d94e756fc8fe807d4ea02e415416cc7ee7e7f889f7a9427029fb6b219164c4d"
+    },
+    {
+      "path": "index.html",
+      "bytes": 866,
+      "sha256": "f1d5c899a5eb0e309c6ccf36330595f91b11f4f62ea95af4789c32934a5658be"
+    },
+    {
+      "path": "licenses/vite.txt",
+      "bytes": 115624,
+      "sha256": "008938a3441801ca3960f8e3ccb4c0738e7996442a53063141d57d3769a7344d"
+    },
+    {
+      "path": "sbom.cdx.json",
+      "bytes": 11643,
+      "sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962"
+    },
+    {
+      "path": "THIRD-PARTY-NOTICES.txt",
+      "bytes": 121399,
+      "sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709"
+    }
+  ],
+  "matching_inventory_sha256": "ff566eda988b3612e009e33b923b6dc6d7bf57e49e3a692c0eb888f4db053788",
+  "controls": [
+    {
+      "image_id": "sha256:bfa018a64d50cf4c5b2dca73bd264832bcd3042c595d0141df42f87ec04cb6e9",
+      "change": "index.html bytes changed without updating the inventory",
+      "image_inspection_refused": true,
+      "reason": "output inventory differs",
+      "container_started": false
+    },
+    {
+      "image_id": "sha256:41aa74212cd3c145531f7c5f9613e5af150f9085fe62bdae70d580b5b5c6a770",
+      "change": "index.html and its inventory entry changed coherently with unchanged source/SBOM/notices",
+      "internal_image_inspection_passed": true,
+      "archive_binding_refused": true,
+      "reason": "product console differs from its archive",
+      "inventory_sha256": "8bb91562237683eb2d24d9e4bdcc115edfe9ad9081d59afb05b45e1473ea58ce",
+      "unchanged_sbom_sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962",
+      "unchanged_notices_sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709",
+      "container_started": false
+    }
+  ],
+  "limits": [
+    "Local dirty source candidate at the recorded parent, not clean hosted OCI/native qualification.",
+    "Actual Linux ARM product-image console carriage and independent macOS ARM console archive equality only; no full image smoke, Compose, Helm or other native platform qualification claimed.",
+    "The stopped image reader validates bytes without executing candidate code and attempts removal of its own container and temporary TAR on every path; cleanup failure refuses passing evidence.",
+    "The earlier OCI qualification and unresolved native Windows Syft blocker remain separate; this proof cannot substitute for either run inventory.",
+    "No registry publication, public release, tag, main merge, tenant data or retained deployment mutation."
+  ]
+}

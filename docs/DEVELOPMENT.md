@@ -89,20 +89,26 @@ make compose-up                   # reuse that same state
 `make compose-reset` is destructive and requires the lifecycle's exact
 project-bound confirmation. It is not a routine troubleshooting or migration
 step. Never remove existing volumes or key files to get a test green.
-Pre-epoch-3 databases are deliberately refused; no compatibility migrator exists.
-For a **new disposable database**, let the normal bootstrap apply
-[the single baseline migration](../crates/synveda-store/migrations/0001_context_platform.sql).
+Pre-epoch-3 databases are deliberately refused. The exact published v0.4.3
+epoch-3 baseline has two reviewed forward migrations (ADR-0121, ADR-0126); v0.4.0's
+different baseline checksum remains refused. For a **new disposable database**,
+let the normal bootstrap apply [the released baseline](../crates/synveda-store/migrations/0001_context_platform.sql)
+and the [first](../crates/synveda-store/migrations/0002_context_restart_and_excerpt.sql)
+and [second](../crates/synveda-store/migrations/0003_one_time_login_ledger.sql)
+forward migrations.
 
 ## Validation
 
 Run from the repository root. Choose focused checks in addition to the fast
 path; `check-fast` composes existing static gates and does not execute product
 or database behavior.
+`make check-deps` enforces crate direction and pins the legacy SQLx call sites
+outside `synveda-store`; new authoritative product SQL belongs in the store.
 
 | Change | Commands |
 | --- | --- |
 | All changes / docs | `make check-fast` and `git diff --check` |
-| Rust crate | `cargo fmt --all --check`; `SQLX_OFFLINE=true cargo clippy -p synveda-types --all-targets -- -D warnings`; `SQLX_OFFLINE=true cargo test -p synveda-types` (replace the crate as appropriate) |
+| Rust crate | `cargo fmt --all --check`; `SQLX_OFFLINE=true cargo clippy -p synveda-types --all-targets -- -D warnings`; `SQLX_OFFLINE=true cargo test -p synveda-types` (replace the crate as appropriate); `make check-rustdoc` for public Rustdoc changes |
 | Console | `pnpm --filter @synveda/console test`; `pnpm --filter @synveda/console build` |
 | Claude hooks | `pnpm --filter @synveda/claude-code-adapter test` |
 | Codex / Copilot hooks | `pnpm --filter @synveda/claude-code-adapter build`, then `pnpm --filter @synveda/codex-adapter test` or `pnpm --filter @synveda/copilot-cli-adapter test` |
@@ -110,6 +116,10 @@ or database behavior.
 | SDKs | `make sdk-check sdk-package-check` after [SDK prerequisites](../sdks/README.md#check-local-package-archives) |
 | Deployment / packaging | `make check-deploy chart-lint` (Docker Compose and Helm installed; no live application implied) |
 | CI / release automation | `make check-ci`; `actionlint -shellcheck=` with actionlint 1.7.7; then the affected packaging checks in the [CI/release guide](CI.md) |
+
+On Linux, `make check-ci` and native release assembly need `bsdtar` from
+`libarchive-tools` to inspect the Windows ZIP members. macOS and Windows use
+their existing libarchive `tar`; no foreign executable runs during inspection.
 
 The following checks need real local services, but no proprietary client or
 model credential:
@@ -145,14 +155,16 @@ These are separate from a basic first contribution; report exactly which tier ra
 
 ## Generated contracts
 
-After intentionally changing public DTOs or routes:
+After changing public DTOs, routes or their Rustdoc descriptions:
 
 ```sh
 SQLX_OFFLINE=true SYNVEDA_WRITE_OPENAPI=1 cargo test -p synveda-gateway --test openapi
 node scripts/generate-api-types.mjs
 ```
 
-For the SDK slice, follow [its generator/check workflow](../sdks/README.md).
+Handler and schema descriptions are part of the emitted OpenAPI document.
+For the SDK slice, follow [its generator/check workflow](../sdks/README.md),
+including its whole-document digest after a description-only change.
 For changed SQL, install the SQLx CLI matching the workspace's SQLx 0.8 series,
 then regenerate against the wrapper's fresh current database:
 

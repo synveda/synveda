@@ -57,6 +57,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      - name: Install ZIP reader for cross-platform archive checks
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libarchive-tools
       - name: Check documentation, generated contracts and security boundaries
         run: make check-fast check-deps check-ci
       - name: Install pinned workflow linter
@@ -94,6 +98,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: make check-rustdoc
       - run: cargo test --workspace --locked
       - run: cargo build --workspace --locked
       - name: Check executable documentation
@@ -263,6 +268,10 @@ jobs:
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
         with:
           version: v4.2.3
+      - name: Install ZIP reader for cross-platform archive checks
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libarchive-tools
       - run: make check-deploy chart-lint
 
       - name: Install pinned Kubernetes schema checker

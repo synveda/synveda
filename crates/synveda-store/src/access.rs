@@ -597,7 +597,7 @@ pub async fn set_group_members(
 ///
 /// `expected_revision` is the revision the caller last saw; a mismatch is
 /// [`Error::Conflict`] and nothing is written. A directory-managed group is
-/// refused outright — see [`directory_managed`].
+/// refused outright — see `directory_managed`.
 ///
 /// Must run inside a transaction: the membership replacement is a second and
 /// third statement.
@@ -1637,7 +1637,7 @@ pub struct NewInvite {
     /// Who it is meant for, when the inviter said.
     pub email: Option<String>,
     /// SHA-256 of the whole token. The token itself is never given to this
-    /// crate: [`synveda_identity::invite`] mints it, the gateway shows it once,
+    /// crate: the identity layer mints it, the gateway shows it once,
     /// and only the hash crosses the storage boundary.
     pub token_hash: [u8; 32],
     /// When it stops being redeemable.

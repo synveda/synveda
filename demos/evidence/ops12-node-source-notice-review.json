@@ -1,0 +1,287 @@
+{
+  "schema_version": 1,
+  "feature": "OPS-12",
+  "evidence": "pinned-node-source-notice-review",
+  "repository_source_sha": "c66242cca819c2cf622634ff7303fad02076abb5",
+  "node_sources": {
+    "24.21.0": {
+      "source_sha": "955266bfdd854cd280dffd47548673914484e4c0",
+      "source_archive": {
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0.tar.xz",
+        "bytes": 57357488,
+        "sha256": "a6f54defb6fd7c84f41dba13d61e78e9b4e0961712cf61f29715c05f5ced94fc",
+        "checksum_manifest_sha256": "f410428039e2c922a14058df067a4482691c9304a5c01a75847f9f3f2d3307f6"
+      },
+      "tag_response_sha256": "6de486a5e9f4a2a91ffab5ffc9c2f59fdd1684f44e30d4db8e29c517a0e9bb77",
+      "source_members": 37039,
+      "reviewed_files": [
+        {
+          "path": "LICENSE",
+          "bytes": 157609,
+          "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace"
+        },
+        {
+          "path": "node.gyp",
+          "bytes": 55081,
+          "sha256": "a7c34a79e8d27bd91d2d59728f6a824918c2f26022463c345f411feb07a58eb9"
+        },
+        {
+          "path": "node.gypi",
+          "bytes": 13465,
+          "sha256": "6e3a26834b6c766f16141f5f623974aac6101abdc7e75d29f64d950be158e635"
+        },
+        {
+          "path": "tools/v8_gypfiles/v8.gyp",
+          "bytes": 91129,
+          "sha256": "f0925d70587e3a1e24ece1665745a8a42555b1317e4178fdcec0001be0751f4d"
+        },
+        {
+          "path": "tools/v8_gypfiles/abseil.gyp",
+          "bytes": 22217,
+          "sha256": "5a5b0e0a01725d0e4066cf4504549719ccee0205d82c3570dac51c0ad48782e5"
+        },
+        {
+          "path": "deps/v8/BUILD.gn",
+          "bytes": 274580,
+          "sha256": "d41fadae65b0613bd16c8c4888a80575278be5d238e5ddcf2a761a4a0d1bf2d5"
+        },
+        {
+          "path": "deps/ncrypto/ncrypto.gyp",
+          "bytes": 2548,
+          "sha256": "fda09cecaf8d8a03d56ef5a50561dc8c0b8c36e7e1e285796ed108b3ad4ba028"
+        },
+        {
+          "path": "deps/ncrypto/README.md",
+          "bytes": 283,
+          "sha256": "eac7f233d33572e73765164256a7c92c207099722d59bd32c0e5e3a82b0ce292"
+        },
+        {
+          "path": "deps/v8/third_party/abseil-cpp/README.chromium",
+          "bytes": 1676,
+          "sha256": "0d97edaa52c93ca7406b373abbcc46ab707bf0a75043dda411f9d62675dfbe3f"
+        },
+        {
+          "path": "deps/v8/third_party/rapidhash-v8/README.chromium",
+          "bytes": 621,
+          "sha256": "5172ad559980619ab15320fdcf874ddcd489076d4051fea60da3710657dba4a7"
+        },
+        {
+          "path": "deps/v8/third_party/highway/README.chromium",
+          "bytes": 548,
+          "sha256": "ad55ed0eff57a4c8841f92db7cebc69c2ea120b4c0b5a658687bdb8accf03f4b"
+        },
+        {
+          "path": "deps/v8/src/numbers/conversions.cc",
+          "bytes": 50585,
+          "sha256": "723ff7b60237b16d194cc66418cee6179435c63ceb7f5ab923f4fd2406cb9114"
+        },
+        {
+          "path": "deps/v8/third_party/fast_float/src/include/fast_float/float_common.h",
+          "bytes": 29537,
+          "sha256": "e8e0b702cc272bcb1831855de03654fe824a38df27720f4715db5dfa84600a30"
+        }
+      ],
+      "additional_notices": {
+        "v8-abseil-LICENSE": {
+          "bytes": 11361,
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+          "source_path": "deps/v8/third_party/abseil-cpp/LICENSE"
+        },
+        "v8-fp16-LICENSE": {
+          "bytes": 1158,
+          "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d",
+          "source_path": "deps/v8/third_party/fp16/LICENSE"
+        },
+        "v8-rapidhash-LICENSE": {
+          "bytes": 1705,
+          "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0",
+          "source_path": "deps/v8/third_party/rapidhash-v8/LICENSE"
+        },
+        "v8-zlib-LICENSE": {
+          "bytes": 910,
+          "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c",
+          "source_path": "deps/v8/third_party/zlib/LICENSE"
+        },
+        "v8-highway-LICENSE": {
+          "bytes": 11356,
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "source_path": "deps/v8/third_party/highway/LICENSE"
+        }
+      },
+      "ncrypto_files": [
+        "deps/ncrypto/ncrypto.cc",
+        "deps/ncrypto/BUILD.gn",
+        "deps/ncrypto/engine.cc",
+        "deps/ncrypto/ncrypto.h",
+        "deps/ncrypto/ncrypto.gyp",
+        "deps/ncrypto/unofficial.gni",
+        "deps/ncrypto/README.md"
+      ],
+      "runtime_versions_inferred": false
+    },
+    "22.23.2": {
+      "source_sha": "aa4c77582be995286fc6e00aaf530dc7ade102a9",
+      "source_archive": {
+        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2.tar.xz",
+        "bytes": 51362684,
+        "sha256": "bbe768df8d5815d7fa76124052985332452e0a4742d39f32027550d1aab8f6fb",
+        "checksum_manifest_sha256": "778ac5b2fcdbd68d9c0ae9f4310674faa3af0910bd0d18e7f6597787c40a3e39"
+      },
+      "tag_response_sha256": "d94c9b6edf311a90f59dc27e9bffae804c1e67e5174206b48a68d0e64db1e367",
+      "source_members": 32582,
+      "reviewed_files": [
+        {
+          "path": "LICENSE",
+          "bytes": 145485,
+          "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4"
+        },
+        {
+          "path": "node.gyp",
+          "bytes": 46926,
+          "sha256": "b7f1544d40de42a76c8c6c88a8615db560db43d05dbfeb3bcfca72e9f35d9aac"
+        },
+        {
+          "path": "node.gypi",
+          "bytes": 13067,
+          "sha256": "52426ab9d4988a91d20289557d591806d8d594b48ff0fdebb599a43034b04047"
+        },
+        {
+          "path": "tools/v8_gypfiles/v8.gyp",
+          "bytes": 88788,
+          "sha256": "6a6ec4bccac3420879d60f8c979eca1dc0ecf188d534beb977102499c26a13e6"
+        },
+        {
+          "path": "tools/v8_gypfiles/abseil.gyp",
+          "bytes": 18629,
+          "sha256": "e949c3941d0bbb27fd2e888f65e36ba29395397ab3115e62fdf70d986afdac00"
+        },
+        {
+          "path": "deps/v8/BUILD.gn",
+          "bytes": 284827,
+          "sha256": "d28e3cafd406393825a79fbe7538d68678e5d223bf5a8cc74cb2dac412d2e1e2"
+        },
+        {
+          "path": "deps/ncrypto/ncrypto.gyp",
+          "bytes": 553,
+          "sha256": "543ba8350c08ab909a974b0a7715562843738fa5de8ae948e2a99d7aa3130559"
+        },
+        {
+          "path": "deps/ncrypto/README.md",
+          "bytes": 283,
+          "sha256": "eac7f233d33572e73765164256a7c92c207099722d59bd32c0e5e3a82b0ce292"
+        },
+        {
+          "path": "deps/v8/third_party/abseil-cpp/README.chromium",
+          "bytes": 1676,
+          "sha256": "01a8c2c460d279bf5e9ed2d51d0dd731affa5ddd1289e7d926e6ffde3e29f072"
+        },
+        {
+          "path": "deps/v8/third_party/rapidhash-v8/README.chromium",
+          "bytes": 621,
+          "sha256": "5172ad559980619ab15320fdcf874ddcd489076d4051fea60da3710657dba4a7"
+        }
+      ],
+      "additional_notices": {
+        "v8-abseil-LICENSE": {
+          "bytes": 11361,
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+          "source_path": "deps/v8/third_party/abseil-cpp/LICENSE"
+        },
+        "v8-fp16-LICENSE": {
+          "bytes": 1158,
+          "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d",
+          "source_path": "deps/v8/third_party/fp16/LICENSE"
+        },
+        "v8-rapidhash-LICENSE": {
+          "bytes": 1705,
+          "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0",
+          "source_path": "deps/v8/third_party/rapidhash-v8/LICENSE"
+        },
+        "v8-zlib-LICENSE": {
+          "bytes": 910,
+          "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c",
+          "source_path": "deps/v8/third_party/zlib/LICENSE"
+        }
+      },
+      "ncrypto_files": [
+        "deps/ncrypto/ncrypto.cc",
+        "deps/ncrypto/BUILD.gn",
+        "deps/ncrypto/engine.cc",
+        "deps/ncrypto/ncrypto.h",
+        "deps/ncrypto/ncrypto.gyp",
+        "deps/ncrypto/unofficial.gni",
+        "deps/ncrypto/README.md"
+      ],
+      "runtime_versions_inferred": false
+    }
+  },
+  "windows_static_analysis": {
+    "tool": "Apple LLVM llvm-objdump",
+    "version": "21.0.0",
+    "tool_bytes": 18133888,
+    "tool_sha256": "83b32f39e5475ee168927eb1509c82978e08e0100ec8c6fafeca588d9960773c",
+    "arguments": [
+      "--private-headers",
+      "<original-upstream-node.exe>"
+    ],
+    "targets": [
+      {
+        "target": "windows-x86_64",
+        "upstream_binary_bytes": 93580104,
+        "upstream_binary_sha256": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+        "analysis_bytes": 575613,
+        "analysis_sha256": "ca60f2c50efc48b97d3153ce09fb5d87047eab550f3de88730cc80cb307ee253",
+        "imported_libraries": [
+          "CRYPT32.dll",
+          "WS2_32.dll",
+          "USER32.dll",
+          "dbghelp.dll",
+          "ADVAPI32.dll",
+          "IPHLPAPI.DLL",
+          "USERENV.dll",
+          "SHELL32.dll",
+          "ole32.dll",
+          "WINMM.dll",
+          "KERNEL32.dll"
+        ],
+        "native_execution": false
+      },
+      {
+        "target": "windows-arm64",
+        "upstream_binary_bytes": 81881416,
+        "upstream_binary_sha256": "dff59da18b6ffe1bf1ca99e1d2af4906080c481740619f5b5098c0fca28bd9b7",
+        "analysis_bytes": 574644,
+        "analysis_sha256": "4644914930c2e4881aacb6db6a2d7a4e54fdecd73a025fe39e6f2aa1619ce9c6",
+        "imported_libraries": [
+          "CRYPT32.dll",
+          "WS2_32.dll",
+          "USER32.dll",
+          "dbghelp.dll",
+          "ADVAPI32.dll",
+          "IPHLPAPI.DLL",
+          "USERENV.dll",
+          "SHELL32.dll",
+          "ole32.dll",
+          "WINMM.dll",
+          "KERNEL32.dll"
+        ],
+        "native_execution": false
+      }
+    ]
+  },
+  "findings": [
+    "Both official source archives have Abseil, FP16, rapidhash and a separate V8 zlib build path without named aggregate licence sections; the original separate licence files are preserved.",
+    "Node 24 additionally selects Highway in its V8 GYP dependencies; its full upstream Apache notice is preserved.",
+    "Source references and notice headers do not supply actual linked binary library versions. No version is inferred from a notice or a source directory.",
+    "Both original Windows Node binaries import eleven library names. This static file inspection does not identify host-library versions or qualify native execution.",
+    "Both source archives ship seven ncrypto files and no separate ncrypto licence. Upstream provenance remains open; absence alone establishes no licence.",
+    "Node 24 V8 conversions includes fast_float headers, but the source archive contains no corresponding full licence file. Upstream provenance remains open.",
+    "GN-only and conditional V8 components require actual Node GYP/build-selection review before any complete inventory claim."
+  ],
+  "qualification": {
+    "clean_hosted_source": false,
+    "six_native_executions": false,
+    "complete_transitive_inventory": false,
+    "complete_notice_review": false
+  }
+}

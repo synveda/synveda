@@ -327,7 +327,7 @@ pub enum AuditAction {
     /// ref itself carries who and when and nothing else.
     ChannelPinned,
     /// A standing pin was released and the channel serves its head again.
-    /// The one ref deletion the schema permits (migration 0021).
+    /// The one ref deletion the `vedaflow_refs` guard permits.
     ChannelUnpinned,
     /// A proposal was opened against a scope's published channel
     /// (FLOW-3, ADR-0032 decision 18). Payload carries the target, asset
@@ -515,7 +515,7 @@ impl AuditAction {
     /// Every action, in declaration order — the vocabulary a query surface
     /// may name (AUD-2, ADR-0045 decision 3).
     ///
-    /// Hand-maintained beside the enum, like [`synveda_types::Role::ALL`]:
+    /// Hand-maintained beside the enum, like [`synveda_types::access::RoleKey::ALL`]:
     /// Rust cannot make an array literal exhaustive, so the guard is the
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
@@ -847,7 +847,7 @@ mod tests {
 
     #[test]
     fn every_actor_kind_matches_the_column_constraint() {
-        // migration 0011 + 0014: the CHECK accepts exactly these three.
+        // The audit actor-kind CHECK accepts exactly these three.
         for (kind, expected) in [
             (ActorKind::Subject, "subject"),
             (ActorKind::BreakGlass, "break_glass"),

@@ -179,7 +179,7 @@ pub async fn sweep_once(
 }
 
 /// Embeds one tenant's next immutable batch. Public for deterministic tests
-/// and acceptance demos; production reaches it only through [`run`].
+/// and acceptance demos; production reaches it only through `run`.
 #[tracing::instrument(
     name = "knowledge.embedding.sweep_tenant",
     skip_all,

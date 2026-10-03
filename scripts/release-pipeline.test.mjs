@@ -1,8 +1,12 @@
+import { requiredRustPackages } from "./rust-sbom.mjs";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
+  copyFileSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -22,9 +26,27 @@ import { releaseImages } from "./release-registries.mjs";
 import {
   releaseAssets,
   regularAssets,
+  checkArchiveNotices,
   checkQualification,
+  checkCandidateImageReports,
 } from "./check-release-assets.mjs";
+import { noticeHashes } from "./verify-release-images.mjs";
 import { publishRelease, uploadedAssets } from "./publish-release.mjs";
+import { rustImageRoots, sbomGenerator } from "./rust-image-sbom.mjs";
+
+import { checkConsolePackage } from "./check-console-package.mjs";
+import { consolePackageFixture } from "./fixtures/console-package.mjs";
+import { productNodeReport } from "./fixtures/node-image.mjs";
+import { productPackageFixture } from "./fixtures/product-packages.mjs";
+
+const rustSbomFixture = (name, version, imageManifest, platform = "linux/arm64") => ({
+  schema_version: 1, scanner: "syft-v1.51.0", spdx_version: "SPDX-2.3",
+  image_manifest: imageManifest, attestation_manifest: `sha256:${"f".repeat(64)}`,
+  statement_sha256: "9".repeat(64), package_count: 100, cargo_package_count: 50, cargo_identity_count: 50,
+  required_packages: requiredRustPackages(name, version),
+  ...(name === "product" ? { debian_inventory: productPackageFixture(platform.split("/")[1], imageManifest).plan } : {}),
+});
+
 
 test("workflow refactor retains release, native platform and security boundaries", () => {
   const current = workflowSources();
@@ -54,6 +76,9 @@ test("workflow refactor retains release, native platform and security boundaries
       'SYNVEDA_PACKAGE_CONSUMER_CANDIDATE: "0"',
     ],
     ["release", "node scripts/check-release-assets.mjs", "echo incomplete"],
+    ["release", "node scripts/check-console-package.mjs", "echo skipped console inventory"],
+    ["release", "SYNVEDA_BUILD_SOURCE_SHA: ${{ github.sha }}", "SYNVEDA_BUILD_SOURCE_SHA: obsolete"],
+    ["docker", "build-args: SYNVEDA_BUILD_SOURCE_SHA=${{ github.sha }}", "build-args: SYNVEDA_BUILD_SOURCE_SHA=obsolete"],
     ["release", "subject-path: assets/SHA256SUMS", "subject-path: unrelated"],
     [
       "release",
@@ -101,6 +126,15 @@ test("workflow refactor retains release, native platform and security boundaries
     ["cli", "node scripts/package-client.mjs", "echo skipped"],
     ["cli", "node scripts/check-client-package.mjs", "echo skipped"],
     ["cli", "node scripts/windows-client-candidate.mjs", "echo skipped"],
+    ["cli", "node scripts/rust-archive-sbom.mjs client", "echo skipped"],
+    ["cli", "node scripts/rust-archive-sbom.mjs server", "echo skipped"],
+    ["cli", "node scripts/download-syft.mjs", "echo unpinned scanner"],
+    ["cli", "cargo auditable build --release --locked", "cargo build --release --locked"],
+    ["cli", "cargo-auditable --version 0.7.6", "cargo-auditable --version 0.7.5"],
+    ["cli", '--root "$RUNNER_TEMP/synveda-auditable"', '--root "$HOME"'],
+    ["cli", 'strip "$stage/synveda" "$stage/synveda-gateway" "$stage/synveda-worker"', 'strip "$stage/synveda" "$stage/synveda-gateway" "$stage/synveda-worker" || true'],
+    ["release", "assets/synveda-*.spdx.json", "assets/unrelated-*.spdx.json"],
+    ["release", "assets/synveda-*.rust-sbom.json", "assets/unrelated-*.rust-sbom.json"],
     ["cli", "runner: windows-11-arm", "runner: windows-2025"],
     ["cli", "target: linux-arm64", "target: linux-unsupported"],
     ["cli", "  binaries:\n", "  binaries:\n    continue-on-error: true\n"],
@@ -127,6 +161,8 @@ test("workflow refactor retains release, native platform and security boundaries
     ],
     ["docker", "          provenance: mode=max", "          provenance: false"],
     ["docker", "          sbom: true", "          sbom: false"],
+    ["docker", `sbom: generator=${sbomGenerator}`, "sbom: true"],
+    ["docker", "tags: localhost:5000/synveda/product:${{ inputs.version }}-${{ matrix.arch }}", "tags: untrusted.example/product:latest"],
     [
       "docker",
       "          file: deploy/helm/postgres/Dockerfile\n",
@@ -239,6 +275,7 @@ test("two registry destinations copy one complete immutable OCI candidate set", 
           archive: `${repository}.tar`,
           digest: `sha256:${"b".repeat(64)}`,
           sha256: "c".repeat(64),
+          ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: rustSbomFixture(name, "0.4.0", `sha256:${"d".repeat(64)}`) } : {}),
         },
       ]),
     ),
@@ -291,7 +328,52 @@ test("two registry destinations copy one complete immutable OCI candidate set", 
   }
 });
 
-test("qualification rejects incomplete, failed or transplanted native reports", () => {
+test("all non-client release archives retain exact regular licence and notice files", (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-release-notices-"));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const version = "0.4.0";
+  const archives = [
+    [`synveda-${version}-darwin-arm64.tar.gz`, ""],
+    [`synveda-${version}-linux-x86_64.tar.gz`, ""],
+    [`synveda-console-${version}.tar.gz`, "console"],
+    [`synveda-reference-${version}.tar.gz`, `synveda-reference-${version}`],
+    [`synveda-plugin-${version}.tar.gz`, "plugin"],
+    [`synveda-${version}.tgz`, "synveda"],
+  ];
+  const stages = archives.map(([archive, prefix], index) => {
+    const stage = join(scratch, `stage-${index}`);
+    const directory = join(stage, prefix);
+    mkdirSync(directory, { recursive: true });
+    for (const name of ["LICENSE", "NOTICE"])
+      copyFileSync(new URL(`../${name}`, import.meta.url), join(directory, name));
+    const pack = (duplicate = false) => execFileSync("tar", ["-czf", join(scratch, archive), "-C", stage,
+      ...(prefix ? [prefix] : readdirSync(stage)), ...(duplicate ? [prefix ? `${prefix}/NOTICE` : "NOTICE"] : [])]);
+    pack();
+    return { directory, pack };
+  });
+  checkArchiveNotices(scratch, version);
+  for (const { directory, pack } of stages) {
+    const notice = join(directory, "NOTICE");
+    const original = readFileSync(notice);
+    for (const damage of [
+      () => rmSync(notice),
+      () => writeFileSync(notice, "changed notice\n"),
+      () => { rmSync(notice); symlinkSync("LICENSE", notice); },
+    ]) {
+      damage();
+      pack();
+      assert.throws(() => checkArchiveNotices(scratch, version));
+      rmSync(notice, { force: true });
+      writeFileSync(notice, original);
+    }
+    pack(true);
+    assert.throws(() => checkArchiveNotices(scratch, version), /one regular file/);
+    pack();
+  }
+  checkArchiveNotices(scratch, version);
+});
+
+test("qualification rejects incomplete, failed or transplanted native reports", t => {
   const scratch = mkdtempSync(join(tmpdir(), "synveda-qualified-reports-"));
   try {
     const version = "0.4.0",
@@ -317,11 +399,19 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
         ]),
       ),
     };
+    const console = consolePackageFixture(t, { version, source });
+    console.pack();
+    const consoleReport = checkConsolePackage(console.archive, version, source, console.root);
+    const consoleEvidence = { ...consoleReport };
+    delete consoleEvidence.archive_sha256;
     // The retained operator fixture has day-two evidence for the two complete
     // ownership modes and install/upgrade evidence for all four combinations.
     const evidence = JSON.parse(
       readFileSync("demos/evidence/ops11-bundled.json", "utf8"),
     );
+    // Model the new candidate field without rewriting historical live evidence.
+    for (const item of evidence.cases)
+      item.reinstallTransport = { directGateway: 200, applicationEdge: 200, issuerEdge: 200, recoveredMs: 1, failedProbes: 0 };
     const reports = {};
     for (const arch of ["amd64", "arm64"]) {
       const platform = `linux/${arch}`;
@@ -335,6 +425,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
             archive: `${repo}.tar`,
             sha256: "c".repeat(64),
             digest: `sha256:${"a".repeat(64)}`,
+            ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: rustSbomFixture(name, version, inventory.registries.dockerhub.images[name].platforms[platform], platform) } : {}),
           }],
         )),
       };
@@ -354,6 +445,11 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
           image,
           platforms: { [platform]: inventory.registries.dockerhub.images[name].platforms[platform] },
           executable_checks: 1,
+          notice_sha256: noticeHashes,
+          ...(name === "product" ? { console_inventory: consoleEvidence } : {}),
+          ...(name === "product" ? { node_inventory: productNodeReport(platform) } : {}),
+          ...(name === "product" ? { package_inventory: productPackageFixture(arch, candidate.images.product.rust_sbom.image_manifest).report } : {}),
+          ...(Object.hasOwn(rustImageRoots, name) ? { rust_sbom: candidate.images[name].rust_sbom } : {}),
         })),
       };
       reports[`release-images-${arch}.json`] = {
@@ -372,6 +468,10 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
                 image: entry.reference,
                 platforms: { [platform]: entry.platforms[platform] },
                 executable_checks: 1,
+                notice_sha256: noticeHashes,
+                ...(name === "product" ? { console_inventory: consoleEvidence } : {}),
+                ...(name === "product" ? { node_inventory: productNodeReport(platform) } : {}),
+                ...(name === "product" ? { package_inventory: productPackageFixture(arch, entry.platforms[platform]).report } : {}),
               })),
             },
           ]),
@@ -400,10 +500,30 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
       change(changed);
       for (const [file, report] of Object.entries(changed))
         writeFileSync(join(scratch, file), JSON.stringify(report));
-      checkQualification(scratch, version, source, inventory);
+      checkCandidateImageReports(scratch, version, source, consoleReport);
+      checkQualification(scratch, version, source, inventory, consoleReport);
     };
     check();
     for (const change of [
+      r => { delete r["release-candidate-arm64.json"].images.product.rust_sbom.debian_inventory; },
+      r => { delete r["release-local-images-amd64.json"].images[0].package_inventory; },
+      r => { r["release-local-images-arm64.json"].images[0].package_inventory.files[0].sha256 = "f".repeat(64); },
+      r => { r["release-local-images-amd64.json"].images[0].package_inventory.packages[0].version = "0"; },
+      r => { delete r["release-images-arm64.json"].registries.dockerhub.images[0].package_inventory; },
+      r => { r["release-images-amd64.json"].registries.ghcr.images[0].package_inventory.files.pop(); },
+      r => { delete r["release-local-images-arm64.json"].images[0].node_inventory; },
+      r => { r["release-local-images-amd64.json"].images[0].node_inventory.binary_sha256 = "0".repeat(64); },
+      r => { r["release-local-images-arm64.json"].images[0].node_inventory.dependencies.openssl = "0.0.0"; },
+      r => { r["release-images-arm64.json"].registries.ghcr.images[0].node_inventory.notices["nbytes-LICENSE"].sha256 = "0".repeat(64); },
+      r => { delete r["release-images-amd64.json"].registries.dockerhub.images[0].node_inventory; },
+      r => { delete r["release-local-images-arm64.json"].images[0].console_inventory; },
+      r => { r["release-local-images-amd64.json"].images[0].console_inventory.inventory_sha256 = "0".repeat(64); },
+      r => { r["release-local-images-arm64.json"].images[0].console_inventory.source_sha = "b".repeat(40); },
+      r => { r["release-images-amd64.json"].registries.ghcr.images[0].console_inventory.notices_sha256 = "0".repeat(64); },
+      r => { delete r["release-images-arm64.json"].registries.dockerhub.images[0].console_inventory; },
+      (r) => { delete r["release-candidate-arm64.json"].images.product.rust_sbom; },
+      (r) => { delete r["release-local-images-amd64.json"].images[0].rust_sbom; },
+      (r) => { r["release-candidate-arm64.json"].images.product.rust_sbom.required_packages.sqlx = "0.0.0"; },
       (r) => {
         r["release-docker-arm64.json"].source = "c".repeat(40);
       },
@@ -432,11 +552,35 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
         r["release-images-arm64.json"].registries.dockerhub.images.pop();
       },
       (r) => {
+        delete r["release-local-images-arm64.json"].images[0].notice_sha256;
+      },
+      (r) => {
+        r["release-images-amd64.json"].registries.ghcr.images[0].notice_sha256.NOTICE = "0".repeat(64);
+      },
+      (r) => {
         r["release-kubernetes-arm64.json"].evidence.cases.pop();
       },
       (r) => {
         r["release-kubernetes-amd64.json"].evidence.cases[0].persistentContent =
           false;
+      },
+      (r) => {
+        delete r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport;
+      },
+      (r) => {
+        r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport.applicationEdge = 502;
+      },
+      (r) => {
+        r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport.recoveredMs = 60_001;
+      },
+      (r) => {
+        r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport.recoveredMs = -1;
+      },
+      (r) => {
+        delete r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport.issuerEdge;
+      },
+      (r) => {
+        r["release-kubernetes-arm64.json"].evidence.cases[0].reinstallTransport.failedProbes = -1;
       },
       (r) => {
         delete r["release-kubernetes-arm64.json"].evidence.cases[0].dayTwo
@@ -451,7 +595,7 @@ test("qualification rejects incomplete, failed or transplanted native reports", 
     check();
     rmSync(join(scratch, "release-consumer-arm64.json"));
     assert.throws(() =>
-      checkQualification(scratch, version, source, inventory),
+      checkQualification(scratch, version, source, inventory, consoleReport),
     );
   } finally {
     rmSync(scratch, { recursive: true, force: true });
@@ -463,13 +607,13 @@ test("stable publication waits for every expected upload and never includes chec
   try {
     const version = "0.4.0",
       source = "a".repeat(40);
-    assert.equal(releaseAssets(version).length, 31);
+    assert.equal(releaseAssets(version).length, 51);
     const names = [
       ...releaseAssets(version, true),
       "SHA256SUMS",
       "SHA256SUMS.sigstore.json",
     ];
-    assert.equal(names.length, 35);
+    assert.equal(names.length, 55);
     for (const target of [
       "darwin-arm64",
       "darwin-x86_64",
@@ -533,6 +677,7 @@ test("stable publication waits for every expected upload and never includes chec
             if (args[1].includes("/assets?"))
               return JSON.stringify(
                 expected
+                  .filter((entry) => fault !== "sbom" || !entry.name.endsWith(".spdx.json"))
                   .slice(fault === "missing" ? 1 : 0)
                   .map((entry) => ({ ...entry, state: "uploaded" })),
               );
@@ -542,6 +687,11 @@ test("stable publication waits for every expected upload and never includes chec
         },
       );
     invoke();
+    const notes = readFileSync(join(scratch, "release-notes.md"), "utf8");
+    assert.ok(notes.includes(`SYNVEDA_SOURCE_SHA=${source}`));
+    assert.ok(notes.includes(`-SourceSha ${source}`));
+    assert.ok(notes.includes(`https://raw.githubusercontent.com/synveda/synveda/${source}/scripts/install.sh`));
+    assert.ok(!notes.includes("{{source}}"));
     const create = calls.find(
       ([command, args]) => command === "gh" && args[1] === "create",
     )[1];
@@ -568,6 +718,7 @@ test("stable publication waits for every expected upload and never includes chec
     for (const fault of [
       "upload",
       "missing",
+      "sbom",
       "tag",
       "source",
       "draft",

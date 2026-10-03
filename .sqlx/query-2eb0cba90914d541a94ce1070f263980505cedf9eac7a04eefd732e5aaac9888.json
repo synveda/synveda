@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select count(*) from pending_logins",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2eb0cba90914d541a94ce1070f263980505cedf9eac7a04eefd732e5aaac9888"
+}

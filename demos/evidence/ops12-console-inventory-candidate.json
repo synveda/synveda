@@ -1,0 +1,374 @@
+{
+  "schema_version": 1,
+  "feature": "OPS-12",
+  "evidence": "console-inventory-source-candidate",
+  "observed_at": "2026-10-01T05:14:14.905Z",
+  "parent_sha": "2edfb4f8ec6fb8cffeb1c90d2cac552e4887eec0",
+  "source_tree_dirty": true,
+  "inputs": [
+    {
+      "path": "console/package.json",
+      "bytes": 769,
+      "sha256": "d08ff88424f3aefddd4044109c6ef6a211b16f0041fce8d4d5aadaeb20c95232"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "bytes": 48754,
+      "sha256": "d0fbb7abc57bb9de6231e2eb68aec24ea4bb275df81065765100faed4d557099"
+    },
+    {
+      "path": "console/vite.config.ts",
+      "bytes": 1825,
+      "sha256": "2b79c0dffa773463ead4494953720bda450045563392cf0279d96a818a407fe9"
+    },
+    {
+      "path": "console/dependency-policy.json",
+      "bytes": 332,
+      "sha256": "3ef51aa81ebdf57c50d1740d0d054dfcb9e6524152274de9a4a99bdc7c357494"
+    },
+    {
+      "path": "console/build/dependency-contract.mjs",
+      "bytes": 11241,
+      "sha256": "bab9efb43995cbf778dc4ee483280965f8acf98995b52fdc5fbfb5c986682bdf"
+    },
+    {
+      "path": "console/build/dependency-plugin.mjs",
+      "bytes": 6658,
+      "sha256": "07bb7ef4d0ad618f6e3bd7c05c44a13bae9d0bdd02510ab3fb71e8f5e012efec"
+    }
+  ],
+  "tools": {
+    "plugin": "rollup-plugin-sbom",
+    "version": "4.0.0",
+    "format": "CycloneDX",
+    "spec_version": "1.6",
+    "vite": "6.4.3",
+    "rollup": "4.62.4",
+    "lockfile_sha256": "d0fbb7abc57bb9de6231e2eb68aec24ea4bb275df81065765100faed4d557099"
+  },
+  "linux_builder": {
+    "base": "node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5",
+    "image_id": "sha256:b1a4b6b9d56b4604f78d083912a0327fc5d1e69b649d828215dbb7ec6b7b73d9",
+    "node": "v22.23.2",
+    "os": "linux",
+    "architecture": "arm64"
+  },
+  "native_file_sets_identical": true,
+  "javascript_unchanged_from_mechanism_probe": true,
+  "platforms": [
+    {
+      "os": "darwin",
+      "architecture": "arm64",
+      "node": "v24.18.0",
+      "archive_bytes": 530612,
+      "packages": [
+        {
+          "name": "react",
+          "version": "19.2.8"
+        },
+        {
+          "name": "react-dom",
+          "version": "19.2.8"
+        },
+        {
+          "name": "scheduler",
+          "version": "0.27.0"
+        }
+      ],
+      "files": 12,
+      "sbom_sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962",
+      "notices_sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709",
+      "archive_sha256": "b15cfebe62d869fdc8ec4410d0ed7d9b7e178fbc360fb9a9eec42eda17333ee9",
+      "source_sha": "2edfb4f8ec6fb8cffeb1c90d2cac552e4887eec0",
+      "version": "0.4.3",
+      "file_inventory": [
+        {
+          "path": "assets/favicon-Bqc7NBR_.svg",
+          "bytes": 802,
+          "sha256": "547c2f0cbf2296323fbbe96ed9f36dedc8956abcc547f0a3db63b9f21322a315"
+        },
+        {
+          "path": "assets/index-CU2NIDBT.js",
+          "bytes": 491865,
+          "sha256": "2b1f4f1030f5556068d0761916b2ad96644674d0784f1040ecac18e1983b4d7d"
+        },
+        {
+          "path": "assets/index-DOFsoE20.css",
+          "bytes": 28444,
+          "sha256": "81fce3eab69b349a6f4ea3879b5a42a41c14c04f51127c0f2745a8f97a47f726"
+        },
+        {
+          "path": "assets/Inter-OFL.txt",
+          "bytes": 4380,
+          "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+        },
+        {
+          "path": "assets/InterVariable-DiVDrmQJ.woff2",
+          "bytes": 352240,
+          "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3"
+        },
+        {
+          "path": "assets/synveda-lockup-CWbR4xLc.svg",
+          "bytes": 4181,
+          "sha256": "bfa0e6cbcd166722469c97b7035673b9159022b97587e27d2bc4e10de1a3e276"
+        },
+        {
+          "path": "assets/synveda-lockup-dark-DB6LV7sd.svg",
+          "bytes": 4181,
+          "sha256": "1d94e756fc8fe807d4ea02e415416cc7ee7e7f889f7a9427029fb6b219164c4d"
+        },
+        {
+          "path": "dependency-inventory.json",
+          "bytes": 3779,
+          "sha256": "140804cae7b275bd228ec7c555902686fe9aae49a8c9f6b63e91c7d5c0016672"
+        },
+        {
+          "path": "index.html",
+          "bytes": 866,
+          "sha256": "f1d5c899a5eb0e309c6ccf36330595f91b11f4f62ea95af4789c32934a5658be"
+        },
+        {
+          "path": "licenses/vite.txt",
+          "bytes": 115624,
+          "sha256": "008938a3441801ca3960f8e3ccb4c0738e7996442a53063141d57d3769a7344d"
+        },
+        {
+          "path": "sbom.cdx.json",
+          "bytes": 11643,
+          "sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962"
+        },
+        {
+          "path": "THIRD-PARTY-NOTICES.txt",
+          "bytes": 121399,
+          "sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709"
+        }
+      ],
+      "rendered_packages": [
+        {
+          "name": "react",
+          "version": "19.2.8",
+          "modules": [
+            "cjs/react-jsx-runtime.production.js",
+            "cjs/react.production.js",
+            "index.js",
+            "jsx-runtime.js"
+          ]
+        },
+        {
+          "name": "react-dom",
+          "version": "19.2.8",
+          "modules": [
+            "cjs/react-dom-client.production.js",
+            "cjs/react-dom.production.js",
+            "client.js",
+            "index.js"
+          ]
+        },
+        {
+          "name": "scheduler",
+          "version": "0.27.0",
+          "modules": [
+            "cjs/scheduler.production.js",
+            "index.js"
+          ]
+        }
+      ],
+      "generated_helpers": {
+        "provider": "vite",
+        "version": "6.4.3",
+        "kinds": [
+          "commonjs",
+          "modulepreload-polyfill"
+        ],
+        "notice_sha256": "008938a3441801ca3960f8e3ccb4c0738e7996442a53063141d57d3769a7344d"
+      },
+      "package_licences": [
+        {
+          "name": "react",
+          "version": "19.2.8",
+          "license": "MIT",
+          "bytes": 1088,
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        },
+        {
+          "name": "react-dom",
+          "version": "19.2.8",
+          "license": "MIT",
+          "bytes": 1088,
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        },
+        {
+          "name": "scheduler",
+          "version": "0.27.0",
+          "license": "MIT",
+          "bytes": 1088,
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
+      "os": "linux",
+      "architecture": "arm64",
+      "node": "v22.23.2",
+      "archive_bytes": 530523,
+      "packages": [
+        {
+          "name": "react",
+          "version": "19.2.8"
+        },
+        {
+          "name": "react-dom",
+          "version": "19.2.8"
+        },
+        {
+          "name": "scheduler",
+          "version": "0.27.0"
+        }
+      ],
+      "files": 12,
+      "sbom_sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962",
+      "notices_sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709",
+      "archive_sha256": "4026e4e10a0c5e21c9f15271900080f2c8fb3b15367f5188171cbd4e4afb2cfc",
+      "source_sha": "2edfb4f8ec6fb8cffeb1c90d2cac552e4887eec0",
+      "version": "0.4.3",
+      "file_inventory": [
+        {
+          "path": "assets/favicon-Bqc7NBR_.svg",
+          "bytes": 802,
+          "sha256": "547c2f0cbf2296323fbbe96ed9f36dedc8956abcc547f0a3db63b9f21322a315"
+        },
+        {
+          "path": "assets/index-CU2NIDBT.js",
+          "bytes": 491865,
+          "sha256": "2b1f4f1030f5556068d0761916b2ad96644674d0784f1040ecac18e1983b4d7d"
+        },
+        {
+          "path": "assets/index-DOFsoE20.css",
+          "bytes": 28444,
+          "sha256": "81fce3eab69b349a6f4ea3879b5a42a41c14c04f51127c0f2745a8f97a47f726"
+        },
+        {
+          "path": "assets/Inter-OFL.txt",
+          "bytes": 4380,
+          "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+        },
+        {
+          "path": "assets/InterVariable-DiVDrmQJ.woff2",
+          "bytes": 352240,
+          "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3"
+        },
+        {
+          "path": "assets/synveda-lockup-CWbR4xLc.svg",
+          "bytes": 4181,
+          "sha256": "bfa0e6cbcd166722469c97b7035673b9159022b97587e27d2bc4e10de1a3e276"
+        },
+        {
+          "path": "assets/synveda-lockup-dark-DB6LV7sd.svg",
+          "bytes": 4181,
+          "sha256": "1d94e756fc8fe807d4ea02e415416cc7ee7e7f889f7a9427029fb6b219164c4d"
+        },
+        {
+          "path": "dependency-inventory.json",
+          "bytes": 3779,
+          "sha256": "140804cae7b275bd228ec7c555902686fe9aae49a8c9f6b63e91c7d5c0016672"
+        },
+        {
+          "path": "index.html",
+          "bytes": 866,
+          "sha256": "f1d5c899a5eb0e309c6ccf36330595f91b11f4f62ea95af4789c32934a5658be"
+        },
+        {
+          "path": "licenses/vite.txt",
+          "bytes": 115624,
+          "sha256": "008938a3441801ca3960f8e3ccb4c0738e7996442a53063141d57d3769a7344d"
+        },
+        {
+          "path": "sbom.cdx.json",
+          "bytes": 11643,
+          "sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962"
+        },
+        {
+          "path": "THIRD-PARTY-NOTICES.txt",
+          "bytes": 121399,
+          "sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709"
+        }
+      ],
+      "rendered_packages": [
+        {
+          "name": "react",
+          "version": "19.2.8",
+          "modules": [
+            "cjs/react-jsx-runtime.production.js",
+            "cjs/react.production.js",
+            "index.js",
+            "jsx-runtime.js"
+          ]
+        },
+        {
+          "name": "react-dom",
+          "version": "19.2.8",
+          "modules": [
+            "cjs/react-dom-client.production.js",
+            "cjs/react-dom.production.js",
+            "client.js",
+            "index.js"
+          ]
+        },
+        {
+          "name": "scheduler",
+          "version": "0.27.0",
+          "modules": [
+            "cjs/scheduler.production.js",
+            "index.js"
+          ]
+        }
+      ],
+      "generated_helpers": {
+        "provider": "vite",
+        "version": "6.4.3",
+        "kinds": [
+          "commonjs",
+          "modulepreload-polyfill"
+        ],
+        "notice_sha256": "008938a3441801ca3960f8e3ccb4c0738e7996442a53063141d57d3769a7344d"
+      },
+      "package_licences": [
+        {
+          "name": "react",
+          "version": "19.2.8",
+          "license": "MIT",
+          "bytes": 1088,
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        },
+        {
+          "name": "react-dom",
+          "version": "19.2.8",
+          "license": "MIT",
+          "bytes": 1088,
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        },
+        {
+          "name": "scheduler",
+          "version": "0.27.0",
+          "license": "MIT",
+          "bytes": 1088,
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    }
+  ],
+  "acceptance": [
+    "Frozen build-only closure and independent positively rendered package identities passed on both builders.",
+    "Every runtime package retains complete MIT bytes; Vite helper distribution and Inter OFL notices match reviewed/source bytes.",
+    "Both actual TAR archives passed unique/regular member, source-input, graph, complete-notice and actual output SHA-256 checks.",
+    "All 12 built file bytes including inventory, SBOM and notices agree across macOS ARM and native Linux ARM."
+  ],
+  "limitations": [
+    "Dirty-checkout source candidate labelled with its parent; no clean hosted or public release qualification.",
+    "Optional Rolldown auto-registration warns because the build uses Vite/Rollup; all three required tool entries pass.",
+    "Only console runtime packages, known generated helpers and the font are covered.",
+    "Product OCI console extraction, Node/native C libraries, other release artifacts and complete third-party notice coverage remain open.",
+    "Native Rust qualification remains blocked on the retained upstream Windows Syft defect; this evidence cannot supply any missing native, OCI or deployment report.",
+    "No vulnerability, publisher incident, OS signing, support window, recovery or production readiness claim."
+  ]
+}

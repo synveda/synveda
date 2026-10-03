@@ -39,6 +39,16 @@ pub const GATEWAY_AUTHORITY_READY: &str = "synveda_gateway_authority_ready";
 /// vocabulary `accepted|unavailable|timeout|refused`.
 pub const GATEWAY_AUTHORITY_CHECKS_TOTAL: &str = "synveda_gateway_authority_checks_total";
 
+/// Deployment-key availability for this gateway's current authority
+/// generation. Emitted only when a KMS is configured; zero keeps admission
+/// closed until the key can be unwrapped.
+pub const GATEWAY_DEPLOYMENT_KEY_READY: &str = "synveda_gateway_deployment_key_ready";
+
+/// Bounded deployment-key startup attempts by closed `ok|error|timeout`
+/// outcome. No key reference or credential labels.
+pub const GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL: &str =
+    "synveda_gateway_deployment_key_provision_attempts_total";
+
 /// Worker application-plane authority: 1 only after the complete bounded
 /// database proof accepted and 0 during boot, outage, drain or refusal.
 pub const WORKER_AUTHORITY_READY: &str = "synveda_worker_authority_ready";
@@ -61,6 +71,27 @@ pub const WORKER_READY: &str = "synveda_worker_ready";
 /// Age in seconds of the core worker supervisor's scheduler heartbeat. This
 /// is process-loop liveness, not progress of every owned task.
 pub const WORKER_HEARTBEAT_AGE_SECONDS: &str = "synveda_worker_heartbeat_age_seconds";
+
+/// Credential-custody expiry sweeps, labelled by the closed `ok|error`
+/// outcome. A successful empty pass still increments, so operators can tell
+/// an idle table from a stalled maintenance task.
+pub const CONSOLE_SESSION_PURGE_SWEEPS_TOTAL: &str = "synveda_console_session_purge_sweeps_total";
+
+/// Expired console credential rows removed; no tenant or session labels.
+pub const CONSOLE_SESSION_PURGED_TOTAL: &str = "synveda_console_sessions_purged_total";
+
+/// Successful database batches used by credential-custody expiry sweeps.
+pub const CONSOLE_SESSION_PURGE_BATCHES_TOTAL: &str = "synveda_console_session_purge_batches_total";
+
+/// Sweeps that used all 16 batches and still observed expired custody rows.
+pub const CONSOLE_SESSION_PURGE_BUDGET_HITS_TOTAL: &str =
+    "synveda_console_session_purge_budget_hits_total";
+
+/// Age of the oldest expired credential still retained after the last
+/// successful bounded sweep. Zero means none remained at that observation;
+/// purge errors leave the last value in place and increment the error counter.
+pub const CONSOLE_SESSION_OLDEST_EXPIRED_AGE_SECONDS: &str =
+    "synveda_console_session_oldest_expired_age_seconds";
 
 /// Scope admin operations (CPR-7, ADR-0074), labelled by `op`
 /// (`list`/`create`/`get`/`update`/`ancestors`/`descendants`) and
@@ -94,6 +125,21 @@ pub const SESSION_OPERATIONS_TOTAL: &str = "synveda_session_operations_total";
 /// `unchanged`, or `error` (a stored pack that fails to compile keeps the
 /// last-good compile in force — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
 pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
+
+/// Complete stored-policy sweep outcomes, with a closed `ok|error|timeout`
+/// vocabulary. Only `ok` renews gateway policy freshness (OPS-7, ADR-0127).
+pub const POLICY_PACK_REFRESH_SWEEPS_TOTAL: &str = "synveda_policy_pack_refresh_sweeps_total";
+
+/// Full stored-policy sweep duration, including failed and timed-out sweeps.
+pub const POLICY_PACK_REFRESH_SECONDS: &str = "synveda_policy_pack_refresh_seconds";
+
+/// Active tenants in the last successfully enumerated policy sweep. No tenant
+/// identifier is exported (OPS-7, ADR-0127).
+pub const POLICY_PACK_ACTIVE_TENANTS: &str = "synveda_policy_pack_active_tenants";
+
+/// Stored policy sources read for each tenant during convergence or refresh,
+/// without a tenant or pack label (OPS-7).
+pub const POLICY_PACK_SOURCES_PER_TENANT: &str = "synveda_policy_pack_sources_per_tenant";
 
 /// Policy-source catalogue operations (AUTHZ-2, CPR-30), labelled by `op`
 /// (`packs`) and `outcome` (`ok`, `rejected`, `error`). Runtime selection is
@@ -288,7 +334,7 @@ pub fn init(service_name: &'static str) -> Result<Telemetry> {
 
 /// Installs the W3C trace-context propagator, which is what lets an
 /// incoming `traceparent` become the parent of this request's span
-/// (ADR-0007's deferred clause; see [`crate::app::parent_context`]).
+/// (ADR-0007's deferred clause; see `crate::app::parent_context`).
 ///
 /// Global rather than per-request because that is the only shape the OTel
 /// API offers: `global::get_text_map_propagator` is how both the extractor
@@ -354,6 +400,14 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Gateway HTTP request latency"
     );
     metrics::describe_gauge!(
+        GATEWAY_DEPLOYMENT_KEY_READY,
+        "Configured deployment key is usable for this gateway authority generation"
+    );
+    metrics::describe_counter!(
+        GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL,
+        "Bounded gateway deployment-key attempts by ok, error or timeout outcome"
+    );
+    metrics::describe_gauge!(
         WORKER_READY,
         "Core-worker supervisor readiness after lifecycle, database, schema and runtime-role checks"
     );
@@ -377,6 +431,27 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         WORKER_HEARTBEAT_AGE_SECONDS,
         metrics::Unit::Seconds,
         "Age of the core worker supervisor scheduler heartbeat; not per-task progress"
+    );
+    metrics::describe_counter!(
+        CONSOLE_SESSION_PURGE_SWEEPS_TOTAL,
+        "Expired console-session custody sweeps by ok or error outcome"
+    );
+    metrics::describe_counter!(
+        CONSOLE_SESSION_PURGED_TOTAL,
+        "Expired console-session custody rows deleted"
+    );
+    metrics::describe_counter!(
+        CONSOLE_SESSION_PURGE_BATCHES_TOTAL,
+        "Successful bounded console-session expiry batches"
+    );
+    metrics::describe_counter!(
+        CONSOLE_SESSION_PURGE_BUDGET_HITS_TOTAL,
+        "Console-session expiry sweeps that exhausted the batch budget with backlog remaining"
+    );
+    metrics::describe_gauge!(
+        CONSOLE_SESSION_OLDEST_EXPIRED_AGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Age of the oldest expired console credential after a successful sweep"
     );
     metrics::describe_counter!(
         synveda_store::operations::OPERATIONS_TOTAL,
@@ -441,6 +516,22 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         POLICY_PACK_RELOADS_TOTAL,
         "Policy pack reloads by outcome (installed/removed/unchanged/error)"
+    );
+    metrics::describe_counter!(
+        POLICY_PACK_REFRESH_SWEEPS_TOTAL,
+        "Complete stored-policy sweep outcomes by ok/error/timeout"
+    );
+    metrics::describe_histogram!(
+        POLICY_PACK_REFRESH_SECONDS,
+        "Complete stored-policy sweep duration in seconds by outcome"
+    );
+    metrics::describe_gauge!(
+        POLICY_PACK_ACTIVE_TENANTS,
+        "Active tenants in the last successful policy-sweep enumeration"
+    );
+    metrics::describe_histogram!(
+        POLICY_PACK_SOURCES_PER_TENANT,
+        "Stored policy sources per tenant during convergence or refresh"
     );
     // AUTHZ-2 counters (ADR-0014): policy-source catalogue reads;
     // fail-safe resolution in synveda-policy.

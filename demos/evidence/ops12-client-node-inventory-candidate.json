@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "feature_id": "OPS-12",
+  "evidence": "local-client-node-inventory-candidate",
+  "source_sha": "f0681edb684c318e1436bbd263ef1cd833d415c6",
+  "source_tree_dirty": true,
+  "scope": "Actual macOS ARM private Node inventory, notice carriage and client archive acceptance. CLI built from unchanged Rust source with the local dev profile; no Cargo SBOM, six-target hosted, image or release qualification.",
+  "source_inputs": {
+    ".gitattributes": "eaa20dc268a6e9a40463a0f4377bba71247df3c43068fc7b09479b4589f2fbc8",
+    "Makefile": "7835c383b3f2259bdd905b0b5102f70faddcd86fb74c8dbb8a2d7e8e09cda4ae",
+    "scripts/node-runtimes.json": "cfe68f07fd30d1daa0aa4e60dfe9f36a305ad4314196cfb24f3fd18b2d78c52d",
+    "scripts/node-runtime-inventory.mjs": "fa12278a0ef244bcaabed8d6b7262eebe0c8a2b1c9be7c1d881356b768bfe8ff",
+    "scripts/rust-archive-sbom.mjs": "d758b9f1763eb5696be77794a2dfedb176702997945dda6111969f6c8b39c742",
+    "scripts/package-client.mjs": "adcbbb0ec9022d9ff847d4604eba6768907a2894fdc296477da8f64facb7d474",
+    "scripts/check-client-package.mjs": "b32c55dcd702d66a19ef1d043a18fb4e2d466ae0f2b275f19116a0624d86c7e8",
+    "scripts/check-windows-client-package.mjs": "3c92ef83e7216e285a0d3acdf8c8b3326acd562329cb9d2d03e7d55b84b5a4b1",
+    "scripts/check-client-release.mjs": "152cf28551dc0f413b090c416915b4cc70dc651a75ba5d4404a1900b454b5ab4",
+    "assets/licenses/node/nbytes-LICENSE": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2",
+    "assets/licenses/node/sqlite-NOTICE": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755"
+  },
+  "cli_build": {
+    "command": "cargo build --locked --offline -p synveda-cli",
+    "profile": "dev",
+    "native_target": "darwin-arm64",
+    "binary_sha256": "d8872645299ad6af0e8c2a2c90f62847ed7fb11e88ea4ab117b4b612144af2f2"
+  },
+  "native_report_sha256": "4ba2bf1a7fd5882764dfcccae91700893e7d4b6c25193c94fd05629613bb434b",
+  "native_report": {
+    "schema_version": 1,
+    "evidence": "native-client-archive",
+    "target": "darwin-arm64",
+    "version": "0.4.3",
+    "cli_version": "synveda 0.4.3",
+    "source_sha": "f0681edb684c318e1436bbd263ef1cd833d415c6",
+    "source_tree_dirty": true,
+    "node": {
+      "version": "24.21.0",
+      "archive": "node-v24.21.0-darwin-arm64.tar.gz",
+      "archive_sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057",
+      "inventory": {
+        "schema_version": 1,
+        "target": "darwin-arm64",
+        "upstream_source_sha": "955266bfdd854cd280dffd47548673914484e4c0",
+        "binary_bytes": 122129232,
+        "binary_sha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+        "notices": {
+          "LICENSE": {
+            "bytes": 157609,
+            "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace"
+          },
+          "nbytes-LICENSE": {
+            "bytes": 1064,
+            "sha256": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2"
+          },
+          "sqlite-NOTICE": {
+            "bytes": 297,
+            "sha256": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755"
+          }
+        },
+        "dependencies": {
+          "acorn": "8.18.0",
+          "ada": "4.0.0",
+          "amaro": "1.1.11",
+          "ares": "1.34.8",
+          "brotli": "1.2.0",
+          "icu": "78.3",
+          "llhttp": "9.4.3",
+          "merve": "1.2.2",
+          "nbytes": "0.1.4",
+          "ncrypto": "0.0.1",
+          "nghttp2": "1.70.0",
+          "openssl": "3.5.8",
+          "simdjson": "4.6.7",
+          "simdutf": "6.4.0",
+          "sqlite": "3.53.4",
+          "undici": "7.29.1",
+          "uv": "1.52.1",
+          "uvwasi": "0.0.23",
+          "v8": "13.6.233.17-node.53",
+          "zlib": "1.3.2.1-motley-8002e91",
+          "zstd": "1.5.7"
+        },
+        "shared_libraries": {
+          "ada": false,
+          "brotli": false,
+          "cares": false,
+          "libuv": false,
+          "nghttp2": false,
+          "openssl": false,
+          "simdjson": false,
+          "simdutf": false,
+          "sqlite": false,
+          "uvwasi": false,
+          "zlib": false,
+          "zstd": false
+        }
+      }
+    },
+    "archive_sha256": "9936a34e18e12d9e8afad3b491f3abd1bb415f7715aedfe9f03ddc6217630e7a",
+    "archive_bytes": 54354600,
+    "local_install_ms": 2117,
+    "repeat_install_ms": 2124,
+    "total_ms": 31176,
+    "network_download_measured": false,
+    "real_issuer_login": false,
+    "native_harness_run": false,
+    "checks": [
+      "pinned-node-dependency-and-notice-inventory",
+      "licence-and-notice-carriage",
+      "native-identity-and-client-only-inventory",
+      "restricted-path-install-cli-and-three-hook-launches",
+      "private-install-without-harness-or-credential-mutation",
+      "repeat-install-preserves-deployment-state",
+      "packaged-authentication-lifecycle",
+      "codex-extracted-lifecycle-replay",
+      "copilot-cli-extracted-lifecycle-replay"
+    ]
+  },
+  "actual_archive_controls": [
+    {
+      "control": "binary",
+      "archive_sha256": "26a6b208ae6137f01b58271def4ef1385a87861135213be481959d502a619ea1",
+      "manifest_inventory_valid": true,
+      "report_updated_coherently": true,
+      "refusal": "Node executable hash differs from upstream pin"
+    },
+    {
+      "control": "truncated-license",
+      "archive_sha256": "4034d06e9c9fa444c7aa3dcdd69055a6f590491b1e69b51131be5795fbabc578",
+      "manifest_inventory_valid": true,
+      "report_updated_coherently": true,
+      "refusal": "Node notice size differs from upstream pin"
+    }
+  ],
+  "control_storage_removed": true,
+  "external_blocker": "Native Rust qualification still awaits an official Syft distribution containing Windows resolver fix 5341; no new qualification source or runs selected."
+}

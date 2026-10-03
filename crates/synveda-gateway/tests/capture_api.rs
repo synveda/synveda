@@ -568,7 +568,8 @@ async fn wait_for_database_lock(state: &AppState, tenant_id: TenantId, applicati
                 .expect("begin worker-state inspection");
             let waiting: bool = sqlx::query_scalar(
                 "select exists (select 1 from pg_stat_activity \
-                 where application_name = $1 and wait_event_type = 'Lock')",
+                 where application_name = $1 and wait_event_type = 'Lock' \
+                   and query like '%from configuration_bindings binding%')",
             )
             .bind(application_name)
             .fetch_one(&mut *tx)
@@ -1090,7 +1091,10 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
         batches_per_tenant: 1,
         lease_owner: format!("cpr45-renew-{}", CaptureBatchId::new()),
     };
-    let sweep = tokio::spawn(async move { capture_worker::sweep_once(&deps, &config).await });
+    let sweep =
+        tokio::spawn(
+            async move { capture_worker::sweep_tenant_once(&deps, &config, tenant_id).await },
+        );
     tokio::time::timeout(Duration::from_secs(10), blocked.entered.notified())
         .await
         .expect("extractor receives the frozen event");
@@ -1149,7 +1153,10 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
         batches_per_tenant: 1,
         lease_owner: loser_owner,
     };
-    let sweep = tokio::spawn(async move { capture_worker::sweep_once(&deps, &config).await });
+    let sweep =
+        tokio::spawn(
+            async move { capture_worker::sweep_tenant_once(&deps, &config, tenant_id).await },
+        );
     tokio::time::timeout(Duration::from_secs(10), lost.entered.notified())
         .await
         .expect("losing extractor receives the frozen event");
@@ -1225,15 +1232,17 @@ async fn capture_worker_reproves_a_preflight_lease_before_calling_the_extractor(
         .expect("parse preflight batch id");
 
     // AccessExclusive is a serial test synchronisation barrier, not worker
-    // authority. PostgreSQL 17 correctly withholds that lock from the gateway,
-    // so the barrier uses the separately verified migrator/database owner;
-    // the worker still claims and reads through its ordinary tenant role.
+    // authority. Block the policy-selector read after the claim statement;
+    // locking configuration_versions can instead stall the claim's FK check
+    // and start its lease only after the barrier is released. PostgreSQL 17
+    // withholds this lock from the gateway, so the barrier uses the separately
+    // verified migrator/database owner. The worker keeps its tenant role.
     let barrier_pool = tenant_fixture::migrator_pool(&state.pool).await;
     let mut blocker = barrier_pool.begin().await.expect("begin preflight barrier");
-    sqlx::query("lock table configuration_versions in access exclusive mode")
+    sqlx::query("lock table configuration_bindings in access exclusive mode")
         .execute(&mut *blocker)
         .await
-        .expect("lock frozen configuration reads");
+        .expect("lock policy selector reads");
 
     let fixture =
         spawn_blocking_vllm("Expired preflight authority must prevent provider disclosure.").await;
@@ -1254,7 +1263,10 @@ async fn capture_worker_reproves_a_preflight_lease_before_calling_the_extractor(
         batches_per_tenant: 1,
         lease_owner: format!("cpr45-preflight-{}", CaptureBatchId::new()),
     };
-    let sweep = tokio::spawn(async move { capture_worker::sweep_once(&deps, &config).await });
+    let sweep =
+        tokio::spawn(
+            async move { capture_worker::sweep_tenant_once(&deps, &config, tenant_id).await },
+        );
     wait_for_database_lock(&state, tenant_id, &application_name).await;
     tokio::time::sleep(Duration::from_millis(1_250)).await;
     blocker.rollback().await.expect("release preflight barrier");

@@ -11,7 +11,7 @@
 //! registering the actors — is `evals/lib.sh`, in the same shell idiom
 //! every demo uses. This binary is a client and nothing more.
 //!
-//! Environment (EVAL-3, ADR-0061): `SYNVEDA_JUDGE` (`lexical` [default] |
+//! Environment (EVAL-3, ADR-0061): `SYNVEDA_JUDGE` (`lexical` by default |
 //! `claude`) selects the judge the way `SYNVEDA_EXTRACTOR` selects an
 //! extractor, with `ANTHROPIC_API_KEY`, `SYNVEDA_JUDGE_MODEL` and
 //! `SYNVEDA_ANTHROPIC_BASE_URL` as its companions. The default reaches no

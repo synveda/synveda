@@ -3,6 +3,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { requiredJobs } from "./ci-result.mjs";
+import { sbomGenerator } from "./rust-image-sbom.mjs";
 
 const read = (path) =>
   readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -156,6 +157,8 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     "name: release-assets",
     "assets/synveda-client-*.zip",
     "assets/synveda-client-report-*.json",
+    "assets/synveda-*.spdx.json",
+    "assets/synveda-*.rust-sbom.json",
     "assets/release-candidate-*.json",
     "assets/release-local-images-*.json",
     "assets/release-docker-*.json",
@@ -248,10 +251,31 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     "local_state::windows_tests",
     "spool::tests",
     "--test client_platform",
+    "node scripts/download-syft.mjs",
+    "node scripts/rust-archive-sbom.mjs client",
+    "node scripts/rust-archive-sbom.mjs server",
+    "synveda-*.spdx.json",
+    "synveda-*.rust-sbom.json",
+    "key: cli-auditable-0.7.6-${{ matrix.target }}",
   ])
     require(shared.cli.includes(
       marker,
     ), `native client coverage missing: ${marker}`);
+  require((shared.cli.match(/cargo install cargo-auditable --version 0\.7\.6 --locked --root/g) ?? []).length === 2,
+    "native builds require the pinned private Cargo inventory tool on both OS families");
+  for (const marker of ['--root "$RUNNER_TEMP/synveda-auditable"', '--root "$env:RUNNER_TEMP/synveda-auditable"'])
+    require(shared.cli.includes(marker), "native build tooling must use private runner storage");
+  require((shared.cli.match(/cargo auditable build --release --locked/g) ?? []).length === 3 &&
+    !/cargo build --release/.test(shared.cli), "native CLI and server release builds must all embed Rust inventory");
+  for (const marker of ["node scripts/download-syft.mjs", "node scripts/rust-archive-sbom.mjs client"])
+    require(shared.cli.split(marker).length === 3, `both native OS families must run ${marker}`);
+  for (const [job, name] of [["binaries", "Inspect final archived Rust binaries"], ["windows-clients", "Inspect final archived Rust CLI"]]) {
+    const block = stepBlock(jobBlock(shared.cli, job), name);
+    require(!/^        if:/m.test(block) && !/\|\|\s*true|continue-on-error/.test(block), "native Rust archive inspection cannot be skipped or suppressed");
+    for (const marker of ["node scripts/download-syft.mjs", "node scripts/rust-archive-sbom.mjs client"])
+      require(block.includes(marker), `${job}: missing final Rust archive inspection`);
+  }
+  require(!/\|\|\s*true/.test(stepBlock(jobBlock(shared.cli, "binaries"), "Package")), "server stripping failures cannot be suppressed");
   const plan = [
     ["The product image", "deploy/compose/product/Dockerfile", "product", null],
     ["Postgres", "deploy/compose/postgres/Dockerfile", "postgres", "reference"],
@@ -290,23 +314,29 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
       outputs: `type=oci,dest=\${{ runner.temp }}/images/${archive}.tar`,
       platforms: "${{ matrix.platform }}",
       provenance: "mode=max",
-      sbom: "true",
+      sbom: ["product", "browser-acceptance"].includes(archive) ? `generator=${sbomGenerator}` : "true",
       labels: "|",
     }))
       require(inputs[key] === value, `${name}: invalid ${key}`);
     require((inputs.target ?? null) === target, `${name}: wrong build target`);
+    require((inputs["build-args"] ?? null) === (archive === "product" ? "SYNVEDA_BUILD_SOURCE_SHA=${{ github.sha }}" : null),
+      `${name}: console source binding or build override differs`);
+    require(inputs.tags === `localhost:5000/synveda/${archive}:\${{ inputs.version }}-\${{ matrix.arch }}`,
+      `${name}: named OCI export is required for attestation subjects`);
     require(Object.keys(inputs).every((key) =>
       [
         "context",
         "file",
         "outputs",
         "platforms",
+        "tags",
         "provenance",
         "sbom",
         "labels",
         "target",
         "cache-from",
         "cache-to",
+        "build-args",
       ].includes(key),
     ), `${name}: unexpected build override`);
     require(!/^        if:/m.test(
@@ -319,6 +349,12 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     ])
       require(block.includes(marker), `${name}: source identity label missing`);
   }
+  const consoleBundle = stepBlock(jobs.bundles, "The console bundle");
+  for (const marker of [
+    "SYNVEDA_BUILD_SOURCE_SHA: ${{ github.sha }}",
+    'node scripts/check-console-package.mjs "synveda-console-$version.tar.gz" "$version" "$SYNVEDA_BUILD_SOURCE_SHA"',
+  ]) require(consoleBundle.includes(marker), `console release inventory gate missing: ${marker}`);
+  require(!/^        if:/m.test(consoleBundle) && !/\|\|\s*true/.test(consoleBundle), "console inventory gate cannot be skipped or suppressed");
   for (const marker of [
     "127.0.0.1:5000:5000",
     "node scripts/docker-candidate.mjs",

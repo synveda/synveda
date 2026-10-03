@@ -276,7 +276,11 @@ fn state(url: &str, issuer: &str) -> AppState {
         metrics: metrics_handle(),
         verifier: verifier.clone(),
         login: Some(Arc::new(ConfiguredLogin::for_behavior_test(
-            LoginFlow::new(verifier, REDIRECT_URI.to_owned()),
+            LoginFlow::new(
+                verifier,
+                REDIRECT_URI.to_owned(),
+                Arc::new(synveda_identity::MemoryLoginLedger::new()),
+            ),
             false,
         ))),
         public_origin: "http://127.0.0.1:8120".to_owned(),

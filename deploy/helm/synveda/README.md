@@ -1,6 +1,7 @@
 # Deploy to Kubernetes
 
-The existing chart runs one gateway/console and one private worker. Select
+The chart runs one gateway/console and one combined private worker by default;
+the source candidate can add up to two capture-only workers. Select
 bundled or existing application PostgreSQL independently of bundled Keycloak
 or existing OIDC. Bundled PostgreSQL is a persistent namespaced StatefulSet;
 CNPG is an explicit alternative requiring an operator you already manage.
@@ -46,13 +47,16 @@ For your existing infrastructure use the configuration below.
 Read [configuration](CONFIGURATION.md) for exact database privileges, issuer
 and Secret formats; [operations](OPERATIONS.md) for maintenance and recovery;
 [portability](PORTABILITY.md) for existing ingress, Gateway API and OpenShift
-configuration. Generic OIDC compatibility is not verified support for every IdP.
+configuration. The new opt-in [CNPG backup candidate](BACKUP.md) is available
+in source only and still requires an independent PITR drill. Generic OIDC
+compatibility is not verified support for every IdP.
 
 ## Cluster administrator prerequisites
 
 The administrator supplies a namespace, installer RBAC, quotas, DNS, trusted TLS,
 private networking and registry access. Bundled PostgreSQL needs persistent storage. Only `postgres.mode=cnpg` needs
-a preinstalled CNPG operator. Loopback evaluation needs neither DNS nor ingress TLS. The chart creates no CRD/operator, ingress
+a preinstalled CNPG operator; `postgres.backup.enabled` additionally needs the
+Barman Cloud plugin and an operator-owned ObjectStore. Loopback evaluation needs neither DNS nor ingress TLS. The chart creates no CRD/operator, ingress
 controller, certificate issuer, storage class or monitoring stack.
 
 The release qualification uses Kind 0.32.0, Kubernetes and kubectl 1.36.1,
@@ -69,8 +73,9 @@ unqualified. Structural API validation is distinct from execution evidence.
   Deployments, StatefulSets, Jobs, Pods/log/exec, Services, ConfigMaps, Secrets,
   ServiceAccounts, PVCs and the selected Ingress/Route/NetworkPolicy resources.
   CNPG mode additionally requires access to its namespaced Cluster resource.
-- Set quota for database/provider pods plus gateway, worker and the temporary
-  installation Job; allow replacement pods/PVC provisioning. See resource
+- Set quota for database/provider pods plus gateway, worker, optional
+  capture-only workers and the temporary installation Job; allow replacement
+  pods/PVC provisioning. See resource
   observations in [OPS-11](../../../docs/backlog/OPS-11.md). The tested engine
   exposed 18 CPUs and 16.8 GB RAM; that is test context, not a minimum.
 - Select a persistent CSI StorageClass supporting PostgreSQL fsync and the

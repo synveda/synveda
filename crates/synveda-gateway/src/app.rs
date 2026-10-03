@@ -26,7 +26,9 @@ use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
 use crate::auth;
 use crate::authority::AuthorityGate;
+use crate::authz::PolicyReadyGeneration;
 use crate::error::ApiError;
+use crate::shutdown::GatewayAdmission;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
 
@@ -173,10 +175,9 @@ impl AppState {
     /// (TEN-4, ADR-0064 decision 5).
     ///
     /// The deployment scope rather than a tenant one because the row this
-    /// belongs to has no tenant, on purpose: a session is read before the
-    /// tenant exists, so there is nothing to select a per-tenant key by. See
-    /// migration 0034's header for why that column is absent and migration
-    /// 0038's for why that makes a second key scope rather than an exemption.
+    /// belongs to has no tenant, on purpose: a session is read before its
+    /// token identifies the tenant, so there is no per-tenant key to select.
+    /// `deployment_keys` is the separate key scope for this custody row.
     ///
     /// Bound to the session's own `token_hash`, so a sealed token moved to
     /// another session's row does not open.
@@ -270,20 +271,33 @@ pub fn behavior_test_router(state: AppState) -> Router {
 /// Builds the product router with a fail-closed database-authority gate.
 ///
 /// Liveness and private metrics remain available while the gate is closed;
-/// readiness runs the same bounded serialized proof as the process sentinel;
-/// every auth, console, SCIM and `/v1` route is structurally gated.
-pub fn governed_router(state: AppState, gate: AuthorityGate) -> Router {
-    let application = application_routes(&state).route_layer(middleware::from_fn_with_state(
-        gate.clone(),
-        require_authority,
-    ));
+/// readiness requires the authority sentinel's current generation and its
+/// first successful stored-policy convergence; every auth, console, SCIM and
+/// `/v1` route is structurally gated.
+pub fn governed_router(
+    state: AppState,
+    gate: AuthorityGate,
+    admission: GatewayAdmission,
+    policy_ready: PolicyReadyGeneration,
+) -> Router {
+    let application = application_routes(&state)
+        .route_layer(middleware::from_fn_with_state(
+            (gate.clone(), policy_ready.clone()),
+            require_authority,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            admission.clone(),
+            require_admission,
+        ));
     let ops = Router::new()
         .route("/healthz", get(healthz))
         .route(
             "/readyz",
             get(move || {
                 let gate = gate.clone();
-                async move { governed_readyz(gate).await }
+                let admission = admission.clone();
+                let policy_ready = policy_ready.clone();
+                async move { governed_readyz(gate, admission, policy_ready).await }
             }),
         )
         .route("/metrics", get(render_metrics));
@@ -359,12 +373,18 @@ async fn response_trace_id(request: Request, next: Next) -> Response {
 }
 
 async fn require_authority(
-    State(gate): State<AuthorityGate>,
+    State((gate, policy_ready)): State<(AuthorityGate, PolicyReadyGeneration)>,
     request: Request,
     next: Next,
 ) -> Response {
+    let Some(generation) = gate.open_generation() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response();
+    };
+    if !policy_ready.is_for(generation) {
+        return (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response();
+    }
     let mut permit = gate.permit();
-    if !permit.is_open() {
+    if !permit.is_for(generation) {
         return (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response();
     }
     let response = next.run(request);
@@ -374,14 +394,28 @@ async fn require_authority(
         () = permit.revoked() => {
             (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response()
         }
+        () = policy_ready.stale_for(generation) => {
+            (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response()
+        }
         response = &mut response => {
-            if permit.is_open() {
+            if permit.is_open() && policy_ready.is_for(generation) {
                 response
             } else {
                 (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response()
             }
         }
     }
+}
+
+async fn require_admission(
+    State(admission): State<GatewayAdmission>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !admission.is_accepting() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response();
+    }
+    next.run(request).await
 }
 
 /// Liveness: the process is up. No dependencies touched.
@@ -422,16 +456,228 @@ async fn behavior_test_readyz(State(state): State<AppState>) -> Response {
 
 #[cfg(all(test, feature = "test-support"))]
 mod assembly_tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use axum::body::Body;
+    use axum::http::Request;
+    use tokio::sync::Notify;
+    use tower::ServiceExt;
+
+    use super::*;
+
     #[test]
     fn the_product_entrypoint_uses_only_the_governed_router() {
         let entrypoint = include_str!("main.rs");
         assert!(entrypoint.contains("app::governed_router"));
         assert!(!entrypoint.contains("behavior_test_router"));
     }
+
+    #[tokio::test]
+    async fn withdrawal_fails_readiness_before_new_admission_but_finishes_existing_work() {
+        let admission = GatewayAdmission::new();
+        let gate = AuthorityGate::open_for_test();
+        let policy_ready = PolicyReadyGeneration::new();
+        policy_ready.mark_converged(gate.open_generation().expect("test authority is open"));
+        assert_eq!(
+            governed_readyz(gate.clone(), admission.clone(), policy_ready.clone())
+                .await
+                .status(),
+            StatusCode::OK
+        );
+
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let route_started = Arc::clone(&started);
+        let route_release = Arc::clone(&release);
+        let app = Router::new()
+            .route(
+                "/work",
+                get(move || {
+                    let started = Arc::clone(&route_started);
+                    let release = Arc::clone(&route_release);
+                    async move {
+                        started.notify_one();
+                        release.notified().await;
+                        "complete"
+                    }
+                }),
+            )
+            .route_layer(middleware::from_fn_with_state(
+                admission.clone(),
+                require_admission,
+            ));
+        let first_app = app.clone();
+        let first = tokio::spawn(async move {
+            first_app
+                .oneshot(Request::get("/work").body(Body::empty()).expect("request"))
+                .await
+                .expect("first response")
+        });
+        tokio::time::timeout(Duration::from_secs(1), started.notified())
+            .await
+            .expect("first request admitted");
+
+        admission.withdraw();
+        assert_eq!(
+            governed_readyz(gate, admission, policy_ready)
+                .await
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let rejected = app
+            .oneshot(Request::get("/work").body(Body::empty()).expect("request"))
+            .await
+            .expect("second response");
+        assert_eq!(rejected.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        release.notify_one();
+        let completed = first.await.expect("first request joined");
+        assert_eq!(completed.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn stored_policy_must_converge_for_the_current_authority_generation() {
+        let gate = AuthorityGate::open_for_test();
+        let admission = GatewayAdmission::new();
+        let policy_ready = PolicyReadyGeneration::new();
+        let app = Router::new()
+            .route("/work", get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(
+                (gate.clone(), policy_ready.clone()),
+                require_authority,
+            ));
+        let request = || Request::get("/work").body(Body::empty()).expect("request");
+
+        assert_eq!(
+            governed_readyz(gate.clone(), admission.clone(), policy_ready.clone())
+                .await
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            app.clone()
+                .oneshot(request())
+                .await
+                .expect("response")
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+
+        let generation = gate.open_generation().expect("test authority is open");
+        policy_ready.mark_converged(generation);
+        assert_eq!(
+            governed_readyz(gate.clone(), admission.clone(), policy_ready.clone())
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            app.clone()
+                .oneshot(request())
+                .await
+                .expect("response")
+                .status(),
+            StatusCode::OK
+        );
+
+        policy_ready.mark_converged(generation + 1);
+        assert_eq!(
+            governed_readyz(gate, admission, policy_ready)
+                .await
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            app.oneshot(request()).await.expect("response").status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_policy_withdraws_admission_and_cancels_in_flight_work() {
+        let gate = AuthorityGate::open_for_test();
+        let admission = GatewayAdmission::new();
+        let policy_ready = PolicyReadyGeneration::with_max_age(Duration::from_millis(200));
+        let generation = gate.open_generation().expect("test authority is open");
+        policy_ready.mark_converged(generation);
+
+        let started = Arc::new(Notify::new());
+        let route_started = Arc::clone(&started);
+        let app = Router::new()
+            .route(
+                "/work",
+                get(move || {
+                    let started = Arc::clone(&route_started);
+                    async move {
+                        started.notify_one();
+                        std::future::pending::<()>().await;
+                        "unreachable"
+                    }
+                }),
+            )
+            .route("/ok", get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(
+                (gate.clone(), policy_ready.clone()),
+                require_authority,
+            ));
+        let first_app = app.clone();
+        let first = tokio::spawn(async move {
+            first_app
+                .oneshot(Request::get("/work").body(Body::empty()).expect("request"))
+                .await
+                .expect("response")
+        });
+        tokio::time::timeout(Duration::from_secs(1), started.notified())
+            .await
+            .expect("work started before policy expiry");
+        let expired = tokio::time::timeout(Duration::from_secs(1), first)
+            .await
+            .expect("stale work was canceled")
+            .expect("request joined");
+        assert_eq!(expired.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            governed_readyz(gate.clone(), admission.clone(), policy_ready.clone())
+                .await
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let request = || Request::get("/ok").body(Body::empty()).expect("request");
+        assert_eq!(
+            app.clone()
+                .oneshot(request())
+                .await
+                .expect("response")
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+
+        policy_ready.mark_refreshed(generation + 1);
+        assert!(!policy_ready.is_for(generation));
+        policy_ready.mark_refreshed(generation);
+        assert_eq!(
+            app.oneshot(request()).await.expect("response").status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            governed_readyz(gate, admission, policy_ready)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
 }
 
-async fn governed_readyz(gate: AuthorityGate) -> Response {
-    if gate.is_open() {
+async fn governed_readyz(
+    gate: AuthorityGate,
+    admission: GatewayAdmission,
+    policy_ready: PolicyReadyGeneration,
+) -> Response {
+    if admission.is_accepting()
+        && gate
+            .open_generation()
+            .is_some_and(|generation| policy_ready.is_for(generation))
+    {
         (StatusCode::OK, "ready").into_response()
     } else {
         (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response()

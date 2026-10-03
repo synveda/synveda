@@ -1,0 +1,27 @@
+# OPS-5 example, not a ready-to-apply recovery policy. Replace the endpoint,
+# bucket/prefix and Secret before use; keep the bucket outside the source
+# cluster's failure domain. For AWS S3, omit endpointURL and use the same
+# ObjectStore contract with an operator-owned IAM or Secret credential.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: synveda-backups
+  namespace: synveda
+spec:
+  configuration:
+    destinationPath: s3://replace-with-owned-bucket/synveda
+    endpointURL: https://objects.example.com
+    s3Credentials:
+      accessKeyId:
+        name: synveda-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: synveda-backup-s3
+        key: ACCESS_SECRET_KEY
+    data:
+      compression: gzip
+      encryption: AES256
+    wal:
+      compression: gzip
+      encryption: AES256
+  # Add an owner-reviewed retentionPolicy only after independent PITR succeeds.

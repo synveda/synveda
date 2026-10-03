@@ -191,11 +191,15 @@ struct HandlerContext {
     product_pool: sqlx::PgPool,
     runtime: skill_validation::Runtime,
     authority: AuthorityGate,
+    policy_ready: authz::PolicyReadyGeneration,
+    generation: u64,
 }
 
 #[derive(Clone)]
 struct Health {
     authority: AuthorityGate,
+    policy_ready: authz::PolicyReadyGeneration,
+    generation: u64,
     queue_pool: sqlx::PgPool,
     ready: Arc<AtomicBool>,
     metrics: metrics_exporter_prometheus::PrometheusHandle,
@@ -332,9 +336,9 @@ async fn run_process(
     ));
     let signal = shutdown::signal();
     tokio::pin!(signal);
-    tokio::select! {
+    let generation = tokio::select! {
         opened = gate.wait_until_open() => {
-            opened.map_err(|()| "the Apalis worker database authority was refused")?;
+            opened.map_err(|()| "the Apalis worker database authority was refused")?
         }
         () = &mut signal => {
             let _ = stop_tx.send(true);
@@ -345,10 +349,22 @@ async fn run_process(
         result = &mut sentinel => {
             return Err(format!("the Apalis worker authority sentinel stopped during boot: {result:?}").into());
         }
-    }
+    };
 
     let pdp = Arc::new(Pdp::new()?);
-    authz::converge_packs_once(&product_pool, &pdp).await?;
+    tokio::time::timeout(
+        synveda_gateway::authority::CHECK_TIMEOUT,
+        authz::converge_packs_once(&product_pool, &pdp),
+    )
+    .await
+    .map_err(|_| "initial Apalis policy convergence timed out")??;
+    if gate.open_generation() != Some(generation) {
+        return Err(
+            "the Apalis worker database authority changed during policy convergence".into(),
+        );
+    }
+    let policy_ready = authz::PolicyReadyGeneration::new();
+    policy_ready.mark_converged(generation);
     let queue_pool = runtime_queue_pool().await?;
     let queue_config = Config::new(QUEUE_NAMESPACE)
         .set_buffer_size(1)
@@ -361,6 +377,8 @@ async fn run_process(
     let ready = Arc::new(AtomicBool::new(false));
     let health = Health {
         authority: gate.clone(),
+        policy_ready: policy_ready.clone(),
+        generation,
         queue_pool: queue_pool.clone(),
         ready: Arc::clone(&ready),
         metrics,
@@ -374,6 +392,8 @@ async fn run_process(
         product_pool: product_pool.clone(),
         runtime,
         authority: gate.clone(),
+        policy_ready: policy_ready.clone(),
+        generation,
     };
     let worker = WorkerBuilder::new("synveda-skill-validation")
         .concurrency(1)
@@ -390,16 +410,23 @@ async fn run_process(
         product_pool.clone(),
         queue,
         gate.clone(),
+        policy_ready.clone(),
+        generation,
         stop_rx.clone(),
         dispatcher_id,
     ));
-    let refresh_interval =
-        runtime_config::bounded_duration_setting("SYNVEDA_POLICY_REFRESH_SECS", 5, 1, 3_600)?;
+    let refresh_interval = runtime_config::bounded_duration_setting(
+        "SYNVEDA_POLICY_REFRESH_SECS",
+        5,
+        1,
+        runtime_config::POLICY_REFRESH_MAX_SECS,
+    )?;
     let mut policy_task = tokio::spawn(authz::run_pack_refresher(
         product_pool.clone(),
         pdp,
         refresh_interval,
         stop_rx.clone(),
+        (policy_ready.clone(), generation),
     ));
     ready.store(true, Ordering::Release);
     metrics::gauge!(APALIS_READY).set(1.0);
@@ -409,6 +436,10 @@ async fn run_process(
         () = &mut signal => (None, None),
         () = gate.wait_until_closed() => (
             Some("product database authority closed".to_owned()),
+            None,
+        ),
+        () = policy_ready.stale_for(generation) => (
+            Some("product policy convergence expired".to_owned()),
             None,
         ),
         result = &mut monitor_task => (
@@ -536,6 +567,8 @@ async fn run_dispatcher(
     product_pool: sqlx::PgPool,
     mut queue: PostgresStorage<Value>,
     authority: AuthorityGate,
+    policy_ready: authz::PolicyReadyGeneration,
+    generation: u64,
     mut shutdown: watch::Receiver<bool>,
     dispatcher_id: String,
 ) {
@@ -550,7 +583,10 @@ async fn run_dispatcher(
             }
             _ = ticker.tick() => {}
         }
-        if *shutdown.borrow() || !authority.is_open() {
+        if *shutdown.borrow()
+            || authority.open_generation() != Some(generation)
+            || !policy_ready.is_for(generation)
+        {
             return;
         }
         let active = match tenants::active(&product_pool).await {
@@ -563,11 +599,14 @@ async fn run_dispatcher(
             }
         };
         for tenant in active {
-            if *shutdown.borrow() || !authority.is_open() {
+            if *shutdown.borrow()
+                || authority.open_generation() != Some(generation)
+                || !policy_ready.is_for(generation)
+            {
                 return;
             }
             let mut permit = authority.permit();
-            if !permit.is_open() {
+            if !permit.is_for(generation) {
                 return;
             }
             let dispatch = dispatch_one(&product_pool, &mut queue, tenant.id, &dispatcher_id);
@@ -575,6 +614,7 @@ async fn run_dispatcher(
             let result = tokio::select! {
                 biased;
                 () = permit.revoked() => return,
+                () = policy_ready.stale_for(generation) => return,
                 result = &mut dispatch => result,
             };
             if let Err(error) = result {
@@ -672,15 +712,20 @@ async fn handle_task(task: Value, context: Data<HandlerContext>) -> Result<(), A
         }
     };
     let mut permit = context.authority.permit();
-    if !permit.is_open() {
+    if !permit.is_for(context.generation) {
         metrics::counter!(APALIS_TASKS_TOTAL, "outcome" => "authority_closed").increment(1);
         return Err(retry_task("authority_closed"));
+    }
+    if !context.policy_ready.is_for(context.generation) {
+        metrics::counter!(APALIS_TASKS_TOTAL, "outcome" => "policy_stale").increment(1);
+        return Err(retry_task("policy_stale"));
     }
     let execution = handle_authorized_task(&task, &context);
     tokio::pin!(execution);
     let outcome = tokio::select! {
         biased;
         () = permit.revoked() => Err(retry_task("authority_closed")),
+        () = context.policy_ready.stale_for(context.generation) => Err(retry_task("policy_stale")),
         outcome = &mut execution => outcome,
     };
     match outcome {
@@ -722,7 +767,7 @@ async fn recover_delivery(
     task: &SkillValidationTask,
     context: &HandlerContext,
 ) -> Result<ExecuteOutcome, ApalisError> {
-    if !context.authority.is_open() {
+    if context.authority.open_generation() != Some(context.generation) {
         return Err(retry_task("authority_closed"));
     }
     let mut tx = rls::begin_tenant_tx(&context.product_pool, task.tenant_id)
@@ -801,7 +846,10 @@ async fn healthz() -> StatusCode {
 }
 
 async fn readyz(State(health): State<Health>) -> StatusCode {
-    if !health.ready.load(Ordering::Acquire) || !health.authority.is_open() {
+    if !health.ready.load(Ordering::Acquire)
+        || health.authority.open_generation() != Some(health.generation)
+        || !health.policy_ready.is_for(health.generation)
+    {
         return StatusCode::SERVICE_UNAVAILABLE;
     }
     match tokio::time::timeout(Duration::from_secs(1), health.queue_pool.acquire()).await {

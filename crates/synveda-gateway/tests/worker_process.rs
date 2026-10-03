@@ -66,6 +66,22 @@ fn configured_roles_json() -> Option<String> {
 }
 
 fn spawn_worker(database_url_file: &Path, roles_json: &str, listen_addr: &str) -> ChildGuard {
+    spawn_worker_with_profile(
+        database_url_file,
+        roles_json,
+        listen_addr,
+        "combined",
+        "deterministic",
+    )
+}
+
+fn spawn_worker_with_profile(
+    database_url_file: &Path,
+    roles_json: &str,
+    listen_addr: &str,
+    profile: &str,
+    embedder: &str,
+) -> ChildGuard {
     let child = Command::new(env!("CARGO_BIN_EXE_synveda-worker"))
         .env_remove("DATABASE_URL")
         .env("DATABASE_URL_FILE", database_url_file)
@@ -74,9 +90,10 @@ fn spawn_worker(database_url_file: &Path, roles_json: &str, listen_addr: &str) -
         .env_remove("SYNVEDA_EXPECTED_DATABASE_ROLE")
         .env_remove("SYNVEDA_EXPECTED_DATABASE_ROLE_FILE")
         .env("SYNVEDA_WORKER_LISTEN_ADDR", listen_addr)
+        .env("SYNVEDA_WORKER_PROFILE", profile)
         .env("SYNVEDA_WORKER_SHUTDOWN_SECS", "3")
         .env("SYNVEDA_EXTRACTOR", "deterministic")
-        .env("SYNVEDA_EMBEDDER", "deterministic")
+        .env("SYNVEDA_EMBEDDER", embedder)
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("ANTHROPIC_API_KEY_FILE")
         .env_remove("SYNVEDA_OIDC_ISSUERS")
@@ -93,6 +110,58 @@ fn spawn_worker(database_url_file: &Path, roles_json: &str, listen_addr: &str) -
         .spawn()
         .expect("spawn synveda-worker");
     ChildGuard(child)
+}
+
+#[tokio::test]
+async fn capture_only_starts_without_maintenance_embedder_configuration() {
+    let addr = free_loopback_addr();
+    let roles = r#"{"migrator":"migrator","gateway":"gateway","worker":"unavailable","administrators":["administrator"],"administrative_memberships":[],"forbidden_databases":["postgres"],"isolated_peer_roles":[]}"#;
+    let database_url_file = std::env::temp_dir().join(format!(
+        "synveda-capture-only-outage-url-{}",
+        std::process::id()
+    ));
+    std::fs::write(
+        &database_url_file,
+        "postgres://unavailable:opaque@127.0.0.1:1/unavailable\n",
+    )
+    .expect("write outage database URL file");
+    let mut capture_only =
+        spawn_worker_with_profile(&database_url_file, roles, &addr, "capture-only", "invalid");
+    wait_for_status(
+        &mut capture_only,
+        &format!("http://{addr}/healthz"),
+        StatusCode::OK,
+        Duration::from_secs(10),
+    )
+    .await;
+    wait_for_status(
+        &mut capture_only,
+        &format!("http://{addr}/readyz"),
+        StatusCode::SERVICE_UNAVAILABLE,
+        Duration::from_secs(3),
+    )
+    .await;
+    send_sigterm(&capture_only);
+    assert!(
+        wait_for_exit(&mut capture_only, Duration::from_secs(5))
+            .await
+            .success()
+    );
+
+    let combined_addr = free_loopback_addr();
+    let mut combined = spawn_worker_with_profile(
+        &database_url_file,
+        roles,
+        &combined_addr,
+        "combined",
+        "invalid",
+    );
+    let refusal = wait_for_exit(&mut combined, Duration::from_secs(5)).await;
+    assert!(
+        !refusal.success(),
+        "combined worker accepted invalid embedder"
+    );
+    std::fs::remove_file(database_url_file).ok();
 }
 
 fn private_database_url_file(setting: &str) -> Option<PathBuf> {

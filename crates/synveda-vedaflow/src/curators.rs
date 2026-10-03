@@ -219,7 +219,7 @@ impl CuratorFile {
 
     /// Whether the file requires anything at all. An empty file is how a
     /// scope's curator requirements are cleared: refs hold no DELETE
-    /// grant (migration 0018), so "no requirements here" is committed,
+    /// grant, so "no requirements here" is committed,
     /// not deleted — which also leaves the removal in the history.
     #[must_use]
     pub fn is_empty(&self) -> bool {

@@ -3754,7 +3754,7 @@
           "context-packs"
         ],
         "summary": "`POST /v1/context-packs` — author a pack: create it, or replace the\ndocuments named in the request.",
-        "description": "An overwrite is the authoring act rather than a conflict; what cannot\nchange is the pack's identity, which migration 0030's triggers enforce\nbelow this handler. Documents *not* named in the request are left\nalone — a bundle is edited a file at a time, and a request that dropped\nthe rest would make every save a full re-upload.",
+        "description": "An overwrite is the authoring act rather than a conflict; what cannot\nchange is the pack's identity, which `context_packs_transition` enforces\nbelow this handler. Documents *not* named in the request are left\nalone — a bundle is edited a file at a time, and a request that dropped\nthe rest would make every save a full re-upload.",
         "operationId": "author_context_pack",
         "requestBody": {
           "content": {
@@ -7492,7 +7492,7 @@
           "prompts"
         ],
         "summary": "`POST /v1/prompts` — author a draft: create it, or replace the content\nof the one that is there.",
-        "description": "An overwrite is the authoring act rather than a conflict; what cannot\nchange is the prompt's identity, which migration 0029's trigger\nenforces below this handler.",
+        "description": "An overwrite is the authoring act rather than a conflict; what cannot\nchange is the prompt's identity, which the `prompts_transition` trigger\nenforces below this handler.",
         "operationId": "author_prompt",
         "requestBody": {
           "content": {

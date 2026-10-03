@@ -2458,10 +2458,18 @@ async fn run(cli: Cli) -> Result<(), String> {
             let pool = connect().await?;
             let database_roles = settings::database_roles()?;
             if check {
-                synveda_store::check_migration_compatibility(&pool, &database_roles)
+                let metadata = synveda_store::check_migration_compatibility(&pool, &database_roles)
                     .await
                     .map_err(|err| err.to_string())?;
-                eprintln!("candidate database compatibility verified without writes");
+                if metadata.migration_head != synveda_store::epoch::CURRENT_MIGRATION_HEAD {
+                    eprintln!(
+                        "database migration head {} is upgradeable after a verified joint backup and writer shutdown; this image cannot serve it until migration head {} is stamped (read-only check, no writes)",
+                        metadata.migration_head,
+                        synveda_store::epoch::CURRENT_MIGRATION_HEAD,
+                    );
+                } else {
+                    eprintln!("candidate database compatibility verified without writes");
+                }
             } else {
                 synveda_store::migrate(&pool, &database_roles)
                     .await

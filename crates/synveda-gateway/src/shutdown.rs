@@ -1,5 +1,55 @@
 //! Process signal handling shared by the gateway and core worker.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+/// Maximum time for a routing probe to observe withdrawn gateway readiness.
+const GATEWAY_PROBE_DRAIN_WINDOW: Duration = Duration::from_secs(10);
+
+/// One-way request admission for process shutdown, separate from authority.
+///
+/// A normal drain refuses new work but lets already-admitted requests finish
+/// under their live authority permits. Closing the authority gate instead
+/// would cancel those requests and is reserved for an actual authority loss.
+#[derive(Clone)]
+pub struct GatewayAdmission {
+    accepting: Arc<AtomicBool>,
+}
+
+impl Default for GatewayAdmission {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GatewayAdmission {
+    /// Starts an accepting gateway process.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            accepting: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    /// Permanently refuses new application work and readiness.
+    pub fn withdraw(&self) {
+        self.accepting.store(false, Ordering::Release);
+    }
+
+    /// Whether the process may admit a new application request.
+    #[must_use]
+    pub fn is_accepting(&self) -> bool {
+        self.accepting.load(Ordering::Acquire)
+    }
+}
+
+/// Leaves one cooperative second and one forced-join second inside the bound.
+#[must_use]
+pub fn gateway_probe_drain_window(shutdown_grace: Duration) -> Duration {
+    GATEWAY_PROBE_DRAIN_WINDOW.min(shutdown_grace.saturating_sub(Duration::from_secs(2)))
+}
+
 /// Waits for the first supported process-termination signal.
 ///
 /// Failure to install one handler does not make the process exit as though a
@@ -62,6 +112,33 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
+
+    #[test]
+    fn gateway_admission_withdrawal_is_shared_and_one_way() {
+        let admission = GatewayAdmission::new();
+        let replica = admission.clone();
+        assert!(replica.is_accepting());
+        admission.withdraw();
+        assert!(!replica.is_accepting());
+        replica.withdraw();
+        assert!(!admission.is_accepting());
+    }
+
+    #[test]
+    fn gateway_probe_window_preserves_cleanup_and_abort_reserve() {
+        assert_eq!(
+            gateway_probe_drain_window(Duration::from_secs(30)),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            gateway_probe_drain_window(Duration::from_secs(8)),
+            Duration::from_secs(6)
+        );
+        assert_eq!(
+            gateway_probe_drain_window(Duration::from_secs(2)),
+            Duration::ZERO
+        );
+    }
 
     struct ChildGuard(Child);
 

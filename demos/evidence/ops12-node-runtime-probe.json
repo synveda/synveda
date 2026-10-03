@@ -1,0 +1,622 @@
+{
+  "schema_version": 1,
+  "feature_id": "OPS-12",
+  "evidence": "local-node-runtime-mechanism-probe",
+  "source_sha": "19ca39982b45d6ad64a1a64b43230f5fa9166d65",
+  "source_tree_dirty": false,
+  "scope": "Official upstream distribution bytes and one preceding task-owned product image; not six native client executions, clean hosted qualification or complete native dependency coverage.",
+  "scanner": {
+    "version": "1.51.0",
+    "host_target": "darwin-arm64",
+    "binary_sha256": "b1147cee2d7f49d6ea58d9c95b24734985a4cc208fdd3f0f0f1ff950622f0252",
+    "source": "https://github.com/anchore/syft/blob/v1.51.0/syft/pkg/cataloger/binary/classifiers.go",
+    "cataloger": "binary-classifier-cataloger"
+  },
+  "node_sources": {
+    "24.21.0": {
+      "node_source_sha": "955266bfdd854cd280dffd47548673914484e4c0",
+      "upstream_notice_sections": [
+        "Acorn",
+        "c-ares",
+        "merve",
+        "ittapi",
+        "amaro",
+        "swc",
+        "ICU",
+        "libuv",
+        "LIEF",
+        "llhttp",
+        "corepack",
+        "undici",
+        "postject",
+        "OpenSSL",
+        "Punycode.js",
+        "V8",
+        "SipHash",
+        "zlib",
+        "simdjson",
+        "simdutf",
+        "ada",
+        "minimatch",
+        "npm",
+        "GYP",
+        "inspector_protocol",
+        "jinja2",
+        "markupsafe",
+        "cpplint.py",
+        "gypi_to_gn.py",
+        "gtest",
+        "nghttp2",
+        "large_pages",
+        "caja",
+        "brotli",
+        "zstd",
+        "HdrHistogram",
+        "node-heapdump",
+        "rimraf",
+        "uvwasi",
+        "ngtcp2",
+        "nghttp3",
+        "node-fs-extra",
+        "on-exit-leak-free",
+        "sonic-boom"
+      ],
+      "nbytes_notice_in_aggregate": false,
+      "sqlite_declaration_in_aggregate": false,
+      "nbytes_source_path": "deps/nbytes/LICENSE",
+      "sqlite_source_path": "deps/sqlite/sqlite3.h"
+    },
+    "22.23.2": {
+      "node_source_sha": "aa4c77582be995286fc6e00aaf530dc7ade102a9",
+      "upstream_notice_sections": [
+        "Acorn",
+        "c-ares",
+        "cjs-module-lexer",
+        "ittapi",
+        "amaro",
+        "swc",
+        "ICU",
+        "libuv",
+        "llhttp",
+        "corepack",
+        "undici",
+        "postject",
+        "OpenSSL",
+        "Punycode.js",
+        "V8",
+        "SipHash",
+        "zlib",
+        "simdjson",
+        "simdutf",
+        "ada",
+        "minimatch",
+        "npm",
+        "GYP",
+        "inspector_protocol",
+        "jinja2",
+        "markupsafe",
+        "cpplint.py",
+        "gypi_to_gn.py",
+        "gtest",
+        "nghttp2",
+        "large_pages",
+        "caja",
+        "brotli",
+        "zstd",
+        "HdrHistogram",
+        "node-heapdump",
+        "rimraf",
+        "uvwasi",
+        "ngtcp2",
+        "nghttp3",
+        "node-fs-extra",
+        "on-exit-leak-free",
+        "sonic-boom"
+      ],
+      "nbytes_notice_in_aggregate": false,
+      "sqlite_declaration_in_aggregate": false,
+      "nbytes_source_path": "deps/nbytes/LICENSE",
+      "sqlite_source_path": "deps/sqlite/sqlite3.h"
+    }
+  },
+  "upstream_source_files": {
+    "node22-LICENSE": {
+      "bytes": 145485,
+      "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4"
+    },
+    "node22-deps-nbytes-LICENSE": {
+      "bytes": 1064,
+      "sha256": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2"
+    },
+    "node22-deps-ncrypto-ncrypto.h": {
+      "bytes": 35815,
+      "sha256": "faa3d8986f832e7925d29314278c5fb95088eac9d8525e52f5d80bd63fcf3854"
+    },
+    "node22-deps-sqlite-sqlite3.h": {
+      "bytes": 671786,
+      "sha256": "19585c8b5230e9d4f223bf31b709ece7b6a0bb3faf00d8310625d8e58cda1b1d"
+    },
+    "node22-src-node_metadata.cc": {
+      "bytes": 5634,
+      "sha256": "7e8dc2c02a4ea4c05787e12c261cf3dd1275699f4256fb6b85353d21b1439223"
+    },
+    "node24-LICENSE": {
+      "bytes": 157609,
+      "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace"
+    },
+    "node24-deps-nbytes-LICENSE": {
+      "bytes": 1064,
+      "sha256": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2"
+    },
+    "node24-deps-ncrypto-ncrypto.h": {
+      "bytes": 63346,
+      "sha256": "d867aa42a339ba2d7baee72e39b094e4995e4c841c89dbbe24424d3502d26659"
+    },
+    "node24-deps-sqlite-sqlite3.h": {
+      "bytes": 690838,
+      "sha256": "919e7f2e8ed1d8f56ac17b412b8971c76aa5d1a879752cc6058f75e7d5910e1d"
+    },
+    "node24-license-builder.sh": {
+      "bytes": 7900,
+      "sha256": "284d2a2e6262958a7956b7b0a5f2f7bc799227e39df4a0c23f28cd7002548ab3"
+    },
+    "node24-src-node_metadata.cc": {
+      "bytes": 5393,
+      "sha256": "77a1636ecccaee51546589290430edac163e3ec10a77e12dda4e25f162b8102c"
+    },
+    "syft-classifiers.go": {
+      "bytes": 57226,
+      "sha256": "d32f120dfa46c1326167ea2c0384419696bb8803c4260e959509507d4fa8082a"
+    }
+  },
+  "client_upstream_distributions": [
+    {
+      "target": "darwin-arm64",
+      "binary": {
+        "member": "node-v24.21.0-darwin-arm64/bin/node",
+        "bytes": 122129232,
+        "sha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b"
+      },
+      "platform": {
+        "os": "darwin",
+        "arch": "arm64"
+      },
+      "licence": {
+        "member": "node-v24.21.0-darwin-arm64/LICENSE",
+        "bytes": 157609,
+        "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
+        "source_line_endings": "LF"
+      },
+      "scan": {
+        "sha256": "ea5a9863165f62b08b0fbdd15650ef57d71af7b411225fbcf49c72eb79c71c6d",
+        "packages": [
+          {
+            "name": "node",
+            "version": "24.21.0",
+            "purls": [
+              "pkg:generic/node@24.21.0"
+            ]
+          },
+          {
+            "name": "node",
+            "version": "sha256:e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+            "purls": []
+          }
+        ]
+      },
+      "native": {
+        "versions": {
+          "node": "24.21.0",
+          "acorn": "8.18.0",
+          "ada": "4.0.0",
+          "amaro": "1.1.11",
+          "ares": "1.34.8",
+          "brotli": "1.2.0",
+          "cldr": "48.0",
+          "icu": "78.3",
+          "llhttp": "9.4.3",
+          "merve": "1.2.2",
+          "modules": "137",
+          "napi": "10",
+          "nbytes": "0.1.4",
+          "ncrypto": "0.0.1",
+          "nghttp2": "1.70.0",
+          "nghttp3": "",
+          "ngtcp2": "",
+          "openssl": "3.5.8",
+          "simdjson": "4.6.7",
+          "simdutf": "6.4.0",
+          "sqlite": "3.53.4",
+          "tz": "2026c",
+          "undici": "7.29.1",
+          "unicode": "17.0",
+          "uv": "1.52.1",
+          "uvwasi": "0.0.23",
+          "v8": "13.6.233.17-node.53",
+          "zlib": "1.3.2.1-motley-8002e91",
+          "zstd": "1.5.7"
+        },
+        "platform": "darwin",
+        "arch": "arm64",
+        "shared": {
+          "node_shared_zlib": false,
+          "node_shared_http_parser": false,
+          "node_shared_libuv": false,
+          "node_shared_ada": false,
+          "node_shared_simdjson": false,
+          "node_shared_simdutf": false,
+          "node_shared_brotli": false,
+          "node_shared_cares": false,
+          "node_shared_gtest": false,
+          "node_shared_hdr_histogram": false,
+          "node_shared_merve": false,
+          "node_shared_nbytes": false,
+          "node_shared_nghttp2": false,
+          "node_shared_nghttp3": false,
+          "node_shared_ngtcp2": false,
+          "node_shared_sqlite": false,
+          "node_shared_uvwasi": false,
+          "node_shared_zstd": false,
+          "node_shared_openssl": false
+        }
+      },
+      "upstream_archive": {
+        "target": "darwin-arm64",
+        "archive": "node-v24.21.0-darwin-arm64.tar.gz",
+        "sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057",
+        "bytes": 52909993
+      }
+    },
+    {
+      "target": "darwin-x86_64",
+      "binary": {
+        "member": "node-v24.21.0-darwin-x64/bin/node",
+        "bytes": 125270960,
+        "sha256": "7abcf39bd37ab251015337ff75304d7555f0d8e88c6e0fbf04bce8ce34636f49"
+      },
+      "platform": {
+        "os": "darwin",
+        "arch": "x86_64"
+      },
+      "licence": {
+        "member": "node-v24.21.0-darwin-x64/LICENSE",
+        "bytes": 157609,
+        "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
+        "source_line_endings": "LF"
+      },
+      "scan": {
+        "sha256": "27e134aa8bf67bffb1c5a8f08895cdaa68d8f969fe14de42e6d09149d8275ee3",
+        "packages": [
+          {
+            "name": "node",
+            "version": "24.21.0",
+            "purls": [
+              "pkg:generic/node@24.21.0"
+            ]
+          },
+          {
+            "name": "node",
+            "version": "sha256:7abcf39bd37ab251015337ff75304d7555f0d8e88c6e0fbf04bce8ce34636f49",
+            "purls": []
+          }
+        ]
+      },
+      "upstream_archive": {
+        "target": "darwin-x86_64",
+        "archive": "node-v24.21.0-darwin-x64.tar.gz",
+        "sha256": "1462cb3b3046b815cf8ea436d3da450ec1a9f11dac7e5a46b0ada5305d7e8097",
+        "bytes": 54203979
+      }
+    },
+    {
+      "target": "linux-arm64",
+      "binary": {
+        "member": "node-v24.21.0-linux-arm64/bin/node",
+        "bytes": 122893672,
+        "sha256": "0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584"
+      },
+      "platform": {
+        "os": "linux",
+        "arch": "arm64"
+      },
+      "licence": {
+        "member": "node-v24.21.0-linux-arm64/LICENSE",
+        "bytes": 157609,
+        "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
+        "source_line_endings": "LF"
+      },
+      "scan": {
+        "sha256": "13dcbe68192f4e04badeb7b470135ef134d10381e5a2675785797647f3b6cf8f",
+        "packages": [
+          {
+            "name": "node",
+            "version": "24.21.0",
+            "purls": [
+              "pkg:generic/node@24.21.0"
+            ]
+          },
+          {
+            "name": "node",
+            "version": "sha256:0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584",
+            "purls": []
+          }
+        ]
+      },
+      "upstream_archive": {
+        "target": "linux-arm64",
+        "archive": "node-v24.21.0-linux-arm64.tar.gz",
+        "sha256": "724282c3b43aec998aa9527380465b45d229e021b58035f5f4f63095eabfe5d5",
+        "bytes": 57824078
+      }
+    },
+    {
+      "target": "windows-arm64",
+      "binary": {
+        "member": "node-v24.21.0-win-arm64/node.exe",
+        "bytes": 81881416,
+        "sha256": "dff59da18b6ffe1bf1ca99e1d2af4906080c481740619f5b5098c0fca28bd9b7"
+      },
+      "platform": {
+        "os": "windows",
+        "arch": "arm64"
+      },
+      "licence": {
+        "member": "node-v24.21.0-win-arm64/LICENSE",
+        "bytes": 160555,
+        "sha256": "ed34dd8e3f0a78dbaf00d0444ce8e285b015b765379c2e17880455f70370f8e9",
+        "source_line_endings": "CRLF"
+      },
+      "scan": {
+        "sha256": "abe590d0d368752d9ad305ff747ffb44b2706e53852242c54c7d8a28866dd596",
+        "packages": [
+          {
+            "name": "node.exe",
+            "version": "sha256:dff59da18b6ffe1bf1ca99e1d2af4906080c481740619f5b5098c0fca28bd9b7",
+            "purls": []
+          }
+        ]
+      },
+      "upstream_archive": {
+        "target": "windows-arm64",
+        "archive": "node-v24.21.0-win-arm64.zip",
+        "sha256": "8779b1bde1d39f8d420e3b57aa657b39891af434d3de44a919044cec06785921",
+        "bytes": 33679608
+      }
+    },
+    {
+      "target": "windows-x86_64",
+      "binary": {
+        "member": "node-v24.21.0-win-x64/node.exe",
+        "bytes": 93580104,
+        "sha256": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32"
+      },
+      "platform": {
+        "os": "windows",
+        "arch": "x86_64"
+      },
+      "licence": {
+        "member": "node-v24.21.0-win-x64/LICENSE",
+        "bytes": 160555,
+        "sha256": "ed34dd8e3f0a78dbaf00d0444ce8e285b015b765379c2e17880455f70370f8e9",
+        "source_line_endings": "CRLF"
+      },
+      "scan": {
+        "sha256": "656bc08a68eb84c31db574cf31ce258647408db97253076d5c69467246e81374",
+        "packages": [
+          {
+            "name": "node.exe",
+            "version": "sha256:ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+            "purls": []
+          }
+        ]
+      },
+      "upstream_archive": {
+        "target": "windows-x86_64",
+        "archive": "node-v24.21.0-win-x64.zip",
+        "sha256": "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541",
+        "bytes": 37618919
+      }
+    },
+    {
+      "target": "linux-x86_64",
+      "binary": {
+        "member": "node-v24.21.0-linux-x64/bin/node",
+        "bytes": 126595440,
+        "sha256": "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c"
+      },
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64"
+      },
+      "licence": {
+        "member": "node-v24.21.0-linux-x64/LICENSE",
+        "bytes": 157609,
+        "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
+        "source_line_endings": "LF"
+      },
+      "scan": {
+        "sha256": "3ec6d805cf3f5b3b5789cde8ffd92aae4b923be58ab683797a56c4102bde37f4",
+        "packages": [
+          {
+            "name": "node",
+            "version": "24.21.0",
+            "purls": [
+              "pkg:generic/node@24.21.0"
+            ]
+          },
+          {
+            "name": "node",
+            "version": "sha256:7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c",
+            "purls": []
+          }
+        ]
+      },
+      "upstream_archive": {
+        "target": "linux-x86_64",
+        "archive": "node-v24.21.0-linux-x64.tar.gz",
+        "sha256": "6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff",
+        "bytes": 58088022
+      }
+    }
+  ],
+  "product": {
+    "upstream": [
+      {
+        "target": "linux-arm64",
+        "archive": "node-v22.23.2-linux-arm64.tar.gz",
+        "archive_sha256": "013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30",
+        "binary": {
+          "member": "node-v22.23.2-linux-arm64/bin/node",
+          "bytes": 122159120,
+          "sha256": "1a638b0fe2b68da0489276aca95526c5122fc61ba54d6a2d0d00c1c92ab7b876"
+        },
+        "platform": {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        "licence": {
+          "member": "node-v22.23.2-linux-arm64/LICENSE",
+          "bytes": 145485,
+          "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4"
+        },
+        "scan": {
+          "sha256": "962c774590d5c170cafd4e6ed130ad09e8d295e3e39d3a2e6d0fb5542d4e384f",
+          "packages": [
+            {
+              "name": "node",
+              "version": "22.23.2",
+              "purls": [
+                "pkg:generic/node@22.23.2"
+              ]
+            },
+            {
+              "name": "node",
+              "version": "sha256:1a638b0fe2b68da0489276aca95526c5122fc61ba54d6a2d0d00c1c92ab7b876",
+              "purls": []
+            }
+          ]
+        }
+      },
+      {
+        "target": "linux-x86_64",
+        "archive": "node-v22.23.2-linux-x64.tar.gz",
+        "archive_sha256": "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a",
+        "binary": {
+          "member": "node-v22.23.2-linux-x64/bin/node",
+          "bytes": 124836408,
+          "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+        },
+        "platform": {
+          "os": "linux",
+          "arch": "x86_64"
+        },
+        "licence": {
+          "member": "node-v22.23.2-linux-x64/LICENSE",
+          "bytes": 145485,
+          "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4"
+        },
+        "scan": {
+          "sha256": "b0a6ef0a3261a1027d4fd22cd2054d11f47d1fe78c93ef607eaf2e4780c35304",
+          "packages": [
+            {
+              "name": "node",
+              "version": "22.23.2",
+              "purls": [
+                "pkg:generic/node@22.23.2"
+              ]
+            },
+            {
+              "name": "node",
+              "version": "sha256:3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+              "purls": []
+            }
+          ]
+        }
+      }
+    ],
+    "actual": {
+      "image_id": "sha256:4e389a6e7f2da6773491f9292a84460ac7d86a88455d428567dfb71ba1975e92",
+      "platform": "linux/arm64",
+      "source_sha": "334369effb0288e0e7046b9919dbc35052cc1606",
+      "binary": {
+        "path": "/usr/local/bin/node",
+        "bytes": 122159120,
+        "sha256": "1a638b0fe2b68da0489276aca95526c5122fc61ba54d6a2d0d00c1c92ab7b876",
+        "upstream_bytes_equal": true
+      },
+      "licence": {
+        "path": "/usr/share/licenses/node/LICENSE",
+        "bytes": 145485,
+        "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4",
+        "upstream_bytes_equal": true
+      },
+      "native": {
+        "versions": {
+          "node": "22.23.2",
+          "acorn": "8.16.0",
+          "ada": "2.9.2",
+          "amaro": "1.1.8",
+          "ares": "1.34.6",
+          "brotli": "1.1.0",
+          "cjs_module_lexer": "2.2.0",
+          "cldr": "48.0",
+          "icu": "78.2",
+          "llhttp": "9.4.3",
+          "modules": "127",
+          "napi": "10",
+          "nbytes": "0.1.3",
+          "ncrypto": "0.0.1",
+          "nghttp2": "1.69.0",
+          "openssl": "3.5.7",
+          "simdjson": "4.5.0",
+          "simdutf": "6.4.2",
+          "sqlite": "3.51.3",
+          "tz": "2026a",
+          "undici": "6.28.0",
+          "unicode": "17.0",
+          "uv": "1.51.0",
+          "uvwasi": "0.0.23",
+          "v8": "12.4.254.21-node.56",
+          "zlib": "1.3.1-e00f703",
+          "zstd": "1.5.7"
+        },
+        "platform": "linux",
+        "arch": "arm64",
+        "shared": {
+          "node_shared_zlib": false,
+          "node_shared_http_parser": false,
+          "node_shared_libuv": false,
+          "node_shared_ada": false,
+          "node_shared_simdjson": false,
+          "node_shared_simdutf": false,
+          "node_shared_brotli": false,
+          "node_shared_cares": false,
+          "node_shared_nghttp2": false,
+          "node_shared_nghttp3": false,
+          "node_shared_ngtcp2": false,
+          "node_shared_sqlite": false,
+          "node_shared_uvwasi": false,
+          "node_shared_zstd": false,
+          "node_shared_openssl": false
+        }
+      },
+      "source_tree_dirty": true,
+      "preceding_evidence": "demos/evidence/ops12-console-image-candidate.json"
+    }
+  },
+  "findings": [
+    "All six locked client archive hashes match official SHASUMS256.txt; fixed binary headers match their target.",
+    "All complete client LICENSE files match upstream source, with exact CRLF bytes on Windows and LF bytes on macOS/Linux.",
+    "Syft identifies generic Node on all POSIX distributions and both product Linux distributions, but no Node identity for the two original Windows node.exe filenames; it identifies no embedded Node library versions.",
+    "Native macOS ARM Node 24.21.0 and actual product Linux ARM Node 22.23.2 expose library versions through maintained process.versions and false shared-library flags through process.config.",
+    "Actual product Node and full LICENSE bytes equal official checksummed Linux ARM upstream content.",
+    "Both upstream aggregate LICENSE files omit a separate nbytes copyright/MIT notice; exact upstream deps/nbytes/LICENSE bytes are identical between versions.",
+    "SQLite is built into Node and its upstream source disclaims copyright. The reported ncrypto helper still needs explicit licence provenance review; no separate notice was found in the aggregate.",
+    "modules/napi are ABI identifiers; cldr/tz/unicode are data versions; empty nghttp3/ngtcp2 values do not establish shipped component versions.",
+    "process.versions is not a complete transitive component inventory: upstream notice sections include unversioned embedded helpers and build-only tools.",
+    "Cargo normal/build trees select non-vendored openssl-sys on Linux; the C OpenSSL version requires OS/native evidence rather than the Rust binding version. libsqlite3-sys is locked but absent from the selected release dependency tree."
+  ],
+  "next_action": "Record and implement the small Node packaging contract: exact binary and complete platform-specific notice pins, supplementary upstream nbytes notice and SQLite declaration, native process.versions checks in existing reports, and independent final archive/image byte validation. Keep unversioned/transitive native coverage open for the remaining artifact slice.",
+  "qualification_blocker": "Native Rust qualification still awaits a fixed official Syft Windows distribution; no new qualification source or run is selected.",
+  "owned_probe_containers_remaining": 0
+}

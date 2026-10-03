@@ -14,7 +14,7 @@ SYNVEDA_TEI_IMAGE ?= $(or $(TEI_IMAGE_$(shell uname -m)),$(TEI_IMAGE_amd64))
 export SYNVEDA_TEI_IMAGE
 RETRIEVAL_COMPOSE = docker compose -p synveda-retrieval-eval -f evals/compose.retrieval.yaml
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-backup compose-restore-smoke compose-upgrade-smoke compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-backup compose-pitr-backup compose-restore-smoke compose-upgrade-smoke compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 # CPR-45's canonical topology renders the closed runtime/provider matrix and
 # optional profiles without starting or pulling images.
@@ -52,6 +52,9 @@ compose-acceptance:
 
 compose-backup:
 	demos/cpr-45-docker-reference.sh backup
+
+compose-pitr-backup:
+	deploy/compose/scripts/compose.sh pitr-backup
 
 compose-restore-smoke:
 	SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance demos/cpr-45-docker-reference.sh restore-smoke
@@ -272,9 +275,13 @@ fmt:
 .PHONY: check-fast
 check-fast: check-docs check-backlog check-adr-status check-api-types check-adapters check-context-security check-context-hard-cut check-product-eval check-corpus-licences check-benchmarks
 
+.PHONY: check-rustdoc
+check-rustdoc:
+	RUSTDOCFLAGS="-D warnings" SQLX_OFFLINE=true cargo doc --workspace --no-deps --locked
+
 .PHONY: check-ci
 check-ci:
-	node --test scripts/ci.test.mjs scripts/release-pipeline.test.mjs scripts/verify-starter-image-reuse.test.mjs
+	node --test scripts/ci.test.mjs scripts/release-pipeline.test.mjs scripts/verify-starter-image-reuse.test.mjs scripts/rust-image-sbom.test.mjs scripts/rust-archive-sbom.test.mjs scripts/check-console-package.test.mjs scripts/node-runtime-inventory.test.mjs scripts/product-package-inventory.test.mjs
 	node scripts/check-workflows.mjs
 
 lint:
@@ -291,6 +298,8 @@ deny:
 
 check-deps:
 	node scripts/check-crate-deps.mjs
+	node --test scripts/check-product-sql.test.mjs
+	node scripts/check-product-sql.mjs
 
 # The frontend's types are generated from the OpenAPI document, and the
 # document is generated from the gateway's own handlers (CPR-4, ADR-0071
@@ -410,6 +419,7 @@ chart-lint:
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
 	node scripts/check-helm-contract.mjs
 	node scripts/check-starter-contract.mjs
+	node scripts/check-ops5-backup-chart.mjs
 	node scripts/check-portability-contract.mjs
 
 # Requires kubeconform 0.7.0 and network access to the pinned official schemas.
@@ -427,6 +437,7 @@ check-deploy: check-release-parity check-chart-images check-compose-contract
 
 check-compose-contract:
 	node --test scripts/evaluation.test.mjs
+	node --test scripts/check-pgbackrest-config.test.mjs
 	node --test scripts/generate-compose-issuer.test.mjs
 	node --test scripts/check-tls-inputs.test.mjs
 	node --test scripts/manage-hosts-file.test.mjs
@@ -442,4 +453,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-ci check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check sdk-check ts-build plugin-package-check check-npm-licences ts-test
+ci: fmt lint test build check-rustdoc deny check-ci check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check sdk-check ts-build plugin-package-check check-npm-licences ts-test

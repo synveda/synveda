@@ -11,10 +11,6 @@
 //! constraint and the later VedaFlow/audit write that must commit or vanish
 //! with Knowledge.
 //!
-//! Nothing in this module imports, reads or writes [`crate::records`]. The old
-//! aggregate remains temporarily on its own runtime path until CPR-17 deletes
-//! it; there is no bridge or dual write.
-
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};

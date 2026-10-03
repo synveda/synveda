@@ -257,6 +257,119 @@ still ran Docker and took 2h15m18s; the nonpublishing Release drill took
 2h04m56s. These are observed wall times on different commits and runners,
 not a controlled speedup measurement.
 
+## Roadmap source qualification (2026-09-30)
+
+Clean source `f433eb1719bc58b5f36b0516bedf71e886d23185` passed all 23 jobs in
+[full CI](https://github.com/synveda/synveda/actions/runs/36765529532), including
+all six native client targets and both native four-mode image/Helm matrices.
+The same-source [nonpublishing Release](https://github.com/synveda/synveda/actions/runs/36765540733)
+completed successfully with fifteen jobs passed and final publication skipped.
+Both native architectures passed full launcher and plain-Compose recovery,
+four ownership modes, day-two operations and local browser acceptance.
+[Retained evidence](../demos/evidence/ops12-source-qualification.json) records
+independent verification of the original checksum inventory and all 31 same-run
+payloads, all six native reports and both deployment report sets. No report is
+borrowed from an earlier source or run. This is a `publish=false` qualification;
+registry copying and anonymous public-pull steps did not run.
+
+Native archive reports require exact source, target, archive and private-Node
+identity, installation/authentication checks and first-party notice carriage.
+ADR-0135 additionally requires the checksum-pinned Node executable, complete
+platform-specific upstream licence and the complete supplementary notices pinned
+for that Node version, including reviewed V8 helpers.
+Native jobs check Node's reported dependency versions and reviewed linkage flags;
+assembly independently reads those actual archive members and the embedded
+manifest, refusing coherent report/content substitutions. The inventory remains
+in `client.json` and the existing native report, inside the 51-payload plan.
+Plugin packaging now copies only the existing runtime module list. The extracted
+archive check compares complete notices and original module bytes, refuses test,
+mock/driver, declaration/map and filesystem-metadata members, and launches the
+Claude hook before adding private test helpers. The same configuration and
+Codex/Copilot lifecycle replays remain required. Native clients consume this
+plugin payload without a separate filtering path.
+Windows additionally exercises the actual download cleanup helper with a
+synchronously acquired exclusive handle released by a native thread, persistent
+sharing-lock exhaustion and immediate non-sharing refusal. Cleanup retries only
+sharing/lock codes 32 and 33, at most twenty attempts with nineteen 250-ms pauses.
+Installation locks and retained state remain separately protected.
+
+Image qualification requires readable source-matching notices and native
+runtime probes. ADR-0135 also checks the product's actual Node executable and
+seven complete notice files in a stopped, immutable image before running its
+isolated native metadata command. Existing local and both-registry reports
+retain the pinned dependency/notice inventory; assembly independently checks
+its reviewed platform, executable, notice and dependency values. Console
+byte/source binding and the original 51-payload inventory remain required.
+ADR-0136 also derives installed Debian identities, supporting complete notices,
+package database and reviewed native-library hashes/owners from the original
+product SPDX. Independent stopped-image reads compare the database identities,
+full raw bytes and native ELF target before product execution. File count,
+per-file size, total copied bytes and the 180-second inspection deadline are
+bounded; failed inspection or owned cleanup cannot retain passing evidence.
+Existing local and both-registry reports carry the observed sizes and hashes;
+assembly compares them to the native-image-bound candidate inventory. This
+extends existing reports without changing the 51-payload inventory or claiming
+complete native/third-party coverage.
+Helm operations compare the complete three-row migration ledger
+before and after concurrent reruns. The outage observer requires gateway-loopback
+readiness 503 and liveness 200, then public recovery. Retained reinstall requires
+three stateless routes to recover within 60 seconds before single-execution
+login/authority assertions; only named transient transport errors and HTTP
+502/503/504 retry. The local-evaluation case requires the exact runtime-role
+epoch-preflight refusal, correct reapply and browser login/logout. These gates
+qualify declared source candidates; they do not establish anonymous public
+installation, real client/issuer acceptance, disaster recovery or production
+readiness. [OPS-12](backlog/OPS-12.md) owns the run evidence and remaining work.
+
+The subsequent ADR-0133 source increment adds embedded Rust inventory and
+actual OCI subject/hash/content gates for product/browser candidates. Local ARM
+exports and ordinary-binary refusals pass; clean hosted evidence for the changed
+source is required separately from the `f433eb17` checkpoint above. Native archive
+and non-Rust coverage remain open. [OPS-12](backlog/OPS-12.md) records the boundary.
+
+The following native archive source slice uses private pinned Cargo/Syft tools
+and a distinct build cache key. Each final Rust binary is scanned separately;
+server stripping failures are fatal. CI retains SPDX bytes and archive-bound
+reports, and release assembly reads their Cargo content and hashes before
+including all 20 sidecars in the checksum/publisher inventory. Eight focused
+archive tests and publication refusals pass locally, with real macOS ARM
+client/server and private client-execution evidence. All six clean native hosted
+targets remain required for this changed source. The preceding OCI runs do not
+supply its native archive qualification.
+
+ADR-0134 inventories the console during its existing Vite build with pinned
+build-only `rollup-plugin-sbom` 4.0.0. The generated CycloneDX 1.6 file, full
+third-party notices and closed file inventory stay inside the console archive
+and product image. Independent build checks require the positively rendered
+React/React DOM/scheduler versions and complete MIT bytes, known Vite helpers
+with its full upstream notice, and the source Inter font/OFL. Release preparation
+and assembly rehash the actual regular archive members and compare source input
+bindings; the closed 51-payload plan is unchanged. A normal local build can have
+no release source and remains refused by assembly. To inspect a candidate:
+
+```sh
+node scripts/check-console-package.mjs CONSOLE_ARCHIVE VERSION SOURCE_SHA
+```
+
+`console/dependency-policy.json` pins reviewed package/notice coverage; a lockfile
+or helper change must pass that review rather than silently adding missing
+content. The plugin's optional Rolldown auto-registration warns on this
+Vite/Rollup build; the required Vite, Rollup and SBOM-tool entries are validated.
+The native image verifier also creates a stopped container from the inspected
+immutable product image ID and reads its fixed console directory through Docker's
+bounded TAR stream. It reuses the archive path/type/duplicate/size refusals and
+complete content/source validator, starts no candidate code, and removes only
+its own container and temporary stream. Cleanup failure refuses passing evidence.
+The archive and image reports include the inventory's SHA-256, binding all output
+bytes. Assembly requires equal console evidence for both local native image
+reports; published qualification requires it at both registries and architectures.
+Equal source/SBOM/notice fields cannot substitute for the output inventory hash.
+
+Local macOS ARM and native Linux ARM file sets match; an actual Linux ARM product
+image matches the independently built archive. Both stale and coherently changed
+image-content controls refuse qualification. These dirty source candidates do
+not establish clean hosted qualification or broader non-Rust coverage.
+
 ## Manual owner settings
 
 1. **CI Result** (GitHub Actions) is now required in the active main ruleset.
@@ -284,8 +397,12 @@ not a controlled speedup measurement.
    publisher identity; no signing key or PAT is needed for GitHub publication.
 5. Keep Linux ARM64, macOS Intel/ARM64 and Windows x64/ARM64 hosted runners
    available. A disabled/unavailable runner blocks its required platform; never
-   change it to an allowed failure. Existing OS signing, notarization, installer
-   attestation enforcement and real client issuer/harness gaps remain OPS-12 work.
+   change it to an allowed failure. Source installers now enforce publisher
+   verification under ADR-0132; the recorded source drill passed its native
+   fixture gates. Every changed release source requires new qualification. Archive
+   reports require licence/notice carriage, and native image reports require
+   source-matching notice hashes. OS signing, notarization, complete third-party
+   notice/SBOM review and real client issuer/harness gaps remain OPS-12 work.
 
 The [native CLI asset table](RELEASING.md#native-cli-release-artifacts) names
 every required public package. The v0.4.3 release includes all six client-only

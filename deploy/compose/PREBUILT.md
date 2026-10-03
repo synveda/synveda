@@ -189,10 +189,12 @@ state. Back up first. Use the new bundle only when its notes explicitly support
 your schema epoch. Keep the same runtime selection: an existing HTTPS reference
 deployment must retain `SYNVEDA_COMPOSE_RUNTIME=reference`. Switching to the
 loopback evaluation creates a separate deployment; it does not migrate the
-reference volume, realm or issuer. The current baseline is **epoch 3**. Earlier
-epochs fail with reset guidance; there is no compatibility migrator or
-supported v0.2.0 → current data upgrade. Helm/application rollback never
-reverses SQL migrations.
+reference volume, realm or issuer. The current published baseline is **epoch
+3**. Earlier epochs fail with reset guidance and have no data migrator. The
+source candidate's forward path from the exact v0.4.3 baseline is not a
+qualified published upgrade; preserve v0.4.3 data until OPS-6 proves the joint
+recovery procedure. There is no supported v0.2.0 → current data upgrade.
+Helm/application rollback never reverses SQL migrations.
 
 Ordinary removal is `down`, followed by deliberate removal of the extracted
 archive if desired. Data and secrets survive. For a disposable destructive reset:

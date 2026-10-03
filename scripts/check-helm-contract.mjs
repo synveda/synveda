@@ -12,10 +12,10 @@ const appVersion = readFileSync(`${chart}/Chart.yaml`, "utf8").match(
 )?.[1];
 if (!appVersion) throw new Error("chart appVersion is missing");
 
-function render(extraArgs = []) {
+function render(extraArgs = [], valuesFile = values) {
   return spawnSync(
     "helm",
-    ["template", "synveda", chart, "--api-versions", "postgresql.cnpg.io/v1", "-f", values, ...extraArgs],
+    ["template", "synveda", chart, "--api-versions", "postgresql.cnpg.io/v1", "-f", valuesFile, ...extraArgs],
     { encoding: "utf8" },
   );
 }
@@ -26,8 +26,8 @@ function requireSuccess(name, result) {
   }
 }
 
-function requireRefusal(name, expected, extraArgs) {
-  const result = render(extraArgs);
+function requireRefusal(name, expected, extraArgs, valuesFile = values) {
+  const result = render(extraArgs, valuesFile);
   if (result.status === 0) {
     throw new Error(`${name} rendered but should have been refused`);
   }
@@ -116,6 +116,7 @@ requireMarkers("CloudNativePG Cluster", cluster, [
   "create database synveda with owner synveda_migrator template template0 encoding 'UTF8' allow_connections false",
 ]);
 forbidMarkers("CloudNativePG Cluster", cluster, [
+  "grant connect on database postgres to streaming_replica",
   "postInitApplicationSQL:",
   "create extension if not exists vector",
   "create extension if not exists btree_gin",
@@ -140,6 +141,7 @@ if (!productImage || containerImage(worker, "worker") !== productImage) {
 
 requireMarkers("gateway", gateway, [
   "automountServiceAccountToken: false",
+  "terminationGracePeriodSeconds: 40",
   "- name: DATABASE_URL_FILE",
   "value: /run/secrets/synveda-gateway/database_url",
   "- name: SYNVEDA_DATABASE_ROLES_FILE",
@@ -150,6 +152,9 @@ requireMarkers("gateway", gateway, [
   "secretName: synveda-gateway-db",
   "path: /readyz",
 ]);
+if (!/readinessProbe:[\s\S]*?failureThreshold: 1\n\s+volumeMounts:/.test(gateway)) {
+  throw new Error("gateway drain requires one failed readiness probe before volume mounts");
+}
 forbidMarkers("gateway", gateway, [
   "synveda-pg-app",
   "synveda-pg-superuser",
@@ -186,6 +191,51 @@ if (/^\s*ports:/m.test(worker) || resource(valid.stdout, "Service", "worker")) {
 if (gateway.includes("SYNVEDA_EXTRACTOR") || !worker.includes("SYNVEDA_EXTRACTOR")) {
   throw new Error("extractor configuration is not owned exclusively by the worker");
 }
+if (resource(valid.stdout, "Deployment", "capture-worker")) {
+  throw new Error("capture-only workers must remain opt-in");
+}
+const captureScale = render(["--set", "worker.captureOnlyReplicas=2"]);
+requireSuccess("bounded capture-only scale", captureScale);
+const captureWorker = resource(captureScale.stdout, "Deployment", "capture-worker");
+const combinedWorker = resource(captureScale.stdout, "Deployment", "worker");
+requireMarkers("capture-only worker", captureWorker, [
+  "name: synveda-capture-worker",
+  "replicas: 2",
+  "app.kubernetes.io/component: capture-worker",
+  "automountServiceAccountToken: false",
+  "name: SYNVEDA_WORKER_PROFILE",
+  "value: capture-only",
+  "secretName: synveda-worker-db",
+  "value: /run/secrets/synveda-worker/database_url",
+  "name: SYNVEDA_DATABASE_ROLES_FILE",
+  "value: /etc/synveda/database/roles.json",
+  "name: SYNVEDA_EXTRACTOR",
+  "value: 127.0.0.1:8121",
+]);
+requireMarkers("combined worker under capture scale", combinedWorker, ["replicas: 1"]);
+if (containerImage(captureWorker, "capture-worker") !== productImage) {
+  throw new Error("capture-only workers must use the same product image");
+}
+forbidMarkers("capture-only worker", captureWorker, [
+  "SYNVEDA_EMBEDDER",
+  "SYNVEDA_KMS_KEY",
+  "SYNVEDA_OIDC_ISSUERS_FILE",
+  "SYNVEDA_EXECUTION_PROVIDER",
+  "synveda-gateway-db",
+  "synveda-pg-superuser",
+]);
+if (/^\s*ports:/m.test(captureWorker) || resource(captureScale.stdout, "Service", "capture-worker")) {
+  throw new Error("capture-only worker health must remain private");
+}
+requireRefusal("capture-only replicas over the accepted bound", "maximum", [
+  "--set", "worker.captureOnlyReplicas=3",
+]);
+requireRefusal("capture-only database pools without CNPG headroom", "worker.captureOnlyReplicas", [
+  "--set", "worker.captureOnlyReplicas=2", "--set", "postgres.maxConnections=44",
+]);
+requireRefusal("capture-only database pools without bundled PostgreSQL headroom", "worker.captureOnlyReplicas", [
+  "--set", "worker.captureOnlyReplicas=2", "--set", "postgres.maxConnections=44",
+], `${chart}/ci/bundled-values.yaml`);
 
 const bootstrap = namedItem(install, "database-bootstrap");
 const preflight = namedItem(install, "database-preflight");
@@ -211,6 +261,8 @@ requireMarkers("database bootstrap", bootstrap, [
   'cp -- "$source" "$destination"',
   'chmod 0600 "$destination"',
   "exec /usr/local/bin/synveda-database-bootstrap synveda",
+  "name: SYNVEDA_POSTGRES_CNPG_CLUSTER",
+  'value: "true"',
   "name: SYNVEDA_DATABASE_BOOTSTRAP_PRIVATE_DIR",
   "value: /run/secrets",
   "name: synveda-pg-superuser",

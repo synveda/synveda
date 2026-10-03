@@ -71,6 +71,113 @@ issuer/harness use of these archives and cold network download measurements
 remain open. The two historical server binary archives
 and system-Node plugin archive retain their existing contract.
 
+The source candidate in ADR-0135 also pins each private Node executable and its
+complete upstream licence bytes, preserving Windows CRLF. Its existing manifest
+and native report carry the reported dependency versions and notice hashes;
+assembly rechecks the actual archive members. Supplementary nbytes, SQLite,
+Abseil, FP16, rapidhash and V8-zlib notices stay beside the full upstream licence;
+Node 24 clients also carry Highway's notice. The product image carries its
+reviewed Node 22 notice set. The native image verifier reads the actual executable
+and notices
+before isolated metadata execution; local and both-registry assembly require
+the pinned inventory in existing reports. Local macOS ARM client and Linux ARM
+product candidates pass; these are not changes to published v0.4.3 or clean
+hosted qualification. Reported versions do not establish complete transitive
+native-library coverage. The [source review](../demos/evidence/ops12-node-source-notice-review.json)
+retains exact source/archive hashes and Windows static imports; ncrypto and
+fast_float provenance and conditional V8 coverage remain open.
+
+Source release packaging retains the exact root `LICENSE` and `NOTICE` in
+native server archives, the console, reference bundle, chart and plugin archive.
+Each independently copied adapter package and private shared package also
+retains those files and its Apache-2.0 metadata. Client qualification compares
+every required notice with source bytes, and assembly requires the resulting
+`licence-and-notice-carriage` check from all six native archive reports.
+Assembly separately refuses missing, changed, duplicate or non-regular notices
+in the six other TAR/chart archives. Chart parity checks the real packaged bytes
+across clock seconds. The packager fixes timestamps only in its private staging
+copies; original chart and complete notice bytes remain intact.
+
+The six Synveda OCI images retain those notices at
+`/usr/share/licenses/synveda/`, readable without root. Native candidate and
+anonymous public-image verification run isolated SHA-256 checks and report
+`notice_sha256`; final qualification requires matching source hashes for every
+image in both registries. Upstream images and their terms remain separate.
+These source gates do not change earlier published artifacts or establish a
+complete third-party notice/SBOM review. The
+[2026-09-30 source drill](../demos/evidence/ops12-source-qualification.json)
+verified carriage on all six native clients and both Linux image architectures
+from clean source `f433eb17`, with the original 31-file same-run inventory.
+Every changed release source still requires the full native qualification;
+this `publish=false` checkpoint does not qualify anonymous public pulls.
+
+The plugin packager copies only the existing executable module set; native
+clients use that same payload. Tests, mock/driver modules, declarations, source
+maps and Darwin filesystem metadata are excluded. Archive checks inspect the
+original shipped files before adding private helpers for configuration/lifecycle
+replays. The [plugin/chart probe](../demos/evidence/ops12-plugin-chart-inventory-probe.json)
+records actual component and full-notice bytes and the maintained scanner's
+coverage gaps; it does not establish a complete plugin/chart SBOM.
+
+Under [ADR-0133](adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md),
+product/browser images build Rust executables with locked `cargo-auditable`.
+Their native OCI candidates require actual blob hashes, source/platform and
+in-toto subject bindings, the pinned Syft generator and expected Cargo roots plus
+locked Cedar/SQLx versions. Candidate reports retain statement/manifest hashes
+and required package versions; assembly refuses missing or mismatched reports.
+OCI exports use fixed loopback names to populate subjects without publishing.
+These checks do not establish native archive, non-Rust or full dependency SBOM
+coverage, vulnerability policy or readiness; [OPS-12](backlog/OPS-12.md) records
+local ARM evidence and the required clean hosted follow-up.
+
+[ADR-0136](adr/adr-0136-verify-product-system-packages-and-notices.md) extends the
+same product SPDX report with installed Debian identities, supporting copyright
+paths, all recognized raw copyright/common-licence hashes, the package database
+and reviewed OpenSSL/libc/C++ file hashes and owners. Stopped-image inspection
+independently corroborates database identities, original bytes and native ELF
+headers. The raw notices remain in the product. Existing local and both-registry
+image reports retain the actual file sizes/hashes, and assembly requires their
+exact candidate inventory. Public verification reads the checksummed
+`release-candidate-ARCH.json` beside its required registry inventory before
+inspection. No new scanner or release payload is added. Other images, remaining
+native components, plugins/chart terms and security policies remain open.
+
+Native archive producers also use pinned `cargo-auditable` 0.7.6, installed in
+private runner storage. [Reviewed Syft 1.51.0 pins](../scripts/syft-runtimes.json)
+cover all six hosts, with both archive and executable hashes checked before
+execution. Each final archived Rust binary is scanned separately using
+`cargo-auditable-binary-cataloger`; server stripping must succeed. The scanner
+and build tool are never packaged into the client.
+
+The six client archives each have an SPDX sidecar and a Rust-inventory report.
+Each of the two historical server archives has separate SPDX sidecars for CLI,
+gateway and worker, plus one report. These 20 required sidecars join the closed
+release inventory: 51 assembled payloads, 53 after public-image qualification,
+and 55 published files including the checksum inventory and its attestation
+bundle. Assembly rehashes the actual archive and SPDX bytes, checks the exact
+source/target/scanner pin and reads each document's Cargo content and single
+binary SHA-256; another binary cannot supply missing metadata. Publisher
+verification covers their checksums through the same signed inventory.
+
+From the exact producer checkout, after native packaging, the inspection is
+runnable with its reviewed native scanner. `OUTPUT` contains the final archive
+and receives its sidecars; `SOURCE_SHA` must equal the checkout's commit:
+
+```sh
+node scripts/download-syft.mjs TARGET PRIVATE_SCANNER_DIRECTORY
+node scripts/rust-archive-sbom.mjs client TARGET VERSION SOURCE_SHA SYFT_PATH OUTPUT
+# Only darwin-arm64 and linux-x86_64 have historical server archives.
+node scripts/rust-archive-sbom.mjs server TARGET VERSION SOURCE_SHA SYFT_PATH OUTPUT
+```
+
+[Local macOS ARM evidence](../demos/evidence/ops12-native-rust-sbom.json)
+passes the actual client and successfully stripped server binaries, plus private
+client install/reinstall, authentication fixtures and extracted hook replay.
+It is a dirty-checkout probe; assembly deliberately refuses its source state.
+Clean hosted archive qualification remains pending. These documents cover
+embedded Rust dependencies, not Node/JavaScript, C libraries, OS/chart inventory,
+third-party notice completeness or vulnerability/incident policy.
+
 ## Owner setup
 
 1. Select a Docker Hub namespace you own. Do not assume `synveda` is available.
@@ -303,10 +410,17 @@ before extracting it. A checksum from an unauthenticated download does not
 establish publisher identity. Failed or absent attestation is not permission to
 skip verification. GitHub documents [attestation verification](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
-The current installer does not yet enforce this new attestation boundary;
-integrating verification without imposing GitHub CLI or Docker on client-only
-installation remains open. Do not advertise this source installer as an
-authenticated consumer installer. Artifact authentication also does not prove
+The current source installers enforce this boundary under
+[ADR-0132](adr/adr-0132-verify-publisher-before-installing-release-code.md): remote
+installs require a trusted GitHub CLI and an expected source commit, with fixed
+publisher/workflow/tag/runner policy and no checksum-only fallback. Unix uses
+curl for HTTPS redirects. Future release notes render the source commit and
+fetch the inspected bootstrap by that commit. An absolute local asset directory
+without an expected commit remains a clearly labelled development candidate;
+it is not publisher verification. Native Windows and six-platform archive
+qualification are required before publishing this installer contract. The
+published v0.4.3 tag-bound scripts still require the manual verification above.
+Artifact authentication also does not prove
 OS code signing, absence of vulnerabilities or safe data migration. An owner
 incident response must revoke publishing access, identify affected immutable
 digests/tags and publish a reviewed replacement; never silently replace bytes.

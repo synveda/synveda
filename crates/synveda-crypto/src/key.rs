@@ -15,7 +15,7 @@ pub const KEY_LEN: usize = 32;
 /// There is no `Debug` that prints bytes, no `Display`, no `Serialize` and no
 /// `Clone` — a key that can be copied casually is a key that outlives the
 /// scope somebody reasoned about. Getting the bytes out is deliberately
-/// awkward and crate-private ([`DataKey::expose`]).
+/// awkward and crate-private (`DataKey::expose`).
 #[derive(ZeroizeOnDrop)]
 pub struct DataKey([u8; KEY_LEN]);
 

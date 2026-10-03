@@ -309,7 +309,7 @@ pub struct RemovePlan {
 }
 
 /// `synveda mcp uninstall --client <name>` — the exact mirror of
-/// [`install`] (OPS-10, ADR-0067 decision 3).
+/// `install` (OPS-10, ADR-0067 decision 3).
 ///
 /// It removes the one key we own and nothing else. That is the same promise
 /// `install` makes in the other direction, and half a promise is not one: a

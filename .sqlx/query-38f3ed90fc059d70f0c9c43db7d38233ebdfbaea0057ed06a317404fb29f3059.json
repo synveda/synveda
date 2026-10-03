@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select extract(epoch from now() - absolute_expires_at)::double precision\n            as \"age_seconds!\"\n        from console_sessions\n        where absolute_expires_at <= now()\n        order by absolute_expires_at\n        limit 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "age_seconds!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "38f3ed90fc059d70f0c9c43db7d38233ebdfbaea0057ed06a317404fb29f3059"
+}

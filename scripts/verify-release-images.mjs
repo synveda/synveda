@@ -2,24 +2,144 @@
 // OPS-8 / CPR-45: immutable image smoke on a native runner. Public verification
 // stays anonymous; only the internal candidate path admits the loopback registry.
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   digestPattern, imageNamespace, indexDescriptors, platforms,
   releaseImages as repositories, validateIndex, validateRegistryManifest,
 } from "./release-registries.mjs";
+import { readConsoleArchive } from "./check-console-package.mjs";
+import { checkConsoleFiles } from "../console/build/dependency-contract.mjs";
+import { checkNodeFiles, nodeInventory, nodeMetadataArguments } from "./node-runtime-inventory.mjs";
+import { checkNativeBinary, readArchiveMember } from "./rust-archive-sbom.mjs";
+import { checkProductPackageImageReport, checkProductPackagePlan, checkInstalledPackageDatabase, packageDatabase } from "./product-package-inventory.mjs";
+import { checkRustImageReport } from "./rust-image-sbom.mjs";
+import { sha256 } from "./client-artifact.mjs";
 
 export { validateIndex } from "./release-registries.mjs";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
-const execute = (args, timeout = 60_000) =>
-  execFileSync("docker", args, {
-    encoding: "utf8",
+const noticeFiles = ["LICENSE", "NOTICE"];
+export const noticeHashes = Object.fromEntries(noticeFiles.map((name) => [name,
+  createHash("sha256").update(readFileSync(new URL(`../${name}`, import.meta.url))).digest("hex")]));
+const noticeCommand = ["/bin/sh", "-ec", "sha256sum /usr/share/licenses/synveda/LICENSE /usr/share/licenses/synveda/NOTICE"];
+const expectedNotices = noticeFiles.map((name) => `${noticeHashes[name]}  /usr/share/licenses/synveda/${name}`).join("\n");
+const repository = fileURLToPath(new URL("../", import.meta.url));
+const maxConsoleStream = 34 * 1024 * 1024;
+const execute = (args, timeout = 60_000, binary = false, maxBytes = binary ? maxConsoleStream : 8 * 1024 * 1024) => {
+  const output = execFileSync("docker", args, {
+    encoding: binary ? undefined : "utf8",
     timeout,
-    maxBuffer: 8 * 1024 * 1024,
+    maxBuffer: maxBytes,
     stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+  });
+  return binary ? output : output.trim();
+};
+
+export function inspectConsoleImage(imageId, platform, version, source, run = execute, root = repository) {
+  assert.match(imageId, digestPattern);
+  assert.ok(platforms.includes(platform), "expected a native Linux platform");
+  const container = `synveda-console-check-${randomUUID()}`;
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-console-image-"));
+  let report, failure;
+  try {
+    const id = run(["create", "--name", container, "--pull=never", "--platform", platform,
+      "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+      "--user=65532:65532", "--pids-limit=64", "--memory=128m", "--cpus=1",
+      "--entrypoint", "/usr/local/bin/synveda", imageId, "--version"]);
+    assert.match(id, /^[0-9a-f]{64}$/, "expected one stopped inspection container");
+    const bytes = run(["cp", `${container}:/usr/share/synveda/console`, "-"], 60_000, true);
+    assert.ok(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= maxConsoleStream, "console image stream exceeds its bound");
+    const archive = join(scratch, "console.tar");
+    writeFileSync(archive, bytes, { flag: "wx", mode: 0o600 });
+    report = { ...checkConsoleFiles(readConsoleArchive(archive, false), root, version, source), source_sha: source, version };
+  } catch (error) { failure = error; }
+  // Remove only this invocation's container/storage; preserve the inspection cause.
+  try { run(["rm", "--force", "--volumes", container], 15_000); } catch (error) { failure ??= error; }
+  try { rmSync(scratch, { recursive: true }); } catch (error) { failure ??= error; }
+  if (failure) throw failure;
+  return report;
+}
+
+export function inspectNodeImage(imageId, platform, run = execute, root = repository) {
+  assert.match(imageId, digestPattern);
+  assert.ok(platforms.includes(platform), "expected a native Linux platform");
+  const target = platform === "linux/arm64" ? "linux-arm64" : "linux-x86_64";
+  const lock = readJson(join(root, "scripts/node-runtimes.json")).product;
+  const container = `synveda-node-check-${randomUUID()}`;
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-node-image-"));
+  let report, failure;
+  try {
+    const id = run(["create", "--name", container, "--pull=never", "--platform", platform,
+      "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+      "--user=65532:65532", "--pids-limit=64", "--memory=256m", "--cpus=1",
+      "--env=NODE_OPTIONS=", "--env=NODE_PATH=", "--entrypoint", "/usr/local/bin/node", imageId, ...nodeMetadataArguments]);
+    assert.match(id, /^[0-9a-f]{64}$/, "expected one stopped Node inspection container");
+    const read = (path, member, limit) => {
+      const maxStream = limit + 2 * 1024 * 1024;
+      const bytes = run(["cp", `${container}:${path}`, "-"], 60_000, true, maxStream);
+      assert.ok(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= maxStream, "Node image stream exceeds its bound");
+      const archive = join(scratch, `${member}.tar`);
+      writeFileSync(archive, bytes, { flag: "wx", mode: 0o600 });
+      return readArchiveMember(archive, member, limit);
+    };
+    const binary = read("/usr/local/bin/node", "node", 256 * 1024 * 1024);
+    const notices = Object.fromEntries(["LICENSE", ...Object.keys(lock.supplementary_notices)].map((name) =>
+      [name, read(`/usr/share/licenses/node/${name}`, name, 1024 * 1024)]));
+    const files = checkNodeFiles(binary, notices, target, lock);
+    const metadata = run(["start", "--attach", container], 30_000, false, 64 * 1024);
+    assert.ok(typeof metadata === "string" && Buffer.byteLength(metadata) <= 64 * 1024, "Node image metadata exceeds its bound");
+    const observed = JSON.parse(metadata);
+    report = { ...nodeInventory(files, observed, target, lock), runtime_version: observed.versions.node };
+  } catch (error) { failure = error; }
+  try { run(["rm", "--force", "--volumes", container], 15_000); } catch (error) { failure ??= error; }
+  try { rmSync(scratch, { recursive: true }); } catch (error) { failure ??= error; }
+  if (failure) throw failure;
+  return report;
+}
+
+export function inspectProductPackages(imageId, platform, expected, run = execute) {
+  assert.match(imageId, digestPattern);
+  checkProductPackagePlan(expected, platform);
+  const container = `synveda-packages-check-${randomUUID()}`;
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-product-packages-"));
+  const deadline = Date.now() + 180_000;
+  let report, failure, copied = 0;
+  try {
+    const id = run(["create", "--name", container, "--pull=never", "--platform", platform,
+      "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+      "--user=65532:65532", "--pids-limit=64", "--memory=128m", "--cpus=1",
+      "--entrypoint", "/usr/local/bin/synveda", imageId, "--version"]);
+    assert.match(id, /^[0-9a-f]{64}$/, "expected one stopped package inspection container");
+    const files = [];
+    for (const [i, file] of expected.files.entries()) {
+      const remaining = deadline - Date.now();
+      assert.ok(remaining > 0, "product package inspection deadline exceeded");
+      const limit = file.kind === "notice" ? 1024 * 1024 : file.kind === "database" ? 4 * 1024 * 1024 : 32 * 1024 * 1024;
+      const bytes = run(["cp", `${container}:${file.path}`, "-"], Math.min(60_000, remaining), true, limit + 2 * 1024 * 1024);
+      assert.ok(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= limit + 2 * 1024 * 1024, "product package stream exceeds its bound");
+      copied += bytes.length;
+      assert.ok(copied <= 64 * 1024 * 1024, "product package streams exceed their total bound");
+      const archive = join(scratch, `${i}.tar`);
+      writeFileSync(archive, bytes, { flag: "wx", mode: 0o600 });
+      const actual = readArchiveMember(archive, file.path.split("/").at(-1), limit);
+      assert.equal(sha256(actual), file.sha256, "actual product package file hash differs from OCI SPDX");
+      if (file.path === packageDatabase) checkInstalledPackageDatabase(actual, expected);
+      if (file.kind === "library") checkNativeBinary(actual, platform === "linux/arm64" ? "linux-arm64" : "linux-x86_64");
+      files.push({ ...file, bytes: actual.length });
+    }
+    assert.ok(Date.now() <= deadline, "product package inspection deadline exceeded");
+    report = { ...expected, files };
+    checkProductPackageImageReport(report, expected, platform, expected.image_manifest);
+  } catch (error) { failure = error; }
+  try { run(["rm", "--force", "--volumes", container], 15_000); } catch (error) { failure ??= error; }
+  try { rmSync(scratch, { recursive: true }); } catch (error) { failure ??= error; }
+  if (failure) throw failure;
+  return report;
+}
 
 export function validateEnvironment(manifest, version, sourceSha, local = false) {
   if (
@@ -136,6 +256,8 @@ export function verifyImages(
   sourceSha,
   run = execute,
   localCandidate = false,
+  root = repository,
+  productPackages,
 ) {
   validateEnvironment(manifest, version, sourceSha, localCandidate);
   if (!platforms.includes(platform))
@@ -193,7 +315,10 @@ export function verifyImages(
         );
       }
     }
-    for (const command of smokeCommands[name] ?? []) {
+    if (name === "product") checkProductPackagePlan(productPackages, platform, descriptors[platform]);
+    const packageInventory = name === "product" ? inspectProductPackages(local.Id, platform, productPackages, run) : undefined;
+    const commands = [...(smokeCommands[name] ?? []), ...(firstParty ? [noticeCommand] : [])];
+    for (const command of commands) {
       const container = `synveda-release-check-${randomUUID()}`;
       try {
         const output = run([
@@ -226,6 +351,9 @@ export function verifyImages(
             `${name}: compiled CLI version disagrees with the release`,
           );
         }
+        if (command === noticeCommand && output !== expectedNotices) {
+          throw new Error(`${name}: packaged licence/notice hashes disagree with source`);
+        }
       } finally {
         // Bound cleanup even when a Docker client times out after container start.
         try {
@@ -240,7 +368,11 @@ export function verifyImages(
       image,
       platforms: descriptors,
       image_id: local.Id,
-      executable_checks: smokeCommands[name]?.length ?? 0,
+      executable_checks: commands.length,
+      ...(firstParty ? { notice_sha256: noticeHashes } : {}),
+      ...(name === "product" ? { console_inventory: inspectConsoleImage(local.Id, platform, version, sourceSha, run, root) } : {}),
+      ...(name === "product" ? { node_inventory: inspectNodeImage(local.Id, platform, run, root) } : {}),
+      ...(name === "product" ? { package_inventory: packageInventory } : {}),
     });
   }
   return {
@@ -252,12 +384,12 @@ export function verifyImages(
     ...(localCandidate ? { local_candidate: true } : {}),
     checked_at: new Date().toISOString(),
     scope:
-      "Image pull and isolated executable/asset smoke; no deployment or OIDC acceptance.",
+      "Image pull, actual console/Node/package inventory and isolated executable/asset smoke; no deployment or OIDC acceptance.",
     images,
   };
 }
 
-export function verifyRegistrySet(manifest, inventory, platform, version, sourceSha, run = execute) {
+export function verifyRegistrySet(manifest, inventory, platform, version, sourceSha, run = execute, root = repository, productPackages) {
   validateEnvironment(manifest, version, sourceSha);
   validateRegistryManifest(inventory, version, sourceSha);
   if (!inventory.published) throw new Error("dry-run registry inventory is not installable");
@@ -268,8 +400,8 @@ export function verifyRegistrySet(manifest, inventory, platform, version, source
   const registries = {};
   for (const [registry, target] of Object.entries(inventory.registries)) {
     const images = Object.fromEntries(Object.entries(target.images).map(([name, entry]) => [name, entry.reference]));
-    const inspect = (args, timeout) => {
-      const raw = run(args, timeout);
+    const inspect = (args, timeout, binary, maxBytes) => {
+      const raw = run(args, timeout, binary, maxBytes);
       if (args[0] === "buildx") {
         const expected = Object.values(target.images).find((entry) => entry.reference === args.at(-1));
         if (expected && JSON.stringify(indexDescriptors(JSON.parse(raw))) !== JSON.stringify(expected.descriptors)) {
@@ -278,7 +410,7 @@ export function verifyRegistrySet(manifest, inventory, platform, version, source
       }
       return raw;
     };
-    registries[registry] = verifyImages({ ...manifest, image_namespace: target.namespace, images }, platform, version, sourceSha, inspect);
+    registries[registry] = verifyImages({ ...manifest, image_namespace: target.namespace, images }, platform, version, sourceSha, inspect, false, root, productPackages);
   }
   return { ...registries.dockerhub, registries };
 }
@@ -290,9 +422,9 @@ if (
   try {
     const [bundle, platform, version, sourceSha, report, inventoryPath, ...extra] =
       process.argv.slice(2);
-    if (!report || extra.length)
+    if (!report || !inventoryPath || extra.length)
       throw new Error(
-        "usage: verify-release-images.mjs BUNDLE PLATFORM VERSION SOURCE_SHA REPORT [REGISTRY_INVENTORY]",
+        "usage: verify-release-images.mjs BUNDLE PLATFORM VERSION SOURCE_SHA REPORT REGISTRY_INVENTORY",
       );
     requireAnonymousConfig(process.env.DOCKER_CONFIG);
     if (
@@ -302,9 +434,13 @@ if (
       throw new Error("archive identity does not match the workflow");
     }
     const manifest = readJson(join(bundle, "environment.json"));
-    const result = inventoryPath
-      ? verifyRegistrySet(manifest, readJson(inventoryPath), platform, version, sourceSha)
-      : verifyImages(manifest, platform, version, sourceSha);
+    assert.ok(platforms.includes(platform), "expected a native Linux platform");
+    const candidate = readJson(join(dirname(inventoryPath), `release-candidate-${platform.split("/")[1]}.json`));
+    assert.equal(candidate.source, sourceSha); assert.equal(candidate.version, version); assert.equal(candidate.arch, platform.split("/")[1]);
+    assert.equal(candidate.source_dirty, false, "package inspection requires clean candidate evidence");
+    const sbom = candidate.images?.product?.rust_sbom;
+    checkRustImageReport(sbom, "product", version, sbom?.image_manifest, platform);
+    const result = verifyRegistrySet(manifest, readJson(inventoryPath), platform, version, sourceSha, undefined, undefined, sbom.debian_inventory);
     writeFileSync(report, `${JSON.stringify(result, null, 2)}\n`);
     console.log(
       `Verified ${result.images.length} anonymous digest pulls per registry on ${platform}; report: ${report}`,

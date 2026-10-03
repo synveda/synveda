@@ -18,7 +18,7 @@ use crate::{Written, storage_error};
 /// was already present.
 pub const OBJECTS_WRITTEN_TOTAL: &str = "synveda_vedaflow_objects_written_total";
 
-/// The largest blob the store accepts, matching migration 0018's CHECK.
+/// The largest blob the store accepts, matching `vedaflow_objects`' CHECK.
 /// A governed store that accepts arbitrary blobs is a file server with an
 /// approval workflow; raising this is a reviewed diff (ADR-0030 reversal
 /// trigger b).

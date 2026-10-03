@@ -13,7 +13,7 @@ default-run = "synveda-gateway"
 # integration tests can assemble handlers without a process supervisor. The
 # release binaries reject this feature and the normal library does not expose
 # the behavior-only router.
-test-support = []
+test-support = ["synveda-identity/test-support"]
 
 [[bin]]
 name = "synveda-gateway"
@@ -46,6 +46,7 @@ synveda-crypto = { workspace = true }
 synveda-vedaflow = { workspace = true }
 
 axum = { workspace = true }
+async-trait = { workspace = true }
 # The inject audit event's task hash (CTX-3, ADR-0026 decision 5).
 blake3 = { workspace = true }
 chrono = { workspace = true }

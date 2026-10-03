@@ -37,9 +37,100 @@ use synveda_types::{
     CurrentRelaxation, Error, GroupId, Identity, IdentityKind, Result, ScopeId, Sensitivity,
     TenantId,
 };
+use tokio::sync::watch;
+use tokio::time::Instant;
 
 use crate::app::AppState;
-use crate::telemetry::{POLICY_PACK_RELOADS_TOTAL, SERVICE_TOKEN_REJECTIONS_TOTAL};
+use crate::telemetry::{
+    POLICY_PACK_ACTIVE_TENANTS, POLICY_PACK_REFRESH_SECONDS, POLICY_PACK_REFRESH_SWEEPS_TOTAL,
+    POLICY_PACK_RELOADS_TOTAL, POLICY_PACK_SOURCES_PER_TENANT, SERVICE_TOKEN_REJECTIONS_TOTAL,
+};
+
+/// Source-candidate safety ceiling for every process-local policy compile;
+/// deployment configuration cannot widen it.
+pub const MAX_POLICY_PACK_AGE: Duration = Duration::from_secs(30);
+
+/// The authority generation whose stored policy packs converged locally.
+///
+/// Database authority may open before the background pack loader finishes.
+/// Keeping this marker separate makes startup and outage recovery refuse
+/// governed work until the exact new generation has loaded its packs.
+#[derive(Clone)]
+pub struct PolicyReadyGeneration {
+    lease: watch::Sender<PolicyLease>,
+    max_age: Duration,
+}
+
+#[derive(Clone, Copy)]
+struct PolicyLease {
+    generation: u64,
+    until: Instant,
+}
+
+impl Default for PolicyReadyGeneration {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PolicyReadyGeneration {
+    /// Starts with no policy generation eligible to serve.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::with_max_age(MAX_POLICY_PACK_AGE)
+    }
+
+    pub(crate) fn with_max_age(max_age: Duration) -> Self {
+        let (lease, _) = watch::channel(PolicyLease {
+            generation: 0,
+            until: Instant::now(),
+        });
+        Self { lease, max_age }
+    }
+
+    /// Publishes one completed initial convergence to the HTTP plane.
+    pub fn mark_converged(&self, generation: u64) {
+        self.lease.send_replace(PolicyLease {
+            generation,
+            until: Instant::now() + self.max_age,
+        });
+    }
+
+    /// Renews only the generation whose complete sweep succeeded.
+    pub fn mark_refreshed(&self, generation: u64) {
+        let current = self.lease.borrow().generation;
+        if generation != 0 && current == generation {
+            self.mark_converged(generation);
+        }
+    }
+
+    /// Whether the current database-authority generation has fresh packs.
+    #[must_use]
+    pub fn is_for(&self, generation: u64) -> bool {
+        let lease = self.lease.borrow();
+        generation != 0 && lease.generation == generation && Instant::now() < lease.until
+    }
+
+    /// Completes when the current lease expires or belongs to another
+    /// authority generation. Middleware cancels the in-flight request then.
+    pub async fn stale_for(&self, generation: u64) {
+        let mut changed = self.lease.subscribe();
+        loop {
+            let lease = *changed.borrow_and_update();
+            if generation == 0 || lease.generation != generation || Instant::now() >= lease.until {
+                return;
+            }
+            tokio::select! {
+                _ = tokio::time::sleep_until(lease.until) => {}
+                update = changed.changed() => {
+                    if update.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Everything [`require`] assembles for one decision: the principal and
 /// the caller-supplied data the PDP resolves and materialises from.
@@ -328,13 +419,14 @@ async fn gather_resolved_identity(
     };
     let principal_scopes: Arc<[ScopeNode]> = match own_scope {
         Some(scope_id) => {
-            // The identity pins its scope, so this resolves; a missing row
-            // (mid-transaction archive) just leaves the principal
-            // unanchored — composition rules then read nothing (fail
-            // closed).
-            let Some(scope) = scopes::get(&mut *conn, tenant_id, scope_id).await? else {
-                unreachable!("an identity's scope is pinned by its foreign key")
-            };
+            // A missing scope contradicts the identity/principal lookup in
+            // this transaction. Refuse the decision instead of panicking in
+            // the authorisation path.
+            let scope = scopes::get(&mut *conn, tenant_id, scope_id)
+                .await?
+                .ok_or_else(|| Error::Storage {
+                    message: "the principal scope disappeared during authorisation".to_owned(),
+                })?;
             let sealed = identity.as_ref().is_some_and(Identity::sealed);
             let mut chain = vec![ScopeNode::from_scope(&scope, sealed)];
             for ancestor in scopes::ancestors(&mut *conn, tenant_id, scope_id).await? {
@@ -756,12 +848,20 @@ fn empty_chain() -> Arc<[ScopeNode]> {
 /// tenant transaction — `policy_packs` is RLS-scoped) and reconcile the
 /// PDP: install changed packs, drop removed ones, skip unchanged
 /// versions. A pack that fails to compile keeps that pack's last-good
-/// compile (ADR-0012 decision 5); per-tenant and per-pack failures never
-/// abort the sweep.
+/// compile (ADR-0012 decision 5), but the sweep as a whole is unsuccessful
+/// and cannot renew the process's freshness lease (ADR-0127/ADR-0128).
 #[tracing::instrument(name = "authz.refresh_packs", skip_all, err(Display))]
 pub async fn refresh_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
-    for tenant in tenants::active(pool).await? {
-        refresh_tenant_packs(pool, pdp, tenant.id).await;
+    let mut failed = false;
+    let active = tenants::active(pool).await?;
+    metrics::gauge!(POLICY_PACK_ACTIVE_TENANTS).set(active.len() as f64);
+    for tenant in active {
+        failed |= refresh_tenant_packs(pool, pdp, tenant.id).await == "error";
+    }
+    if failed {
+        return Err(Error::Invalid {
+            message: "stored policy-pack refresh did not converge".to_owned(),
+        });
     }
     Ok(())
 }
@@ -774,7 +874,9 @@ pub async fn refresh_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
 /// background plane cannot start until every active tenant has been read and
 /// compiled once.
 pub async fn converge_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
-    for tenant in tenants::active(pool).await? {
+    let active = tenants::active(pool).await?;
+    metrics::gauge!(POLICY_PACK_ACTIVE_TENANTS).set(active.len() as f64);
+    for tenant in active {
         let outcomes = refresh_tenant(pool, pdp, tenant.id).await?;
         if record_refresh_outcomes(&outcomes) == "error" {
             return Err(Error::Invalid {
@@ -826,6 +928,7 @@ async fn refresh_tenant(
 ) -> Result<Vec<&'static str>> {
     let mut tx = rls::begin_tenant_tx(pool, tenant_id).await?;
     let stored = policy_packs::stored(&mut *tx, tenant_id).await?;
+    metrics::histogram!(POLICY_PACK_SOURCES_PER_TENANT).record(stored.len() as f64);
     // Read-only transaction; dropping it rolls back, GUC included.
     drop(tx);
     let installed = pdp.installed_versions(tenant_id);
@@ -870,14 +973,15 @@ async fn refresh_tenant(
 
 /// Runs the process-local policy-pack refresh loop until process shutdown.
 ///
-/// The worker performs one successful refresh before this loop is started,
-/// so Capture cannot decide against a fresh process that has not installed
-/// stored tenant packs yet.
+/// Gateway and workers perform initial convergence before this loop starts.
+/// A complete failed sweep keeps last-good packs but cannot renew the
+/// process-local freshness lease.
 pub async fn run_pack_refresher(
     pool: PgPool,
     pdp: Arc<Pdp>,
     interval: Duration,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
+    policy_lease: (PolicyReadyGeneration, u64),
 ) {
     let mut ticker = tokio::time::interval(interval);
     // The initial convergence was explicit; do not immediately duplicate it.
@@ -895,8 +999,31 @@ pub async fn run_pack_refresher(
         if *shutdown.borrow() {
             return;
         }
-        if let Err(error) = refresh_packs_once(&pool, &pdp).await {
-            tracing::warn!(error = %error, "policy pack refresh sweep failed");
+        let started = Instant::now();
+        let outcome = tokio::time::timeout(
+            crate::authority::CHECK_TIMEOUT,
+            refresh_packs_once(&pool, &pdp),
+        )
+        .await;
+        let label = match outcome {
+            Ok(Ok(())) => {
+                policy_lease.0.mark_refreshed(policy_lease.1);
+                "ok"
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(error = %error, "policy pack refresh sweep failed");
+                "error"
+            }
+            Err(_) => {
+                tracing::warn!("policy pack refresh sweep timed out");
+                "timeout"
+            }
+        };
+        metrics::counter!(POLICY_PACK_REFRESH_SWEEPS_TOTAL, "outcome" => label).increment(1);
+        metrics::histogram!(POLICY_PACK_REFRESH_SECONDS, "outcome" => label)
+            .record(started.elapsed().as_secs_f64());
+        if *shutdown.borrow() {
+            return;
         }
     }
 }

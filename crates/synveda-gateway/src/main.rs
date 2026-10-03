@@ -7,7 +7,7 @@
 //! and `/auth/*`, with `SYNVEDA_PUBLIC_URL` naming this gateway in redirect
 //! URIs, default `http://127.0.0.1:8120`) or `SYNVEDA_DEV_JWT_SECRET` (the
 //! HS256 dev mode, ADR-0008). Neither set means every `/v1` request is
-//! rejected. `SYNVEDA_POLICY_REFRESH_SECS` (default 5, range 1..=3600) paces
+//! rejected. `SYNVEDA_POLICY_REFRESH_SECS` (default 5, range 1..=15) paces
 //! the policy pack refresher (AUTHZ-1, ADR-0012).
 //! `SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS`
 //! (default 3600) caps service identities' token lifetime at the
@@ -17,7 +17,7 @@
 //! pull run only in `synveda-worker` (CPR-45, ADR-0102). The gateway retains
 //! synchronous request work. Its embedder is selected by `SYNVEDA_EMBEDDER`
 //! (`deterministic` [default] | `tei` —
-//! deliberately no `off`: embed-or-fail is unconditional); `tei`
+//! deliberately no `off`: required indexing fails if embedding fails); `tei`
 //! requires `SYNVEDA_TEI_URL` (the isolated retrieval-evaluation fixture uses
 //! `http://localhost:8110`) and honours `SYNVEDA_EMBEDDER_MODEL`
 //! (default `BAAI/bge-m3`).
@@ -38,6 +38,9 @@ use std::time::Duration;
 
 use synveda_gateway::app::{self, AppState, ConfiguredLogin};
 use synveda_gateway::authority::{self, AuthorityGate, AuthorityMonitor, CheckOutcome};
+use synveda_gateway::authz::PolicyReadyGeneration;
+use synveda_gateway::login_ledger::PostgresLoginLedger;
+use synveda_gateway::shutdown::GatewayAdmission;
 use synveda_gateway::{authz, runtime_config, shutdown, telemetry};
 use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, TokenVerifier};
 use synveda_ingest::embedding::Embedder as _;
@@ -93,6 +96,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let public_url = runtime_config::public_application_url()?;
     let public_origin = public_url.origin().to_owned();
 
+    // OIDC's pre-tenant one-time state and console sessions share the
+    // deployment key. A disabled KMS leaves bearer-only traffic available,
+    // but beginning a login now fails closed before any redirect is issued.
+    let keys = Arc::new(synveda_store::keys::KeyRing::new(
+        runtime_config::kms_from_env()?,
+    ));
+    let deployment_key_ref = match keys.kms() {
+        synveda_crypto::Kms::Disabled => {
+            tracing::warn!(
+                "no SYNVEDA_KMS_KEY: OIDC login, console sessions and per-tenant secrets are \
+                 unavailable (TEN-4, ADR-0064; OPS-7, ADR-0126)"
+            );
+            None
+        }
+        kms => Some(synveda_crypto::KeyManagement::key_ref(kms).to_owned()),
+    };
+
     // One auth mode, never two (ADR-0010); fail closed when neither is
     // configured (ADR-0008).
     let oidc_issuers =
@@ -128,9 +148,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     issuers = %oidc.issuers().collect::<Vec<_>>().join(", "),
                     "OIDC auth mode (ADR-0010): /v1 accepts IdP-issued bearer tokens"
                 );
-                let flow = Arc::new(
-                    public_url.configure_login(LoginFlow::new(Arc::clone(&oidc), redirect_uri)),
-                );
+                let ledger = Arc::new(PostgresLoginLedger::new(pool.clone(), Arc::clone(&keys)));
+                let flow = Arc::new(public_url.configure_login(LoginFlow::new(
+                    Arc::clone(&oidc),
+                    redirect_uri,
+                    ledger,
+                )));
                 (oidc, Some(flow))
             }
             (None, Some(secret)) => {
@@ -146,8 +169,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // The embedded PDP (AUTHZ-1, ADR-0012): failure here means the binary's
     // own schema or an embedded product pack is broken — refuse to boot.
     let pdp = Arc::new(Pdp::new()?);
-    let refresh_interval =
-        runtime_config::bounded_duration_setting("SYNVEDA_POLICY_REFRESH_SECS", 5, 1, 3_600)?;
+    let refresh_interval = runtime_config::bounded_duration_setting(
+        "SYNVEDA_POLICY_REFRESH_SECS",
+        5,
+        1,
+        runtime_config::POLICY_REFRESH_MAX_SECS,
+    )?;
     let shutdown_grace =
         runtime_config::bounded_duration_setting("SYNVEDA_GATEWAY_SHUTDOWN_SECS", 30, 2, 300)?;
 
@@ -159,25 +186,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .filter(|secs| *secs > 0)
             .ok_or("SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS must be a positive integer")?,
         Err(_) => 3600,
-    };
-
-    // The key plane (TEN-4, ADR-0064). `Kms::Disabled` when no KEK is
-    // configured, which is fail-closed rather than fail-to-boot: `/v1`
-    // bearer traffic never touches a sealed column, so a deployment that has
-    // not set a key keeps serving and the surfaces that need one say which
-    // key is missing.
-    let keys = Arc::new(synveda_store::keys::KeyRing::new(
-        runtime_config::kms_from_env()?,
-    ));
-    let deployment_key_ref = match keys.kms() {
-        synveda_crypto::Kms::Disabled => {
-            tracing::warn!(
-                "no SYNVEDA_KMS_KEY: console sessions and per-tenant secrets are \
-                 unavailable (TEN-4, ADR-0064). `synveda kms keygen` mints one."
-            );
-            None
-        }
-        kms => Some(synveda_crypto::KeyManagement::key_ref(kms).to_owned()),
     };
 
     // Request-time context planning keeps the same explicit embedder identity
@@ -225,15 +233,22 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "synveda-gateway listening");
 
+    let admission = GatewayAdmission::new();
+    let policy_ready = PolicyReadyGeneration::new();
+    let (http_stop_tx, mut http_stop) = tokio::sync::watch::channel(false);
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
-    let mut http_stop = stop_rx.clone();
     let http_gate = gate.clone();
+    let http_admission = admission.clone();
+    let http_policy_ready = policy_ready.clone();
     let mut server = tokio::spawn(async move {
-        axum::serve(listener, app::governed_router(app_state, http_gate))
-            .with_graceful_shutdown(async move {
-                while !*http_stop.borrow() && http_stop.changed().await.is_ok() {}
-            })
-            .await
+        axum::serve(
+            listener,
+            app::governed_router(app_state, http_gate, http_admission, http_policy_ready),
+        )
+        .with_graceful_shutdown(async move {
+            while !*http_stop.borrow() && http_stop.changed().await.is_ok() {}
+        })
+        .await
     });
     let mut sentinel = tokio::spawn(authority::run_sentinel(authority, stop_rx.clone()));
     let mut background = tokio::spawn(run_gateway_background(
@@ -242,7 +257,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&keys),
         deployment_key_ref,
         refresh_interval,
-        gate.clone(),
+        GatewayPolicyGate {
+            authority: gate.clone(),
+            ready: policy_ready,
+        },
         stop_rx.clone(),
     ));
     let mut pool_monitor = tokio::spawn(run_pool_monitor(pool.clone(), max_connections, stop_rx));
@@ -265,14 +283,37 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         result = &mut server => ExitReason::Server(result),
     };
 
-    let _ = stop_tx.send(true);
+    admission.withdraw();
+    let drain_window = if matches!(&reason, ExitReason::Signal) {
+        shutdown::gateway_probe_drain_window(shutdown_grace)
+    } else {
+        Duration::ZERO
+    };
+    tracing::info!(
+        drain_window_secs = drain_window.as_secs(),
+        "gateway readiness and new request admission withdrawn"
+    );
+    if !drain_window.is_zero() {
+        tokio::time::sleep(drain_window).await;
+    }
+    let _ = http_stop_tx.send(true);
     let mut sentinel_finished = matches!(&reason, ExitReason::Sentinel(_));
     let mut background_finished = matches!(&reason, ExitReason::Background(_));
     let mut pool_monitor_finished = matches!(&reason, ExitReason::Pool);
     let mut server_finished = matches!(&reason, ExitReason::Server(_));
     let mut cleanup_error = None;
-    let cleanup_grace = shutdown_grace.saturating_sub(SHUTDOWN_ABORT_RESERVE);
+    let cleanup_grace = shutdown_grace
+        .saturating_sub(drain_window)
+        .saturating_sub(SHUTDOWN_ABORT_RESERVE);
     let cleanup = tokio::time::timeout(cleanup_grace, async {
+        if !server_finished {
+            match (&mut server).await {
+                Ok(Ok(())) => {}
+                _ => cleanup_error = Some("gateway HTTP supervisor failed during shutdown"),
+            }
+            server_finished = true;
+        }
+        let _ = stop_tx.send(true);
         if !sentinel_finished {
             let _ = (&mut sentinel).await;
             sentinel_finished = true;
@@ -288,17 +329,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let _ = (&mut pool_monitor).await;
             pool_monitor_finished = true;
         }
-        if !server_finished {
-            match (&mut server).await {
-                Ok(Ok(())) => {}
-                _ => cleanup_error = Some("gateway HTTP supervisor failed during shutdown"),
-            }
-            server_finished = true;
-        }
         pool.close().await;
     })
     .await;
     if cleanup.is_err() {
+        let _ = stop_tx.send(true);
         if !sentinel_finished {
             sentinel.abort();
         }
@@ -369,16 +404,28 @@ enum BackgroundGenerationEnd {
     Shutdown,
 }
 
+struct GatewayPolicyGate {
+    authority: AuthorityGate,
+    ready: PolicyReadyGeneration,
+}
+
 async fn run_gateway_background(
     pool: sqlx::PgPool,
     pdp: Arc<Pdp>,
     keys: Arc<synveda_store::keys::KeyRing>,
     deployment_key_ref: Option<String>,
     refresh_interval: Duration,
-    gate: AuthorityGate,
+    policy_gate: GatewayPolicyGate,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), String> {
+    let GatewayPolicyGate {
+        authority: gate,
+        ready: policy_ready,
+    } = policy_gate;
     loop {
+        if deployment_key_ref.is_some() {
+            metrics::gauge!(telemetry::GATEWAY_DEPLOYMENT_KEY_READY).set(0.0);
+        }
         let generation = tokio::select! {
             biased;
             () = shutdown::requested(&mut shutdown) => return Ok(()),
@@ -393,6 +440,69 @@ async fn run_gateway_background(
         let mut permit = gate.permit();
         if !permit.is_for(generation) {
             continue;
+        }
+
+        if let Some(key_ref) = deployment_key_ref.as_deref() {
+            loop {
+                let provision = tokio::time::timeout(authority::CHECK_TIMEOUT, async {
+                    let version = keys
+                        .provision(&pool, synveda_crypto::KeyScope::Deployment)
+                        .await?;
+                    // An existing row alone does not prove that this process
+                    // can unwrap it with the configured KEK.
+                    keys.sealing_key(&pool, synveda_crypto::KeyScope::Deployment)
+                        .await?;
+                    Ok::<_, synveda_types::Error>(version)
+                });
+                tokio::pin!(provision);
+                let result = tokio::select! {
+                    biased;
+                    () = permit.revoked() => break,
+                    () = shutdown::requested(&mut shutdown) => return Ok(()),
+                    result = &mut provision => result,
+                };
+                match result {
+                    Ok(Ok(version)) => {
+                        metrics::counter!(telemetry::GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL, "outcome" => "ok")
+                            .increment(1);
+                        metrics::gauge!(telemetry::GATEWAY_DEPLOYMENT_KEY_READY).set(1.0);
+                        tracing::info!(
+                            key.version = version.get(),
+                            kek.ref = key_ref,
+                            authority.generation = generation,
+                            "deployment encryption key ready (TEN-4, ADR-0064)"
+                        );
+                        break;
+                    }
+                    Ok(Err(_)) => {
+                        metrics::counter!(telemetry::GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL, "outcome" => "error")
+                            .increment(1);
+                        tracing::warn!("deployment encryption key provisioning unavailable");
+                    }
+                    Err(_) => {
+                        metrics::counter!(telemetry::GATEWAY_DEPLOYMENT_KEY_PROVISION_ATTEMPTS_TOTAL, "outcome" => "timeout")
+                            .increment(1);
+                        tracing::warn!(
+                            timeout_ms = authority::CHECK_TIMEOUT.as_millis() as u64,
+                            "deployment encryption key provisioning timed out"
+                        );
+                    }
+                }
+                tokio::select! {
+                    biased;
+                    () = permit.revoked() => break,
+                    () = shutdown::requested(&mut shutdown) => return Ok(()),
+                    () = tokio::time::sleep(BACKGROUND_RETRY_INTERVAL) => {}
+                }
+            }
+            if !permit.is_for(generation) {
+                if gate.is_terminal() {
+                    return Err(
+                        "the gateway database authority was conclusively refused".to_owned()
+                    );
+                }
+                continue;
+            }
         }
 
         loop {
@@ -427,41 +537,12 @@ async fn run_gateway_background(
             }
             continue;
         }
+        policy_ready.mark_converged(generation);
+        tracing::info!(
+            authority.generation = generation,
+            "stored policy packs converged for gateway admission"
+        );
 
-        if let Some(key_ref) = deployment_key_ref.as_deref() {
-            let provision = tokio::time::timeout(
-                authority::CHECK_TIMEOUT,
-                keys.provision(&pool, synveda_crypto::KeyScope::Deployment),
-            );
-            tokio::pin!(provision);
-            let result = tokio::select! {
-                biased;
-                () = permit.revoked() => None,
-                () = shutdown::requested(&mut shutdown) => return Ok(()),
-                result = &mut provision => Some(result),
-            };
-            match result {
-                None if gate.is_terminal() => {
-                    return Err(
-                        "the gateway database authority was conclusively refused".to_owned()
-                    );
-                }
-                None => continue,
-                Some(Ok(Ok(version))) => tracing::info!(
-                    key.version = version.get(),
-                    kek.ref = key_ref,
-                    authority.generation = generation,
-                    "deployment encryption key ready (TEN-4, ADR-0064)"
-                ),
-                Some(Ok(Err(_))) => {
-                    tracing::warn!("deployment encryption key provisioning unavailable")
-                }
-                Some(Err(_)) => tracing::warn!(
-                    timeout_ms = authority::CHECK_TIMEOUT.as_millis() as u64,
-                    "deployment encryption key provisioning timed out"
-                ),
-            }
-        }
         if !permit.is_for(generation) {
             continue;
         }
@@ -472,6 +553,7 @@ async fn run_gateway_background(
             Arc::clone(&pdp),
             refresh_interval,
             generation_stop_rx,
+            (policy_ready.clone(), generation),
         );
         tokio::pin!(refresher);
         let end = tokio::select! {

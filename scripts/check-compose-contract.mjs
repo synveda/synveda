@@ -26,7 +26,7 @@ const SECRET_SENTINEL = "cpr45-secret-sentinel";
 const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   [
     "keycloak/Dockerfile",
-    "d144d10506d36d42a5df8f38a15814640183e05f5b12b02098cd5acda3299730",
+    "3dc5480395b68ff6a7995e662bd12e8613c5089c5c40d411e15610a24f16a9a3",
   ],
   [
     "keycloak/keycloak-entrypoint",
@@ -2967,6 +2967,9 @@ export function canonicalComposeFindings(model, expected) {
   if (services.gateway?.healthcheck?.test?.at(-1) !== "ready") {
     findings.push("gateway health does not use readiness");
   }
+  if (services.gateway?.stop_grace_period !== "40s") {
+    findings.push("gateway stop grace must exceed its default shutdown bound by ten seconds");
+  }
   if (services.worker?.healthcheck?.test?.at(-1) !== "ready") {
     findings.push("worker health does not use readiness");
   }
@@ -4914,9 +4917,9 @@ function checkStaticInputs() {
   const product = readFileSync(join(COMPOSE, "product/Dockerfile"), "utf8");
   const productBuilds = product
     .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#") && /\bcargo build\b/.test(line));
+    .filter((line) => !line.trimStart().startsWith("#") && /\bcargo (?:auditable )?build\b/.test(line));
   assert.equal(productBuilds.length, 2);
-  for (const build of productBuilds) assert.match(build, /\bcargo build --locked\b/);
+  for (const build of productBuilds) assert.match(build, /\bcargo auditable build --locked\b/);
   assert.match(
     product,
     /apt-get install --no-install-recommends --yes ca-certificates curl libssl3/,

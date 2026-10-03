@@ -6,8 +6,8 @@
 //! `state`, `nonce`) and parks a [`PendingLogin`]; [`LoginFlow::complete`]
 //! consumes the `state` (single use — replay is a 401), exchanges the code
 //! at the token endpoint with the `code_verifier`, and verifies the ID
-//! token including the nonce. Pending logins live in a bounded in-memory
-//! store with a 10-minute TTL: single-replica only until OPS-2 (ADR-0010).
+//! token including the nonce. The one-time state is parked through the
+//! deployment-scoped login ledger (OPS-7, ADR-0126).
 //!
 //! A CLI-initiated login carries a [`CliHandoff`] through the same flow
 //! untouched — the point of ADR-0027 decision 5 is that `synveda login`
@@ -23,18 +23,17 @@
 //! handoff payload is opaque `serde_json::Value` here: what a session
 //! contains — tenant, placement — is the gateway tier's vocabulary.
 
-use std::collections::HashMap;
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use synveda_types::{Error, Result};
 
+use crate::LoginLedger;
 use crate::oidc::OidcVerifier;
 use crate::token::Claims;
 
@@ -57,18 +56,6 @@ const OFFLINE_ACCESS: &str = "offline_access";
 /// larger body is a provider failure, not useful login data.
 const MAX_TOKEN_RESPONSE_BYTES: usize = 65_536;
 
-/// How long a pending login may wait between redirect and callback.
-const PENDING_TTL: Duration = Duration::from_secs(600);
-
-/// How long a handoff code may wait between the loopback redirect and its
-/// redemption (ADR-0027 decision 5). The CLI redeems it in the same
-/// breath; a minute is generous for that and short for anything else.
-const HANDOFF_TTL: Duration = Duration::from_secs(60);
-
-/// Upper bound on parked logins; beyond it new logins are rate-limited
-/// rather than letting an unauthenticated caller grow memory.
-const PENDING_CAP: usize = 10_000;
-
 /// The fixed path a CLI loopback listener must serve (ADR-0027 decision 5).
 const CLI_REDIRECT_PATH: &str = "/callback";
 
@@ -77,22 +64,14 @@ const CLI_REDIRECT_PATH: &str = "/callback";
 /// attacker-controlled, unbounded callback value.
 const CLI_STATE_LENGTH: usize = 43;
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PendingLogin {
     issuer: String,
     code_verifier: String,
     nonce: String,
-    expires_at: Instant,
     /// Where to hand the completed session back.
     destination: LoginDestination,
-}
-
-impl PendingLogin {
-    fn matches_correlation(&self, presented_secret: Option<&str>) -> bool {
-        match &self.destination {
-            LoginDestination::Console(binding) => binding.matches(presented_secret),
-            LoginDestination::Json | LoginDestination::Cli(_) => true,
-        }
-    }
 }
 
 /// Where a completed login is delivered. The OIDC exchange is identical for
@@ -103,7 +82,7 @@ impl PendingLogin {
 /// own reasoning: a struct with `cli: Option<..>` beside `console: bool`
 /// can represent "a CLI login that is also a console login", and the way
 /// that gets fixed is somebody noticing. Here it cannot be written.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum LoginDestination {
     /// AUTH-1's browser login (ADR-0010 §1): the session comes back as
     /// JSON on the callback response.
@@ -128,7 +107,7 @@ pub enum LoginDestination {
 /// host-only cookie and parks only its SHA-256 here. It is therefore not
 /// enough to learn or forward an OIDC callback URL: the callback must also
 /// arrive from the initiating browser.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ConsoleLoginBinding {
     correlation_hash: [u8; 32],
 }
@@ -139,20 +118,8 @@ impl ConsoleLoginBinding {
         Self { correlation_hash }
     }
 
-    fn matches(&self, presented_secret: Option<&str>) -> bool {
-        let Some(presented_hash) = presented_secret.and_then(crate::console::presented_hash) else {
-            return false;
-        };
-        // Fixed-work comparison. The input is already a SHA-256 digest, but
-        // avoiding an early-exit equality keeps the binding independent of
-        // optimiser/library comparison details.
+    fn hash(&self) -> [u8; 32] {
         self.correlation_hash
-            .iter()
-            .zip(presented_hash)
-            .fold(0u8, |difference, (expected, actual)| {
-                difference | (*expected ^ actual)
-            })
-            == 0
     }
 }
 
@@ -160,7 +127,7 @@ impl ConsoleLoginBinding {
 /// loopback URI `synveda login` is listening on, and the CSRF state it
 /// minted. Both round-trip through the IdP untouched — the gateway parks
 /// them, and only ever sends a one-time code back to that address.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CliHandoff {
     /// Loopback return URI, already checked against the allowlist by
     /// [`validate_cli_redirect_uri`].
@@ -297,14 +264,6 @@ impl fmt::Debug for RefreshedSession {
     }
 }
 
-/// Session material parked under a one-time handoff code.
-struct Handoff {
-    /// The CLI state this code is bound to: a code alone redeems nothing.
-    state: String,
-    payload: serde_json::Value,
-    expires_at: Instant,
-}
-
 #[derive(Deserialize)]
 struct TokenResponse {
     access_token: String,
@@ -339,19 +298,21 @@ fn decode_token_response(body: &[u8]) -> Result<TokenResponse> {
 pub struct LoginFlow {
     verifier: Arc<OidcVerifier>,
     redirect_uri: String,
-    pending: Mutex<HashMap<String, PendingLogin>>,
-    handoffs: Mutex<HashMap<String, Handoff>>,
+    ledger: Arc<dyn LoginLedger>,
 }
 
 impl LoginFlow {
     /// Builds a flow that sends callbacks to `redirect_uri`
     /// (`{SYNVEDA_PUBLIC_URL}/auth/callback`).
-    pub fn new(verifier: Arc<OidcVerifier>, redirect_uri: String) -> Self {
+    pub fn new(
+        verifier: Arc<OidcVerifier>,
+        redirect_uri: String,
+        ledger: Arc<dyn LoginLedger>,
+    ) -> Self {
         Self {
             verifier,
             redirect_uri,
-            pending: Mutex::new(HashMap::new()),
-            handoffs: Mutex::new(HashMap::new()),
+            ledger,
         }
     }
 
@@ -444,26 +405,23 @@ impl LoginFlow {
             }
         }
 
-        {
-            let mut pending = self.pending.lock().expect("pending login lock");
-            let now = Instant::now();
-            pending.retain(|_, login| login.expires_at > now);
-            if pending.len() >= PENDING_CAP {
-                return Err(Error::RateLimited {
-                    message: "too many logins in flight; retry shortly".to_owned(),
-                });
-            }
-            pending.insert(
-                state,
-                PendingLogin {
-                    issuer: issuer.clone(),
-                    code_verifier,
-                    nonce,
-                    expires_at: now + PENDING_TTL,
-                    destination,
-                },
-            );
-        }
+        let correlation_hash = match &destination {
+            LoginDestination::Console(binding) => Some(binding.hash()),
+            LoginDestination::Json | LoginDestination::Cli(_) => None,
+        };
+        let pending = PendingLogin {
+            issuer: issuer.clone(),
+            code_verifier,
+            nonce,
+            destination,
+        };
+        self.ledger
+            .park_pending(
+                hash_secret(&state),
+                correlation_hash,
+                encode_pending(&pending)?,
+            )
+            .await?;
         metrics::counter!(OIDC_LOGINS_TOTAL, "issuer" => issuer, "outcome" => "started")
             .increment(1);
         Ok(url.into())
@@ -477,30 +435,37 @@ impl LoginFlow {
     /// browser tab (ADR-0056). A correctly bound expired entry is still
     /// visible here so its terminal callback can clear the browser cookie;
     /// [`Self::complete`] remains the authority that refuses its expiry.
-    pub fn peek_destination(
+    pub async fn peek_destination(
         &self,
         state: &str,
         presented_correlation: Option<&str>,
-    ) -> Option<LoginDestination> {
-        let pending = self.pending.lock().expect("pending login lock");
-        pending
-            .get(state)
-            .filter(|login| login.matches_correlation(presented_correlation))
-            .map(|login| login.destination.clone())
+    ) -> Result<Option<LoginDestination>> {
+        if !valid_cli_state(state) {
+            return Ok(None);
+        }
+        self.ledger
+            .peek_pending(
+                hash_secret(state),
+                presented_correlation.and_then(crate::console::presented_hash),
+            )
+            .await?
+            .map(|payload| decode_pending(&payload).map(|pending| pending.destination))
+            .transpose()
     }
 
     /// Discards a pending login without completing it — the IdP-reported
     /// failure path, where there is no code to exchange and nothing to
     /// keep parked for ten minutes.
-    pub fn abandon(&self, state: &str, presented_correlation: Option<&str>) -> bool {
-        let mut pending = self.pending.lock().expect("pending login lock");
-        if !pending
-            .get(state)
-            .is_some_and(|login| login.matches_correlation(presented_correlation))
-        {
-            return false;
+    pub async fn abandon(&self, state: &str, presented_correlation: Option<&str>) -> Result<bool> {
+        if !valid_cli_state(state) {
+            return Ok(false);
         }
-        pending.remove(state).is_some()
+        self.ledger
+            .abandon_pending(
+                hash_secret(state),
+                presented_correlation.and_then(crate::console::presented_hash),
+            )
+            .await
     }
 
     /// Completes a login from the IdP callback. `state` is single-use;
@@ -511,20 +476,27 @@ impl LoginFlow {
         code: &str,
         presented_correlation: Option<&str>,
     ) -> Result<LoginSession> {
-        let login = {
-            let mut pending = self.pending.lock().expect("pending login lock");
-            if !pending
-                .get(state)
-                .is_some_and(|login| login.matches_correlation(presented_correlation))
-            {
-                None
-            } else {
-                pending.remove(state)
-            }
+        if !valid_cli_state(state) {
+            return Err(Error::Unauthenticated {
+                message: "unknown or already-used login state".to_owned(),
+            });
         }
-        .ok_or_else(|| Error::Unauthenticated {
-            message: "unknown or already-used login state".to_owned(),
-        })?;
+        let consumed = self
+            .ledger
+            .consume_pending(
+                hash_secret(state),
+                presented_correlation.and_then(crate::console::presented_hash),
+            )
+            .await?
+            .ok_or_else(|| Error::Unauthenticated {
+                message: "unknown or already-used login state".to_owned(),
+            })?;
+        if consumed.expired {
+            return Err(Error::Unauthenticated {
+                message: "login expired; start again".to_owned(),
+            });
+        }
+        let login = decode_pending(&consumed.payload)?;
         let issuer = login.issuer.clone();
         let outcome = self.complete_inner(login, code).await;
         let label = match &outcome {
@@ -537,11 +509,6 @@ impl LoginFlow {
     }
 
     async fn complete_inner(&self, login: PendingLogin, code: &str) -> Result<LoginSession> {
-        if login.expires_at <= Instant::now() {
-            return Err(Error::Unauthenticated {
-                message: "login expired; start again".to_owned(),
-            });
-        }
         let tokens = self.exchange(&login, code).await?;
         let id_token = tokens.id_token.ok_or_else(|| Error::Dependency {
             service: "oidc-token-endpoint".to_owned(),
@@ -608,43 +575,48 @@ impl LoginFlow {
     /// returns the code (ADR-0027 decision 5). `state` is the CLI's own,
     /// and redemption requires it: the code that travels to the loopback
     /// listener is worth nothing to anything that did not start the login.
-    pub fn park_handoff(&self, state: &str, payload: serde_json::Value) -> Result<String> {
-        let code = random_urlsafe()?;
-        let mut handoffs = self.handoffs.lock().expect("handoff lock");
-        let now = Instant::now();
-        handoffs.retain(|_, handoff| handoff.expires_at > now);
-        if handoffs.len() >= PENDING_CAP {
-            return Err(Error::RateLimited {
-                message: "too many logins in flight; retry shortly".to_owned(),
+    pub async fn park_handoff(&self, state: &str, payload: serde_json::Value) -> Result<String> {
+        if !valid_cli_state(state) {
+            return Err(Error::Invalid {
+                message: "CLI handoff state has the wrong shape".to_owned(),
             });
         }
-        handoffs.insert(
-            code.clone(),
-            Handoff {
-                state: state.to_owned(),
-                payload,
-                expires_at: now + HANDOFF_TTL,
-            },
-        );
+        let code = random_urlsafe()?;
+        let encoded = serde_json::to_vec(&payload).map_err(|_| Error::Internal {
+            message: "could not encode CLI handoff".to_owned(),
+        })?;
+        if encoded.len() > 131_000 {
+            return Err(Error::Invalid {
+                message: "CLI handoff exceeds the byte bound".to_owned(),
+            });
+        }
+        self.ledger
+            .park_handoff(hash_secret(&code), hash_secret(state), encoded)
+            .await?;
         Ok(code)
     }
 
     /// Redeems a handoff code for its parked session material. Single use
     /// — the entry is removed on the first attempt, valid or not — 60
     /// seconds, and bound to the state the CLI minted.
-    pub fn redeem_handoff(&self, code: &str, state: &str) -> Result<serde_json::Value> {
+    pub async fn redeem_handoff(&self, code: &str, state: &str) -> Result<serde_json::Value> {
         let rejected = || Error::Unauthenticated {
             message: "unknown, expired, or already-redeemed handoff code".to_owned(),
         };
-        let handoff = {
-            let mut handoffs = self.handoffs.lock().expect("handoff lock");
-            handoffs.remove(code)
-        }
-        .ok_or_else(rejected)?;
-        if handoff.expires_at <= Instant::now() || handoff.state != state {
+        if !valid_cli_state(code) {
             return Err(rejected());
         }
-        Ok(handoff.payload)
+        let handoff = self
+            .ledger
+            .consume_handoff(hash_secret(code))
+            .await?
+            .ok_or_else(rejected)?;
+        if handoff.expired || !valid_cli_state(state) || handoff.state_hash != hash_secret(state) {
+            return Err(rejected());
+        }
+        serde_json::from_slice(&handoff.payload).map_err(|_| Error::Internal {
+            message: "stored CLI handoff could not be decoded".to_owned(),
+        })
     }
 
     /// The authorization-code exchange: a public client authenticating the
@@ -731,6 +703,33 @@ impl LoginFlow {
     }
 }
 
+fn hash_secret(secret: &str) -> [u8; 32] {
+    Sha256::digest(secret.as_bytes()).into()
+}
+
+fn encode_pending(pending: &PendingLogin) -> Result<Vec<u8>> {
+    let payload = serde_json::to_vec(pending).map_err(|_| Error::Internal {
+        message: "could not encode pending login".to_owned(),
+    })?;
+    if payload.len() > 8_000 {
+        return Err(Error::Invalid {
+            message: "pending login exceeds the byte bound".to_owned(),
+        });
+    }
+    Ok(payload)
+}
+
+fn decode_pending(payload: &[u8]) -> Result<PendingLogin> {
+    if payload.len() > 8_000 {
+        return Err(Error::Internal {
+            message: "stored pending login exceeds the byte bound".to_owned(),
+        });
+    }
+    serde_json::from_slice(payload).map_err(|_| Error::Internal {
+        message: "stored pending login could not be decoded".to_owned(),
+    })
+}
+
 /// 32 bytes of CSPRNG entropy, base64url — used for `state`, `nonce`, and
 /// the PKCE `code_verifier` (43 chars, within RFC 7636's 43–128).
 fn random_urlsafe() -> Result<String> {
@@ -750,10 +749,17 @@ fn valid_cli_state(state: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
+    use crate::MemoryLoginLedger;
     use crate::oidc::parse_issuers;
 
     fn flow() -> LoginFlow {
+        flow_with_ledger().0
+    }
+
+    fn flow_with_ledger() -> (LoginFlow, Arc<MemoryLoginLedger>) {
         let verifier = Arc::new(
             OidcVerifier::new(
                 parse_issuers(
@@ -763,7 +769,15 @@ mod tests {
             )
             .unwrap(),
         );
-        LoginFlow::new(verifier, "http://127.0.0.1:8120/auth/callback".to_owned())
+        let ledger = Arc::new(MemoryLoginLedger::new());
+        (
+            LoginFlow::new(
+                verifier,
+                "http://127.0.0.1:8120/auth/callback".to_owned(),
+                ledger.clone(),
+            ),
+            ledger,
+        )
     }
 
     #[test]
@@ -780,8 +794,9 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_login_state_is_rejected_without_io() {
+        let unknown = random_urlsafe().expect("unissued state");
         let err = flow()
-            .complete("never-issued", "code", None)
+            .complete(&unknown, "code", None)
             .await
             .expect_err("unknown state must be rejected");
         assert!(matches!(err, Error::Unauthenticated { .. }), "got {err:?}");
@@ -882,6 +897,7 @@ mod tests {
                 provisioning: None,
                 lifetime: Some(Duration::from_secs(60)),
                 credential_class: crate::token::CredentialClass::Interactive,
+                oidc_token: None,
             },
             issuer: "https://idp.example.test".to_owned(),
             access_token: "never-log-access-token".to_owned(),
@@ -931,66 +947,95 @@ mod tests {
 
     #[tokio::test]
     async fn console_state_is_invisible_and_unconsumed_without_its_browser_secret() {
-        let flow = flow();
+        let (flow, ledger) = flow_with_ledger();
         let correlation = crate::console::mint().expect("correlation");
-        let state = "console-state";
-        flow.pending.lock().expect("pending login lock").insert(
-            state.to_owned(),
-            PendingLogin {
-                issuer: "http://127.0.0.1:1/idp".to_owned(),
-                code_verifier: "verifier".to_owned(),
-                nonce: "nonce".to_owned(),
-                expires_at: Instant::now() + PENDING_TTL,
-                destination: LoginDestination::Console(ConsoleLoginBinding::new(correlation.hash)),
-            },
-        );
+        let state = random_urlsafe().expect("console state");
+        flow.ledger
+            .park_pending(
+                hash_secret(&state),
+                Some(correlation.hash),
+                encode_pending(&PendingLogin {
+                    issuer: "http://127.0.0.1:1/idp".to_owned(),
+                    code_verifier: "verifier".to_owned(),
+                    nonce: "nonce".to_owned(),
+                    destination: LoginDestination::Console(ConsoleLoginBinding::new(
+                        correlation.hash,
+                    )),
+                })
+                .expect("encode"),
+            )
+            .await
+            .expect("park");
 
         for wrong in [
             None,
             Some("malformed"),
             Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
         ] {
-            assert!(flow.peek_destination(state, wrong).is_none());
-            assert!(!flow.abandon(state, wrong));
+            assert!(
+                flow.peek_destination(&state, wrong)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(!flow.abandon(&state, wrong).await.unwrap());
             let error = flow
-                .complete(state, "code", wrong)
+                .complete(&state, "code", wrong)
                 .await
                 .expect_err("wrong correlation must fail before exchange");
             assert!(matches!(error, Error::Unauthenticated { .. }));
         }
 
         assert!(matches!(
-            flow.peek_destination(state, Some(&correlation.secret)),
+            flow.peek_destination(&state, Some(&correlation.secret))
+                .await
+                .unwrap(),
             Some(LoginDestination::Console(_))
         ));
-        assert!(flow.abandon(state, Some(&correlation.secret)));
         assert!(
-            flow.peek_destination(state, Some(&correlation.secret))
+            flow.abandon(&state, Some(&correlation.secret))
+                .await
+                .unwrap()
+        );
+        assert!(
+            flow.peek_destination(&state, Some(&correlation.secret))
+                .await
+                .unwrap()
                 .is_none()
         );
 
         let expired = crate::console::mint().expect("expired correlation");
-        flow.pending.lock().expect("pending login lock").insert(
-            "expired-console-state".to_owned(),
-            PendingLogin {
-                issuer: "http://127.0.0.1:1/idp".to_owned(),
-                code_verifier: "verifier".to_owned(),
-                nonce: "nonce".to_owned(),
-                expires_at: Instant::now() - Duration::from_secs(1),
-                destination: LoginDestination::Console(ConsoleLoginBinding::new(expired.hash)),
-            },
-        );
+        let expired_state = random_urlsafe().expect("expired console state");
+        flow.ledger
+            .park_pending(
+                hash_secret(&expired_state),
+                Some(expired.hash),
+                encode_pending(&PendingLogin {
+                    issuer: "http://127.0.0.1:1/idp".to_owned(),
+                    code_verifier: "verifier".to_owned(),
+                    nonce: "nonce".to_owned(),
+                    destination: LoginDestination::Console(ConsoleLoginBinding::new(expired.hash)),
+                })
+                .expect("encode"),
+            )
+            .await
+            .expect("park");
+        ledger.expire_pending(hash_secret(&expired_state));
         assert!(matches!(
-            flow.peek_destination("expired-console-state", Some(&expired.secret)),
+            flow.peek_destination(&expired_state, Some(&expired.secret))
+                .await
+                .unwrap(),
             Some(LoginDestination::Console(_))
         ));
         let error = flow
-            .complete("expired-console-state", "code", Some(&expired.secret))
+            .complete(&expired_state, "code", Some(&expired.secret))
             .await
             .expect_err("expiry must be refused before token exchange");
         assert!(matches!(error, Error::Unauthenticated { .. }));
         assert!(
-            flow.peek_destination("expired-console-state", Some(&expired.secret))
+            flow.peek_destination(&expired_state, Some(&expired.secret))
+                .await
+                .unwrap()
                 .is_none(),
             "the terminal expired callback consumes its state"
         );
@@ -1009,16 +1054,19 @@ mod tests {
 
     // ── The handoff code (ADR-0027 decision 5) ──────────────────────────
 
-    #[test]
-    fn a_handoff_code_redeems_once_and_only_with_its_state() {
+    #[tokio::test]
+    async fn a_handoff_code_redeems_once_and_only_with_its_state() {
         let flow = flow();
+        let state = random_urlsafe().expect("CLI state");
         let payload = serde_json::json!({ "access_token": "at" });
 
         let code = flow
-            .park_handoff("cli-state", payload.clone())
+            .park_handoff(&state, payload.clone())
+            .await
             .expect("park");
         let wrong = flow
             .redeem_handoff(&code, "another-state")
+            .await
             .expect_err("a code alone must redeem nothing");
         assert!(
             matches!(wrong, Error::Unauthenticated { .. }),
@@ -1027,7 +1075,8 @@ mod tests {
         // The mismatched attempt consumed it: a wrong state is a failed
         // redemption, not a free retry.
         let replay = flow
-            .redeem_handoff(&code, "cli-state")
+            .redeem_handoff(&code, &state)
+            .await
             .expect_err("a consumed code must not redeem");
         assert!(
             matches!(replay, Error::Unauthenticated { .. }),
@@ -1035,14 +1084,16 @@ mod tests {
         );
 
         let code = flow
-            .park_handoff("cli-state", payload.clone())
+            .park_handoff(&state, payload.clone())
+            .await
             .expect("park");
         assert_eq!(
-            flow.redeem_handoff(&code, "cli-state").expect("redeem"),
+            flow.redeem_handoff(&code, &state).await.expect("redeem"),
             payload
         );
         let replay = flow
-            .redeem_handoff(&code, "cli-state")
+            .redeem_handoff(&code, &state)
+            .await
             .expect_err("single use");
         assert!(
             matches!(replay, Error::Unauthenticated { .. }),
@@ -1050,30 +1101,29 @@ mod tests {
         );
     }
 
-    #[test]
-    fn an_expired_handoff_code_redeems_nothing() {
-        let flow = flow();
+    #[tokio::test]
+    async fn an_expired_handoff_code_redeems_nothing() {
+        let (flow, ledger) = flow_with_ledger();
+        let state = random_urlsafe().expect("CLI state");
         let code = flow
-            .park_handoff("cli-state", serde_json::json!({}))
+            .park_handoff(&state, serde_json::json!({}))
+            .await
             .expect("park");
-        // Reach past the clock: the TTL is a minute, and a test that slept
-        // one would be a minute of nothing.
-        flow.handoffs
-            .lock()
-            .expect("handoff lock")
-            .get_mut(&code)
-            .expect("parked")
-            .expires_at = Instant::now() - Duration::from_secs(1);
+        ledger.expire_handoff(hash_secret(&code));
         let err = flow
-            .redeem_handoff(&code, "cli-state")
+            .redeem_handoff(&code, &state)
+            .await
             .expect_err("an expired code must not redeem");
         assert!(matches!(err, Error::Unauthenticated { .. }), "got {err:?}");
     }
 
-    #[test]
-    fn unknown_handoff_codes_are_rejected() {
+    #[tokio::test]
+    async fn unknown_handoff_codes_are_rejected() {
+        let code = random_urlsafe().expect("unissued code");
+        let state = random_urlsafe().expect("CLI state");
         let err = flow()
-            .redeem_handoff("never-issued", "cli-state")
+            .redeem_handoff(&code, &state)
+            .await
             .expect_err("unknown code must be rejected");
         assert!(matches!(err, Error::Unauthenticated { .. }), "got {err:?}");
     }

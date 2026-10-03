@@ -38,6 +38,7 @@ pub mod knowledge;
 mod knowledge_api;
 mod knowledge_conflicts;
 pub mod knowledge_index;
+pub mod login_ledger;
 mod me;
 pub mod okf;
 pub mod openapi;

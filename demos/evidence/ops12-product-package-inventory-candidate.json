@@ -1,0 +1,1921 @@
+{
+  "schema_version": 1,
+  "feature_id": "OPS-12",
+  "evidence": "local-product-system-package-and-full-notice-candidate",
+  "checked_at": "2026-10-01T14:06:28.483Z",
+  "source_sha": "7d1ab12e61fab348c49a5727ae2a2affc6b2c442",
+  "source_tree_dirty": true,
+  "source_inputs": {
+    "docs/adr/adr-0136-verify-product-system-packages-and-notices.md": "74a25773892dc4f8b76676dda22492644cfb84166db415a3ff5ec6584b973b85",
+    "scripts/product-package-inventory.mjs": "3493595e34acee5c90b9916e1f73ee14ca7eb1272851ada1232d95f712e9c6fe",
+    "scripts/verify-release-images.mjs": "ab9959f5c477efbffe93b6a5076ee047f4bf20f1b55fa5f65996340525fdaae8",
+    "scripts/rust-image-sbom.mjs": "51d5d20a3fd40f47771b10e32e06074d14180f1641aa28d63d31897c29452079",
+    "scripts/docker-candidate.mjs": "7d8ac55b45dcd3046b92da2ec9e4a054d17a5790823517e469e38a882479eddf",
+    "scripts/check-release-assets.mjs": "8b7a21e33ca74c1a5c9bb034e96b9101031159648612bd7e4e299fe4167d2387",
+    "scripts/package-chart.sh": "82b857f18fea1f562d0864313c0b68fe2e988478f66f15ad1538a1d90d61c548",
+    "scripts/check-release-parity.test.mjs": "8c3bac049352fe31208fbce203444d7b30b59bff792139c195dd7edc40780bd8",
+    "scripts/product-package-inventory.test.mjs": "6cff81e22fa301892c453edf2094d2e821382119b102f883c82e7fe5235a2cc2",
+    "scripts/fixtures/product-packages.mjs": "baf93db45bf94d4a2aa8eef68ff3f23dceffdcc27f136841585799a075eea18b",
+    "scripts/node-runtime-inventory.mjs": "e0f9cfd3306d1838bf895179f5e0800f49cc13537fa47dafaa7c73fd14c139d4",
+    "scripts/node-runtimes.json": "7e9dc1a62afcf430d3ff9f322ab72eec0262eebe30e7542b2d9ba2a484ea21d3",
+    "scripts/rust-archive-sbom.mjs": "d758b9f1763eb5696be77794a2dfedb176702997945dda6111969f6c8b39c742",
+    "scripts/client-artifact.mjs": "b389ebd8ba81dc01f03b72efec47d9345cf85db5e75598ca8dced2c84fb33060",
+    "deploy/compose/product/Dockerfile": "cf744a34f83a1e3528a137529174d741f248a653ab02b6c0856be4ef8427f19d",
+    "Cargo.lock": "b560b4499f4374f6662ade67af69e0d62238e2e486428f7b08d012d45dae7b12",
+    "console/build/dependency-contract.mjs": "478c5d91589a8152961d83489198ff71b6b867022e4e0a4bb3ebf6ac7ab3da7e",
+    "Makefile": "465877fa2ebef4ae6daef989058873213880508c0bd8f0850dc05124c294e1ec"
+  },
+  "scope": "Dirty reader candidate inspecting a newly built clean Linux ARM product artifact from the recorded parent source. Local installed-package, raw-notice and reviewed native-library gate only; no clean hosted, AMD64, six-client, registry, deployment or complete third-party qualification.",
+  "artifact": {
+    "source_sha": "7d1ab12e61fab348c49a5727ae2a2affc6b2c442",
+    "source_tree_dirty": false,
+    "oci_archive_bytes": 139440128,
+    "oci_archive_sha256": "5b659aa5027c84eac9cfa06fb13308621204f78e3af89f70e45ce11c96959060",
+    "image_id": "sha256:79482289153e630e9f4805740e309b2e79693798d4de86628468bbbc754018ab",
+    "platform": "linux/arm64",
+    "buildkit_sbom_generator": "docker.io/docker/buildkit-syft-scanner:1.12.0@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9",
+    "rust_sbom": {
+      "schema_version": 1,
+      "image_manifest": "sha256:00018d7824029e1c3f0328652c2eeaadd4b1335604b4587326312e60e7acfe03",
+      "attestation_manifest": "sha256:afa8f37a3f82f7f4642dbb0f153b32a9bc5c991687e25f45468024a34afe1221",
+      "statement_sha256": "dcd1a03bd318d465602ada4c57b30f624897cda9056b909014e24bfc774e8a7a",
+      "scanner": "syft-v1.51.0",
+      "spdx_version": "SPDX-2.3",
+      "package_count": 1718,
+      "cargo_package_count": 1606,
+      "cargo_identity_count": 351,
+      "required_packages": {
+        "synveda-cli": "0.4.3",
+        "synveda-gateway": "0.4.3",
+        "synveda-apalis": "0.4.3",
+        "cedar-policy": "4.11.2",
+        "cedar-policy-core": "4.11.2",
+        "sqlx": "0.8.6",
+        "sqlx-postgres": "0.8.6"
+      }
+    }
+  },
+  "package_inventory": {
+    "schema_version": 1,
+    "platform": "linux/arm64",
+    "image_manifest": "sha256:00018d7824029e1c3f0328652c2eeaadd4b1335604b4587326312e60e7acfe03",
+    "packages": [
+      {
+        "name": "adduser",
+        "version": "3.134",
+        "architecture": "all",
+        "source_package": "adduser",
+        "source_version": "3.134",
+        "purl": "pkg:deb/debian/adduser@3.134?arch=all&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/adduser/copyright"
+      },
+      {
+        "name": "apt",
+        "version": "2.6.1",
+        "architecture": "arm64",
+        "source_package": "apt",
+        "source_version": "2.6.1",
+        "purl": "pkg:deb/debian/apt@2.6.1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/apt/copyright"
+      },
+      {
+        "name": "base-files",
+        "version": "12.4+deb12u15",
+        "architecture": "arm64",
+        "source_package": "base-files",
+        "source_version": "12.4+deb12u15",
+        "purl": "pkg:deb/debian/base-files@12.4%2Bdeb12u15?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/base-files/copyright"
+      },
+      {
+        "name": "base-passwd",
+        "version": "3.6.1",
+        "architecture": "arm64",
+        "source_package": "base-passwd",
+        "source_version": "3.6.1",
+        "purl": "pkg:deb/debian/base-passwd@3.6.1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/base-passwd/copyright"
+      },
+      {
+        "name": "bash",
+        "version": "5.2.15-2+b13",
+        "architecture": "arm64",
+        "source_package": "bash",
+        "source_version": "5.2.15-2",
+        "purl": "pkg:deb/debian/bash@5.2.15-2%2Bb13?arch=arm64&distro=debian-12.15&upstream=bash%405.2.15-2",
+        "notice_path": "/usr/share/doc/bash/copyright"
+      },
+      {
+        "name": "bsdutils",
+        "version": "1:2.38.1-5+deb12u3",
+        "architecture": "arm64",
+        "source_package": "util-linux",
+        "source_version": "2.38.1-5+deb12u3",
+        "purl": "pkg:deb/debian/bsdutils@1%3A2.38.1-5%2Bdeb12u3?arch=arm64&distro=debian-12.15&upstream=util-linux%402.38.1-5%2Bdeb12u3",
+        "notice_path": "/usr/share/doc/bsdutils/copyright"
+      },
+      {
+        "name": "ca-certificates",
+        "version": "20250419~deb12u1",
+        "architecture": "all",
+        "source_package": "ca-certificates",
+        "source_version": "20250419~deb12u1",
+        "purl": "pkg:deb/debian/ca-certificates@20250419~deb12u1?arch=all&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/ca-certificates/copyright"
+      },
+      {
+        "name": "coreutils",
+        "version": "9.1-1",
+        "architecture": "arm64",
+        "source_package": "coreutils",
+        "source_version": "9.1-1",
+        "purl": "pkg:deb/debian/coreutils@9.1-1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/coreutils/copyright"
+      },
+      {
+        "name": "curl",
+        "version": "7.88.1-10+deb12u15",
+        "architecture": "arm64",
+        "source_package": "curl",
+        "source_version": "7.88.1-10+deb12u15",
+        "purl": "pkg:deb/debian/curl@7.88.1-10%2Bdeb12u15?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/curl/copyright"
+      },
+      {
+        "name": "dash",
+        "version": "0.5.12-2",
+        "architecture": "arm64",
+        "source_package": "dash",
+        "source_version": "0.5.12-2",
+        "purl": "pkg:deb/debian/dash@0.5.12-2?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/dash/copyright"
+      },
+      {
+        "name": "debconf",
+        "version": "1.5.82",
+        "architecture": "all",
+        "source_package": "debconf",
+        "source_version": "1.5.82",
+        "purl": "pkg:deb/debian/debconf@1.5.82?arch=all&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/debconf/copyright"
+      },
+      {
+        "name": "debian-archive-keyring",
+        "version": "2023.3+deb12u2",
+        "architecture": "all",
+        "source_package": "debian-archive-keyring",
+        "source_version": "2023.3+deb12u2",
+        "purl": "pkg:deb/debian/debian-archive-keyring@2023.3%2Bdeb12u2?arch=all&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/debian-archive-keyring/copyright"
+      },
+      {
+        "name": "debianutils",
+        "version": "5.7-0.5~deb12u1",
+        "architecture": "arm64",
+        "source_package": "debianutils",
+        "source_version": "5.7-0.5~deb12u1",
+        "purl": "pkg:deb/debian/debianutils@5.7-0.5~deb12u1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/debianutils/copyright"
+      },
+      {
+        "name": "diffutils",
+        "version": "1:3.8-4",
+        "architecture": "arm64",
+        "source_package": "diffutils",
+        "source_version": "1:3.8-4",
+        "purl": "pkg:deb/debian/diffutils@1%3A3.8-4?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/diffutils/copyright"
+      },
+      {
+        "name": "dpkg",
+        "version": "1.21.23",
+        "architecture": "arm64",
+        "source_package": "dpkg",
+        "source_version": "1.21.23",
+        "purl": "pkg:deb/debian/dpkg@1.21.23?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/dpkg/copyright"
+      },
+      {
+        "name": "e2fsprogs",
+        "version": "1.47.0-2+b2",
+        "architecture": "arm64",
+        "source_package": "e2fsprogs",
+        "source_version": "1.47.0-2",
+        "purl": "pkg:deb/debian/e2fsprogs@1.47.0-2%2Bb2?arch=arm64&distro=debian-12.15&upstream=e2fsprogs%401.47.0-2",
+        "notice_path": "/usr/share/doc/e2fsprogs/copyright"
+      },
+      {
+        "name": "findutils",
+        "version": "4.9.0-4",
+        "architecture": "arm64",
+        "source_package": "findutils",
+        "source_version": "4.9.0-4",
+        "purl": "pkg:deb/debian/findutils@4.9.0-4?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/findutils/copyright"
+      },
+      {
+        "name": "gcc-12-base",
+        "version": "12.2.0-14+deb12u1",
+        "architecture": "arm64",
+        "source_package": "gcc-12",
+        "source_version": "12.2.0-14+deb12u1",
+        "purl": "pkg:deb/debian/gcc-12-base@12.2.0-14%2Bdeb12u1?arch=arm64&distro=debian-12.15&upstream=gcc-12",
+        "notice_path": "/usr/share/doc/gcc-12-base/copyright"
+      },
+      {
+        "name": "gpgv",
+        "version": "2.2.40-1.1+deb12u2",
+        "architecture": "arm64",
+        "source_package": "gnupg2",
+        "source_version": "2.2.40-1.1+deb12u2",
+        "purl": "pkg:deb/debian/gpgv@2.2.40-1.1%2Bdeb12u2?arch=arm64&distro=debian-12.15&upstream=gnupg2",
+        "notice_path": "/usr/share/doc/gpgv/copyright"
+      },
+      {
+        "name": "grep",
+        "version": "3.8-5",
+        "architecture": "arm64",
+        "source_package": "grep",
+        "source_version": "3.8-5",
+        "purl": "pkg:deb/debian/grep@3.8-5?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/grep/copyright"
+      },
+      {
+        "name": "gzip",
+        "version": "1.12-1",
+        "architecture": "arm64",
+        "source_package": "gzip",
+        "source_version": "1.12-1",
+        "purl": "pkg:deb/debian/gzip@1.12-1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/gzip/copyright"
+      },
+      {
+        "name": "hostname",
+        "version": "3.23+nmu1",
+        "architecture": "arm64",
+        "source_package": "hostname",
+        "source_version": "3.23+nmu1",
+        "purl": "pkg:deb/debian/hostname@3.23%2Bnmu1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/hostname/copyright"
+      },
+      {
+        "name": "init-system-helpers",
+        "version": "1.65.2+deb12u1",
+        "architecture": "all",
+        "source_package": "init-system-helpers",
+        "source_version": "1.65.2+deb12u1",
+        "purl": "pkg:deb/debian/init-system-helpers@1.65.2%2Bdeb12u1?arch=all&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/init-system-helpers/copyright"
+      },
+      {
+        "name": "libacl1",
+        "version": "2.3.1-3",
+        "architecture": "arm64",
+        "source_package": "acl",
+        "source_version": "2.3.1-3",
+        "purl": "pkg:deb/debian/libacl1@2.3.1-3?arch=arm64&distro=debian-12.15&upstream=acl",
+        "notice_path": "/usr/share/doc/libacl1/copyright"
+      },
+      {
+        "name": "libapt-pkg6.0",
+        "version": "2.6.1",
+        "architecture": "arm64",
+        "source_package": "apt",
+        "source_version": "2.6.1",
+        "purl": "pkg:deb/debian/libapt-pkg6.0@2.6.1?arch=arm64&distro=debian-12.15&upstream=apt",
+        "notice_path": "/usr/share/doc/libapt-pkg6.0/copyright"
+      },
+      {
+        "name": "libattr1",
+        "version": "1:2.5.1-4",
+        "architecture": "arm64",
+        "source_package": "attr",
+        "source_version": "1:2.5.1-4",
+        "purl": "pkg:deb/debian/libattr1@1%3A2.5.1-4?arch=arm64&distro=debian-12.15&upstream=attr",
+        "notice_path": "/usr/share/doc/libattr1/copyright"
+      },
+      {
+        "name": "libaudit-common",
+        "version": "1:3.0.9-1",
+        "architecture": "all",
+        "source_package": "audit",
+        "source_version": "1:3.0.9-1",
+        "purl": "pkg:deb/debian/libaudit-common@1%3A3.0.9-1?arch=all&distro=debian-12.15&upstream=audit",
+        "notice_path": "/usr/share/doc/libaudit-common/copyright"
+      },
+      {
+        "name": "libaudit1",
+        "version": "1:3.0.9-1",
+        "architecture": "arm64",
+        "source_package": "audit",
+        "source_version": "1:3.0.9-1",
+        "purl": "pkg:deb/debian/libaudit1@1%3A3.0.9-1?arch=arm64&distro=debian-12.15&upstream=audit",
+        "notice_path": "/usr/share/doc/libaudit1/copyright"
+      },
+      {
+        "name": "libblkid1",
+        "version": "2.38.1-5+deb12u3",
+        "architecture": "arm64",
+        "source_package": "util-linux",
+        "source_version": "2.38.1-5+deb12u3",
+        "purl": "pkg:deb/debian/libblkid1@2.38.1-5%2Bdeb12u3?arch=arm64&distro=debian-12.15&upstream=util-linux",
+        "notice_path": "/usr/share/doc/libblkid1/copyright"
+      },
+      {
+        "name": "libbrotli1",
+        "version": "1.0.9-2+b6",
+        "architecture": "arm64",
+        "source_package": "brotli",
+        "source_version": "1.0.9-2",
+        "purl": "pkg:deb/debian/libbrotli1@1.0.9-2%2Bb6?arch=arm64&distro=debian-12.15&upstream=brotli%401.0.9-2",
+        "notice_path": "/usr/share/doc/libbrotli1/copyright"
+      },
+      {
+        "name": "libbz2-1.0",
+        "version": "1.0.8-5+b1",
+        "architecture": "arm64",
+        "source_package": "bzip2",
+        "source_version": "1.0.8-5",
+        "purl": "pkg:deb/debian/libbz2-1.0@1.0.8-5%2Bb1?arch=arm64&distro=debian-12.15&upstream=bzip2%401.0.8-5",
+        "notice_path": "/usr/share/doc/libbz2-1.0/copyright"
+      },
+      {
+        "name": "libc-bin",
+        "version": "2.36-9+deb12u14",
+        "architecture": "arm64",
+        "source_package": "glibc",
+        "source_version": "2.36-9+deb12u14",
+        "purl": "pkg:deb/debian/libc-bin@2.36-9%2Bdeb12u14?arch=arm64&distro=debian-12.15&upstream=glibc",
+        "notice_path": "/usr/share/doc/libc-bin/copyright"
+      },
+      {
+        "name": "libc6",
+        "version": "2.36-9+deb12u14",
+        "architecture": "arm64",
+        "source_package": "glibc",
+        "source_version": "2.36-9+deb12u14",
+        "purl": "pkg:deb/debian/libc6@2.36-9%2Bdeb12u14?arch=arm64&distro=debian-12.15&upstream=glibc",
+        "notice_path": "/usr/share/doc/libc6/copyright"
+      },
+      {
+        "name": "libcap-ng0",
+        "version": "0.8.3-1+b3",
+        "architecture": "arm64",
+        "source_package": "libcap-ng",
+        "source_version": "0.8.3-1",
+        "purl": "pkg:deb/debian/libcap-ng0@0.8.3-1%2Bb3?arch=arm64&distro=debian-12.15&upstream=libcap-ng%400.8.3-1",
+        "notice_path": "/usr/share/doc/libcap-ng0/copyright"
+      },
+      {
+        "name": "libcap2",
+        "version": "1:2.66-4+deb12u3+b1",
+        "architecture": "arm64",
+        "source_package": "libcap2",
+        "source_version": "1:2.66-4+deb12u3",
+        "purl": "pkg:deb/debian/libcap2@1%3A2.66-4%2Bdeb12u3%2Bb1?arch=arm64&distro=debian-12.15&upstream=libcap2%401%3A2.66-4%2Bdeb12u3",
+        "notice_path": "/usr/share/doc/libcap2/copyright"
+      },
+      {
+        "name": "libcom-err2",
+        "version": "1.47.0-2+b2",
+        "architecture": "arm64",
+        "source_package": "e2fsprogs",
+        "source_version": "1.47.0-2",
+        "purl": "pkg:deb/debian/libcom-err2@1.47.0-2%2Bb2?arch=arm64&distro=debian-12.15&upstream=e2fsprogs%401.47.0-2",
+        "notice_path": "/usr/share/doc/libcom-err2/copyright"
+      },
+      {
+        "name": "libcrypt1",
+        "version": "1:4.4.33-2",
+        "architecture": "arm64",
+        "source_package": "libxcrypt",
+        "source_version": "1:4.4.33-2",
+        "purl": "pkg:deb/debian/libcrypt1@1%3A4.4.33-2?arch=arm64&distro=debian-12.15&upstream=libxcrypt",
+        "notice_path": "/usr/share/doc/libcrypt1/copyright"
+      },
+      {
+        "name": "libcurl4",
+        "version": "7.88.1-10+deb12u15",
+        "architecture": "arm64",
+        "source_package": "curl",
+        "source_version": "7.88.1-10+deb12u15",
+        "purl": "pkg:deb/debian/libcurl4@7.88.1-10%2Bdeb12u15?arch=arm64&distro=debian-12.15&upstream=curl",
+        "notice_path": "/usr/share/doc/libcurl4/copyright"
+      },
+      {
+        "name": "libdb5.3",
+        "version": "5.3.28+dfsg2-1",
+        "architecture": "arm64",
+        "source_package": "db5.3",
+        "source_version": "5.3.28+dfsg2-1",
+        "purl": "pkg:deb/debian/libdb5.3@5.3.28%2Bdfsg2-1?arch=arm64&distro=debian-12.15&upstream=db5.3",
+        "notice_path": "/usr/share/doc/libdb5.3/copyright"
+      },
+      {
+        "name": "libdebconfclient0",
+        "version": "0.270",
+        "architecture": "arm64",
+        "source_package": "cdebconf",
+        "source_version": "0.270",
+        "purl": "pkg:deb/debian/libdebconfclient0@0.270?arch=arm64&distro=debian-12.15&upstream=cdebconf",
+        "notice_path": "/usr/share/doc/libdebconfclient0/copyright"
+      },
+      {
+        "name": "libext2fs2",
+        "version": "1.47.0-2+b2",
+        "architecture": "arm64",
+        "source_package": "e2fsprogs",
+        "source_version": "1.47.0-2",
+        "purl": "pkg:deb/debian/libext2fs2@1.47.0-2%2Bb2?arch=arm64&distro=debian-12.15&upstream=e2fsprogs%401.47.0-2",
+        "notice_path": "/usr/share/doc/libext2fs2/copyright"
+      },
+      {
+        "name": "libffi8",
+        "version": "3.4.4-1",
+        "architecture": "arm64",
+        "source_package": "libffi",
+        "source_version": "3.4.4-1",
+        "purl": "pkg:deb/debian/libffi8@3.4.4-1?arch=arm64&distro=debian-12.15&upstream=libffi",
+        "notice_path": "/usr/share/doc/libffi8/copyright"
+      },
+      {
+        "name": "libgcc-s1",
+        "version": "12.2.0-14+deb12u1",
+        "architecture": "arm64",
+        "source_package": "gcc-12",
+        "source_version": "12.2.0-14+deb12u1",
+        "purl": "pkg:deb/debian/libgcc-s1@12.2.0-14%2Bdeb12u1?arch=arm64&distro=debian-12.15&upstream=gcc-12",
+        "notice_path": "/usr/share/doc/gcc-12-base/copyright"
+      },
+      {
+        "name": "libgcrypt20",
+        "version": "1.10.1-3+deb12u1",
+        "architecture": "arm64",
+        "source_package": "libgcrypt20",
+        "source_version": "1.10.1-3+deb12u1",
+        "purl": "pkg:deb/debian/libgcrypt20@1.10.1-3%2Bdeb12u1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/libgcrypt20/copyright"
+      },
+      {
+        "name": "libgmp10",
+        "version": "2:6.2.1+dfsg1-1.1",
+        "architecture": "arm64",
+        "source_package": "gmp",
+        "source_version": "2:6.2.1+dfsg1-1.1",
+        "purl": "pkg:deb/debian/libgmp10@2%3A6.2.1%2Bdfsg1-1.1?arch=arm64&distro=debian-12.15&upstream=gmp",
+        "notice_path": "/usr/share/doc/libgmp10/copyright"
+      },
+      {
+        "name": "libgnutls30",
+        "version": "3.7.9-2+deb12u7",
+        "architecture": "arm64",
+        "source_package": "gnutls28",
+        "source_version": "3.7.9-2+deb12u7",
+        "purl": "pkg:deb/debian/libgnutls30@3.7.9-2%2Bdeb12u7?arch=arm64&distro=debian-12.15&upstream=gnutls28",
+        "notice_path": "/usr/share/doc/libgnutls30/copyright"
+      },
+      {
+        "name": "libgpg-error0",
+        "version": "1.46-1",
+        "architecture": "arm64",
+        "source_package": "libgpg-error",
+        "source_version": "1.46-1",
+        "purl": "pkg:deb/debian/libgpg-error0@1.46-1?arch=arm64&distro=debian-12.15&upstream=libgpg-error",
+        "notice_path": "/usr/share/doc/libgpg-error0/copyright"
+      },
+      {
+        "name": "libgssapi-krb5-2",
+        "version": "1.20.1-2+deb12u5",
+        "architecture": "arm64",
+        "source_package": "krb5",
+        "source_version": "1.20.1-2+deb12u5",
+        "purl": "pkg:deb/debian/libgssapi-krb5-2@1.20.1-2%2Bdeb12u5?arch=arm64&distro=debian-12.15&upstream=krb5",
+        "notice_path": "/usr/share/doc/libgssapi-krb5-2/copyright"
+      },
+      {
+        "name": "libhogweed6",
+        "version": "3.8.1-2",
+        "architecture": "arm64",
+        "source_package": "nettle",
+        "source_version": "3.8.1-2",
+        "purl": "pkg:deb/debian/libhogweed6@3.8.1-2?arch=arm64&distro=debian-12.15&upstream=nettle",
+        "notice_path": "/usr/share/doc/libhogweed6/copyright"
+      },
+      {
+        "name": "libidn2-0",
+        "version": "2.3.3-1+b1",
+        "architecture": "arm64",
+        "source_package": "libidn2",
+        "source_version": "2.3.3-1",
+        "purl": "pkg:deb/debian/libidn2-0@2.3.3-1%2Bb1?arch=arm64&distro=debian-12.15&upstream=libidn2%402.3.3-1",
+        "notice_path": "/usr/share/doc/libidn2-0/copyright"
+      },
+      {
+        "name": "libk5crypto3",
+        "version": "1.20.1-2+deb12u5",
+        "architecture": "arm64",
+        "source_package": "krb5",
+        "source_version": "1.20.1-2+deb12u5",
+        "purl": "pkg:deb/debian/libk5crypto3@1.20.1-2%2Bdeb12u5?arch=arm64&distro=debian-12.15&upstream=krb5",
+        "notice_path": "/usr/share/doc/libk5crypto3/copyright"
+      },
+      {
+        "name": "libkeyutils1",
+        "version": "1.6.3-2",
+        "architecture": "arm64",
+        "source_package": "keyutils",
+        "source_version": "1.6.3-2",
+        "purl": "pkg:deb/debian/libkeyutils1@1.6.3-2?arch=arm64&distro=debian-12.15&upstream=keyutils",
+        "notice_path": "/usr/share/doc/libkeyutils1/copyright"
+      },
+      {
+        "name": "libkrb5-3",
+        "version": "1.20.1-2+deb12u5",
+        "architecture": "arm64",
+        "source_package": "krb5",
+        "source_version": "1.20.1-2+deb12u5",
+        "purl": "pkg:deb/debian/libkrb5-3@1.20.1-2%2Bdeb12u5?arch=arm64&distro=debian-12.15&upstream=krb5",
+        "notice_path": "/usr/share/doc/libkrb5-3/copyright"
+      },
+      {
+        "name": "libkrb5support0",
+        "version": "1.20.1-2+deb12u5",
+        "architecture": "arm64",
+        "source_package": "krb5",
+        "source_version": "1.20.1-2+deb12u5",
+        "purl": "pkg:deb/debian/libkrb5support0@1.20.1-2%2Bdeb12u5?arch=arm64&distro=debian-12.15&upstream=krb5",
+        "notice_path": "/usr/share/doc/libkrb5support0/copyright"
+      },
+      {
+        "name": "libldap-2.5-0",
+        "version": "2.5.13+dfsg-5",
+        "architecture": "arm64",
+        "source_package": "openldap",
+        "source_version": "2.5.13+dfsg-5",
+        "purl": "pkg:deb/debian/libldap-2.5-0@2.5.13%2Bdfsg-5?arch=arm64&distro=debian-12.15&upstream=openldap",
+        "notice_path": "/usr/share/doc/libldap-2.5-0/copyright"
+      },
+      {
+        "name": "liblz4-1",
+        "version": "1.9.4-1",
+        "architecture": "arm64",
+        "source_package": "lz4",
+        "source_version": "1.9.4-1",
+        "purl": "pkg:deb/debian/liblz4-1@1.9.4-1?arch=arm64&distro=debian-12.15&upstream=lz4",
+        "notice_path": "/usr/share/doc/liblz4-1/copyright"
+      },
+      {
+        "name": "liblzma5",
+        "version": "5.4.1-1+deb12u1",
+        "architecture": "arm64",
+        "source_package": "xz-utils",
+        "source_version": "5.4.1-1+deb12u1",
+        "purl": "pkg:deb/debian/liblzma5@5.4.1-1%2Bdeb12u1?arch=arm64&distro=debian-12.15&upstream=xz-utils",
+        "notice_path": "/usr/share/doc/liblzma5/copyright"
+      },
+      {
+        "name": "libmd0",
+        "version": "1.0.4-2",
+        "architecture": "arm64",
+        "source_package": "libmd",
+        "source_version": "1.0.4-2",
+        "purl": "pkg:deb/debian/libmd0@1.0.4-2?arch=arm64&distro=debian-12.15&upstream=libmd",
+        "notice_path": "/usr/share/doc/libmd0/copyright"
+      },
+      {
+        "name": "libmount1",
+        "version": "2.38.1-5+deb12u3",
+        "architecture": "arm64",
+        "source_package": "util-linux",
+        "source_version": "2.38.1-5+deb12u3",
+        "purl": "pkg:deb/debian/libmount1@2.38.1-5%2Bdeb12u3?arch=arm64&distro=debian-12.15&upstream=util-linux",
+        "notice_path": "/usr/share/doc/libmount1/copyright"
+      },
+      {
+        "name": "libnettle8",
+        "version": "3.8.1-2",
+        "architecture": "arm64",
+        "source_package": "nettle",
+        "source_version": "3.8.1-2",
+        "purl": "pkg:deb/debian/libnettle8@3.8.1-2?arch=arm64&distro=debian-12.15&upstream=nettle",
+        "notice_path": "/usr/share/doc/libnettle8/copyright"
+      },
+      {
+        "name": "libnghttp2-14",
+        "version": "1.52.0-1+deb12u3",
+        "architecture": "arm64",
+        "source_package": "nghttp2",
+        "source_version": "1.52.0-1+deb12u3",
+        "purl": "pkg:deb/debian/libnghttp2-14@1.52.0-1%2Bdeb12u3?arch=arm64&distro=debian-12.15&upstream=nghttp2",
+        "notice_path": "/usr/share/doc/libnghttp2-14/copyright"
+      },
+      {
+        "name": "libp11-kit0",
+        "version": "0.24.1-2",
+        "architecture": "arm64",
+        "source_package": "p11-kit",
+        "source_version": "0.24.1-2",
+        "purl": "pkg:deb/debian/libp11-kit0@0.24.1-2?arch=arm64&distro=debian-12.15&upstream=p11-kit",
+        "notice_path": "/usr/share/doc/libp11-kit0/copyright"
+      },
+      {
+        "name": "libpam-modules",
+        "version": "1.5.2-6+deb12u2",
+        "architecture": "arm64",
+        "source_package": "pam",
+        "source_version": "1.5.2-6+deb12u2",
+        "purl": "pkg:deb/debian/libpam-modules@1.5.2-6%2Bdeb12u2?arch=arm64&distro=debian-12.15&upstream=pam",
+        "notice_path": "/usr/share/doc/libpam-modules/copyright"
+      },
+      {
+        "name": "libpam-modules-bin",
+        "version": "1.5.2-6+deb12u2",
+        "architecture": "arm64",
+        "source_package": "pam",
+        "source_version": "1.5.2-6+deb12u2",
+        "purl": "pkg:deb/debian/libpam-modules-bin@1.5.2-6%2Bdeb12u2?arch=arm64&distro=debian-12.15&upstream=pam",
+        "notice_path": "/usr/share/doc/libpam-modules-bin/copyright"
+      },
+      {
+        "name": "libpam-runtime",
+        "version": "1.5.2-6+deb12u2",
+        "architecture": "all",
+        "source_package": "pam",
+        "source_version": "1.5.2-6+deb12u2",
+        "purl": "pkg:deb/debian/libpam-runtime@1.5.2-6%2Bdeb12u2?arch=all&distro=debian-12.15&upstream=pam",
+        "notice_path": "/usr/share/doc/libpam-runtime/copyright"
+      },
+      {
+        "name": "libpam0g",
+        "version": "1.5.2-6+deb12u2",
+        "architecture": "arm64",
+        "source_package": "pam",
+        "source_version": "1.5.2-6+deb12u2",
+        "purl": "pkg:deb/debian/libpam0g@1.5.2-6%2Bdeb12u2?arch=arm64&distro=debian-12.15&upstream=pam",
+        "notice_path": "/usr/share/doc/libpam0g/copyright"
+      },
+      {
+        "name": "libpcre2-8-0",
+        "version": "10.42-1",
+        "architecture": "arm64",
+        "source_package": "pcre2",
+        "source_version": "10.42-1",
+        "purl": "pkg:deb/debian/libpcre2-8-0@10.42-1?arch=arm64&distro=debian-12.15&upstream=pcre2",
+        "notice_path": "/usr/share/doc/libpcre2-8-0/copyright"
+      },
+      {
+        "name": "libpsl5",
+        "version": "0.21.2-1",
+        "architecture": "arm64",
+        "source_package": "libpsl",
+        "source_version": "0.21.2-1",
+        "purl": "pkg:deb/debian/libpsl5@0.21.2-1?arch=arm64&distro=debian-12.15&upstream=libpsl",
+        "notice_path": "/usr/share/doc/libpsl5/copyright"
+      },
+      {
+        "name": "librtmp1",
+        "version": "2.4+20151223.gitfa8646d.1-2+b2",
+        "architecture": "arm64",
+        "source_package": "rtmpdump",
+        "source_version": "2.4+20151223.gitfa8646d.1-2",
+        "purl": "pkg:deb/debian/librtmp1@2.4%2B20151223.gitfa8646d.1-2%2Bb2?arch=arm64&distro=debian-12.15&upstream=rtmpdump%402.4%2B20151223.gitfa8646d.1-2",
+        "notice_path": "/usr/share/doc/librtmp1/copyright"
+      },
+      {
+        "name": "libsasl2-2",
+        "version": "2.1.28+dfsg-10",
+        "architecture": "arm64",
+        "source_package": "cyrus-sasl2",
+        "source_version": "2.1.28+dfsg-10",
+        "purl": "pkg:deb/debian/libsasl2-2@2.1.28%2Bdfsg-10?arch=arm64&distro=debian-12.15&upstream=cyrus-sasl2",
+        "notice_path": "/usr/share/doc/libsasl2-2/copyright"
+      },
+      {
+        "name": "libsasl2-modules-db",
+        "version": "2.1.28+dfsg-10",
+        "architecture": "arm64",
+        "source_package": "cyrus-sasl2",
+        "source_version": "2.1.28+dfsg-10",
+        "purl": "pkg:deb/debian/libsasl2-modules-db@2.1.28%2Bdfsg-10?arch=arm64&distro=debian-12.15&upstream=cyrus-sasl2",
+        "notice_path": "/usr/share/doc/libsasl2-modules-db/copyright"
+      },
+      {
+        "name": "libseccomp2",
+        "version": "2.5.4-1+deb12u1",
+        "architecture": "arm64",
+        "source_package": "libseccomp",
+        "source_version": "2.5.4-1+deb12u1",
+        "purl": "pkg:deb/debian/libseccomp2@2.5.4-1%2Bdeb12u1?arch=arm64&distro=debian-12.15&upstream=libseccomp",
+        "notice_path": "/usr/share/doc/libseccomp2/copyright"
+      },
+      {
+        "name": "libselinux1",
+        "version": "3.4-1+b6",
+        "architecture": "arm64",
+        "source_package": "libselinux",
+        "source_version": "3.4-1",
+        "purl": "pkg:deb/debian/libselinux1@3.4-1%2Bb6?arch=arm64&distro=debian-12.15&upstream=libselinux%403.4-1",
+        "notice_path": "/usr/share/doc/libselinux1/copyright"
+      },
+      {
+        "name": "libsemanage-common",
+        "version": "3.4-1",
+        "architecture": "all",
+        "source_package": "libsemanage",
+        "source_version": "3.4-1",
+        "purl": "pkg:deb/debian/libsemanage-common@3.4-1?arch=all&distro=debian-12.15&upstream=libsemanage",
+        "notice_path": "/usr/share/doc/libsemanage-common/copyright"
+      },
+      {
+        "name": "libsemanage2",
+        "version": "3.4-1+b5",
+        "architecture": "arm64",
+        "source_package": "libsemanage",
+        "source_version": "3.4-1",
+        "purl": "pkg:deb/debian/libsemanage2@3.4-1%2Bb5?arch=arm64&distro=debian-12.15&upstream=libsemanage%403.4-1",
+        "notice_path": "/usr/share/doc/libsemanage2/copyright"
+      },
+      {
+        "name": "libsepol2",
+        "version": "3.4-2.1",
+        "architecture": "arm64",
+        "source_package": "libsepol",
+        "source_version": "3.4-2.1",
+        "purl": "pkg:deb/debian/libsepol2@3.4-2.1?arch=arm64&distro=debian-12.15&upstream=libsepol",
+        "notice_path": "/usr/share/doc/libsepol2/copyright"
+      },
+      {
+        "name": "libsmartcols1",
+        "version": "2.38.1-5+deb12u3",
+        "architecture": "arm64",
+        "source_package": "util-linux",
+        "source_version": "2.38.1-5+deb12u3",
+        "purl": "pkg:deb/debian/libsmartcols1@2.38.1-5%2Bdeb12u3?arch=arm64&distro=debian-12.15&upstream=util-linux",
+        "notice_path": "/usr/share/doc/libsmartcols1/copyright"
+      },
+      {
+        "name": "libss2",
+        "version": "1.47.0-2+b2",
+        "architecture": "arm64",
+        "source_package": "e2fsprogs",
+        "source_version": "1.47.0-2",
+        "purl": "pkg:deb/debian/libss2@1.47.0-2%2Bb2?arch=arm64&distro=debian-12.15&upstream=e2fsprogs%401.47.0-2",
+        "notice_path": "/usr/share/doc/libss2/copyright"
+      },
+      {
+        "name": "libssh2-1",
+        "version": "1.10.0-3+deb12u1",
+        "architecture": "arm64",
+        "source_package": "libssh2",
+        "source_version": "1.10.0-3+deb12u1",
+        "purl": "pkg:deb/debian/libssh2-1@1.10.0-3%2Bdeb12u1?arch=arm64&distro=debian-12.15&upstream=libssh2",
+        "notice_path": "/usr/share/doc/libssh2-1/copyright"
+      },
+      {
+        "name": "libssl3",
+        "version": "3.0.20-1~deb12u2",
+        "architecture": "arm64",
+        "source_package": "openssl",
+        "source_version": "3.0.20-1~deb12u2",
+        "purl": "pkg:deb/debian/libssl3@3.0.20-1~deb12u2?arch=arm64&distro=debian-12.15&upstream=openssl",
+        "notice_path": "/usr/share/doc/libssl3/copyright"
+      },
+      {
+        "name": "libstdc++6",
+        "version": "12.2.0-14+deb12u1",
+        "architecture": "arm64",
+        "source_package": "gcc-12",
+        "source_version": "12.2.0-14+deb12u1",
+        "purl": "pkg:deb/debian/libstdc%2B%2B6@12.2.0-14%2Bdeb12u1?arch=arm64&distro=debian-12.15&upstream=gcc-12",
+        "notice_path": "/usr/share/doc/gcc-12-base/copyright"
+      },
+      {
+        "name": "libsystemd0",
+        "version": "252.39-1~deb12u2",
+        "architecture": "arm64",
+        "source_package": "systemd",
+        "source_version": "252.39-1~deb12u2",
+        "purl": "pkg:deb/debian/libsystemd0@252.39-1~deb12u2?arch=arm64&distro=debian-12.15&upstream=systemd",
+        "notice_path": "/usr/share/doc/libsystemd0/copyright"
+      },
+      {
+        "name": "libtasn1-6",
+        "version": "4.19.0-2+deb12u1",
+        "architecture": "arm64",
+        "source_package": "libtasn1-6",
+        "source_version": "4.19.0-2+deb12u1",
+        "purl": "pkg:deb/debian/libtasn1-6@4.19.0-2%2Bdeb12u1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/libtasn1-6/copyright"
+      },
+      {
+        "name": "libtinfo6",
+        "version": "6.4-4",
+        "architecture": "arm64",
+        "source_package": "ncurses",
+        "source_version": "6.4-4",
+        "purl": "pkg:deb/debian/libtinfo6@6.4-4?arch=arm64&distro=debian-12.15&upstream=ncurses",
+        "notice_path": "/usr/share/doc/libtinfo6/copyright"
+      },
+      {
+        "name": "libudev1",
+        "version": "252.39-1~deb12u2",
+        "architecture": "arm64",
+        "source_package": "systemd",
+        "source_version": "252.39-1~deb12u2",
+        "purl": "pkg:deb/debian/libudev1@252.39-1~deb12u2?arch=arm64&distro=debian-12.15&upstream=systemd",
+        "notice_path": "/usr/share/doc/libudev1/copyright"
+      },
+      {
+        "name": "libunistring2",
+        "version": "1.0-2",
+        "architecture": "arm64",
+        "source_package": "libunistring",
+        "source_version": "1.0-2",
+        "purl": "pkg:deb/debian/libunistring2@1.0-2?arch=arm64&distro=debian-12.15&upstream=libunistring",
+        "notice_path": "/usr/share/doc/libunistring2/copyright"
+      },
+      {
+        "name": "libuuid1",
+        "version": "2.38.1-5+deb12u3",
+        "architecture": "arm64",
+        "source_package": "util-linux",
+        "source_version": "2.38.1-5+deb12u3",
+        "purl": "pkg:deb/debian/libuuid1@2.38.1-5%2Bdeb12u3?arch=arm64&distro=debian-12.15&upstream=util-linux",
+        "notice_path": "/usr/share/doc/libuuid1/copyright"
+      },
+      {
+        "name": "libxxhash0",
+        "version": "0.8.1-1",
+        "architecture": "arm64",
+        "source_package": "xxhash",
+        "source_version": "0.8.1-1",
+        "purl": "pkg:deb/debian/libxxhash0@0.8.1-1?arch=arm64&distro=debian-12.15&upstream=xxhash",
+        "notice_path": "/usr/share/doc/libxxhash0/copyright"
+      },
+      {
+        "name": "libzstd1",
+        "version": "1.5.4+dfsg2-5",
+        "architecture": "arm64",
+        "source_package": "libzstd",
+        "source_version": "1.5.4+dfsg2-5",
+        "purl": "pkg:deb/debian/libzstd1@1.5.4%2Bdfsg2-5?arch=arm64&distro=debian-12.15&upstream=libzstd",
+        "notice_path": "/usr/share/doc/libzstd1/copyright"
+      },
+      {
+        "name": "login",
+        "version": "1:4.13+dfsg1-1+deb12u2",
+        "architecture": "arm64",
+        "source_package": "shadow",
+        "source_version": "1:4.13+dfsg1-1+deb12u2",
+        "purl": "pkg:deb/debian/login@1%3A4.13%2Bdfsg1-1%2Bdeb12u2?arch=arm64&distro=debian-12.15&upstream=shadow",
+        "notice_path": "/usr/share/doc/login/copyright"
+      },
+      {
+        "name": "logsave",
+        "version": "1.47.0-2+b2",
+        "architecture": "arm64",
+        "source_package": "e2fsprogs",
+        "source_version": "1.47.0-2",
+        "purl": "pkg:deb/debian/logsave@1.47.0-2%2Bb2?arch=arm64&distro=debian-12.15&upstream=e2fsprogs%401.47.0-2",
+        "notice_path": "/usr/share/doc/logsave/copyright"
+      },
+      {
+        "name": "mawk",
+        "version": "1.3.4.20200120-3.1",
+        "architecture": "arm64",
+        "source_package": "mawk",
+        "source_version": "1.3.4.20200120-3.1",
+        "purl": "pkg:deb/debian/mawk@1.3.4.20200120-3.1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/mawk/copyright"
+      },
+      {
+        "name": "mount",
+        "version": "2.38.1-5+deb12u3",
+        "architecture": "arm64",
+        "source_package": "util-linux",
+        "source_version": "2.38.1-5+deb12u3",
+        "purl": "pkg:deb/debian/mount@2.38.1-5%2Bdeb12u3?arch=arm64&distro=debian-12.15&upstream=util-linux",
+        "notice_path": "/usr/share/doc/mount/copyright"
+      },
+      {
+        "name": "ncurses-base",
+        "version": "6.4-4",
+        "architecture": "all",
+        "source_package": "ncurses",
+        "source_version": "6.4-4",
+        "purl": "pkg:deb/debian/ncurses-base@6.4-4?arch=all&distro=debian-12.15&upstream=ncurses",
+        "notice_path": "/usr/share/doc/ncurses-base/copyright"
+      },
+      {
+        "name": "ncurses-bin",
+        "version": "6.4-4",
+        "architecture": "arm64",
+        "source_package": "ncurses",
+        "source_version": "6.4-4",
+        "purl": "pkg:deb/debian/ncurses-bin@6.4-4?arch=arm64&distro=debian-12.15&upstream=ncurses",
+        "notice_path": "/usr/share/doc/ncurses-bin/copyright"
+      },
+      {
+        "name": "openssl",
+        "version": "3.0.20-1~deb12u2",
+        "architecture": "arm64",
+        "source_package": "openssl",
+        "source_version": "3.0.20-1~deb12u2",
+        "purl": "pkg:deb/debian/openssl@3.0.20-1~deb12u2?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/openssl/copyright"
+      },
+      {
+        "name": "passwd",
+        "version": "1:4.13+dfsg1-1+deb12u2",
+        "architecture": "arm64",
+        "source_package": "shadow",
+        "source_version": "1:4.13+dfsg1-1+deb12u2",
+        "purl": "pkg:deb/debian/passwd@1%3A4.13%2Bdfsg1-1%2Bdeb12u2?arch=arm64&distro=debian-12.15&upstream=shadow",
+        "notice_path": "/usr/share/doc/passwd/copyright"
+      },
+      {
+        "name": "perl-base",
+        "version": "5.36.0-7+deb12u3",
+        "architecture": "arm64",
+        "source_package": "perl",
+        "source_version": "5.36.0-7+deb12u3",
+        "purl": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=arm64&distro=debian-12.15&upstream=perl",
+        "notice_path": "/usr/share/doc/perl-base/copyright"
+      },
+      {
+        "name": "sed",
+        "version": "4.9-1+deb12u1",
+        "architecture": "arm64",
+        "source_package": "sed",
+        "source_version": "4.9-1+deb12u1",
+        "purl": "pkg:deb/debian/sed@4.9-1%2Bdeb12u1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/sed/copyright"
+      },
+      {
+        "name": "sysvinit-utils",
+        "version": "3.06-4",
+        "architecture": "arm64",
+        "source_package": "sysvinit",
+        "source_version": "3.06-4",
+        "purl": "pkg:deb/debian/sysvinit-utils@3.06-4?arch=arm64&distro=debian-12.15&upstream=sysvinit",
+        "notice_path": "/usr/share/doc/sysvinit-utils/copyright"
+      },
+      {
+        "name": "tar",
+        "version": "1.34+dfsg-1.2+deb12u1",
+        "architecture": "arm64",
+        "source_package": "tar",
+        "source_version": "1.34+dfsg-1.2+deb12u1",
+        "purl": "pkg:deb/debian/tar@1.34%2Bdfsg-1.2%2Bdeb12u1?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/tar/copyright"
+      },
+      {
+        "name": "tzdata",
+        "version": "2026b-0+deb12u1",
+        "architecture": "all",
+        "source_package": "tzdata",
+        "source_version": "2026b-0+deb12u1",
+        "purl": "pkg:deb/debian/tzdata@2026b-0%2Bdeb12u1?arch=all&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/tzdata/copyright"
+      },
+      {
+        "name": "usr-is-merged",
+        "version": "37~deb12u1",
+        "architecture": "all",
+        "source_package": "usrmerge",
+        "source_version": "37~deb12u1",
+        "purl": "pkg:deb/debian/usr-is-merged@37~deb12u1?arch=all&distro=debian-12.15&upstream=usrmerge",
+        "notice_path": "/usr/share/doc/usr-is-merged/copyright"
+      },
+      {
+        "name": "util-linux",
+        "version": "2.38.1-5+deb12u3",
+        "architecture": "arm64",
+        "source_package": "util-linux",
+        "source_version": "2.38.1-5+deb12u3",
+        "purl": "pkg:deb/debian/util-linux@2.38.1-5%2Bdeb12u3?arch=arm64&distro=debian-12.15",
+        "notice_path": "/usr/share/doc/util-linux/copyright"
+      },
+      {
+        "name": "util-linux-extra",
+        "version": "2.38.1-5+deb12u3",
+        "architecture": "arm64",
+        "source_package": "util-linux",
+        "source_version": "2.38.1-5+deb12u3",
+        "purl": "pkg:deb/debian/util-linux-extra@2.38.1-5%2Bdeb12u3?arch=arm64&distro=debian-12.15&upstream=util-linux",
+        "notice_path": "/usr/share/doc/util-linux-extra/copyright"
+      },
+      {
+        "name": "zlib1g",
+        "version": "1:1.2.13.dfsg-1",
+        "architecture": "arm64",
+        "source_package": "zlib",
+        "source_version": "1:1.2.13.dfsg-1",
+        "purl": "pkg:deb/debian/zlib1g@1%3A1.2.13.dfsg-1?arch=arm64&distro=debian-12.15&upstream=zlib",
+        "notice_path": "/usr/share/doc/zlib1g/copyright"
+      }
+    ],
+    "files": [
+      {
+        "path": "/usr/lib/aarch64-linux-gnu/libc.so.6",
+        "kind": "library",
+        "sha256": "e4ac8ae1d81e4865e3aadedb962879cf9415903b3f2ba81ec75e9962b86ab8b0",
+        "owner": "libc6",
+        "bytes": 1651408
+      },
+      {
+        "path": "/usr/lib/aarch64-linux-gnu/libcrypto.so.3",
+        "kind": "library",
+        "sha256": "6ca49d148cc9fff2ee82e46019f508d736cef6b3f15f2f5cbbc86457df9b05ce",
+        "owner": "libssl3",
+        "bytes": 4532392
+      },
+      {
+        "path": "/usr/lib/aarch64-linux-gnu/libssl.so.3",
+        "kind": "library",
+        "sha256": "9e171264a6651d714938e83d81277d16524c150a36eaa59ce56e79b9cdbea7ce",
+        "owner": "libssl3",
+        "bytes": 737192
+      },
+      {
+        "path": "/usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.30",
+        "kind": "library",
+        "sha256": "532f3a12d7b8fef6cc7a064ea106b6c4ab2365674b73e743e4a385d4ffb6c8ab",
+        "owner": "libstdc++6",
+        "bytes": 2174296
+      },
+      {
+        "path": "/usr/share/common-licenses/Apache-2.0",
+        "kind": "notice",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "bytes": 11358
+      },
+      {
+        "path": "/usr/share/common-licenses/Artistic",
+        "kind": "notice",
+        "sha256": "b7fd9b73ea99602016a326e0b62e6646060d18febdd065ceca8bb482208c3d88",
+        "bytes": 6111
+      },
+      {
+        "path": "/usr/share/common-licenses/BSD",
+        "kind": "notice",
+        "sha256": "5d588eb3b157d52112afea935c88a7ff9efddc1e2d95a42c25d3b96ad9055008",
+        "bytes": 1499
+      },
+      {
+        "path": "/usr/share/common-licenses/CC0-1.0",
+        "kind": "notice",
+        "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+        "bytes": 7048
+      },
+      {
+        "path": "/usr/share/common-licenses/GFDL-1.2",
+        "kind": "notice",
+        "sha256": "d8e94ae5fdb5433fcae2961aeb1a8cf17174d6f4a0465d24bf37dd8a038bd439",
+        "bytes": 20432
+      },
+      {
+        "path": "/usr/share/common-licenses/GFDL-1.3",
+        "kind": "notice",
+        "sha256": "110535522396708cea37c72a802c5e7e81391139f5f7985631c93ef242b206a4",
+        "bytes": 22955
+      },
+      {
+        "path": "/usr/share/common-licenses/GPL-1",
+        "kind": "notice",
+        "sha256": "d77d235e41d54594865151f4751e835c5a82322b0e87ace266567c3391a4b912",
+        "bytes": 12632
+      },
+      {
+        "path": "/usr/share/common-licenses/GPL-2",
+        "kind": "notice",
+        "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "bytes": 18092
+      },
+      {
+        "path": "/usr/share/common-licenses/GPL-3",
+        "kind": "notice",
+        "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+        "bytes": 35149
+      },
+      {
+        "path": "/usr/share/common-licenses/LGPL-2",
+        "kind": "notice",
+        "sha256": "681e386e44a19d7d0674b4320272c90e66b6610b741e7e6305f8219c42e85366",
+        "bytes": 25381
+      },
+      {
+        "path": "/usr/share/common-licenses/LGPL-2.1",
+        "kind": "notice",
+        "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+        "bytes": 26530
+      },
+      {
+        "path": "/usr/share/common-licenses/LGPL-3",
+        "kind": "notice",
+        "sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",
+        "bytes": 7652
+      },
+      {
+        "path": "/usr/share/common-licenses/MPL-1.1",
+        "kind": "notice",
+        "sha256": "f849fc26a7a99981611a3a370e83078deb617d12a45776d6c4cada4d338be469",
+        "bytes": 25755
+      },
+      {
+        "path": "/usr/share/common-licenses/MPL-2.0",
+        "kind": "notice",
+        "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85",
+        "bytes": 16726
+      },
+      {
+        "path": "/usr/share/doc/adduser/copyright",
+        "kind": "notice",
+        "sha256": "b143053a4862ab354831487b5f8bd31dc9ffdc589d15de9d9c764332a0209796",
+        "bytes": 12432
+      },
+      {
+        "path": "/usr/share/doc/apt/copyright",
+        "kind": "notice",
+        "sha256": "b4701305243d8d746f4acaafe15d94f946251b05691bd6917fef41dd15e9ee12",
+        "bytes": 7668
+      },
+      {
+        "path": "/usr/share/doc/base-files/copyright",
+        "kind": "notice",
+        "sha256": "fd7e4aae7e7b05f217bcf2d02322825c360e66c52c4c2f1b28d784d6297a1c23",
+        "bytes": 1208
+      },
+      {
+        "path": "/usr/share/doc/base-passwd/copyright",
+        "kind": "notice",
+        "sha256": "0f1cde79bd80a75f9029ae9a8c252b642223027ef36f6989c63a8230aae576a7",
+        "bytes": 798
+      },
+      {
+        "path": "/usr/share/doc/bash/copyright",
+        "kind": "notice",
+        "sha256": "06319d84c3e5ed096036f6a9310a030c7e84e50dff2b8a6792285c83ec0ada73",
+        "bytes": 9764
+      },
+      {
+        "path": "/usr/share/doc/bsdutils/copyright",
+        "kind": "notice",
+        "sha256": "30539a2df6a89d844f43c727505a3193a60515f8ec6cdede8cc515ed22941d1c",
+        "bytes": 23237
+      },
+      {
+        "path": "/usr/share/doc/ca-certificates/copyright",
+        "kind": "notice",
+        "sha256": "e85e1bcad3a915dc7e6f41412bc5bdeba275cadd817896ea0451f2140a93967c",
+        "bytes": 18940
+      },
+      {
+        "path": "/usr/share/doc/ca-certificates/examples/ca-certificates-local/debian/copyright",
+        "kind": "notice",
+        "sha256": "ccfe62f0f73541f1c76a6d33aed26290391685c43f914a5e24c6b1f72cddcdff",
+        "bytes": 164
+      },
+      {
+        "path": "/usr/share/doc/coreutils/copyright",
+        "kind": "notice",
+        "sha256": "24e86c5ca53d6bfd8e0c47988160daa62d10a74997fe11f651e1d9533c78bff6",
+        "bytes": 5552
+      },
+      {
+        "path": "/usr/share/doc/curl/copyright",
+        "kind": "notice",
+        "sha256": "a7c131b21e6e73b3b085a7d9f1637b68f5f92b832cc6f462e0c978fbe7841ccb",
+        "bytes": 21749
+      },
+      {
+        "path": "/usr/share/doc/dash/copyright",
+        "kind": "notice",
+        "sha256": "d98c53f281321baad38164aa9ae6e368a9253be6ec51bd26a759b5e72b326f4a",
+        "bytes": 3878
+      },
+      {
+        "path": "/usr/share/doc/debconf/copyright",
+        "kind": "notice",
+        "sha256": "57163c71bd8a5289660892827dd0dfaa7fef47f89deedc9dc6711ced7d0a28d7",
+        "bytes": 2764
+      },
+      {
+        "path": "/usr/share/doc/debian-archive-keyring/copyright",
+        "kind": "notice",
+        "sha256": "b32aecaae84643700a33bc9ee83fa9b36938d35aa7b61b5042092eca77ddb732",
+        "bytes": 1243
+      },
+      {
+        "path": "/usr/share/doc/debianutils/copyright",
+        "kind": "notice",
+        "sha256": "fd2d797e208bcfb713510e47a89867191180943e1167d44c2acd8ff1b88e5c10",
+        "bytes": 9055
+      },
+      {
+        "path": "/usr/share/doc/diffutils/copyright",
+        "kind": "notice",
+        "sha256": "8654d7cc7cdae1f31bb67a3ce5bf35d512c0bdfffd071df757edc54153cc7930",
+        "bytes": 16112
+      },
+      {
+        "path": "/usr/share/doc/dpkg/copyright",
+        "kind": "notice",
+        "sha256": "7442bdadcd44e818fddd786057db07639cc68225c389c7c240d3bb3984b05173",
+        "bytes": 7943
+      },
+      {
+        "path": "/usr/share/doc/e2fsprogs/copyright",
+        "kind": "notice",
+        "sha256": "1ca415a294c0e56958c4f795b3f1f69ea3479bca53d7811f5cdd020a258949db",
+        "bytes": 15209
+      },
+      {
+        "path": "/usr/share/doc/findutils/copyright",
+        "kind": "notice",
+        "sha256": "8fbcc77ed31f480a85654e9b6d1d25cbb95b62e9dc5159ae1565bca684c3e1dc",
+        "bytes": 24782
+      },
+      {
+        "path": "/usr/share/doc/gcc-12-base/copyright",
+        "kind": "notice",
+        "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3",
+        "bytes": 68194
+      },
+      {
+        "path": "/usr/share/doc/gpgv/copyright",
+        "kind": "notice",
+        "sha256": "84dab06b5c1baf3a7a45c3cdc5f98fb121234e98fdd6266c3f773d54fcdc4f54",
+        "bytes": 10555
+      },
+      {
+        "path": "/usr/share/doc/grep/copyright",
+        "kind": "notice",
+        "sha256": "42d9b4d610396b1e8d1303dcb9487af3f5a2d2709623cf03a04cf76acdf6c5e3",
+        "bytes": 1807
+      },
+      {
+        "path": "/usr/share/doc/gzip/copyright",
+        "kind": "notice",
+        "sha256": "1ca5dd5098fe2e1c0f0d05196f5b3da8b414a807702e6ca8b536eb5fd3059130",
+        "bytes": 2895
+      },
+      {
+        "path": "/usr/share/doc/hostname/copyright",
+        "kind": "notice",
+        "sha256": "94189fc5a9a7b7224d96e1a0cfdfe9be0df2018b04bf21d591627ab96b30cad1",
+        "bytes": 1273
+      },
+      {
+        "path": "/usr/share/doc/init-system-helpers/copyright",
+        "kind": "notice",
+        "sha256": "7534601cc4fa513804d16490359f5831e7b6a1212da3bbf948bebdd4c8799783",
+        "bytes": 3133
+      },
+      {
+        "path": "/usr/share/doc/libacl1/copyright",
+        "kind": "notice",
+        "sha256": "9a2dfb4a5abc7e84be2cc41f1089be665519c9409549296f6c19de57ab1d37c2",
+        "bytes": 2048
+      },
+      {
+        "path": "/usr/share/doc/libapt-pkg6.0/copyright",
+        "kind": "notice",
+        "sha256": "b4701305243d8d746f4acaafe15d94f946251b05691bd6917fef41dd15e9ee12",
+        "bytes": 7668
+      },
+      {
+        "path": "/usr/share/doc/libattr1/copyright",
+        "kind": "notice",
+        "sha256": "0cbec745d85ea775450b2d54fac55277197f429e52d611f72852ed420450620e",
+        "bytes": 1947
+      },
+      {
+        "path": "/usr/share/doc/libaudit-common/copyright",
+        "kind": "notice",
+        "sha256": "6c7011e93f643b112c4cc3622131e28a30477afad6c4f5efe466b13aa7f603cc",
+        "bytes": 1596
+      },
+      {
+        "path": "/usr/share/doc/libaudit1/copyright",
+        "kind": "notice",
+        "sha256": "6c7011e93f643b112c4cc3622131e28a30477afad6c4f5efe466b13aa7f603cc",
+        "bytes": 1596
+      },
+      {
+        "path": "/usr/share/doc/libblkid1/copyright",
+        "kind": "notice",
+        "sha256": "30539a2df6a89d844f43c727505a3193a60515f8ec6cdede8cc515ed22941d1c",
+        "bytes": 23237
+      },
+      {
+        "path": "/usr/share/doc/libbrotli1/copyright",
+        "kind": "notice",
+        "sha256": "24a64e5bb83d0960d1835696a1e23c0896ad6055b0ca47c66ab0eb9a766324b1",
+        "bytes": 1354
+      },
+      {
+        "path": "/usr/share/doc/libbz2-1.0/copyright",
+        "kind": "notice",
+        "sha256": "832ed535ff3c3d025a8d2348eb1b697b89addcf2eaadbc17650262040b9145e2",
+        "bytes": 2228
+      },
+      {
+        "path": "/usr/share/doc/libc-bin/copyright",
+        "kind": "notice",
+        "sha256": "40c7e1f2118531f038ca22999bd976901254e1bc5cd1b0f0211bdd064c599987",
+        "bytes": 25467
+      },
+      {
+        "path": "/usr/share/doc/libc6/copyright",
+        "kind": "notice",
+        "sha256": "40c7e1f2118531f038ca22999bd976901254e1bc5cd1b0f0211bdd064c599987",
+        "bytes": 25467
+      },
+      {
+        "path": "/usr/share/doc/libcap-ng0/copyright",
+        "kind": "notice",
+        "sha256": "49b5db19990a3e3cc1a9ed716aed231f6f3c1c217e58f62ae4dc2818c6d3e9cc",
+        "bytes": 2035
+      },
+      {
+        "path": "/usr/share/doc/libcap2/copyright",
+        "kind": "notice",
+        "sha256": "e60a5642e12e340060e4e519a65b2eb0330be2917854841c644e36268f607d54",
+        "bytes": 4631
+      },
+      {
+        "path": "/usr/share/doc/libcom-err2/copyright",
+        "kind": "notice",
+        "sha256": "1ca415a294c0e56958c4f795b3f1f69ea3479bca53d7811f5cdd020a258949db",
+        "bytes": 15209
+      },
+      {
+        "path": "/usr/share/doc/libcrypt1/copyright",
+        "kind": "notice",
+        "sha256": "5a5e7ca0e9f3f9679977e3a3e9ede45ad92885a3297ea78e766979f9866c5a16",
+        "bytes": 6010
+      },
+      {
+        "path": "/usr/share/doc/libcurl4/copyright",
+        "kind": "notice",
+        "sha256": "a7c131b21e6e73b3b085a7d9f1637b68f5f92b832cc6f462e0c978fbe7841ccb",
+        "bytes": 21749
+      },
+      {
+        "path": "/usr/share/doc/libdb5.3/copyright",
+        "kind": "notice",
+        "sha256": "8b53da37d73289d9df7317b3a2dbe16491f1fa9fec8b77b86d69704b40ce2c26",
+        "bytes": 17177
+      },
+      {
+        "path": "/usr/share/doc/libdebconfclient0/copyright",
+        "kind": "notice",
+        "sha256": "cf63099896d1c0f6529c41b8d95738e6fea342ffba609187d339c4f38ce36ecc",
+        "bytes": 5856
+      },
+      {
+        "path": "/usr/share/doc/libext2fs2/copyright",
+        "kind": "notice",
+        "sha256": "1ca415a294c0e56958c4f795b3f1f69ea3479bca53d7811f5cdd020a258949db",
+        "bytes": 15209
+      },
+      {
+        "path": "/usr/share/doc/libffi8/copyright",
+        "kind": "notice",
+        "sha256": "f83d2ecba1ea4d99957e81c50bebbd076a128194288a3ec22cc8ccdb77c43087",
+        "bytes": 10165
+      },
+      {
+        "path": "/usr/share/doc/libgcrypt20/copyright",
+        "kind": "notice",
+        "sha256": "95db2f9da663f2bfe2aabe9c72fce9d6c9ae767b912f397d7823f50bd55a1a7d",
+        "bytes": 24896
+      },
+      {
+        "path": "/usr/share/doc/libgmp10/copyright",
+        "kind": "notice",
+        "sha256": "7d366aef5ba325150246de1d7820c4c9926cd27ca61a69948492b26cd3b61601",
+        "bytes": 4153
+      },
+      {
+        "path": "/usr/share/doc/libgnutls30/copyright",
+        "kind": "notice",
+        "sha256": "bb7e5c24b3e27bbba5671dd710d159a0066833bda4caa1d55d8027ffed539337",
+        "bytes": 51588
+      },
+      {
+        "path": "/usr/share/doc/libgpg-error0/copyright",
+        "kind": "notice",
+        "sha256": "8760fd36efa1d7186f8769d4e76a3e678045b94d54465bf6f2db5eb871c7c27f",
+        "bytes": 4903
+      },
+      {
+        "path": "/usr/share/doc/libgssapi-krb5-2/copyright",
+        "kind": "notice",
+        "sha256": "936728f4181718f42951b881c1e8f1386bf6b2723c4fbc533c374d6f42c71816",
+        "bytes": 63047
+      },
+      {
+        "path": "/usr/share/doc/libhogweed6/copyright",
+        "kind": "notice",
+        "sha256": "ca2ca597320220c00ef6dc0fe5d0d82025548d6d4ba80e85615eb691f9021f93",
+        "bytes": 24923
+      },
+      {
+        "path": "/usr/share/doc/libidn2-0/copyright",
+        "kind": "notice",
+        "sha256": "41702469f28e8ff406345e3d1dd0c741f11bdfca319264f67036efd6aaa79e4b",
+        "bytes": 5348
+      },
+      {
+        "path": "/usr/share/doc/libk5crypto3/copyright",
+        "kind": "notice",
+        "sha256": "936728f4181718f42951b881c1e8f1386bf6b2723c4fbc533c374d6f42c71816",
+        "bytes": 63047
+      },
+      {
+        "path": "/usr/share/doc/libkeyutils1/copyright",
+        "kind": "notice",
+        "sha256": "c62fe37d22203046611112bc10a9e03a39a7f73bec1b061e7c615326166d9ff5",
+        "bytes": 2104
+      },
+      {
+        "path": "/usr/share/doc/libkrb5-3/copyright",
+        "kind": "notice",
+        "sha256": "936728f4181718f42951b881c1e8f1386bf6b2723c4fbc533c374d6f42c71816",
+        "bytes": 63047
+      },
+      {
+        "path": "/usr/share/doc/libkrb5support0/copyright",
+        "kind": "notice",
+        "sha256": "936728f4181718f42951b881c1e8f1386bf6b2723c4fbc533c374d6f42c71816",
+        "bytes": 63047
+      },
+      {
+        "path": "/usr/share/doc/libldap-2.5-0/copyright",
+        "kind": "notice",
+        "sha256": "b4081907f0d9a4110736fa6540dc8ca9d7d60a20878b5d78f84916cc04907bdc",
+        "bytes": 62837
+      },
+      {
+        "path": "/usr/share/doc/liblz4-1/copyright",
+        "kind": "notice",
+        "sha256": "d3be0f43fe14da244f97c451bbae789c0acf868612598a69f5f22a289abeca40",
+        "bytes": 3275
+      },
+      {
+        "path": "/usr/share/doc/liblzma5/copyright",
+        "kind": "notice",
+        "sha256": "a2dc8fac0f496e1c58aff67018cf0c6b88336316afa5642f9335b71642e28aa8",
+        "bytes": 15465
+      },
+      {
+        "path": "/usr/share/doc/libmd0/copyright",
+        "kind": "notice",
+        "sha256": "4365ef6255ad553fce69dd4bc0e093472c5d0e41b8ea493a545cc926ce171aa6",
+        "bytes": 8018
+      },
+      {
+        "path": "/usr/share/doc/libmount1/copyright",
+        "kind": "notice",
+        "sha256": "30539a2df6a89d844f43c727505a3193a60515f8ec6cdede8cc515ed22941d1c",
+        "bytes": 23237
+      },
+      {
+        "path": "/usr/share/doc/libnettle8/copyright",
+        "kind": "notice",
+        "sha256": "ca2ca597320220c00ef6dc0fe5d0d82025548d6d4ba80e85615eb691f9021f93",
+        "bytes": 24923
+      },
+      {
+        "path": "/usr/share/doc/libnghttp2-14/copyright",
+        "kind": "notice",
+        "sha256": "a34ae32a5eba61e535835a8de7c398f47e420247d339bc400a3b9c618ba29a3d",
+        "bytes": 6535
+      },
+      {
+        "path": "/usr/share/doc/libp11-kit0/copyright",
+        "kind": "notice",
+        "sha256": "ed139379f7c874f0ee75f3ddcc2e01091dd828d84ee1a0bdff6a1c5673ee6e58",
+        "bytes": 8646
+      },
+      {
+        "path": "/usr/share/doc/libpam-modules-bin/copyright",
+        "kind": "notice",
+        "sha256": "9596b9028339d66c285422237728d6170e1e29d0b0d9adf0e9f1bda82e2391ce",
+        "bytes": 9477
+      },
+      {
+        "path": "/usr/share/doc/libpam-modules/copyright",
+        "kind": "notice",
+        "sha256": "9596b9028339d66c285422237728d6170e1e29d0b0d9adf0e9f1bda82e2391ce",
+        "bytes": 9477
+      },
+      {
+        "path": "/usr/share/doc/libpam-runtime/copyright",
+        "kind": "notice",
+        "sha256": "9596b9028339d66c285422237728d6170e1e29d0b0d9adf0e9f1bda82e2391ce",
+        "bytes": 9477
+      },
+      {
+        "path": "/usr/share/doc/libpam0g/copyright",
+        "kind": "notice",
+        "sha256": "9596b9028339d66c285422237728d6170e1e29d0b0d9adf0e9f1bda82e2391ce",
+        "bytes": 9477
+      },
+      {
+        "path": "/usr/share/doc/libpcre2-8-0/copyright",
+        "kind": "notice",
+        "sha256": "030511beb4d9d620ad09914c369c36ec0528dcf301d1923cc643c948ee7c6a38",
+        "bytes": 6626
+      },
+      {
+        "path": "/usr/share/doc/libpsl5/copyright",
+        "kind": "notice",
+        "sha256": "bbafb0cf52d34465fc69f5ffd22d724224f6a2f28402c88b045c69d88af06aaf",
+        "bytes": 3310
+      },
+      {
+        "path": "/usr/share/doc/librtmp1/copyright",
+        "kind": "notice",
+        "sha256": "4302abcc1ea1b6cbe8d19c79b892acf78878030220210707c19006828866207c",
+        "bytes": 2726
+      },
+      {
+        "path": "/usr/share/doc/libsasl2-2/copyright",
+        "kind": "notice",
+        "sha256": "5e77ddcac7fb682d696bc4b034dc2869e5a9011e8c2ed3c570ab8db0f4506931",
+        "bytes": 32354
+      },
+      {
+        "path": "/usr/share/doc/libsasl2-modules-db/copyright",
+        "kind": "notice",
+        "sha256": "5e77ddcac7fb682d696bc4b034dc2869e5a9011e8c2ed3c570ab8db0f4506931",
+        "bytes": 32354
+      },
+      {
+        "path": "/usr/share/doc/libseccomp2/copyright",
+        "kind": "notice",
+        "sha256": "6da0653a365b80ab31478dbfe9e7c358e80d58b6d2b52b4e16b4dbb42d7d9f5c",
+        "bytes": 1429
+      },
+      {
+        "path": "/usr/share/doc/libselinux1/copyright",
+        "kind": "notice",
+        "sha256": "641806738b0c6a3d03168c2649e6b94205198bb66cd557e6bae3a20b71c9bb0b",
+        "bytes": 3131
+      },
+      {
+        "path": "/usr/share/doc/libsemanage-common/copyright",
+        "kind": "notice",
+        "sha256": "e00e6a86c598f9e24ced0180a70a5f2f2e45e133d93adf2b17ce8a06ce4b1b51",
+        "bytes": 1830
+      },
+      {
+        "path": "/usr/share/doc/libsemanage2/copyright",
+        "kind": "notice",
+        "sha256": "e00e6a86c598f9e24ced0180a70a5f2f2e45e133d93adf2b17ce8a06ce4b1b51",
+        "bytes": 1830
+      },
+      {
+        "path": "/usr/share/doc/libsepol2/copyright",
+        "kind": "notice",
+        "sha256": "78d2a34606a0302057ec499a3b3c07bcbc43ca334064ce4c80891a0f69c8f6c6",
+        "bytes": 3750
+      },
+      {
+        "path": "/usr/share/doc/libsmartcols1/copyright",
+        "kind": "notice",
+        "sha256": "30539a2df6a89d844f43c727505a3193a60515f8ec6cdede8cc515ed22941d1c",
+        "bytes": 23237
+      },
+      {
+        "path": "/usr/share/doc/libss2/copyright",
+        "kind": "notice",
+        "sha256": "1ca415a294c0e56958c4f795b3f1f69ea3479bca53d7811f5cdd020a258949db",
+        "bytes": 15209
+      },
+      {
+        "path": "/usr/share/doc/libssh2-1/copyright",
+        "kind": "notice",
+        "sha256": "98978241c573785aa7c8504e399bb66cfb3c40c1f20507a0d3c7580bfbf9d8d4",
+        "bytes": 2099
+      },
+      {
+        "path": "/usr/share/doc/libssl3/copyright",
+        "kind": "notice",
+        "sha256": "6a7da622fe0637a334d2a8fc470852d2ffb77d9a2b2f930f854e32a41ad6ef35",
+        "bytes": 2543
+      },
+      {
+        "path": "/usr/share/doc/libsystemd0/copyright",
+        "kind": "notice",
+        "sha256": "a7d06854714a1ca99f6dbd1a1641dde5bcf28635be149f6554449618f8f427f3",
+        "bytes": 12776
+      },
+      {
+        "path": "/usr/share/doc/libtasn1-6/copyright",
+        "kind": "notice",
+        "sha256": "572ad60ad184d8f52c6dc66d83a61a68f137db560b3452ce00588c9ecf128a65",
+        "bytes": 3451
+      },
+      {
+        "path": "/usr/share/doc/libtinfo6/copyright",
+        "kind": "notice",
+        "sha256": "f0974fb41778e23c94111ff90da0546de8971f8270c58877283d372e6bd7f17e",
+        "bytes": 4670
+      },
+      {
+        "path": "/usr/share/doc/libudev1/copyright",
+        "kind": "notice",
+        "sha256": "a7d06854714a1ca99f6dbd1a1641dde5bcf28635be149f6554449618f8f427f3",
+        "bytes": 12776
+      },
+      {
+        "path": "/usr/share/doc/libunistring2/copyright",
+        "kind": "notice",
+        "sha256": "0035f89e5317f3cec389383e8727788521b0fde3e75cea881fa0e92e1d48cb57",
+        "bytes": 6068
+      },
+      {
+        "path": "/usr/share/doc/libuuid1/copyright",
+        "kind": "notice",
+        "sha256": "30539a2df6a89d844f43c727505a3193a60515f8ec6cdede8cc515ed22941d1c",
+        "bytes": 23237
+      },
+      {
+        "path": "/usr/share/doc/libxxhash0/copyright",
+        "kind": "notice",
+        "sha256": "a123c93b07e781919ae996276ac02bb1c8b19dfde88176cd1240ab277c14a4ce",
+        "bytes": 2579
+      },
+      {
+        "path": "/usr/share/doc/libzstd1/copyright",
+        "kind": "notice",
+        "sha256": "35e85e8e9bbb71492c5f5dddf39ed65b68775a02ad8d710c25d097b497f06c49",
+        "bytes": 5389
+      },
+      {
+        "path": "/usr/share/doc/login/copyright",
+        "kind": "notice",
+        "sha256": "a4c3e5b19700dd3cc5961663d204bd7150f65f913314682aede5931548c436d5",
+        "bytes": 7044
+      },
+      {
+        "path": "/usr/share/doc/logsave/copyright",
+        "kind": "notice",
+        "sha256": "1ca415a294c0e56958c4f795b3f1f69ea3479bca53d7811f5cdd020a258949db",
+        "bytes": 15209
+      },
+      {
+        "path": "/usr/share/doc/mawk/copyright",
+        "kind": "notice",
+        "sha256": "167d04422f2fdf76ab565878c23be8ba0c2ebb2c57a5dac0a5a59ccd27e747a5",
+        "bytes": 22591
+      },
+      {
+        "path": "/usr/share/doc/mount/copyright",
+        "kind": "notice",
+        "sha256": "30539a2df6a89d844f43c727505a3193a60515f8ec6cdede8cc515ed22941d1c",
+        "bytes": 23237
+      },
+      {
+        "path": "/usr/share/doc/ncurses-base/copyright",
+        "kind": "notice",
+        "sha256": "f0974fb41778e23c94111ff90da0546de8971f8270c58877283d372e6bd7f17e",
+        "bytes": 4670
+      },
+      {
+        "path": "/usr/share/doc/ncurses-bin/copyright",
+        "kind": "notice",
+        "sha256": "f0974fb41778e23c94111ff90da0546de8971f8270c58877283d372e6bd7f17e",
+        "bytes": 4670
+      },
+      {
+        "path": "/usr/share/doc/openssl/copyright",
+        "kind": "notice",
+        "sha256": "6a7da622fe0637a334d2a8fc470852d2ffb77d9a2b2f930f854e32a41ad6ef35",
+        "bytes": 2543
+      },
+      {
+        "path": "/usr/share/doc/passwd/copyright",
+        "kind": "notice",
+        "sha256": "a4c3e5b19700dd3cc5961663d204bd7150f65f913314682aede5931548c436d5",
+        "bytes": 7044
+      },
+      {
+        "path": "/usr/share/doc/perl-base/copyright",
+        "kind": "notice",
+        "sha256": "b52f3ca17b45473cb0da6ec46748949101fcf0dda1fd5d8b306e6c97fd41af4d",
+        "bytes": 109772
+      },
+      {
+        "path": "/usr/share/doc/sed/copyright",
+        "kind": "notice",
+        "sha256": "719320e425e8e6da53a55e0fcfa2f2ed9b1332cea16abd65321bd651b2a88568",
+        "bytes": 8618
+      },
+      {
+        "path": "/usr/share/doc/sysvinit-utils/copyright",
+        "kind": "notice",
+        "sha256": "ad7cb339e58a88918a883d553ca236795191f027e158788a8b33f747ff502fb2",
+        "bytes": 4689
+      },
+      {
+        "path": "/usr/share/doc/tar/copyright",
+        "kind": "notice",
+        "sha256": "bea61e0c172868e07845cf50423f97f093a9a46de167dbbe333a38be610c8e00",
+        "bytes": 3798
+      },
+      {
+        "path": "/usr/share/doc/tzdata/copyright",
+        "kind": "notice",
+        "sha256": "cb61132bc0fc7b26ef5a82ee18b2fb644a1362f4f286ed980ff22e408471f59a",
+        "bytes": 375
+      },
+      {
+        "path": "/usr/share/doc/usr-is-merged/copyright",
+        "kind": "notice",
+        "sha256": "9836bfe2ef94505bbf29701e8c90799ab1a5fd966d26d60d019a822cdbf3d61a",
+        "bytes": 987
+      },
+      {
+        "path": "/usr/share/doc/util-linux-extra/copyright",
+        "kind": "notice",
+        "sha256": "30539a2df6a89d844f43c727505a3193a60515f8ec6cdede8cc515ed22941d1c",
+        "bytes": 23237
+      },
+      {
+        "path": "/usr/share/doc/util-linux/copyright",
+        "kind": "notice",
+        "sha256": "30539a2df6a89d844f43c727505a3193a60515f8ec6cdede8cc515ed22941d1c",
+        "bytes": 23237
+      },
+      {
+        "path": "/usr/share/doc/zlib1g/copyright",
+        "kind": "notice",
+        "sha256": "9e5b96d63773a5d177ba264254390f792be07e41748ebd94730981c6cac31cc6",
+        "bytes": 2927
+      },
+      {
+        "path": "/var/lib/dpkg/status",
+        "kind": "database",
+        "sha256": "a97267a77544712400b1ddbff3e21a7d54771f0887ab3a7a92ebcc7a3c437ad2",
+        "bytes": 92466
+      }
+    ]
+  },
+  "same_image": {
+    "console_inventory": {
+      "packages": [
+        {
+          "name": "react",
+          "version": "19.2.8"
+        },
+        {
+          "name": "react-dom",
+          "version": "19.2.8"
+        },
+        {
+          "name": "scheduler",
+          "version": "0.27.0"
+        }
+      ],
+      "files": 12,
+      "inventory_sha256": "b2fbf546463235162f80e305b1aa9102bc2e869b220f25f3bed0ec54bdb3a4a7",
+      "sbom_sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962",
+      "notices_sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709",
+      "source_sha": "7d1ab12e61fab348c49a5727ae2a2affc6b2c442",
+      "version": "0.4.3"
+    },
+    "node_inventory": {
+      "schema_version": 1,
+      "target": "linux-arm64",
+      "upstream_source_sha": "aa4c77582be995286fc6e00aaf530dc7ade102a9",
+      "binary_bytes": 122159120,
+      "binary_sha256": "1a638b0fe2b68da0489276aca95526c5122fc61ba54d6a2d0d00c1c92ab7b876",
+      "notices": {
+        "LICENSE": {
+          "bytes": 145485,
+          "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4"
+        },
+        "nbytes-LICENSE": {
+          "bytes": 1064,
+          "sha256": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2"
+        },
+        "sqlite-NOTICE": {
+          "bytes": 297,
+          "sha256": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755"
+        },
+        "v8-abseil-LICENSE": {
+          "bytes": 11361,
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747"
+        },
+        "v8-fp16-LICENSE": {
+          "bytes": 1158,
+          "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d"
+        },
+        "v8-rapidhash-LICENSE": {
+          "bytes": 1705,
+          "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0"
+        },
+        "v8-zlib-LICENSE": {
+          "bytes": 910,
+          "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c"
+        }
+      },
+      "dependencies": {
+        "acorn": "8.16.0",
+        "ada": "2.9.2",
+        "amaro": "1.1.8",
+        "ares": "1.34.6",
+        "brotli": "1.1.0",
+        "cjs_module_lexer": "2.2.0",
+        "icu": "78.2",
+        "llhttp": "9.4.3",
+        "nbytes": "0.1.3",
+        "ncrypto": "0.0.1",
+        "nghttp2": "1.69.0",
+        "openssl": "3.5.7",
+        "simdjson": "4.5.0",
+        "simdutf": "6.4.2",
+        "sqlite": "3.51.3",
+        "undici": "6.28.0",
+        "uv": "1.51.0",
+        "uvwasi": "0.0.23",
+        "v8": "12.4.254.21-node.56",
+        "zlib": "1.3.1-e00f703",
+        "zstd": "1.5.7"
+      },
+      "shared_libraries": {
+        "ada": false,
+        "brotli": false,
+        "cares": false,
+        "libuv": false,
+        "nghttp2": false,
+        "openssl": false,
+        "simdjson": false,
+        "simdutf": false,
+        "sqlite": false,
+        "uvwasi": false,
+        "zlib": false,
+        "zstd": false
+      },
+      "runtime_version": "22.23.2"
+    }
+  },
+  "controls": [
+    {
+      "control": "truncated-full-copyright",
+      "image_id": "sha256:bef9ca7aa6a36ac3d27b8d4611cc0541378964c4e9bae8f9485a4ac1e6109238",
+      "source_sha": "7d1ab12e61fab348c49a5727ae2a2affc6b2c442",
+      "refusal": "actual product package file hash differs from OCI SPDX",
+      "package_database_digest_updated": false
+    },
+    {
+      "control": "changed-database-source-with-coherent-digest",
+      "image_id": "sha256:a93fb15d543dffb1d03268f43ca0b232550d32250369ce9718509eb4d828b36c",
+      "source_sha": "7d1ab12e61fab348c49a5727ae2a2affc6b2c442",
+      "refusal": "SPDX and actual installed database identities differ",
+      "package_database_digest_updated": true
+    }
+  ],
+  "owned_inspection_containers_removed": true,
+  "owned_control_images_removed": true,
+  "unrelated_deployments_changed": false,
+  "chart_reproducibility": {
+    "before_sha256": [
+      "050be82654702aeb06809197bc5a8fff92d9d4d7cc3fb7ee6cfaa3a9bc8a76d1",
+      "cb74e616490c5b0231e90fcbfe11cb8fd212cdaae149749597609cd9ca4eab92"
+    ],
+    "after_sha256": [
+      "65789a0148d1c245eba5072852d14d29be99d6babd539d2892b16e9d329a5c51",
+      "65789a0148d1c245eba5072852d14d29be99d6babd539d2892b16e9d329a5c51"
+    ],
+    "regular_member_count": 81,
+    "changed_timestamp_count": 52,
+    "all_raw_member_bytes_preserved": true,
+    "source_notice_sha256": {
+      "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "NOTICE": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+    },
+    "scope": "Actual source chart packages across clock seconds; no published chart or vendor payload rewritten."
+  },
+  "validation": {
+    "focused_tests": 44,
+    "ci_tooling_tests": 53,
+    "release_parity_tests": 85,
+    "failed": 0,
+    "skipped": 0,
+    "passed": [
+      "make check-fast check-ci check-release-parity",
+      "make check-deploy chart-lint",
+      "cargo fmt --all --check",
+      "actionlint 1.7.7 -shellcheck=",
+      "git diff --check"
+    ],
+    "strict_clippy": "Not applicable: no Rust source changed."
+  },
+  "next_action": "Resolve pinned ncrypto/fast_float provenance and remaining Node/native coverage, then plugin/chart and other-image inventories/full notices before vulnerability and publisher incident policy. GitHub transport and native Rust Windows scanner blockers remain separate; no full qualification source/run is selected."
+}

@@ -11,12 +11,11 @@
 //! The reconciler is the gateway's and takes `AppState`, so the *loop* is the
 //! gateway's too (ADR-0060 decision 1). The connector needs none of that: it
 //! needs an HTTP client, an issuer's configuration and a credential, all of
-//! which are already here. Placing it beside [`crate::oidc`] also makes
+//! which are already here. Placing it beside the OIDC verifier also makes
 //! ADR-0060 decision 8 **structural** rather than a promise. This crate is a
-//! sibling of `synveda-store`, not a dependent, so a connector cannot name a
-//! scope, a role, a pack or a record even if somebody wanted it to — the
-//! types do not exist here. That is why [`DirectoryUserRecord`] mirrors the
-//! mirror's shape rather than importing it.
+//! sibling of `synveda-store`, not a dependent, so a connector cannot read or
+//! write hierarchy, grants or the directory mirror. It returns
+//! [`DirectoryUserRecord`] values for the gateway's reconciler to govern.
 //!
 //! ## Completeness is a type, not a flag
 //!
@@ -339,7 +338,7 @@ pub enum Enumeration {
         /// Everything gathered before the failure, which may be empty.
         snapshot: DirectorySnapshot,
         /// Why it stopped, for a log and a metric. Never carries the
-        /// credential; see [`redact`].
+        /// credential; see `redact`.
         failure: String,
     },
 }

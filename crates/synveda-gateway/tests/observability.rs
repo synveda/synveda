@@ -15,7 +15,9 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, behavior_test_router as router, governed_router};
 use synveda_gateway::authority::{self, AuthorityMonitor, CheckOutcome};
+use synveda_gateway::authz::PolicyReadyGeneration;
 use synveda_gateway::runtime_config;
+use synveda_gateway::shutdown::GatewayAdmission;
 use synveda_gateway::telemetry;
 use tower::ServiceExt;
 use tracing_subscriber::layer::{Context, SubscriberExt};
@@ -204,7 +206,12 @@ async fn governed_routes_stay_closed_while_storage_is_unreachable() {
     state.pool = pool_options.connect_lazy_with(options);
     let monitor =
         AuthorityMonitor::new(state.pool.clone(), pool_refusal, "nobody".to_owned(), roles);
-    let app = governed_router(state, monitor.gate());
+    let app = governed_router(
+        state,
+        monitor.gate(),
+        GatewayAdmission::new(),
+        PolicyReadyGeneration::new(),
+    );
 
     let health = app
         .clone()
@@ -258,7 +265,10 @@ async fn governed_routes_open_only_for_exact_authority_and_terminal_drift_stays_
         .await
         .expect("initial authority proof is bounded")
         .expect("initial authority proof accepts");
-    let app = governed_router(state, gate.clone());
+    let policy_ready = PolicyReadyGeneration::new();
+    policy_ready.mark_converged(gate.open_generation().expect("authority gate is open"));
+    let admission = GatewayAdmission::new();
+    let app = governed_router(state.clone(), gate.clone(), admission, policy_ready.clone());
 
     let accepted = app
         .clone()
@@ -270,6 +280,27 @@ async fn governed_routes_open_only_for_exact_authority_and_terminal_drift_stays_
         StatusCode::UNAUTHORIZED,
         "the open gate reaches the normal disabled-auth boundary"
     );
+
+    let draining = GatewayAdmission::new();
+    let draining_app = governed_router(state, gate.clone(), draining.clone(), policy_ready);
+    draining.withdraw();
+    let draining_readiness = draining_app
+        .clone()
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(draining_readiness.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let draining_request = draining_app
+        .clone()
+        .oneshot(Request::get("/v1/whoami").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(draining_request.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let draining_liveness = draining_app
+        .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(draining_liveness.status(), StatusCode::OK);
 
     let quoted_role = quote_postgres_identifier(&runtime.role);
     sqlx::query(&format!("alter role {quoted_role} bypassrls"))

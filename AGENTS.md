@@ -27,8 +27,10 @@ establish HA, SaaS, disaster recovery or enterprise certification.
 
 ## Current boundaries
 
-- Schema epoch 3 is the single `0001_context_platform.sql` baseline. Earlier
-  schemas are refused with reset guidance; no compatibility migrator exists.
+- Schema epoch 3 starts from the byte-pinned published v0.4.3
+  `0001_context_platform.sql` baseline and an additive `0002` forward
+  migration. Pre-epoch-3 schemas are refused with reset guidance; v0.4.0's
+  different baseline checksum is not a supported upgrade path.
 - `synveda_types::scope::ScopeKind` and `synveda_types::access::RoleKey` are the
   only scope/role vocabularies. Placement is identity; Cedar-governed grants
   are authority.

@@ -108,6 +108,8 @@ jobs:
           version: v4.2.3
       - run: corepack enable
       - name: The console bundle
+        env:
+          SYNVEDA_BUILD_SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           version="${{ needs.version.outputs.version }}"
@@ -117,8 +119,10 @@ jobs:
           stage="$(mktemp -d)"
           mkdir -p "$stage/console"
           cp -R console/dist/. "$stage/console/"
+          cp LICENSE NOTICE "$stage/console/"
           test -f "$stage/console/index.html"
           tar -czf "synveda-console-$version.tar.gz" -C "$stage" console
+          node scripts/check-console-package.mjs "synveda-console-$version.tar.gz" "$version" "$SYNVEDA_BUILD_SOURCE_SHA"
           tar -tzf "synveda-console-$version.tar.gz" | sed -n '1,3p'
       - name: The Helm chart
         run: sh scripts/package-chart.sh "${{ needs.version.outputs.version }}" .
@@ -218,6 +222,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      - name: Install ZIP reader for archived executable verification
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libarchive-tools
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -299,6 +307,8 @@ jobs:
             assets/synveda-*.yaml
             assets/synveda-registry-images-*.json
             assets/synveda-client-report-*.json
+            assets/synveda-*.spdx.json
+            assets/synveda-*.rust-sbom.json
             assets/release-candidate-*.json
             assets/release-local-images-*.json
             assets/release-docker-*.json
@@ -401,6 +411,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      - name: Install ZIP reader for archived executable verification
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libarchive-tools
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-assets
@@ -447,6 +461,8 @@ jobs:
             assets/synveda-*.yaml
             assets/synveda-registry-images-*.json
             assets/synveda-client-report-*.json
+            assets/synveda-*.spdx.json
+            assets/synveda-*.rust-sbom.json
             assets/release-*.json
           retention-days: 30
           if-no-files-found: error

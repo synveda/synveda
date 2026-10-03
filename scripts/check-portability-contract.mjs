@@ -87,6 +87,14 @@ try {
     assert.equal(env.find((e) => e.name === "NO_PROXY").valueFrom.secretKeyRef.name, "proxy");
   }
   checkSecurity(render(), false, false);
+  const captureScale = render([...policy, "--set", "worker.captureOnlyReplicas=2"]);
+  checkSecurity(captureScale, false, false);
+  assert.equal(captureScale.find((o) => o.kind === "Deployment" && o.metadata.name === "synveda-worker").spec.replicas, 1);
+  assert.equal(captureScale.find((o) => o.kind === "Deployment" && o.metadata.name === "synveda-capture-worker").spec.replicas, 2);
+  const capturePolicy = captureScale.find((o) => o.kind === "NetworkPolicy" && o.metadata.name === "synveda-capture-worker");
+  assert.equal(capturePolicy.spec.podSelector.matchLabels["app.kubernetes.io/component"], "capture-worker");
+  assert.deepEqual(capturePolicy.spec.ingress, []);
+  assert.ok(capturePolicy.spec.egress.some((rule) => rule.ports?.some((port) => port.port === 5432)));
   const managed = render(["-f", `${chart}/examples/managed-kubernetes.yaml`]);
   assert.equal(managed.filter((o) => o.kind === "Ingress").length, 1);
   assert.equal(managed.some((o) => o.kind === "Route"), false);

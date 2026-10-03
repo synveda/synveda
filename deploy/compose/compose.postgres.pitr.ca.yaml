@@ -1,0 +1,10 @@
+# Only a project with an operator-owned private CA file selects this overlay.
+services:
+  postgres:
+    secrets:
+      - source: pgbackrest_ca
+        target: pgbackrest_ca
+
+secrets:
+  pgbackrest_ca:
+    file: ${SYNVEDA_PITR_CA_FILE:?set SYNVEDA_PITR_CA_FILE}

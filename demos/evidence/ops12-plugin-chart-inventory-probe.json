@@ -1,0 +1,645 @@
+{
+  "schema_version": 1,
+  "feature_id": "OPS-12",
+  "evidence": "local-plugin-runtime-closure-and-chart-inventory-probe",
+  "checked_at": "2026-10-01T14:39:42.971Z",
+  "source_sha": "4ff8e6ac14788378ba56ac7b8537377835c4ade4",
+  "source_tree_dirty": true,
+  "source_inputs": {
+    "docs/adr/adr-0065-release-and-distribution.md": "2ca5d53bebf715643ea32c80cf9d189985057cbafda747435df341dc97e10bc2",
+    "scripts/package-plugin.sh": "6ed837fec2fa8ab1ce79e300a94b608b0e489d0a631c5f8b488f66dfdedb3150",
+    "scripts/package-client.mjs": "1c8f07710d8481fba52da0b88629e4864298e1760dfdfe3ebc7db58016977e1a",
+    "scripts/check-plugin-package.mjs": "d35738d03a6f9ca6bfb179bfc517b66f0308d01ed4cf7a14fcdc7d6dd7717c52",
+    "scripts/check-client-package.mjs": "b32c55dcd702d66a19ef1d043a18fb4e2d466ae0f2b275f19116a0624d86c7e8",
+    "scripts/package-chart.sh": "82b857f18fea1f562d0864313c0b68fe2e988478f66f15ad1538a1d90d61c548",
+    "scripts/syft-runtimes.json": "a47c9a4efb99abc67c3fa3791340ea35c96fccd081641c4716ed4fc30f83237f",
+    "scripts/node-runtimes.json": "7e9dc1a62afcf430d3ff9f322ab72eec0262eebe30e7542b2d9ba2a484ea21d3",
+    "deploy/helm/synveda/Chart.yaml": "66810056614916c280b127796a0bd68be84753c748f2a8ed4c25f6e3d0b896ec",
+    "deploy/helm/synveda/Chart.lock": "7ac672811fb3a2ae3d1d2a5ebef392a2154a15f8eb339731836c71c4c76559c1",
+    "deploy/helm/synveda/third-party/keycloakx-LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "pnpm-lock.yaml": "d0fbb7abc57bb9de6231e2eb68aec24ea4bb275df81065765100faed4d557099",
+    "package.json": "e3ba55dd94165723d1ffc729f084fddf4ae78bff7ca242e939c0bd73f6b43b7b",
+    "adapters/claude-code/package.json": "76f13466e33a26fbc027b4a59151e2204c435033d066e2f8c2b82ecd9dca969e",
+    "adapters/codex/package.json": "ac78245e6b7a91c21ce5a4da87f3b5f92216bf36d44bfbb2ebcc7110634903cb",
+    "adapters/copilot-cli/package.json": "51ae32a470207154f64007c08b201824db3c7c5d5f4a665f30ae057930ae17b7"
+  },
+  "scope": "Actual plugin/runtime cleanup and retained chart byte/notice probe using unchanged-source compiled adapters. Local macOS ARM client uses the existing dev-profile CLI; no Cargo SBOM, clean hosted, six-target, registry, deployment, complete non-Rust SBOM or licence-provenance qualification.",
+  "maintained_probe": {
+    "scanner": "syft-v1.51.0",
+    "platform": "darwin-arm64",
+    "binary_sha256": "b1147cee2d7f49d6ea58d9c95b24734985a4cc208fdd3f0f0f1ff950622f0252",
+    "scan_sha256": {
+      "plugin.spdx.json": "5b4114c7aefbbd4f7f9d89d525efb13e784d0b01221285669570c05605d9fabf",
+      "plugin-directory.syft.json": "404387713436478726c4915fb1fdfa5a386187b043d60701ba1b7289542e59f8",
+      "plugin-installed.syft.json": "51ff5a41ea22d301c5093939de134bebc5e25340ccb0b1b76758f867a10755dc",
+      "after/plugin-installed.syft.json": "8578ee14d423c0a5e0f12e37df193327af69f4f5fae29f616749dad0fd2e7c57",
+      "after/plugin-installed.spdx.json": "7de83bf2f10d0ed69af57979da8e4e4601cde2de3518f8a99417bb34e0b0cdd3",
+      "chart-directory.syft.json": "37f773b67ac03d8facc3319fc25e9a364117ef6dbd0cb6d2d98a604233b8c2be",
+      "chart-directory.spdx.json": "6a8eaa26e12dfa82d5f9ca5c6ab9ca088ae00f63023e4bb0c3512f371fde84cb"
+    },
+    "installed_cataloger": "javascript-package-cataloger",
+    "initial_archive_packages": 0,
+    "initial_directory_packages": 0,
+    "explicit_installed_package_occurrences": 4,
+    "distinct_npm_identities": 3,
+    "chart_packages": 0,
+    "limitations": [
+      "An empty initial archive or directory scan does not establish zero dependencies.",
+      "Explicit installed-package cataloging identifies the four shipped private npm manifests; the separate Claude plugin manifest is independently read.",
+      "No Helm component identity was supplied by the chart directory scan. A narrow maintained metadata/notice inventory choice remains necessary before report implementation."
+    ]
+  },
+  "plugin": {
+    "version": "0.4.3",
+    "before_archive_sha256": "b1b0e39bb6a28d7e1c4aed7d7bc43d939558a718329fa41d28cc55d5c72517d5",
+    "before_regular_files": 344,
+    "after_archive_sha256": "1d50d87d6f77db610638a745c4b27f4011c38950b444e21644b81687a81e156d",
+    "after_archive_bytes": 118479,
+    "after_regular_files": 73,
+    "claude_plugin_manifest_sha256": "7acf443673b6f44d4acb2907550ef65f2e412818eef21ff01b5ab737e0b5906e",
+    "installed_packages": [
+      {
+        "name": "@synveda/claude-code-adapter",
+        "version": "0.4.3",
+        "type": "npm",
+        "purl": "pkg:npm/%40synveda/claude-code-adapter@0.4.3",
+        "manifest_path": "plugin/codex/node_modules/@synveda/claude-code-adapter/package.json",
+        "manifest_sha256": "b9e5237b955e16d7bf73f9daf9c6956039aaac97747e72fede5fcc1b79264bac",
+        "licence": "Apache-2.0"
+      },
+      {
+        "name": "@synveda/claude-code-adapter",
+        "version": "0.4.3",
+        "type": "npm",
+        "purl": "pkg:npm/%40synveda/claude-code-adapter@0.4.3",
+        "manifest_path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/package.json",
+        "manifest_sha256": "b9e5237b955e16d7bf73f9daf9c6956039aaac97747e72fede5fcc1b79264bac",
+        "licence": "Apache-2.0"
+      },
+      {
+        "name": "@synveda/codex-adapter",
+        "version": "0.4.3",
+        "type": "npm",
+        "purl": "pkg:npm/%40synveda/codex-adapter@0.4.3",
+        "manifest_path": "plugin/codex/package.json",
+        "manifest_sha256": "8a86ec0b0a51004e21677eb61081680fd3a75d63429a5e04e0f16dfa9b8ab6f8",
+        "licence": "Apache-2.0"
+      },
+      {
+        "name": "@synveda/copilot-cli-adapter",
+        "version": "0.4.3",
+        "type": "npm",
+        "purl": "pkg:npm/%40synveda/copilot-cli-adapter@0.4.3",
+        "manifest_path": "plugin/copilot-cli/package.json",
+        "manifest_sha256": "6ccc4120be1a8d0e7671df5fa5ed2843e9491be9f160916a084fa29ef01494e0",
+        "licence": "Apache-2.0"
+      }
+    ],
+    "file_inventory": [
+      {
+        "path": "plugin/LICENSE",
+        "bytes": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      {
+        "path": "plugin/NOTICE",
+        "bytes": 169,
+        "sha256": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+      },
+      {
+        "path": "plugin/synveda/LICENSE",
+        "bytes": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      {
+        "path": "plugin/synveda/.mcp.json",
+        "bytes": 104,
+        "sha256": "487001bf68e819c8f4e421aa8433325075630e54b6021621797dc5179ab2e5fe"
+      },
+      {
+        "path": "plugin/synveda/consumer-setup.json",
+        "bytes": 126,
+        "sha256": "16d1991fe82df6d9a12f63c38f6ea116d56a879a85d09d692887c3c24057549d"
+      },
+      {
+        "path": "plugin/synveda/NOTICE",
+        "bytes": 169,
+        "sha256": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+      },
+      {
+        "path": "plugin/synveda/.claude-plugin/plugin.json",
+        "bytes": 276,
+        "sha256": "7acf443673b6f44d4acb2907550ef65f2e412818eef21ff01b5ab737e0b5906e"
+      },
+      {
+        "path": "plugin/synveda/hooks/hooks.json",
+        "bytes": 1368,
+        "sha256": "0f9489a139f5330d847712567a9d19b5af233eb9c4a49bb716e7c8579459bc20"
+      },
+      {
+        "path": "plugin/synveda/dist/log.mjs",
+        "bytes": 3421,
+        "sha256": "b7d01eb3df65deecb2b606f82919b319332462c31ca3816a0450bb23c7ab392c"
+      },
+      {
+        "path": "plugin/synveda/dist/turn.mjs",
+        "bytes": 8922,
+        "sha256": "7766d6736e6dcbb4b96a19705ee614b54a04ce2fbde2f77ab6e6f39f8219a12c"
+      },
+      {
+        "path": "plugin/synveda/dist/client.mjs",
+        "bytes": 4206,
+        "sha256": "7b7e8164fb5967903509f8388d06124d374bfa4c1a7218169add28d445e1e2f6"
+      },
+      {
+        "path": "plugin/synveda/dist/session-start.mjs",
+        "bytes": 12931,
+        "sha256": "16244eea5089239ba0167eb0be189c660a18a6d11a44df7991815e62cba4ccdb"
+      },
+      {
+        "path": "plugin/synveda/dist/skills.mjs",
+        "bytes": 6317,
+        "sha256": "49c7a4f0c5f2fae2ca738020951940ea1517299a62d9da50161a1b57995f121b"
+      },
+      {
+        "path": "plugin/synveda/dist/spool.mjs",
+        "bytes": 20628,
+        "sha256": "beaed95d0806ce916ac5d24f58489b64352ff8e08b96822df9526e46733370c4"
+      },
+      {
+        "path": "plugin/synveda/dist/deliver.mjs",
+        "bytes": 9549,
+        "sha256": "614ce514139421f24b0704ea6221f0c7680533c0eb602870f58de8c9aa7e801b"
+      },
+      {
+        "path": "plugin/synveda/dist/paths.mjs",
+        "bytes": 5898,
+        "sha256": "4a80415e21b7dc7b8c141cd70ba1a145b74ce4d41a6cf4bf5f0a51c1a2653922"
+      },
+      {
+        "path": "plugin/synveda/dist/mcp-server.mjs",
+        "bytes": 5149,
+        "sha256": "1e1280d891cd9871da2f508012479fe8698ff8038c68a796a99c4d9d41b43e2f"
+      },
+      {
+        "path": "plugin/synveda/dist/git.mjs",
+        "bytes": 1911,
+        "sha256": "5213b6ebb4b5a2144fe52aa12712fa055853c8cc15379c0de0dd6e942a6cdb4b"
+      },
+      {
+        "path": "plugin/synveda/dist/install-id.mjs",
+        "bytes": 2994,
+        "sha256": "eb6bbc08ad6d53e8565682bf103f9b30e5490e75412a90e798fdd2a58f1610b1"
+      },
+      {
+        "path": "plugin/synveda/dist/session-runtime.mjs",
+        "bytes": 479,
+        "sha256": "8300903daf5a0862e800ce0a2a92e1e75ef8b8dde1836685aba027b50f88ba1f"
+      },
+      {
+        "path": "plugin/synveda/dist/credentials.mjs",
+        "bytes": 3858,
+        "sha256": "502986928e90d4e3382e7532b3fdba1d9aecaa3c65e29fe0d8b50e06e4fea4e5"
+      },
+      {
+        "path": "plugin/synveda/dist/hook.mjs",
+        "bytes": 7345,
+        "sha256": "6eac0727c4c224c96eb21844e806221425adb5ca23a06a01619b300d386f94f7"
+      },
+      {
+        "path": "plugin/synveda/dist/private-state.mjs",
+        "bytes": 1992,
+        "sha256": "421838a7002e0d32338f70829798cf95b9cc21fadae8f1b55f97a9905a95f847"
+      },
+      {
+        "path": "plugin/synveda/dist/config.mjs",
+        "bytes": 7076,
+        "sha256": "35e98777b8bd687e016fc1cf90030e5b4a9f8f8b18f02229778d0075abb7da8b"
+      },
+      {
+        "path": "plugin/synveda/dist/transcript.mjs",
+        "bytes": 8541,
+        "sha256": "4461ae292f65f3fca4471862f764b21593a9f57a837a0533f2fdc1ffff20b70d"
+      },
+      {
+        "path": "plugin/synveda/dist/events.mjs",
+        "bytes": 9805,
+        "sha256": "9c9398ceabddafa0da293a4c2635d652dda3b89df496227d54f698b5d9ed9aac"
+      },
+      {
+        "path": "plugin/.claude-plugin/marketplace.json",
+        "bytes": 629,
+        "sha256": "ef9d6884af92bb38663ef4b776def3152032c7f5cfd29350d42d0117d2ce7083"
+      },
+      {
+        "path": "plugin/copilot-cli/LICENSE",
+        "bytes": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      {
+        "path": "plugin/copilot-cli/NOTICE",
+        "bytes": 169,
+        "sha256": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+      },
+      {
+        "path": "plugin/copilot-cli/package.json",
+        "bytes": 202,
+        "sha256": "6ccc4120be1a8d0e7671df5fa5ed2843e9491be9f160916a084fa29ef01494e0"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/LICENSE",
+        "bytes": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/NOTICE",
+        "bytes": 169,
+        "sha256": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/package.json",
+        "bytes": 207,
+        "sha256": "b9e5237b955e16d7bf73f9daf9c6956039aaac97747e72fede5fcc1b79264bac"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/log.mjs",
+        "bytes": 3421,
+        "sha256": "b7d01eb3df65deecb2b606f82919b319332462c31ca3816a0450bb23c7ab392c"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/turn.mjs",
+        "bytes": 8922,
+        "sha256": "7766d6736e6dcbb4b96a19705ee614b54a04ce2fbde2f77ab6e6f39f8219a12c"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/client.mjs",
+        "bytes": 4206,
+        "sha256": "7b7e8164fb5967903509f8388d06124d374bfa4c1a7218169add28d445e1e2f6"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/session-start.mjs",
+        "bytes": 12931,
+        "sha256": "16244eea5089239ba0167eb0be189c660a18a6d11a44df7991815e62cba4ccdb"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/spool.mjs",
+        "bytes": 20628,
+        "sha256": "beaed95d0806ce916ac5d24f58489b64352ff8e08b96822df9526e46733370c4"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/deliver.mjs",
+        "bytes": 9549,
+        "sha256": "614ce514139421f24b0704ea6221f0c7680533c0eb602870f58de8c9aa7e801b"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/paths.mjs",
+        "bytes": 5898,
+        "sha256": "4a80415e21b7dc7b8c141cd70ba1a145b74ce4d41a6cf4bf5f0a51c1a2653922"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/git.mjs",
+        "bytes": 1911,
+        "sha256": "5213b6ebb4b5a2144fe52aa12712fa055853c8cc15379c0de0dd6e942a6cdb4b"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/install-id.mjs",
+        "bytes": 2994,
+        "sha256": "eb6bbc08ad6d53e8565682bf103f9b30e5490e75412a90e798fdd2a58f1610b1"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/session-runtime.mjs",
+        "bytes": 479,
+        "sha256": "8300903daf5a0862e800ce0a2a92e1e75ef8b8dde1836685aba027b50f88ba1f"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/credentials.mjs",
+        "bytes": 3858,
+        "sha256": "502986928e90d4e3382e7532b3fdba1d9aecaa3c65e29fe0d8b50e06e4fea4e5"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/private-state.mjs",
+        "bytes": 1992,
+        "sha256": "421838a7002e0d32338f70829798cf95b9cc21fadae8f1b55f97a9905a95f847"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/config.mjs",
+        "bytes": 7076,
+        "sha256": "35e98777b8bd687e016fc1cf90030e5b4a9f8f8b18f02229778d0075abb7da8b"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/transcript.mjs",
+        "bytes": 8541,
+        "sha256": "4461ae292f65f3fca4471862f764b21593a9f57a837a0533f2fdc1ffff20b70d"
+      },
+      {
+        "path": "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter/dist/events.mjs",
+        "bytes": 9805,
+        "sha256": "9c9398ceabddafa0da293a4c2635d652dda3b89df496227d54f698b5d9ed9aac"
+      },
+      {
+        "path": "plugin/copilot-cli/dist/hook.mjs",
+        "bytes": 4155,
+        "sha256": "2cf433ad02d1329f04476f99f92930a338f1305a02922c327790ecc6db218181"
+      },
+      {
+        "path": "plugin/copilot-cli/dist/transcript.mjs",
+        "bytes": 5171,
+        "sha256": "966f8ae5f29a954e70d31843750b647eb077ac768dcbdcf2b51e5d53fe9b4091"
+      },
+      {
+        "path": "plugin/codex/LICENSE",
+        "bytes": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      {
+        "path": "plugin/codex/NOTICE",
+        "bytes": 169,
+        "sha256": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+      },
+      {
+        "path": "plugin/codex/package.json",
+        "bytes": 196,
+        "sha256": "8a86ec0b0a51004e21677eb61081680fd3a75d63429a5e04e0f16dfa9b8ab6f8"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/LICENSE",
+        "bytes": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/NOTICE",
+        "bytes": 169,
+        "sha256": "8d6397b3e41fb6054a6a5d4e5ccf02dad5fe4bb06ed5af86fb56dc3220337802"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/package.json",
+        "bytes": 207,
+        "sha256": "b9e5237b955e16d7bf73f9daf9c6956039aaac97747e72fede5fcc1b79264bac"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/log.mjs",
+        "bytes": 3421,
+        "sha256": "b7d01eb3df65deecb2b606f82919b319332462c31ca3816a0450bb23c7ab392c"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/turn.mjs",
+        "bytes": 8922,
+        "sha256": "7766d6736e6dcbb4b96a19705ee614b54a04ce2fbde2f77ab6e6f39f8219a12c"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/client.mjs",
+        "bytes": 4206,
+        "sha256": "7b7e8164fb5967903509f8388d06124d374bfa4c1a7218169add28d445e1e2f6"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/session-start.mjs",
+        "bytes": 12931,
+        "sha256": "16244eea5089239ba0167eb0be189c660a18a6d11a44df7991815e62cba4ccdb"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/spool.mjs",
+        "bytes": 20628,
+        "sha256": "beaed95d0806ce916ac5d24f58489b64352ff8e08b96822df9526e46733370c4"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/deliver.mjs",
+        "bytes": 9549,
+        "sha256": "614ce514139421f24b0704ea6221f0c7680533c0eb602870f58de8c9aa7e801b"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/paths.mjs",
+        "bytes": 5898,
+        "sha256": "4a80415e21b7dc7b8c141cd70ba1a145b74ce4d41a6cf4bf5f0a51c1a2653922"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/git.mjs",
+        "bytes": 1911,
+        "sha256": "5213b6ebb4b5a2144fe52aa12712fa055853c8cc15379c0de0dd6e942a6cdb4b"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/install-id.mjs",
+        "bytes": 2994,
+        "sha256": "eb6bbc08ad6d53e8565682bf103f9b30e5490e75412a90e798fdd2a58f1610b1"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/session-runtime.mjs",
+        "bytes": 479,
+        "sha256": "8300903daf5a0862e800ce0a2a92e1e75ef8b8dde1836685aba027b50f88ba1f"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/credentials.mjs",
+        "bytes": 3858,
+        "sha256": "502986928e90d4e3382e7532b3fdba1d9aecaa3c65e29fe0d8b50e06e4fea4e5"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/private-state.mjs",
+        "bytes": 1992,
+        "sha256": "421838a7002e0d32338f70829798cf95b9cc21fadae8f1b55f97a9905a95f847"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/config.mjs",
+        "bytes": 7076,
+        "sha256": "35e98777b8bd687e016fc1cf90030e5b4a9f8f8b18f02229778d0075abb7da8b"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/transcript.mjs",
+        "bytes": 8541,
+        "sha256": "4461ae292f65f3fca4471862f764b21593a9f57a837a0533f2fdc1ffff20b70d"
+      },
+      {
+        "path": "plugin/codex/node_modules/@synveda/claude-code-adapter/dist/events.mjs",
+        "bytes": 9805,
+        "sha256": "9c9398ceabddafa0da293a4c2635d652dda3b89df496227d54f698b5d9ed9aac"
+      },
+      {
+        "path": "plugin/codex/dist/hook.mjs",
+        "bytes": 3074,
+        "sha256": "2613606c4b74b0b1a099a66ea5b2f9fcd10dcbafc163dd305e8d3cec51122ed4"
+      },
+      {
+        "path": "plugin/codex/dist/transcript.mjs",
+        "bytes": 6102,
+        "sha256": "857363887cddf3585ac21412cf14713a7416fd055668dc3a79ca3811c107557b"
+      }
+    ],
+    "all_retained_file_bytes_unchanged": true,
+    "all_six_complete_notice_sets_match_source": true,
+    "excluded": [
+      "test modules",
+      "mock gateway",
+      "test driver",
+      "empty type-only module",
+      "declarations",
+      "source maps",
+      "AppleDouble filesystem metadata"
+    ]
+  },
+  "chart": {
+    "archive_sha256": "65789a0148d1c245eba5072852d14d29be99d6babd539d2892b16e9d329a5c51",
+    "archive_bytes": 111347,
+    "regular_files": 81,
+    "dependency": {
+      "name": "keycloakx",
+      "version": "7.3.2",
+      "vendor_archive_sha256": "4ebb630c1f842245f7953be4f80ed080d1979ded25b31d48052f43f012e3c1d7",
+      "original_regular_members": 28,
+      "all_original_member_bytes_match": true
+    },
+    "notice_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "notice_bytes": 11357,
+    "complete_retained_notice_matches_packaged_bytes": true,
+    "upstream_notice_version_provenance_qualified": false
+  },
+  "native_client": {
+    "cli_profile": "Existing unchanged-source dev-profile CLI; not Rust SBOM-qualified release output.",
+    "cli_binary_sha256": "d8872645299ad6af0e8c2a2c90f62847ed7fb11e88ea4ab117b4b612144af2f2",
+    "report": {
+      "schema_version": 1,
+      "evidence": "native-client-archive",
+      "target": "darwin-arm64",
+      "version": "0.4.3",
+      "cli_version": "synveda 0.4.3",
+      "source_sha": "4ff8e6ac14788378ba56ac7b8537377835c4ade4",
+      "source_tree_dirty": true,
+      "node": {
+        "version": "24.21.0",
+        "archive": "node-v24.21.0-darwin-arm64.tar.gz",
+        "archive_sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057",
+        "inventory": {
+          "schema_version": 1,
+          "target": "darwin-arm64",
+          "upstream_source_sha": "955266bfdd854cd280dffd47548673914484e4c0",
+          "binary_bytes": 122129232,
+          "binary_sha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+          "notices": {
+            "LICENSE": {
+              "bytes": 157609,
+              "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace"
+            },
+            "nbytes-LICENSE": {
+              "bytes": 1064,
+              "sha256": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2"
+            },
+            "sqlite-NOTICE": {
+              "bytes": 297,
+              "sha256": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755"
+            },
+            "v8-abseil-LICENSE": {
+              "bytes": 11361,
+              "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747"
+            },
+            "v8-fp16-LICENSE": {
+              "bytes": 1158,
+              "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d"
+            },
+            "v8-rapidhash-LICENSE": {
+              "bytes": 1705,
+              "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0"
+            },
+            "v8-zlib-LICENSE": {
+              "bytes": 910,
+              "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c"
+            },
+            "v8-highway-LICENSE": {
+              "bytes": 11356,
+              "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"
+            }
+          },
+          "dependencies": {
+            "acorn": "8.18.0",
+            "ada": "4.0.0",
+            "amaro": "1.1.11",
+            "ares": "1.34.8",
+            "brotli": "1.2.0",
+            "icu": "78.3",
+            "llhttp": "9.4.3",
+            "merve": "1.2.2",
+            "nbytes": "0.1.4",
+            "ncrypto": "0.0.1",
+            "nghttp2": "1.70.0",
+            "openssl": "3.5.8",
+            "simdjson": "4.6.7",
+            "simdutf": "6.4.0",
+            "sqlite": "3.53.4",
+            "undici": "7.29.1",
+            "uv": "1.52.1",
+            "uvwasi": "0.0.23",
+            "v8": "13.6.233.17-node.53",
+            "zlib": "1.3.2.1-motley-8002e91",
+            "zstd": "1.5.7"
+          },
+          "shared_libraries": {
+            "ada": false,
+            "brotli": false,
+            "cares": false,
+            "libuv": false,
+            "nghttp2": false,
+            "openssl": false,
+            "simdjson": false,
+            "simdutf": false,
+            "sqlite": false,
+            "uvwasi": false,
+            "zlib": false,
+            "zstd": false
+          }
+        }
+      },
+      "archive_sha256": "7cbe6c6da318d8de9758cb5e69ccb20f34fffb52543a54164a28584a358ea170",
+      "archive_bytes": 54344864,
+      "local_install_ms": 2117,
+      "repeat_install_ms": 2201,
+      "total_ms": 31758,
+      "network_download_measured": false,
+      "real_issuer_login": false,
+      "native_harness_run": false,
+      "checks": [
+        "pinned-node-dependency-and-notice-inventory",
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "codex-extracted-lifecycle-replay",
+        "copilot-cli-extracted-lifecycle-replay"
+      ]
+    }
+  },
+  "controls": [
+    {
+      "control": "broad-claude-dist",
+      "refused": true,
+      "cause": "Claude must carry ordinary runtime modules only"
+    },
+    {
+      "control": "symlinked-skills",
+      "refused": true,
+      "cause": "package-plugin: shared runtime module skills is not built as a regular file"
+    },
+    {
+      "control": "missing-session-start",
+      "refused": true,
+      "cause": "package-plugin: shared runtime module session-start is not built as a regular file"
+    }
+  ],
+  "owned_controls_removed": true,
+  "unrelated_deployments_changed": false,
+  "validation": {
+    "plugin_replay_tests": 35,
+    "client_package_tests": 21,
+    "failed": 0,
+    "skipped": 0,
+    "passed": [
+      "pnpm adapter build with package-manager signature verification",
+      "make plugin-package-check",
+      "node --test scripts/client-package.test.mjs",
+      "all nine actual native macOS ARM client checks",
+      "make check-fast check-ci check-release-parity",
+      "cargo fmt --all --check",
+      "git diff --check"
+    ],
+    "no_new_scanner_dependency_workflow_report_format_or_release_sidecar": true,
+    "strict_clippy": "Not applicable: no Rust source changed."
+  },
+  "next_action": "Resolve pinned Node notice provenance when GitHub access recovers. Use the retained plugin/chart probe to record the smallest artifact-component/notice inventory choice before implementing report/source/hash gates; continue remaining image inventories/notices, then vulnerability and publisher incident policy. Preserve native Windows scanner and external operator/issuer blockers separately."
+}

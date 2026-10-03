@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::Path;
 
 use base64::Engine as _;
@@ -337,7 +337,18 @@ fn load(path: &Path, source_revision: Option<&str>) -> Result<LoadedBundle, Stri
                 path.display()
             ));
         }
-        let bytes = fs::read(path).map_err(|err| format!("read {}: {err}", path.display()))?;
+        let mut bytes = Vec::new();
+        fs::File::open(path)
+            .map_err(|err| format!("open {}: {err}", path.display()))?
+            .take((MAX_ARCHIVE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|err| format!("read {}: {err}", path.display()))?;
+        if bytes.len() > MAX_ARCHIVE_BYTES {
+            return Err(format!(
+                "OKF archive exceeds {MAX_ARCHIVE_BYTES} bytes: {}",
+                path.display()
+            ));
+        }
         let input = match encoding {
             BundleEncoding::Zip => BundleInput::Zip(bytes),
             BundleEncoding::Tar => BundleInput::Tar(bytes),

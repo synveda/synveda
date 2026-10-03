@@ -959,6 +959,26 @@ test("the retry-review contract proves first run, rerun and persisted evidence",
   refuse(() => validateRetryReviewReceipt(groupGrant), "retry-review");
 });
 
+test("the full retry-review contract accepts only the configured loopback origin", () => {
+  const origin = "http://localhost:8080";
+  const seeded = retryReceipt();
+  const rerun = retryRerunReceipt();
+  const captured = retryReceipt("learning_pending");
+  const binding = retryReceipt("binding_pending");
+  const verified = retryStatus();
+  for (const receipt of [seeded, rerun, captured, binding, verified.receipt]) {
+    receipt.gateway_url = origin;
+  }
+  assert.equal(validateRetryReviewReceipt(seeded, "seeded", origin), true);
+  assert.equal(validateRetryReviewRerun(seeded, rerun, origin), true);
+  assert.equal(validateRetryReviewInspection(retryInspection(seeded), seeded, origin), true);
+  assert.equal(validateRetryReviewReceipt(captured, "learning_pending", origin), true);
+  assert.equal(validateRetryReviewReceipt(binding, "binding_pending", origin), true);
+  assert.equal(validateRetryReviewVerification(retryVerification(binding), binding, origin), true);
+  assert.equal(validateRetryReviewStatus(verified, origin), true);
+  refuse(() => validateRetryReviewStatus(verified, "http://other.local:8080"), "retry-review");
+});
+
 test("console checkpoints keep author reviewer and viewer browser identities separate", async () => {
   const receipt = retryReceipt("learning_pending");
   const proposal = retryProposal(receipt.resources.learning.change_id);

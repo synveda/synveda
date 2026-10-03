@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "feature_id": "OPS-12",
+  "evidence": "local-product-node-inventory-candidate",
+  "source_sha": "05f252527f4e381db35e4c557f9c753c43d29aef",
+  "source_tree_dirty": true,
+  "scope": "Actual native Linux ARM product Node bytes, complete notices and reported dependency metadata, with same-image console content validation. Not clean hosted, both-architecture, Cargo/OCI SPDX, registry, deployment or release qualification; reported Node dependencies do not prove complete transitive native coverage.",
+  "source_inputs": {
+    "deploy/compose/product/Dockerfile": "873ffa2bed98f0c7ced94bfc332e6842affba975830163767ccda4ed011748f6",
+    "scripts/node-runtimes.json": "f85a3da93a6b1679462fb9677446e0b966a61528796c488cf7224430d94d73ab",
+    "scripts/node-runtime-inventory.mjs": "e0f9cfd3306d1838bf895179f5e0800f49cc13537fa47dafaa7c73fd14c139d4",
+    "scripts/verify-release-images.mjs": "7572a222a8fad7bea263d32ef04721a24f38fc521e7505950671f47099a121c6",
+    "scripts/check-release-assets.mjs": "ed36748a4aac79dd787fdcde4d3690ed0c62417fda73fee0519469b4e982ef6c",
+    "scripts/rust-archive-sbom.mjs": "d758b9f1763eb5696be77794a2dfedb176702997945dda6111969f6c8b39c742",
+    "scripts/client-artifact.mjs": "b389ebd8ba81dc01f03b72efec47d9345cf85db5e75598ca8dced2c84fb33060",
+    "scripts/check-console-package.mjs": "b0bc4fed810a1782e009f5799a4833e9e10b1d00b100c5a4db74c340dee1bfa5",
+    "console/build/dependency-contract.mjs": "478c5d91589a8152961d83489198ff71b6b867022e4e0a4bb3ebf6ac7ab3da7e",
+    "assets/licenses/node/nbytes-LICENSE": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2",
+    "assets/licenses/node/sqlite-NOTICE": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755"
+  },
+  "build": {
+    "dockerfile": "deploy/compose/product/Dockerfile",
+    "platform": "linux/arm64",
+    "release_version": "0.4.3",
+    "native_engine": "linux/aarch64",
+    "source_labels": {
+      "org.opencontainers.image.revision": "05f252527f4e381db35e4c557f9c753c43d29aef",
+      "org.opencontainers.image.source": "https://github.com/synveda/synveda",
+      "org.opencontainers.image.version": "0.4.3"
+    },
+    "inspected_image_id": "sha256:ace3ef4afb9aace815f6c4ed0acd62ae7ceda829e4dc8faa65352bb9c9190a36"
+  },
+  "node_inventory": {
+    "schema_version": 1,
+    "target": "linux-arm64",
+    "upstream_source_sha": "aa4c77582be995286fc6e00aaf530dc7ade102a9",
+    "binary_bytes": 122159120,
+    "binary_sha256": "1a638b0fe2b68da0489276aca95526c5122fc61ba54d6a2d0d00c1c92ab7b876",
+    "notices": {
+      "LICENSE": {
+        "bytes": 145485,
+        "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4"
+      },
+      "nbytes-LICENSE": {
+        "bytes": 1064,
+        "sha256": "782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2"
+      },
+      "sqlite-NOTICE": {
+        "bytes": 297,
+        "sha256": "7b8578a074f9ddd01b7554b58b4db2793943a1f8cba2caa29f87a636868ec755"
+      }
+    },
+    "dependencies": {
+      "acorn": "8.16.0",
+      "ada": "2.9.2",
+      "amaro": "1.1.8",
+      "ares": "1.34.6",
+      "brotli": "1.1.0",
+      "cjs_module_lexer": "2.2.0",
+      "icu": "78.2",
+      "llhttp": "9.4.3",
+      "nbytes": "0.1.3",
+      "ncrypto": "0.0.1",
+      "nghttp2": "1.69.0",
+      "openssl": "3.5.7",
+      "simdjson": "4.5.0",
+      "simdutf": "6.4.2",
+      "sqlite": "3.51.3",
+      "undici": "6.28.0",
+      "uv": "1.51.0",
+      "uvwasi": "0.0.23",
+      "v8": "12.4.254.21-node.56",
+      "zlib": "1.3.1-e00f703",
+      "zstd": "1.5.7"
+    },
+    "shared_libraries": {
+      "ada": false,
+      "brotli": false,
+      "cares": false,
+      "libuv": false,
+      "nghttp2": false,
+      "openssl": false,
+      "simdjson": false,
+      "simdutf": false,
+      "sqlite": false,
+      "uvwasi": false,
+      "zlib": false,
+      "zstd": false
+    },
+    "runtime_version": "22.23.2"
+  },
+  "console_inventory": {
+    "packages": [
+      {
+        "name": "react",
+        "version": "19.2.8"
+      },
+      {
+        "name": "react-dom",
+        "version": "19.2.8"
+      },
+      {
+        "name": "scheduler",
+        "version": "0.27.0"
+      }
+    ],
+    "files": 12,
+    "inventory_sha256": "8a1afbca741ab7b6636d2fad658a0e7b4d83d947bca3bf339dc957d9ce5ced2a",
+    "sbom_sha256": "52ea6b6c0d8ee6c43d4834fdc0e7310ea4af07e1066fa426a95a79f82b60b962",
+    "notices_sha256": "d2acfc80be96c7785a57535e8ef09dba746ad4fe141800ac153e7f7f34ae9709",
+    "source_sha": "05f252527f4e381db35e4c557f9c753c43d29aef",
+    "version": "0.4.3"
+  },
+  "actual_image_controls": [
+    {
+      "control": "binary",
+      "image_id": "sha256:1549f6dc4683632eac59e6d6103b5e26cef4ed2648aa8089a854fd30cf30ef85",
+      "source_labels_preserved": true,
+      "refusal": "Node executable hash differs from upstream pin",
+      "metadata_execution_started": false
+    },
+    {
+      "control": "truncated-notice",
+      "image_id": "sha256:595e382ef2f291c7ed36deb863baf354416a2a37b4609f68b3d37ebea9f62413",
+      "source_labels_preserved": true,
+      "refusal": "Node notice size differs from upstream pin",
+      "metadata_execution_started": false
+    }
+  ],
+  "inspection_containers_removed": true,
+  "control_images_and_storage_removed": true,
+  "unrelated_deployments_changed": false,
+  "external_blocker": "Native Rust qualification still awaits an official Syft distribution containing Windows resolver fix 5341; no new qualification source or runs selected."
+}

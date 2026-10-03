@@ -8,13 +8,13 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|backup|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset}" >&2
+    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset}" >&2
     exit 64
 }
 
 action=${1:-}
 case "$action" in
-    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|backup|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset) ;;
+    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset) ;;
     *) usage ;;
 esac
 shift
@@ -56,6 +56,7 @@ hosts_manager=$script_dir/manage-hosts-file.mjs
 
 runtime=${SYNVEDA_COMPOSE_RUNTIME:-development}
 postgres_mode=${SYNVEDA_POSTGRES_MODE:-bundled}
+pitr_enabled=${SYNVEDA_PITR_ENABLED:-false}
 oidc_mode=${SYNVEDA_OIDC_MODE:-bundled}
 otlp_mode=${SYNVEDA_OTLP_MODE:-discard}
 profiles=${SYNVEDA_COMPOSE_PROFILES:-}
@@ -65,6 +66,7 @@ observability_profile=false
 apalis_profile=false
 lifecycle_default_timeout=900
 if [ "$action" = acceptance ] || [ "$action" = backup ] || \
+    [ "$action" = pitr-backup ] || \
     [ "$action" = restore-smoke ] || [ "$action" = upgrade-smoke ]; then
     lifecycle_default_timeout=3600
 fi
@@ -102,7 +104,7 @@ if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_EXTRA_CA_CERTS+x}" = x ] || \
 fi
 case "$runtime:$action:$ambient_node_trust" in
     reference:config:true|reference:up:true|reference:acceptance:true|reference:smoke:true|\
-    reference:backup:true|reference:restore-smoke:true|reference:upgrade-smoke:true|\
+    reference:backup:true|reference:pitr-backup:true|reference:restore-smoke:true|reference:upgrade-smoke:true|\
     reference:restart-gateway:true)
         echo "compose: ambient host trust configuration is not accepted for reference evidence" >&2
         exit 78
@@ -427,6 +429,18 @@ case "$postgres_mode" in
     bundled|external) ;;
     *) echo "compose: SYNVEDA_POSTGRES_MODE must be bundled|external" >&2; exit 64 ;;
 esac
+case "$pitr_enabled" in
+    true|false) ;;
+    *) echo "compose: SYNVEDA_PITR_ENABLED must be true|false" >&2; exit 64 ;;
+esac
+if [ "$pitr_enabled" = true ] && [ "$postgres_mode" != bundled ]; then
+    echo "compose: PITR source candidate requires bundled PostgreSQL" >&2
+    exit 64
+fi
+if [ "$action" = pitr-backup ] && [ "$pitr_enabled" != true ]; then
+    echo "compose: pitr-backup requires SYNVEDA_PITR_ENABLED=true" >&2
+    exit 64
+fi
 case "$oidc_mode" in
     bundled|external) ;;
     *) echo "compose: SYNVEDA_OIDC_MODE must be bundled|external" >&2; exit 64 ;;
@@ -485,7 +499,7 @@ if [ "$apalis_profile" = true ]; then
         exit 64
     }
     case "$action" in
-        config|up|acceptance|smoke|down|reset) ;;
+        config|up|acceptance|pitr-backup|smoke|down|reset) ;;
         *)
             echo "compose: experimental Apalis is unavailable for this lifecycle action" >&2
             exit 69
@@ -505,7 +519,7 @@ if [ "$browser_acceptance_profile" = true ]; then
         exit 64
     }
     case "$action" in
-        config|up|acceptance|backup|restore-smoke|upgrade-smoke|smoke|down|reset) ;;
+        config|up|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|smoke|down|reset) ;;
         *)
             echo "compose: browser acceptance is unavailable for this lifecycle action" >&2
             exit 64
@@ -706,7 +720,7 @@ if [ "$browser_acceptance_profile" = true ]; then
 fi
 
 case "$action" in
-    up|acceptance|backup|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset)
+    up|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset)
         # Hold one exact-project exclusion across authority-file generation and
         # every Docker mutation. Child generators verify and borrow this lock.
         # shellcheck source=deploy/compose/scripts/project-lock.sh
@@ -1197,10 +1211,10 @@ if [ "$action" = resolver-check ]; then
     exit 0
 fi
 case "$action" in
-    up|acceptance|backup|upgrade-smoke|smoke|restart-gateway) run_hosts_ownership_preflight ;;
+    up|acceptance|backup|pitr-backup|upgrade-smoke|smoke|restart-gateway) run_hosts_ownership_preflight ;;
 esac
 case "$action" in
-    up|acceptance|backup|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
+    up|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
 esac
 
 compose_ipv4_pool_set=${SYNVEDA_COMPOSE_IPV4_POOL+x}
@@ -1557,6 +1571,27 @@ require_private_file() {
         exit 78
     }
 }
+if [ "$pitr_enabled" = true ]; then
+    pitr_config_dir=$(dirname "$secret_dir")
+    require_private_directory "$pitr_config_dir" pgbackrest-configuration
+    pitr_config_file=$pitr_config_dir/pgbackrest.conf
+    require_private_file "$pitr_config_file" pgbackrest-configuration
+    reject_sensitive_build_context_path "$pitr_config_file" "$compose_dir/runtime" pgbackrest-configuration
+    pitr_ca_enabled=false
+    pitr_ca_file=$pitr_config_dir/pgbackrest-ca.pem
+    if [ -e "$pitr_ca_file" ] || [ -L "$pitr_ca_file" ]; then
+        require_private_file "$pitr_ca_file" pgbackrest-ca
+        reject_sensitive_build_context_path "$pitr_ca_file" "$compose_dir/runtime" pgbackrest-ca
+        [ "$(size_of "$pitr_ca_file")" -le 65536 ] && \
+            openssl x509 -in "$pitr_ca_file" -noout >/dev/null 2>&1 || {
+            echo "compose: pgBackRest CA file was refused" >&2
+            exit 78
+        }
+        pitr_ca_enabled=true
+    fi
+    run_bounded 30 "$node_runner" "$script_dir/check-pgbackrest-config.mjs" \
+        "$pitr_config_file" "$pitr_ca_enabled"
+fi
 
 canonical_recovery_root() {
     recovery_root_candidate=$1
@@ -1703,7 +1738,7 @@ if [ "$runtime" = reference ]; then
     require_private_file "$secret_dir/tls_cert" tls_cert
     require_private_file "$secret_dir/tls_key" tls_key
     case "$action" in
-        config|up|acceptance|backup|restore-smoke|upgrade-smoke|smoke|restart-gateway)
+        config|up|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|smoke|restart-gateway)
             set_remaining_lifecycle_seconds
             set -- "$script_dir/check-tls-inputs.mjs" \
                 --cert-file "$secret_dir/tls_cert" \
@@ -2212,6 +2247,16 @@ fi
 export SYNVEDA_CADDY_APP_CONFIG=$caddy_app_config
 export SYNVEDA_CADDY_IDENTITY_CONFIG=$caddy_identity_config
 export SYNVEDA_SECRETS_DIR=$secret_dir
+if [ "$pitr_enabled" = true ]; then
+    export SYNVEDA_PITR_CONFIG_FILE=$pitr_config_file
+    if [ "$pitr_ca_enabled" = true ]; then
+        export SYNVEDA_PITR_CA_FILE=$pitr_ca_file
+    else
+        unset SYNVEDA_PITR_CA_FILE
+    fi
+else
+    unset SYNVEDA_PITR_CONFIG_FILE SYNVEDA_PITR_CA_FILE
+fi
 export SYNVEDA_OIDC_DIRECTORY_SECRETS_DIR=$oidc_directory_secret_dir
 export SYNVEDA_OIDC_ISSUERS_FILE=$issuer_file
 export SYNVEDA_DATABASE_ROLES_FILE=$database_roles_file
@@ -2259,11 +2304,20 @@ set -- compose --project-directory "$compose_dir" \
 if [ "$runtime" = development ] && [ "$postgres_mode" = bundled ]; then
     set -- "$@" -f "$compose_dir/compose.postgres.dev.yaml"
 fi
+if [ "$runtime" = development ] && [ "$pitr_enabled" = true ]; then
+    set -- "$@" -f "$compose_dir/compose.postgres.pitr.dev.yaml"
+fi
 if [ "$runtime" = development ] && [ "$oidc_mode" = bundled ]; then
     set -- "$@" -f "$compose_dir/compose.keycloak.dev.yaml"
 fi
 if [ "$postgres_mode" = bundled ]; then
     set -- "$@" -f "$compose_dir/compose.postgres.yaml"
+fi
+if [ "$pitr_enabled" = true ]; then
+    set -- "$@" -f "$compose_dir/compose.postgres.pitr.yaml"
+    if [ "$pitr_ca_enabled" = true ]; then
+        set -- "$@" -f "$compose_dir/compose.postgres.pitr.ca.yaml"
+    fi
 fi
 if [ "$oidc_mode" = bundled ]; then
     set -- "$@" -f "$compose_dir/compose.keycloak.yaml"
@@ -2653,6 +2707,20 @@ run_product_acceptance() {
     esac
     docker_mutation_uncertain=false
     docker_mutation_phase=
+}
+
+run_pitr_pgbackrest() {
+    pitr_command=$1
+    shift
+    set -- "$docker_bin" "$@" exec -T -u postgres postgres pgbackrest \
+        --config=/var/run/postgresql/pgbackrest.conf --stanza=synveda \
+        --pg1-path=/var/lib/postgresql/data --repo1-type=s3 \
+        --repo1-cipher-type=aes-256-cbc --repo1-storage-verify-tls=y \
+        --log-level-file=off
+    if [ "$pitr_command" = backup ]; then
+        set -- "$@" --no-expire-auto --type=full
+    fi
+    run_bounded "$lifecycle_timeout" "$@" "$pitr_command"
 }
 
 resolve_product_image_id() {
@@ -3225,6 +3293,22 @@ case "$action" in
         echo "canonical Compose logical backup $backup_id published for $project"
         echo "database: $database_backup_dir"
         echo "recovery secrets: $recovery_secrets_dir"
+        ;;
+    pitr-backup)
+        prepare_asset_contract "$@"
+        prove_assets_converged
+        run_resolver_preflight
+        run_runtime_smoke "$@"
+        docker_mutation_uncertain=true
+        docker_mutation_phase=compose-pitr-stanza
+        run_pitr_pgbackrest stanza-create "$@"
+        docker_mutation_phase=compose-pitr-check
+        run_pitr_pgbackrest check "$@"
+        docker_mutation_phase=compose-pitr-base-backup
+        run_pitr_pgbackrest backup "$@"
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+        echo "Compose S3 base backup completed for $project; independent PITR restore remains required"
         ;;
     restore-smoke)
         run_restore_smoke "$@"

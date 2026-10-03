@@ -40,9 +40,10 @@ rollback does not reverse database migrations.
 To install only the CLI and adapters on Linux or macOS:
 
 ```sh
-curl -fL https://raw.githubusercontent.com/{{repository}}/{{tag}}/scripts/install.sh -o synveda-install.sh
+curl -fL https://raw.githubusercontent.com/{{repository}}/{{source}}/scripts/install.sh -o synveda-install.sh
 # Inspect synveda-install.sh before running it on a client machine.
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION={{tag}} sh synveda-install.sh
+SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION={{tag}} \
+  SYNVEDA_SOURCE_SHA={{source}} sh synveda-install.sh
 ```
 
 All six native archives are attached to this release:
@@ -53,8 +54,10 @@ All six native archives are attached to this release:
 | macOS | `synveda-client-{{version}}-darwin-x86_64.tar.gz` | `synveda-client-{{version}}-darwin-arm64.tar.gz` |
 | Windows | `synveda-client-{{version}}-windows-x86_64.zip` | `synveda-client-{{version}}-windows-arm64.zip` |
 
-The installers need no compiler, Docker, system Node or registry credentials.
-They check checksums; perform the attestation verification above separately.
+The installers require a trusted GitHub CLI for publisher verification. They
+need no compiler, Docker, system Node or registry credentials. They verify the
+inventory's publisher, release workflow, tag and source commit before fetching
+or executing code, then check each archive against its unique checksum entry.
 The four native Unix client archives include private Node; their
 checksummed `synveda-client-report-*.json` files record restricted-PATH
 installation, packaged authentication lifecycle and extracted hook replay. These checks do not establish
@@ -65,9 +68,9 @@ retained-state reinstallation and unsafe ZIP/installer refusals.
 On Windows, download and inspect the matching PowerShell installer:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/{{repository}}/{{tag}}/scripts/install.ps1 -OutFile synveda-install.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/{{repository}}/{{source}}/scripts/install.ps1 -OutFile synveda-install.ps1
 # Inspect this script; the installer does not change execution policy.
-& ./synveda-install.ps1 -Version {{version}}
+& ./synveda-install.ps1 -Version {{version}} -SourceSha {{source}}
 ```
 
 Windows vendor registration remains manual. Windows deployment,

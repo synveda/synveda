@@ -869,6 +869,59 @@ function ambientHostBuild(sentinel = "cpr45-private-host-build-sentinel") {
   return Object.fromEntries(HOST_BUILD_CONTROLS.map((name) => [name, sentinel]));
 }
 
+test("opt-in S3 archiving validates private config and bounds the backup action", () => {
+  const state = fixture();
+  const config = join(state.runtime, "pgbackrest.conf");
+  const pitr = { SYNVEDA_PITR_ENABLED: "true" };
+  try {
+    const generated = spawnSync(SECRET_GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env: environment(state),
+      encoding: "utf8",
+    });
+    assert.equal(generated.status, 0, generated.stderr);
+    writeFileSync(
+      config,
+      `[global]
+repo1-type=s3
+repo1-path=/synveda/test-project
+repo1-s3-bucket=backup-bucket
+repo1-s3-endpoint=s3.example.test
+repo1-s3-region=eu-west-2
+repo1-s3-key=access-id
+repo1-s3-key-secret=private-key-sentinel
+repo1-cipher-type=aes-256-cbc
+repo1-cipher-pass=${"a".repeat(48)}
+repo1-storage-verify-tls=y
+[synveda]
+pg1-path=/var/lib/postgresql/data
+`,
+      { mode: 0o600 },
+    );
+    chmodSync(config, 0o600);
+    const up = run(state, "up", pitr);
+    assert.equal(up.status, 0, up.stderr);
+    const backup = run(state, "pitr-backup", pitr);
+    assert.equal(backup.status, 0, backup.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /compose\.postgres\.pitr\.dev\.yaml/);
+    assert.match(calls, /compose\.postgres\.pitr\.yaml/);
+    assert.match(calls, /<stanza-create>/);
+    assert.match(calls, /<check>/);
+    assert.match(calls, /<--no-expire-auto> <--type=full> <backup>/);
+    assert.doesNotMatch(calls, /private-key-sentinel/);
+
+    writeFileSync(config, readFileSync(config, "utf8").replace(
+      "repo1-storage-verify-tls=y", "repo1-storage-verify-tls=n",
+    ));
+    const refused = run(state, "pitr-backup", pitr);
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.match(refused.stderr, /pgBackRest S3 configuration was refused/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
 test("reference evidence refuses ambient host trust before Node or project locking", () => {
   const actions = ["config", "up", "smoke", "restart-gateway"];
   for (const [index, name] of HOST_TRUST_CONTROLS.entries()) {

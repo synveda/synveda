@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -144,6 +145,33 @@ test("invalid versions are refused before packager or installer mutation", () =>
     assert.equal(existsSync(home), false);
     assert.equal(existsSync(bin), false);
     assert.equal(readFileSync(join(victim, "sentinel"), "utf8"), "preserve\n");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("chart packages preserve complete notices and reproduce across clock seconds", async () => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-chart-reproducibility-"));
+  const version = workspaceVersion(read("Cargo.toml"));
+  try {
+    const packageChart = (directory) => {
+      const result = spawnSync("sh", ["scripts/package-chart.sh", version, directory], {
+        cwd: ROOT, encoding: "utf8", timeout: 60_000, maxBuffer: 1024 * 1024,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      return join(directory, `synveda-${version}.tgz`);
+    };
+    const first = packageChart(join(scratch, "first"));
+    await delay(1100);
+    const second = packageChart(join(scratch, "second"));
+    assert.deepEqual(readFileSync(first), readFileSync(second), "same-source chart bytes depend on packaging time");
+    for (const name of ["LICENSE", "NOTICE"]) {
+      const result = spawnSync("tar", ["-xOzf", first, `synveda/${name}`], {
+        timeout: 30_000, maxBuffer: 1024 * 1024,
+      });
+      assert.equal(result.status, 0, result.stderr.toString());
+      assert.deepEqual(result.stdout, readFileSync(join(ROOT, name)), "chart notice bytes differ from source");
+    }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

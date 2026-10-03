@@ -3,7 +3,7 @@
 //!
 //! Two halves, and they are different kinds of thing.
 //!
-//! The **draft** half is migration 0029's shape with one extra level:
+//! The **draft** half has two levels:
 //! `context_packs` is a bundle's identity and `context_pack_documents` is
 //! what is in it, one row per `(tenant, scope, pack, document)`. Neither is
 //! a version history — every write also puts a content-addressed object,
@@ -320,7 +320,7 @@ impl TryFrom<ChunkRow> for PackChunk {
 /// the one that is there.
 ///
 /// An overwrite is the authoring act, not a conflict. What cannot change is
-/// its identity: migration 0030's trigger refuses a moved scope or a
+/// its identity: the `context_packs` trigger refuses a moved scope or a
 /// renamed pack, so this statement's `on conflict` can only ever rewrite
 /// the description.
 #[tracing::instrument(

@@ -3,9 +3,8 @@
 //!
 //! Everything here reads and nothing decides. The PDP gates the routes
 //! that call these functions (`AuditRead`, ADR-0045 decision 1), RLS bounds
-//! them to the caller's tenant, and the indexes they plan against arrive in
-//! migration 0028 — which adds no column, because a column inside the
-//! canonical form would invalidate every row written since AUD-1 and one
+//! them to the caller's tenant. The supporting indexes add no column: one
+//! inside the canonical form would invalidate every row written since AUD-1; one
 //! outside it would be a field the chain does not protect (decision 7).
 //!
 //! Two properties are structural rather than checked:
@@ -32,8 +31,8 @@ use crate::event::{AuditAction, Outcome};
 /// disclosure half of "who could see X on date D" (ADR-0045 decision 4),
 /// and the whole of "what did agent A know at time T" (decision 5).
 ///
-/// This is exactly the predicate of migration 0028's partial GIN index; a
-/// query that widens it stops using that index.
+/// The `audit_log_disclosure_idx` partial GIN index also covers historical
+/// inject and recall actions; this is the current ContextRun disclosure action.
 /// `session.context.composed` is the set (CPR-12, ADR-0078 decision 5): a
 /// ContextRun is the **only** way material reaches an agent, and a
 /// disclosure query that did not count it would answer "nobody was served
@@ -301,10 +300,9 @@ pub async fn disclosures(
     let frame = frame(&mut *conn, tenant).await?;
     let containment = json!({ "knowledge": [{ "knowledge_item_id": knowledge_item.to_string() }] });
 
-    // The action list is spelled out rather than parameterised so it
-    // matches migration 0028's partial index predicate exactly — a
-    // parameterised `= any($n)` would not let the planner prove the
-    // partial index applies.
+    // Keep the action literal: it is one member of the partial disclosure
+    // index's action set. A parameterised action would not let the planner
+    // prove that the partial index applies.
     let rows = sqlx::query!(
         r#"select seq, occurred_at, actor_kind, actor_subject, action, payload
            from audit_log

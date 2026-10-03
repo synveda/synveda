@@ -3,6 +3,7 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { sha256 } from "./client-artifact.mjs";
+import { checkClientNodeArchive, readNodeFile } from "./node-runtime-inventory.mjs";
 
 export function checkClientRelease(directory, version, source, publish, lock) {
   for (const [target, pin] of Object.entries(lock.targets)) {
@@ -10,21 +11,22 @@ export function checkClientRelease(directory, version, source, publish, lock) {
     const archive = join(directory, `synveda-client-${version}-${target}.${windows ? "zip" : "tar.gz"}`);
     const reportFile = join(directory, `synveda-client-report-${target}.json`);
     if (![archive, reportFile].every((path) => lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink())) throw new Error("client release inputs must be regular files");
-    const report = JSON.parse(readFileSync(reportFile));
+    const report = JSON.parse(readNodeFile(reportFile, 256 * 1024));
     if (report.schema_version !== 1 || report.evidence !== "native-client-archive" || report.target !== target ||
         report.version !== version || report.source_sha !== source || report.node?.version !== lock.version ||
         report.node.archive_sha256 !== pin.sha256 || report.node.archive !== pin.archive ||
-        report.archive_sha256 !== sha256(readFileSync(archive)) || report.archive_bytes !== lstatSync(archive).size ||
+        report.archive_sha256 !== sha256(readNodeFile(archive, 512 * 1024 * 1024)) || report.archive_bytes !== lstatSync(archive).size ||
         (publish && (report.cli_version !== `synveda ${version}` || report.source_tree_dirty !== false))) {
       throw new Error(`native client identity, pin or archive evidence mismatch: ${target}`);
     }
-    for (const check of ["packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
+    for (const check of ["licence-and-notice-carriage", "pinned-node-dependency-and-notice-inventory", "packaged-authentication-lifecycle", "native-identity-and-client-only-inventory", "restricted-path-install-cli-and-three-hook-launches",
       "private-install-without-harness-or-credential-mutation", "repeat-install-preserves-deployment-state",
       ...(windows ? ["native-windows-private-storage-interoperability", "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
-        "unsafe-zip-and-overlapping-install-root-refusal"]
+        "unsafe-zip-and-overlapping-install-root-refusal", "publisher-policy-and-pre-execution-refusal", "bounded-download-sharing-lock-cleanup"]
         : ["codex-extracted-lifecycle-replay", "copilot-cli-extracted-lifecycle-replay"])]) {
       if (!report.checks?.includes(check)) throw new Error(`missing native client check ${check}: ${target}`);
     }
+    checkClientNodeArchive(archive, report.node, target, version, source, lock);
   }
 }
 

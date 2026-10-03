@@ -760,24 +760,37 @@ async fn ensure_workspace(api: &Api, receipt: &mut ReviewReceipt) -> Result<(), 
 }
 
 async fn ensure_configuration(api: &Api, receipt: &mut ReviewReceipt) -> Result<(), String> {
-    let templates = api.get("/v1/configuration-templates").await?;
-    let template = templates["templates"]
-        .as_array()
-        .and_then(|entries| entries.iter().find(|entry| entry["name"] == "team"))
-        .ok_or_else(|| "gateway did not offer the canonical team Configuration".to_owned())?;
     let workspace = receipt.require("workspace")?;
-    let configuration: Value = api
-        .post_idempotent_as(
+    let workspace_scope = required_str(&workspace, "scope_id")?;
+    let configuration: Value = if let Some(recorded) = receipt.resource("configuration") {
+        // A newer gateway may offer a different team template. The original
+        // idempotency key still names its original body, so validate the
+        // recorded aggregate rather than submitting a changed create request.
+        let recorded = recorded.clone();
+        let artifact_id = required_str(&recorded, "artifact_id")?;
+        let live = api
+            .get(&format!("/v1/configurations/{artifact_id}"))
+            .await?;
+        verify_recorded_configuration(workspace_scope, &recorded, &live)?;
+        recorded
+    } else {
+        let templates = api.get("/v1/configuration-templates").await?;
+        let template = templates["templates"]
+            .as_array()
+            .and_then(|entries| entries.iter().find(|entry| entry["name"] == "team"))
+            .ok_or_else(|| "gateway did not offer the canonical team Configuration".to_owned())?;
+        api.post_idempotent_as(
             "/v1/configurations",
             Some(json!({
-                "governing_scope_id": required_str(&workspace, "scope_id")?,
+                "governing_scope_id": workspace_scope,
                 "name": "Northstar local demo profile",
                 "document": template["document"],
                 "source_template": "team",
             })),
             &receipt.key("configuration"),
         )
-        .await?;
+        .await?
+    };
     require_applied(&configuration, "canonical team Configuration")?;
     receipt.record("configuration", configuration.clone())?;
     let binding: Value = api
@@ -794,6 +807,27 @@ async fn ensure_configuration(api: &Api, receipt: &mut ReviewReceipt) -> Result<
         .await?;
     require_applied(&binding, "canonical team Configuration binding")?;
     receipt.record("configuration_binding", binding)
+}
+
+fn verify_recorded_configuration(
+    workspace_scope: &str,
+    recorded: &Value,
+    live: &Value,
+) -> Result<(), String> {
+    require_applied(recorded, "canonical team Configuration")?;
+    let artifact_id = required_str(recorded, "artifact_id")?;
+    let version_id = required_str(recorded, "version_id")?;
+    if live["id"].as_str() != Some(artifact_id)
+        || live["governing_scope_id"].as_str() != Some(workspace_scope)
+        || live["name"] != "Northstar local demo profile"
+        || live["current_version_id"].as_str() != Some(version_id)
+    {
+        return Err(
+            "the recorded Configuration was changed or repointed; retry-review will not reuse it"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 async fn ensure_project(api: &Api, receipt: &mut ReviewReceipt) -> Result<(), String> {
@@ -1061,8 +1095,21 @@ async fn ensure_source_session(api: &Api, receipt: &mut ReviewReceipt) -> Result
     let workspace = receipt.require("workspace")?;
     let project = receipt.require("project")?;
     let repository = receipt.require("repository")?;
-    let session: Value = api
-        .post_idempotent_as(
+    let fields = [
+        ("workspace_id", required_str(&workspace, "id")?),
+        ("project_id", required_str(&project, "id")?),
+        ("repository_id", required_str(&repository, "id")?),
+        ("principal_id", api.subject.as_str()),
+        ("client_name", "synveda-demo"),
+        ("external_session_id", FIXTURE),
+        ("model_name", "deterministic-manual-capture"),
+    ];
+    let session: Value = if let Some(live) =
+        resume_fixture_session(api, receipt, "source_session", &fields).await?
+    {
+        live
+    } else {
+        api.post_idempotent_as(
             "/v1/sessions",
             Some(json!({
                 "workspace_id": required_str(&workspace, "id")?,
@@ -1079,7 +1126,8 @@ async fn ensure_source_session(api: &Api, receipt: &mut ReviewReceipt) -> Result
             })),
             &receipt.key("source-session"),
         )
-        .await?;
+        .await?
+    };
     receipt.record("source_session", session.clone())?;
     let session_id = required_str(&session, "id")?;
     let client_event_id = format!("{FIXTURE}-finding");
@@ -1173,27 +1221,77 @@ async fn ensure_context_session(
     let workspace = receipt.require("workspace")?;
     let project = receipt.require("project")?;
     let repository = receipt.require("repository")?;
-    let session: Value = reviewer
-        .post_idempotent_as(
-            "/v1/sessions",
-            Some(json!({
-                "workspace_id": required_str(&workspace, "id")?,
-                "project_id": required_str(&project, "id")?,
-                "repository_id": required_str(&repository, "id")?,
-                "client_name": "synveda-demo",
-                "client_version": env!("CARGO_PKG_VERSION"),
-                "external_session_id": format!("{FIXTURE}-context"),
-                "agent_name": "Northstar context consumer",
-                "model_name": "deterministic-context-demo",
-                "branch": "main",
-                "task_summary": "Request reviewed retry guidance",
-                "metadata": {"fixture": FIXTURE, "synthetic": true, "replay": true},
-            })),
-            &receipt.key("context-session"),
-        )
-        .await?;
+    let external_id = format!("{FIXTURE}-context");
+    let fields = [
+        ("workspace_id", required_str(&workspace, "id")?),
+        ("project_id", required_str(&project, "id")?),
+        ("repository_id", required_str(&repository, "id")?),
+        ("principal_id", reviewer.subject.as_str()),
+        ("client_name", "synveda-demo"),
+        ("external_session_id", external_id.as_str()),
+        ("model_name", "deterministic-context-demo"),
+    ];
+    let session: Value = if let Some(live) =
+        resume_fixture_session(reviewer, receipt, "context_session", &fields).await?
+    {
+        live
+    } else {
+        reviewer
+            .post_idempotent_as(
+                "/v1/sessions",
+                Some(json!({
+                    "workspace_id": required_str(&workspace, "id")?,
+                    "project_id": required_str(&project, "id")?,
+                    "repository_id": required_str(&repository, "id")?,
+                    "client_name": "synveda-demo",
+                    "client_version": env!("CARGO_PKG_VERSION"),
+                    "external_session_id": format!("{FIXTURE}-context"),
+                    "agent_name": "Northstar context consumer",
+                    "model_name": "deterministic-context-demo",
+                    "branch": "main",
+                    "task_summary": "Request reviewed retry guidance",
+                    "metadata": {"fixture": FIXTURE, "synthetic": true, "replay": true},
+                })),
+                &receipt.key("context-session"),
+            )
+            .await?
+    };
     receipt.record("context_session", session.clone())?;
     Ok(session)
+}
+
+async fn resume_fixture_session(
+    api: &Api,
+    receipt: &ReviewReceipt,
+    name: &str,
+    expected: &[(&'static str, &str)],
+) -> Result<Option<Value>, String> {
+    let Some(recorded) = receipt.resource(name) else {
+        return Ok(None);
+    };
+    let id = required_str(recorded, "id")?;
+    let live = api.get(&format!("/v1/sessions/{id}")).await?;
+    verify_recorded_fixture_session(name, recorded, &live, expected)?;
+    Ok(Some(live))
+}
+
+fn verify_recorded_fixture_session(
+    name: &str,
+    recorded: &Value,
+    live: &Value,
+    expected: &[(&'static str, &str)],
+) -> Result<(), String> {
+    let id = required_str(recorded, "id")?;
+    if live["id"].as_str() != Some(id)
+        || expected
+            .iter()
+            .any(|(field, value)| live[*field].as_str() != Some(*value))
+    {
+        return Err(format!(
+            "the recorded {name} was changed or repointed; retry-review will not reuse it"
+        ));
+    }
+    Ok(())
 }
 
 fn learning_content() -> Value {
@@ -1481,6 +1579,59 @@ mod tests {
                 &json!({"id": "other", "status": "active"})
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn resumed_configuration_requires_the_original_live_scope_and_version() {
+        let recorded = json!({
+            "outcome": "applied",
+            "artifact_id": "fixture-configuration",
+            "version_id": "original-team-version",
+        });
+        let live = json!({
+            "id": "fixture-configuration",
+            "governing_scope_id": "fixture-workspace",
+            "name": "Northstar local demo profile",
+            "current_version_id": "original-team-version",
+        });
+        verify_recorded_configuration("fixture-workspace", &recorded, &live)
+            .expect("the original version may survive a later template change");
+        for (field, value) in [
+            ("id", "another-configuration"),
+            ("current_version_id", "newer-version"),
+            ("governing_scope_id", "another-workspace"),
+        ] {
+            let mut changed = live.clone();
+            changed[field] = json!(value);
+            assert!(
+                verify_recorded_configuration("fixture-workspace", &recorded, &changed).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn resumed_session_checks_ownership_without_requiring_the_new_client_version() {
+        let recorded = json!({"id": "original-session", "client_version": "0.4.3"});
+        let live = json!({
+            "id": "original-session",
+            "principal_id": "reviewer",
+            "project_id": "original-project",
+            "external_session_id": "cpr45-retry-review-v1-context",
+            "client_version": "0.4.3",
+        });
+        let expected = [
+            ("principal_id", "reviewer"),
+            ("project_id", "original-project"),
+            ("external_session_id", "cpr45-retry-review-v1-context"),
+        ];
+        verify_recorded_fixture_session("context_session", &recorded, &live, &expected)
+            .expect("a newer CLI can reuse the original Session");
+        let mut changed = live.clone();
+        changed["principal_id"] = json!("another-principal");
+        assert!(
+            verify_recorded_fixture_session("context_session", &recorded, &changed, &expected)
+                .is_err()
         );
     }
 

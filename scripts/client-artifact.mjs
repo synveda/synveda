@@ -7,6 +7,8 @@ export const nodePath = `plugin/synveda/runtime/node${process.platform === "win3
 export const cliPath = `bin/synveda${process.platform === "win32" ? ".exe" : ""}`;
 export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 export const targetName = () => `${process.platform === "win32" ? "windows" : process.platform}-${process.arch === "x64" ? "x86_64" : process.arch}`;
+export const clientNoticeDirectories = ["", "plugin", "plugin/synveda", "plugin/codex", "plugin/copilot-cli",
+  "plugin/codex/node_modules/@synveda/claude-code-adapter", "plugin/copilot-cli/node_modules/@synveda/claude-code-adapter"];
 
 export function inventory(root) {
   const files = Object.create(null);

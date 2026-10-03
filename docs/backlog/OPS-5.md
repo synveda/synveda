@@ -12,10 +12,10 @@ size: M
 
 ## Problem and evidence
 
-There is no production backup configuration, WAL archive, PITR restore or
-recurring restore drill. Disposable database tests are not recovery evidence.
-The Helm chart has no backup stanza, and the local KMS key or externally owned
-Helm Secret must be restored with the database. This is a P0 gap in
+There is no qualified production backup, off-host WAL archive, application
+PITR restore or recurring restore drill. Disposable database tests establish
+mechanics only. The local KMS key or externally owned Helm Secret must be
+restored with the database. This is a P0 gap in
 [production readiness](../PRODUCTION_READINESS.md).
 
 The OPS-11 / ADR-0112 local Kubernetes drill now exercises quiesced native
@@ -26,6 +26,48 @@ bounded local recovery evidence; it does not close encrypted off-host custody,
 WAL/PITR, owned RPO/RTO or recurring drills. The next action remains an
 owner-selected backup destination and retention/custody policy, followed by a
 production-shaped PITR rehearsal.
+
+ADR-0122 adds a **source-only, opt-in CNPG chart seam** for the Barman Cloud
+plugin: an operator-owned ObjectStore supplies provider credentials, encryption
+and retention; the chart binds it as WAL archiver and renders a six-field
+ScheduledBackup. The first documented provider is S3-compatible, including
+AWS S3. Static Helm render/refusal checks cover the disabled default, exact
+object-store/schedule binding, missing plugin API and invalid shapes. This is
+configuration plumbing, not a completed backup or PITR. Neither the plugin nor
+its ObjectStore has been installed or exercised with this chart in a live
+cluster; external PostgreSQL remains operator-owned.
+
+ADR-0123 adds a **source-only, opt-in Compose pgBackRest candidate** for bundled
+PostgreSQL. The separate image target pins pgBackRest 2.59.1, and the canonical
+lifecycle validates a private S3-compatible configuration, enables verified-TLS
+WAL archiving and exposes a bounded stanza/check/full-backup action without
+automatic expiry. The default image and logical recovery path remain in place.
+On 2026-09-29, `scripts/ops5-local-pitr-drill.sh` passed on macOS/OrbStack.
+It built the opt-in image and used a pinned S3-compatible server on an isolated
+Docker network. The private-CA TLS path, stanza and WAL check, encrypted full
+backup, named-point restore before the second committed write (one row),
+end-of-archive restore after it (two rows), and wrong-passphrase refusal all
+passed in fresh PostgreSQL volumes. The drill uses temporary local storage;
+the Compose lifecycle still has no supported physical restore command or
+joint identity/KMS custody. Neither source candidate has off-host or Synveda
+application recovery evidence. Azure and GCS are follow-on qualifications.
+
+As of 2026-09-30, the deployment owner has no operator-owned test bucket
+available. The live off-host PITR and joint application restore gate cannot
+run until that destination and its credentials are supplied; the local
+S3-compatible drill remains the current evidence.
+
+The next action is to choose a real off-host bucket/region, encryption/key
+custody, retention, RPO/RTO and drill owner; install the compatible CNPG/Barman
+plugin in a disposable cluster; create the protected S3-compatible ObjectStore;
+and prove continuous WAL plus base backup before and after two committed write
+points. Run the same repository-shaped Compose candidate against an owned
+bucket. Restore both deployment shapes into new storage at selected instants
+with original issuer/KMS custody, run the ordinary
+application/forced-RLS/audit/Knowledge checks, inject incomplete or corrupt
+backup and wrong-key failures, and record elapsed time. Schedule recurring
+drills only after that evidence passes. Do not enable retention deletion until
+a generation has passed independent restore.
 
 ## Scope
 

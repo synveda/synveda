@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "feature": "OPS-12",
+  "observed_at": "2026-09-30T22:37:09.012Z",
+  "evidence": "local-native-oci-rust-sbom-candidate",
+  "platform": "linux/arm64",
+  "version": "0.4.3",
+  "source_sha": "686b75b8a7df4bf59eabc0b7478b786466188200",
+  "source_tree_dirty": true,
+  "source_changes": [
+    ".github/workflows/docker.yml",
+    "Makefile",
+    "deploy/compose/product/Dockerfile",
+    "docs/adr/adr-0133-embed-rust-dependency-inventory-in-release-binaries.md",
+    "scripts/check-compose-contract.mjs",
+    "scripts/check-deploy-convergence.mjs",
+    "scripts/check-deploy-convergence.test.mjs",
+    "scripts/check-release-assets.mjs",
+    "scripts/check-workflows.mjs",
+    "scripts/docker-candidate.mjs",
+    "scripts/release-pipeline.test.mjs",
+    "scripts/rust-image-sbom.mjs",
+    "scripts/rust-image-sbom.test.mjs"
+  ],
+  "build_inputs": {
+    "deploy/compose/product/Dockerfile": "2ca59e08a59cb15b41001c3e002bbb99ec3d4f0d7bc7df0e7f80af1e27d0fc4e",
+    "Cargo.lock": "b560b4499f4374f6662ade67af69e0d62238e2e486428f7b08d012d45dae7b12",
+    "rust-toolchain.toml": "e59c5da37d1f9f4e0f815bc188cb6056fc7410c9cdaa9673c2d44da557c75d12"
+  },
+  "tools": {
+    "rust": "1.96.0",
+    "cargo_auditable": "0.7.6",
+    "sbom_generator": "docker.io/docker/buildkit-syft-scanner:1.12.0@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9",
+    "buildkit": "0.29.0",
+    "native_engine": "linux/aarch64"
+  },
+  "method": [
+    "Export actual product and browser-acceptance targets with the pinned generator and fixed loopback image names",
+    "Read only regular exported OCI JSON blobs and verify every selected descriptor size and SHA-256",
+    "Require native configuration/source/version, digest-bearing in-toto subjects, pinned Syft and locked runtime Cargo content",
+    "Independently rehash both original OCI archives",
+    "Run an ordinary Rust OCI control through the same generator and verifier; refuse absent Cargo content",
+    "Refuse a nameless OCI control with empty in-toto subjects"
+  ],
+  "cases": [
+    {
+      "image": "product",
+      "archive_bytes": 139382784,
+      "archive_sha256": "1d171c0547bb94bcf9e823cf505c6b2b29beda903b008b2bd150f20c72381284",
+      "report": {
+        "schema_version": 1,
+        "image_manifest": "sha256:bf8f23be2fbd370a24657b59a7684b011b924292b6978e4e1e4295d097674861",
+        "attestation_manifest": "sha256:34fdea6bed91495d6e990cd2ad554d26f0c7f2c00b776afca945f92692a1483d",
+        "statement_sha256": "517d5646272ba1def197bc0987c18ad4474b91fe81f4074a87aed89d19445a30",
+        "scanner": "syft-v1.51.0",
+        "spdx_version": "SPDX-2.3",
+        "package_count": 1714,
+        "cargo_package_count": 1606,
+        "cargo_identity_count": 351,
+        "required_packages": {
+          "synveda-cli": "0.4.3",
+          "synveda-gateway": "0.4.3",
+          "synveda-apalis": "0.4.3",
+          "cedar-policy": "4.11.2",
+          "cedar-policy-core": "4.11.2",
+          "sqlx": "0.8.6",
+          "sqlx-postgres": "0.8.6"
+        }
+      }
+    },
+    {
+      "image": "browser_acceptance",
+      "archive_bytes": 1022895616,
+      "archive_sha256": "76e1c11c3a8778607c2acefc447d599f80a2bb40bf113cf97f75b180efb7bedd",
+      "report": {
+        "schema_version": 1,
+        "image_manifest": "sha256:eadaa3b4062a7bf52a8b3b4bcaf89bd4774745dae3598b0b91378d8d4d8190e0",
+        "attestation_manifest": "sha256:1a18f9a3c6976e3260f30f09038a55c4c66c43cedd86f19d04e5989e84fe2f9b",
+        "statement_sha256": "111607c30377f79d0fb4c229003a97321ead1b6dbc640779a36431008910f13c",
+        "scanner": "syft-v1.51.0",
+        "spdx_version": "SPDX-2.3",
+        "package_count": 1009,
+        "cargo_package_count": 295,
+        "cargo_identity_count": 295,
+        "required_packages": {
+          "synveda-cli": "0.4.3",
+          "cedar-policy": "4.11.2",
+          "cedar-policy-core": "4.11.2",
+          "sqlx": "0.8.6",
+          "sqlx-postgres": "0.8.6"
+        }
+      }
+    }
+  ],
+  "controls": [
+    {
+      "case": "missing-runtime-cargo-content",
+      "refused": true,
+      "archive_bytes": 957952,
+      "archive_sha256": "3382d6cbf54134f7621a1f3ee5188968e8e24ed0c09cb3dee36a4a87e8f8b1c0"
+    },
+    {
+      "case": "missing-image-subject",
+      "refused": true,
+      "archive_bytes": 957440,
+      "archive_sha256": "314649ab918fccd31c3474ea418f4c1c16fcb3ec0d6e877bba28c7a2397c8c43"
+    }
+  ],
+  "limits": [
+    "Local ARM source candidates from a dirty build-tooling checkout; not clean hosted qualification",
+    "No deployment or executable smoke, registry publication, real issuer/harness use or production-readiness claim",
+    "Native client/server archive SBOMs, non-Rust coverage, third-party notices and vulnerability policy remain open",
+    "Cargo package entries may repeat across binaries; identity count deduplicates name/version pairs"
+  ]
+}

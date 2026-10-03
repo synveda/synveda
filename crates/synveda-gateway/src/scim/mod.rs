@@ -64,7 +64,7 @@ use crate::app::AppState;
 pub const SCIM_PREFIX: &str = "/scim/v2";
 
 /// How stale a credential's `last_used_at` must be before a request
-/// advances it (migration 0034's cadence rule).
+/// advances it (the credential write-cadence rule).
 const TOUCH_STALENESS_SECS: i32 = 300;
 
 /// The largest page this server will return, and the number

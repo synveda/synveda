@@ -203,7 +203,9 @@ services:
     labels:
       com.synveda.contract: cpr-45
     command: ["gateway"]
-    stop_grace_period: 30s
+    # The gateway's default 30-second drain bound needs an outer margin for
+    # telemetry flush and container-runtime termination, as in Helm.
+    stop_grace_period: 40s
     depends_on:
       tenant-convergence:
         condition: service_completed_successfully

@@ -29,9 +29,187 @@ supported N-1. The release owner must first supply a published compatible pair;
 then run the declared upgrade and failure-recovery matrix. Do not manufacture
 compatibility by resetting an existing database.
 
+Published v0.4.0 and v0.4.3 are not a compatible pair: both report epoch 3 and
+baseline revision 3, but the latter changes `0001_context_platform.sql`
+(`source_payload_hash`). Their published checksums remain immutable; v0.4.0 is
+still refused. ADR-0121 selects v0.4.3 as the first forward-upgrade source.
+The source candidate restores its exact `0001` bytes and moves CTX-6/CTX-8 DDL
+to transactional `0002_context_restart_and_excerpt.sql`. The fast gate pins
+both files. OPS-7 / ADR-0126 now appends `0003_one_time_login_ledger.sql`;
+the read-only candidate check distinguishes exact `0001`, `0002` and current
+`0003` heads. The gateway refuses the earlier heads until migration stamps
+`0003`. Head-specific catalogue proofs flank SQLx DDL, with exact-prefix
+crash recovery. This is an implementation candidate, not a published upgrade
+claim.
+
+An isolated exact-role PostgreSQL run passed 26 focused epoch tests, including
+an exact published-baseline SQLx prefix, retained tenant data and baseline
+ledger row, exact `0002` advancement, read-only preflight, interrupted-stamp recovery, missing-ledger
+preservation and old-catalogue drift refusal. SQLx generated-metadata
+verification passes on a fresh three-head database. On 2026-09-30 the full
+isolated `bash scripts/db-test.sh` suite passed at `0003`, including the
+workspace integration tests, serial authority/tamper checks and all 26 epoch
+cases. Its first run exposed a stale two-row count in the concurrent-install
+test; that assertion now compares successful ledger rows to the embedded
+migrator's length. The corrected full rerun passed and removed its disposable
+volumes. This still has not tested a published application binary, populated
+audit/key state or a joint restore at `0003`.
+
+On 2026-09-29, a disposable macOS/OrbStack rehearsal used the published
+v0.4.3 product image at
+`sha256:071bd209cdd26497c3c928949f38a8f2114c49384bea32eb3196952377ab47f3`
+and checksum-matched `synveda-reference-0.4.3.tar.gz`. The release's
+`SHA256SUMS` passed GitHub attestation verification for the exact release
+workflow, tag and source commit `2acc66f02625727b2ccdfe223358468bf10eef85`;
+the image digest matched the checksummed release overlay. The published stack
+passed its public-API sample, leaving a pending governed proposal. A linked
+PostgreSQL/Keycloak/key backup verified, and its independent private restore
+recovered 58 audit events, opened the original tenant key, refused a wrong key
+and passed browser/OIDC/API/logout acceptance. The sample-specific rerun on
+the new browser fixture returned `product-demo failed`; that client-receipt
+continuity remains unverified.
+
+The source product image built from
+`dc77956b94e0f256125baa49dadbd578db8f861d` with local image ID
+`sha256:75107e28325338f5aa4087d13d8330402db2149bb98d619e7e5e523bb8255b08`.
+Its read-only check classified the released head as upgradeable while refusing
+to serve it. On the restored copy, the old gateway and worker stopped, `0002`
+applied, and the candidate's read-only check passed. The published binary
+refused the advanced schema. Candidate gateway and worker became healthy from
+the exact local image ID; its recovery verifier validated the continuing
+81-event audit chain, opened the original key and refused the wrong key. The
+published private browser/OIDC/API/logout check passed against the candidate.
+A second fresh restore from the same pre-migration set recovered the original
+58-event chain and key, refused the wrong key, started the published gateway
+and worker, passed its schema check and browser/API acceptance. The migrated
+copy and original source were never overwritten.
+
+This is source-candidate, local logical-recovery evidence. It does not prove
+the frozen audit prefix byte-for-byte after migration, complete
+Knowledge/Skill/proposal continuity, failure injection, production-sized lock
+or maintenance time, off-host PITR, Helm ordering or a published N-1/N pair.
+Next run those checks against representative data and the OPS-5 off-host
+recovery set, then publish and qualify the pair. No old binary may serve the
+advanced database; rollback restores the verified recovery set.
+
+The released-byte rehearsal above ended at `0002`, before the OPS-7 login
+ledger existed. It is historical evidence for that prefix. On 2026-09-30 a
+second isolated macOS/OrbStack rehearsal used the checksum-matched published
+v0.4.3 reference archive (SHA-256
+`ca95e99e98eab2046a223ba870b7d657591f76762aa4ef6a525eb6942415927a`)
+and its pinned product image, then a local source image
+`sha256:89c56dd8d63072be5d4c8210c615eb7031a81d285f664340c04965853f8e670c`.
+The published public-API sample created one Knowledge item/revision, five
+proposals and 52 audit events. A linked PostgreSQL/Keycloak/key recovery set
+was verified before stopping all old writers. The source image's read-only
+check classified exact head `0001` as upgradeable but unable to serve; after
+the declared database/peer bootstrap refreshed its postmaster witness,
+`0002` and `0003` applied and the source check passed. The published binary
+refused the advanced schema. The current gateway and worker became healthy,
+and the released browser fixture passed OIDC, API, logout and post-logout
+refusal. The current recovery verifier opened the original tenant key and
+refused an unrelated key. A pending login was stored as sealed bytes, survived
+a gateway process restart and was consumed once by an IdP-denial callback.
+
+The untouched pre-upgrade recovery set restored into a distinct empty project:
+the published binary accepted head `0001`, the original key opened, a wrong
+key was refused, and the released browser/OIDC/API/logout check passed.
+The SHA-256 digest of all serialized fields of the original 52 audit rows was
+identical on that restored copy and the migrated source
+(`a6e6b4297dd87f870ab8ef5ce58033421361d2bcee73f54c363be3404171ec7a`).
+The source's read-only `retry-review status` found the original Knowledge,
+capture and pending proposal. Re-running the published sample, however, hit
+an idempotency conflict: its fixed `configuration.create` key carried the
+current template document rather than the document submitted before upgrade.
+The CPR-45 client now reads and validates the recorded Configuration and
+Sessions before resuming, preserving their original version and ownership
+without resubmitting a changed body under the same idempotency key. Its rebuilt
+browser image replayed the v0.4.3 receipt against the migrated source gateway;
+`product-demo.mjs sample` passed and remained `learning_pending`. The sample's
+complete Skill/approval journey was not seeded before backup, so Skill
+continuity was outside that first drill. This is a
+same-host source-candidate drill, not a published N-1/N pair or off-host PITR.
+
+A second isolated v0.4.3 project completed the full four-person demo: reviewed
+Knowledge, a distinctly approved Skill version and binding, provenance-bound
+context, and a verified audit chain. Its released full-seed browser path exposed
+a loopback-origin assumption that the published `sample` path did not have;
+the candidate acceptance client now passes the configured origin through every
+receipt check. A verified linked recovery set was taken before the source
+candidate applied `0002` and `0003`. The upgraded browser read-only receipt
+check passed. A new CLI rerun initially conflicted on the old context-run
+idempotency key: the new gateway had included omitted optional fields in its
+digest. The candidate gateway now preserves the v0.4.3 digest for omitted
+options and includes non-default restart/tokenizer/required-revision options.
+The rerun then verified the same Knowledge revision, Session-event provenance,
+Skill version and binding, context run, and audit chain through public APIs.
+
+An independent restore into an empty project passed the published binary's
+browser/OIDC/API/logout check. Tenant-scoped read-only transactions under the
+ordinary `synveda_app` role found two Knowledge items, one Skill version, one
+binding, six proposals and one context run in both copies. Audit rows 1–384
+matched by serialized-row checksum and chain hash between the restored and
+migrated databases; each copy appended a different row 385 during its own
+post-backup verification. The source and restore volumes and recovery set are retained,
+with all containers stopped. This remains one macOS/OrbStack source-candidate
+drill, not a published N-1/N pair or off-host PITR. Next recover an in-flight
+pending login from a joint `0003` set, inject migration failures, measure
+production-shaped locks/outage and run the OPS-5 off-host restore before a
+supported upgrade claim.
+
+The published v0.4.3 consumer recovery launcher pins its released product
+verifier, which correctly refuses a `0003` database. A head-`0003` candidate
+reference bundle was therefore needed to park one login, back up the linked
+database/identity/key set, restore into an empty project with that same
+candidate, then consume the state once and refuse replay. Repeating the result
+with a published compatible N pair remains a separate promotion gate.
+
+That source-candidate drill passed on 2026-09-30. An isolated
+`0.4.3-ops6-head3` consumer bundle (archive SHA-256
+`3b7eb0f1f3785d389d1d31c66ddc6c417e3ed87706a2c129f587fe47b82ee89a`)
+used the prior head-`0003` product image
+`sha256:5842486bd6774efa18b56385177e05e51845b044d27b28578cb0a6ef7f442e66`,
+local browser image
+`sha256:8ae942c79ccdbd47184033f3a2b3b8b5a18987bcdda9d83ea88b5ecbd2a70b8f`,
+and the already verified v0.4.3 PostgreSQL, Keycloak and proxy image bytes.
+These are local digest aliases with mixed source provenance, not a published
+single-source release. The fresh project passed browser OIDC/API/logout
+acceptance. A JSON login then left exactly one unexpired 236-byte sealed
+`pending_logins` row when read as `synveda_gateway`.
+
+The candidate recovery launcher quiesced the source, verified the linked
+PostgreSQL/Keycloak/key backup `before-0003-pending`, and restored it into a
+distinct empty project. Recovery verified the five-event audit chain, opened
+the original tenant key and refused a wrong key. The restored gateway-role
+read found one pending row with 286 seconds remaining after the private stack
+became healthy. Its callback opened the sealed state, returned the uniform 401
+for a deliberate IdP `access_denied`, and changed the pending-row count from
+one to zero. Replaying the same opaque state returned 401 and left zero rows;
+a fresh browser OIDC/API/logout flow still passed. Both projects are down with
+their installation, database and browser volumes retained; the source also
+retains its linked recovery volume. This proves one-time rejection-path state
+survival through joint logical restore, not successful in-flight code exchange,
+off-host PITR, a published N pair, production-shaped outage or locks. Next
+measure lock/outage on representative data, and
+repeat with an owner-selected off-host OPS-5 set and published compatible pair.
+
+An exact-role 2026-09-30 failure-injection case installed the published
+v0.4.3 `0001` prefix and a tenant, then held a read lock on
+`context_candidates` after `0002` had altered earlier tables. It observed
+the later access-exclusive DDL wait and separately cancelled the client task
+and terminated the PostgreSQL migrator backend. Each interruption rolled
+back the earlier `session_context_runs` change, preserved the released SQLx
+ledger, marker and tenant, and retried cleanly to `0003`. The full disposable
+`bash scripts/db-test.sh` gate passed with all 26 serial epoch cases and
+removed its isolated volumes. These two mid-DDL failure points do not measure
+a production dataset, application outage, database pod/process crash or
+off-host restore. Next size the dataset and outage budget with the deployment
+owner, then measure lock waits, migration time and restoration on an isolated
+production-shaped copy.
+
 ## Scope
 
-- Define the first supported post-1.0 schema/application compatibility window.
+- Define the first supported schema/application compatibility window.
 - Require expand/backfill/contract sequencing where simultaneous N-1/N serving
   is promised, with bounded resumable backfills and preflight checks.
 - Test installed-host and Helm upgrade, failure and rollback using production-

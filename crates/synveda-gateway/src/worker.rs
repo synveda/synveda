@@ -34,6 +34,9 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const HEARTBEAT_STALE_AFTER: Duration = Duration::from_secs(5);
 const CONVERGENCE_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const ABORT_JOIN_RESERVE: Duration = Duration::from_secs(1);
+const CONSOLE_SESSION_PURGE_INTERVAL: Duration = Duration::from_secs(60);
+const CONSOLE_SESSION_PURGE_TIMEOUT: Duration = Duration::from_secs(10);
+const CONSOLE_SESSION_PURGE_MAX_BATCHES: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExecutionProvider {
@@ -65,6 +68,44 @@ impl ExecutionProvider {
             Self::Postgres => "postgres",
             Self::Apalis => "apalis",
         }
+    }
+}
+
+/// Local task placement; every profile retains the same authority gates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkerProfile {
+    Combined,
+    CaptureOnly,
+}
+
+impl WorkerProfile {
+    fn from_env() -> Result<Self, &'static str> {
+        match std::env::var("SYNVEDA_WORKER_PROFILE") {
+            Ok(value) => Self::parse(&value),
+            Err(std::env::VarError::NotPresent) => Ok(Self::Combined),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err("SYNVEDA_WORKER_PROFILE must be exactly combined or capture-only")
+            }
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, &'static str> {
+        match value {
+            "combined" => Ok(Self::Combined),
+            "capture-only" => Ok(Self::CaptureOnly),
+            _ => Err("SYNVEDA_WORKER_PROFILE must be exactly combined or capture-only"),
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Combined => "combined",
+            Self::CaptureOnly => "capture-only",
+        }
+    }
+
+    const fn runs_maintenance(self) -> bool {
+        matches!(self, Self::Combined)
     }
 }
 
@@ -106,36 +147,66 @@ async fn run_process(
     );
     let pool = pool_options.connect_lazy_with(connect_options);
     let pdp = Arc::new(Pdp::new()?);
+    let profile = WorkerProfile::from_env()?;
     let extractor = Arc::new(runtime_config::extractor_from_env()?);
-    let embedder = Arc::new(runtime_config::embedder_from_env()?);
-    let keys = Arc::new(synveda_store::keys::KeyRing::new(
-        runtime_config::kms_from_env()?,
-    ));
     let capture_config = runtime_config::capture_config_from_env()?;
-    let policy_refresh =
-        runtime_config::bounded_duration_setting("SYNVEDA_POLICY_REFRESH_SECS", 5, 1, 3_600)?;
-    let relaxation_interval =
-        runtime_config::bounded_duration_setting("SYNVEDA_RELAXATION_SWEEP_SECS", 60, 1, 3_600)?;
+    let policy_refresh = runtime_config::bounded_duration_setting(
+        "SYNVEDA_POLICY_REFRESH_SECS",
+        5,
+        1,
+        runtime_config::POLICY_REFRESH_MAX_SECS,
+    )?;
     let shutdown_grace =
         runtime_config::bounded_duration_setting("SYNVEDA_WORKER_SHUTDOWN_SECS", 75, 3, 300)?;
-    let knowledge_config = knowledge_config_from_env()?;
-    let (directory_connectors, directory_config) = directory_config_from_env()?;
-    let execution_provider = ExecutionProvider::from_env()?;
-    if directory_config.is_some()
-        && directory_connectors.is_empty()
-        && matches!(keys.kms(), synveda_crypto::Kms::Disabled)
-    {
-        return Err("SYNVEDA_DIRECTORY_SYNC requires a configured KMS key when no issuer carries a static directory connector".into());
-    }
-    drop(directory_connectors);
+    let maintenance = if profile.runs_maintenance() {
+        let embedder = Arc::new(runtime_config::embedder_from_env()?);
+        let keys = Arc::new(synveda_store::keys::KeyRing::new(
+            runtime_config::kms_from_env()?,
+        ));
+        let knowledge_config = knowledge_config_from_env()?;
+        let relaxation_interval = runtime_config::bounded_duration_setting(
+            "SYNVEDA_RELAXATION_SWEEP_SECS",
+            60,
+            1,
+            3_600,
+        )?;
+        let (directory_connectors, directory_config) = directory_config_from_env()?;
+        if directory_config.is_some()
+            && directory_connectors.is_empty()
+            && matches!(keys.kms(), synveda_crypto::Kms::Disabled)
+        {
+            return Err("SYNVEDA_DIRECTORY_SYNC requires a configured KMS key when no issuer carries a static directory connector".into());
+        }
+        drop(directory_connectors);
+        let execution_provider = ExecutionProvider::from_env()?;
+        Some(MaintenanceRuntime {
+            embedder,
+            keys,
+            knowledge_config,
+            relaxation_interval,
+            directory_config,
+            execution_provider,
+        })
+    } else {
+        None
+    };
+    let (embedder_method, embedding_model) = maintenance
+        .as_ref()
+        .map_or(("disabled", "disabled"), |maintenance| {
+            (maintenance.embedder.method(), maintenance.embedder.model())
+        });
+    let execution_provider_name = maintenance.as_ref().map_or("disabled", |maintenance| {
+        maintenance.execution_provider.as_str()
+    });
 
     tracing::info!(
         extractor = extractor.method(),
-        embedder = embedder.method(),
-        embedding_model = embedder.model(),
+        embedder = embedder_method,
+        embedding_model,
         db.max_connections = max_connections,
         shutdown_grace_secs = shutdown_grace.as_secs(),
-        execution.provider = execution_provider.as_str(),
+        execution.provider = execution_provider_name,
+        worker.profile = profile.as_str(),
         "core worker configuration accepted"
     );
 
@@ -169,14 +240,9 @@ async fn run_process(
         pool: pool.clone(),
         pdp,
         extractor,
-        embedder,
-        keys,
         capture_config,
-        knowledge_config,
         policy_refresh,
-        relaxation_interval,
-        directory_config,
-        native_skill_validation: execution_provider == ExecutionProvider::Postgres,
+        maintenance,
         drain_grace: shutdown_grace
             .saturating_sub(ABORT_JOIN_RESERVE)
             .max(Duration::from_millis(1)),
@@ -229,7 +295,9 @@ async fn run_process(
             _result = &mut heartbeat_task => SupervisorEvent::Heartbeat,
         };
         match event {
-            SupervisorEvent::Generation(Ok(Ok(GenerationEnd::AuthorityClosed))) => {
+            SupervisorEvent::Generation(Ok(Ok(
+                GenerationEnd::AuthorityClosed | GenerationEnd::PolicyStale,
+            ))) => {
                 active_task = Some(tokio::spawn(run_authority_generation(
                     generation.clone(),
                     gate.clone(),
@@ -406,7 +474,9 @@ fn generation_cleanup_error(
     result: Result<Result<GenerationEnd, String>, tokio::task::JoinError>,
 ) -> Option<String> {
     match result {
-        Ok(Ok(GenerationEnd::Shutdown | GenerationEnd::AuthorityClosed)) => None,
+        Ok(Ok(
+            GenerationEnd::Shutdown | GenerationEnd::AuthorityClosed | GenerationEnd::PolicyStale,
+        )) => None,
         Ok(Ok(GenerationEnd::AuthorityRefused)) => {
             Some("the worker database authority was conclusively refused".to_owned())
         }
@@ -420,21 +490,27 @@ struct GenerationRuntime {
     pool: sqlx::PgPool,
     pdp: Arc<Pdp>,
     extractor: Arc<synveda_ingest::extraction::AnyExtractor>,
+    capture_config: synveda_ingest::capture_worker::Config,
+    policy_refresh: Duration,
+    maintenance: Option<MaintenanceRuntime>,
+    drain_grace: Duration,
+}
+
+#[derive(Clone)]
+struct MaintenanceRuntime {
     embedder: Arc<synveda_ingest::embedding::AnyEmbedder>,
     keys: Arc<synveda_store::keys::KeyRing>,
-    capture_config: synveda_ingest::capture_worker::Config,
     knowledge_config: knowledge_index::Config,
-    policy_refresh: Duration,
     relaxation_interval: Duration,
     directory_config: Option<directory_sync::SyncConfig>,
-    native_skill_validation: bool,
-    drain_grace: Duration,
+    execution_provider: ExecutionProvider,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GenerationEnd {
     AuthorityClosed,
     AuthorityRefused,
+    PolicyStale,
     Shutdown,
 }
 
@@ -505,8 +581,13 @@ async fn run_authority_generation(
             GenerationEnd::AuthorityClosed
         });
     }
+    health.policy_ready.mark_converged(generation);
 
-    let directory_connectors = if runtime.directory_config.is_some() {
+    let directory_connectors = if runtime
+        .maintenance
+        .as_ref()
+        .is_some_and(|maintenance| maintenance.directory_config.is_some())
+    {
         directory_config_from_env()
             .map_err(|_| "worker directory configuration could not be rebuilt".to_owned())?
             .0
@@ -520,22 +601,13 @@ async fn run_authority_generation(
         "policy-refresh",
         gate.clone(),
         generation,
+        health.policy_ready.clone(),
         authz::run_pack_refresher(
             runtime.pool.clone(),
             Arc::clone(&runtime.pdp),
             runtime.policy_refresh,
             work_stop_rx.clone(),
-        ),
-    );
-    spawn_governed_named(
-        &mut tasks,
-        "skill-validation",
-        gate.clone(),
-        generation,
-        crate::skill_validation::run(
-            crate::skill_validation::Runtime::new(runtime.pool.clone(), Arc::clone(&runtime.pdp)),
-            runtime.native_skill_validation,
-            work_stop_rx.clone(),
+            (health.policy_ready.clone(), generation),
         ),
     );
     spawn_governed_named(
@@ -543,6 +615,7 @@ async fn run_authority_generation(
         "capture",
         gate.clone(),
         generation,
+        health.policy_ready.clone(),
         synveda_ingest::capture_worker::run(
             synveda_ingest::capture_worker::Deps {
                 pool: runtime.pool.clone(),
@@ -553,46 +626,74 @@ async fn run_authority_generation(
             work_stop_rx.clone(),
         ),
     );
-    spawn_governed_named(
-        &mut tasks,
-        "knowledge-index",
-        gate.clone(),
-        generation,
-        knowledge_index::run(
-            runtime.pool.clone(),
-            Arc::clone(&runtime.embedder),
-            runtime.knowledge_config.clone(),
-            work_stop_rx.clone(),
-        ),
-    );
-    spawn_governed_named(
-        &mut tasks,
-        "relaxation-expiry",
-        gate.clone(),
-        generation,
-        relaxations::run_expiry_sweep(
-            runtime.pool.clone(),
-            runtime.relaxation_interval,
-            work_stop_rx.clone(),
-        ),
-    );
-    if let Some(config) = runtime.directory_config {
+    if let Some(maintenance) = runtime.maintenance {
         spawn_governed_named(
             &mut tasks,
-            "directory-sync",
+            "console-session-expiry",
             gate.clone(),
             generation,
-            directory_sync::run(
-                DirectoryRuntime::new(
+            health.policy_ready.clone(),
+            run_console_session_expiry_sweep(runtime.pool.clone(), work_stop_rx.clone()),
+        );
+        spawn_governed_named(
+            &mut tasks,
+            "skill-validation",
+            gate.clone(),
+            generation,
+            health.policy_ready.clone(),
+            crate::skill_validation::run(
+                crate::skill_validation::Runtime::new(
                     runtime.pool.clone(),
                     Arc::clone(&runtime.pdp),
-                    Arc::clone(&runtime.keys),
                 ),
-                directory_connectors,
-                config,
+                maintenance.execution_provider == ExecutionProvider::Postgres,
                 work_stop_rx.clone(),
             ),
         );
+        spawn_governed_named(
+            &mut tasks,
+            "knowledge-index",
+            gate.clone(),
+            generation,
+            health.policy_ready.clone(),
+            knowledge_index::run(
+                runtime.pool.clone(),
+                Arc::clone(&maintenance.embedder),
+                maintenance.knowledge_config.clone(),
+                work_stop_rx.clone(),
+            ),
+        );
+        spawn_governed_named(
+            &mut tasks,
+            "relaxation-expiry",
+            gate.clone(),
+            generation,
+            health.policy_ready.clone(),
+            relaxations::run_expiry_sweep(
+                runtime.pool.clone(),
+                maintenance.relaxation_interval,
+                work_stop_rx.clone(),
+            ),
+        );
+        if let Some(config) = maintenance.directory_config {
+            spawn_governed_named(
+                &mut tasks,
+                "directory-sync",
+                gate.clone(),
+                generation,
+                health.policy_ready.clone(),
+                directory_sync::run(
+                    DirectoryRuntime::new(
+                        runtime.pool.clone(),
+                        Arc::clone(&runtime.pdp),
+                        Arc::clone(&maintenance.keys),
+                    ),
+                    directory_connectors,
+                    config,
+                    work_stop_rx.clone(),
+                ),
+            );
+        }
     }
 
     health.beat();
@@ -608,6 +709,7 @@ async fn run_authority_generation(
             }
         }
         () = shutdown::requested(&mut shutdown) => GenerationEnd::Shutdown,
+        () = health.policy_ready.stale_for(generation) => GenerationEnd::PolicyStale,
         result = tasks.join_next() => {
             health.fault();
             let reason = unexpected_task_exit(result);
@@ -618,7 +720,73 @@ async fn run_authority_generation(
     };
     health.waiting();
     let _ = work_stop_tx.send(true);
+    if end == GenerationEnd::PolicyStale {
+        tracing::warn!(
+            authority.generation = generation,
+            "worker policy convergence expired; cancelling governed work"
+        );
+        abort_stale_tasks(&mut tasks, authority::CHECK_TIMEOUT).await?;
+        return Ok(end);
+    }
     finish_generation_drain(&mut tasks, runtime.drain_grace, end).await
+}
+
+async fn run_console_session_expiry_sweep(pool: sqlx::PgPool, mut shutdown: watch::Receiver<bool>) {
+    let mut ticker = tokio::time::interval(CONSOLE_SESSION_PURGE_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            biased;
+            () = shutdown::requested(&mut shutdown) => return,
+            _ = ticker.tick() => {}
+        }
+        let result = tokio::select! {
+            biased;
+            () = shutdown::requested(&mut shutdown) => return,
+            result = tokio::time::timeout(
+                CONSOLE_SESSION_PURGE_TIMEOUT,
+                drain_expired_console_sessions(&pool),
+            ) => result,
+        };
+        match result {
+            Ok(Ok(oldest_age_seconds)) => {
+                metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_SWEEPS_TOTAL, "outcome" => "ok")
+                    .increment(1);
+                metrics::gauge!(crate::telemetry::CONSOLE_SESSION_OLDEST_EXPIRED_AGE_SECONDS)
+                    .set(oldest_age_seconds.unwrap_or(0.0));
+            }
+            Ok(Err(error)) => {
+                metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_SWEEPS_TOTAL, "outcome" => "error")
+                    .increment(1);
+                tracing::warn!(%error, "expired console session purge failed");
+            }
+            Err(_) => {
+                metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_SWEEPS_TOTAL, "outcome" => "error")
+                    .increment(1);
+                tracing::warn!("expired console session purge timed out");
+            }
+        }
+    }
+}
+
+/// Catch up after an outage without allowing credential cleanup to monopolise
+/// the worker. The caller also applies a ten-second whole-pass deadline.
+async fn drain_expired_console_sessions(pool: &sqlx::PgPool) -> synveda_types::Result<Option<f64>> {
+    let mut last_batch_full = false;
+    for _ in 0..CONSOLE_SESSION_PURGE_MAX_BATCHES {
+        let removed = synveda_store::console_sessions::purge_expired(pool).await?;
+        metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGED_TOTAL).increment(removed);
+        metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_BATCHES_TOTAL).increment(1);
+        last_batch_full = removed == synveda_store::console_sessions::PURGE_BATCH_SIZE;
+        if !last_batch_full {
+            break;
+        }
+    }
+    let oldest_age = synveda_store::console_sessions::oldest_expired_age_seconds(pool).await?;
+    if last_batch_full && oldest_age.is_some() {
+        metrics::counter!(crate::telemetry::CONSOLE_SESSION_PURGE_BUDGET_HITS_TOTAL).increment(1);
+    }
+    Ok(oldest_age)
 }
 
 async fn finish_generation_drain(
@@ -657,21 +825,44 @@ fn spawn_governed_named<F>(
     name: &'static str,
     gate: AuthorityGate,
     generation: u64,
+    policy_ready: authz::PolicyReadyGeneration,
     task: F,
 ) where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
     let mut permit = gate.permit();
     tasks.spawn(async move {
-        if permit.is_for(generation) {
+        if permit.is_for(generation) && policy_ready.is_for(generation) {
             tokio::select! {
                 biased;
                 () = permit.revoked() => {}
+                () = policy_ready.stale_for(generation) => {}
                 () = task => {}
             }
         }
         name
     });
+}
+
+async fn abort_stale_tasks(
+    tasks: &mut JoinSet<&'static str>,
+    grace: Duration,
+) -> Result<(), String> {
+    tasks.abort_all();
+    tokio::time::timeout(grace, async {
+        while let Some(result) = tasks.join_next().await {
+            match result {
+                Ok(_) => {}
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => {
+                    return Err(format!("worker task failed during policy expiry: {error}"));
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| "worker tasks did not stop after policy expiry".to_owned())?
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -781,6 +972,7 @@ fn directory_config_from_env()
 #[derive(Clone)]
 struct WorkerHealth {
     authority: AuthorityGate,
+    policy_ready: authz::PolicyReadyGeneration,
     metrics: metrics_exporter_prometheus::PrometheusHandle,
     lifecycle: Arc<AtomicU8>,
     active_generation: Arc<AtomicU64>,
@@ -796,6 +988,7 @@ impl WorkerHealth {
         metrics::gauge!(crate::telemetry::WORKER_READY).set(0.0);
         let state = Self {
             authority,
+            policy_ready: authz::PolicyReadyGeneration::new(),
             metrics,
             lifecycle: Arc::new(AtomicU8::new(STARTING)),
             active_generation: Arc::new(AtomicU64::new(0)),
@@ -850,6 +1043,7 @@ impl WorkerHealth {
         self.lifecycle.load(Ordering::Acquire) == RUNNING
             && generation != 0
             && self.authority.open_generation() == Some(generation)
+            && self.policy_ready.is_for(generation)
     }
 }
 
@@ -946,6 +1140,54 @@ async fn worker_readyz(State(state): State<WorkerHealth>) -> Response {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn expired_console_custody_drain_stops_after_sixteen_batches() {
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("skipping: DATABASE_URL unset (run `make db-test`)");
+            return;
+        };
+        let pool = sqlx::PgPool::connect(&url)
+            .await
+            .expect("connect exact-role test database");
+        let issuer = format!("http://auth6-drain-{}.test", synveda_types::TenantId::new());
+        let sealed = [0_u8; 51];
+        sqlx::query(
+            "insert into console_sessions (token_hash, issuer, access_token_sealed, \
+             created_at, absolute_expires_at) \
+             select decode(md5($1 || n::text) || md5($1 || ':' || n::text), 'hex'), \
+             $1, $2, '2000-01-01 00:00:00+00', \
+             '2000-01-02 00:00:00+00' from generate_series(1, 4097) as n",
+        )
+        .bind(&issuer)
+        .bind(&sealed[..])
+        .execute(&pool)
+        .await
+        .expect("seed more than one bounded drain pass");
+
+        let remaining_age = drain_expired_console_sessions(&pool)
+            .await
+            .expect("drain the first pass");
+        assert!(remaining_age.is_some(), "the capped pass leaves one row");
+        let remaining: i64 =
+            sqlx::query_scalar("select count(*) from console_sessions where issuer = $1")
+                .bind(&issuer)
+                .fetch_one(&pool)
+                .await
+                .expect("count retained expired rows");
+        assert_eq!(remaining, 1);
+
+        drain_expired_console_sessions(&pool)
+            .await
+            .expect("drain the remaining row");
+        let remaining: i64 =
+            sqlx::query_scalar("select count(*) from console_sessions where issuer = $1")
+                .bind(&issuer)
+                .fetch_one(&pool)
+                .await
+                .expect("count retained expired rows");
+        assert_eq!(remaining, 0);
+    }
+
     #[test]
     fn execution_provider_is_closed_and_defaults_are_explicit() {
         assert_eq!(
@@ -964,6 +1206,26 @@ mod tests {
         }
         assert_eq!(ExecutionProvider::Postgres.as_str(), "postgres");
         assert_eq!(ExecutionProvider::Apalis.as_str(), "apalis");
+    }
+
+    #[test]
+    fn worker_profile_rejects_unknown_task_placements() {
+        assert_eq!(
+            WorkerProfile::parse("combined"),
+            Ok(WorkerProfile::Combined)
+        );
+        assert_eq!(
+            WorkerProfile::parse("capture-only"),
+            Ok(WorkerProfile::CaptureOnly)
+        );
+        for value in ["", "capture", "maintenance", "CAPTURE-ONLY", "combined "] {
+            assert_eq!(
+                WorkerProfile::parse(value),
+                Err("SYNVEDA_WORKER_PROFILE must be exactly combined or capture-only")
+            );
+        }
+        assert!(WorkerProfile::Combined.runs_maintenance());
+        assert!(!WorkerProfile::CaptureOnly.runs_maintenance());
     }
 
     #[test]
@@ -1024,6 +1286,7 @@ mod tests {
     #[tokio::test]
     async fn draining_withdraws_readiness_before_a_current_unit_finishes() {
         let health = WorkerHealth::new(AuthorityGate::open_for_test(), test_metrics());
+        health.policy_ready.mark_converged(1);
         health.beat();
         health.running(1);
         let (stop_tx, stop_rx) = watch::channel(false);
@@ -1045,6 +1308,51 @@ mod tests {
         drain_tasks(&mut tasks, Duration::from_secs(1))
             .await
             .expect("unit drains");
+    }
+
+    #[tokio::test]
+    async fn stale_policy_withdraws_worker_readiness_and_cancels_a_governed_unit() {
+        let gate = AuthorityGate::open_for_test();
+        let mut health = WorkerHealth::new(gate.clone(), test_metrics());
+        health.policy_ready =
+            authz::PolicyReadyGeneration::with_max_age(Duration::from_millis(200));
+        let generation = gate.open_generation().expect("test authority is open");
+        health.policy_ready.mark_converged(generation);
+        health.running(generation);
+        let (started_tx, started_rx) = oneshot::channel();
+        let mut tasks = JoinSet::new();
+        spawn_governed_named(
+            &mut tasks,
+            "governed-unit",
+            gate,
+            generation,
+            health.policy_ready.clone(),
+            async move {
+                let _ = started_tx.send(());
+                std::future::pending::<()>().await;
+            },
+        );
+        started_rx.await.expect("governed unit started");
+        assert!(health.is_running());
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), tasks.join_next())
+                .await
+                .expect("stale unit was cancelled")
+                .expect("unit completed")
+                .expect("unit did not panic"),
+            "governed-unit"
+        );
+        assert!(!health.is_running());
+    }
+
+    #[tokio::test]
+    async fn expiry_abort_joins_stuck_worker_tasks_within_a_bound() {
+        let mut tasks = JoinSet::new();
+        spawn_named(&mut tasks, "stuck", std::future::pending());
+        abort_stale_tasks(&mut tasks, Duration::from_secs(1))
+            .await
+            .expect("stale task was aborted and joined");
+        assert!(tasks.is_empty());
     }
 
     #[tokio::test]

@@ -879,6 +879,10 @@ pub(crate) fn bounded_u64_setting(
     bounded_u64_value(name, raw.as_deref(), minimum, maximum)
 }
 
+/// The policy refresher gets at least two scheduled attempts inside the
+/// gateway's 30-second source-candidate freshness ceiling.
+pub const POLICY_REFRESH_MAX_SECS: u64 = 15;
+
 /// Parses one bounded duration setting with identical gateway/worker
 /// semantics. Sharing this function prevents one product image from accepting
 /// a value in one command and refusing it in the other.
@@ -1124,12 +1128,24 @@ mod tests {
     #[test]
     fn shared_process_durations_are_bounded_without_clamping() {
         assert_eq!(
-            bounded_u64_value("SYNVEDA_POLICY_REFRESH_SECS", None, 1, 3_600).unwrap(),
+            bounded_u64_value(
+                "SYNVEDA_POLICY_REFRESH_SECS",
+                None,
+                1,
+                POLICY_REFRESH_MAX_SECS
+            )
+            .unwrap(),
             None
         );
-        for refused in ["0", "3601", "not-an-integer"] {
+        for refused in ["0", "16", "not-an-integer"] {
             assert!(
-                bounded_u64_value("SYNVEDA_POLICY_REFRESH_SECS", Some(refused), 1, 3_600).is_err(),
+                bounded_u64_value(
+                    "SYNVEDA_POLICY_REFRESH_SECS",
+                    Some(refused),
+                    1,
+                    POLICY_REFRESH_MAX_SECS
+                )
+                .is_err(),
                 "{refused} must be refused by both product commands"
             );
         }

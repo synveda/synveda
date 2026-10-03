@@ -32,6 +32,13 @@ spec:
   {{- end }}
   enableSuperuserAccess: true
   primaryUpdateStrategy: {{ .Values.postgres.primaryUpdateStrategy }}
+  {{- if .Values.postgres.backup.enabled }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ .Values.postgres.backup.objectStoreName | quote }}
+  {{- end }}
 
   bootstrap:
     initdb:
@@ -45,6 +52,9 @@ spec:
       # afterwards. Create that database explicitly in the same closed/null-ACL
       # state expected by the shared bootstrap; PostgreSQL refuses closing the
       # current database from postInitApplicationSQL.
+      # CNPG creates its reserved streaming_replica role after postInitSQL.
+      # The required administrator bootstrap Job grants that role CONNECT on
+      # postgres once it exists, while leaving this PUBLIC revoke intact.
       postInitSQL:
         - revoke connect, temporary on database postgres, template1 from public;
         - create database {{ include "synveda.dbName" . }} with owner {{ include "synveda.migratorRole" . }} template template0 encoding 'UTF8' allow_connections false;

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from cli_handoffs where expires_at <= now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b7043ba47db12c790d3d4a9a99e93d199dde95c85a7ce509f5c5cfa0ab21215c"
+}

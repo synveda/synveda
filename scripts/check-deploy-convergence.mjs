@@ -1030,10 +1030,18 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
     "configure_authority_snapshot_connection(&mut authority)",
     begin,
   );
-  const acl = runtimeRole.indexOf("application_acl_fingerprint(&mut authority)", snapshot);
-  const routine = runtimeRole.indexOf("routine_catalog_fingerprint(&mut authority", acl);
-  const trigger = runtimeRole.indexOf("trigger_catalog_fingerprint(&mut authority", routine);
-  const rls = runtimeRole.indexOf("rls_catalog_fingerprint(&mut authority)", trigger);
+  const acl = runtimeRole.indexOf(
+    "application_acl_fingerprint(&mut authority, LOGIN_ACL_ROW_COUNT)",
+    snapshot,
+  );
+  const routine = runtimeRole.indexOf("let routine_catalog = routine_catalog_fingerprint(", acl);
+  const trigger = runtimeRole.indexOf("let trigger_catalog = trigger_catalog_fingerprint(", routine);
+  const rls = runtimeRole.indexOf(
+    "rls_catalog_fingerprint(&mut authority, LOGIN_RLS_CATALOG_ROW_COUNT)",
+    trigger,
+  );
+  const routineCall = runtimeRole.slice(routine, trigger);
+  const triggerCall = runtimeRole.slice(trigger, rls);
   const commit = runtimeRole.indexOf(".commit()", rls);
   const output = runtimeRole.indexOf(
     '"authority-fingerprints baseline_revision={}',
@@ -1054,6 +1062,8 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
       routine > acl &&
       trigger > routine &&
       rls > trigger &&
+      /^\s*ROUTINE_CATALOG_ROW_COUNT,\s*$/m.test(routineCall) &&
+      /^\s*TRIGGER_CATALOG_ROW_COUNT,\s*$/m.test(triggerCall) &&
       commit > rls &&
       output > commit
     ) ||
@@ -1505,20 +1515,22 @@ export function missingWorkspaceManifestCopies(source, manifests) {
 }
 
 export function suppressesCargoBuildFailure(source) {
-  return /cargo build[^\n]*\|\|\s*true/.test(source);
+  return /cargo (?:auditable )?build[^\n]*\|\|\s*true/.test(source);
 }
 
 export function productImageFindings(source) {
   const findings = [];
   const cargoBuilds = source
     .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#") && /\bcargo build\b/.test(line));
+    .filter((line) => !line.trimStart().startsWith("#") && /\bcargo (?:auditable )?build\b/.test(line));
   if (
     cargoBuilds.length !== 2 ||
-    cargoBuilds.some((line) => !/\bcargo build --locked\b/.test(line))
+    cargoBuilds.some((line) => !/\bcargo auditable build --locked\b/.test(line))
   ) {
     findings.push("release Cargo builds are not exactly two locked invocations");
   }
+  if (!/^RUN cargo install cargo-auditable --version 0\.7\.6 --locked$/m.test(source))
+    findings.push("release Rust inventory tool is not pinned and locked");
   const stages = [...source.matchAll(/^FROM\s+.*$/gim)];
   const finalStage = stages.length > 0 ? source.slice(stages.at(-1).index) : "";
   const finalActive = finalStage.replace(/^[ \t]*#.*(?:\r?\n|$)/gm, "");
@@ -1588,10 +1600,10 @@ export function productTestSupportFindings(dockerfile, gatewayMain, workerMain) 
     findings.push("dependency cache omits the gateway test-support target stub");
   }
   if (
-    /^\s*RUN\b[^\n]*cargo build[^\n]*(?:--all-features|test-support)/im.test(
+    /^\s*RUN\b[^\n]*cargo (?:auditable )?build[^\n]*(?:--all-features|test-support)/im.test(
       dockerfile,
     ) ||
-    /cargo build[^\n]*(?:--all-features|test-support)/i.test(dockerfile)
+    /cargo (?:auditable )?build[^\n]*(?:--all-features|test-support)/i.test(dockerfile)
   ) {
     findings.push("product image enables gateway test support");
   }
@@ -1892,11 +1904,14 @@ export function helmContractFindings(rendered) {
       publicRevoke < closedApplicationDatabase &&
       applicationInit === -1
     ) ||
-    /create extension if not exists (?:vector|btree_gin)/.test(cluster ?? "")
+    /create extension if not exists (?:vector|btree_gin)|grant connect on database postgres to streaming_replica/.test(cluster ?? "")
   ) {
     findings.push(
-      "CloudNativePG does not close maintenance-database access and create the application database closed before handoff, or still creates extensions as the application owner",
+      "CloudNativePG does not close PUBLIC maintenance access and create the application database closed before handoff, or mutates roles before CNPG creates them",
     );
+  }
+  if (cluster && !install?.includes("SYNVEDA_POSTGRES_CNPG_CLUSTER")) {
+    findings.push("CNPG install bootstrap does not enable reserved replica CONNECT convergence");
   }
   if (!gateway) findings.push("gateway Deployment is missing");
   if (!worker) findings.push("worker Deployment is missing");

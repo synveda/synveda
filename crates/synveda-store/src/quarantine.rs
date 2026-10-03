@@ -4,14 +4,14 @@
 //! A quarantined event's row exists — redacted, ordered, under RLS, idempotent
 //! by the client's own event id — but the `session_event_quarantine` row makes
 //! it ineligible for capture. Review is one-shot (`pending → released |
-//! rejected`, schema-enforced by migration 0046's transition trigger): release
+//! rejected`, schema-enforced by the quarantine transition trigger): release
 //! makes a future batch eligible to freeze it; reject leaves the event as
 //! immutable provenance that never enters extraction. Reach this module
 //! inside [`crate::rls::begin_tenant_tx`].
 //!
 //! ## Why the gate is a second table and not a column
 //!
-//! `session_events` holds SELECT and INSERT and no UPDATE (migration 0044), and
+//! `session_events` holds SELECT and INSERT and no UPDATE, and
 //! that is the whole of its immutability guarantee. A `quarantined` column
 //! would need an UPDATE grant to clear, which would hand every caller the
 //! ability to rewrite an event's payload too. So the reviewable state lives

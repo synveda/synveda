@@ -19,7 +19,7 @@ use crate::{Written, storage_error};
 /// was already present.
 pub const COMMITS_WRITTEN_TOTAL: &str = "synveda_vedaflow_commits_written_total";
 
-/// The longest commit message migration 0018 accepts.
+/// The longest commit message `vedaflow_commits` accepts.
 const MAX_MESSAGE: usize = 4096;
 
 /// A commit to be written.

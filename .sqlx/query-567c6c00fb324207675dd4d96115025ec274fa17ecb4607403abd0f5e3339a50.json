@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from pending_logins\n            where state_hash = $1 and (correlation_hash is null or correlation_hash = $2)\n            returning payload_sealed, (expires_at <= now()) as \"expired!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload_sealed",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 1,
+        "name": "expired!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "567c6c00fb324207675dd4d96115025ec274fa17ecb4607403abd0f5e3339a50"
+}

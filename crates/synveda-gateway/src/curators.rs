@@ -14,7 +14,7 @@
 //! matrix composes with, and a separate action would imply a separable
 //! authority that does not exist.
 //!
-//! There is no DELETE: refs hold no delete grant (migration 0018), so
+//! There is no DELETE: refs hold no delete grant, so
 //! clearing a scope's requirements is committing an empty file — which
 //! also leaves the removal in the history, where a delete would have left
 //! nothing.

@@ -5,8 +5,9 @@ import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
+import { clientNoticeDirectories, nodePath, sha256, targetName, validateClient } from "./client-artifact.mjs";
 import { checkPackagedAuth } from "./check-packaged-auth.mjs";
+import { checkClientNodeArchive, checkNodeMetadata, nodeMetadataArguments } from "./node-runtime-inventory.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const [version, archiveArgument, report] = process.argv.slice(2);
@@ -23,12 +24,21 @@ try {
   const { manifest, digest } = validateClient(client);
   assert.equal(manifest.version, version);
   assert.equal(manifest.target, targetName());
+  checkClientNodeArchive(archive, manifest.node, manifest.target, version, manifest.source_sha);
+  checkNodeMetadata(JSON.parse(run(join(client, nodePath), nodeMetadataArguments, { maxBuffer: 64 * 1024 })), manifest.target);
+  checks.push("pinned-node-dependency-and-notice-inventory");
+  for (const directory of clientNoticeDirectories) {
+    for (const name of ["LICENSE", "NOTICE"]) {
+      assert.deepEqual(readFileSync(join(client, directory, name)), readFileSync(join(root, name)));
+    }
+  }
+  checks.push("licence-and-notice-carriage");
   assert.ok(!Object.keys(manifest.files).some((path) => /synveda-(gateway|worker)|^console\/|^reference\//.test(path)));
   checks.push("native-identity-and-client-only-inventory");
   const tools = join(scratch, "tools");
   mkdirSync(tools);
   // GNU tar invokes gzip as a separate program when extracting .tar.gz files.
-  for (const tool of ["sh", "uname", "curl", "tar", "gzip", "awk", "grep", "cut", "mktemp", "rm", "shasum"]) {
+  for (const tool of ["sh", "uname", "curl", "tar", "gzip", "awk", "grep", "cut", "mktemp", "rm", "shasum", "wc"]) {
     const executable = run("/bin/sh", ["-c", `command -v ${tool}`]).trim();
     symlinkSync(executable, join(tools, tool));
   }

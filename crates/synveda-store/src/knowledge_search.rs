@@ -558,7 +558,7 @@ pub async fn lifecycle_trace_candidates(
 /// Produces the semantic leg for one actually configured model.
 ///
 /// The fixed-dimension dispatch matches the reviewed HNSW expressions in
-/// migration 0049. An untested dimension is refused rather than silently
+/// the epoch-3 schema. An untested dimension is refused rather than silently
 /// falling back to an unindexed full scan.
 #[tracing::instrument(
     name = "store.knowledge_search.semantic_candidates",

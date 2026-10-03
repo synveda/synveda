@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "feature": "OPS-12",
+  "evidence": "console-sbom-mechanism-probe",
+  "observed_at": "2026-10-01T00:36:34.834Z",
+  "input_source_sha": "668a3f96d7490ea92ead06b2c8bfc23dd96e45da",
+  "input_bindings": [
+    {
+      "path": "console/vite.config.ts",
+      "sha256": "172be041c908300eddc88f13aab8b3d80af29fc4e6ebb9225b3e045f77075c4b",
+      "bytes": 1438
+    },
+    {
+      "path": "console/package.json",
+      "sha256": "bbe6277c08755c4f272cede94d3087f3adbfe7a60d6c035e6b46c8e7cd069086",
+      "bytes": 734
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "66018ffb6f2185202c4108a67cac6133b8e3b96e830e8e94c8cd4665fefc4db9",
+      "bytes": 44081
+    },
+    {
+      "path": "assets/brand/fonts/OFL.txt",
+      "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+      "bytes": 4380
+    }
+  ],
+  "host": {
+    "os": "darwin",
+    "architecture": "arm64",
+    "node": "v24.18.0",
+    "vite": "6.4.3"
+  },
+  "method": [
+    "Use existing Vite in memory with write=false; repository build outputs are unchanged.",
+    "Independently associate positively rendered physical modules with installed package metadata and licence files.",
+    "Require both probe builds to produce the same existing console chunk bytes.",
+    "Run checksum-pinned native Syft with only javascript-package-cataloger in private configuration.",
+    "Install rollup-plugin-sbom 3.2.2 and its 13-package closure in disposable storage with install scripts disabled.",
+    "Read actual CycloneDX output and require exact independent package identities and complete licence hashes."
+  ],
+  "chunks": [
+    {
+      "file": "assets/index-CU2NIDBT.js",
+      "sha256": "2b1f4f1030f5556068d0761916b2ad96644674d0784f1040ecac18e1983b4d7d",
+      "bytes": 491865
+    }
+  ],
+  "rendered_packages": [
+    {
+      "name": "react",
+      "version": "19.2.8",
+      "license": "MIT",
+      "manifest_sha256": "e40c3ed9b633c9ecf188e09a4be309780a1ea0a9c068278a30ff6a27e7b2dbb6",
+      "modules": [
+        "cjs/react-jsx-runtime.production.js",
+        "cjs/react.production.js",
+        "index.js",
+        "jsx-runtime.js"
+      ],
+      "license_files": [
+        {
+          "file": "LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+          "bytes": 1088
+        }
+      ]
+    },
+    {
+      "name": "react-dom",
+      "version": "19.2.8",
+      "license": "MIT",
+      "manifest_sha256": "7c82f0967114d4b5d38b1f07e543af87c9919e8d3243f9604004819319cb2200",
+      "modules": [
+        "cjs/react-dom-client.production.js",
+        "cjs/react-dom.production.js",
+        "client.js",
+        "index.js"
+      ],
+      "license_files": [
+        {
+          "file": "LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+          "bytes": 1088
+        }
+      ]
+    },
+    {
+      "name": "scheduler",
+      "version": "0.27.0",
+      "license": "MIT",
+      "manifest_sha256": "393bb96b7e481bf50189a1a02c7e0e7f4d01acba5abc6fbe7d214638624462fc",
+      "modules": [
+        "cjs/scheduler.production.js",
+        "index.js"
+      ],
+      "license_files": [
+        {
+          "file": "LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+          "bytes": 1088
+        }
+      ]
+    }
+  ],
+  "generic_scanner": {
+    "name": "Syft",
+    "version": "1.51.0",
+    "binary_sha256": "b1147cee2d7f49d6ea58d9c95b24734985a4cc208fdd3f0f0f1ff950622f0252",
+    "cataloger": "javascript-package-cataloger",
+    "document_sha256": "24a83cbe175c12527537192b61070f49dbb391fe9f91985ec55fadc5e59cf030",
+    "document_bytes": 952,
+    "total_packages": 1,
+    "npm_packages": 0
+  },
+  "plugin": {
+    "name": "rollup-plugin-sbom",
+    "version": "3.2.2",
+    "license": "MIT",
+    "package_manifest_sha256": "ea40b42bc37c34dd467d4afefc307fe1bb9245fa36022f06d8eb84fa54dee3c5",
+    "executable_module_sha256": "11b28c19d1a2fc71c3509174bd1d69655e64c179b0f38047772d983a653a1b04",
+    "probe_lock_sha256": "d02bd732327c8710fca09590227b2932cfd3c35a4e9b9f8836e7200e718316d5",
+    "format": "CycloneDX",
+    "spec_version": "1.6",
+    "document_sha256": "a1693d1a1f3b217928b3cc44cc146c7c036e3c71084bf4ae943a7b4870f9fe16",
+    "document_bytes": 10452,
+    "components": [
+      {
+        "name": "react",
+        "version": "19.2.8",
+        "purl": "pkg:npm/react@19.2.8?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Freact%2Freact.git%23packages%2Freact",
+        "declared_licenses": [
+          {
+            "license": {
+              "id": "MIT",
+              "acknowledgement": "declared"
+            }
+          }
+        ],
+        "license_sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+        "license_bytes": 1088
+      },
+      {
+        "name": "scheduler",
+        "version": "0.27.0",
+        "purl": "pkg:npm/scheduler@0.27.0?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Ffacebook%2Freact.git%23packages%2Fscheduler",
+        "declared_licenses": [
+          {
+            "license": {
+              "id": "MIT",
+              "acknowledgement": "declared"
+            }
+          }
+        ],
+        "license_sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+        "license_bytes": 1088
+      },
+      {
+        "name": "react-dom",
+        "version": "19.2.8",
+        "purl": "pkg:npm/react-dom@19.2.8?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Freact%2Freact.git%23packages%2Freact-dom",
+        "declared_licenses": [
+          {
+            "license": {
+              "id": "MIT",
+              "acknowledgement": "declared"
+            }
+          }
+        ],
+        "license_sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+        "license_bytes": 1088
+      }
+    ],
+    "dependency_edges": [
+      {
+        "ref": "pkg:npm/%40synveda/console@0.4.3",
+        "dependsOn": [
+          "pkg:npm/react@19.2.8?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Freact%2Freact.git%23packages%2Freact",
+          "pkg:npm/react-dom@19.2.8?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Freact%2Freact.git%23packages%2Freact-dom"
+        ]
+      },
+      {
+        "ref": "pkg:npm/react@19.2.8?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Freact%2Freact.git%23packages%2Freact"
+      },
+      {
+        "ref": "pkg:npm/scheduler@0.27.0?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Ffacebook%2Freact.git%23packages%2Fscheduler"
+      },
+      {
+        "ref": "pkg:npm/react-dom@19.2.8?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Freact%2Freact.git%23packages%2Freact-dom",
+        "dependsOn": [
+          "pkg:npm/react@19.2.8?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Freact%2Freact.git%23packages%2Freact",
+          "pkg:npm/scheduler@0.27.0?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Ffacebook%2Freact.git%23packages%2Fscheduler"
+        ]
+      }
+    ],
+    "tool_registration_limit": "Disposable plugin installation had no Vite/Rollup/Rolldown peers; its optional tool auto-registration warned, while bundle/component collection passed."
+  },
+  "limits": [
+    "Local mechanism comparison; no clean hosted, native release or published artifact qualification.",
+    "No production plugin pin or architecture decision is selected by this probe. Review the current maintained release before implementation.",
+    "Generated bundler helpers, static assets/fonts, native C libraries, Node runtime, charts and upstream image contents require separate coverage and attribution.",
+    "This does not complete third-party notice review or vulnerability policy, and changes no readiness or support claim."
+  ]
+}

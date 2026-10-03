@@ -53,12 +53,12 @@ pub const CONSOLE_SESSIONS_TOTAL: &str = "synveda_console_sessions_total";
 /// open redirector with an audience.
 const CONSOLE_HOME: &str = "/console/";
 
-/// The browser-correlation cookie expires with the in-memory pending login.
+/// The browser-correlation cookie expires with the database pending login.
 const PENDING_LOGIN_MAX_SECS: i64 = 10 * 60;
 
 /// The console session's hard cap — 12 hours, one working day. A refresh
 /// token an IdP never rotates would otherwise make the session immortal;
-/// this is the ceiling migration 0034's `absolute_expires_at` enforces, and
+/// login records this ceiling in `console_sessions.absolute_expires_at`, and
 /// past it the operator logs in again.
 const CONSOLE_SESSION_MAX_SECS: i64 = 12 * 60 * 60;
 
@@ -266,10 +266,16 @@ pub async fn callback(
     // have to land back in the terminal, not on a page nobody sees.
     let cookie_mode = flow.cookie_mode();
     let presented_correlation = login_correlation_cookie(&headers, cookie_mode);
-    let destination = params
-        .state
-        .as_deref()
-        .and_then(|login_state| flow.peek_destination(login_state, presented_correlation));
+    let destination = match params.state.as_deref() {
+        Some(login_state) => match flow
+            .peek_destination(login_state, presented_correlation)
+            .await
+        {
+            Ok(destination) => destination,
+            Err(error) => return ApiError(error).into_response(),
+        },
+        None => None,
+    };
     let matched_console = matches!(destination, Some(LoginDestination::Console(_)));
     let refuse = |error: Error| match &destination {
         Some(LoginDestination::Cli(handoff)) => cli_error_redirect(
@@ -295,10 +301,13 @@ pub async fn callback(
         );
         // Nothing will complete this login; do not leave it parked for the
         // rest of its TTL.
-        let consumed = params
-            .state
-            .as_deref()
-            .is_some_and(|login_state| flow.abandon(login_state, presented_correlation));
+        let consumed = match params.state.as_deref() {
+            Some(login_state) => match flow.abandon(login_state, presented_correlation).await {
+                Ok(consumed) => consumed,
+                Err(error) => return finish_callback(refuse(error), false, cookie_mode),
+            },
+            None => false,
+        };
         return finish_callback(
             refuse(Error::Unauthenticated {
                 message: "the identity provider rejected the authorization request".to_owned(),
@@ -308,10 +317,13 @@ pub async fn callback(
         );
     }
     let (Some(code), Some(login_state)) = (params.code.as_deref(), params.state.as_deref()) else {
-        let consumed = params
-            .state
-            .as_deref()
-            .is_some_and(|login_state| flow.abandon(login_state, presented_correlation));
+        let consumed = match params.state.as_deref() {
+            Some(login_state) => match flow.abandon(login_state, presented_correlation).await {
+                Ok(consumed) => consumed,
+                Err(error) => return finish_callback(refuse(error), false, cookie_mode),
+            },
+            None => false,
+        };
         return finish_callback(
             refuse(Error::Invalid {
                 message: "callback requires code and state".to_owned(),
@@ -372,13 +384,16 @@ pub async fn callback(
         // A CLI login gets a code, and only a code: the session material
         // waits on the gateway until the CLI redeems it (ADR-0027
         // decision 5).
-        LoginDestination::Cli(handoff) => hand_off(
-            flow,
-            &handoff,
-            completed,
-            session.issuer,
-            session.refresh_token,
-        ),
+        LoginDestination::Cli(handoff) => {
+            hand_off(
+                flow,
+                &handoff,
+                completed,
+                session.issuer,
+                session.refresh_token,
+            )
+            .await
+        }
         // A console login gets a cookie, and only a cookie: the tokens
         // stay here (ADR-0056 decisions 2 and 3).
         LoginDestination::Console(_) => {
@@ -664,7 +679,7 @@ fn console_error_redirect(error: &Error) -> Response {
 /// with the one-time code. A failure to park is still a redirect: the CLI
 /// is waiting on that listener, and leaving it to time out would turn a
 /// transient gateway problem into a hung terminal.
-fn hand_off(
+async fn hand_off(
     flow: &synveda_identity::LoginFlow,
     handoff: &CliHandoff,
     session: SessionResponse,
@@ -681,7 +696,7 @@ fn hand_off(
             return cli_error_redirect(handoff, "server_error", &format!("{error}"));
         }
     };
-    match flow.park_handoff(&handoff.state, payload) {
+    match flow.park_handoff(&handoff.state, payload).await {
         Ok(code) => {
             metrics::counter!(CLI_LOGINS_TOTAL, "outcome" => "handed_off").increment(1);
             let mut url = handoff.redirect_uri.clone();
@@ -732,7 +747,7 @@ pub async fn cli_exchange(
     let Some(flow) = &state.login else {
         return not_configured();
     };
-    match flow.redeem_handoff(&request.code, &request.state) {
+    match flow.redeem_handoff(&request.code, &request.state).await {
         Ok(payload) => {
             metrics::counter!(CLI_LOGINS_TOTAL, "outcome" => "exchanged").increment(1);
             private_response(Json(payload).into_response())

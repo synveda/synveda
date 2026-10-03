@@ -12,7 +12,7 @@
 //! `status` — `ACTIVE`, `PROVISIONED`, `SUSPENDED`, `DEPROVISIONED` and
 //! others — and only some of those mean "this person is gone". Mapping it is
 //! a decision rather than a parse, and it is made explicitly in
-//! [`is_active`], because getting it wrong in the permissive direction leaves
+//! `is_active`, because getting it wrong in the permissive direction leaves
 //! leavers live and in the strict direction seals somebody who is merely
 //! mid-onboarding.
 

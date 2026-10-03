@@ -4,7 +4,7 @@
 //! Two scopes, two tables, one ring. `tenant_keys` is what "per-tenant
 //! encryption keys" names; `deployment_keys` exists because
 //! `console_sessions` structurally cannot select a per-tenant key — see
-//! migration 0038's header and ADR-0064 decision 5.
+//! ADR-0064 decision 5 and the deployment-key schema.
 //!
 //! Nothing here ever holds a key in the database. A row carries the data key
 //! *wrapped* by the KEK, and materialising a [`SealingKey`] is an unwrap
@@ -52,7 +52,7 @@ pub const KEYS_MINTED_TOTAL: &str = "synveda_keys_minted_total";
 pub const KEY_OPEN_FAILURES_TOTAL: &str = "synveda_key_open_failures_total";
 
 /// The algorithm recorded beside a wrapped key. Advisory — the envelope
-/// header is authoritative — and kept in step with migration 0038's check
+/// header is authoritative — and kept in step with the key-table check
 /// constraint.
 const ALGORITHM: &str = "xchacha20-poly1305";
 

@@ -212,7 +212,7 @@ async fn lock_scope(
 
 /// Locks one known scope for the caller's transaction and returns it.
 ///
-/// Structural writers normally call the private [`lock_scope`] inside a
+/// Structural writers normally call the private `lock_scope` inside a
 /// larger operation. Cross-subsystem tenant-wide invariants use this narrow
 /// primitive to serialise on the tenant root without duplicating its checked
 /// query or introducing an advisory-lock namespace.

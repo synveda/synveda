@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "feature": "OPS-12",
+  "observed_at": "2026-09-30T20:36:30.947955+00:00",
+  "evidence": "isolated-rust-binary-sbom-mechanism-probe",
+  "platform": "darwin/arm64",
+  "rust": "1.96.0",
+  "tools": {
+    "cargo_auditable": {
+      "version": "0.7.6",
+      "registry_checksum": "26d8fb7a4422b2aea452c301a30bac8528ff54ad89ef300d6ad80dcfb43aef6a",
+      "source_tag": "https://github.com/rust-secure-code/cargo-auditable/tree/v0.7.6",
+      "installed_in_private_scratch": true
+    },
+    "syft": {
+      "version": "1.51.0",
+      "archive": "syft_1.51.0_darwin_arm64.tar.gz",
+      "archive_sha256": "4f37f4c7fefce0a68e4cf71ba3f5f9829a99e65d89b29f7ee41b8c2c10ea8c59",
+      "release": "https://github.com/anchore/syft/releases/tag/v1.51.0",
+      "verification": "Archive matched the official GitHub asset digest and unique checksum-inventory entry before execution"
+    },
+    "strip": "macOS /usr/bin/strip"
+  },
+  "method": [
+    "Build ordinary and cargo-auditable synthetic executables against the same fixture lockfile",
+    "Scan only binary files with the cargo-auditable cataloger; no adjacent Cargo.lock or source directory",
+    "Copy and run the same macOS strip command used by historical server packaging",
+    "Require matching Cargo package lists before and after strip",
+    "Build unchanged Synveda CLI offline with its repository lockfile and SQLX_OFFLINE=true into private scratch; require its CLI version and expected Cedar/SQLx versions"
+  ],
+  "synthetic": [
+    {
+      "case": "normal",
+      "cargo_packages": [],
+      "spdx_sha256": "017e8bf6ebbb3366cdf2978d5e0d62ec69c6a27c0471f510d0c64a8a1b9a83b3"
+    },
+    {
+      "case": "normal-stripped",
+      "cargo_packages": [],
+      "spdx_sha256": "f0fe8ca8a145c4e4581d5b43739a707a529d1fe65110090b29d98b9f516b869b"
+    },
+    {
+      "case": "auditable",
+      "cargo_packages": [
+        [
+          "itoa",
+          "1.0.18"
+        ],
+        [
+          "memchr",
+          "2.8.3"
+        ],
+        [
+          "serde_core",
+          "1.0.229"
+        ],
+        [
+          "serde_json",
+          "1.0.150"
+        ],
+        [
+          "synveda-sbom-probe",
+          "0.1.0"
+        ],
+        [
+          "zmij",
+          "1.0.23"
+        ]
+      ],
+      "spdx_sha256": "3275c42ba6f2a7e7d12ec42a7f4c64f1969b8bb8fba0e30b4603cb0ca4322745"
+    },
+    {
+      "case": "auditable-stripped",
+      "cargo_packages": [
+        [
+          "itoa",
+          "1.0.18"
+        ],
+        [
+          "memchr",
+          "2.8.3"
+        ],
+        [
+          "serde_core",
+          "1.0.229"
+        ],
+        [
+          "serde_json",
+          "1.0.150"
+        ],
+        [
+          "synveda-sbom-probe",
+          "0.1.0"
+        ],
+        [
+          "zmij",
+          "1.0.23"
+        ]
+      ],
+      "spdx_sha256": "be576d1de261de736dd1d097b62bfa336bc31e459ef1bc2089ed6a0bc2662ad4"
+    }
+  ],
+  "synveda": {
+    "source_sha": "f433eb1719bc58b5f36b0516bedf71e886d23185",
+    "source_tree_dirty": true,
+    "source_changes": [
+      "docs/CI.md",
+      "docs/backlog/OPS-12.md",
+      "docs/backlog/STATUS.md"
+    ],
+    "results": [
+      {
+        "case": "synveda",
+        "cargo_package_count": 295,
+        "critical_packages": [
+          [
+            "synveda-cli",
+            "0.4.3"
+          ],
+          [
+            "cedar-policy",
+            "4.11.2"
+          ],
+          [
+            "cedar-policy-core",
+            "4.11.2"
+          ],
+          [
+            "sqlx",
+            "0.8.6"
+          ],
+          [
+            "sqlx-postgres",
+            "0.8.6"
+          ]
+        ],
+        "binary_sha256": "c11261ad8bca53cc73e5252146471262a70670c7d7eb0684dfba7f76c728d31a",
+        "spdx_sha256": "4dfc65273250e7db4cf95ff7d1f5932614409223b7d4afde582d0835f02f8f05"
+      },
+      {
+        "case": "synveda-stripped",
+        "cargo_package_count": 295,
+        "critical_packages": [
+          [
+            "synveda-cli",
+            "0.4.3"
+          ],
+          [
+            "cedar-policy",
+            "4.11.2"
+          ],
+          [
+            "cedar-policy-core",
+            "4.11.2"
+          ],
+          [
+            "sqlx",
+            "0.8.6"
+          ],
+          [
+            "sqlx-postgres",
+            "0.8.6"
+          ]
+        ],
+        "binary_sha256": "acf520cc34d3ab2d281b8e3ff7a7471684911e3c3dcee3ea5882e112779acebd",
+        "spdx_sha256": "d88425ed013393f41b9b5b67ed5529583d48dcae39e77a307d90d90006e9be36"
+      }
+    ]
+  },
+  "limits": [
+    "Experimental local macOS ARM CLI and synthetic fixtures only; no release pipeline implementation",
+    "Synveda source SHA identifies unchanged code; documentation changes made the working tree dirty",
+    "No Linux, Windows, product/worker image or six-target archive SBOM coverage claim",
+    "Embedded Rust metadata does not qualify statically linked C libraries, bundled JavaScript, third-party notices or vulnerability policy",
+    "Neither source release qualification nor publication is established by this probe"
+  ]
+}

@@ -71,7 +71,7 @@ pub const DEFAULT_INVITE_TTL_SECS: i64 = 7 * 24 * 60 * 60;
 ///
 /// A **key**, not a permission set: this enum names authorities, and what each
 /// one may actually do is decided by the policy pack in force at the scope
-/// (ADR-0072 decision 2). Closed, like [`crate::Role`] and pack names, so that
+/// (ADR-0072 decision 2). Closed, like pack names, so that
 /// `owner` means the same thing in every tenant and a pack written for one
 /// deployment reads correctly in another.
 ///

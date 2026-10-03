@@ -28,7 +28,9 @@ use rsa::traits::PublicKeyParts as _;
 use serde::Deserialize;
 use synveda_types::{Error, Result, TenantId};
 
-use crate::token::{Claims, CredentialClass, ProvisioningClaims, TokenVerifier, issued_lifetime};
+use crate::token::{
+    Claims, CredentialClass, OidcTokenIdentity, ProvisioningClaims, TokenVerifier, issued_lifetime,
+};
 
 /// Token verifications by issuer and outcome (`ok`, `rejected`, `error`).
 /// Emitted here, described by the gateway's recorder (ADR-0007 layering).
@@ -851,7 +853,7 @@ impl OidcVerifier {
         // ID tokens require numeric `iat`; bearer tokens may omit it and then
         // carry an unknown lifetime, which the service-identity enforcement
         // seam refuses (ADR-0018 decision 5).
-        let lifetime = oidc_lifetime(&claims, now().as_secs())?;
+        let times = oidc_times(&claims, now().as_secs())?;
 
         Ok(Claims {
             subject,
@@ -863,8 +865,15 @@ impl OidcVerifier {
                 &entry.config.groups_claim,
                 &entry.config.external_id_claim,
             )),
-            lifetime,
+            lifetime: times.lifetime,
             credential_class,
+            oidc_token: Some(OidcTokenIdentity {
+                issuer: entry.config.issuer.clone(),
+                token_id: bounded_token_identifier(&claims, "jti"),
+                session_id: bounded_token_identifier(&claims, "sid"),
+                issued_at: times.issued_at,
+                expires_at: times.expires_at,
+            }),
         })
     }
 
@@ -1572,7 +1581,14 @@ fn provisioning_claims(
     }
 }
 
-fn oidc_lifetime(claims: &serde_json::Value, now: u64) -> Result<Option<Duration>> {
+#[derive(Debug)]
+struct OidcTimes {
+    expires_at: u64,
+    issued_at: Option<u64>,
+    lifetime: Option<Duration>,
+}
+
+fn oidc_times(claims: &serde_json::Value, now: u64) -> Result<OidcTimes> {
     let exp = claims
         .get("exp")
         .and_then(serde_json::Value::as_u64)
@@ -1585,7 +1601,19 @@ fn oidc_lifetime(claims: &serde_json::Value, now: u64) -> Result<Option<Duration
         ),
         None => None,
     };
-    issued_lifetime(exp, iat, now)
+    Ok(OidcTimes {
+        expires_at: exp,
+        issued_at: iat,
+        lifetime: issued_lifetime(exp, iat, now)?,
+    })
+}
+
+fn bounded_token_identifier(claims: &serde_json::Value, name: &str) -> Option<String> {
+    claims
+        .get(name)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+        .map(str::to_owned)
 }
 
 /// Collapses jsonwebtoken's error detail into caller-safe messages.
@@ -2419,29 +2447,31 @@ mod tests {
 
     #[test]
     fn oidc_time_claims_are_ordered_and_future_bounded() {
-        let after_expiry = oidc_lifetime(&serde_json::json!({"exp": 1_060, "iat": 1_061}), 1_000)
+        let after_expiry = oidc_times(&serde_json::json!({"exp": 1_060, "iat": 1_061}), 1_000)
             .expect_err("iat after exp must be rejected");
         assert!(matches!(after_expiry, Error::Unauthenticated { .. }));
 
-        let too_future = oidc_lifetime(&serde_json::json!({"exp": 1_120, "iat": 1_031}), 1_000)
+        let too_future = oidc_times(&serde_json::json!({"exp": 1_120, "iat": 1_031}), 1_000)
             .expect_err("iat beyond skew must be rejected");
         assert!(matches!(too_future, Error::Unauthenticated { .. }));
 
         assert_eq!(
-            oidc_lifetime(&serde_json::json!({"exp": 1_090, "iat": 1_030}), 1_000)
-                .expect("the skew boundary is valid"),
+            oidc_times(&serde_json::json!({"exp": 1_090, "iat": 1_030}), 1_000)
+                .expect("the skew boundary is valid")
+                .lifetime,
             Some(Duration::from_secs(60))
         );
         assert_eq!(
-            oidc_lifetime(&serde_json::json!({"exp": 1_090}), 1_000)
-                .expect("missing iat keeps an unknown lifetime"),
+            oidc_times(&serde_json::json!({"exp": 1_090}), 1_000)
+                .expect("missing iat keeps an unknown lifetime")
+                .lifetime,
             None
         );
         for malformed in [
             serde_json::json!({"exp": "1090", "iat": 1_000}),
             serde_json::json!({"exp": 1_090, "iat": -1}),
         ] {
-            let failure = oidc_lifetime(&malformed, 1_000)
+            let failure = oidc_times(&malformed, 1_000)
                 .expect_err("present malformed timestamps must fail closed");
             assert!(matches!(failure, Error::Unauthenticated { .. }));
         }

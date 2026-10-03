@@ -38,7 +38,8 @@ COPY tsconfig.base.json ./
 COPY console console
 COPY assets/brand/synveda-lockup.svg assets/brand/synveda-lockup-dark.svg assets/brand/favicon.svg assets/brand/
 COPY assets/brand/fonts/InterVariable.woff2 assets/brand/fonts/OFL.txt assets/brand/fonts/
-RUN pnpm --filter @synveda/console build
+ARG SYNVEDA_BUILD_SOURCE_SHA
+RUN SYNVEDA_BUILD_SOURCE_SHA="$SYNVEDA_BUILD_SOURCE_SHA" pnpm --filter @synveda/console build
 
 FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS build
 ARG HTTP_PROXY
@@ -64,6 +65,14 @@ RUN set -eu; \
     grep -Fqx "channel = \"$RUST_VERSION\"" rust-toolchain.toml; \
     test "$(RUSTUP_TOOLCHAIN="$RUST_VERSION" rustc --version | cut -d ' ' -f 2)" = "$RUST_VERSION"
 ENV RUSTUP_TOOLCHAIN=$RUST_VERSION
+
+# Registry transfers use HTTP/1.1 to avoid failing multiplexed connections.
+ENV CARGO_HTTP_MULTIPLEXING=false
+
+# OPS-12 / ADR-0133: final-stage SBOM scanning needs the linked Rust inventory,
+# including after source layers invalidate the dependency cache. This tool is
+# confined to the builder; registry checksums and its locked graph govern install.
+RUN cargo install cargo-auditable --version 0.7.6 --locked
 
 # Dependency layer: the manifests and a stub for every crate in the
 # workspace, so `cargo build` resolves and compiles the dependency graph
@@ -103,7 +112,7 @@ RUN set -eux; \
 # sqlx macros compile against the committed query cache; this image has no
 # database, exactly like CI.
 ENV SQLX_OFFLINE=true
-RUN cargo build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
+RUN cargo auditable build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
 
 # The real sources. Touching them invalidates only from here down.
 COPY .sqlx .sqlx
@@ -111,7 +120,7 @@ COPY adapters/registry.json adapters/registry.json
 COPY crates crates
 RUN set -eux; \
     find crates -name '*.rs' -newermt '1970-01-01' -exec touch {} +; \
-    cargo build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
+    cargo auditable build --locked --release -p synveda-gateway -p synveda-cli -p synveda-apalis
 
 # Acceptance-only browser fixture. Keeping this as a target in the product
 # Dockerfile lets it copy the exact CLI built above instead of compiling a
@@ -140,7 +149,10 @@ RUN pnpm install --frozen-lockfile --prod --filter @synveda/compose-browser-acce
 COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 COPY --chmod=0555 deploy/compose/browser/console-login.mjs deploy/compose/browser/product-demo.mjs deploy/compose/browser/evaluation.mjs deploy/compose/browser/
 COPY --chmod=0444 deploy/compose/browser/console-login-runner.mjs deploy/compose/browser/console-login-contract.mjs deploy/compose/browser/console-product-runner.mjs deploy/compose/browser/product-demo-runner.mjs deploy/compose/browser/product-demo-contract.mjs deploy/compose/browser/
+RUN mkdir -p /usr/share/licenses/synveda /usr/share/licenses/synveda-browser-acceptance \
+    && chmod 0555 /usr/share/licenses /usr/share/licenses/synveda /usr/share/licenses/synveda-browser-acceptance
 COPY --chmod=0444 deploy/compose/browser/PLAYWRIGHT-LICENSE deploy/compose/browser/PLAYWRIGHT-NOTICE deploy/compose/browser/seccomp_profile.NOTICE /usr/share/licenses/synveda-browser-acceptance/
+COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 
 # Docker populates a new named volume from this sticky, otherwise empty mount
 # point. The fixture can therefore create private per-UID directories without
@@ -174,6 +186,12 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=console /usr/local/bin/node /usr/local/bin/node
 COPY --from=console /usr/local/LICENSE /usr/share/licenses/node/LICENSE
+COPY --chmod=0444 assets/licenses/node/nbytes-LICENSE assets/licenses/node/sqlite-NOTICE \
+    assets/licenses/node/v8-abseil-LICENSE assets/licenses/node/v8-fp16-LICENSE \
+    assets/licenses/node/v8-rapidhash-LICENSE assets/licenses/node/v8-zlib-LICENSE /usr/share/licenses/node/
+RUN mkdir -p /usr/share/licenses/synveda \
+    && chmod 0555 /usr/share/licenses /usr/share/licenses/synveda
+COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 # Product binaries and no mutable data: the Cedar schema, the base layer and all three
 # product packs are `include_str!`d into synveda-policy, so there is no
 # policy directory to ship and no way for the image's policy to differ from

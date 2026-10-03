@@ -122,6 +122,10 @@ spec:
               value: postgresql://$(SYNVEDA_POSTGRES_BOOTSTRAP_USER)@{{ include "synveda.clusterName" . }}-rw:5432/postgres
             - name: SYNVEDA_POSTGRES_BUNDLED_CLUSTER
               value: "true"
+            {{- if eq .Values.postgres.mode "cnpg" }}
+            - name: SYNVEDA_POSTGRES_CNPG_CLUSTER
+              value: "true"
+            {{- end }}
             - name: SYNVEDA_DATABASE_BOOTSTRAP_PRIVATE_DIR
               value: /run/secrets
             - name: SYNVEDA_DATABASE_ROLES_FILE

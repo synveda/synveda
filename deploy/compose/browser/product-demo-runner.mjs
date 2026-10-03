@@ -665,7 +665,7 @@ export async function runProductAcceptance({
       process.stdout.write(`Fictional Northstar sample: ${receipt.state}. Open ${settings.appOrigin}/console/ and review the proposed learning. No reviews were approved by this command.\n`);
       return true;
     }
-    validateRetryReviewReceipt(first, "seeded");
+    validateRetryReviewReceipt(first, "seeded", settings.appOrigin);
     await browserCheckpoint({
       chromium,
       environment,
@@ -679,7 +679,7 @@ export async function runProductAcceptance({
       demoTimeout,
       spawnProcess,
     );
-    validateRetryReviewRerun(first, second);
+    validateRetryReviewRerun(first, second, settings.appOrigin);
     await browserCheckpoint({
       chromium,
       environment,
@@ -703,6 +703,7 @@ export async function runProductAcceptance({
         spawnProcess,
       ),
       second,
+      settings.appOrigin,
     );
     const captured = await command(
       [
@@ -719,7 +720,7 @@ export async function runProductAcceptance({
       demoTimeout,
       spawnProcess,
     );
-    validateRetryReviewReceipt(captured, "learning_pending");
+    validateRetryReviewReceipt(captured, "learning_pending", settings.appOrigin);
 
     const inspectProposal = async (id) => {
       const proposal = await command(
@@ -838,7 +839,7 @@ export async function runProductAcceptance({
       demoTimeout,
       spawnProcess,
     );
-    validateRetryReviewReceipt(binding, "binding_pending");
+    validateRetryReviewReceipt(binding, "binding_pending", settings.appOrigin);
     await approveAndApply(binding.resources.skill_binding.change_id, true);
     const verification = await command(
       [
@@ -857,7 +858,7 @@ export async function runProductAcceptance({
       demoTimeout,
       spawnProcess,
     );
-    validateRetryReviewVerification(verification, binding);
+    validateRetryReviewVerification(verification, binding, settings.appOrigin);
   }
   const status = await command(
     [
@@ -872,7 +873,7 @@ export async function runProductAcceptance({
     demoTimeout,
     spawnProcess,
   );
-  validateRetryReviewStatus(status);
+  validateRetryReviewStatus(status, settings.appOrigin);
   await browserCheckpoint({
     chromium,
     environment,

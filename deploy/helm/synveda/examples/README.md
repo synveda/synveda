@@ -1,5 +1,10 @@
 # Deploy to Kubernetes
 
+`s3-backup-objectstore.yaml` is a **source-only OPS-5 example**, not part of
+the published v0.4.3 recovery contract. Its bucket, endpoint and Secret names
+are placeholders; use the [backup candidate guide](../BACKUP.md) and verify a
+separate PITR before counting any backup protection.
+
 These examples target the **published v0.4.3 chart** and its matching digest
 overlay. For current source checks, start with the
 [chart setup](../README.md#namespace-installer-and-artifact-acquisition),

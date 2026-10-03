@@ -112,7 +112,9 @@ spec:
               port: http
             periodSeconds: 5
             timeoutSeconds: 3
-            failureThreshold: 3
+            # A terminating process withdraws admission before it stops HTTP.
+            # One failed probe removes it within the ten-second drain window.
+            failureThreshold: 1
           volumeMounts:
             {{- include "synveda.outboundMounts" . | nindent 12 }}
             {{- include "synveda.databaseTransportMounts" . | nindent 12 }}

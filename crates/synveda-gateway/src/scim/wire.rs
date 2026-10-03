@@ -14,8 +14,7 @@
 //! handful of attributes on every request whether or not a server asked for
 //! them. Refusing would mean refusing every real client; what keeps that
 //! honest is that `/Schemas` publishes exactly the attributes this server
-//! stores, so an attribute it drops is one it never claimed to keep
-//! (migration 0036's header).
+//! stores, so an attribute it drops has no advertised persistence promise.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

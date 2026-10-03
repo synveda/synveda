@@ -19,10 +19,57 @@ session inventory/revoke API or tested revocation-within-bound guarantee;
 refresh rotation remains provider-dependent. This P1 gap is recorded in
 [production readiness](../PRODUCTION_READINESS.md).
 
+The 2026-09-30 senior Rust/architecture pass found that expired console
+credential rows had no cleanup caller. The read path already refused them,
+but retained ciphertext could accumulate. It also confirmed that ADR-0056
+intentionally keeps `console_sessions` without tenant/subject columns and
+re-verifies the bearer on every request. A broad
+inventory scan or treating that row as identity would violate this contract.
+[ADR-0130](../adr/adr-0130-separate-session-inventory-from-credential-custody.md)
+selects a separate tenant-scoped, credential-free index and request-time
+identifier revocation. The combined maintenance worker now drains up to 16
+skip-locked batches of 256 expired custody rows per minute, under a ten-second
+whole-pass deadline; successful/failed sweeps, completed batches, budget hits
+and removed rows have separate content-free counters.
+No AUTH-6 revocation enforcement or inventory is implemented yet.
+The [2026-09-30 Rust review](../RUST_ARCHITECTURE_REVIEW_2026-09-30.md)
+also found that one 256-row purge batch per minute lacked retention-lag
+evidence. Each successful sweep now observes the indexed oldest expired age
+in a deployment-wide gauge (zero when no expired row remains); a failed sweep
+leaves the last observation and increments the error counter. The bounded
+catch-up pass can remove at most 4,096 rows per tick, but the ten-second
+deadline may stop it earlier. A 4,097-row exact-role database fixture proves
+the first pass stops at the batch ceiling and the second drains the remainder.
+The arrival envelope and retention bound remain unproved; measure oldest age
+and budget hits under representative load before claiming bounded retention.
+
+The first candidate issuer contract is now the exact bundled Keycloak realm:
+verified access-token `jti` for one bearer, `sid` for an interactive session
+family, numeric `iat`/`exp` with at most five minutes of access lifetime,
+rotating refresh tokens with zero reuse, no offline access, and an eight-hour
+maximum SSO session. Revocation evidence for a family remains for 12 hours.
+The OIDC verifier now carries the exact configured issuer, bounded optional
+`jti`/`sid`, and numeric token times only after signature and audience checks.
+A signed mock-issuer fixture covers changed per-token ID with stable family,
+malformed optional identifiers, redacted debug output and signature tampering.
+It does not prove a Keycloak refresh or enable revocation.
+The local 2026-09-30 live-proof preflight found no running Synveda Keycloak
+container. The source Compose hostname check refused because the shared
+`app.synveda.test`/`auth.synveda.test` block belongs to the retained
+`synveda-development-acceptance-interop` project. Keep that block and its
+state intact. Run the proof on a separate supported host or after its operator
+deliberately hands off the hostnames; verify the real Synveda client, not the
+existing master-realm administrator-token projection.
+The first product slice is self-only inventory/revoke; administrator access
+remains a separately reviewed authority/disclosure change. Entra, Okta and
+other external issuers retain login support but have no revocation promise
+until their exact token and refresh contracts pass live acceptance. None of
+the Keycloak revocation behavior is implemented or qualified yet.
+
 ## Scope
 
-- Inventory active Synveda console sessions for the current principal and
-  authorised administrators without exposing bearer or refresh material.
+- Inventory active Synveda console sessions for the current principal without
+  exposing bearer or refresh material; defer administrator inventory/revoke.
 - Revoke one or all sessions and audit the action.
 - Persist bounded revocation evidence for verifiable issuer/token identifiers
   and enforce it in the existing credential-verification path using database
@@ -49,8 +96,9 @@ cleanup is TTL-bounded and safe across replicas.
 
 ## Acceptance criteria
 
-- A revoked console session and revocable user/service token fail every public
-  API within 30 seconds or a stricter owner-approved bound.
+- A revoked console session and a token in the enforced bundled-Keycloak
+  profile fail every public API within 30 seconds of commit under a healthy
+  database; no external issuer inherits this claim.
 - Reusing a rotated refresh credential fails where the IdP contract supports
   rotation, and the result is distinguishable from transient provider outage.
 - Session inventory reveals only safe device/client/time metadata and never
@@ -79,7 +127,15 @@ back to observe-only.
 
 ## Dependencies
 
-Identity/security owners must choose the revocation bound, supported issuer
-claims, administrator visibility, device-binding scope and incident override.
-OPS-7 supplies multi-replica acceptance; live Entra/Okta evidence requires
-external tenants and credentials.
+The first candidate claim/lifetime/session contract and self-only scope are
+selected in ADR-0130. EVAL-6 must establish revocation-row capacity and
+cleanup lag. OPS-7 supplies multi-replica acceptance; external issuer
+promotion requires its own live tenant, credentials and claim mapping.
+
+Next: prove the signed `jti`/`sid` and refresh rotation/replay contract with
+the bundled Synveda Keycloak realm, then append a forward migration
+for the tenant index/revocation ledger, wire atomic console-session creation,
+and add Cedar-governed self inventory/revoke. Promote bearer-family enforcement
+only after the complete Keycloak and cross-replica acceptance passes; missing
+required claims must fail closed in that profile. Measure the 30-second target
+and ledger capacity before advertising revocation.

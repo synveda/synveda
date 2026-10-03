@@ -9,14 +9,14 @@
 //! Since TEN-4 the two token columns are **sealed** (ADR-0064 decision 5),
 //! and this module handles only the envelopes: it neither seals nor opens.
 //! The key is the *deployment's*, not a tenant's, and the reason is the
-//! reason this table has no `tenant_id` — a session is read before the
-//! tenant exists, so there is no tenant to select a key by. Sealing lives in
+//! reason this table has no `tenant_id` — a session is read before its token
+//! identifies the tenant, so there is no per-tenant key to select. Sealing lives in
 //! the gateway, which is the one crate that may depend on both the key ring
 //! and this module; `synveda-identity` is this crate's sibling and cannot
 //! reach a `KeyRing` at all.
 //!
-//! Deliberately not tenant-scoped: see migration 0034's header. A session
-//! row carries no tenant because the tenant comes from verifying the access
+//! Deliberately not tenant-scoped: a session row carries no tenant because
+//! the tenant comes from verifying the access
 //! token it holds, which is what makes ADR-0056 decision 2's invariant —
 //! *the session's authority is the token's authority* — a property of the
 //! schema rather than of the code that reads it.
@@ -24,6 +24,10 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use synveda_types::{Error, Result};
+
+/// Maximum rows removed by one locked expiry query. Keep this equal to the
+/// static SQL limit below; the worker uses it to stop a drain pass early.
+pub const PURGE_BATCH_SIZE: u64 = 256;
 
 /// A stored console session. Carries no tenant and no subject on purpose
 /// (ADR-0056 decision 2): both come from verifying the sealed access token.
@@ -227,13 +231,52 @@ pub async fn delete(executor: impl PgExecutor<'_>, token_hash: &[u8; 32]) -> Res
     Ok(result.rows_affected() > 0)
 }
 
-/// Reaps sessions past their hard cap. Returns how many went, for the
-/// caller's metric.
+/// Reaps at most 256 sessions past their hard cap. The ordered, locked batch
+/// keeps one maintenance pass bounded while concurrent gateways may sign out
+/// other rows. Returns how many went, for the caller's metric.
 #[tracing::instrument(name = "store.console_sessions.purge_expired", skip_all, err(Display))]
 pub async fn purge_expired(executor: impl PgExecutor<'_>) -> Result<u64> {
-    let result = sqlx::query!("delete from console_sessions where absolute_expires_at <= now()")
-        .execute(executor)
-        .await
-        .map_err(storage_error)?;
+    let result = sqlx::query!(
+        r#"
+        with expired as (
+            select token_hash
+            from console_sessions
+            where absolute_expires_at <= now()
+            order by absolute_expires_at, token_hash
+            limit 256
+            for update skip locked
+        )
+        delete from console_sessions as session
+        using expired
+        where session.token_hash = expired.token_hash
+        "#,
+    )
+    .execute(executor)
+    .await
+    .map_err(storage_error)?;
     Ok(result.rows_affected())
+}
+
+/// Age of the oldest expired credential still retained after a purge. The
+/// expiry index answers one ordered row; this avoids counting an unbounded
+/// deployment-wide table on every maintenance tick.
+#[tracing::instrument(
+    name = "store.console_sessions.oldest_expired_age",
+    skip_all,
+    err(Display)
+)]
+pub async fn oldest_expired_age_seconds(executor: impl PgExecutor<'_>) -> Result<Option<f64>> {
+    sqlx::query_scalar!(
+        r#"
+        select extract(epoch from now() - absolute_expires_at)::double precision
+            as "age_seconds!"
+        from console_sessions
+        where absolute_expires_at <= now()
+        order by absolute_expires_at
+        limit 1
+        "#,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)
 }

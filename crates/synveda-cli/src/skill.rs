@@ -4,14 +4,15 @@
 //! version into a client directory.
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use synveda_types::{
-    MAX_SKILL_BUNDLE_CHARS, MAX_SKILL_FILE_CHARS, MAX_SKILL_FILES, SKILL_MANIFEST, ScopeId,
-    Sensitivity, SkillBindingId, SkillBundle, SkillFile, SkillFilePath, SkillId, SkillName,
-    SkillVersionId,
+    MAX_SKILL_BUNDLE_CHARS, MAX_SKILL_FILE_CHARS, MAX_SKILL_FILES, MAX_SKILL_PATH_SEGMENTS,
+    SKILL_MANIFEST, ScopeId, Sensitivity, SkillBindingId, SkillBundle, SkillFile, SkillFilePath,
+    SkillId, SkillName, SkillVersionId,
 };
 use synveda_vedaflow::SkillAsset;
 
@@ -21,6 +22,12 @@ const CLIENT_ROOTS: [(&str, &str); 2] = [
     ("claude-code", ".claude/skills"),
     ("codex", ".codex/skills"),
 ];
+// Count empty directories too. This still admits every valid 64-file bundle:
+// each file contributes at most its four path segments to the tree.
+const MAX_SKILL_TREE_ENTRIES: usize = MAX_SKILL_FILES * MAX_SKILL_PATH_SEGMENTS;
+// Rust's character limit counts Unicode scalars; each occupies at most four
+// UTF-8 bytes. This admits every valid file while bounding the read itself.
+const MAX_SKILL_FILE_BYTES: usize = MAX_SKILL_FILE_CHARS * 4;
 
 #[derive(Clone, Deserialize, Serialize)]
 struct VersionView {
@@ -367,7 +374,7 @@ pub async fn import(
         .parse::<SkillName>()
         .map_err(|err| err.to_string())?;
     let mut files = Vec::new();
-    collect(dir, dir, &mut files)?;
+    collect(dir, &mut files)?;
     files.sort_by(|left, right| left.path.cmp(&right.path));
     let bundle = SkillBundle {
         name: name.clone(),
@@ -448,58 +455,98 @@ pub async fn import(
     Ok(())
 }
 
-fn collect(root: &Path, dir: &Path, out: &mut Vec<SkillFile>) -> Result<(), String> {
-    let entries = std::fs::read_dir(dir).map_err(|err| format!("read {}: {err}", dir.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|err| format!("read {}: {err}", dir.display()))?;
-        let path = entry.path();
-        let meta = std::fs::symlink_metadata(&path)
-            .map_err(|err| format!("stat {}: {err}", path.display()))?;
-        if meta.file_type().is_symlink() {
-            return Err(format!(
-                "{} is a symlink; bundles carry bytes",
-                path.display()
-            ));
+fn collect(root: &Path, out: &mut Vec<SkillFile>) -> Result<(), String> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut entry_count = 0;
+    while let Some(dir) = pending.pop() {
+        let entries =
+            std::fs::read_dir(&dir).map_err(|err| format!("read {}: {err}", dir.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|err| format!("read {}: {err}", dir.display()))?;
+            if entry_count == MAX_SKILL_TREE_ENTRIES {
+                return Err(format!(
+                    "more than {MAX_SKILL_TREE_ENTRIES} entries under {}",
+                    root.display()
+                ));
+            }
+            entry_count += 1;
+            let path = entry.path();
+            let meta = std::fs::symlink_metadata(&path)
+                .map_err(|err| format!("stat {}: {err}", path.display()))?;
+            if meta.file_type().is_symlink() {
+                return Err(format!(
+                    "{} is a symlink; bundles carry bytes",
+                    path.display()
+                ));
+            }
+            if meta.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if !meta.is_file() {
+                return Err(format!("{} is not a regular file", path.display()));
+            }
+            if out.len() >= MAX_SKILL_FILES {
+                return Err(format!(
+                    "more than {MAX_SKILL_FILES} files under {}",
+                    root.display()
+                ));
+            }
+            out.push(read_skill_file(root, &path, meta.len())?);
         }
-        if meta.is_dir() {
-            collect(root, &path, out)?;
-            continue;
-        }
-        if !meta.is_file() {
-            return Err(format!("{} is not a regular file", path.display()));
-        }
-        if out.len() >= MAX_SKILL_FILES {
-            return Err(format!(
-                "more than {MAX_SKILL_FILES} files under {}",
-                root.display()
-            ));
-        }
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|err| format!("{} is not under {}: {err}", path.display(), root.display()))?
-            .to_str()
-            .ok_or_else(|| format!("{} is not valid UTF-8", path.display()))?
-            .replace('\\', "/");
-        let bundled = relative
-            .parse::<SkillFilePath>()
-            .map_err(|err| err.to_string())?;
-        let content = std::fs::read_to_string(&path)
-            .map_err(|err| format!("read {} as UTF-8 text: {err}", path.display()))?;
-        if content.chars().count() > MAX_SKILL_FILE_CHARS {
-            return Err(format!(
-                "{} exceeds the {MAX_SKILL_FILE_CHARS}-character file limit",
-                path.display()
-            ));
-        }
-        out.push(SkillFile {
-            path: bundled,
-            content,
-        });
     }
-    if dir == root && !out.iter().any(|file| file.path.is_manifest()) {
+    if !out.iter().any(|file| file.path.is_manifest()) {
         return Err(format!("{} has no {SKILL_MANIFEST}", root.display()));
     }
     Ok(())
+}
+
+fn read_skill_file(root: &Path, path: &Path, metadata_len: u64) -> Result<SkillFile, String> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|err| format!("{} is not under {}: {err}", path.display(), root.display()))?
+        .to_str()
+        .ok_or_else(|| format!("{} is not valid UTF-8", path.display()))?
+        .replace('\\', "/");
+    let bundled = relative
+        .parse::<SkillFilePath>()
+        .map_err(|err| err.to_string())?;
+    if metadata_len > MAX_SKILL_FILE_BYTES as u64 {
+        return Err(format!(
+            "{} exceeds the {MAX_SKILL_FILE_BYTES}-byte file limit",
+            path.display()
+        ));
+    }
+    let file =
+        std::fs::File::open(path).map_err(|err| format!("read {}: {err}", path.display()))?;
+    let content = read_bounded_utf8(file, path)?;
+    Ok(SkillFile {
+        path: bundled,
+        content,
+    })
+}
+
+fn read_bounded_utf8(reader: impl Read, path: &Path) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    reader
+        .take((MAX_SKILL_FILE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|err| format!("read {}: {err}", path.display()))?;
+    if bytes.len() > MAX_SKILL_FILE_BYTES {
+        return Err(format!(
+            "{} exceeds the {MAX_SKILL_FILE_BYTES}-byte file limit",
+            path.display()
+        ));
+    }
+    let content = String::from_utf8(bytes)
+        .map_err(|err| format!("read {} as UTF-8 text: {err}", path.display()))?;
+    if content.chars().count() > MAX_SKILL_FILE_CHARS {
+        return Err(format!(
+            "{} exceeds the {MAX_SKILL_FILE_CHARS}-character file limit",
+            path.display()
+        ));
+    }
+    Ok(content)
 }
 
 /// List exact versions enabled by bindings at a project or principal scope.
@@ -912,6 +959,7 @@ fn announce(api: &Api, origin: &Origin) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     fn scratch(label: &str) -> PathBuf {
         let root = std::env::temp_dir()
@@ -961,6 +1009,87 @@ mod tests {
             assert!(!root.starts_with('/'), "{name}");
             assert!(root.ends_with("skills"), "{name}");
         }
+    }
+
+    #[test]
+    fn empty_directories_count_toward_import_limit() {
+        let root = scratch("empty-tree");
+        std::fs::write(root.join(SKILL_MANIFEST), "manifest").unwrap();
+        for index in 0..MAX_SKILL_TREE_ENTRIES {
+            std::fs::create_dir(root.join(format!("empty-{index}"))).unwrap();
+        }
+        let error = collect(&root, &mut Vec::new()).unwrap_err();
+        assert!(
+            error.contains(&format!("more than {MAX_SKILL_TREE_ENTRIES} entries")),
+            "{error}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deep_directory_tree_is_iterative_and_bounded() {
+        let root = scratch("deep-tree");
+        std::fs::write(root.join(SKILL_MANIFEST), "manifest").unwrap();
+        let mut dir = root.clone();
+        for _ in 0..(MAX_SKILL_TREE_ENTRIES / 2) {
+            dir = dir.join("d");
+            std::fs::create_dir(&dir).unwrap();
+        }
+        let mut files = Vec::new();
+        collect(&root, &mut files).unwrap();
+        assert_eq!(files.len(), 1);
+        for _ in (MAX_SKILL_TREE_ENTRIES / 2)..MAX_SKILL_TREE_ENTRIES {
+            dir = dir.join("d");
+            std::fs::create_dir(&dir).unwrap();
+        }
+        let error = collect(&root, &mut Vec::new()).unwrap_err();
+        assert!(
+            error.contains(&format!("more than {MAX_SKILL_TREE_ENTRIES} entries")),
+            "{error}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn oversized_file_is_rejected_before_reading() {
+        let root = scratch("large-file");
+        std::fs::write(
+            root.join(SKILL_MANIFEST),
+            vec![b'x'; MAX_SKILL_FILE_BYTES + 1],
+        )
+        .unwrap();
+        let error = collect(&root, &mut Vec::new()).unwrap_err();
+        assert!(error.contains("byte file limit"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn file_growth_after_metadata_check_stays_bounded() {
+        let root = scratch("growing-file");
+        let path = root.join(SKILL_MANIFEST);
+        std::fs::write(&path, "x").unwrap();
+        let metadata = std::fs::symlink_metadata(&path).unwrap();
+        assert!(metadata.len() <= MAX_SKILL_FILE_BYTES as u64);
+        let file = std::fs::File::open(&path).unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(&vec![b'x'; MAX_SKILL_FILE_BYTES])
+            .unwrap();
+        let error = read_bounded_utf8(file, &path).unwrap_err();
+        assert!(error.contains("byte file limit"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn multibyte_file_uses_character_limit_without_early_byte_refusal() {
+        let path = Path::new(SKILL_MANIFEST);
+        let text = "🦀".repeat(MAX_SKILL_FILE_CHARS);
+        assert_eq!(read_bounded_utf8(text.as_bytes(), path).unwrap(), text);
+        let error =
+            read_bounded_utf8("x".repeat(MAX_SKILL_FILE_CHARS + 1).as_bytes(), path).unwrap_err();
+        assert!(error.contains("character file limit"), "{error}");
     }
 
     #[test]

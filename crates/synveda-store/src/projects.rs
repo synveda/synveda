@@ -7,7 +7,7 @@
 //! module; every read is tenant-filtered in SQL as well as by RLS.
 //!
 //! The one rule that is this module's own: a project's scope is a **child of
-//! its workspace's scope**, which migration 0041 makes a foreign key rather
+//! its workspace's scope**, which the epoch-3 schema makes a foreign key rather
 //! than a convention — so a project's scope cannot later be moved out from
 //! under the workspace whose policy governs it.
 

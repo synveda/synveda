@@ -321,6 +321,85 @@ async fn a_session_past_its_hard_cap_is_gone() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+/// Expired credential custody is cleaned in bounded batches. Synthetic
+/// ciphertext is sufficient here because this test never resolves a session;
+/// it exercises only the database retention boundary under the app role.
+#[tokio::test]
+async fn expired_console_sessions_are_purged_in_bounded_batches() {
+    let _guard = serial().await;
+    let Some(url) = db_url() else { return };
+    let pool = pool(&url);
+    let issuer = format!("http://auth6-purge-{}.test", TenantId::new());
+    let sealed = [0_u8; 51];
+
+    for _ in 0..257 {
+        let secret = mint().expect("mint a unique session hash");
+        sqlx::query(
+            "insert into console_sessions (token_hash, issuer, access_token_sealed, \
+             created_at, absolute_expires_at) values ($1, $2, $3, \
+             '2000-01-01 00:00:00+00', '2000-01-02 00:00:00+00')",
+        )
+        .bind(&secret.hash[..])
+        .bind(&issuer)
+        .bind(&sealed[..])
+        .execute(&pool)
+        .await
+        .expect("insert expired session");
+    }
+
+    let active = mint().expect("mint an active session hash");
+    synveda_store::console_sessions::create(
+        &pool,
+        &active.hash,
+        &issuer,
+        &sealed,
+        None,
+        None,
+        Utc::now() + chrono::Duration::hours(1),
+    )
+    .await
+    .expect("insert active session");
+
+    let first = synveda_store::console_sessions::purge_expired(&pool)
+        .await
+        .expect("purge first batch");
+    assert_eq!(first, synveda_store::console_sessions::PURGE_BATCH_SIZE);
+    let remaining: i64 = sqlx::query_scalar(
+        "select count(*) from console_sessions where issuer = $1 \
+         and absolute_expires_at <= now()",
+    )
+    .bind(&issuer)
+    .fetch_one(&pool)
+    .await
+    .expect("count retained expired sessions");
+    assert_eq!(remaining, 1);
+    let oldest_age = synveda_store::console_sessions::oldest_expired_age_seconds(&pool)
+        .await
+        .expect("observe oldest expired custody row")
+        .expect("a backlog remains after the bounded batch");
+    assert!(
+        oldest_age > 3600.0,
+        "the retained row is more than an hour old"
+    );
+
+    let second = synveda_store::console_sessions::purge_expired(&pool)
+        .await
+        .expect("purge second batch");
+    assert!(second >= 1);
+    let remaining: i64 =
+        sqlx::query_scalar("select count(*) from console_sessions where issuer = $1")
+            .bind(&issuer)
+            .fetch_one(&pool)
+            .await
+            .expect("count retained sessions");
+    assert_eq!(remaining, 1, "the active session must survive both batches");
+    assert!(
+        synveda_store::console_sessions::delete(&pool, &active.hash)
+            .await
+            .expect("remove active fixture")
+    );
+}
+
 // ── Ambient authority (decision 4) ───────────────────────────────────────────
 
 /// The CSRF defence. A cross-site form can make a browser send the cookie;

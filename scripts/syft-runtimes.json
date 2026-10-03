@@ -1,0 +1,48 @@
+{
+  "version": "1.54.0",
+  "source": "https://github.com/anchore/syft/releases/tag/v1.54.0",
+  "targets": {
+    "darwin-x86_64": {
+      "archive": "syft_1.54.0_darwin_amd64.tar.gz",
+      "bytes": 30450520,
+      "sha256": "22b71725e388a4c0de385249c4bc1044f78a870f2894f34b43ba957e792145d7",
+      "binary_sha256": "4ca3d1c3cc14d47df41f841524dc2b72e0e9724005cd9ce81ea1fa9591ffe451",
+      "binary_bytes": 90140916
+    },
+    "darwin-arm64": {
+      "archive": "syft_1.54.0_darwin_arm64.tar.gz",
+      "bytes": 27894431,
+      "sha256": "7e0bdad94c569fc6d5785c9a657bbae3d4c4e140ccb5eace3d0b5b6bc2b6dbcf",
+      "binary_sha256": "835607cdfbdbfc59335b0beadeefc47aa6aab7d3b403c11cfa65627d92a27f61",
+      "binary_bytes": 84549862
+    },
+    "linux-x86_64": {
+      "archive": "syft_1.54.0_linux_amd64.tar.gz",
+      "bytes": 29217540,
+      "sha256": "54a87372498168b2d033e876fd41fa4e8035b872699e525a57046e1f2f09c860",
+      "binary_sha256": "d46a9a61a6ae3d367f0a03748c5e9c59253e586c4388ab26ddcacebc2efa0d92",
+      "binary_bytes": 87204002
+    },
+    "linux-arm64": {
+      "archive": "syft_1.54.0_linux_arm64.tar.gz",
+      "bytes": 26697817,
+      "sha256": "ee6d4566373a05b344bc6b5f1706f14419bf9338ba39ff686e247deefe9b8818",
+      "binary_sha256": "fced89f2b5d414b189190e083d83cf7068d4befdca483c5a4e8ed225d8e9b58e",
+      "binary_bytes": 81068194
+    },
+    "windows-x86_64": {
+      "archive": "syft_1.54.0_windows_amd64.zip",
+      "bytes": 29834852,
+      "sha256": "77f4b472779058e819eec9a054753a5071a996aaa40db31a290f8b256748593f",
+      "binary_sha256": "71bb3254c6eab5faf8c882ae04b6595d49b31245b367d4a5e029b90eca660683",
+      "binary_bytes": 89237504
+    },
+    "windows-arm64": {
+      "archive": "syft_1.54.0_windows_arm64.zip",
+      "bytes": 26827648,
+      "sha256": "0fdfa61470a69b99ace491df1fd7ef9803439c15d4d3d19a0bcb139d8b9fba4e",
+      "binary_sha256": "680da266b19ddcbfdd90a3d4e8aa56d3678b4da294ba0bbc1947a9eadca771c5",
+      "binary_bytes": 82051072
+    }
+  }
+}

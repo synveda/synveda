@@ -2,9 +2,15 @@
 
 Use the [installation guide](README.md) and save the exact chart, values,
 immutable image overlays and Secret custody references. This runbook covers
-one gateway and one worker with planned maintenance. It does not establish HA,
+one gateway and one combined worker, with optional capture-only capacity and
+planned maintenance. It does not establish HA,
 WAL/PITR, zero downtime or a promised RPO/RTO. Compose keeps its existing
 [backup/restore/upgrade entry points](../../compose/README.md).
+
+The optional [OPS-5 CNPG object-store backup candidate](BACKUP.md) adds chart
+plumbing for physical base backup and WAL through the Barman Cloud plugin. It
+does not change this runbook's recovery evidence until a live isolated PITR and
+joint identity/key drill pass.
 
 ## Health, logs and telemetry
 
@@ -15,6 +21,63 @@ convergence. The authority proof has a five-second deadline and repeats every
 schema or database-identity refusal exits. Restart loops need diagnosis, not
 weaker readiness or an elevated database role.
 
+The gateway also waits for its first successful stored policy-pack load for
+the current authority generation. A recovered database generation requires a
+new load before requests resume, even if the process still holds an older
+compiled pack. An unavailable or invalid stored pack keeps the gateway
+unready; inspect the policy refresh logs rather than routing around the gate.
+After startup, a complete successful sweep renews a provisional 30-second
+freshness lease. An incomplete, failed or five-second timed-out sweep cannot
+renew it; expiry withdraws readiness and cancels governed HTTP work. The
+`SYNVEDA_POLICY_REFRESH_SECS` range is 1–15 seconds (default 5). Inspect
+`synveda_policy_pack_refresh_sweeps_total` and
+`synveda_policy_pack_refresh_seconds` when readiness drops. The core worker
+uses the same provisional lease: expiry withdraws readiness, cancels governed
+work and retries initial convergence before resuming. An interrupted claim
+requires a lease/fence recovery check for each job family. In one disposable
+Kind run, a
+claimed Capture request was cancelled on policy expiry, then its fenced second
+attempt committed one candidate after policy recovery. A separate two-worker
+Kind run deleted the pod owning a blocked Capture claim; another pod reclaimed
+it and committed one candidate. The chart retains one combined worker;
+capture-only pods may add fenced Capture throughput but do not run the other
+job families. Provider-wide quotas remain operator-owned.
+
+## Optional Capture capacity
+
+The source chart accepts `worker.captureOnlyReplicas: 0..2`; zero is the
+default. It always keeps exactly one combined worker because Knowledge
+indexing and directory pull have no multi-process owner. Each extra pod uses
+the ordinary worker database role, the same authority and policy readiness
+gates, and only the fenced Capture loop. It has no OIDC, KMS or embedder
+Secret mount. `worker.replicas` remains refused. The published v0.4.3 chart
+does not include this source candidate.
+
+Reserve one extractor call and `worker.dbMaxConnections` database connections
+per extra pod, plus enough capacity for a replacement during rollout. The
+chart rejects a bundled/CNPG connection budget that is too small; an external
+database and provider need their own operator-enforced quotas. If using
+NetworkPolicy, `networkPolicy.extraEgress.worker` also applies to capture-only
+pods, so permit the chosen extractor endpoint there. Check each private
+`/readyz` through a pod exec and inspect Capture metrics before increasing
+the count. To roll back, set `worker.captureOnlyReplicas: 0` using the saved
+values and wait for interrupted claims to expire and be reclaimed by the
+combined worker. A repeated external provider call is possible; the attempt
+fence permits one durable candidate set. This is Capture capacity, not
+general maintenance-worker availability or gateway HA.
+
+OIDC login now parks its PKCE state and CLI handoff in the same deployment-key
+plane as console sessions. A missing deployment key refuses `/auth/login`
+before redirect; restore the matching key with PostgreSQL so unexpired logins
+can complete after a gateway restart. The isolated cross-process test exercises
+this source path. An OPS-7 one-node Kind drill used three ready pods to route
+JSON and CLI login across them, refuse replays and read the same identity from
+each pod after baseline database failover. It left the chart at one replica;
+two audited test-pack revisions then compiled on all three pods within
+5 seconds of their database timestamps at light load. The harness cleared
+its pack and restored one replica. Key rotation, decision-level restrictive
+policy latency under sustained load and multi-node loss remain unqualified.
+
 After a database outage, Kubernetes' Ready status can lag the application's
 current gate. Probe `/readyz` directly, then validate a fresh login and governed
 read before reopening traffic. The external drill also observed Keycloak using
@@ -23,7 +86,16 @@ recovered. Its report counts those failures within a 90-second test bound;
 readiness alone is not a sign-in guarantee. Escalate persistent failures to the
 identity administrator; do not replace credentials or weaken token checks.
 
-Shutdown withdraws worker readiness and cancels supervised tasks. Capture
+Gateway SIGTERM withdraws `/readyz` and refuses new application work first.
+With the default 30-second shutdown bound, it leaves up to ten seconds for
+the next five-second Helm readiness probe to remove the endpoint; Helm accepts
+one failed probe. It then stops HTTP admission, waits for in-flight requests
+while the authority sentinel stays live, stops background tasks and flushes
+telemetry. A conclusive database-authority refusal still cancels affected
+requests immediately. Shorter configured bounds reduce the pre-drain window;
+the single-process source test is not evidence of a rolling upgrade or
+multi-pod availability. Shutdown also withdraws worker readiness and cancels
+supervised tasks. Capture
 cancellation leaves its fenced claim for the existing 60-second lease expiry;
 the next worker retries. A request may reach an external provider more than
 once. Database claim fencing/idempotency does not promise exactly-once external
@@ -50,6 +122,42 @@ curl --fail --silent http://127.0.0.1:8120/readyz
 curl --fail --silent http://127.0.0.1:8120/metrics
 ```
 
+## CNPG replica maintenance access
+
+The packaged CNPG bootstrap closes PUBLIC access to the `postgres` and
+`template1` databases. CNPG also uses its reserved `streaming_replica` role
+for a certificate-authenticated connection to `postgres`; see the
+[CNPG 1.30 security contract](https://cloudnative-pg.io/docs/1.30/security/).
+CNPG creates that role after its initial `postInitSQL` PUBLIC revoke. The
+required administrator bootstrap Job grants the reserved role CONNECT on
+`postgres` only and verifies the remaining restrictions. A fresh
+chart-rendered two-instance cluster passed bootstrap and replica restart in
+an isolated Kind run. An older retained cluster without this grant can leave
+a restarted replica unready with `permission denied for database "postgres"`,
+even while the primary and Synveda processes serve requests.
+
+Check `kubectl -n synveda get cluster/synveda-pg -o wide` and the unready
+replica's `postgres` container logs. If that exact error appears, have the
+database operator connect locally as `postgres` on the *current primary* and
+run `GRANT CONNECT ON DATABASE postgres TO streaming_replica;`. Before and
+after the repair, verify `has_database_privilege` on `postgres`: the reserved
+replica role should change from false to true, while `synveda_gateway` and
+`synveda_worker` remain false. Wait for the CNPG Cluster to report every
+instance ready before treating Helm `--wait` or failover as healthy. Do not
+grant CONNECT to PUBLIC or any product role. Include this ACL in restore
+verification. The fixed bootstrap Job converges a retained cluster when an
+upgrade uses an image containing the fix; the previously published v0.4.3
+image does not. Repair the existing ACL before an upgrade that waits for all
+replicas, or first use the fixed image with a controlled upgrade sequence. A
+retained one-node Kind release upgraded to the fixed source image and passed
+bootstrap with two ready instances. In a subsequent loss drill, a normal
+primary Pod delete remained in CNPG's 30-minute termination grace while
+failover waited for WAL receivers to stop; an intentional crash-style deletion
+in that disposable cluster allowed promotion, two ready instances and fresh
+three-gateway login/authorization. This does not establish a planned
+switchover procedure, node-loss tolerance or a recovery-time target. Separate
+planned maintenance from crash drills in the operator runbook.
+
 Keep logs at `info` initially. Do not log HTTP authorization/cookie headers,
 Secret manifests, credential URLs or Session/Knowledge bodies. Backup files and
 Keycloak administration output are sensitive even when ordinary product audit
@@ -66,7 +174,7 @@ spans; it must not restart the application.
 | Full Synveda PostgreSQL database, schema and SQLx metadata | Identities/grants, Sessions and payloads, Knowledge revisions, VedaFlow objects, Skills, secret envelopes, jobs/outbox and audit all live here |
 | Full packaged Keycloak PostgreSQL database | Users, stable subjects, passwords/credentials, signing keys, realm/client configuration and service identities; a realm configuration export alone is insufficient |
 | Database role/owner/ACL contract and credential custody | `pg_dump` does not back up cluster roles; restore exact separate owner/runtime roles before loading the archive |
-| Original KMS KEK and reference; any external KMS custody | Needed to open deployment and tenant envelopes and sealed console sessions; neither can be reconstructed from ciphertext |
+| Original KMS KEK and reference; any external KMS custody | Needed to open deployment and tenant envelopes, sealed console sessions and pending OIDC/CLI handoffs; none can be reconstructed from ciphertext |
 | Issuer/client configuration and client secrets, provider credentials, CA/TLS keys, saved values and artifact digests | Preserve canonical issuer and subjects; keep signing-key history through Keycloak DB or external IdP recovery |
 | Adapter/client spool or unpublished local work where used | Lives on the client; it has not necessarily reached the server backup |
 
@@ -218,11 +326,15 @@ and [restore](https://www.postgresql.org/docs/17/app-pgrestore.html) semantics.
 
 There is **no supported upgrade between published versions**. Public v0.2.0 has
 the retired schema. Published v0.4.0 and v0.4.3 both use epoch 3 and baseline
-revision 3, but the `0001` migration changed; the candidate's read-only
-`synveda db migrate --check` rejects the changed SQLx checksum. Keep the current
-installation and its data rather than resetting it to make an upgrade pass.
-Same-source Helm migration reruns and retained reinstall are continuity checks,
-not cross-release upgrades. OPS-6 owns a future declared compatibility window.
+revision 3, but their `0001` checksums differ and remain incompatible. The
+source candidate now preserves the exact v0.4.3 baseline and adds `0002` under
+ADR-0121 and `0003` under ADR-0126; its read-only check identifies exact
+`0001` and `0002` heads as upgradeable
+after quiescence, not ready for the new binary to serve. Keep the current
+installation and its data until the published-artifact and joint recovery drill
+qualifies this path. Same-source Helm migration reruns and retained reinstall
+are continuity checks, not cross-release upgrades. OPS-6 owns the declared
+compatibility window.
 CI and Release retain four-mode install/upgrade/reinstall checks and the two
 end-to-end recovery drills. Passing those checks does not establish migration
 compatibility between two different published versions.
