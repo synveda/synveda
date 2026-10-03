@@ -545,10 +545,16 @@ binds those observations to the reviewed tool bytes and source. That diagnostic
 run was stopped after both probes; it is not product qualification. The
 validator now requires the basename on every target; the former Windows spelling
 refuses. The regression failed against the former check before the fix, and the
-temporary script/workflow step is removed. Next verify corrected PR CI.
-Complete same-source native/archive and
+temporary script/workflow step is removed. Implementation source
+`92a1e26ad43fa93fd0983a0d12c4a3c42c014f94` passes all 53 CI-tooling tests,
+fast/dependency gates, formatting, pinned actionlint and diff checks. Its initial
+PR run `37118099996` is superseded by this documentation checkpoint; assess the
+latest PR checks before continuation. Complete same-source native/archive and
 nonpublishing Release qualification remains separate and pending; do not resume
-the obsolete `ef6d61db` runs. The documented inventory order follows the CI fix.
+the obsolete `ef6d61db` runs. Next select one clean corrected source and record
+fresh full CI/nonpublishing Release IDs before retaining the original 51-payload
+proof. No new full qualification pair is selected. The documented inventory
+order follows that qualification.
 Production qualification and the operator/issuer blockers remain open; the
 automation remains paused.
 

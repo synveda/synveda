@@ -1753,14 +1753,24 @@ ADR-0133 records the observed contract before replacing the old filename check.
 The executable basename is now required on every target; the former Windows
 backslash spelling refuses. The regression fails against the previous validator
 before the correction. The temporary script and workflow diagnostic are removed.
-Current action: verify fresh corrected PR CI on one source. No checksum
+Correction `92a1e26ad43fa93fd0983a0d12c4a3c42c014f94` passes all 53 CI-tooling
+tests, fast/dependency gates, pinned actionlint, Rust formatting and diff checks.
+Its initial PR check
+[`37118099996`](https://github.com/synveda/synveda/actions/runs/37118099996)
+is superseded by this documentation checkpoint; assess the latest checks on
+[PR #67](https://github.com/synveda/synveda/pull/67) before continuation.
+PR checks defer Docker qualification and do not supply the full release proof.
+No checksum
 injection, custom build, path widening, archive-content or publication gate
 exception is selected. Automatic approval review rejected the proposed separate
 remote probe branch; no commit or push occurred there, and its task-created
 local worktree/branch are removed.
 
 Full clean-source native/archive and nonpublishing Release qualification remains
-pending. Do not resume `ef6d61db` or borrow reports from another source/run;
+pending; no new full qualification source/run pair is selected. After PR checks,
+select one clean corrected source, dispatch fresh full CI and nonpublishing
+Release, and record their exact SHAs/IDs here and in STATUS. Do not resume
+`ef6d61db` or borrow reports from another source/run;
 independently verify the original 51-payload inventory before assembly and all
 six client reports, eight archive reports, twelve SPDX documents and both full
 OCI/Compose/Helm sets before retaining proof. Preserve the separate `3beeb1cb`
