@@ -537,9 +537,16 @@ only both native Windows SBOM jobs failed the missing executable SHA-256 gate.
 The official immutable Syft 1.54.0 release now contains upstream fix 5341.
 ADR-0133 records the reviewed native pin upgrade; all six archives, extracted
 executable hashes/sizes and platform headers were independently checked.
-Next inspect native Windows path/digest probes in the existing PR jobs before
-replacing their exact filename expectation, remove the temporary diagnostic,
-then verify corrected PR CI. Complete same-source native/archive and
+Both Windows probes in
+[diagnostic CI 37117271010](https://github.com/synveda/synveda/actions/runs/37117271010)
+passed the actual SHA-256 binding and reported the exact basename `synveda.exe`.
+[Retained resolver evidence](../../demos/evidence/ops12-native-syft-release-probe.json)
+binds those observations to the reviewed tool bytes and source. That diagnostic
+run was stopped after both probes; it is not product qualification. The
+validator now requires the basename on every target; the former Windows spelling
+refuses. The regression failed against the former check before the fix, and the
+temporary script/workflow step is removed. Next verify corrected PR CI.
+Complete same-source native/archive and
 nonpublishing Release qualification remains separate and pending; do not resume
 the obsolete `ef6d61db` runs. The documented inventory order follows the CI fix.
 Production qualification and the operator/issuer blockers remain open; the

@@ -160,14 +160,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24.21.0
-          architecture: ${{ matrix.arch }}
-          cache: pnpm
-      - name: Probe fixed native scanner file digests
-        run: node scripts/ops12-native-scanner-probe.mjs "$env:RUNNER_TEMP/synveda-native-scanner-probe"
       - run: rustup toolchain install $env:RUSTUP_TOOLCHAIN --component clippy,rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -188,6 +180,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "$env:RUNNER_TEMP/synveda-auditable/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - run: cargo auditable build --release --locked -p synveda-cli
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.21.0
+          architecture: ${{ matrix.arch }}
+          cache: pnpm
       - run: pnpm install --frozen-lockfile --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter...
       - run: pnpm --filter @synveda/codex-adapter... --filter @synveda/copilot-cli-adapter... build
       - name: Check native Rust and Node storage

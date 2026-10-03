@@ -1736,15 +1736,28 @@ official asset digests and checksum list. Extracted executables have independent
 hashes/sizes and correct ELF/Mach-O/PE platform headers; ADR-0133 records the
 native pin choice before implementation. OCI scanning remains separately pinned.
 
-Current action: a temporary diagnostic in the existing PR Windows jobs scans
-the reviewed official tool copied as `synveda.exe`, using the production
-single-file/cataloger/full-metadata options. It checks actual byte/digest binding
-and prints exact filenames. This tool fixture cannot establish product Cargo
-coverage. Review both native outputs before changing the closed filename
-contract, remove the diagnostic, then require corrected PR CI. No scanner
-checksum injection, custom build, path widening, archive-content or publication
-gate exception is selected. Automatic approval review rejected the proposed
-separate remote probe branch; no commit or push occurred there.
+The temporary diagnostic at head
+`03c096eb5eded1de1a6594a665dbcc27c4ba24b5` ran in
+[CI 37117271010](https://github.com/synveda/synveda/actions/runs/37117271010),
+checkout `9a32229397de13e3acabdfe6712dc8dbecf498b3`. The native probe step passed
+in Windows x64 job `111186399230` and ARM64 job `111186399253`. The reviewed official
+tool was copied as `synveda.exe` and scanned using the production single-file,
+Rust cataloger and full-metadata options. Both report the exact basename
+`synveda.exe`, unchanged empty/non-regular root, and SHA-256 matching the actual
+reviewed tool bytes. [Retained evidence](../../demos/evidence/ops12-native-syft-release-probe.json)
+binds each result to its original job/source and independent distribution pins.
+This tool fixture cannot establish product Cargo coverage. The run was stopped
+after both probes passed, so it is not full CI or product qualification.
+
+ADR-0133 records the observed contract before replacing the old filename check.
+The executable basename is now required on every target; the former Windows
+backslash spelling refuses. The regression fails against the previous validator
+before the correction. The temporary script and workflow diagnostic are removed.
+Current action: verify fresh corrected PR CI on one source. No checksum
+injection, custom build, path widening, archive-content or publication gate
+exception is selected. Automatic approval review rejected the proposed separate
+remote probe branch; no commit or push occurred there, and its task-created
+local worktree/branch are removed.
 
 Full clean-source native/archive and nonpublishing Release qualification remains
 pending. Do not resume `ef6d61db` or borrow reports from another source/run;

@@ -188,8 +188,10 @@ executable's actual SHA-256, size and platform, plus its own SPDX Cargo content.
 Assembly correction `31980069` closes a coherent report/SPDX digest substitution
 gap; focused checks pass. The native Windows file lookup defect is fixed in
 the official Syft 1.54.0 release. Its six native distributions are independently
-checksum/header reviewed; actual Windows filename/digest probes and fresh
-complete qualification remain pending. The
+checksum/header reviewed. Both native Windows tool probes pass actual digest
+binding and report `synveda.exe`; the validator requires that exact basename.
+[Resolver evidence](../demos/evidence/ops12-native-syft-release-probe.json)
+does not establish product coverage; fresh complete qualification remains pending. The
 [blocker evidence](../demos/evidence/ops12-native-windows-scanner-blocker.json)
 records both native x64 gate failures and exact upstream source comparison.
 Failed reports provide no target qualification. PR CI repair does not replace

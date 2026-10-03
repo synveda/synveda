@@ -1,0 +1,285 @@
+{
+  "schema_version": 1,
+  "evidence": "official-native-syft-resolver-probe",
+  "reviewed_at": "2026-10-03",
+  "scanner_release": {
+    "version": "1.54.0",
+    "url": "https://github.com/anchore/syft/releases/tag/v1.54.0",
+    "immutable": true,
+    "published_at": "2026-10-01T20:54:29Z",
+    "source_sha": "cc326e45a6213360266dda4b30cc68095946d676",
+    "windows_fix_sha": "6ac7afb439c950ec2fc169103c4850c6dfe74c5a",
+    "fix_in_release": true,
+    "checksums_sha256": "e423344e663d7d14db62e51ddd31e4a5012818ed69e78358391dc487483f839c",
+    "sigstore_bundle_sha256": "6a0dbf94cb89e2fb157f022bed752b3ceb5827cb557a4a4cfb6af67f98b99811"
+  },
+  "downloads": [
+    {
+      "target": "darwin-x86_64",
+      "archive": "syft_1.54.0_darwin_amd64.tar.gz",
+      "bytes": 30450520,
+      "sha256": "22b71725e388a4c0de385249c4bc1044f78a870f2894f34b43ba957e792145d7",
+      "binary_sha256": "4ca3d1c3cc14d47df41f841524dc2b72e0e9724005cd9ce81ea1fa9591ffe451",
+      "binary_bytes": 90140916,
+      "platform": {
+        "os": "darwin",
+        "arch": "x86_64"
+      }
+    },
+    {
+      "target": "darwin-arm64",
+      "archive": "syft_1.54.0_darwin_arm64.tar.gz",
+      "bytes": 27894431,
+      "sha256": "7e0bdad94c569fc6d5785c9a657bbae3d4c4e140ccb5eace3d0b5b6bc2b6dbcf",
+      "binary_sha256": "835607cdfbdbfc59335b0beadeefc47aa6aab7d3b403c11cfa65627d92a27f61",
+      "binary_bytes": 84549862,
+      "platform": {
+        "os": "darwin",
+        "arch": "arm64"
+      }
+    },
+    {
+      "target": "linux-x86_64",
+      "archive": "syft_1.54.0_linux_amd64.tar.gz",
+      "bytes": 29217540,
+      "sha256": "54a87372498168b2d033e876fd41fa4e8035b872699e525a57046e1f2f09c860",
+      "binary_sha256": "d46a9a61a6ae3d367f0a03748c5e9c59253e586c4388ab26ddcacebc2efa0d92",
+      "binary_bytes": 87204002,
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64"
+      }
+    },
+    {
+      "target": "linux-arm64",
+      "archive": "syft_1.54.0_linux_arm64.tar.gz",
+      "bytes": 26697817,
+      "sha256": "ee6d4566373a05b344bc6b5f1706f14419bf9338ba39ff686e247deefe9b8818",
+      "binary_sha256": "fced89f2b5d414b189190e083d83cf7068d4befdca483c5a4e8ed225d8e9b58e",
+      "binary_bytes": 81068194,
+      "platform": {
+        "os": "linux",
+        "arch": "arm64"
+      }
+    },
+    {
+      "target": "windows-x86_64",
+      "archive": "syft_1.54.0_windows_amd64.zip",
+      "bytes": 29834852,
+      "sha256": "77f4b472779058e819eec9a054753a5071a996aaa40db31a290f8b256748593f",
+      "binary_sha256": "71bb3254c6eab5faf8c882ae04b6595d49b31245b367d4a5e029b90eca660683",
+      "binary_bytes": 89237504,
+      "platform": {
+        "os": "windows",
+        "arch": "x86_64"
+      }
+    },
+    {
+      "target": "windows-arm64",
+      "archive": "syft_1.54.0_windows_arm64.zip",
+      "bytes": 26827648,
+      "sha256": "0fdfa61470a69b99ace491df1fd7ef9803439c15d4d3d19a0bcb139d8b9fba4e",
+      "binary_sha256": "680da266b19ddcbfdd90a3d4e8aa56d3678b4da294ba0bbc1947a9eadca771c5",
+      "binary_bytes": 82051072,
+      "platform": {
+        "os": "windows",
+        "arch": "arm64"
+      }
+    }
+  ],
+  "windows_ci": {
+    "id": 37117271010,
+    "url": "https://github.com/synveda/synveda/actions/runs/37117271010",
+    "head_sha": "03c096eb5eded1de1a6594a665dbcc27c4ba24b5",
+    "checkout_sha": "9a32229397de13e3acabdfe6712dc8dbecf498b3",
+    "cancelled_after_successful_probes": true,
+    "jobs": [
+      {
+        "job_id": 111186399230,
+        "url": "https://github.com/synveda/synveda/actions/runs/37117271010/job/111186399230",
+        "probe_step": "Probe fixed native scanner file digests",
+        "probe_conclusion": "success",
+        "report": {
+          "evidence": "native-scanner-tool-fixture-probe",
+          "source_sha": "9a32229397de13e3acabdfe6712dc8dbecf498b3",
+          "target": "windows-x86_64",
+          "scanner_version": "1.54.0",
+          "fixture": "official Syft executable copied as synveda.exe",
+          "binary_sha256": "71bb3254c6eab5faf8c882ae04b6595d49b31245b367d4a5e029b90eca660683",
+          "binary_bytes": 89237504,
+          "spdx_sha256": "fd08dfa52475aa99dca59bb319f471b43c504c1e82c5eff77c4eb45f58863ad0",
+          "files": [
+            {
+              "fileName": "",
+              "SPDXID": "SPDXRef-File--5567c94c988a1a09",
+              "fileTypes": [
+                "OTHER"
+              ],
+              "checksums": [
+                {
+                  "algorithm": "SHA1",
+                  "checksumValue": "0000000000000000000000000000000000000000"
+                }
+              ],
+              "licenseConcluded": "NOASSERTION",
+              "licenseInfoInFiles": [
+                "NOASSERTION"
+              ],
+              "copyrightText": "NOASSERTION"
+            },
+            {
+              "fileName": "synveda.exe",
+              "SPDXID": "SPDXRef-File-synveda.exe-79034cc12e75b582",
+              "fileTypes": [
+                "APPLICATION",
+                "BINARY"
+              ],
+              "checksums": [
+                {
+                  "algorithm": "SHA1",
+                  "checksumValue": "4cf6e020fff12565b8c5d13d8c6e3e86c18a6ff5"
+                },
+                {
+                  "algorithm": "SHA256",
+                  "checksumValue": "71bb3254c6eab5faf8c882ae04b6595d49b31245b367d4a5e029b90eca660683"
+                }
+              ],
+              "licenseConcluded": "NOASSERTION",
+              "licenseInfoInFiles": [
+                "NOASSERTION"
+              ],
+              "copyrightText": "NOASSERTION"
+            }
+          ],
+          "creators": [
+            "Organization: Anchore, Inc",
+            "Tool: syft-1.54.0"
+          ],
+          "package_count": 1
+        }
+      },
+      {
+        "job_id": 111186399253,
+        "url": "https://github.com/synveda/synveda/actions/runs/37117271010/job/111186399253",
+        "probe_step": "Probe fixed native scanner file digests",
+        "probe_conclusion": "success",
+        "report": {
+          "evidence": "native-scanner-tool-fixture-probe",
+          "source_sha": "9a32229397de13e3acabdfe6712dc8dbecf498b3",
+          "target": "windows-arm64",
+          "scanner_version": "1.54.0",
+          "fixture": "official Syft executable copied as synveda.exe",
+          "binary_sha256": "680da266b19ddcbfdd90a3d4e8aa56d3678b4da294ba0bbc1947a9eadca771c5",
+          "binary_bytes": 82051072,
+          "spdx_sha256": "e133aedd04ade42ca6a0d1dde945243cc49dc144f6ef36409e92b17795883bfc",
+          "files": [
+            {
+              "fileName": "",
+              "SPDXID": "SPDXRef-File--5567c94c988a1a09",
+              "fileTypes": [
+                "OTHER"
+              ],
+              "checksums": [
+                {
+                  "algorithm": "SHA1",
+                  "checksumValue": "0000000000000000000000000000000000000000"
+                }
+              ],
+              "licenseConcluded": "NOASSERTION",
+              "licenseInfoInFiles": [
+                "NOASSERTION"
+              ],
+              "copyrightText": "NOASSERTION"
+            },
+            {
+              "fileName": "synveda.exe",
+              "SPDXID": "SPDXRef-File-synveda.exe-79034cc12e75b582",
+              "fileTypes": [
+                "APPLICATION",
+                "BINARY"
+              ],
+              "checksums": [
+                {
+                  "algorithm": "SHA1",
+                  "checksumValue": "1c4a5d047f030569a0c643fec0c9a26c345c68f3"
+                },
+                {
+                  "algorithm": "SHA256",
+                  "checksumValue": "680da266b19ddcbfdd90a3d4e8aa56d3678b4da294ba0bbc1947a9eadca771c5"
+                }
+              ],
+              "licenseConcluded": "NOASSERTION",
+              "licenseInfoInFiles": [
+                "NOASSERTION"
+              ],
+              "copyrightText": "NOASSERTION"
+            }
+          ],
+          "creators": [
+            "Organization: Anchore, Inc",
+            "Tool: syft-1.54.0"
+          ],
+          "package_count": 1
+        }
+      }
+    ]
+  },
+  "darwin_arm64_tool_probe": {
+    "fixture": "official Syft executable copied as synveda",
+    "spdx_sha256": "7c2609742125d6d9565370f7a2455f5aa8552d14a37c9d4fcce56360492de902",
+    "files": [
+      {
+        "fileName": "",
+        "SPDXID": "SPDXRef-File--5567c94c988a1a09",
+        "fileTypes": [
+          "OTHER"
+        ],
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "0000000000000000000000000000000000000000"
+          }
+        ],
+        "licenseConcluded": "NOASSERTION",
+        "licenseInfoInFiles": [
+          "NOASSERTION"
+        ],
+        "copyrightText": "NOASSERTION"
+      },
+      {
+        "fileName": "synveda",
+        "SPDXID": "SPDXRef-File-synveda-b40b20f7a2012461",
+        "fileTypes": [
+          "APPLICATION",
+          "BINARY"
+        ],
+        "checksums": [
+          {
+            "algorithm": "SHA1",
+            "checksumValue": "db4244a29805471b379ddb86690bbcd4c54085cd"
+          },
+          {
+            "algorithm": "SHA256",
+            "checksumValue": "835607cdfbdbfc59335b0beadeefc47aa6aab7d3b403c11cfa65627d92a27f61"
+          }
+        ],
+        "licenseConcluded": "NOASSERTION",
+        "licenseInfoInFiles": [
+          "NOASSERTION"
+        ],
+        "copyrightText": "NOASSERTION"
+      }
+    ],
+    "creators": [
+      "Organization: Anchore, Inc",
+      "Tool: syft-1.54.0"
+    ]
+  },
+  "qualification": false,
+  "limitations": [
+    "The fixture is the reviewed scanner itself, not a Synveda product binary.",
+    "No product Cargo, native client or complete release qualification follows from these resolver probes.",
+    "The diagnostic CI run was stopped after both probes passed; full corrected PR CI and same-source Release evidence remain separate.",
+    "The Sigstore bundle bytes were hashed; this record does not claim signature verification."
+  ]
+}

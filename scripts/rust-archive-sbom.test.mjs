@@ -32,7 +32,7 @@ const spdxFor = (binary, binaryHash) => ({
   spdxVersion: "SPDX-2.3", creationInfo: { creators: ["Tool: syft-1.54.0"] },
   files: [
     { fileName: "", fileTypes: ["OTHER"], checksums: [{ algorithm: "SHA1", checksumValue: "0".repeat(40) }] },
-    { fileName: binary.member.endsWith(".exe") ? "\\synveda.exe" : binary.member.split("/").at(-1), checksums: [{ algorithm: "SHA256", checksumValue: binaryHash }] },
+    { fileName: binary.member.split("/").at(-1), checksums: [{ algorithm: "SHA256", checksumValue: binaryHash }] },
   ],
   packages: Object.entries({ [binary.kind === "cli" ? "synveda-cli" : "synveda-gateway"]: version,
     "cedar-policy": "4.11.2", "cedar-policy-core": "4.11.2", sqlx: "0.8.6", "sqlx-postgres": "0.8.6" }).map(([name, versionInfo]) => ({
@@ -122,7 +122,7 @@ test("pinned Windows Syft filenames bind only the root-relative scanned executab
     const binaryHash = sha256(bytesFor(target));
     const doc = spdxFor(binary, binaryHash);
     assert.equal(checkNativeRustSpdx(doc, binaryHash, binary, version).required_packages["synveda-cli"], version);
-    for (const fileName of ["synveda.exe", "/synveda.exe", "\\\\synveda.exe", "\\other\\synveda.exe", "C:\\synveda.exe", "\\synveda-gateway.exe"]) {
+    for (const fileName of ["\\synveda.exe", "/synveda.exe", "\\\\synveda.exe", "\\other\\synveda.exe", "C:\\synveda.exe", "\\synveda-gateway.exe"]) {
       const damaged = structuredClone(doc);
       damaged.files[1].fileName = fileName;
       assert.throws(() => checkNativeRustSpdx(damaged, binaryHash, binary, version), /file differs/);

@@ -50,6 +50,17 @@ replacing the download pins. The closed filename contract must follow actual
 native path/digest output before it changes; missing hashes still fail. The
 existing OCI scanner remains independently pinned to Syft 1.51.0.
 
+[Native resolver evidence](../../demos/evidence/ops12-native-syft-release-probe.json)
+from both Windows runners shows the same exact basename `synveda.exe` and its
+actual SHA-256. The empty synthetic root and its non-regular placeholder are
+unchanged; a macOS ARM tool probe also retains the existing basename contract.
+Require the fixed archived executable basename on every target; the former
+Windows backslash spelling now refuses alongside nested, rooted and drive paths.
+These probes scan the reviewed tool as a fixture, not a product binary. Their CI
+run was deliberately stopped after both probes passed; it supplies no full
+native or release qualification. Remove the temporary probe before the fresh
+product CI run, retaining all Cargo-content, archive/hash and publication gates.
+
 Validate the packaged binary or final image rather than a source `Cargo.lock`
 copied into the distribution. Bind each SBOM/report to its exact artifact,
 source and platform identity. Require expected first-party roots and critical

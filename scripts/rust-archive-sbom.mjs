@@ -81,15 +81,14 @@ export function checkNativeRustSpdx(spdx, binaryHash, binary, version) {
   assert.match(binaryHash, hashPattern);
   const content = checkRustSpdx(spdx, binary.kind, version, nativeRustScanner);
   assert.ok(Array.isArray(spdx.files) && spdx.files.length === 2, "native Rust SBOM must describe only its root and one binary");
-  // Pinned Syft names a Windows file relative to its synthetic root. Exact
-  // spelling preserves member identity without normalizing arbitrary paths.
-  const windows = binary.member === "client/bin/synveda.exe";
   // Full file metadata includes this directory, which has no bytes to hash.
   // Its exact placeholder is permitted only here, never as executable binding.
   assert.equal(spdx.files[0].fileName, "", "native SBOM synthetic root differs");
   assert.deepEqual(spdx.files[0].fileTypes, ["OTHER"], "native SBOM synthetic root type differs");
   assert.deepEqual(spdx.files[0].checksums, [{ algorithm: "SHA1", checksumValue: "0".repeat(40) }], "native SBOM synthetic root checksum differs");
-  const fileName = windows ? "\\synveda.exe" : binary.member.split("/").at(-1);
+  // Reviewed native Syft emits the extracted basename on every target. Refuse
+  // other spellings rather than normalizing paths from the scanner document.
+  const fileName = binary.member.split("/").at(-1);
   assert.equal(spdx.files[1].fileName, fileName, "native SBOM file differs from the archived binary");
   const sums = spdx.files[1].checksums;
   assert.ok(Array.isArray(sums) && sums.length <= 8, "expected bounded binary checksums");
