@@ -119,7 +119,7 @@ renumbered.
 | [ADR-0097](adr-0097-bounded-knowledge-graph-retrieval.md) | Bounded Knowledge graph retrieval | Current | Replaces ADR-0043 and ADR-0044 and removes the remaining Record graph. |
 | [ADR-0098](adr-0098-client-adapter-conformance.md) | Evidence-based client support | Current | — |
 | [ADR-0099](adr-0099-context-platform-product-evaluation.md) | Product delivery, use and trust evaluation | Current | Incorporates the earlier evaluation gates under one outcome model. |
-| [ADR-0100](adr-0100-public-api-pulseboard-demo.md) | Resumable public-API demo | Current | Partially supersedes ADR-0066's demo shape. |
+| [ADR-0100](adr-0100-public-api-pulseboard-demo.md) | Resumable public-API demo | Current | Partially supersedes ADR-0066's demo shape; the 2026-10-04 amendment preserves pending Configuration review/retry after console setup. |
 | [ADR-0101](adr-0101-production-hardening-boundary.md) | Production-hardening boundary | Current | — |
 | [ADR-0102](adr-0102-portable-reference-deployment.md) | Portable reference deployment contract | Current (live validation pending) | Compose is the canonical single-host reference; Keycloak replaces Rauthy, workers are separate and optional Apalis remains a leaf adapter. ADR-0105 replaces provider simulation with direct Compose acceptance; OPS-12 derives a candidate consumer graph with private named-volume initialization and paired logical recovery. Confirmed hosts installation can renew a verified device-only witness change. |
 | ADR-0103 → [replacement](adr-0105-direct-compose-acceptance.md) | Cooperative aggregate live-provider reservation | Removed; replaced by ADR-0105 | The non-executing provider-reservation fixture was deleted; a supported Docker engine is an operator-owned prerequisite. |

@@ -59,6 +59,8 @@ struct Summary {
 struct Requirement {
     roles: Vec<RequiredRole>,
     distinct_approvers: u8,
+    forbid_author_approval: bool,
+    separate_effect_actor: bool,
     #[serde(default)]
     subjects: Vec<String>,
     origins: Vec<String>,
@@ -251,7 +253,7 @@ pub async fn publish(profile: &str, id: ProposalId) -> Result<(), String> {
     Ok(())
 }
 
-/// `synveda proposal apply <id>` — run an approved Knowledge change.
+/// `synveda proposal apply <id>` — run an approved typed change.
 ///
 /// The gateway repeats the command's PDP and revision checks; this client
 /// supplies no effect payload and cannot turn an approval into authority.
@@ -266,12 +268,7 @@ pub async fn apply(profile: &str, id: ProposalId) -> Result<(), String> {
             .unwrap_or("-")
             .to_owned()
     };
-    eprintln!(
-        "synveda: Knowledge change {} — item {}, revision {}",
-        field("outcome"),
-        field("knowledge_item_id"),
-        field("revision_id"),
-    );
+    eprintln!("synveda: change {id} — {}", field("outcome"));
     Ok(())
 }
 
@@ -581,6 +578,12 @@ fn describe(requirement: &Requirement) -> String {
             requirement.distinct_approvers
         ));
     }
+    if requirement.forbid_author_approval {
+        parts.push("reviewers distinct from author".to_owned());
+    }
+    if requirement.separate_effect_actor {
+        parts.push("effect actor distinct from author and reviewers".to_owned());
+    }
     for subject in &requirement.subjects {
         parts.push(format!("@{subject}"));
     }
@@ -757,6 +760,8 @@ mod tests {
                     count: 1,
                 }],
                 distinct_approvers: 1,
+                forbid_author_approval: false,
+                separate_effect_actor: false,
                 subjects: Vec::new(),
                 origins: vec!["pack regulated-strict".to_owned()],
             },
@@ -962,6 +967,8 @@ mod tests {
                 },
             ],
             distinct_approvers: 2,
+            forbid_author_approval: true,
+            separate_effect_actor: true,
             subjects: vec!["sam".to_owned()],
             origins: vec!["floor".to_owned(), "pack regulated-strict".to_owned()],
         };
@@ -969,12 +976,22 @@ mod tests {
         assert!(described.contains("1 × curator"), "{described}");
         assert!(described.contains("1 × compliance"), "{described}");
         assert!(described.contains("2 distinct approvers"), "{described}");
+        assert!(
+            described.contains("reviewers distinct from author"),
+            "{described}"
+        );
+        assert!(
+            described.contains("effect actor distinct from author and reviewers"),
+            "{described}"
+        );
         assert!(described.contains("@sam"), "{described}");
         assert!(described.contains("floor"), "{described}");
 
         let nothing = Requirement {
             roles: Vec::new(),
             distinct_approvers: 0,
+            forbid_author_approval: false,
+            separate_effect_actor: false,
             subjects: Vec::new(),
             origins: vec!["pack open-collaboration".to_owned()],
         };

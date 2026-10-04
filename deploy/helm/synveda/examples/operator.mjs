@@ -126,8 +126,8 @@ export function check({ action, directory, architecture, confirmedStorageClass }
   if (v.fullnameOverride !== p.release || v.install?.tenant?.id !== state.tenant || v.gateway.publicUrl !== p.appUrl || v.postgres.mode !== p.database) throw new Error("values conflict with prepared release, tenant, origin or database ownership; preserve files and recover matching inputs before retrying");
   if (createHash("sha256").update(readFileSync(path("release-images.yaml"))).digest("hex") !== state.evidenceHash) throw new Error("image overlay changed; restore the saved verified overlay before retrying");
   let failures = 0;
-  const result = (level, message, next = "") => { if (level === "FAIL") failures++; report(`${level}: ${message}${next ? ` → ${next}` : ""}`); };
-  const retry = `node "$CHART/examples/operator.mjs" ${action} --prepared "$PREPARED" --architecture ${architecture ?? "amd64|arm64"}`;
+  const result = (level, message, next = "") => { if (level === "FAIL") failures++; report(`${level}: ${message}${next && level !== "PASS" ? ` → ${next}` : ""}`); };
+  const retry = `node "$CHART/examples/operator.mjs" ${action} --prepared "$PREPARED" --architecture ${architecture ?? "amd64|arm64"}${confirmedStorageClass ? ' --confirmed-storage-class "$STORAGE_CLASS"' : ""}`;
   const kube = (...args) => run("kubectl", ["--context", p.context, "--namespace", p.namespace, "--request-timeout=15s", ...args]);
   const get = (kind, name, extra = []) => { const r = kube("get", kind, ...(name ? [name] : []), ...extra, "-o", "json"); try { return r.ok ? JSON.parse(r.text) : null; } catch { return null; } };
   if (action !== "diagnose") report(`Context: ${p.context}; namespace: ${p.namespace}; release: ${p.release}; exposure: ${v.gateway.publicUrl}; PostgreSQL: ${v.postgres.mode}; identity: ${v.keycloak?.enabled ? "bundled" : "external"}.`);
@@ -311,7 +311,10 @@ export function check({ action, directory, architecture, confirmedStorageClass }
     const claim = storage.existingClaim ? get("pvc", storage.existingClaim) : null;
     const classes = get("storageclasses");
     const selected = storage.storageClass ? classes?.items.find((x) => x.metadata.name === storage.storageClass) : classes?.items.find((x) => x.metadata.annotations?.["storageclass.kubernetes.io/is-default-class"] === "true");
-    if (!classes) result(claim?.status?.phase === "Bound" || confirmedStorageClass && storage.storageClass === confirmedStorageClass ? "WARN" : "FAIL", "StorageClass listing unavailable under namespaced RBAC", `${label}: ${claim?.status?.phase === "Bound" ? "existing claim is Bound; administrator still supplies provisioner/UID and recovery ownership" : `administrator must confirm class ${storage.storageClass || "(select an explicit class)"}, provisioner, fsync/UID support, volumeBindingMode and quota; pass --confirmed-storage-class only for that named class and rerun`}`);
+    if (!classes) {
+      const confirmed = confirmedStorageClass && storage.storageClass === confirmedStorageClass;
+      result(claim?.status?.phase === "Bound" || confirmed ? "WARN" : "FAIL", "StorageClass listing unavailable under namespaced RBAC", `${label}: ${claim?.status?.phase === "Bound" ? "existing claim is Bound; administrator still supplies provisioner/UID and recovery ownership" : confirmed ? `administrator confirmed class ${confirmedStorageClass}; the install still needs to establish provisioner/fsync/UID behavior` : `administrator must confirm class ${storage.storageClass || "(select an explicit class)"}, provisioner, fsync/UID support, volumeBindingMode and quota; pass --confirmed-storage-class only for that named class and rerun`}`);
+    }
     else if (!selected && !storage.existingClaim) result("FAIL", `no selected/default StorageClass for ${label}`, "administrator must supply a usable class; deliberately adjust saved Helm storage before install (new preparation selects --storage-class); preserve original credentials and retry preflight");
     else if (selected) report(`PASS: storage ${selected.metadata.name}; binding=${selected.volumeBindingMode ?? "Immediate"}; provisioner=${selected.provisioner}.`);
     if (storage.existingClaim) {

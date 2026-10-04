@@ -175,6 +175,13 @@ test("namespaced installer can supply an explicit administrator-confirmed Storag
   assert.match(messages.join("\n"), /StorageClass listing unavailable under namespaced RBAC/);
   assert.match(messages.join("\n"), /namespace inspection/);
   assert.match(messages.join("\n"), /Not established by preflight/);
+  assert.match(messages.join("\n"), /administrator confirmed class selected-fast/);
+  assert.match(messages.join("\n"), /Retry:.*--confirmed-storage-class "\$STORAGE_CLASS"/);
+  assert.ok(!messages.some((line) => line.startsWith("PASS:") && line.includes(" → ")));
+  const missing = [];
+  assert.ok(check({ action: "preflight", directory: f.o.output, architecture: "arm64" }, kubeFixture(f), (s) => missing.push(s)) > 0);
+  assert.match(missing.join("\n"), /FAIL: StorageClass listing unavailable/);
+  assert.match(missing.join("\n"), /pass --confirmed-storage-class only for that named class and rerun/);
 });
 
 test("wrong CA, issuer/audience and missing key refuse without disclosing credentials", (t) => {

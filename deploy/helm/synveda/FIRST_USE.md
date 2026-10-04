@@ -106,6 +106,38 @@ synveda demo retry-review seed \
   --approver-credentials approver \
   --viewer-credentials viewer \
   --confirm-target "$SYNVEDA_GATEWAY"
+```
+
+If a canonical Configuration was already adopted during console setup, seed
+can stop for review of its Configuration or binding. It prints the exact
+`<configuration-change-id>` and retains the original request privately.
+Inspect that proposal and its approval requirements before reviewing it:
+
+An unbound workspace uses the strict matrix: two administrators review, and
+another administrator applies, distinct from both reviewers and the author.
+Keep Vera restricted. Use People/Access to invite an additional operator into
+this workspace and grant that verified identity administrator authority. Sign
+in as that operator with their own CLI profile:
+
+```sh
+synveda login --gateway "$SYNVEDA_GATEWAY" --profile configuration-operator --no-browser
+```
+
+```sh
+synveda proposal show <configuration-change-id> --profile reviewer
+synveda proposal approve <configuration-change-id> --profile reviewer \
+  --comment "Reviewed the sample workspace Configuration and its pinned version"
+synveda proposal approve <configuration-change-id> --profile approver \
+  --comment "Distinct administrator review of the exact Configuration change"
+synveda proposal apply <configuration-change-id> --profile configuration-operator
+```
+
+Rerun the same seed command with the same profiles. A binding may separately
+require this review with its own printed ID. Seed resumes the current outcome
+of each original change; it does not cast approvals, replace a rejected change
+or require a tenant reset. Once seed completes, inspect and capture the Session:
+
+```sh
 synveda demo retry-review inspect --author-credentials author
 synveda demo retry-review capture \
   --author-credentials author \

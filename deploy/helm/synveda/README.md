@@ -5,7 +5,7 @@ installation Job. Choose who owns PostgreSQL and identity; the chart installs
 no cluster operator, ingress controller or StorageClass. A tenant is this
 installation's identity boundary; a workspace groups people and projects.
 
-<!-- installation-version: 0.4.3; publication: published -->
+<!-- installation-version: 0.4.4; publication: unreleased -->
 **The current published release is v0.4.3.** The preparation, customer presets,
 preflight and console changes in this checkout are **source candidates for the
 next release**. They are included by chart packaging and tested locally; they
@@ -70,7 +70,8 @@ and install namespaced workloads/Secrets. Ask the administrator for Helm's
 get/list/watch/create/update/patch/delete access to Deployments, Jobs,
 Services, ConfigMaps, Secrets, ServiceAccounts and selected StatefulSets/PVCs
 and Ingresses. Pod inspection/logs and explicit private verification need
-Pods get/list/watch, pods/log get and pods/exec create. CNPG adds its selected
+Pods get/list/watch, pods/log get, pods/exec create and pods/portforward create
+for local access. CNPG adds its selected
 namespaced API; NetworkPolicy/Route access is needed only when enabled.
 Cluster-admin is unnecessary. Helm stores its release metadata in Secrets.
 
@@ -101,7 +102,24 @@ retained claims and Helm's optional verification Pod (100m/128Mi request,
 [Short-run observations](../../../demos/evidence/ops11-starter.json) exclude
 cluster/driver overhead. No setup-time or minimum-cluster claim is published.
 
+For a macOS **local evaluation**, OrbStack Kubernetes can supply the selected
+cluster. Start it with `orb start k8s`, set `CONTEXT=orbstack`, and inspect its
+actual StorageClasses with `kubectl --context "$CONTEXT" get storageclasses`.
+Use a newly authorised namespace and a kubectl client within one minor version
+of its API server; OrbStack's bundled client can lag its server. Confirm both
+versions with `kubectl --context "$CONTEXT" version -o json` before preparing.
+Keep the two loopback forwards below even when OrbStack offers direct Service
+access, so the application origin, issuer and callback stay consistent.
+This local route needs no ingress controller. Shared HTTPS ingress, other
+distributions and human timing trials require their own acceptance.
+
 ## 3. Download and verify a named release
+
+The release chart is already packaged with its locked Keycloak dependency,
+customer presets and preparation tools. You do not compile Helm, build Rust
+or run `helm dependency build` to install a downloaded release. For a reviewed
+source checkout, [package the chart with one command](BUILD.md); its images
+remain a separate, matching source candidate.
 
 Run this **entire block** from a workstation directory for downloads. The
 subshell fails closed: extraction occurs only after publisher and all selected

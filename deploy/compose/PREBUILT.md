@@ -4,7 +4,7 @@ Run the prebuilt bundle for local evaluation, or use reference HTTPS with
 infrastructure you already operate. Both use the same Synveda services and
 access controls.
 
-<!-- installation-version: 0.4.3; publication: published -->
+<!-- installation-version: 0.4.4; publication: unreleased -->
 **v0.4.3 is the current published bundle.** It downloads images by digest from
 the public registry. Installing the server bundle does not require a native
 Synveda CLI or registry credentials.

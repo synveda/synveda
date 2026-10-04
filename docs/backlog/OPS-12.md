@@ -1804,12 +1804,22 @@ clean hosted source/run pair nor changes to immutable v0.4.3. Candidate client,
 runtime and server bytes must match; published same-version client contracts
 must not be described as this candidate.
 
-**Next action:** obtain the authorised disposable target and three unfamiliar
-engineers in [OPS-11](OPS-11.md#fresh-install-source-checkpoint-2026-10-03), then
-qualify preparation → fresh-human login → project → client → reviewed
-Knowledge/context/source, correction/retry and retained reinstall. Kind also
-needs a running authorised Docker daemon. After candidate acceptance, select a
-clean source for the existing full same-source CI/nonpublishing Release proof.
-No publication, hosted dispatch, new source/run pair or external contact occurred
-here. Release-security continuation and paused automation remain unchanged.
-OPS-12 remains open.
+The owner's 2026-10-04 OrbStack selection now has live local evidence in
+[OPS-11](OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04): namespace-only
+installation, real browser login, native CLI MCP revision/source delivery and
+retained reinstall passed. Source packaging is one `make chart-package`, with
+the locked dependency and tools already included. ADR-0100 records pending
+Configuration request/change custody and normal matrix-aware review/apply retry.
+Three unfamiliar engineer trials, shared first-human/ingress acceptance and
+native harness loading remain pending. The optional after-console sample's
+strict apply needs another admitted operator; the proposed temporary provider
+administration was rejected by automatic approval review and awaits explicit
+owner permission.
+
+**Next action:** finish that normal reviewed resume without a reset, run the
+three guide-only trials, and qualify one clean committed 0.4.4 source with full
+main-push CI and the existing nonpublishing Release drill. The owner authorised
+commit, push and a new release after the friction is resolved; 0.4.4 metadata
+and generated contracts are prepared as unreleased. No immutable tag or public
+release has been created. Do not borrow earlier source/run reports. Paused
+automation remains unchanged. OPS-12 remains open.

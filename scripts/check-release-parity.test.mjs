@@ -56,6 +56,52 @@ function validateVersion(version) {
   });
 }
 
+test("one-command source chart packaging includes its dependency and native tools without downloads", (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-chart-command-"));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const output = join(scratch, "chart output");
+  const version = workspaceVersion(read("Cargo.toml"));
+  const before = read("deploy/helm/synveda/Chart.lock");
+  const archive = join(output, `synveda-${version}.tgz`);
+  let first;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = spawnSync("make", ["chart-package"], {
+      cwd: ROOT, encoding: "utf8", timeout: 30_000,
+      env: { ...process.env, SYNVEDA_CHART_OUTPUT: output },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(result.stdout.includes(`Source chart: ${archive}`));
+    const bytes = readFileSync(archive);
+    if (first) assert.deepEqual(bytes, first, "retry must preserve archive bytes");
+    first = bytes;
+  }
+  assert.equal(read("deploy/helm/synveda/Chart.lock"), before);
+  for (const member of ["examples/prepare.mjs", "examples/operator.mjs", "BUILD.md"]) {
+    const extracted = spawnSync("tar", ["-xOzf", archive, `synveda/${member}`], { encoding: "utf8" });
+    assert.equal(extracted.status, 0, extracted.stderr);
+    assert.equal(extracted.stdout, read(`deploy/helm/synveda/${member}`));
+  }
+  const dependency = spawnSync("helm", ["show", "chart", archive], { encoding: "utf8" });
+  assert.equal(dependency.status, 0, dependency.stderr);
+  assert.match(dependency.stdout, /name: keycloakx/);
+  assert.ok(dependency.stdout.includes(`version: ${version}`));
+});
+
+test("an incomplete chart checkout refuses packaging before output or dependency fetch", (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-chart-missing-"));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  mkdirSync(join(scratch, "scripts"));
+  for (const name of ["package-chart.sh", "release-version.sh"]) writeFileSync(join(scratch, "scripts", name), read(`scripts/${name}`));
+  writeFileSync(join(scratch, "Cargo.toml"), read("Cargo.toml"));
+  const output = join(scratch, "output");
+  const result = spawnSync("sh", [join(scratch, "scripts/package-chart.sh")], {
+    cwd: scratch, encoding: "utf8", env: { ...process.env, SYNVEDA_CHART_OUTPUT: output },
+  });
+  assert.equal(result.status, 66);
+  assert.ok(result.stderr.includes("restore the matching source checkout or verified chart archive"));
+  assert.equal(existsSync(output), false);
+});
+
 test("release versions form one bounded label- and OCI-safe vocabulary", () => {
   for (const version of [
     "0.2.0",

@@ -133,15 +133,51 @@ conflicts, registry pull status, interruption/retry, quota/limits and retained
 claim rendering. These do not establish live retained-data continuity or login.
 Published v0.4.3 remains separate from this candidate.
 
-**Blockers and next action:** no authorised disposable context with a named
-distribution/patch, namespace allowance, actual ingress, StorageClass/driver
-and enforcing CNI has been supplied. The local Docker client has no running
-daemon, so candidate Kind/browser/product acceptance cannot run here. Obtain
-that explicit target, package one matching reviewed source/image set, run the
-guide in fresh namespaces and retain separate readiness, fresh-human login and
-bootstrap-removal, client context delivery, learning/review/provenance and
-retained-data evidence. Never use an arbitrary current context. A non-OpenShift
-target qualifies only its named environment; SCC/router acceptance remains open.
+### OrbStack local acceptance checkpoint (2026-10-04)
+
+The owner selected OrbStack Kubernetes for live acceptance. OrbStack 2.2.3,
+Kubernetes `v1.35.6+orb1`, Helm 4.2.3 and a matching kubectl 1.35.6 ran the
+packaged bundled/bundled local recipe in a fresh restricted namespace. The
+installer used a namespace-only ServiceAccount, a non-default release, two
+selected loopback ports and a dedicated Retain StorageClass backed by
+`rancher.io/local-path` with WaitForFirstConsumer. The actual PVC bound at
+37Gi. A credential-free probe allowed HTTP before a NetworkPolicy and denied
+it afterward. No ingress controller was installed or qualified.
+
+Preparation retry preserved private state and credentials. Preflight, the
+installation Job, private readiness and `helm test` passed. Real browser PKCE,
+workspace/project creation, manual Codex/Copilot discovery, reload recovery,
+exploration and logout passed. Ordinary governed Knowledge, native CLI MCP
+recall with project/Session binding, exact-revision Context, synthetic repository
+provenance and a valid audit chain passed. Retained uninstall/reinstall preserved
+the same PVC UID, nine original Secret objects/bytes and original product
+addresses; fresh browser authentication and MCP/context checks passed afterward.
+
+`make chart-package` now produces the workspace-version archive without Rust,
+Docker or dependency downloads. The package includes its tracked locked
+Keycloak dependency, operator tools and customer instructions. Packaging twice
+produced identical bytes; incomplete source refuses before producing output.
+The [content-free record](../../demos/evidence/ops11-orbstack-first-use.json)
+names the source/image identities, checks and limits. These are local source
+probes, not qualification of the final 0.4.4 release artifacts.
+
+**Blockers and next action:** the optional staged sample after console setup
+correctly requires strict Configuration review. The CLI now persists its
+original request/change, names normal review and retry, and displays author/
+reviewer/effect separation. Two distinct reviews passed; applying as the author
+was correctly denied. Finishing that live resume test needs a separate admitted
+workspace administrator. Automatic approval review rejected the proposed
+temporary Keycloak provider-admin procedure and brief identity-service stop;
+explicit owner approval is pending. No provider bootstrap or extra authority
+was created. Keep the existing tenant/receipt and complete normal invitation,
+review/apply and retry after that input; never reset to evade the matrix.
+
+Shared HTTPS ingress, private first-human admission/bootstrap removal, external
+providers, OpenShift SCC/router and actual vendor/model use remain separate live
+checks. Qualify only the named local route from this evidence. The coordinated
+0.4.4 source remains unreleased until its exact committed source passes full
+main-push CI and the existing nonpublishing Release drill, followed by the
+authorised immutable tagged publication.
 
 Three unfamiliar engineer trials also await participants. Give each only the
 shipped guide, its own authorised disposable namespace and fresh human identity

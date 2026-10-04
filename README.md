@@ -27,7 +27,7 @@ utility. Allow at least 6 GiB for Docker. No source build, cloud account or
 model subscription is required. Start on Linux AMD64/ARM64; see
 [platform limits](docs/PRODUCTION_READINESS.md) for other hosts.
 
-<!-- installation-version: 0.4.3; publication: published -->
+<!-- installation-version: 0.4.4; publication: unreleased -->
 Download the [published v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
 into a new directory and verify its publisher and checksum before extraction:
 

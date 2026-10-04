@@ -6,17 +6,28 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-version="${1:?usage: package-chart.sh <version> <output-dir>}"
-outdir="${2:?usage: package-chart.sh <version> <output-dir>}"
+if [ "$#" -gt 2 ]; then
+  printf '%s\n' 'usage: package-chart.sh [version] [output-dir]' >&2
+  exit 64
+fi
+version="${1:-$(awk -F '"' '/^\[workspace.package\]$/ { selected=1; next } selected && /^version = / { print $2; exit }' Cargo.toml)}"
+outdir="${2:-${SYNVEDA_CHART_OUTPUT:-target/helm}}"
 
 # Version validation must precede every derived output path.
 sh scripts/release-version.sh "$version"
 
 command -v helm >/dev/null 2>&1 || {
-  printf '%s\n' 'package-chart: helm is not on PATH' >&2
+  printf '%s\n' 'package-chart: install Helm, then retry make chart-package' >&2
   exit 69
 }
 
+# OPS-12: the locked dependency travels with source and release archives.
+# Packaging must not fetch a different chart or update its lock on a retry.
+test -f deploy/helm/synveda/charts/keycloakx-7.3.2.tgz || {
+  printf '%s\n' 'package-chart: bundled Keycloak chart is missing; restore the matching source checkout or verified chart archive, then retry. No dependency update is required.' >&2
+  exit 66
+}
+case "$outdir" in /*) ;; *) outdir="$PWD/$outdir" ;; esac
 mkdir -p "$outdir"
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT INT TERM
@@ -29,3 +40,6 @@ helm package "$stage/synveda" \
   --version "$version" \
   --app-version "$version" \
   --destination "$outdir"
+printf '%s\n' "Source chart: $outdir/synveda-$version.tgz" \
+  'Includes the locked dependency, customer presets and preparation tools. No Rust build, Docker or dependency download is required.' \
+  'Use matching reviewed images; packaging alone does not establish publication or live acceptance.'

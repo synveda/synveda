@@ -1,6 +1,6 @@
 # Production readiness
 
-Assessment baseline: 2026-09-24; source claims reconciled 2026-10-03. Scope:
+Assessment baseline: 2026-09-24; source claims reconciled 2026-10-04. Scope:
 the current context-platform checkout as a self-hosted service. Passing
 repository gates establishes repeatable behaviour; it does not establish
 availability, recoverability, supportability or a releasable supply chain.
@@ -14,13 +14,21 @@ fresh installation: native repeatable preparation, packaged customer presets,
 storage-mode refusal, prerequisite checks, private human admission, truthful
 resumable client setup and Knowledge/review/context guidance.
 [Local validation](../demos/evidence/ops11-first-install-source.json) records
-offline renders, controlled API regressions and console checks. Candidate live
-Kind/first-login/client/product acceptance is unrun here: Docker has no running
-daemon and no authorised named self-managed target was supplied. Three unfamiliar
-engineer trials and measured setup times remain pending in
-[OPS-11](backlog/OPS-11.md#fresh-install-source-checkpoint-2026-10-03).
+offline renders, controlled API regressions and console checks. The owner's
+2026-10-04 [OrbStack local probe](../demos/evidence/ops11-orbstack-first-use.json)
+adds actual namespace-only installation, selected 37Gi retained storage,
+NetworkPolicy enforcement, real browser PKCE, native CLI MCP exact-revision
+Knowledge/context/source delivery and retained reinstall. It uses local source
+images and synthetic identities, not the final 0.4.4 release artifact set.
+Shared HTTPS ingress, first-human bootstrap removal, real harness/model use and
+three unfamiliar engineer trials remain pending. The optional sample's strict
+Configuration resume additionally needs a separate admitted effect actor;
+automatic approval review rejected temporary provider administration pending
+explicit permission. [OPS-11](backlog/OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04)
+owns these blockers and next actions.
 Published v0.4.3 lacks these new tools and instructions. This candidate changes
-neither the verdict nor HA, N-1, CNI/CSI/ingress, recovery or publisher claims.
+neither the verdict nor HA, N-1, shared CNI/CSI/ingress, off-host recovery or
+publisher claims. The coordinated 0.4.4 source remains unreleased.
 
 The 2026-09-19 [Kubernetes deployment audit](../deploy/README.md#kubernetes-release-contract)
 defines OPS-11's narrower next release. The portable chart increment implements

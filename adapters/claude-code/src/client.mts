@@ -25,7 +25,7 @@ import type {
 } from "./types.mjs";
 
 export const CLIENT_NAME = "claude-code";
-export const CLIENT_VERSION = "0.4.3";
+export const CLIENT_VERSION = "0.4.4";
 
 export type CallResult<T> =
   | { ok: true; value: T; degraded: string[] }
