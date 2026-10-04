@@ -678,7 +678,7 @@ function InstructionsStep({
         Run these commands in a terminal on the machine where you use{" "}
         {client.label}. They require the Synveda CLI on your PATH.
       </p>
-      <p><a href="https://github.com/synveda/synveda/blob/main/docs/CONSUMER_CLI.md">Install the Synveda CLI</a> matching this server’s release or source candidate, then add its binary directory to PATH. These setup commands require the current candidate CLI; the published v0.4.3 CLI has an earlier client contract.</p>
+      <p><a href="https://github.com/synveda/synveda/blob/main/docs/CONSUMER_CLI.md">Install the Synveda CLI</a> matching this server’s version, then add its binary directory to PATH. Use the same version so setup commands match this server’s client contract.</p>
       <p>Run project setup at the Git repository root. Observation is initially off. To opt into recording transcript/tool events, explicitly rerun <code>synveda setup --project {projectId} --observation on</code> and follow the trusted-hook instructions. Capture creates proposed learnings for review.</p>
       <ol className="commands">
         {connectionSteps(client, origin, projectId ?? undefined).map((command) => (
