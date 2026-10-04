@@ -5,9 +5,11 @@ People can inspect its source, review proposed changes and choose what later
 sessions may use. The web console handles everyday work; the CLI and public API
 support automation and advanced administration.
 
-<!-- installation-version: 0.4.4; publication: unreleased -->
-The current published release is **v0.4.3**. Choose the route that matches your
-infrastructure:
+<!-- installation-version: 0.4.4; publication: published -->
+The current published release is **[v0.4.4](https://github.com/synveda/synveda/releases/tag/v0.4.4)**,
+for controlled evaluation. The three unfamiliar engineers' guide-only trials
+remain [pending](backlog/OPS-11.md); setup time and production readiness are
+unclaimed. Choose the route that matches your infrastructure:
 
 | Route | Guide | When to use it |
 | --- | --- | --- |
@@ -238,10 +240,11 @@ backup and restore procedure. Keep both the Synveda and Keycloak databases
 with the matching encryption and identity material. For Kubernetes, use its
 [operations guide](../deploy/helm/synveda/OPERATIONS.md).
 
-Schema epoch 3 now has an exact v0.4.3 baseline and a forward migration in the
-source candidate (ADR-0121). The release-shaped v0.4.3 upgrade and joint
-recovery drill remain unqualified; do not use a source checkout to upgrade
-retained customer data. Older epochs and v0.4.0's different baseline checksum
+Published v0.4.4 preserves the exact v0.4.3 schema epoch 3 baseline and adds
+the `0002` and `0003` forward migrations (ADR-0121 and ADR-0126). The published
+v0.4.3-to-v0.4.4 upgrade and joint recovery drill remain unqualified; preserve
+retained customer data until OPS-6 qualifies that pair. Older epochs and
+v0.4.0's different baseline checksum
 are refused. A reset deletes data and requires the exact confirmation in the
 Docker guide. Application rollback does not reverse a database migration.
 The [production readiness assessment](PRODUCTION_READINESS.md) states current

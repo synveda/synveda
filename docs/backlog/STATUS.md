@@ -7,8 +7,9 @@ implementation briefs.
 
 114 delivered; 37 open. CI checks the counts, IDs and open-brief contract.
 
-The current [v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
-is available for self-hosted evaluation. [Production readiness](../PRODUCTION_READINESS.md)
+The current [v0.4.4 release](https://github.com/synveda/synveda/releases/tag/v0.4.4)
+is available for controlled self-hosted evaluation. Three unfamiliar engineers'
+guide-only trials remain pending. [Production readiness](../PRODUCTION_READINESS.md)
 tracks deployment and recovery gaps; the generated [client support matrix](../CLIENT_SUPPORT.md)
 tracks tested agent versions. The release history and implementation diaries
 remain in Git and the linked release evidence.
@@ -320,10 +321,14 @@ three unfamiliar engineer participants remain unavailable. The owner authorised
 guides carry matching version/source pins and source-bound outside links under
 ADR-0137, without editing the original chart tools or dependency.
 The [current checkpoint](OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04)
-owns the exact next action. Both features remain open; the coordinated 0.4.4
-candidate still needs exact-source hosted CI/Release qualification and authorised
-publication. Setup time, shared platform support and production readiness remain
-unclaimed.
+owns the exact next action. Both features remain open. The controlled evaluation
+v0.4.4 release now passes
+exact-source full main-push CI, the nonpublishing drill and tagged publication
+at `95139842af512faf2dad711fdff14e471e93a3ba`; the
+[release record](../../demos/evidence/ops12-044-controlled-release.json) retains its proof.
+Next recruit the three guide-only trial participants and qualify shared
+first-human/HTTPS admission separately. Setup time, shared platform support and
+production readiness remain unclaimed.
 
 OPS-12 / ADR-0132 requires source installers to verify the signed checksum
 inventory with a trusted GitHub CLI, fixed publisher/workflow/tag/runner policy

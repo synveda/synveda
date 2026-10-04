@@ -1827,10 +1827,21 @@ trials explicitly pending. Private chart staging now gives the archive's guides
 matching version/source pins and source-bound outside links, retaining exact
 tools, presets, dependency and licence bytes under ADR-0137.
 
-**Next action:** qualify one clean committed source with full main-push CI and
-the existing nonpublishing Release drill, then publish its new immutable tag.
-The owner authorised
-commit, push and a new release after the friction is resolved; 0.4.4 metadata
-and generated contracts are prepared as unreleased. No immutable tag or public
-release has been created. Do not borrow earlier source/run reports. Paused
+**Current release checkpoint:** v0.4.4 is published as controlled evaluation
+from exact source `95139842af512faf2dad711fdff14e471e93a3ba`.
+[Full main-push CI](https://github.com/synveda/synveda/actions/runs/37200002514),
+[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/37200048266) and
+[tagged qualification/publication](https://github.com/synveda/synveda/actions/runs/37207056495) passed for that source.
+The [retained record](../../demos/evidence/ops12-044-controlled-release.json)
+binds all 55 public assets and same-run reports to the attested inventory.
+All six native clients and Rust sidecars, both OCI/Compose/consumer recovery
+sets and all four Helm ownership modes per architecture passed; the published
+images and byte-identical OCI chart passed anonymous verification. No earlier
+source/run report supplied missing evidence. Immutable v0.4.0–v0.4.3 artifacts
+remain unchanged.
+
+**Next action:** recruit the three unfamiliar engineers for guide-only trials;
+qualify shared first-human/HTTPS admission and installed native real issuer/
+vendor/model use separately. Resolve the documented notice-provenance and
+coverage gaps without expanding this release's claims. Paused
 automation remains unchanged. OPS-12 remains open.

@@ -5,8 +5,8 @@ These files ship inside the chart archive. They are ordinary Helm values;
 for context selection, verification and installation.
 
 <!-- chart-package-source-status:start -->
-The current files and
-native utilities are source candidates, absent from the published v0.4.3 archive.
+These recipes and native utilities ship in the controlled evaluation v0.4.4
+chart. Use its matching verified archive and image overlay.
 <!-- chart-package-source-status:end -->
 
 Start with local evaluation for one person, shared HTTPS with bundled services

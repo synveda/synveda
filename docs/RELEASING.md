@@ -25,6 +25,21 @@ anonymous download. Its upload-only failure was recovered from the original
 workflow artifacts; that workflow remains failed while its installation jobs
 and recovered release are verified. v0.3.0 also remains immutable.
 
+## Controlled evaluation v0.4.4
+
+The [controlled evaluation v0.4.4 release](https://github.com/synveda/synveda/releases/tag/v0.4.4)
+uses exact source `95139842af512faf2dad711fdff14e471e93a3ba`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/37200002514),
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/37200048266) and
+[tagged publication](https://github.com/synveda/synveda/actions/runs/37207056495) passed. The release contains 55 attested assets,
+all six native client reports and Rust sidecars, both native OCI/Compose/consumer
+recovery sets, all four Helm ownership modes per architecture and anonymous
+two-registry/image/chart verification. The [retained record](../demos/evidence/ops12-044-controlled-release.json)
+binds source, run IDs, inventory/report hashes and published chart bytes.
+These gates do not establish production readiness, OS signing, complete
+third-party coverage, a published N-1 upgrade or native vendor/model use.
+Three unfamiliar engineers' guide-only trials remain pending in OPS-11.
+
 ## Native CLI release artifacts
 
 The Release workflow requires every archive below and its native execution
@@ -71,7 +86,7 @@ issuer/harness use of these archives and cold network download measurements
 remain open. The two historical server binary archives
 and system-Node plugin archive retain their existing contract.
 
-The source candidate in ADR-0135 also pins each private Node executable and its
+The v0.4.4 packaging contract in ADR-0135 pins each private Node executable and its
 complete upstream licence bytes, preserving Windows CRLF. Its existing manifest
 and native report carry the reported dependency versions and notice hashes;
 assembly rechecks the actual archive members. Supplementary nbytes, SQLite,
@@ -81,8 +96,8 @@ reviewed Node 22 notice set. The native image verifier reads the actual executab
 and notices
 before isolated metadata execution; local and both-registry assembly require
 the pinned inventory in existing reports. Local macOS ARM client and Linux ARM
-product candidates pass; these are not changes to published v0.4.3 or clean
-hosted qualification. Reported versions do not establish complete transitive
+product probes pass separately from the complete v0.4.4 native hosted
+qualification. Published v0.4.3 remains unchanged. Reported versions do not establish complete transitive
 native-library coverage. The [source review](../demos/evidence/ops12-node-source-notice-review.json)
 retains exact source/archive hashes and Windows static imports; ncrypto and
 fast_float provenance and conditional V8 coverage remain open.
@@ -174,8 +189,10 @@ node scripts/rust-archive-sbom.mjs server TARGET VERSION SOURCE_SHA SYFT_PATH OU
 passes the actual client and successfully stripped server binaries, plus private
 client install/reinstall, authentication fixtures and extracted hook replay.
 It is a dirty-checkout probe; assembly deliberately refuses its source state.
-Clean hosted archive qualification remains pending. These documents cover
-embedded Rust dependencies, not Node/JavaScript, C libraries, OS/chart inventory,
+The v0.4.4 clean hosted archive qualification now passes all six native client
+targets and both historical server archives; the local probe remains separate.
+These documents cover embedded Rust dependencies, not Node/JavaScript,
+C libraries, OS/chart inventory,
 third-party notice completeness or vulnerability/incident policy.
 
 ## Owner setup
@@ -343,12 +360,13 @@ never use a real release to test whether the secret was added correctly.
 
 ## Artifacts and verification
 
-The complete stable inventory is 35 assets: six native client archives and six
+The complete stable inventory is 55 assets: six native client archives and six
 matching reports; the two historical server archives; console, plugin and
 reference archives; the Helm chart and two image overlays; the two-registry
 inventory; two native anonymous image reports, two candidate identities, two
-candidate image smoke reports and six candidate Compose/consumer/Helm reports; and
-`SHA256SUMS` plus `SHA256SUMS.sigstore.json`. The executable inventory is
+candidate image smoke reports and six candidate Compose/consumer/Helm reports;
+20 native Rust SPDX/inventory sidecars; and `SHA256SUMS` plus
+`SHA256SUMS.sigstore.json`. The executable inventory is
 [`scripts/check-release-assets.mjs`](../scripts/check-release-assets.mjs).
 
 Each native AMD64/ARM64 image is built once per run from the same source and
@@ -393,7 +411,7 @@ must be byte-identical to the downloadable chart. The source checkout's
 
 After those gates, GitHub attests the final `SHA256SUMS`, which covers all
 archives, overlays, destination digests and native reports. The downloadable
-`SHA256SUMS.sigstore.json` carries that attestation. For a future approved
+`SHA256SUMS.sigstore.json` carries that attestation. For an approved
 release, verify it with a current trusted GitHub CLI before trusting its
 checksums. Supply the exact approved tag and source commit from the release:
 
@@ -410,15 +428,16 @@ before extracting it. A checksum from an unauthenticated download does not
 establish publisher identity. Failed or absent attestation is not permission to
 skip verification. GitHub documents [attestation verification](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
-The current source installers enforce this boundary under
+The published v0.4.4 installers enforce this boundary under
 [ADR-0132](adr/adr-0132-verify-publisher-before-installing-release-code.md): remote
 installs require a trusted GitHub CLI and an expected source commit, with fixed
 publisher/workflow/tag/runner policy and no checksum-only fallback. Unix uses
-curl for HTTPS redirects. Future release notes render the source commit and
+curl for HTTPS redirects. Release notes render the source commit and
 fetch the inspected bootstrap by that commit. An absolute local asset directory
 without an expected commit remains a clearly labelled development candidate;
-it is not publisher verification. Native Windows and six-platform archive
-qualification are required before publishing this installer contract. The
+it is not publisher verification. Both native Windows targets and all six
+archive targets passed the v0.4.4 qualification gates; changed source requires
+fresh qualification. The
 published v0.4.3 tag-bound scripts still require the manual verification above.
 Artifact authentication also does not prove
 OS code signing, absence of vulnerabilities or safe data migration. An owner

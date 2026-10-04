@@ -1,6 +1,6 @@
 {
   "sourceVersion": "0.4.4",
-  "publication": "unreleased",
+  "publication": "published",
   "pagesUrl": "https://synveda.github.io/synveda/",
   "dockerGuide": "deploy/compose/PREBUILT.md",
   "kubernetesGuide": "deploy/helm/synveda/README.md",

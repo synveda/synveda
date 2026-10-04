@@ -1,6 +1,6 @@
 # Native consumer commands
 
-These commands are in the published v0.4.3 client archive and matching plugin.
+These commands are in the published v0.4.4 client archive and matching plugin.
 Install the archive for your platform, or build the current CLI with
 `SQLX_OFFLINE=true cargo build -p synveda-cli`. The
 [client support matrix](CLIENT_SUPPORT.md) records tested agent versions and
@@ -9,43 +9,51 @@ platform limits.
 ## Release downloads
 
 The [release asset table](RELEASING.md#native-cli-release-artifacts) names the
-Linux, macOS and Windows archives for x64 and ARM64. Download the v0.4.3
-archive for your platform. Source examples later in this guide use locally
-built assets from the same workspace version.
+Linux, macOS and Windows archives for x64 and ARM64. Published v0.4.4 includes
+all six. The installers select the native archive and verify its publisher,
+tag, exact source and unique checksum entry before fetching or executing code.
+They require a trusted GitHub CLI, installed independently of these assets;
+no compiler, Docker, system Node or registry credentials are needed.
 
-For published v0.4.3, download your platform's archive,
-`SHA256SUMS` and `SHA256SUMS.sigstore.json` into a private directory. Follow the
-[publisher and checksum verification steps](RELEASING.md#artifacts-and-verification)
-before installation. Use the installer from that exact tag and inspect it.
-From the directory containing the verified downloads on Unix:
+On Unix, fetch the bootstrap by the reviewed release's immutable source commit,
+inspect it, then install only the CLI and adapters:
 
 ```sh
-RELEASE_VERSION=0.4.3
-curl -fL "https://raw.githubusercontent.com/synveda/synveda/v$RELEASE_VERSION/scripts/install.sh" \
-  -o synveda-install.sh
+(
+  set -eu
+  RELEASE_VERSION=0.4.4
+  SOURCE_SHA=95139842af512faf2dad711fdff14e471e93a3ba
+  curl --fail --location --proto '=https' --proto-redir '=https' \
+    "https://raw.githubusercontent.com/synveda/synveda/$SOURCE_SHA/scripts/install.sh" \
+    --output synveda-install.sh
+)
 # Inspect synveda-install.sh before executing it.
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION="$RELEASE_VERSION" \
-  SYNVEDA_BASE_URL="file://$PWD" sh synveda-install.sh
+SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.4 \
+  SYNVEDA_SOURCE_SHA=95139842af512faf2dad711fdff14e471e93a3ba sh synveda-install.sh
 ```
 
-On Windows, place the verified ZIP and checksum inventory in a private local
-directory, download `scripts/install.ps1` from the same tag, inspect it, then
-run it with `-Version` and `-BaseUrl 'file:///C:/verified-synveda-assets'` pointing
-to those files. Follow the Windows ownership and PowerShell requirements below.
-Neither route requires a compiler, Docker, system Node or registry credentials.
-The tag-bound v0.4.3 installer checks checksums; it does not perform the
-attestation step for you. That published installer remains unchanged.
+On Windows, download and inspect the same source's PowerShell installer:
 
-The current source installer follows
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/synveda/synveda/95139842af512faf2dad711fdff14e471e93a3ba/scripts/install.ps1 -OutFile synveda-install.ps1
+# Inspect this script; use a host whose existing execution policy permits it.
+& ./synveda-install.ps1 -Version 0.4.4 -SourceSha 95139842af512faf2dad711fdff14e471e93a3ba
+```
+
+The expected source comes from the reviewed release record, never from an
+unverified download. HTTPS mirrors follow the same verification policy. For
+offline installation, download the platform archive, `SHA256SUMS` and
+`SHA256SUMS.sigstore.json` into a private local directory; retain `SYNVEDA_SOURCE_SHA`
+or `-SourceSha` and supply `SYNVEDA_BASE_URL=file:///absolute/path/to/verified-assets`
+or `-BaseUrl 'file:///C:/verified-synveda-assets'`. The signer check still applies.
+Missing or failed proof stops installation, under
 [ADR-0132](adr/adr-0132-verify-publisher-before-installing-release-code.md).
-Remote installs require a trusted GitHub CLI and `SYNVEDA_SOURCE_SHA` (Unix) or
-`-SourceSha` (Windows), naming the expected 40-character source commit from the
-reviewed release record. It verifies `SHA256SUMS.sigstore.json` against the fixed
-publisher, release workflow, tag and commit before fetching or executing code.
-HTTPS mirrors use the same policy. Missing proof or a failed verifier stops
-installation. Future release notes supply the exact commit and an inspected
-bootstrap script fetched by that commit. This is a source candidate; native
-Windows and all six next-release archive checks remain required.
+
+The older v0.4.3 installer is unchanged and requires the manual attestation
+verification in its [versioned guide](https://github.com/synveda/synveda/blob/v0.4.3/docs/CONSUMER_CLI.md).
+Native execution reports establish archive installation and fixtures, not
+OS code signatures, native vendor loading or real issuer login from the client
+archives. See [production readiness](PRODUCTION_READINESS.md) for those limits.
 
 <a id="client-archive-candidate"></a>
 ## Client archive contents and local candidates
@@ -54,7 +62,7 @@ Windows and all six next-release archive checks remain required.
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
-`windows-x86_64`. The v0.4.3 release includes all six archives. See the
+`windows-x86_64`. The v0.4.4 release includes all six archives. See the
 [readiness assessment](PRODUCTION_READINESS.md) for platform limits.
 On Windows, credentials, receipts and hook spool state use private local storage.
 Windows setup and vendor configuration writers, deployment and diagnostic logs
@@ -82,7 +90,7 @@ The existing installer has an explicit client mode. For **locally built**
 candidate assets and their `SHA256SUMS` in an absolute directory:
 
 ```sh
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.3 \
+SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.4 \
   SYNVEDA_BASE_URL=file:///absolute/path/to/candidate-assets \
   sh scripts/install.sh
 ```
@@ -105,7 +113,7 @@ On native Windows x64 or arm64, use the source PowerShell installer with
 existing PowerShell policy permits it; the installer never changes that policy:
 
 ```powershell
-& ./scripts/install.ps1 -Version 0.4.3 -BaseUrl 'file:///C:/candidate-assets'
+& ./scripts/install.ps1 -Version 0.4.4 -BaseUrl 'file:///C:/candidate-assets'
 ```
 
 PowerShell 5.1+ and a private local fixed-drive parent are required. The default
@@ -149,11 +157,11 @@ and Corepack. Build the existing adapters first, download the selected pinned
 archive, then run on that target's native host:
 
 ```sh
-node scripts/package-client.mjs 0.4.3 darwin-arm64 target/debug/synveda \
+node scripts/package-client.mjs 0.4.4 darwin-arm64 target/debug/synveda \
   /absolute/path/to/node-v24.21.0-darwin-arm64.tar.gz \
   /absolute/path/to/candidate-assets "$(git rev-parse HEAD)"
-node scripts/check-client-package.mjs 0.4.3 \
-  /absolute/path/to/candidate-assets/synveda-client-0.4.3-darwin-arm64.tar.gz \
+node scripts/check-client-package.mjs 0.4.4 \
+  /absolute/path/to/candidate-assets/synveda-client-0.4.4-darwin-arm64.tar.gz \
   /absolute/path/to/client-report.json
 ```
 
@@ -169,7 +177,7 @@ state.
 On each native Windows host, build the same adapters and CLI, then run:
 
 ```powershell
-node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.3 windows-arm64 C:/candidate-assets (git rev-parse HEAD)
+node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.4 windows-arm64 C:/candidate-assets (git rev-parse HEAD)
 ```
 
 Use `windows-x86_64` on x64. This downloads the pinned Node ZIP, packages the
@@ -187,11 +195,11 @@ when absent; the CLI does not build images.
 From a terminal, using the built CLI on PATH:
 
 ```sh
-synveda doctor --bundle /absolute/path/to/synveda-reference-0.4.3
-synveda up --bundle /absolute/path/to/synveda-reference-0.4.3
-synveda status --bundle /absolute/path/to/synveda-reference-0.4.3
-synveda logs --bundle /absolute/path/to/synveda-reference-0.4.3 --tail 100
-synveda down --bundle /absolute/path/to/synveda-reference-0.4.3
+synveda doctor --bundle /absolute/path/to/synveda-reference-0.4.4
+synveda up --bundle /absolute/path/to/synveda-reference-0.4.4
+synveda status --bundle /absolute/path/to/synveda-reference-0.4.4
+synveda logs --bundle /absolute/path/to/synveda-reference-0.4.4 --tail 100
+synveda down --bundle /absolute/path/to/synveda-reference-0.4.4
 ```
 
 Without `--bundle`, the commands look in `$SYNVEDA_HOME/reference/current`

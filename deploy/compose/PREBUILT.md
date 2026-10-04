@@ -4,8 +4,8 @@ Run the prebuilt bundle for local evaluation, or use reference HTTPS with
 infrastructure you already operate. Both use the same Synveda services and
 access controls.
 
-<!-- installation-version: 0.4.4; publication: unreleased -->
-**v0.4.3 is the current published bundle.** It downloads images by digest from
+<!-- installation-version: 0.4.4; publication: published -->
+**v0.4.4 is the current controlled evaluation bundle.** It downloads images by digest from
 the public registry. Installing the server bundle does not require a native
 Synveda CLI or registry credentials.
 
@@ -18,26 +18,33 @@ the checksums; the GitHub CLI is a verification tool, not an installation
 dependency of the bundle.
 
 ```sh
-version=0.4.3
-release_url="https://github.com/synveda/synveda/releases/download/v$version"
-mkdir "synveda-$version" && cd "synveda-$version"
-for file in "synveda-reference-$version.tar.gz" SHA256SUMS SHA256SUMS.sigstore.json; do
-  curl -fLO "$release_url/$file"
-done
-gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
-  --repo synveda/synveda \
-  --signer-workflow synveda/synveda/.github/workflows/release.yml \
-  --source-ref "refs/tags/v$version" --deny-self-hosted-runners
-awk -v file="synveda-reference-$version.tar.gz" \
-  '$2 == file { count++; print } END { if (count != 1) exit 1 }' \
-  SHA256SUMS > reference.sha256
-if command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 --check reference.sha256
-else
-  sha256sum --check reference.sha256
-fi
-tar -xzf "synveda-reference-$version.tar.gz"
-cd "synveda-reference-$version"
+(
+  set -eu
+  RELEASE_VERSION=0.4.4
+  SOURCE_SHA=95139842af512faf2dad711fdff14e471e93a3ba
+  release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
+  mkdir "synveda-$RELEASE_VERSION" || exit 1
+  cd "synveda-$RELEASE_VERSION" || exit 1
+  for file in "synveda-reference-$RELEASE_VERSION.tar.gz" SHA256SUMS SHA256SUMS.sigstore.json; do
+    curl --fail --location --proto '=https' --proto-redir '=https' \
+      --connect-timeout 15 --max-time 120 --output "$file" "$release_url/$file" || exit 1
+  done
+  gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+    --repo synveda/synveda \
+    --signer-workflow synveda/synveda/.github/workflows/release.yml \
+    --source-ref "refs/tags/v$RELEASE_VERSION" --source-digest "$SOURCE_SHA" \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners || exit 1
+  awk -v file="synveda-reference-$RELEASE_VERSION.tar.gz" \
+    '$2 == file { count++; print } END { if (count != 1) exit 1 }' \
+    SHA256SUMS > reference.sha256 || exit 1
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 --check reference.sha256 || exit 1
+  else
+    sha256sum --check reference.sha256 || exit 1
+  fi
+  tar -xzf "synveda-reference-$RELEASE_VERSION.tar.gz" || exit 1
+) && cd synveda-0.4.4/synveda-reference-0.4.4
 ```
 
 Review `evaluation.json` before starting the installation, as described below.
@@ -191,9 +198,9 @@ deployment must retain `SYNVEDA_COMPOSE_RUNTIME=reference`. Switching to the
 loopback evaluation creates a separate deployment; it does not migrate the
 reference volume, realm or issuer. The current published baseline is **epoch
 3**. Earlier epochs fail with reset guidance and have no data migrator. The
-source candidate's forward path from the exact v0.4.3 baseline is not a
-qualified published upgrade; preserve v0.4.3 data until OPS-6 proves the joint
-recovery procedure. There is no supported v0.2.0 → current data upgrade.
+v0.4.4 forward migrations preserve the exact v0.4.3 baseline, but that published
+upgrade pair is not qualified. Preserve v0.4.3 data until OPS-6 proves the joint
+upgrade/recovery procedure. There is no supported v0.2.0 → current data upgrade.
 Helm/application rollback never reverses SQL migrations.
 
 Ordinary removal is `down`, followed by deliberate removal of the extracted
