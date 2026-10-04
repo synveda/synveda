@@ -26,16 +26,20 @@ the [strict Configuration resume](../demos/evidence/ops11-orbstack-reviewed-resu
 now passes through a separate normally invited operator, preserving the original
 changes and receipt. The staged Capture, distinct review/apply, Skill binding,
 revision/source Context and audit checks also pass. Temporary provider
-administration was removed. Selected PR checks pass at `97c12bc1`; full
-main-push CI and same-source Release qualification remain pending.
+administration was removed. The controlled evaluation v0.4.4 release now passes
+full main-push CI and
+same-source dry-run/tagged qualification at `95139842af512faf2dad711fdff14e471e93a3ba`.
+The [release record](../demos/evidence/ops12-044-controlled-release.json) retains exact
+run/report/inventory hashes, all six native clients and both image architectures.
+The historical OrbStack probe remains tied to its recorded source images.
 [OPS-11](backlog/OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04)
 owns these blockers and next actions. The owner authorised 0.4.4 as controlled
 evaluation with the three guide-only trials explicitly pending. Private chart
 staging binds its guides to the archive version and source without changing
 tools, presets or locked dependencies.
-Published v0.4.3 lacks these new tools and instructions. This candidate changes
-neither the verdict nor HA, N-1, shared CNI/CSI/ingress, off-host recovery or
-publisher claims. The coordinated 0.4.4 source remains unreleased.
+Published v0.4.4 includes these tools and instructions. Its verified publisher
+and packaging evidence changes neither the Not ready verdict nor the unresolved
+HA, N-1, shared CNI/CSI/ingress, off-host recovery and human acceptance gaps.
 
 The 2026-09-19 [Kubernetes deployment audit](../deploy/README.md#kubernetes-release-contract)
 defines OPS-11's narrower next release. The portable chart increment implements
@@ -85,13 +89,12 @@ durations are in [OPS-11](backlog/OPS-11.md) and the
 does not qualify encrypted off-host custody, WAL/PITR, a published N-1 upgrade,
 production RPO/RTO or recurring drills.
 
-**Verdict: Not ready.** Published v0.4.3 establishes native Linux AMD64/ARM64
-candidate deployment/recovery, anonymous public image/chart checks and an
-attested 35-asset inventory. Its tagged workflow passed all qualification but
-failed after draft upload on a GitHub draft-by-tag lookup; the exact verified
-draft was promoted by ID. The earlier v0.4.1 and v0.4.2 runs stopped before
-their final releases. Published installation evidence does not establish HA or
-production readiness.
+**Verdict: Not ready.** Published v0.4.4 establishes native Linux AMD64/ARM64
+candidate deployment/recovery, all six native client archives, anonymous public
+image/chart checks and an attested 55-asset inventory for controlled evaluation.
+The earlier v0.4.3 required verified draft-by-ID recovery; v0.4.1 and v0.4.2
+stopped before their final releases. Published installation evidence does not
+establish HA or production readiness.
 Release parity also remains conditional on the optional CNPG deployment path; production key
 custody/rotation and backup/PITR with recurring live restore remain P0 gaps.
 P1 gaps also leave the gateway single-replica, restart-shaped, without production
@@ -219,7 +222,8 @@ the official Syft 1.54.0 release. Its six native distributions are independently
 checksum/header reviewed. Both native Windows tool probes pass actual digest
 binding and report `synveda.exe`; the validator requires that exact basename.
 [Resolver evidence](../demos/evidence/ops12-native-syft-release-probe.json)
-does not establish product coverage; fresh complete qualification remains pending. The
+does not establish product coverage; complete qualification was pending at that
+checkpoint. The
 [blocker evidence](../demos/evidence/ops12-native-windows-scanner-blocker.json)
 records both native x64 gate failures and exact upstream source comparison.
 Failed reports provide no target qualification. PR CI repair does not replace
@@ -233,9 +237,9 @@ unchanged JavaScript. [Actual product-image evidence](../demos/evidence/ops12-co
 checks the stopped native Linux ARM image and matches all 12 files to the
 independently built console archive. A coherently changed image inventory with
 unchanged source/SBOM/notices still fails the archive binding. These dirty source
-candidates are separate from clean hosted qualification; Node/native libraries
-and broader third-party coverage remain open. Native Rust's Windows blocker and
-the readiness verdict are unchanged.
+candidates are separate from clean hosted qualification. The v0.4.4 release
+record now establishes the required native Rust and rendered-console checks;
+broader third-party coverage and the readiness verdict remain unchanged.
 
 The [Node mechanism probe](../demos/evidence/ops12-node-runtime-probe.json) checks
 all six official client distributions and both product Linux distributions.
@@ -249,9 +253,9 @@ refusals. The [product source candidate](../demos/evidence/ops12-product-node-in
 passes stopped-image byte/notice checks and native Linux ARM metadata execution;
 altered executable and truncated-notice images refuse before execution.
 Existing assembly gates require that inventory without adding a sidecar.
-Clean hosted and six-target native qualification remain pending. Reported
-versions do not establish complete transitive native coverage or change the
-readiness verdict.
+Clean hosted and six-target native qualification were pending at that
+checkpoint and now pass in v0.4.4. Reported versions do not establish complete
+transitive native coverage or change the readiness verdict.
 
 The [native package/notice mechanism probe](../demos/evidence/ops12-native-package-notice-probe.json)
 uses existing Syft catalogers on the retained local product image. Its 106
@@ -305,7 +309,7 @@ score for the implemented code.
 
 | Scope | Status | Exit evidence | Limit |
 |---|---|---|---|
-| Bundled loopback release | Conditional | Published v0.4.0 passed anonymous retrieval, installation, authentication, sample, recreation and paired restore on native Linux AMD64/ARM64; local macOS/OrbStack candidate also passed | v0.4.1 publication failed; localhost HTTP, one host, Docker Desktop/WSL2, off-host custody and N-1 remain unqualified |
+| Bundled loopback release | Conditional | Published v0.4.4 binds anonymous image retrieval to the same-run native Linux AMD64/ARM64 installation, authentication, sample, recreation and paired restore checks; local macOS/OrbStack source acceptance is recorded separately | Localhost HTTP and one host; Docker Desktop/WSL2, off-host custody and N-1 remain unqualified |
 | Development Compose | Not ready | Repeat the clean-volume browser/product lifecycle on Linux and Docker Desktop; one macOS/OrbStack run passed | Explicit loopback HTTP; no reference security claim |
 | Single-host reference | Not ready | Linux and desktop HTTPS runs with the restart matrix, joint logical database/key restore, Apalis canary and the implemented Operations view | One host; planned interruption; no HA, owned RPO/RTO or DR |
 | External OIDC | Not assessed | Same product image boots against a named conformant provider | Configuration-only evidence is not provider support |
@@ -478,15 +482,16 @@ Local macOS ARM packaging, successful server stripping and private client
 execution pass; the clean-source gate correctly refuses the local dirty probe.
 Windows x64 passed packaged execution before the new validator refused pinned
 Syft's root-relative filename; a failing-then-passing regression now pins the
-exact Windows spelling and retains file/hash/content refusals. Clean hosted
-qualification of the correction remains pending. It does not
+exact Windows spelling and retains file/hash/content refusals. The v0.4.4
+release now passes clean hosted qualification on all six client targets and
+both historical server archives. It does not
 establish non-Rust inventory, complete notices, vulnerability policy or readiness.
 
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |
 |---|---|---|---|---|---|---|---|---|
-| Release/Helm artifact parity and reproducibility | Not ready | P0 | v0.4.3 is the latest complete public release. It passed full native candidate Compose/Helm deployment, anonymous Docker Hub/GHCR execution and OCI chart byte parity; its exact draft was promoted after the post-upload lookup failure. v0.4.1 and v0.4.2 retain incomplete public release states. | `make check-release-parity`; `make chart-lint`; `make check-chart-images`; v0.4.3 tagged native/public reports and signed asset inventory in OPS-12 | Published-registry full deployment was not repeated; the release binds public digests to fully deployed native candidates. Optional CNPG controller-backed use of published bytes, independent image-build reproducibility and per-artifact signature verification remain unproved. | A tagged release publishes the exact chart/reference/six-image set; empty hosts complete login/context and empty clusters boot every accepted chart mode with matching digests. | Qualify optional CNPG and a fresh public v0.4.3 installation from its signed inventory, then test independent image reproducibility and per-artifact signatures. | Operator/cluster authorisation and registry retention. |
+| Release/Helm artifact parity and reproducibility | Not ready | P0 | v0.4.4 is the latest complete public release for controlled evaluation. It passed full native candidate Compose/four-mode Helm deployment, anonymous Docker Hub/GHCR execution and OCI chart byte parity, with no tagged job skipped or failed. v0.4.3 needed verified draft recovery; v0.4.1 and v0.4.2 retain incomplete public release states. | `make check-release-parity`; `make chart-lint`; `make check-chart-images`; v0.4.4 tagged native/public reports and attested inventory in OPS-12 | Published-registry full deployment was not repeated; the release binds public digests to fully deployed native candidates. Optional CNPG controller-backed use of published bytes, independent image-build reproducibility and per-artifact signature verification remain unproved. | A tagged release publishes the exact chart/reference/six-image set; empty hosts complete login/context and empty clusters boot every accepted chart mode with matching digests. | Qualify optional CNPG and a fresh public v0.4.4 installation from its attested inventory, then test independent image reproducibility and per-artifact signatures. | Operator/cluster authorisation and registry retention. |
 | Installer, upgrade, rollback and deployment parity | Not ready | P1 | Deterministic installer evidence proves required checksums, canonical reference archive identity, a two-version `reference/current` update, idempotent reinstall with mutable state preserved and pre-mutation refusal of the retired profile footprint. Automatic artifact removal is deliberately fail-closed pending an OPS-10 ownership receipt. Canonical Compose has a deterministic same-schema product-image lifecycle: the candidate checks exact epoch/ledger/authority read-only, then gateway and worker alone traverse candidate, starting rollback and final candidate while browser/product evidence is repeated. Helm remains restart-shaped and the database hard cut has no translator. | Release-install demo and installer tests; `make check-deploy`; deterministic `compose-upgrade-smoke` lifecycle tests; chart lint | The installed Compose lifecycle has not run against two published images on a supported reference host. There is no receipt-bound artifact uninstall, supported general N-1 window, schema/provider upgrade or downgrade, zero-downtime upgrade, package manager or production Compose/Helm parity. | N-1 to N and failed-N rollback run in installed-host and Helm shapes with preserved data/key; versions/schema/contract are checked before traffic; previous artifact remains recoverable; default uninstall removes only receipt-owned artifacts and preserves recovery state. | Run the bounded installed Compose image smoke from a published manifest, then add the strict OPS-10 ownership receipt and widen the compatibility matrix only after artifact parity and DR. | Owner sets support window and acceptable upgrade outage. |
-| Platforms, version support and project licence | Not ready | P1 | v0.4.3 publishes six native client archives and installed-binary reports for Linux, macOS and Windows x64/ARM64. Public v0.4.0 had only macOS ARM64 and Linux x64 server/CLI archives. Apache-2.0 is in root `LICENSE`, with attribution in `NOTICE`; package metadata agrees under ADR-0106. The OPS-12 source increment retains first-party notices in all release artifacts and requires byte/hash evidence. All six native clients and both image architectures pass source notice carriage; plugin replay and packaged-chart checks also pass. | Native source/authentication tests and installed-archive checks; notice-carriage release gates; six-target signed release inventory; evidence and gaps in OPS-12 | Source qualification is recorded separately from publication. Complete third-party notice/SBOM review, OS signing/notarization, broader OS/version support windows and real issuer/vendor loading from published client packages remain open. | A support matrix names tested OS/arch/Postgres/Kubernetes versions and lifecycle; CI exercises each claimed target; root `LICENSE`/`NOTICE` ship in every first-party artifact and generated metadata agrees. | Retain third-party terms, qualify published archives with real issuer/harness use and define a support policy; rerun native gates after release source changes. | First-party licence is decided; support policy and broader platform qualification remain open. |
+| Platforms, version support and project licence | Not ready | P1 | v0.4.4 publishes six qualified native client archives and installed-binary reports for Linux, macOS and Windows x64/ARM64. Public v0.4.0 had only macOS ARM64 and Linux x64 server/CLI archives. Apache-2.0 is in root `LICENSE`, with attribution in `NOTICE`; package metadata agrees under ADR-0106. The OPS-12 gates retain first-party notices in all release artifacts and require byte/hash evidence. All six native clients and both image architectures pass notice carriage; plugin replay and packaged-chart checks also pass. | Native source/authentication tests and installed-archive checks; notice-carriage release gates; six-target attested release inventory; evidence and gaps in OPS-12 | Complete third-party notice/SBOM review, OS signing/notarization, broader OS/version support windows and real issuer/vendor loading from published client packages remain open. | A support matrix names tested OS/arch/Postgres/Kubernetes versions and lifecycle; CI exercises each claimed target; root `LICENSE`/`NOTICE` ship in every first-party artifact and generated metadata agrees. | Retain third-party terms, qualify published archives with real issuer/harness use and define a support policy; rerun native gates after release source changes. | First-party licence is decided; support policy and broader platform qualification remain open. |
 | SaaS deployment and residency | Not ready | P1 | Current Helm is one regional installation and OPS-3 residency routing remains open (`docs/backlog/OPS-3.md:13-19`). No control-plane/data-plane regional routing or SaaS tenant operations are present. | Single-cluster deployment checks | No regional isolation, tenant placement/move, multi-region failover, billing, regional support boundary or SaaS provisioning/suspension/erasure control plane. | A tenant pinned to a region keeps data/embeddings within it under network-policy tests; failover and support access preserve that boundary; lifecycle and DR meet regional RPO/RTO. | Treat as a later control-plane feature; do not add speculative abstractions to the single-region core. | Hosting topology, jurisdictions, subprocessors and billing are owner decisions. |
 
 ## Harness support
@@ -530,7 +535,7 @@ rows above.
 
 | ID / feature | Severity | Exact scope and architecture seam | Non-goals | Acceptance tests | Rollout and rollback | Dependencies / owner decision |
 |---|---|---|---|---|---|---|
-| PR-01 / release artifact parity | P0 | Qualify optional CNPG deployment and fresh public v0.4.3 installation against published image/chart digests; test independent reproducibility. | No product-profile branch or chart redesign. | Pull the signed v0.4.3 inventory, images and chart anonymously, complete login/context on an empty host, boot the optional CNPG mode in a disposable cluster, and verify source/digest parity. | Keep v0.4.0-v0.4.3 tag/image/chart coordinates immutable; retain prior atomic manifests/charts for rollback. | Disposable cluster with the declared CNPG operator, fresh reference host and registry retention. |
+| PR-01 / release artifact parity | P0 | Qualify optional CNPG deployment and fresh public v0.4.4 installation against published image/chart digests; test independent reproducibility. | No product-profile branch or chart redesign. | Pull the attested v0.4.4 inventory, images and chart anonymously, complete login/context on an empty host, boot the optional CNPG mode in a disposable cluster, and verify source/digest parity. | Keep v0.4.0-v0.4.4 tag/image/chart coordinates immutable; retain prior atomic manifests/charts for rollback. | Disposable cluster with the declared CNPG operator, fresh reference host and registry retention. |
 | PR-02 / key custody acceptance | P0 | Exercise the existing Helm Secret/local-KMS seam through key use, rotation, restart and joint DB/key restore. | No cloud KMS/HSM implementation until its provider/custody decision is accepted. | Correct key restores and opens data; missing, stale and wrong keys fail closed; rendered artifacts/logs contain no plaintext. | Rehearse on isolated restored data; keep the prior KEK/envelopes until verification completes and document reversal. | Security owner chooses custody, delivery, backup and rotation ceremony. |
 | PR-03 / OPS-5 | P0 | ADR-0122 adds source-only CNPG/Barman WAL and scheduled backup; ADR-0123 adds source-only Compose pgBackRest S3 archiving and full backup. Qualify encrypted off-host storage, isolated selected-point PITR and matching identity/key/schema/Knowledge/audit/index verification for both. | No multi-region failover or invented RPO/RTO. | Restore to chosen points before/after writes, verify frozen audit prefix and rebuilt indexes, and measure recurring RPO/RTO. | Enable on a non-production cluster, validate restore, then stage retention; rollback disables new scheduling without deleting valid backups. | Object store/region, retention, key custody, RPO/RTO and drill owner. |
 | PR-04 / OPS-7 + drain | P1 | Qualify durable login handoff under three pods, prove fresh request-time mutation reads and bound compiled-policy refresh across processes, withdraw readiness on termination and join/release workers within a bound. | No distributed cache product, second queue plane or multi-worker scale claim without evidence. | Three replicas finish cross-pod login, see an authority mutation within the bound, survive pod loss, and drain in-flight requests/leases on SIGTERM. | Shadow policy-pack refresh lag first; retain one-replica/Recreate settings until the complete test passes, with rollback to that shape. | Availability/policy-staleness/drain SLO and worker-ownership choice. |
@@ -540,7 +545,7 @@ rows above.
 | PR-08 / TEN-5 | P1 | Build a restart-safe tenant lifecycle over the epoch-3 FK/table inventory: suspend/resume, streaming export/import and verified erasure. | Deployment reset is not tenant erasure; no legal-hold semantics without policy. | A populated tenant suspends, restores into clean storage and erases to zero tenant references with content-free certificate; interruption resumes. | Dry-run inventory first; hold source data until restore verification, and make destructive execution force-explicit/non-reversible. | Privacy/legal retention, hold and certificate decisions. |
 | PR-09 / AUD-3 + AUD-4 | P1 | Feed canonical frozen-head audit export through a durable idempotent outbox to object lock and a documented SIEM schema. | No historical Cedar replay or content-bearing audit payload. | Object-locked prefix verifies offline and after DB restore; duplicate/retry delivery is harmless; lag/failure alerts fire. | Dual-write to non-authoritative sink first; rollback stops delivery without mutating the canonical chain. | WORM/SIEM targets, retention and compliance owner. |
 | PR-10 / OPS-15 | P1 | Define bounded SLIs/alerts/runbooks and tenant-safe aggregate health APIs for session, context, Knowledge, registry, provider, backup and release state. | No full internal SaaS console or high-cardinality tenant labels on hot metrics. | Synthetic failures page with runbook/release marker; customer views distinguish loading/partial/stale/degraded without denied counts. | Ship recording rules/dashboards dark, tune from evidence, then alert; rollback alerts without removing raw signals. | Telemetry backend, on-call, regions, retention and SLOs. |
-| PR-11 / OPS-12 + OPS-8 | P1 | ADR-0132 implements source-installer publisher verification before remote code execution; native source fixtures pass, while signed future publication remains unqualified. Complete SBOM coverage, vulnerability policy and publisher revocation evidence are still required. | No hand-rolled crypto or silent baseline acceptance. | Installer verifies artifacts; every chart/image/archive has matching SBOM/attestation; critical findings and expired exceptions fail release. | Qualify signed candidate installs before publishing the enforcement contract; retain the last trusted inventory and a documented incident procedure. | Native runners, authorized release, signing custody/notarisation and vulnerability SLA. |
+| PR-11 / OPS-12 + OPS-8 | P1 | ADR-0132 publisher verification is enforced by the published v0.4.4 installers; all six native archives and the exact-source attested inventory pass qualification. Complete SBOM coverage, vulnerability policy and publisher revocation evidence are still required. | No hand-rolled crypto or silent baseline acceptance. | Installer verifies artifacts; every chart/image/archive has matching SBOM/attestation; critical findings and expired exceptions fail release. | Retain the last trusted inventory, qualify real issuer/vendor use from published clients and document the incident/revocation procedure. | Native runners, authorized release, signing custody/notarisation and vulnerability SLA. |
 | PR-12 / OPS-6 | P1 | ADR-0121 implements an exact v0.4.3 baseline plus additive `0002`; ADR-0126 appends `0003`. Local released-byte-to-source `0003` drills and independent rollback restores passed, including a full Knowledge/Skill approval fixture, context idempotent replay and frozen audit-row equality. Qualify planned-interruption installed-host and Helm ordering with off-host recovery. | No compatibility shim for deleted pre-1.0 epochs. | N-1 upgrades to N, failed N restores/rolls back within the window, and incompatible binaries refuse before traffic. | Canary restored data first; keep previous application artifact and measured restore path until the window closes. | Supported release window, outage budget and verified joint recovery owner. |
 | PR-13 / licence and platform policy | P1 | Apache-2.0 and package metadata agree. Source packagers retain first-party notices in all release artifacts and qualification checks their bytes/hashes; all six native clients and both image architectures pass source carriage. Complete third-party notice review and the OS/arch/Postgres/Kubernetes support window remain open. | Preserve third-party terms and claim only tested platforms. | Release contents/metadata agree; every claimed platform has native build/install evidence and lifecycle dates. | Keep source evidence separate from earlier released artifacts, rerun qualification after source changes and expand support only after measured acceptance. | Support owner, registry access and CI platforms. |
 | PR-14 / CTX-7 + EVAL-6 | P1 | Stabilise dense query planning, publish the supported corpus/concurrency envelope and measure context/event/capture/pool/index/storage behaviour. | No benchmark-baseline rewrite to accept regressions. | Representative mixed tenants report p50/p95/p99, throughput, pool wait, plans, lag, growth and soak failures against reviewed thresholds. | Run as non-gating evidence, set thresholds from reviewed runs, then gate; rollback the code regression rather than the floor. | Hardware/model/corpus envelope and performance budget. |

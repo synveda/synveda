@@ -5,18 +5,13 @@ installation Job. Choose who owns PostgreSQL and identity; the chart installs
 no cluster operator, ingress controller or StorageClass. A tenant is this
 installation's identity boundary; a workspace groups people and projects.
 
-<!-- installation-version: 0.4.4; publication: unreleased -->
-**The current published release is v0.4.3.** The preparation, customer presets,
-preflight and console changes in this checkout are **source candidates for the
-next release**. They are included by chart packaging and tested locally; they
-are absent from the immutable v0.4.3 archive. For that release, follow its
-[versioned installation guide](https://github.com/synveda/synveda/blob/v0.4.3/deploy/helm/synveda/README.md).
-Do not mix an older published chart with commands introduced in this candidate.
+<!-- installation-version: 0.4.4; publication: published -->
+**The current controlled evaluation release is [v0.4.4](https://github.com/synveda/synveda/releases/tag/v0.4.4).**
+Its chart includes the preparation tools, customer presets and locked dependency.
+Use the verified archive and matching image overlay below; no compilation or
+dependency download is required. Three unfamiliar engineers' guide-only trials
+remain pending in [OPS-11](../../../docs/backlog/OPS-11.md).
 
-The procedure below is the candidate's shipped operator guide. Set `CHART` to
-the extracted, reviewed candidate chart and use its matching digest overlay.
-The download ceremony also applies to a named published release, using that
-release's versioned instructions. Local source tests are not publisher proof.
 <!-- chart-package-source-status:end -->
 
 The service is available for controlled self-hosted evaluation. One gateway
@@ -49,7 +44,7 @@ advanced combinations. No customer command depends on `ci/` fixtures.
 All commands below run in a **workstation terminal**, as an ordinary account.
 You need Helm (qualified: **4.2.3**), kubectl matching the cluster (qualified:
 **1.36.1**), trusted GitHub CLI with attestation verification, curl and tar.
-Candidate preparation additionally needs **Node 22+ and OpenSSL** on Linux or
+Preparation additionally needs **Node 22+ and OpenSSL** on Linux or
 macOS. Docker, Rust and npm installation are unnecessary for preparation.
 Windows preparation is unqualified; native Windows client packages are separate.
 
@@ -126,17 +121,17 @@ Run this **entire block** from a workstation directory for downloads. The
 subshell fails closed: extraction occurs only after publisher and all selected
 checksums pass. The directory must be new.
 <!-- chart-package-source-identity:start -->
-The source commit shown is the
-published v0.4.3 source; take any future release's commit from its reviewed
-release record. Never copy an expected commit from an unverified downloaded
-inventory. GitHub CLI must be installed independently of these assets.
+The source commit shown is the reviewed v0.4.4 release source; take any
+future release's commit from its reviewed release record. Never copy an expected
+commit from an unverified downloaded inventory. GitHub CLI must be installed
+independently of these assets.
 <!-- chart-package-source-identity:end -->
 
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.3
-  SOURCE_SHA=2acc66f02625727b2ccdfe223358468bf10eef85
+  RELEASE_VERSION=0.4.4
+  SOURCE_SHA=95139842af512faf2dad711fdff14e471e93a3ba
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-chart-$RELEASE_VERSION"
   cd "synveda-chart-$RELEASE_VERSION"
@@ -394,6 +389,7 @@ Recovery needs both application and identity databases, original issuer and
 subject identities, KMS key/reference, TLS/private CA and provider credentials.
 Retained PVCs are not backups. [Operations](OPERATIONS.md) covers quiesced,
 paired logical recovery into a fresh target. No published general N-1 upgrade
-pair is qualified; the source forward path from v0.4.3 requires backup and
+pair is qualified. v0.4.4 preserves the v0.4.3 baseline with additive migrations;
+OPS-6 still needs the published-pair upgrade/recovery drill with backup and
 planned downtime. **Helm rollback does not reverse database migrations or
 identity changes.** Use a compatible roll-forward or the verified joint restore.

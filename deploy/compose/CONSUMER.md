@@ -1,8 +1,7 @@
 # Plain Compose consumer bundle
 
-This 0.4.4 bundle is a qualification artifact until the matching GitHub Release
-is stable; the earlier
-v0.4.0 launcher remains available. This bundle uses the
+This 0.4.4 bundle is part of the matching published GitHub Release for
+controlled evaluation; the earlier v0.4.0 launcher remains available. This bundle uses the
 existing evaluation services with named private state; it cannot adopt the
 launcher's retained host state. Its artifact gate includes paired backup/restore;
 native Docker Desktop qualification remains separate.

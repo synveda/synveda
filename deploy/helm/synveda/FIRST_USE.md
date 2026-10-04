@@ -5,8 +5,10 @@ and choose a registry-backed client. You can explore the console before client
 setup. Its checks keep browser/server access, sign-in, project access, your
 setup confirmation and authenticated Session/context delivery separate.
 
-Install a CLI matching the server candidate from the verified client artifact
-or your reviewed source candidate; see [client-only installation](../../../docs/CONSUMER_CLI.md).
+Install the CLI version matching your server from its verified native client
+archive; see [client-only installation](../../../docs/CONSUMER_CLI.md). The
+matching GitHub Release notes supply its exact source and installer commands.
+Use the source build instructions only for a reviewed source deployment.
 Run setup at the actual repository root with the selected project ID. The
 console prints this gateway's actual origin and project. Observation starts
 off; explicitly opt in to trusted hooks before recording transcripts/tools.
@@ -69,8 +71,9 @@ provider-backed extraction requires its separately configured provider.
 This sample works with the Kubernetes **local evaluation** forwards; it needs
 no Docker command or paid model. It uses ordinary authenticated public APIs
 and existing review rules. It is deliberately refused on shared remote targets.
-The current staged commands require the source candidate CLI. Published
-packages must be qualified separately.
+The v0.4.4 CLI contains these staged commands. Use its matching verified
+client archive. Native package qualification and this local workflow do not
+establish real vendor/model use; those acceptance limits remain separate.
 
 Keep both forwards running. Use a new private browser context for each of the
 four explicitly selected evaluation identities. Retrieve each person's

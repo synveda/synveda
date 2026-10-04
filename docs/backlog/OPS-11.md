@@ -2,7 +2,7 @@
 
 ## Problem and evidence
 
-The published [v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
+The controlled evaluation [v0.4.4 release](https://github.com/synveda/synveda/releases/tag/v0.4.4)
 includes the Helm chart, digest-bound image overlays and native Linux AMD64/ARM64
 Kubernetes reports. The existing chart offers external, bundled or optional
 preinstalled-CNPG PostgreSQL independently of bundled Keycloak or external OIDC.
@@ -21,8 +21,8 @@ v0.4.3 both use schema epoch 3 and baseline revision 3, but v0.4.3 changes the
 single `0001_context_platform.sql` migration by adding `source_payload_hash`.
 The read-only `synveda db migrate --check` compares the exact SQLx migration
 checksum, so this pair cannot be declared a supported in-place upgrade.
-OPS-6 / ADR-0121 now carries the exact v0.4.3 baseline plus a source-only
-`0002` forward migration; there is still no accepted published upgrade pair.
+OPS-6 / ADR-0121 preserves the exact v0.4.3 baseline in v0.4.4 and adds
+`0002`; ADR-0126 adds `0003`. There is still no accepted published upgrade pair.
 
 ## Scope
 
@@ -181,20 +181,20 @@ exact-revision/source Context and audit verification. Its native CLI is 0.4.4
 source `97c12bc1`; live server images remain the earlier committed source
 candidate. It is not final release-artifact qualification.
 
-**Blockers and next action:** all selected checks and `CI Result` passed for
-[PR #68](https://github.com/synveda/synveda/pull/68) at `97c12bc1`. This PR run
-does not replace full main-push CI: its Docker stage is intentionally unselected.
-Three unfamiliar engineer trials still need participants. The owner authorised
-0.4.4 as a controlled evaluation release with those trials explicitly pending.
-Preserve the existing tenant/receipt and qualify one exact
-committed release source; no reset or automatic approval is needed.
+**Blockers and next action:** the controlled evaluation v0.4.4 release is
+published from `95139842af512faf2dad711fdff14e471e93a3ba` after exact-source
+full main-push CI, the nonpublishing drill and tagged qualification. Its
+[release record](../../demos/evidence/ops12-044-controlled-release.json) binds those
+results to the published artifacts. The owner authorised release with the three
+unfamiliar engineer trials explicitly pending. Recruit those participants and
+use only the shipped v0.4.4 guide and matching archive/overlay, preserving the
+existing tenant, receipt and private recovery material. No reset or automatic
+approval is needed.
 
 Shared HTTPS ingress, private first-human admission/bootstrap removal, external
-providers, OpenShift SCC/router and actual vendor/model use remain separate live
-checks. Qualify only the named local route from this evidence. The coordinated
-0.4.4 source remains unreleased until its exact committed source passes full
-main-push CI and the existing nonpublishing Release drill, followed by the
-authorised immutable tagged publication.
+provider/platform acceptance, OpenShift SCC/router and actual vendor/model use
+remain separate live checks. The two native tagged jobs qualify the four named
+Kind ownership modes; they do not establish shared production admission.
 
 The packaged guides now name their archive version and reviewed source rather
 than retaining the checkout's older publication notes and download pins.

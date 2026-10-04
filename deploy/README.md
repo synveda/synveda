@@ -1,8 +1,8 @@
 # Deployment
 
 Public entry points: [Run with Docker](compose/PREBUILT.md) and
-[Deploy to Kubernetes](helm/synveda/README.md). Published v0.4.3 is the
-current complete release. It passed exact-source CI, native installation drills
+[Deploy to Kubernetes](helm/synveda/README.md). Published v0.4.4 is the
+current controlled evaluation release. It passed exact-source CI, native installation drills
 and anonymous image/chart checks. The [CI and Release guide](../docs/CI.md)
 records the release history and publication procedure.
 
@@ -49,7 +49,7 @@ freshness or Skill/Tool advertisement.
   Only CNPG mode requires a separately installed operator. The release workflow packages this
   chart and a digest-bound reference bundle using one versioned six-image plan:
   product, single-host and CloudNativePG PostgreSQL, optimized Keycloak,
-  reference proxy and browser acceptance. Published v0.4.3 provides the chart,
+  reference proxy and browser acceptance. Published v0.4.4 provides the chart,
   digest overlays and four-mode native Kind reports. Real OpenShift and a
   published cross-release upgrade remain outside the qualified set.
 
@@ -151,10 +151,10 @@ profile remains pending.
 - The chart has no Qdrant, workflow scheduler, backup promise, external HSM or
   customer-managed-key implementation. Provider credentials are Secret
   references; rendered diagnostics must not contain values.
-- Native binaries have no OS code signature or notarization. The v0.4.1
-  candidate passed all six native client package jobs, including Windows
-  x64/ARM64, but none was published. The installer does not yet enforce
-  attestation verification. There is no
+- Native binaries have no OS code signature or notarization. Published v0.4.4
+  passes all six native client package jobs, including Windows x64/ARM64.
+  Its installers enforce publisher attestation before remote code execution;
+  native vendor/model use remains unqualified. There is no
   zero-downtime gateway upgrade guarantee or old-schema translator.
 
 <a id="small-team-kubernetes-release-contract"></a>
@@ -176,7 +176,7 @@ by ADR-0109 through ADR-0112 and the deployment contract above.
 | Portability | Restricted-ID Kind simulation and Kubernetes/OpenShift structural schemas; real SCC/router/CNI/CSI/cloud execution remains unqualified |
 | Recovery | Writer-quiesced native PostgreSQL archives, original key/issuer custody and clean-namespace functional verification; actual measurements are recorded in OPS-11, not inferred from retained PVCs |
 | Upgrade | Same-source migration reruns and retained reinstall work; no published upgrade pair is supported. v0.4.0 and v0.4.3 have different epoch-3 baseline checksums. |
-| Distribution | v0.4.3 publishes the chart, immutable image overlays and native AMD64/ARM64 Kubernetes reports; both registries and the OCI chart passed anonymous checks. |
+| Distribution | v0.4.4 publishes the chart, immutable image overlays and native AMD64/ARM64 Kubernetes reports; both registries and the OCI chart passed anonymous checks. |
 
 The [release guide](../docs/RELEASING.md#owner-setup) records the owner
 settings needed for subsequent versions. A general

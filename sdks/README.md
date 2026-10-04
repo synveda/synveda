@@ -106,11 +106,13 @@ macOS arm64 checks with Node 24.18.0/Python 3.14.6 pass nine source tests and ni
 installed-package tests per SDK, including identical clean builds, installed
 types/resources, licence text and 0.4.0 target metadata. That is historical
 evidence. The v0.4.3 source increment regenerated the checked contract and
-passed local source and installed-package checks. The unreleased v0.4.4 source
+passed local source and installed-package checks. The v0.4.4 increment
 changes only the API version and document digest; its 15 operation bindings and
 53 reachable schemas remain unchanged. Ten source tests per SDK pass locally.
 Installed-package checks, the hosted runtime matrix and authenticated gateway
-acceptance still need the exact committed candidate's CI.
+acceptance passed in [full main-push CI](https://github.com/synveda/synveda/actions/runs/37200002514)
+for release source `95139842af512faf2dad711fdff14e471e93a3ba`. SDK packages remain
+private version 0.1.0; this release does not publish npm or PyPI packages.
 
 The 2026-09-19 Apache-2.0 increment starting at `9365c92` repeats the two
 native arm64 rows below, including exact installed licence/notice checks.

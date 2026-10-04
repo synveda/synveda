@@ -27,29 +27,41 @@ utility. Allow at least 6 GiB for Docker. No source build, cloud account or
 model subscription is required. Start on Linux AMD64/ARM64; see
 [platform limits](docs/PRODUCTION_READINESS.md) for other hosts.
 
-<!-- installation-version: 0.4.4; publication: unreleased -->
-Download the [published v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
-into a new directory and verify its publisher and checksum before extraction:
+<!-- installation-version: 0.4.4; publication: published -->
+Download the [controlled evaluation v0.4.4 release](https://github.com/synveda/synveda/releases/tag/v0.4.4)
+into a new directory. Run this whole block; extraction follows successful
+publisher and checksum verification. Its expected source comes from the reviewed
+release record, independently of the downloaded inventory. The three unfamiliar
+engineers' guide-only trials remain [pending](docs/backlog/OPS-11.md).
 
 ```sh
-mkdir synveda-0.4.3 && cd synveda-0.4.3
-release_url=https://github.com/synveda/synveda/releases/download/v0.4.3
-for file in synveda-reference-0.4.3.tar.gz SHA256SUMS SHA256SUMS.sigstore.json; do
-  curl -fLO "$release_url/$file"
-done
-gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
-  --repo synveda/synveda \
-  --signer-workflow synveda/synveda/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.4.3 --deny-self-hosted-runners
-awk '$2 == "synveda-reference-0.4.3.tar.gz" { n++; print } END { if (n != 1) exit 1 }' \
-  SHA256SUMS > reference.sha256
-if command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 --check reference.sha256
-else
-  sha256sum --check reference.sha256
-fi
-tar -xzf synveda-reference-0.4.3.tar.gz
-cd synveda-reference-0.4.3
+(
+  set -eu
+  RELEASE_VERSION=0.4.4
+  SOURCE_SHA=95139842af512faf2dad711fdff14e471e93a3ba
+  release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
+  mkdir "synveda-$RELEASE_VERSION" || exit 1
+  cd "synveda-$RELEASE_VERSION" || exit 1
+  for file in "synveda-reference-$RELEASE_VERSION.tar.gz" SHA256SUMS SHA256SUMS.sigstore.json; do
+    curl --fail --location --proto '=https' --proto-redir '=https' \
+      --connect-timeout 15 --max-time 120 --output "$file" "$release_url/$file" || exit 1
+  done
+  gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+    --repo synveda/synveda \
+    --signer-workflow synveda/synveda/.github/workflows/release.yml \
+    --source-ref "refs/tags/v$RELEASE_VERSION" --source-digest "$SOURCE_SHA" \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners || exit 1
+  awk -v file="synveda-reference-$RELEASE_VERSION.tar.gz" \
+    '$2 == file { count++; print } END { if (count != 1) exit 1 }' \
+    SHA256SUMS > reference.sha256 || exit 1
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 --check reference.sha256 || exit 1
+  else
+    sha256sum --check reference.sha256 || exit 1
+  fi
+  tar -xzf "synveda-reference-$RELEASE_VERSION.tar.gz" || exit 1
+) && cd synveda-0.4.4/synveda-reference-0.4.4
 ```
 
 Before the first start, open `evaluation.json`. Its defaults use port `8080`,

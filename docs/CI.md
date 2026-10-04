@@ -30,7 +30,7 @@ independent. Only CLI and Docker share reusable jobs between CI and Release.
 | Release `images` ×2 | Six native images, two registries | Docker candidate validation; Publish Docker candidates | Same Dockerfiles, targets, labels, SBOM/provenance; Release dispatch and tag runs add both full Compose lifecycle/recovery drills before tested OCI archives are copied to Docker Hub and GHCR |
 | Release `assemble` | Indexes and asset inventory | Assemble release assets | Independently inspected registry digests, reference bundle/overlays, byte-identical OCI chart; all six client and both native candidate report sets mandatory |
 | Release `verify-images` ×2 | Anonymous distribution | Test published Docker and Helm artifacts | Both registries, exact digest and executable smoke, anonymous chart comparison; full native candidate reports were retained earlier in the same run |
-| Release `publish` | Attest and announce | Publish verified release | Exact-source attestation and checksum inventory; draft stays unpublished until all 35 assets upload successfully |
+| Release `publish` | Attest and announce | Publish verified release | Exact-source attestation and checksum inventory; draft stays unpublished until all 55 assets upload successfully |
 | Eval `eval`, `retrieval`, `security` | Scheduled deeper evaluation | Extended Tests (same `eval.yml`) | Same nightly deterministic, real TEI retrieval and 10,000-variant security gates |
 | Pages `build` ×2, `deploy` | Website | Pages unchanged | Native amd64/arm64 site/brand/docs checks; main-only deployment |
 
@@ -111,11 +111,28 @@ with a successful **main-push CI run for that exact SHA**, including CI Result
 and no skipped jobs. Wait for that CI run before tagging. Publication downloads
 only artifacts produced in the same release run; no PR/cross-run artifact is
 promoted. Registry jobs copy hash-checked OCI files, then assemble both platforms.
-Fresh runners retain anonymous distribution checks. All 33 payloads enter the
-attested SHA256SUMS; the inventory and its attestation make 35 public assets.
+Fresh runners retain anonymous distribution checks. All 53 payloads enter the
+attested SHA256SUMS; the inventory and its attestation make 55 public assets.
+That includes 20 native Rust SPDX/inventory sidecars; coverage limits remain
+explicit in OPS-12.
 Upload failure leaves a draft. `verified-release-assets` retains the signed set
 for 30 days; candidate OCI files retain seven days and diagnostic reports 14.
 Follow [RELEASING](RELEASING.md) for reviewed recovery and immutable-tag rules.
+
+## Controlled evaluation v0.4.4
+
+The [controlled evaluation v0.4.4 release](https://github.com/synveda/synveda/releases/tag/v0.4.4)
+uses exact source `95139842af512faf2dad711fdff14e471e93a3ba`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/37200002514),
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/37200048266) and
+[tagged publication](https://github.com/synveda/synveda/actions/runs/37207056495) passed. The release contains 55 attested assets,
+all six native client reports and Rust sidecars, both native OCI/Compose/consumer
+recovery sets, all four Helm ownership modes per architecture and anonymous
+two-registry/image/chart verification. The [retained record](../demos/evidence/ops12-044-controlled-release.json)
+binds source, run IDs, inventory/report hashes and published chart bytes.
+These gates do not establish production readiness, OS signing, complete
+third-party coverage, a published N-1 upgrade or native vendor/model use.
+Three unfamiliar engineers' guide-only trials remain pending in OPS-11.
 
 ## Evidence and remaining qualification
 
@@ -187,7 +204,8 @@ UTC, 2h27m). Each native candidate report records seven launcher Compose checks,
 checksums were verified after download. Its registry inventory explicitly says
 `published: false`. The native candidate and public-distribution reports and
 checksum attestation only exist on a successful tagged publication path; that
-path must verify all 35 assets before making the draft stable.
+path at that checkpoint required all 35 assets before making the draft stable.
+The v0.4.4 inventory above includes the subsequent native Rust sidecars.
 
 The final PR ARM64 fresh launcher took 577s, and AMD64 took 769s; the exact-source
 Release dry run took 588s and 769s respectively. An older published run's
