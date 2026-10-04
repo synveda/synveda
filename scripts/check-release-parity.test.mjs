@@ -56,6 +56,104 @@ function validateVersion(version) {
   });
 }
 
+test("one-command source chart packaging includes its dependency and native tools without downloads", (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-chart-command-"));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const output = join(scratch, "chart output");
+  const version = workspaceVersion(read("Cargo.toml"));
+  const source = spawnSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).stdout.trim();
+  const before = read("deploy/helm/synveda/Chart.lock");
+  const beforeGuide = read("deploy/helm/synveda/README.md");
+  const archive = join(output, `synveda-${version}.tgz`);
+  let first;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = spawnSync("make", ["chart-package"], {
+      cwd: ROOT, encoding: "utf8", timeout: 30_000,
+      env: { ...process.env, SYNVEDA_CHART_OUTPUT: output, SYNVEDA_BUILD_SOURCE_SHA: "" },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(result.stdout.includes(`Source chart: ${archive}`));
+    const bytes = readFileSync(archive);
+    if (first) assert.deepEqual(bytes, first, "retry must preserve archive bytes");
+    first = bytes;
+  }
+  assert.equal(read("deploy/helm/synveda/Chart.lock"), before);
+  assert.equal(read("deploy/helm/synveda/README.md"), beforeGuide);
+  for (const member of ["examples/prepare.mjs", "examples/operator.mjs", "examples/bundled-database.json", "examples/bundled-identity.json"]) {
+    const extracted = spawnSync("tar", ["-xOzf", archive, `synveda/${member}`], { encoding: "utf8" });
+    assert.equal(extracted.status, 0, extracted.stderr);
+    assert.equal(extracted.stdout, read(`deploy/helm/synveda/${member}`));
+  }
+  const guide = (member) => {
+    const result = spawnSync("tar", ["-xOzf", archive, `synveda/${member}`], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  const main = guide("README.md"), examples = guide("examples/README.md"), base = `https://github.com/synveda/synveda/blob/${source}/`;
+  for (const packaged of [main, examples]) {
+    assert.ok(packaged.includes(`**Chart archive ${version}.** This guide belongs to source \`${source}\`.`));
+    assert.ok(packaged.includes("publisher attestation, checksums"));
+    assert.doesNotMatch(packaged, /installation-version:|source candidates, absent|source candidates for the/);
+  }
+  assert.ok(main.includes(`  RELEASE_VERSION=${version}\n  SOURCE_SHA=${source}\n`));
+  assert.ok(main.includes("independently reviewed release record"));
+  assert.ok(main.includes(`](${base}docs/PRODUCTION_READINESS.md)`));
+  assert.ok(main.includes("](BUILD.md)"), "chart-local links must survive extraction");
+  assert.ok(examples.includes("](../README.md)"));
+  assert.ok(guide("BUILD.md").includes(`](${base}docs/RELEASING.md)`));
+  assert.ok(guide("CONFIGURATION.md").includes(`](${base}deploy/compose/postgres/synveda-database-bootstrap)`));
+  const dependency = spawnSync("helm", ["show", "chart", archive], { encoding: "utf8" });
+  assert.equal(dependency.status, 0, dependency.stderr);
+  assert.match(dependency.stdout, /name: keycloakx/);
+  assert.ok(dependency.stdout.includes(`version: ${version}`));
+});
+
+test("unknown chart source refuses before creating an archive output directory", (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-chart-source-"));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  for (const source of ["main", "a".repeat(39), "A".repeat(40), "../source", "a".repeat(40) + "\n"]) {
+    const output = join(scratch, "output");
+    const result = spawnSync("sh", ["scripts/package-chart.sh"], {
+      cwd: ROOT, encoding: "utf8", env: { ...process.env, SYNVEDA_BUILD_SOURCE_SHA: source, SYNVEDA_CHART_OUTPUT: output },
+    });
+    assert.equal(result.status, 64, result.stderr);
+    assert.match(result.stderr, /^package-chart: select an exact reviewed source commit/);
+    assert.equal(existsSync(output), false);
+  }
+});
+
+test("changed chart guide identity boundaries refuse instead of leaving stale release pins", () => {
+  const main = read("deploy/helm/synveda/README.md");
+  const examples = read("deploy/helm/synveda/examples/README.md");
+  for (const [mode, original, markers] of [
+    ["main", main, ["<!-- installation-version:", "<!-- chart-package-source-status:end -->", "<!-- chart-package-source-identity:start -->", "<!-- chart-package-source-identity:end -->", "  RELEASE_VERSION=", "  SOURCE_SHA="]],
+    ["examples", examples, ["<!-- chart-package-source-status:start -->", "<!-- chart-package-source-status:end -->"]],
+  ]) {
+    for (const marker of markers) {
+      const result = spawnSync("awk", ["-v", `${mode}=1`, "-v", "version=0.4.4", "-v", `source=${"a".repeat(40)}`, "-f", "scripts/package-chart-guide.awk"], {
+        cwd: ROOT, encoding: "utf8", input: original.replace(marker, "removed-boundary"),
+      });
+      assert.equal(result.status, 66, `${mode}: ${marker}`);
+      assert.match(result.stderr, /guide identity boundaries changed/);
+    }
+  }
+});
+
+test("an incomplete chart checkout refuses packaging before output or dependency fetch", (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-chart-missing-"));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  mkdirSync(join(scratch, "scripts"));
+  for (const name of ["package-chart.sh", "release-version.sh"]) writeFileSync(join(scratch, "scripts", name), read(`scripts/${name}`));
+  writeFileSync(join(scratch, "Cargo.toml"), read("Cargo.toml"));
+  const output = join(scratch, "output");
+  const result = spawnSync("sh", [join(scratch, "scripts/package-chart.sh")], {
+    cwd: scratch, encoding: "utf8", env: { ...process.env, SYNVEDA_CHART_OUTPUT: output },
+  });
+  assert.equal(result.status, 66);
+  assert.ok(result.stderr.includes("restore the matching source checkout or verified chart archive"));
+  assert.equal(existsSync(output), false);
+});
+
 test("release versions form one bounded label- and OCI-safe vocabulary", () => {
   for (const version of [
     "0.2.0",

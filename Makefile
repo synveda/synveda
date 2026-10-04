@@ -414,10 +414,15 @@ plugin-package-check:
 # Needs helm. The chart's defaults deliberately do not render — five values
 # have no default because each is a decision somebody has to make on
 # purpose — so the lint values are also the list of those decisions.
+.PHONY: chart-package
+chart-package:
+	sh scripts/package-chart.sh
+
 chart-lint:
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/lint-values.yaml
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
 	node scripts/check-helm-contract.mjs
+	node --test scripts/kubernetes-onboarding.test.mjs
 	node scripts/check-starter-contract.mjs
 	node scripts/check-ops5-backup-chart.mjs
 	node scripts/check-portability-contract.mjs

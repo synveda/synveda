@@ -20,6 +20,8 @@ import {
   STEPS,
   STEP_COUNT,
   checkVerdict,
+  clientEvidence,
+  readProgress,
   clientOf,
   connectionSteps,
   nextStep,
@@ -116,8 +118,10 @@ test("every listed client has an id the CLI would accept", () => {
   // projects configuration from `adapters/registry.json`.
   const known = [
     "claude-code",
+    "copilot-cli",
     "cursor",
     "vscode",
+    "codex",
     "claude-desktop",
     "zed",
     "windsurf",
@@ -134,7 +138,56 @@ test("connection instructions carry evidence levels without promoting recipes", 
   assert.equal(clientOf("claude-code").supportLevel, "verified");
   assert.equal(clientOf("cursor").supportLevel, "experimental");
   assert.equal(clientOf("vscode").supportLevel, "configured");
-  assert.match(clientOf("cursor").note, /No Cursor executable/);
+  assert.match(clientOf("cursor").limits, /complete native lifecycle is not qualified/);
+});
+
+test("manual native routes bind the selected project and do not use a shared task", () => {
+  for (const id of ["codex", "copilot-cli"]) {
+    const client = clientOf(id);
+    assert.equal(client.registration, "manual");
+    const instructions = connectionSteps(client, "https://actual.example", "project-123").join("\n");
+    assert.match(instructions, /https:\/\/actual.example/);
+    assert.match(instructions, /--observation off/);
+    assert.match(instructions, /YOUR-TASK-KEY/);
+    assert.match(instructions, /project-123/);
+    assert.match(instructions, /writes/);
+    assert.match(instructions, /host/);
+    assert.ok(!instructions.includes(`mcp install --client ${id}`));
+  }
+});
+
+test("project instructions use the managed MCP writer with the selected setup receipt", () => {
+  for (const client of CLIENTS.filter((c) => c.via === "mcp" && c.registration === "automatic")) {
+    const commands = connectionSteps(client, "https://actual.example", "project-123");
+    assert.ok(commands.includes("synveda setup --project project-123 --observation off"));
+    assert.equal(commands.at(-1), `synveda adapter install --client ${client.id} --scope user`);
+    assert.ok(!commands.some((c) => c.includes("--task")), "a user-wide writer must stay unbound across tasks");
+  }
+});
+
+test("project access alone never becomes evidence of a client operation", () => {
+  const empty = clientEvidence([], [], "project", "reader", "codex");
+  assert.equal(empty.contextRecorded, false); assert.equal(empty.observationsRecorded, false);
+  assert.match(empty.lines[0] ?? "", /No completed/);
+  const session = { id: "session", project_id: "project", principal_id: "reader", client_name: "mcp", last_observed_at: null };
+  const run = { session_id: "session", project_id: "project", completion_status: "completed" };
+  const evidence = clientEvidence([session as never], [run as never], "project", "reader", "codex");
+  assert.equal(evidence.contextRecorded, true); assert.equal(evidence.observationsRecorded, false);
+  assert.match(evidence.lines[0] ?? "", /authenticated context operation/);
+  assert.match(evidence.lines[1] ?? "", /observation remains unverified/);
+  assert.match(evidence.lines[2] ?? "", /self-reported/);
+  assert.equal(clientEvidence([{ ...session, principal_id: "other" } as never], [run as never], "project", "reader", "codex").contextRecorded, false);
+  assert.equal(clientEvidence([session as never], [{ ...run, completion_status: "failed" } as never], "project", "reader", "codex").contextRecorded, false);
+  assert.equal(clientEvidence([{ ...session, last_observed_at: "2026-10-03T12:00:00Z" } as never], [], "project", "reader", "codex").observationsRecorded, true);
+});
+
+test("progress is scoped to the current project and validates saved seeding outcomes", () => {
+  const progress = { projectId: "p", step: "instructions", clientId: "codex", setupCompleted: true, seed: { kind: "pending", what: "Configuration", changeId: "review" } };
+  const storage = { getItem: () => JSON.stringify(progress) };
+  assert.deepEqual(readProgress(storage, "key", "p"), progress);
+  assert.equal(readProgress(storage, "key", "other"), null);
+  assert.equal(readProgress({ getItem: () => JSON.stringify({ ...progress, seed: { kind: "pending" } }) }, "key", "p"), null);
+  assert.equal(readProgress({ getItem: () => { throw new Error("storage unavailable"); } }, "key", "p"), null);
 });
 
 test("the check passes without a repository and fails without a readable project", () => {

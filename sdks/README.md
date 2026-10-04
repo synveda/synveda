@@ -3,7 +3,7 @@
 This initial, unpublished slice covers 15 operations from Synveda's checked
 OpenAPI: Sessions, observations, Context, approved immutable Skills, Knowledge
 proposals and audit pages. The generated contracts include the source SHA-256;
-they target the 0.4.3 API in this checkout. Broader API coverage, published
+they target the 0.4.4 API in this checkout. Broader API coverage, published
 packages and a public support policy remain in `docs/backlog/ADPT-4.md`.
 
 TypeScript uses Node's maintained Fetch implementation; Python uses HTTPX.
@@ -76,8 +76,8 @@ generated types, operation bindings, contract metadata and `py.typed`.
 
 ## Compatibility and release boundary
 
-SDK version **0.1.0** targets API version **0.4.3** and checked OpenAPI SHA-256
-`4b60d885a77ea591c7b00fe203d3f6033aa99c747135719e059026e44e7058c2`.
+SDK version **0.1.0** targets API version **0.4.4** and checked OpenAPI SHA-256
+`62d550af54de74d1ecf18e3917b289e1cd0f02a7e0ac32622862b394bb6960e1`.
 That digest covers the whole API document; the SDK exposes only the 15 selected
 operations and 53 reachable schemas. Another server version or contract has no
 compatibility claim from these checks. Regenerate after reviewed contract or
@@ -105,9 +105,12 @@ digest; all 15 operation bindings and 52 SDK schemas remain unchanged. Local
 macOS arm64 checks with Node 24.18.0/Python 3.14.6 pass nine source tests and nine
 installed-package tests per SDK, including identical clean builds, installed
 types/resources, licence text and 0.4.0 target metadata. That is historical
-evidence. The current v0.4.3 candidate regenerated the checked contract and
-passed local source and installed-package checks; its hosted runtime matrix and
-authenticated gateway acceptance remain gated by this candidate's CI.
+evidence. The v0.4.3 source increment regenerated the checked contract and
+passed local source and installed-package checks. The unreleased v0.4.4 source
+changes only the API version and document digest; its 15 operation bindings and
+53 reachable schemas remain unchanged. Ten source tests per SDK pass locally.
+Installed-package checks, the hosted runtime matrix and authenticated gateway
+acceptance still need the exact committed candidate's CI.
 
 The 2026-09-19 Apache-2.0 increment starting at `9365c92` repeats the two
 native arm64 rows below, including exact installed licence/notice checks.

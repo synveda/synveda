@@ -9,8 +9,8 @@ const chart = "deploy/helm/synveda";
 const read = (path) => readFileSync(path, "utf8");
 function render(database, identity, extra = []) {
   const args = ["template", "synveda", chart, "--api-versions", "postgresql.cnpg.io/v1",
-    "-f", `${chart}/ci/${database}-values.yaml`];
-  if (identity === "packaged") args.push("-f", `${chart}/ci/packaged-keycloak-values.yaml`);
+    "-f", `${chart}/examples/${database === "cnpg" ? "existing-cnpg" : `${database}-database`}.json`];
+  if (identity === "packaged") args.push("-f", `${chart}/examples/bundled-identity.json`);
   return spawnSync("helm", [...args, ...extra], { encoding: "utf8" });
 }
 for (const database of ["external", "cnpg", "bundled"]) {

@@ -294,6 +294,37 @@ cross-process entity invalidation bus is not presumed necessary.
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open
 
+The 2026-10-03 OPS-11/OPS-12/OPS-8 candidate under Accepted ADR-0137 adds native
+repeatable Kubernetes preparation, packaged customer recipes, mode-specific
+storage refusal, prerequisite checks, private human admission, readiness tests
+and allowlisted diagnostics. CPR-8/CPR-39 regenerate registry-backed manual
+Codex/Copilot choices and distinguish browser access, setup confirmation and
+authenticated Session evidence. The guide carries shared and loopback first-use
+review paths. [Local validation](../../demos/evidence/ops11-first-install-source.json)
+is separate from immutable v0.4.3 and hosted release proof. The owner's
+2026-10-04 OrbStack target passed packaged local installation with namespace-only
+RBAC, dedicated 37Gi storage, real browser authentication, native CLI MCP
+Knowledge/context/source delivery and retained uninstall/reinstall. The
+[OrbStack record](../../demos/evidence/ops11-orbstack-first-use.json) labels its
+source/image bytes and excludes shared ingress, real vendor loading and human
+timings. `make chart-package` removes manual source packaging steps. ADR-0100's
+accepted amendment makes a pending sample Configuration resumable and exposes
+effect-actor separation. The owner-approved
+[reviewed continuation](../../demos/evidence/ops11-orbstack-reviewed-resume.json)
+now passes both original Configuration effects through a separate normally
+invited operator, then Capture, distinct Knowledge/Skill review/apply, pinned
+binding, revision/source Context, safe replay and audit verification. Temporary
+provider administration was removed. Selected PR checks pass at `97c12bc1`;
+three unfamiliar engineer participants remain unavailable. The owner authorised
+0.4.4 as controlled evaluation with those trials explicitly pending. Archive
+guides carry matching version/source pins and source-bound outside links under
+ADR-0137, without editing the original chart tools or dependency.
+The [current checkpoint](OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04)
+owns the exact next action. Both features remain open; the coordinated 0.4.4
+candidate still needs exact-source hosted CI/Release qualification and authorised
+publication. Setup time, shared platform support and production readiness remain
+unclaimed.
+
 OPS-12 / ADR-0132 requires source installers to verify the signed checksum
 inventory with a trusted GitHub CLI, fixed publisher/workflow/tag/runner policy
 and expected source commit before remote code execution. Real macOS verification

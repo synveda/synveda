@@ -5,7 +5,7 @@ People can inspect its source, review proposed changes and choose what later
 sessions may use. The web console handles everyday work; the CLI and public API
 support automation and advanced administration.
 
-<!-- installation-version: 0.4.3; publication: published -->
+<!-- installation-version: 0.4.4; publication: unreleased -->
 The current published release is **v0.4.3**. Choose the route that matches your
 infrastructure:
 

@@ -14,7 +14,7 @@ joint logical restore have executable fixtures. See the
 [operations runbook](../../deploy/helm/synveda/OPERATIONS.md) and
 [CI record](../CI.md) for the current contract and reports.
 
-Two decisions remain. Routes, assigned-ID workloads and NetworkPolicies render,
+Two release/platform decisions remain. Routes, assigned-ID workloads and NetworkPolicies render,
 but only Kind and structural schema checks have run; no real OpenShift SCC,
 router, CNI or CSI target has been qualified. Separately, published v0.4.0 and
 v0.4.3 both use schema epoch 3 and baseline revision 3, but v0.4.3 changes the
@@ -37,6 +37,11 @@ OPS-6 / ADR-0121 now carries the exact v0.4.3 baseline plus a source-only
   work in [OPS-6](OPS-6.md). Do not treat same-source Helm reapply as an upgrade.
 - Keep installation, portability and release guidance aligned with the published
   artifacts and the selected support boundary.
+- Complete the human first-install journey under ADR-0137: repeatable native
+  preparation, customer presets, prerequisite checks, private first-human login,
+  truthful client setup, governed Knowledge retrieval and safe recovery. Qualify
+  the guide on a named self-managed target and with three unfamiliar engineers
+  before making platform or setup-time claims.
 
 ## Non-goals
 
@@ -99,6 +104,120 @@ artifact identities. Test the upgrade candidate with `synveda db migrate
 --check` against a restored published database before allowing a write. A
 missing cluster or supported release pair is an unmet acceptance item, not a
 passing test.
+
+### Fresh-install source checkpoint (2026-10-03)
+
+This uncommitted candidate starts at
+`d289fd46b2368eea9d305f06b67aab8a3b94e3be`. Accepted ADR-0137 precedes its
+implementation. The reproduced bundled-storage trap previously rendered a
+default 10Gi PVC after accepting CNPG-only `postgres.storage.*`. Correct bundled
+settings now render the selected 37Gi/class and wrong-mode non-default settings
+refuse. Tests consume packaged customer presets for all six ownership recipes.
+
+Node 22+/OpenSSL preparation replaces Docker on the Kubernetes workstation.
+Protected tenant/key/password/CA state is committed once before ordinary Helm
+and Secret outputs; interrupted outputs resume without rotating credentials.
+Offline checks, read-only namespaced API checks, explicit Secret creation and
+a temporary external-database authority probe are separate actions. The normal
+mutating install order remains bootstrap → three-role preflight → migration →
+tenant admission. Readiness tests carry no user credentials; support diagnostics
+include only allowlisted status. CPR-8/CPR-39 regenerate registry-backed manual
+Codex/Copilot choices and distinguish browser access, setup confirmation and
+authenticated Session evidence. The guide covers private first-human admission,
+shared Knowledge/review/context and an optional staged loopback sample.
+
+The [source validation record](../../demos/evidence/ops11-first-install-source.json)
+records exact gates/tool versions and limits. Controlled API fixtures cover
+namespaced RBAC, absent/default storage, missing keys, wrong CA/issuer, Secret
+conflicts, registry pull status, interruption/retry, quota/limits and retained
+claim rendering. These do not establish live retained-data continuity or login.
+Published v0.4.3 remains separate from this candidate.
+
+### OrbStack local acceptance checkpoint (2026-10-04)
+
+The owner selected OrbStack Kubernetes for live acceptance. OrbStack 2.2.3,
+Kubernetes `v1.35.6+orb1`, Helm 4.2.3 and a matching kubectl 1.35.6 ran the
+packaged bundled/bundled local recipe in a fresh restricted namespace. The
+installer used a namespace-only ServiceAccount, a non-default release, two
+selected loopback ports and a dedicated Retain StorageClass backed by
+`rancher.io/local-path` with WaitForFirstConsumer. The actual PVC bound at
+37Gi. A credential-free probe allowed HTTP before a NetworkPolicy and denied
+it afterward. No ingress controller was installed or qualified.
+
+Preparation retry preserved private state and credentials. Preflight, the
+installation Job, private readiness and `helm test` passed. Real browser PKCE,
+workspace/project creation, manual Codex/Copilot discovery, reload recovery,
+exploration and logout passed. Ordinary governed Knowledge, native CLI MCP
+recall with project/Session binding, exact-revision Context, synthetic repository
+provenance and a valid audit chain passed. Retained uninstall/reinstall preserved
+the same PVC UID, nine original Secret objects/bytes and original product
+addresses; fresh browser authentication and MCP/context checks passed afterward.
+
+`make chart-package` now produces the workspace-version archive without Rust,
+Docker or dependency downloads. The package includes its tracked locked
+Keycloak dependency, operator tools and customer instructions. Packaging twice
+produced identical bytes; incomplete source refuses before producing output.
+The [content-free record](../../demos/evidence/ops11-orbstack-first-use.json)
+names the source/image identities, checks and limits. These are local source
+probes, not qualification of the final 0.4.4 release artifacts.
+
+The owner subsequently approved isolated native Keycloak administration and a
+brief stop of this task's identity Pod. Provider maintenance used the owner's
+credentials because the ordinary installer could not patch the StatefulSet's
+scale subresource. The original Pod returned Ready. A fifth synthetic identity
+received no provider bootstrap membership or tenant roles, then accepted an
+ordinary audited workspace administrator invitation. The temporary provider
+administrator was deleted, its authentication refused, and its Job/Secret and
+private administrator files removed.
+
+The [reviewed resume record](../../demos/evidence/ops11-orbstack-reviewed-resume.json)
+shows the original Configuration and binding applied by that separate effect
+actor after two distinct reviews. Author/reviewer effects and premature binding
+effects were denied. Request/change addresses and the receipt stayed intact;
+seed resumed without a reset. The existing product runner then passed real
+CLI/browser PKCE, safe seed replay preserving console edits, Session capture,
+restricted-viewer denial, reviewed Knowledge and Skill publication/binding,
+exact-revision/source Context and audit verification. Its native CLI is 0.4.4
+source `97c12bc1`; live server images remain the earlier committed source
+candidate. It is not final release-artifact qualification.
+
+**Blockers and next action:** all selected checks and `CI Result` passed for
+[PR #68](https://github.com/synveda/synveda/pull/68) at `97c12bc1`. This PR run
+does not replace full main-push CI: its Docker stage is intentionally unselected.
+Three unfamiliar engineer trials still need participants. The owner authorised
+0.4.4 as a controlled evaluation release with those trials explicitly pending.
+Preserve the existing tenant/receipt and qualify one exact
+committed release source; no reset or automatic approval is needed.
+
+Shared HTTPS ingress, private first-human admission/bootstrap removal, external
+providers, OpenShift SCC/router and actual vendor/model use remain separate live
+checks. Qualify only the named local route from this evidence. The coordinated
+0.4.4 source remains unreleased until its exact committed source passes full
+main-push CI and the existing nonpublishing Release drill, followed by the
+authorised immutable tagged publication.
+
+The packaged guides now name their archive version and reviewed source rather
+than retaining the checkout's older publication notes and download pins.
+Outside links point to that source; tools, presets and locked dependency bytes
+are unchanged. ADR-0137 records this private staging adjustment. It adds no
+publisher proof, timing or platform claim.
+
+Three unfamiliar engineer trials also await participants. Give each only the
+shipped guide, its own authorised disposable namespace and fresh human identity
+on the declared environment/artifact set. Start at route selection, record
+prerequisite delays separately, and stop at verified sign-in and the exact
+approved Knowledge revision delivered in client context. Count substitutions,
+documentation jumps, every error and guide resolution, and maintainer help.
+Retained recovery material stays with its trial owner.
+
+| Trial | Sign-in elapsed | Useful client context elapsed | Substitutions / doc jumps | Errors resolved by guide | Maintainer assistance |
+| --- | --- | --- | --- | --- | --- |
+| Engineer 1 | Not run | Not run | Not measured | Not measured | Not measured |
+| Engineer 2 | Not run | Not run | Not measured | Not measured | Not measured |
+| Engineer 3 | Not run | Not run | Not measured | Not measured | Not measured |
+
+No five-minute claim, new platform support or production qualification follows
+from these source tests. OPS-11 remains open.
 
 ## Rollout and rollback
 

@@ -22,6 +22,12 @@
   "clients": [
     {
       "id": "claude-code",
+      "onboarding": {
+        "registration": "automatic",
+        "guide": "docs/CONSUMER_CLI.md",
+        "capabilities": "Automatic context on start/resume, durable Session observations and governed Skill sync.",
+        "limits": "Claude Code 2.1.241 has named lifecycle evidence. Published-package loading and broader platforms need separate qualification."
+      },
       "display_name": "Claude Code",
       "support_level": "verified",
       "connection": "plugin",
@@ -71,6 +77,12 @@
     },
     {
       "id": "copilot-cli",
+      "onboarding": {
+        "registration": "manual",
+        "guide": "docs/integrations/copilot-cli.md",
+        "capabilities": "MCP recall and start/resume context; optional trusted hooks record Session observations.",
+        "limits": "Copilot CLI 1.0.83 on macOS arm64 has source-build lifecycle evidence. Native outage/compaction and other platforms remain unqualified."
+      },
       "display_name": "GitHub Copilot CLI",
       "support_level": "verified",
       "connection": "mcp",
@@ -223,6 +235,12 @@
     },
     {
       "id": "cursor",
+      "onboarding": {
+        "registration": "automatic",
+        "guide": "docs/CLIENT_SUPPORT.md",
+        "capabilities": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
+        "limits": "Experimental recipe; a complete native lifecycle is not qualified. See tested versions and platform evidence."
+      },
       "display_name": "Cursor",
       "support_level": "experimental",
       "connection": "mcp",
@@ -255,6 +273,12 @@
     },
     {
       "id": "vscode",
+      "onboarding": {
+        "registration": "automatic",
+        "guide": "docs/CLIENT_SUPPORT.md",
+        "capabilities": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
+        "limits": "Configured recipe; a complete native lifecycle is not qualified. See tested versions and platform evidence."
+      },
       "display_name": "Visual Studio Code",
       "support_level": "configured",
       "connection": "mcp",
@@ -286,6 +310,12 @@
     },
     {
       "id": "codex",
+      "onboarding": {
+        "registration": "manual",
+        "guide": "docs/integrations/codex.md",
+        "capabilities": "Task-bound MCP recall/context; optional trusted hooks record observations and reinject context after compaction.",
+        "limits": "Codex CLI 0.152.0 on macOS arm64 has source-build lifecycle evidence. Other platforms and published-package native runs remain unqualified."
+      },
       "display_name": "Codex CLI",
       "support_level": "verified",
       "connection": "mcp",
@@ -450,6 +480,12 @@
     },
     {
       "id": "claude-desktop",
+      "onboarding": {
+        "registration": "automatic",
+        "guide": "docs/CLIENT_SUPPORT.md",
+        "capabilities": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
+        "limits": "Captured recipe; a complete native lifecycle is not qualified. See tested versions and platform evidence."
+      },
       "display_name": "Claude Desktop",
       "support_level": "captured",
       "connection": "mcp",
@@ -479,6 +515,12 @@
     },
     {
       "id": "zed",
+      "onboarding": {
+        "registration": "automatic",
+        "guide": "docs/CLIENT_SUPPORT.md",
+        "capabilities": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
+        "limits": "Captured recipe; a complete native lifecycle is not qualified. See tested versions and platform evidence."
+      },
       "display_name": "Zed",
       "support_level": "captured",
       "connection": "mcp",
@@ -504,6 +546,12 @@
     },
     {
       "id": "windsurf",
+      "onboarding": {
+        "registration": "automatic",
+        "guide": "docs/CLIENT_SUPPORT.md",
+        "capabilities": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
+        "limits": "Configured recipe; a complete native lifecycle is not qualified. See tested versions and platform evidence."
+      },
       "display_name": "Windsurf",
       "support_level": "configured",
       "connection": "mcp",
@@ -521,6 +569,12 @@
     },
     {
       "id": "continue",
+      "onboarding": {
+        "registration": "automatic",
+        "guide": "docs/CLIENT_SUPPORT.md",
+        "capabilities": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
+        "limits": "Configured recipe; a complete native lifecycle is not qualified. See tested versions and platform evidence."
+      },
       "display_name": "Continue",
       "support_level": "configured",
       "connection": "mcp",

@@ -45,6 +45,11 @@ export function validateRegistry(registry, root = ROOT) {
     if (!Array.isArray(client.tested_versions)) fail(`${at}: tested_versions must be an array`);
     if (!Array.isArray(client.limitations) || client.limitations.length === 0) fail(`${at}: limitations must be explicit`);
     if (!Array.isArray(client.authentic_fixtures)) fail(`${at}: authentic_fixtures must be an array`);
+    if (client.onboarding) {
+      const setup = client.onboarding;
+      if (!["manual", "automatic"].includes(setup.registration) || !setup.capabilities || !setup.limits || !setup.guide || !existsSync(resolve(root, setup.guide))) fail(`${at}: onboarding needs registration, capabilities, limits and an existing guide`);
+      if (setup.registration === "automatic" && client.connection === "mcp" && !client.configuration) fail(`${at}: automatic onboarding requires a configuration writer`);
+    }
 
     if (client.connection === "mcp" && client.support_level !== "unsupported") {
       const config = client.configuration;
@@ -119,12 +124,16 @@ export function renderMatrix(registry) {
 }
 
 export function renderTypescript(registry) {
-  const clients = registry.clients.filter((client) => client.connection === "plugin" || client.configuration !== null).map((client) => ({
+  const clients = registry.clients.filter((client) => client.connection === "plugin" || client.configuration !== null || client.onboarding?.registration === "manual").map((client) => ({
     id: client.id,
     label: client.display_name,
     via: client.connection,
     supportLevel: client.support_level,
-    note: `${client.support_level}: ${client.limitations[0]}`,
+    note: client.onboarding?.capabilities ?? `${client.support_level}: ${client.limitations[0]}`,
+    registration: client.onboarding?.registration ?? "automatic",
+    testedVersions: client.tested_versions,
+    limits: client.onboarding?.limits ?? client.limitations[0],
+    guide: `https://github.com/synveda/synveda/blob/main/${client.onboarding?.guide ?? "docs/CLIENT_SUPPORT.md"}`,
   }));
   return `// Generated from adapters/registry.json by scripts/check-adapter-conformance.mjs.\n// Do not edit by hand: support claims and connection choices share one authority.\n\nexport const GENERATED_AGENT_CLIENTS = ${JSON.stringify(clients, null, 2)} as const;\n\nexport type GeneratedAgentClient = (typeof GENERATED_AGENT_CLIENTS)[number];\n`;
 }

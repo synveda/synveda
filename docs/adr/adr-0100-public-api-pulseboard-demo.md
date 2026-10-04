@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-26
-- **Feature(s)**: CPR-41, CPR-45
+- **Feature(s)**: CPR-41, CPR-45; OPS-11, OPS-12
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
@@ -139,3 +139,35 @@ violate the platform's central governance claim.
 - **Audit/secrets:** standard action events retain ids, hashes and governance
   outcomes. One-time invite material is shown once and never logged or stored;
   no Tool secret value is part of the fixture.
+
+## Amendment: resume reviewed Configuration after console setup (2026-10-04)
+
+Accepted for OPS-11/OPS-12 and CPR-45 at the owner's first-use friction request.
+The OrbStack walkthrough reproduced a legitimate pending Configuration after
+Getting started had already adopted the tenant's first canonical profile.
+Telling that operator to obtain a fresh tenant is not recovery.
+
+The staged fixture establishes its existing, explicitly supplied synthetic
+reviewers' workspace grants before requesting its own team Configuration.
+Persist the original non-secret Configuration request and pending mutation
+response in the existing private receipt, whose state remains `starting`.
+Report its exact change address and normal review/apply actions. Never approve
+or apply the pending change inside seed. After the required people act, replay
+the original request with its original idempotency key and use the server's
+current governance result. Repeat this boundary for a pending binding.
+Reject rejected/withdrawn changes and changed artifact/version addresses.
+
+The live unbound scope uses `regulated-strict`: its effect actor must also be
+distinct from the proposer and both reviewers. The four-person fixture's Vera
+remains a restricted viewer. If that matrix applies, the operator explicitly
+admits a separate identity through normal People/Access, grants workspace
+administrator authority and applies with that identity's own credential
+profile. Seed never provisions an extra principal, grants Vera extra authority
+or chooses the author as an effect actor contrary to the displayed matrix.
+
+The first-profile adoption rule, approval matrix, effect authority, public API,
+receipt ownership and product state vocabulary remain unchanged. This is an
+extension of the fixture's existing interrupted-start recovery, not a new
+configuration authority or tenant reset. Acceptance must exercise console
+setup before seed, denied premature effects, two distinct normal reviewers,
+retry with stable addresses and the later learning/context/provenance path.

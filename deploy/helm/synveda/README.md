@@ -1,443 +1,399 @@
-# Deploy to Kubernetes
+# Install Synveda on an existing Kubernetes cluster
 
-The chart runs one gateway/console and one combined private worker by default;
-the source candidate can add up to two capture-only workers. Select
-bundled or existing application PostgreSQL independently of bundled Keycloak
-or existing OIDC. Bundled PostgreSQL is a persistent namespaced StatefulSet;
-CNPG is an explicit alternative requiring an operator you already manage.
-All modes preserve Cedar, forced RLS, VedaFlow, audit and the migration contract.
+Synveda installs a console/API gateway, a separate worker and a bounded
+installation Job. Choose who owns PostgreSQL and identity; the chart installs
+no cluster operator, ingress controller or StorageClass. A tenant is this
+installation's identity boundary; a workspace groups people and projects.
 
-<!-- installation-version: 0.4.3; publication: published -->
-**v0.4.3 is the current published chart.** The earlier
-[v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
-passed native candidate qualification but failed during anonymous image checks. The
-[v0.4.2 tagged run](https://github.com/synveda/synveda/actions/runs/35987467297)
-passed anonymous image pulls but timed out after its full candidate chart
-qualification while repeating deployment checks. The
-[published v0.4.0 chart and instructions](https://github.com/synveda/synveda/tree/v0.4.0/deploy/helm/synveda)
-retain their earlier contract.
+<!-- installation-version: 0.4.4; publication: unreleased -->
+**The current published release is v0.4.3.** The preparation, customer presets,
+preflight and console changes in this checkout are **source candidates for the
+next release**. They are included by chart packaging and tested locally; they
+are absent from the immutable v0.4.3 archive. For that release, follow its
+[versioned installation guide](https://github.com/synveda/synveda/blob/v0.4.3/deploy/helm/synveda/README.md).
+Do not mix an older published chart with commands introduced in this candidate.
 
-The [release pipeline](../../../docs/CI.md) retains all four modes, locked chart
-dependencies, install/upgrade/reinstall and recovery checks. It publishes
-Docker Hub/GHCR images and attested checksums after testing exact native OCI
-candidates. Server installation needs no native CLI package or publisher token.
+The procedure below is the candidate's shipped operator guide. Set `CHART` to
+the extracted, reviewed candidate chart and use its matching digest overlay.
+The download ceremony also applies to a named published release, using that
+release's versioned instructions. Local source tests are not publisher proof.
+<!-- chart-package-source-status:end -->
 
-## Version 0.4.3 chart
+The service is available for controlled self-hosted evaluation. One gateway
+and one combined worker use planned downtime for upgrades. No HA, supported
+cross-release upgrade window or production-readiness claim is made. See the
+[readiness register](../../../docs/PRODUCTION_READINESS.md) and
+[qualification record](../../../docs/backlog/OPS-11.md).
 
-Verify `SHA256SUMS`
-with its attestation before trusting chart or overlay checksums. The package and its two image
-overlays come from that same release; no source build or registry login is
-needed. The release checks the archive against the anonymously retrievable
-GHCR OCI chart and tests all four PostgreSQL/Keycloak ownership combinations.
+## 1. Choose a route and dependency owners
 
-Start with the [complete loopback evaluation recipe](examples/README.md).
-It prepares private Secrets in a short-lived container, installs no cluster-wide
-infrastructure, and exposes the console through explicit loopback port-forwards.
-For your existing infrastructure use the configuration below.
+| Route | Recommended audience | What you provide |
+| --- | --- | --- |
+| **Local evaluation on Kubernetes** | One person trying the product | Authorised namespace, persistent storage, explicit evaluation identities and two loopback ports. PostgreSQL and Keycloak are bundled. |
+| **Shared installation on an existing cluster** | A team using real identities | Application HTTPS/DNS, trusted ingress, an initial human administrator and recovery ownership. Bundle either dependency or use existing PostgreSQL and OIDC independently. |
+| **Advanced existing-CNPG installation** | Operators already running CloudNativePG | Existing compatible controller/API, storage and its database lifecycle. Identity can be bundled or external. |
 
-## Dependency ownership
+These are infrastructure recipes. Product behavior is governed Configuration,
+selected after sign-in. Start locally for individual evaluation. Start with
+shared HTTPS and bundled dependencies for a team without existing services;
+use the [existing-service worksheet](CONFIGURATION.md) when those services
+already have owners. Existing-CNPG users follow the same procedure with
+`--route cnpg`; the chart never installs its operator.
 
-| Application database | Identity | Starting values |
-|---|---|---|
-| Bundled | Bundled Keycloak | [local recipe](examples/README.md) or [bundled DB](ci/bundled-values.yaml) + [Keycloak](examples/bundled-keycloak.yaml) |
-| Existing | Existing OIDC | [external](ci/external-values.yaml) |
-| Existing | Bundled Keycloak | [external](ci/external-values.yaml) + [separate identity DB](examples/external-database-keycloak.yaml) |
-| Bundled | Existing OIDC | [bundled DB](ci/bundled-values.yaml) |
+Customer presets in `examples/` are ordinary Helm values, packaged with the
+chart and used by tests. [The preset index](examples/README.md) lists the
+advanced combinations. No customer command depends on `ci/` fixtures.
 
-Read [configuration](CONFIGURATION.md) for exact database privileges, issuer
-and Secret formats; [operations](OPERATIONS.md) for maintenance and recovery;
-[portability](PORTABILITY.md) for existing ingress, Gateway API and OpenShift
-configuration. The new opt-in [CNPG backup candidate](BACKUP.md) is available
-in source only and still requires an independent PITR drill. Generic OIDC
-compatibility is not verified support for every IdP.
+## 2. Check prerequisites with your cluster administrator
 
-## Cluster administrator prerequisites
+All commands below run in a **workstation terminal**, as an ordinary account.
+You need Helm (qualified: **4.2.3**), kubectl matching the cluster (qualified:
+**1.36.1**), trusted GitHub CLI with attestation verification, curl and tar.
+Candidate preparation additionally needs **Node 22+ and OpenSSL** on Linux or
+macOS. Docker, Rust and npm installation are unnecessary for preparation.
+Windows preparation is unqualified; native Windows client packages are separate.
 
-The administrator supplies a namespace, installer RBAC, quotas, DNS, trusted TLS,
-private networking and registry access. Bundled PostgreSQL needs persistent storage. Only `postgres.mode=cnpg` needs
-a preinstalled CNPG operator; `postgres.backup.enabled` additionally needs the
-Barman Cloud plugin and an operator-owned ObjectStore. Loopback evaluation needs neither DNS nor ingress TLS. The chart creates no CRD/operator, ingress
-controller, certificate issuer, storage class or monitoring stack.
-
-The release qualification uses Kind 0.32.0, Kubernetes and kubectl 1.36.1,
-Helm 4.2.3, PostgreSQL 17.11 with vector 0.8.6 and btree_gin 1.3, and Keycloak
-26.7.2 via locked keycloakx 7.3.2. Earlier explicit CNPG evidence used operator
-1.30.0; the bundled release installs no operator. Native Linux AMD64/ARM64
-runners qualified the source-built OCI candidates; local candidate evidence also covers
-Linux arm64 on macOS/OrbStack. The four-mode fixture uses private-CA HTTPS; the local recipe
-uses loopback port-forwarding. Real ingress,
-OpenShift, cloud services and a general Kubernetes minor-version window remain
-unqualified. Structural API validation is distinct from execution evidence.
-
-- Create a project/namespace and grant its installer namespaced access to
-  Deployments, StatefulSets, Jobs, Pods/log/exec, Services, ConfigMaps, Secrets,
-  ServiceAccounts, PVCs and the selected Ingress/Route/NetworkPolicy resources.
-  CNPG mode additionally requires access to its namespaced Cluster resource.
-- Set quota for database/provider pods plus gateway, worker, optional
-  capture-only workers and the temporary installation Job; allow replacement
-  pods/PVC provisioning. See resource
-  observations in [OPS-11](../../../docs/backlog/OPS-11.md). The tested engine
-  exposed 18 CPUs and 16.8 GB RAM; that is test context, not a minimum.
-- Select a persistent CSI StorageClass supporting PostgreSQL fsync and the
-  cluster's UID/fsGroup rules. Record expansion and PV reclaim policies.
-  Retained PVCs are not a backup. External mode without TEI needs no app PVC.
-- Provision two DNS names and certificates for packaged identity, or one app
-  name plus the organisation's canonical issuer. Both pods and browsers must
-  resolve and trust the same issuer. Keep management, master realm and metrics
-  private. Supply the existing ingress class or Route integration explicitly.
-- Allow DNS, PostgreSQL, identity and optional approved model/telemetry egress.
-  NetworkPolicy needs an enforcing CNI and real selectors/CIDRs; see the small
-  [generic/cloud](examples/managed-kubernetes.yaml),
-  [OpenShift](examples/openshift.yaml) and [network](examples/network-policy.yaml)
-  overlays. They validate renders only until run on the named target.
-
-## Namespace installer and artifact acquisition
-
-Current starter requests are gateway **500m / 512Mi**, worker **250m / 256Mi**,
-CNPG **1 CPU / 2Gi** and Keycloak **500m / 1280Mi**, plus installation jobs and
-cluster/ingress overhead. The four-agent short workload observed Keycloak near
-1Gi; its request was raised from 768Mi while retaining the 2Gi limit. These are
-initial reservations, not throughput or capacity guarantees; see the measured
-[starter](../../../demos/evidence/ops11-operations-cnpg-packaged.json) and
-[external](../../../demos/evidence/ops11-operations-external-external.json) reports.
-
-Use Helm 4.2.3, GitHub CLI for publisher attestation verification, and a
-namespace-scoped kubeconfig supplied by the administrator.
-These checks print capability/status information, not credentials:
+Choose one context and a namespace the administrator permits you to install
+into. Namespace creation is an administrator action if your credentials are
+namespaced. Do not use an arbitrary current context for a disposable drill.
 
 ```sh
-export NAMESPACE=synveda
-kubectl config current-context
-kubectl auth can-i create deployments -n "$NAMESPACE"
-kubectl auth can-i create secrets -n "$NAMESPACE"
-kubectl auth can-i create jobs -n "$NAMESPACE"
-kubectl -n "$NAMESPACE" get resourcequota,limitrange
-kubectl get storageclass
+export CONTEXT=your-authorised-context     # replace
+export NAMESPACE=synveda-evaluation       # change if administrator supplied another
+export RELEASE=synveda                   # change freely; keep the same selectors on retry
+kubectl config use-context "$CONTEXT"
+kubectl --context "$CONTEXT" -n "$NAMESPACE" auth can-i create deployments
+kubectl --context "$CONTEXT" -n "$NAMESPACE" get resourcequota,limitrange
 ```
 
-Download the published chart, its image overlays and attested checksum inventory
-into a new directory. Verify the publisher and downloaded entries before
-unpacking. Stop
-on any download or checksum failure. No Rust compiler, native CLI, Dockerfile
-inspection or source edit is part of chart installation.
+Success means the namespace exists and the selected identity can inspect it
+and install namespaced workloads/Secrets. Ask the administrator for Helm's
+get/list/watch/create/update/patch/delete access to Deployments, Jobs,
+Services, ConfigMaps, Secrets, ServiceAccounts and selected StatefulSets/PVCs
+and Ingresses. Pod inspection/logs and explicit private verification need
+Pods get/list/watch, pods/log get, pods/exec create and pods/portforward create
+for local access. CNPG adds its selected
+namespaced API; NetworkPolicy/Route access is needed only when enabled.
+Cluster-admin is unnecessary. Helm stores its release metadata in Secrets.
+
+For bundled storage select a named StorageClass supporting PostgreSQL fsync,
+ReadWriteOnce and the cluster's UID/fsGroup rules. The administrator supplies
+its provisioner, binding mode, reclaim policy and expansion support. If you
+cannot list StorageClasses, obtain this exact input rather than assuming a
+default. A Pending claim with **WaitForFirstConsumer** waits for the database
+Pod to be scheduled; it is not alone evidence of a failed provisioner.
+
+Default reservations below exclude cluster, ingress and external-provider
+resources. They include a single installation Job; its sequential bootstrap,
+preflight and migration containers are not simultaneous reservations.
+
+| Database / identity recipe | Running CPU / memory | During installation CPU / memory | PVC |
+| --- | --- | --- | --- |
+| Bundled / bundled (local or shared) | 1500m / 2560Mi | 1600m / 2688Mi, 5 Pods | 20Gi selected class |
+| Bundled / external | 1000m / 1280Mi | 1100m / 1408Mi, 4 Pods | 20Gi selected class |
+| External / bundled | 1250m / 2048Mi | 1350m / 2176Mi, 4 Pods | Database owner's storage |
+| External / external | 750m / 768Mi | 850m / 896Mi, 3 Pods | None for the lexical app |
+| Existing CNPG / bundled, one DB instance | 2250m / 4096Mi | 2350m / 4224Mi, 5 Pods | 20Gi selected class |
+| Existing CNPG / external, one DB instance | 1750m / 2816Mi | 1850m / 2944Mi, 4 Pods | 20Gi selected class |
+
+Memory limits are 2Gi each for gateway, bundled DB and Keycloak, 1Gi for
+worker and install Job. Reserve quota for those limits, replacement Pods,
+retained claims and Helm's optional verification Pod (100m/128Mi request,
+1Gi memory limit). These are requests, not observed use or measured minimums.
+[Short-run observations](../../../demos/evidence/ops11-starter.json) exclude
+cluster/driver overhead. No setup-time or minimum-cluster claim is published.
+
+For a macOS **local evaluation**, OrbStack Kubernetes can supply the selected
+cluster. Start it with `orb start k8s`, set `CONTEXT=orbstack`, and inspect its
+actual StorageClasses with `kubectl --context "$CONTEXT" get storageclasses`.
+Use a newly authorised namespace and a kubectl client within one minor version
+of its API server; OrbStack's bundled client can lag its server. Confirm both
+versions with `kubectl --context "$CONTEXT" version -o json` before preparing.
+Keep the two loopback forwards below even when OrbStack offers direct Service
+access, so the application origin, issuer and callback stay consistent.
+This local route needs no ingress controller. Shared HTTPS ingress, other
+distributions and human timing trials require their own acceptance.
+
+## 3. Download and verify a named release
+
+The release chart is already packaged with its locked Keycloak dependency,
+customer presets and preparation tools. You do not compile Helm, build Rust
+or run `helm dependency build` to install a downloaded release. For a reviewed
+source checkout, [package the chart with one command](BUILD.md); its images
+remain a separate, matching source candidate.
+
+Run this **entire block** from a workstation directory for downloads. The
+subshell fails closed: extraction occurs only after publisher and all selected
+checksums pass. The directory must be new.
+<!-- chart-package-source-identity:start -->
+The source commit shown is the
+published v0.4.3 source; take any future release's commit from its reviewed
+release record. Never copy an expected commit from an unverified downloaded
+inventory. GitHub CLI must be installed independently of these assets.
+<!-- chart-package-source-identity:end -->
 
 ```sh
-RELEASE_VERSION=${RELEASE_VERSION:-0.4.3}
-release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
-mkdir "synveda-chart-$RELEASE_VERSION"
-cd "synveda-chart-$RELEASE_VERSION"
-for file in "synveda-$RELEASE_VERSION.tgz" "synveda-images-$RELEASE_VERSION.yaml" \
-  "synveda-cnpg-image-$RELEASE_VERSION.yaml" SHA256SUMS SHA256SUMS.sigstore.json; do
-  curl -fLO "$release_url/$file"
-done
-gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
-  --repo synveda/synveda \
-  --signer-workflow synveda/synveda/.github/workflows/release.yml \
-  --source-ref "refs/tags/v$RELEASE_VERSION" --deny-self-hosted-runners
-awk -v chart="synveda-$RELEASE_VERSION.tgz" \
-  -v images="synveda-images-$RELEASE_VERSION.yaml" \
-  -v cnpg="synveda-cnpg-image-$RELEASE_VERSION.yaml" \
-  '$2 == chart || $2 == images || $2 == cnpg { seen[$2]++; print }
-   END { if (seen[chart] != 1 || seen[images] != 1 || seen[cnpg] != 1) exit 1 }' \
-  SHA256SUMS > chart.sha256
-if command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 --check chart.sha256
-else
-  sha256sum --check chart.sha256
-fi
-mkdir chart
-# The archive contains synveda/ and its unchanged locked Keycloak dependency.
-tar -xzf "synveda-$RELEASE_VERSION.tgz" -C chart
-export CHART="$PWD/chart/synveda"
-cp "synveda-images-$RELEASE_VERSION.yaml" release-images.yaml
+(
+  set -eu
+  RELEASE_VERSION=0.4.3
+  SOURCE_SHA=2acc66f02625727b2ccdfe223358468bf10eef85
+  release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
+  mkdir "synveda-chart-$RELEASE_VERSION"
+  cd "synveda-chart-$RELEASE_VERSION"
+  for file in "synveda-$RELEASE_VERSION.tgz" "synveda-images-$RELEASE_VERSION.yaml" \
+    "synveda-cnpg-image-$RELEASE_VERSION.yaml" SHA256SUMS SHA256SUMS.sigstore.json; do
+    curl --fail --location --proto '=https' --proto-redir '=https' \
+      --connect-timeout 15 --max-time 120 --output "$file" "$release_url/$file"
+  done
+  gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+    --repo synveda/synveda \
+    --signer-workflow synveda/synveda/.github/workflows/release.yml \
+    --source-ref "refs/tags/v$RELEASE_VERSION" --source-digest "$SOURCE_SHA" \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners
+  awk -v chart="synveda-$RELEASE_VERSION.tgz" \
+    -v images="synveda-images-$RELEASE_VERSION.yaml" \
+    -v cnpg="synveda-cnpg-image-$RELEASE_VERSION.yaml" \
+    '$2 == chart || $2 == images || $2 == cnpg { seen[$2]++; print }
+     END { if (seen[chart] != 1 || seen[images] != 1 || seen[cnpg] != 1) exit 1 }' \
+    SHA256SUMS > chart.sha256
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 --check chart.sha256
+  else
+    sha256sum --check chart.sha256
+  fi
+  mkdir chart
+  tar -xzf "synveda-$RELEASE_VERSION.tgz" -C chart
+  cp "synveda-images-$RELEASE_VERSION.yaml" release-images.yaml
+)
 ```
 
-Save the verified archive, overlays, checksums and source revision with operator
-configuration. The public OCI chart at
-`oci://ghcr.io/synveda/charts/synveda`, version `0.4.3`, is byte-identical
-to the downloadable archive and requires no registry token. Do not substitute
-an arbitrary PR build for this trusted release.
+Success ends with matching hashes and an extracted chart. On any failure,
+stop and correct download/verifier access; do not execute partially obtained
+code. Preserve the inventory, attestation, overlay and expected source with
+operator configuration. The archive and public OCI chart are byte-identical.
+[Publisher policy](../../../docs/adr/adr-0132-verify-publisher-before-installing-release-code.md)
+and [release evidence](../../../docs/CI.md) explain verification limits.
 
-Private image mirrors need existing namespace-local pull
-Secrets in `imagePullSecrets` and, for packaged identity,
-`keycloak.imagePullSecrets`. Create them through your secret manager or
-`kubectl create secret generic registry-access --type=kubernetes.io/dockerconfigjson
---from-file=.dockerconfigjson=private/registry-config.json -n "$NAMESPACE"`;
-do not pass registry passwords in shell arguments.
-
-## Choose the preset
-
-| Database / identity | Starting values | Ownership |
-|---|---|---|
-| External / external | `ci/external-values.yaml` | Database and identity administrators own both services and their recovery |
-| CNPG / packaged | `starter-values.yaml` | Existing operator manages one persistent server and two isolated databases |
-| External / packaged | External values plus `keycloak` from starter | DBA provisions both databases; application release owns Keycloak |
-| CNPG / external | Starter with `keycloak.enabled: false` | CNPG owns product DB; identity administrator owns identities |
-
-Copy the selected file from `$CHART` to `team-values.yaml`. Replace every example
-host, tenant and Secret reference. For CNPG only, append the verified release's
-`synveda-cnpg-image-$RELEASE_VERSION.yaml` to `release-images.yaml` (its top-level
-`postgres` key is distinct). Keep database and identity image digests unchanged
-on later application-only upgrades. For external services, complete
-[database provisioning](CONFIGURATION.md#external-postgresql) and
-[OIDC setup](CONFIGURATION.md#identity-and-secret-formats) first; the application
-never provisions or repairs an independently operated provider.
-
-For the starter, prepare the two non-secret values files with:
+Set paths once, using the actual extracted **candidate** with the tools below:
 
 ```sh
-cp "$CHART/starter-values.yaml" team-values.yaml
-cat "synveda-cnpg-image-$RELEASE_VERSION.yaml" >> release-images.yaml
+export CHART=/absolute/path/to/reviewed-candidate/chart/synveda
+export IMAGES=/absolute/path/to/its/matching/release-images.yaml
+export PREPARED="$HOME/.synveda-kubernetes-$RELEASE"
+export ARCHITECTURE=arm64               # administrator-confirmed amd64 or arm64
+export STORAGE_CLASS=your-persistent-class  # replace; do not guess a class name
 ```
 
-For external services, instead copy `$CHART/ci/external-values.yaml` and keep
-the product image overlay without the CNPG addition. The commands below use
-release and namespace `synveda`; keep those names consistent in values, Secrets
-and administrative checks.
-
-## Prepare one installation
-
-1. Provision the namespace, CNPG operator if selected, persistent StorageClass,
-   private cluster networking and an HTTPS ingress/proxy. No ingress controller,
-   certificate issuer or monitoring stack is installed by this chart.
-2. Copy the preset to your private operator configuration. Set the product and
-   provider images, `install.tenant.id` to a preselected UUIDv7, tenant `slug`
-   and `name`, application/identity HTTPS origins, actual TLS Secrets and ingress
-   class. Use that tenant ID and exact issuer in the issuer Secret below.
-3. Set `postgres.storage.storageClass` and `size` (20 GiB initially). CNPG uses
-   filesystem volumes with `ReadWriteOnce`; choose a CSI driver that supports
-   PostgreSQL fsync and the required ownership/mount permissions. No team
-   template uses `hostPath`. Expansion depends on the StorageClass; shrinking
-   and arbitrary existing-PVC adoption are not supported by this preset. Use
-   the operator's documented recovery procedure for existing database data.
-4. Set `keycloak.proxyTrustedAddresses` to the actual ingress source addresses
-   or bounded CIDRs. Leave the Service private. Only `/realms/synveda` and
-   `/resources` are public; master realm, `/admin`, health and metrics remain
-   private. Backend HTTP requires a trusted private network; this chart offers opt-in NetworkPolicy; it does not supply pod-to-pod TLS.
-
-Generate distinct private credentials; never paste their values into Helm
-values, source control or shell arguments. For the shared CNPG preset:
+For advanced CNPG, merge the matching verified CNPG reference into the image
+overlay before preparation. Both original files must pass the same inventory
+verification. Do not concatenate duplicate YAML `postgres` keys. On the
+workstation, set `CNPG_IMAGES` to that verified file and run:
 
 ```sh
-umask 077
-mkdir private
-printf '%s\n' 'local:team-primary' > private/kms-key-ref
-python3 - <<'PY'
-from pathlib import Path
-from secrets import token_hex
-for name in ('gateway-password', 'worker-password', 'keycloak-password',
-             'keycloak-admin-password', 'kms-key'):
-    Path(f'private/{name}').write_text(token_hex(32))
-for role in ('gateway', 'worker'):
-    password = Path(f'private/{role}-password').read_text().strip()
-    Path(f'private/{role}-url').write_text(
-        f'postgresql://synveda_{role}:{password}@synveda-pg-rw:5432/synveda\n')
-PY
+export CNPG_IMAGES=/absolute/path/to/synveda-cnpg-image-VERSION.yaml
+export MERGED_IMAGES="$PWD/release-images-cnpg.yaml"
+node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const cnpg=readFileSync(process.env.CNPG_IMAGES,'utf8');
+const reference=/^  image: ([^\n]+)$/m.exec(cnpg)?.[1];
+if (!reference || !/@sha256:[a-f0-9]{64}["']?$/.test(reference)) throw Error('verified CNPG digest reference missing');
+const base=readFileSync(process.env.IMAGES,'utf8');
+const merged=base.includes('\npostgres:\n')?base.replace('\npostgres:\n','\npostgres:\n  image: '+reference+'\n'):base+'\npostgres:\n  image: '+reference+'\n';
+writeFileSync(process.env.MERGED_IMAGES,merged,{flag:'wx',mode:0o600});
+NODE
+export IMAGES="$MERGED_IMAGES"
 ```
 
-Create `private/keycloak-admin-username` with your operator-selected temporary
-Keycloak bootstrap administrator name, without a trailing newline. Keycloak's
-native Secret environment values are exact bytes; its username and passwords
-must not contain line endings. No username or password is supplied by the
-preset. Create `private/issuers.json`, replacing both the URL and tenant ID:
+Preserve the two verified originals and the derived overlay. If the derived
+file already exists, reuse the existing inspected file instead of replacing
+it. A matching version string alone does not establish publication.
 
-```json
-[{
-  "issuer": "https://auth.example.com/realms/synveda",
-  "client_id": "synveda",
-  "audience": "synveda-api",
-  "service_audiences": ["synveda-agents"],
-  "algorithms": ["RS256"],
-  "groups_claim": "groups",
-  "tenant": {"static": {"tenant_id": "YOUR-PRESELECTED-UUIDV7"}}
-}]
-```
+## 4. Prepare the selected configuration
 
-The starter has one issuer and one organisation. A verified stable subject
-identifies a principal within that issuer's tenant. Admission rejects two
-issuers bound to the same tenant, and rejects mixing a claim-bound issuer with
-another issuer. This is the narrower safe admission contract, **not** persistent
-federated identity linking. The database still keys subjects within a tenant;
-operators must not replace its issuer or enable email-based directory adoption.
-Emails and display names never grant team access. Full issuer migration/linking
-and directory reconciliation remain MEM-7 work.
+Preparation writes files only. It prints context, namespace, release, exposure
+and dependency owners; it contacts no cluster. Inspect `values.json` afterward.
+Keep `state.json` and `secrets.json` private with the original database/identity
+recovery set. Repeating the same command preserves tenant UUIDv7, passwords,
+CA/private keys and issuer binding; interrupted derived outputs resume from
+saved state. Conflicting inputs/files stop with a recovery action.
 
-Create operator-owned Secrets (namespace `synveda`, release `synveda`):
+**Local evaluation** (recommended for one person): choose two unused ports and
+explicitly opt into four unique synthetic evaluation identities.
 
 ```sh
-kubectl -n synveda create secret generic synveda-gateway-db --from-file=DATABASE_URL=private/gateway-url --from-file=password=private/gateway-password
-kubectl -n synveda create secret generic synveda-worker-db --from-file=DATABASE_URL=private/worker-url --from-file=password=private/worker-password
-kubectl -n synveda create secret generic synveda-keycloak-db --from-file=password=private/keycloak-password
-kubectl -n synveda create secret generic synveda-keycloak-admin --from-file=username=private/keycloak-admin-username --from-file=password=private/keycloak-admin-password
-kubectl -n synveda create secret generic synveda-oidc --from-file=SYNVEDA_OIDC_ISSUERS=private/issuers.json
-kubectl -n synveda create secret generic synveda-kms --from-file=SYNVEDA_KMS_KEY=private/kms-key --from-file=SYNVEDA_KMS_KEY_REF=private/kms-key-ref
+export APP_PORT=8120 IDENTITY_PORT=8081
+node "$CHART/examples/prepare.mjs" --route local \
+  --context "$CONTEXT" --namespace "$NAMESPACE" --release "$RELEASE" \
+  --storage-class "$STORAGE_CLASS" --storage-size 20Gi \
+  --app-port "$APP_PORT" --identity-port "$IDENTITY_PORT" \
+  --images "$IMAGES" --output "$PREPARED"
 ```
 
-CNPG generates the separate migrator/superuser Secrets and database CA. The
-installation Job copies only its required bootstrap files to private memory,
-converges both databases with the existing bootstrap, proves the peer database,
-then runs ordinary-role preflight/migration and tenant admission. Gateway and
-worker receive neither bootstrap nor Keycloak credentials. Keycloak receives
-only its own database and initial administrator Secret references. Kubernetes
-Secret encryption at rest and namespace RBAC remain operator responsibilities.
-
-For **external PostgreSQL with packaged Keycloak**, use the external values
-specimen rather than merging CNPG-only settings. Provision `keycloak` with its
-separate owner/password through the database administrator; configure
-`keycloak.database.hostname`, `port`, `existingSecret` and
-`databaseCaExistingSecret`. JDBC requires `verify-full` and a hostname-valid
-certificate. Keep its database/user exactly `keycloak`. If both applications
-share the external server, declare `keycloak` in Synveda's
-`postgres.external.roles.forbidden_databases` and `isolated_peer_roles`.
-Synveda's migrator/gateway/worker URLs and CA follow the
-[external database contract](CONFIGURATION.md#external-postgresql).
-
-Install from the saved values; Helm must wait for the ordinary install Job:
+**Shared installation**, bundled dependencies (recommended for a team without
+existing services): provision both public DNS names and their TLS Secrets
+through the certificate owner first. Replace the five environment inputs below.
+The proxy CIDRs must be the actual ingress source addresses, never a public /0.
 
 ```sh
-helm lint "$CHART" --strict -f team-values.yaml -f release-images.yaml
-helm template synveda "$CHART" -n synveda -f team-values.yaml -f release-images.yaml --api-versions postgresql.cnpg.io/v1 > rendered.yaml
-helm upgrade --install synveda "$CHART" -n synveda -f team-values.yaml -f release-images.yaml --wait --wait-for-jobs --timeout 15m
-kubectl -n synveda get pods,pvc
+export APP_URL=https://memory.your-domain.example
+export IDENTITY_URL=https://identity.your-domain.example
+export INGRESS_CLASS=your-ingress-class
+export PROXY_CIDRS=your-ingress-source-cidrs
+export ADMIN_USER=your-private-bootstrap-admin
+node "$CHART/examples/prepare.mjs" --route shared \
+  --context "$CONTEXT" --namespace "$NAMESPACE" --release "$RELEASE" \
+  --storage-class "$STORAGE_CLASS" --storage-size 20Gi \
+  --app-url "$APP_URL" --identity-url "$IDENTITY_URL" \
+  --ingress-class "$INGRESS_CLASS" --proxy-cidrs "$PROXY_CIDRS" \
+  --app-tls-secret application-tls --identity-tls-secret identity-tls \
+  --admin-user "$ADMIN_USER" --images "$IMAGES" --output "$PREPARED"
 ```
 
-Keycloak uses production `start --optimized --cache=local --import-realm`.
-Native import creates the realm/client/group only when the realm is absent;
-it skips an existing realm and never replaces team users on upgrade. Registration
-and email reset are disabled. No sample content or team accounts are imported.
-Make later realm changes through Keycloak's administration tools.
+Success reports protected files and no applied resource. For existing services,
+use `--database external` and/or `--identity external` with the
+[worksheet and exact inputs](examples/README.md#existing-services).
+For advanced CNPG, use `--route cnpg`, otherwise the shared arguments above;
+its operator creates the owner credential and CA after installation starts.
 
-## First use and membership
+`postgres.bundled.size/storageClass` configures bundled PVCs;
+`postgres.storage.size/storageClass` configures **CNPG only**. The wrong mode
+is refused. An existing bundled claim uses `postgres.bundled.existingClaim`
+and matching original data/Secrets, without size/class overrides.
+No Helm template generates credentials or reads live Secrets to render.
+The [manual equivalent](MANUAL.md) uses ordinary values and protected files.
 
-Use the [Keycloak Admin CLI](https://www.keycloak.org/docs/latest/server_admin/#admin-cli)
-over private pod access, or your organisation's restricted administration path.
-For example, select the Keycloak pod and authenticate interactively:
+## 5. Validate and install
+
+Run on the **same workstation** with the saved selectors. Offline checks need
+no cluster; preflight reads the selected Kubernetes API within your permissions.
+The `secrets` action explicitly creates missing prepared Secrets and refuses
+conflicting existing credentials. It never replaces existing Secret values.
 
 ```sh
-kubectl -n synveda get pods -l app.kubernetes.io/name=keycloakx
-kubectl -n synveda exec -it KEYCLOAK_POD -- /opt/keycloak/bin/kcadm.sh config credentials --config /tmp/team-admin.config --server http://localhost:8080 --realm master --user YOUR_BOOTSTRAP_ADMIN
+node "$CHART/examples/operator.mjs" offline --prepared "$PREPARED" --architecture "$ARCHITECTURE"
+node "$CHART/examples/operator.mjs" secrets --prepared "$PREPARED"
+node "$CHART/examples/operator.mjs" preflight --prepared "$PREPARED" --architecture "$ARCHITECTURE"
+helm lint "$CHART" --strict -f "$PREPARED/values.json" -f "$PREPARED/release-images.yaml"
 ```
 
-The CLI prompts for the administrator password. Its temporary config contains
-credentials: keep it private and delete it after administration. Follow
-Keycloak's [bootstrap administrator recovery guidance](https://www.keycloak.org/server/bootstrap-admin-recovery)
-to establish durable private administration and remove the temporary bootstrap
-account. The Secret is an initial creation input, not a password rotation API.
+Run each step only after the previous exits successfully. A FAIL gives the
+specific missing permission/input and retry command. Under namespaced RBAC,
+preflight may request administrator confirmation of a named StorageClass;
+`--confirmed-storage-class "$STORAGE_CLASS"` records that input, not proof of
+provisioner health. Preflight checks CPU/memory and storage quota, installation
+headroom, and Container/Pod/PVC limits for these recipes. Extra containers or
+provider-managed sidecars need administrator reconciliation with the rendered
+pods. Registry/pod-connectivity requirements remain explicit. Workstation network access
+cannot prove a Pod can reach a provider.
 
-Create an operator-selected human in realm `synveda`, with a privately delivered
-temporary password and required password change, or configure your existing
-trusted identity federation. Assign **only that selected initial owner** to the
-existing `synveda-admins` group. The first verified login carrying that group
-receives the existing one-time tenant administrator grant; an unauthenticated
-visitor or ordinary OIDC user cannot claim it. The durable bootstrap marker
-prevents later group additions or re-login from recreating revoked authority.
-Remove the bootstrap group assignment after confirming the Synveda grant.
+For external PostgreSQL, run `operator.mjs database-probe --prepared
+"$PREPARED" --architecture "$ARCHITECTURE"` before the Helm command. This
+explicitly creates a bounded temporary Job/ConfigMap, using the existing
+three-role authority verifier and no administrator credentials or DDL. Require
+its printed `kubectl wait ... Complete` command to succeed. Failure goes to
+the DBA handoff before a long Helm wait.
 
-| Team term | Existing Synveda role | Meaning |
-|---|---|---|
-| Initial organisation administrator | `administrator` at tenant root | Configure the installation's tenant and manage governed access |
-| Workspace owner | `owner` | Creator owns the workspace; scope descendants inherit its grant |
-| Team administrator | `administrator` at workspace | Manage that team's access, subject to Cedar policy |
-| Member | `member` | Work with Sessions, context and governed publication at granted scope |
-| Read-only member | `viewer` | Read allowed content; publication and membership changes are denied |
-
-1. Sign in at the application `/console/` as the selected owner. In Configuration,
-   select **Organisation**, create from the **team** template and bind it at
-   the tenant root. Then create a workspace and project.
-   Descendants inherit this organisation configuration; membership remains
-   scoped. Policy and any required later reviews remain active.
-2. Create the second person's identity in Keycloak without the bootstrap group.
-   In the existing **People** screen, create a bounded member invitation and
-   privately share its one-time link. They sign in as themselves and accept.
-   SMTP is unnecessary. An invitation is a bearer admission secret; its optional
-   email is descriptive, not proof of the accepting identity. For exact-subject
-   admission, use People/direct grants with the verified principal subject.
-3. Publish a Knowledge convention in the project, for example an explicitly
-   opt-in test release schedule. Complete any required VedaFlow review. A
-   second user can read it only after admission. Ordinary authentication may
-   create that person's own scope; it does not reveal your team's content.
-4. Connect the existing supported CLI/MCP integration using that user's own
-   `synveda login`, or the scoped service credential below. Open a Session in
-   this project and use MCP `recall` to retrieve the published convention.
-5. In People, remove the member grant. To change a role, revoke its exact grant
-   and grant the replacement role; review inherited/group grants too. Repeat
-   context/Knowledge/search/Skills calls with the existing credential. They
-   must no longer disclose the removed workspace's content. Already delivered
-   content cannot be recalled. The live fixture exercises this same API path.
-
-The public equivalents are `POST /v1/workspaces/{id}/invites`, authenticated
-`POST /v1/invites/{token}/accept`, `POST /v1/admin/grants`, and
-`DELETE /v1/admin/grants/{id}`. Writes that declare `Idempotency-Key` require it.
-No SQL, email-domain rule or second role vocabulary is involved.
-
-### Agent credentials and revocation
-
-Use an existing OIDC confidential service client with client-credentials enabled,
-interactive/direct-password flows disabled, exact `synveda-agents` audience and
-**300-second** access-token lifetime. Keep the Keycloak `basic` client scope so
-tokens contain stable `sub`; do not attach interactive bootstrap groups. Read
-its service-account subject through private provider administration. An owner
-registers that subject with `POST /v1/service-identities` and the workspace
-`scope_id`, then grants only the needed existing role at the project scope.
-The placement vocabulary permits a service principal beneath a workspace,
-tenant or org unit, not beneath a project. Registration
-alone is not a team role. Synveda rejects an unregistered service subject.
-
-Obtain its short-lived token from the issuer token endpoint using
-`grant_type=client_credentials`, keeping the client secret in a private file or
-secret store. Use the existing CLI `SYNVEDA_TOKEN` input, set by a private process
-launcher, with `SYNVEDA_GATEWAY` and `synveda mcp --session SESSION_ID`. See
-[client support](../../../docs/CLIENT_SUPPORT.md) for supported integration
-claims. Never give an agent the owner's browser token. The token's registered
-workspace confines all requests even if a caller supplies another workspace ID;
-the separate project grant determines authority within that boundary.
-
-Delete the service registration with `DELETE /v1/service-identities/{id}` to
-deny subsequent authenticated requests, then disable/rotate its IdP client.
-Revoking the Synveda member grant or service registration is checked on the
-next governed request in the one gateway. In contrast, IdP disable/logout alone
-does not invalidate an already issued JWT: budget its remaining lifetime plus
-the validator's **30-second** clock leeway (up to 330 seconds here). There is no
-claim of immediate global JWT revocation or recall of in-flight responses.
-Console/CLI refresh and account-session inventory have their separate AUTH-6
-qualification gaps.
-
-## Verification and measured commands
-
-After Helm completes, inspect statuses and the revision-scoped installation
-Job; `helm history synveda -n synveda` gives its revision. Normal migration is
-bounded, advisory-locked and repeatable. `/healthz` reports the process;
-`/readyz` reports mandatory database/schema/role authority. Optional provider
-outages do not become liveness failures. Health and metrics stay off public
-Ingress/Route paths. The [operations runbook](OPERATIONS.md) has private checks.
-
-The following exact source-fixture command is executable with Docker, Kind,
-Helm, kubectl, Node 22+, Ruby, Python 3 and OpenSSL. It creates its own clean
-cluster and namespaces, generates synthetic credentials, runs the real chart,
-then removes only its test resources. It requires no team kubeconfig or secrets:
+Now install on the workstation after every prerequisite has passed:
 
 ```sh
-BUNDLED_MATRIX=1 PORTABILITY=1 OPERATIONS=1 STARTER_MATRIX=1 bash demos/ops-2-helm-install.sh
-OPERATIONS=1 STARTER_MATRIX=1 STARTER_CASE=cnpg-packaged bash demos/ops-2-helm-install.sh
-OPERATIONS=1 STARTER_MATRIX=1 STARTER_CASE=external-external bash demos/ops-2-helm-install.sh
-POSTGRES_MODE=external bash demos/ops-2-helm-install.sh
+helm upgrade --install "$RELEASE" "$CHART" --kube-context "$CONTEXT" -n "$NAMESPACE" \
+  -f "$PREPARED/values.json" -f "$PREPARED/release-images.yaml" \
+  --wait --wait-for-jobs --timeout 15m
 ```
 
-The first command exercises all four bundled/external combinations without an
-operator. The next two commands package and extract the chart, then exercise
-each ownership endpoint through all day-two drills and write a separate report.
-The explicit CNPG fixture installs its operator only inside its disposable Kind
-cluster; it requires authorisation for that cluster-wide test infrastructure.
-Omit `STARTER_CASE` to run both sequentially. The last command retains the database TLS/client-certificate and
-OIDC negative matrix. `PORTABILITY=1 STARTER_MATRIX=1` additionally exercises
-all four ownership combinations under simulated restricted IDs. These use
-local source images, not a verified public release. `KEEP=1` retains diagnostic
-state; `REUSE=1` requires empty selected fixture namespaces. Results and exact
-executed profiles live in [OPS-11](../../../docs/backlog/OPS-11.md).
+Installation succeeds when Helm reports deployed and the revision-named
+installation Job completes. It runs administrator bootstrap (bundled/CNPG),
+three-role database authority preflight, migration and tenant admission in
+order. The Job is mutating, bounded to 15 minutes; it is not a read-only probe.
+A failed init/container identifies the failing stage. Start with:
 
-Release qualification uses `scripts/qualify-kubernetes-release.mjs` with the
-extracted candidate bundle, packaged chart archive and report path. It disables
-builds, imports the manifest-bound images and also exercises the shipped local
-preparation and browser port-forward recipe. The
-[installation record](../../../docs/backlog/CPR-45.md#installation-mission-2026-09-20)
-and content-free reports distinguish local candidates from published artifacts.
+```sh
+node "$CHART/examples/operator.mjs" diagnose --prepared "$PREPARED"
+```
+
+Use [the stage recovery table](OPERATIONS.md#installation-stage-recovery).
+Correct the prerequisite and rerun the exact Helm command with the same files.
+Never regenerate credentials or reset a database as install recovery.
+
+## 6. Open the console and sign in
+
+Local evaluation: run each forward in a **separate workstation terminal**.
+Keep both running through browser and CLI authentication.
+
+```sh
+kubectl --context "$CONTEXT" -n "$NAMESPACE" port-forward --address 127.0.0.1 "service/$RELEASE" "$APP_PORT:8120"
+kubectl --context "$CONTEXT" -n "$NAMESPACE" port-forward --address 127.0.0.1 "service/$RELEASE-keycloak-http" "$IDENTITY_PORT:80"
+```
+
+Open `http://localhost:8120/console/`, using your chosen `APP_PORT`.
+Retrieve only the selected account password in a **private terminal**:
+
+```sh
+node -e 'const fs=require("fs"); const s=JSON.parse(fs.readFileSync(process.env.PREPARED+"/secrets.json")); process.stdout.write(s.items.find(x=>x.metadata.name===process.env.RELEASE+"-evaluation-accounts").stringData.admin+"\n")'
+```
+
+Sign in as `synveda-demo-admin` (Avery Author). Shared installations open
+`$APP_URL/console/` and follow the exact
+[private first-human administration procedure](FIRST_LOGIN.md) before login.
+External OIDC uses [the configuration worksheet](CONFIGURATION.md#external-oidc-worksheet).
+Emails grant no authority; only the selected verified identity may hold the
+one-time bootstrap group. On failure, follow the TLS/OIDC rows in the runbook.
+
+## 7. Complete the first useful workflow
+
+In Getting started, create or select a workspace/project, optionally attach a
+repository, then choose a client. You can explore the console before connecting
+one. The instructions use the actual gateway and project and offer manual
+routes for Codex CLI and Copilot CLI. Install the CLI from the verified
+client-only release instructions if it is missing. Review each client's tested
+version/platform limits and normal trust prompts. Observation starts off;
+recording transcript/tool evidence requires explicit consent.
+
+Server available, signed in, project accessible, setup confirmed and client
+operation observed are separate states. Browser access does not verify a
+client. Run an actual context/recall operation, then inspect its Session and
+Context evidence; follow source links to immutable Knowledge revisions.
+
+[First use and optional fictional example](FIRST_USE.md) follows source
+inspection → learning review → explicit apply → Knowledge retrieval. It works
+against the Kubernetes gateway without Docker. Sample proposals retain their
+normal reviewers; no command automatically approves them. The initial
+`deterministic` providers are lexical/synthetic, not semantic or model-backed.
+
+## 8. Verify, retry, stop and uninstall safely
+
+```sh
+node "$CHART/examples/operator.mjs" verify --prepared "$PREPARED" --architecture "$ARCHITECTURE"
+helm test "$RELEASE" --kube-context "$CONTEXT" -n "$NAMESPACE" --logs --timeout 90s
+```
+
+Verification inspects the installation stage and private readiness. `helm test`
+creates a temporary bounded Pod using the same product image, without customer
+credentials. It needs scheduling/DNS/network/quota headroom and cannot prove
+login, client delivery or Capture. Complete the authenticated workflow above.
+
+Retry a failed installation or reapply the same release with the same Helm
+command, selectors, values, overlay and original Secrets. Stop local forwards
+with Ctrl-C; this does not remove data. Application shutdown retains its
+recovery material. A retained uninstall is:
+
+```sh
+helm uninstall "$RELEASE" --kube-context "$CONTEXT" -n "$NAMESPACE" --wait
+```
+
+The bundled PVC and separately owned Secrets remain. Reinstall with the same
+files plus `--set-string "postgres.bundled.existingClaim=$RELEASE-pg-data"`
+and `--set-string postgres.bundled.storageClass=` on the Helm command.
+CNPG retains its Cluster only with `postgres.retain: true` (the customer preset
+sets it). The retained operator-managed database continues running.
+External providers retain their own state. Never delete a namespace for normal
+uninstall: it can delete all recovery credentials and claims.
+
+Recovery needs both application and identity databases, original issuer and
+subject identities, KMS key/reference, TLS/private CA and provider credentials.
+Retained PVCs are not backups. [Operations](OPERATIONS.md) covers quiesced,
+paired logical recovery into a fresh target. No published general N-1 upgrade
+pair is qualified; the source forward path from v0.4.3 requires backup and
+planned downtime. **Helm rollback does not reverse database migrations or
+identity changes.** Use a compatible roll-forward or the verified joint restore.

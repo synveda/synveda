@@ -226,14 +226,15 @@ function packageAndRenderChart(version) {
     const name = `synveda-${version}.tgz`;
     const digests = "123456".split("").map((c) => `sha256:${c.repeat(64)}`);
     execFileSync("bash", ["scripts/package-release.sh", version, first, "0".repeat(40), ...digests], { cwd: ROOT, stdio: "pipe" });
-    for (const mode of ["external", "cnpg"]) for (const identity of ["external", "packaged"]) {
-      const args = ["template", "synveda", join(first, name), "-f", `deploy/helm/synveda/ci/${mode}-values.yaml`];
-      if (identity === "packaged") args.push("-f", "deploy/helm/synveda/ci/packaged-keycloak-values.yaml");
+    for (const mode of ["external", "bundled", "cnpg"]) for (const identity of ["external", "packaged"]) {
+      const args = ["template", "synveda", join(first, name), "-f", `deploy/helm/synveda/examples/${mode === "cnpg" ? "existing-cnpg" : `${mode}-database`}.json`];
+      if (identity === "packaged") args.push("-f", "deploy/helm/synveda/examples/bundled-identity.json");
       args.push("-f", join(first, `synveda-images-${version}.yaml`));
       if (mode === "cnpg") args.push("--api-versions", "postgresql.cnpg.io/v1", "-f", join(first, `synveda-cnpg-image-${version}.yaml`));
       const locked = execFileSync("helm", args, { cwd: ROOT, encoding: "utf8" });
       if (!locked.includes(`ghcr.io/synveda/product@${digests[0]}`)) throw new Error("release overlay lost immutable product image");
       if (identity === "packaged" && !locked.includes(`ghcr.io/synveda/keycloak@${digests[2]}`)) throw new Error("release overlay lost immutable Keycloak image");
+      if (mode === "bundled" && !locked.includes(`ghcr.io/synveda/postgres@${digests[1]}`)) throw new Error("release overlay lost immutable bundled database image");
       if (mode === "cnpg" && !locked.includes(`17.11-synveda-${version}@${digests[5]}`)) throw new Error("release overlay lost version-bearing CNPG digest");
     }
     const firstBytes = readFileSync(join(first, name));

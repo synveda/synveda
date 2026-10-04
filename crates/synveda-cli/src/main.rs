@@ -1316,7 +1316,7 @@ enum ProposalCommand {
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Run an approved Knowledge proposal's typed effect. The gateway
+    /// Run an approved proposal's typed effect. The gateway
     /// repeats PDP and revision checks before applying it (CPR-16).
     Apply {
         /// The proposal UUID.

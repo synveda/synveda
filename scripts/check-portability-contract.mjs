@@ -82,6 +82,13 @@ try {
   assert.deepEqual(certs.find((o) => o.kind === "RoleBinding").subjects, [{ kind: "ServiceAccount", name: "router", namespace: "openshift-ingress" }]);
   const native = render(["--set", "outbound.caBundleExistingSecret=ca,outbound.proxyExistingSecret=proxy"]);
   for (const { pod } of pods(native).filter((p) => !p.name.includes("install"))) {
+    if (pod.metadata?.annotations?.["helm.sh/hook"] === "test") {
+      assert.equal(pod.spec.containers.length, 1);
+      assert.equal(pod.spec.containers[0].name, "readiness");
+      assert.equal(pod.spec.containers[0].env, undefined, "private HTTP readiness holds no provider credentials/proxy settings");
+      assert.match(pod.spec.containers[0].args[0], /http:\/\/synveda:8120\/readyz/);
+      continue;
+    }
     const env = pod.spec.containers[0].env;
     assert.equal(env.find((e) => e.name === "SSL_CERT_FILE").value, "/run/synveda-ca/ca-bundle.crt");
     assert.equal(env.find((e) => e.name === "NO_PROXY").valueFrom.secretKeyRef.name, "proxy");

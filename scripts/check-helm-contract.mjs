@@ -235,7 +235,7 @@ requireRefusal("capture-only database pools without CNPG headroom", "worker.capt
 ]);
 requireRefusal("capture-only database pools without bundled PostgreSQL headroom", "worker.captureOnlyReplicas", [
   "--set", "worker.captureOnlyReplicas=2", "--set", "postgres.maxConnections=44",
-], `${chart}/ci/bundled-values.yaml`);
+], `${chart}/examples/bundled-database.json`);
 
 const bootstrap = namedItem(install, "database-bootstrap");
 const preflight = namedItem(install, "database-preflight");
@@ -565,7 +565,7 @@ const external = externalRender();
 requireSuccess("external services", external);
 forbidMarkers("external services", external.stdout, [
   "kind: Cluster\n", "kind: Secret\n", "kind: ClusterRole", "kind: PersistentVolumeClaim",
-  "database-bootstrap", "synveda-pg-superuser", "helm.sh/hook", "kind: StatefulSet",
+  "database-bootstrap", "synveda-pg-superuser", "kind: StatefulSet",
 ]);
 for (const component of ["gateway", "worker"]) {
   const deployment = resource(external.stdout, "Deployment", component);
@@ -592,8 +592,8 @@ for (const stage of ["database-preflight", "migrate"]) {
 const digest = `sha256:${"a".repeat(64)}`;
 const pinned = externalRender(["--set-string", `image.digest=${digest}`]);
 requireSuccess("digest image", pinned);
-if ((pinned.stdout.match(new RegExp(`image: ghcr.io/synveda/product@${digest}`, "g")) ?? []).length !== 5) {
-  throw new Error("digest must select the same product image for both processes and all three Job stages");
+if ((pinned.stdout.match(new RegExp(`image: ghcr.io/synveda/product@${digest}`, "g")) ?? []).length !== 6) {
+  throw new Error("digest must select the same product image for both processes, all three Job stages and the credential-free test Pod");
 }
 const mutualTls = externalRender(["--set-string", "postgres.external.clientExistingSecret=client-cert", "--set-string", "postgres.external.clientCertSecretKey=tls.crt", "--set-string", "postgres.external.clientKeySecretKey=tls.key"]);
 requireSuccess("client certificate", mutualTls);
@@ -666,3 +666,18 @@ try {
 console.log(
   "ok: Helm renders one migrator-owned database, mandatory three-role preflight, narrow migration/tenant authority, and distinct file-only gateway/worker credentials.",
 );
+
+// OPS-11: prove storage in the actual PVC, including custom release/namespace.
+const bundledStorage = render(["--namespace", "human-install", "--set", "postgres.bundled.size=37Gi", "--set", "postgres.bundled.storageClass=selected-fast"], `${chart}/examples/bundled-database.json`);
+requireSuccess("bundled selected storage", bundledStorage);
+requireMarkers("bundled PVC", resourceByKind(bundledStorage.stdout, "PersistentVolumeClaim"), ['storageClassName: "selected-fast"', 'storage: 37Gi']);
+requireRefusal("CNPG storage on bundled mode", "apply only", ["--set", "postgres.storage.size=37Gi", "--set", "postgres.storage.storageClass=selected-fast"], `${chart}/examples/bundled-database.json`);
+requireRefusal("bundled storage on CNPG", "applies only", ["--set", "postgres.bundled.size=37Gi"]);
+
+for (const doc of documents(external.stdout)) {
+  if (doc.includes("helm.sh/hook")) {
+    requireMarkers("readiness test only", doc, ["kind: Pod", "helm.sh/hook: test", "activeDeadlineSeconds: 60", "automountServiceAccountToken: false"]);
+    forbidMarkers("credential-free readiness test", doc, ["secretKeyRef", "secretName:", "DATABASE_URL", "SYNVEDA_OIDC", "SYNVEDA_KMS"]);
+  }
+}
+forbidMarkers("ordinary install Job never a hook", externalJob, ["helm.sh/hook"]);

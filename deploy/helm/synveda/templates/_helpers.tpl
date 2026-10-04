@@ -105,6 +105,13 @@ silent if the chart rendered it anyway.
 */}}
 {{- define "synveda.validate" -}}
 
+{{- if and (ne .Values.postgres.mode "cnpg") (or .Values.postgres.storage.storageClass (ne .Values.postgres.storage.size "100Gi")) -}}
+{{- fail "postgres.storage.size/storageClass apply only to postgres.mode=cnpg; bundled storage uses postgres.bundled.size/storageClass. Remove the unused settings." -}}
+{{- end -}}
+{{- if and (ne .Values.postgres.mode "bundled") (ne .Values.postgres.bundled.size "10Gi") -}}
+{{- fail "postgres.bundled.size applies only to postgres.mode=bundled; CNPG storage uses postgres.storage.size" -}}
+{{- end -}}
+
 {{- if and (ne .Values.postgres.mode "bundled") (or .Values.postgres.bundled.administratorExistingSecret .Values.postgres.bundled.migratorExistingSecret .Values.postgres.bundled.tlsExistingSecret .Values.postgres.bundled.existingClaim .Values.postgres.bundled.storageClass) -}}
 {{- fail "bundled PostgreSQL credentials/storage are incompatible with the selected postgres.mode" -}}
 {{- end -}}

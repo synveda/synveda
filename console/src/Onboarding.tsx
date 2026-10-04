@@ -39,6 +39,9 @@ import {
   CLIENTS,
   STEP_COUNT,
   checkVerdict,
+  clientEvidence,
+  readProgress,
+  allowExploration,
   clientOf,
   connectionSteps,
   initialStep,
@@ -48,6 +51,7 @@ import {
   slugFrom,
   stepNumber,
   type CheckVerdict,
+  type ClientEvidence,
   type SeedOutcome,
   type Shape,
   type Step,
@@ -58,11 +62,16 @@ export function Onboarding() {
   // Resume where the deployment actually is rather than at step one: a
   // person who created a workspace and closed the tab should not be asked
   // to create another. The server's own word decides (`me.onboarding`).
+  const progressKey = `synveda.onboarding:${me.tenant.id}:${me.principal.subject}`;
+  const storage = () => { try { return typeof window === "undefined" ? null : window.localStorage; } catch { return null; } };
+  const [saved] = useState(() => readProgress(storage(), progressKey, selection.projectId));
+  const [setupCompleted, setSetupCompleted] = useState(saved?.setupCompleted ?? false);
+  const [evidence, setEvidence] = useState<ClientEvidence | null>(null);
   const [step, setStep] = useState<Step>(() =>
-    initialStep(me.onboarding.state, selection),
+    saved?.step ?? initialStep(me.onboarding.state, selection),
   );
   const [shape, setShape] = useState<Shape>("personal");
-  const [seed, setSeed] = useState<SeedOutcome | null>(null);
+  const [seed, setSeed] = useState<SeedOutcome | null>(saved?.seed ?? null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(
     selection.workspaceId,
   );
@@ -73,7 +82,7 @@ export function Onboarding() {
     me.onboarding.state === "ready" && selection.projectId !== null,
   );
   const [clientId, setClientId] = useState<string>(
-    CLIENTS[0]?.id ?? "claude-code",
+    saved?.clientId ?? CLIENTS[0]?.id ?? "claude-code",
   );
   const [verdict, setVerdict] = useState<CheckVerdict | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +96,10 @@ export function Onboarding() {
       previousStep.current = step;
     }
   }, [step]);
+
+  useEffect(() => {
+    try { storage()?.setItem(progressKey, JSON.stringify({ projectId, step, clientId, setupCompleted, seed })); } catch { /* Setup can continue when browser storage is unavailable. */ }
+  }, [progressKey, projectId, step, clientId, setupCompleted, seed]);
 
   const fail = (message: string) => {
     setBusy(false);
@@ -289,10 +302,18 @@ export function Onboarding() {
       );
       return;
     }
+    setEvidence(null);
     const project = await request("get_project", { path: { project_id: id } });
     const repositories = await request("list_repositories", {
       path: { project_id: id },
     });
+    const [sessions, runs] = await Promise.all([
+      request("list_sessions", { query: { project_id: id, principal_id: me.principal.subject, limit: "50" } }),
+      request("list_context_runs", { query: { project_id: id, principal_id: me.principal.subject, limit: "50" } }),
+    ]);
+    setEvidence(sessions.kind === "ok" && runs.kind === "ok"
+      ? clientEvidence(sessions.body.sessions, runs.body.runs, id, me.principal.subject, clientId)
+      : { checked: false, contextRecorded: false, observationsRecorded: false, lines: ["Client evidence could not be checked. Open Sessions and Context, or sign in again if your session expired. Browser project access still does not prove client delivery."] });
     setBusy(false);
     setVerdict(
       checkVerdict({
@@ -309,13 +330,14 @@ export function Onboarding() {
             : 0,
       }),
     );
-  }, [projectId]);
+  }, [projectId, clientId, me.principal.subject]);
 
   const finish = useCallback(() => {
+    allowExploration(me.tenant.id, me.principal.subject);
     invalidate(ME_KEY);
     reload();
     navigate(hrefOf("home"));
-  }, [reload]);
+  }, [reload, me.tenant.id, me.principal.subject]);
 
   if (me.onboarding.state === "blocked") {
     return (
@@ -351,6 +373,15 @@ export function Onboarding() {
         />
       </header>
 
+      <p><button type="button" onClick={finish}>Explore the console; connect a client later</button></p>
+      <ul aria-label="First-use status">
+        <li>Server available: this browser loaded the console.</li>
+        <li>Signed in: {me.principal.display_name ?? me.principal.subject}.</li>
+        <li>Project accessible: {projectId ? "selected; check below to verify current access" : "select or create a project"}.</li>
+        <li>Client setup completed: {setupCompleted ? "confirmed by you; vendor loading remains unverified" : "not confirmed"}.</li>
+        <li>Client operation observed: {evidence === null ? "not checked" : !evidence.checked ? "check unavailable" : evidence.contextRecorded || evidence.observationsRecorded ? "authenticated Session evidence recorded; client initiation remains unverified" : "no operation found in the checked page"}.</li>
+      </ul>
+      {seed ? <div className="banner" role="status">{seedSentence(seed)}</div> : null}
       {error ? (
         <div className="banner error" role="alert">
           {error}
@@ -391,7 +422,7 @@ export function Onboarding() {
       {step === "client" ? (
         <ClientStep
           chosen={clientId}
-          onChoose={setClientId}
+          onChoose={(id) => { setClientId(id); setSetupCompleted(false); setEvidence(null); }}
           onNext={() => setStep(nextStep("client"))}
         />
       ) : null}
@@ -399,7 +430,8 @@ export function Onboarding() {
       {step === "instructions" ? (
         <InstructionsStep
           clientId={clientId}
-          onNext={() => setStep(nextStep("instructions"))}
+          projectId={projectId}
+          onNext={() => { setSetupCompleted(true); setStep(nextStep("instructions")); }}
         />
       ) : null}
 
@@ -407,6 +439,7 @@ export function Onboarding() {
         <CheckStep
           busy={busy}
           verdict={verdict}
+          evidence={evidence}
           onRun={() => void runCheck()}
           onFinish={finish}
         />
@@ -611,6 +644,8 @@ function ClientStep({
               />
               <strong>{client.label}</strong>
               <div className="muted">{client.note}</div>
+              <div className="muted">Tested versions: {client.testedVersions.join(", ") || "none"}. {client.limits}</div>
+              <div>{client.registration === "manual" ? "Manual configuration available" : "Configuration writer available"}</div>
             </label>
           </li>
         ))}
@@ -624,9 +659,11 @@ function ClientStep({
 
 function InstructionsStep({
   clientId,
+  projectId,
   onNext,
 }: {
   clientId: string;
+  projectId: string | null;
   onNext: () => void;
 }) {
   const client = clientOf(clientId);
@@ -641,13 +678,19 @@ function InstructionsStep({
         Run these commands in a terminal on the machine where you use{" "}
         {client.label}. They require the Synveda CLI on your PATH.
       </p>
+      <p><a href="https://github.com/synveda/synveda/blob/main/docs/CONSUMER_CLI.md">Install the Synveda CLI</a> matching this server’s version, then add its binary directory to PATH. Use the same version so setup commands match this server’s client contract.</p>
+      <p>Run project setup at the Git repository root. Observation is initially off. To opt into recording transcript/tool events, explicitly rerun <code>synveda setup --project {projectId} --observation on</code> and follow the trusted-hook instructions. Capture creates proposed learnings for review.</p>
       <ol className="commands">
-        {connectionSteps(client, origin).map((command) => (
+        {connectionSteps(client, origin, projectId ?? undefined).map((command) => (
           <li key={command}>
             <code className="breakable">{command}</code>
           </li>
         ))}
       </ol>
+      <p>Use your client's normal repository, hook and MCP trust prompts. For the dedicated Codex/Copilot invocation, replace <code>YOUR-TASK-KEY</code> with one stable key for this task. Reuse it only for the same task; keep fixed task keys out of shared global configuration. A native conversation ID is not a Synveda Session ID.</p>
+      <p>The managed MCP writer records this selected project's arguments in the client’s user configuration. Shared MCP servers stay unbound: pass the Synveda Session ID from host context with each call. Without a host-supplied Session, use the dedicated task route or the manual guide before recall. Optional hooks own observations and use <code>--writes host</code>; follow the guide before combining them with MCP.</p>
+      <p>The printed Codex/Copilot route exposes recall only. For other MCP routes, <code>remember</code> is an explicit governed observation tool; call it only for evidence you consent to retain. Project hook consent does not control separate MCP tool calls.</p>
+      <p><a href={client.guide}>Manual setup, hooks and platform limits for {client.label}</a> · <a href="https://github.com/synveda/synveda/blob/main/docs/CLIENT_SUPPORT.md">Detailed conformance evidence</a></p>
       {client.id === "other" ? (
         <p className="muted">
           Add your client's settings to{" "}
@@ -665,11 +708,13 @@ function InstructionsStep({
 function CheckStep({
   busy,
   verdict,
+  evidence,
   onRun,
   onFinish,
 }: {
   busy: boolean;
   verdict: CheckVerdict | null;
+  evidence: ClientEvidence | null;
   onRun: () => void;
   onFinish: () => void;
 }) {
@@ -713,6 +758,7 @@ function CheckStep({
           {verdict.kind === "fail" ? <p>{verdict.why}</p> : null}
         </div>
       ) : null}
+      <ul aria-label="Authenticated client evidence">{evidence?.lines.map((line) => <li key={line}>{line}</li>)}</ul>
       <p>
         <button type="button" onClick={onFinish}>
           Go to Home

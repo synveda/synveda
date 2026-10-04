@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use synveda_types::ProposalId;
 
 use crate::api::{Api, Origin};
 
@@ -160,7 +161,6 @@ pub async fn seed(
         (&viewer, viewer_profile),
     )?;
     ensure_workspace(&author, &mut receipt).await?;
-    ensure_configuration(&author, &mut receipt).await?;
     ensure_project(&author, &mut receipt).await?;
     ensure_repository(&author, &mut receipt).await?;
 
@@ -206,6 +206,9 @@ pub async fn seed(
     .await?;
     verify_role_shape(&author, &receipt).await?;
 
+    // Configuration can require review after ordinary console setup. Establish
+    // the selected reviewers' existing workspace grants before opening it.
+    ensure_configuration(&author, &mut receipt).await?;
     ensure_baseline_knowledge(&author, &mut receipt).await?;
     ensure_curator_rule(&author, &mut receipt).await?;
     ensure_skill_install(&author, &mut receipt).await?;
@@ -762,7 +765,10 @@ async fn ensure_workspace(api: &Api, receipt: &mut ReviewReceipt) -> Result<(), 
 async fn ensure_configuration(api: &Api, receipt: &mut ReviewReceipt) -> Result<(), String> {
     let workspace = receipt.require("workspace")?;
     let workspace_scope = required_str(&workspace, "scope_id")?;
-    let configuration: Value = if let Some(recorded) = receipt.resource("configuration") {
+    let configuration: Value = if let Some(recorded) = receipt
+        .resource("configuration")
+        .filter(|recorded| recorded["outcome"] == "applied")
+    {
         // A newer gateway may offer a different team template. The original
         // idempotency key still names its original body, so validate the
         // recorded aggregate rather than submitting a changed create request.
@@ -774,25 +780,41 @@ async fn ensure_configuration(api: &Api, receipt: &mut ReviewReceipt) -> Result<
         verify_recorded_configuration(workspace_scope, &recorded, &live)?;
         recorded
     } else {
-        let templates = api.get("/v1/configuration-templates").await?;
-        let template = templates["templates"]
-            .as_array()
-            .and_then(|entries| entries.iter().find(|entry| entry["name"] == "team"))
-            .ok_or_else(|| "gateway did not offer the canonical team Configuration".to_owned())?;
-        api.post_idempotent_as(
-            "/v1/configurations",
-            Some(json!({
+        let request = if let Some(request) = receipt.resource("configuration_request") {
+            request.clone()
+        } else {
+            let templates = api.get("/v1/configuration-templates").await?;
+            let template = templates["templates"]
+                .as_array()
+                .and_then(|entries| entries.iter().find(|entry| entry["name"] == "team"))
+                .ok_or_else(|| {
+                    "gateway did not offer the canonical team Configuration".to_owned()
+                })?;
+            let request = json!({
                 "governing_scope_id": workspace_scope,
                 "name": "Northstar local demo profile",
                 "document": template["document"],
                 "source_template": "team",
-            })),
-            &receipt.key("configuration"),
-        )
-        .await?
+            });
+            // Save before submission: a restart must replay the original body,
+            // even when the gateway's canonical template has since changed.
+            receipt.record("configuration_request", request.clone())?;
+            request
+        };
+        let current: Value = api
+            .post_idempotent_as(
+                "/v1/configurations",
+                Some(request),
+                &receipt.key("configuration"),
+            )
+            .await?;
+        if let Some(recorded) = receipt.resource("configuration") {
+            verify_configuration_replay(recorded, &current)?;
+        }
+        current
     };
-    require_applied(&configuration, "canonical team Configuration")?;
     receipt.record("configuration", configuration.clone())?;
+    require_configuration_applied(&configuration, "canonical team Configuration", receipt)?;
     let binding: Value = api
         .post_idempotent_as(
             "/v1/configuration-bindings",
@@ -805,8 +827,51 @@ async fn ensure_configuration(api: &Api, receipt: &mut ReviewReceipt) -> Result<
             &receipt.key("configuration-binding"),
         )
         .await?;
-    require_applied(&binding, "canonical team Configuration binding")?;
-    receipt.record("configuration_binding", binding)
+    if let Some(recorded) = receipt.resource("configuration_binding") {
+        verify_configuration_replay(recorded, &binding)?;
+    }
+    receipt.record("configuration_binding", binding.clone())?;
+    require_configuration_applied(&binding, "canonical team Configuration binding", receipt)
+}
+
+fn verify_configuration_replay(recorded: &Value, current: &Value) -> Result<(), String> {
+    for field in [
+        "change_id",
+        "artifact_id",
+        "version_id",
+        "binding_id",
+        "binding_revision",
+    ] {
+        if !recorded[field].is_null() && recorded[field] != current[field] {
+            return Err(
+                "the recorded Configuration change was repointed; retry-review will not reuse it"
+                    .to_owned(),
+            );
+        }
+    }
+    if recorded["outcome"] == "rejected" {
+        return Err("the recorded Configuration change was rejected or withdrawn; retry-review will not replace it".to_owned());
+    }
+    Ok(())
+}
+
+fn require_configuration_applied(
+    value: &Value,
+    label: &str,
+    receipt: &ReviewReceipt,
+) -> Result<(), String> {
+    if value["outcome"] == "pending_review" {
+        let change_id: ProposalId = required_str(value, "change_id")?
+            .parse()
+            .map_err(|_| format!("{label} response has an invalid change ID"))?;
+        return Err(format!(
+            "{label} needs review: change {change_id}.\nInspect with `synveda proposal show {change_id} --profile {:?}`. Review the displayed approval requirements as {:?} and {:?}. If the matrix requires a separate effect actor, use another admitted workspace administrator who is neither the author nor either reviewer: `synveda proposal apply {change_id} --profile <effect-profile>`. Keep the restricted viewer's grants unchanged. Rerun the same seed command with the same profiles and receipt; it resumes this change without resetting data or approving automatically.",
+            receipt.reviewer.credential_profile,
+            receipt.reviewer.credential_profile,
+            receipt.approver.credential_profile,
+        ));
+    }
+    require_applied(value, label)
 }
 
 fn verify_recorded_configuration(
@@ -1310,8 +1375,19 @@ fn learning_content() -> Value {
 fn require_applied(value: &Value, label: &str) -> Result<(), String> {
     match value["outcome"].as_str() {
         Some("applied") => Ok(()),
+        Some("pending_review") => {
+            let change_id: ProposalId = required_str(value, "change_id")?
+                .parse()
+                .map_err(|_| format!("{label} response has an invalid change ID"))?;
+            Err(format!(
+                "{label} needs review: change {change_id}; inspect it with `synveda proposal show {change_id}`, satisfy its displayed approval requirements and apply it, then rerun the same stage with the same receipt"
+            ))
+        }
+        Some("rejected") => Err(format!(
+            "{label} was rejected or withdrawn; retry-review will not replace the recorded change"
+        )),
         Some(outcome) => Err(format!(
-            "{label} returned {outcome}; use this fixture on a fresh local demo tenant so the canonical first Configuration can apply"
+            "{label} returned an unsupported governance outcome: {outcome}"
         )),
         None => Err(format!("{label} response has no governance outcome")),
     }
@@ -1608,6 +1684,66 @@ mod tests {
                 verify_recorded_configuration("fixture-workspace", &recorded, &changed).is_err()
             );
         }
+    }
+
+    #[test]
+    fn reviewed_configuration_replay_preserves_every_address_and_refuses_terminal_changes() {
+        let pending = json!({
+            "change_id": "original-change",
+            "outcome": "pending_review",
+            "artifact_id": "original-artifact",
+            "version_id": "original-version",
+            "binding_id": "original-binding",
+            "binding_revision": null,
+        });
+        let mut applied = pending.clone();
+        applied["outcome"] = json!("applied");
+        applied["binding_revision"] = json!(1);
+        verify_configuration_replay(&pending, &applied)
+            .expect("the current outcome may advance without changing its addresses");
+        for field in ["change_id", "artifact_id", "version_id", "binding_id"] {
+            let mut repointed = applied.clone();
+            repointed[field] = json!("another-address");
+            assert!(verify_configuration_replay(&pending, &repointed).is_err());
+        }
+        let mut repointed = applied.clone();
+        repointed["binding_revision"] = json!(2);
+        assert!(verify_configuration_replay(&applied, &repointed).is_err());
+        let mut rejected = pending;
+        rejected["outcome"] = json!("rejected");
+        assert!(verify_configuration_replay(&rejected, &applied).is_err());
+        assert!(require_applied(&rejected, "Configuration").is_err());
+    }
+
+    #[test]
+    fn pending_configuration_names_the_change_and_actual_profiles_without_advancing_seed() {
+        let receipt = ReviewReceipt::new(
+            "http://localhost:18240",
+            ("local-author", "author-subject"),
+            ("local-reviewer", "reviewer-subject"),
+            ("local-approver", "approver-subject"),
+            ("local-viewer", "viewer-subject"),
+        );
+        let change = "5d29bfc1-c49a-4987-9480-e3890a77981d";
+        let pending = json!({"change_id": change, "outcome": "pending_review"});
+        let error = require_configuration_applied(&pending, "Configuration", &receipt)
+            .expect_err("review remains a separate governed act");
+        assert!(error.contains(&format!("proposal show {change}")));
+        assert!(error.contains("local-reviewer"));
+        assert!(error.contains("local-approver"));
+        assert!(error.contains(&format!("proposal apply {change}")));
+        assert!(error.contains("<effect-profile>"));
+        assert!(error.contains("neither the author nor either reviewer"));
+        assert!(error.contains("Rerun the same seed command"));
+        assert_eq!(receipt.state, ReviewState::Starting);
+        assert!(
+            require_configuration_applied(
+                &json!({"change_id": "invalid", "outcome": "pending_review"}),
+                "Configuration",
+                &receipt,
+            )
+            .is_err()
+        );
     }
 
     #[test]

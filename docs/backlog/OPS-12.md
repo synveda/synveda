@@ -1777,3 +1777,60 @@ OCI/Compose/Helm sets before retaining proof. Preserve the separate `3beeb1cb`
 OCI qualification and temporary qualification branch until that corrected proof
 is retained. The plugin/chart slice follows this CI repair; external operator,
 issuer and notice-provenance gaps remain separate. Automation stays paused.
+
+### Kubernetes consumer first-use checkpoint (2026-10-03)
+
+The owner's fresh-install request adds the ADR-0137 candidate at base
+`d289fd46b2368eea9d305f06b67aab8a3b94e3be`, separate from hosted qualification
+above. OPS-11 owns target/human acceptance. OPS-12/OPS-8 extend the existing
+packaged chart utility with native Node 22+/OpenSSL, protected repeatable state
+and ordinary Helm/Secret outputs. No new deployment framework or `synveda init`
+behavior is introduced. Customer presets ship in the chart; all six ownership
+combinations render from the same files, including extracted-package parity.
+Preparation refuses missing selected dependency pins; publisher/checksum
+verification fails closed before extracting code.
+
+CPR-8/CPR-39 add registry onboarding metadata and regenerate manual Codex/Copilot
+choices with project/task binding. Non-secret progress and pending/refused
+Configuration actions survive reload. Browser access, sign-in, project access,
+user-confirmed setup and authenticated Session evidence are distinct. Readiness
+cannot establish vendor loading, model use or Capture. Shared users have a
+Knowledge/review/context path; the optional fictional sample uses the existing
+staged public-API commands and Kubernetes forwards, without a Docker launcher.
+
+The [source validation record](../../demos/evidence/ops11-first-install-source.json)
+lists exact local results and unavailable services. It establishes neither a
+clean hosted source/run pair nor changes to immutable v0.4.3. Candidate client,
+runtime and server bytes must match; published same-version client contracts
+must not be described as this candidate.
+
+The owner's 2026-10-04 OrbStack selection now has live local evidence in
+[OPS-11](OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04): namespace-only
+installation, real browser login, native CLI MCP revision/source delivery and
+retained reinstall passed. Source packaging is one `make chart-package`, with
+the locked dependency and tools already included. ADR-0100 records pending
+Configuration request/change custody and normal matrix-aware review/apply retry.
+Three unfamiliar engineer trials, shared first-human/ingress acceptance and
+native harness loading remain pending. The owner approved isolated temporary
+provider administration; the separate synthetic operator received workspace
+authority by ordinary invitation, with no provider bootstrap membership. Both
+original Configuration effects and the full staged learning/Skill/context
+runner now pass; the temporary provider administrator and its resources were
+removed. The [continuation record](../../demos/evidence/ops11-orbstack-reviewed-resume.json)
+ties this source probe to its actual CLI/runtime bytes. All selected PR checks
+and `CI Result` passed for `97c12bc1` in
+[run 37187270147](https://github.com/synveda/synveda/actions/runs/37187270147).
+That PR run intentionally skips Docker and is not main-push release evidence.
+
+The owner authorised 0.4.4 as controlled evaluation with the three guide-only
+trials explicitly pending. Private chart staging now gives the archive's guides
+matching version/source pins and source-bound outside links, retaining exact
+tools, presets, dependency and licence bytes under ADR-0137.
+
+**Next action:** qualify one clean committed source with full main-push CI and
+the existing nonpublishing Release drill, then publish its new immutable tag.
+The owner authorised
+commit, push and a new release after the friction is resolved; 0.4.4 metadata
+and generated contracts are prepared as unreleased. No immutable tag or public
+release has been created. Do not borrow earlier source/run reports. Paused
+automation remains unchanged. OPS-12 remains open.

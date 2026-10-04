@@ -117,6 +117,12 @@ outside `synveda-store`; new authoritative product SQL belongs in the store.
 | Deployment / packaging | `make check-deploy chart-lint` (Docker Compose and Helm installed; no live application implied) |
 | CI / release automation | `make check-ci`; `actionlint -shellcheck=` with actionlint 1.7.7; then the affected packaging checks in the [CI/release guide](CI.md) |
 
+`make chart-package` packages the existing chart at the workspace version into
+`target/helm/`. Its locked Keycloak dependency is already included; no dependency
+download, Rust build or Docker daemon is required. Set `SYNVEDA_CHART_OUTPUT`
+to choose a different output directory. [Chart packaging](../deploy/helm/synveda/BUILD.md)
+separates that source archive from a publisher-verified release and its images.
+
 On Linux, `make check-ci` and native release assembly need `bsdtar` from
 `libarchive-tools` to inspect the Windows ZIP members. macOS and Windows use
 their existing libarchive `tar`; no foreign executable runs during inspection.

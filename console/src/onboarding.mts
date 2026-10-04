@@ -1,5 +1,5 @@
 import { GENERATED_AGENT_CLIENTS } from "./generated/adapter-clients.js";
-import type { MeView } from "./generated/api.js";
+import type { ContextRunView, MeView, SessionView } from "./generated/api.js";
 import type { Selection } from "./selection.mjs";
 
 /**
@@ -163,6 +163,10 @@ export interface AgentClient {
     | "unsupported";
   /** What to say about which surface it gets. */
   note: string;
+  registration: "automatic" | "manual";
+  testedVersions: readonly string[];
+  limits: string;
+  guide: string;
 }
 
 /**
@@ -184,6 +188,10 @@ export const CLIENTS: readonly AgentClient[] = [
     via: "mcp",
     supportLevel: "unsupported",
     note: "Anything that speaks MCP over stdio. Unknown clients are a config file, not a release.",
+    registration: "manual",
+    testedVersions: [],
+    limits: "No native lifecycle or platform qualification for this client.",
+    guide: "https://github.com/synveda/synveda/blob/main/docs/CLIENT_SUPPORT.md",
   },
 ] as const;
 
@@ -203,19 +211,67 @@ export function clientOf(id: string): AgentClient {
  * is print them correctly, which means printing this deployment's own
  * origin rather than a placeholder somebody has to substitute.
  */
-export function connectionSteps(client: AgentClient, origin: string): string[] {
+export function connectionSteps(client: AgentClient, origin: string, projectId?: string): string[] {
   const login = `synveda login --gateway ${origin}`;
+  const setup = projectId ? [`synveda setup --project ${projectId} --observation off`] : [];
+  if (client.id === "codex") return [login, ...setup, `codex -c 'mcp_servers.synveda.command="synveda"' -c 'mcp_servers.synveda.args=["mcp","--writes","host"${projectId ? `,"--task","YOUR-TASK-KEY","--project","${projectId}"` : ""}]'`];
+  if (client.id === "copilot-cli") return [login, ...setup, `copilot --additional-mcp-config '${JSON.stringify({ mcpServers: { synveda: { type: "local", command: "synveda", args: ["mcp", "--writes", "host", ...(projectId ? ["--task", "YOUR-TASK-KEY", "--project", projectId] : [])], tools: ["recall"] } } })}'`];
   switch (client.via) {
     case "plugin":
-      return [login, "synveda plugin install"];
+      return [login, ...setup, projectId ? "synveda adapter install --client claude-code --scope project" : "synveda plugin install"];
     case "mcp":
       return [
         login,
-        client.id === "other"
+        ...setup,
+        projectId
+          ? `synveda adapter install --client ${client.id === "other" ? "<your-client>" : client.id} --scope user`
+          : client.id === "other"
           ? "synveda mcp install --client <your-client>   # or --print to paste it yourself"
           : `synveda mcp install --client ${client.id}`,
       ];
   }
+}
+
+/** Evidence is scoped to this reader and project; client labels are self-reported. */
+export interface ClientEvidence { checked: boolean; contextRecorded: boolean; observationsRecorded: boolean; lines: string[] }
+
+export function clientEvidence(sessions: SessionView[], runs: ContextRunView[], projectId: string, subject: string, clientId: string): ClientEvidence {
+  const matching = sessions.filter((s) => s.project_id === projectId && s.principal_id === subject && (s.client_name === clientId || (clientId !== "claude-code" && s.client_name === "mcp")));
+  const ids = new Set(matching.map((s) => s.id));
+  const context = runs.some((r) => ids.has(r.session_id) && r.project_id === projectId && r.completion_status === "completed");
+  const observed = matching.some((s) => s.last_observed_at != null);
+  return { checked: true, contextRecorded: context, observationsRecorded: observed, lines: [
+    context ? "An authenticated context operation is recorded for your selected project's Session." : "No completed client context operation found in the checked page. Run context/recall in the client, then check again or inspect Sessions.",
+    observed ? "Authenticated Session observations are recorded. Review their source in Sessions." : "Session observation remains unverified; context-only clients do not capture turns automatically.",
+    "Session client names are self-reported; the console can also request context. This evidence does not independently prove client initiation, vendor loading, tool trust or model use.",
+  ] };
+}
+
+export interface SetupProgress { projectId: string | null; step: Step; clientId: string; setupCompleted: boolean; seed: SeedOutcome | null }
+
+// Exploration affects navigation only, never the server's onboarding authority.
+const exploring = new Set<string>();
+export function allowExploration(tenant: string, subject: string): void {
+  const key = `synveda.explore:${tenant}:${subject}`;
+  exploring.add(key);
+  try { window.sessionStorage.setItem(key, "true"); } catch { /* This tab still permits exploration. */ }
+}
+export function canExplore(tenant: string, subject: string): boolean {
+  const key = `synveda.explore:${tenant}:${subject}`;
+  try { return exploring.has(key) || window.sessionStorage.getItem(key) === "true"; } catch { return exploring.has(key); }
+}
+export function readProgress(storage: Pick<Storage, "getItem"> | null, key: string, projectId: string | null): SetupProgress | null {
+  try {
+    const raw = storage?.getItem(key);
+    if (!raw || raw.length > 4096) return null;
+    const p = JSON.parse(raw) as SetupProgress;
+    if (p.projectId !== projectId || !STEPS.includes(p.step) || !CLIENTS.some((c) => c.id === p.clientId) || typeof p.setupCompleted !== "boolean") return null;
+    if (p.seed !== null && (!p.seed || typeof p.seed.what !== "string" ||
+        !["applied", "pending", "refused", "skipped"].includes(p.seed.kind) ||
+        (p.seed.kind === "pending" && typeof p.seed.changeId !== "string") ||
+        (p.seed.kind === "refused" && typeof p.seed.why !== "string"))) return null;
+    return p;
+  } catch { return null; }
 }
 
 /**

@@ -1,0 +1,434 @@
+{
+  "feature_ids": [
+    "OPS-11",
+    "OPS-12",
+    "OPS-8",
+    "CPR-8",
+    "CPR-39",
+    "CPR-45"
+  ],
+  "decisions": [
+    "ADR-0137 (Accepted)",
+    "ADR-0100 accepted amendment 2026-10-04"
+  ],
+  "recorded_at": "2026-10-04T07:53:18.318Z",
+  "source": {
+    "base_commit": "9f4ab800a51350ff168c29632706c143bea11acc",
+    "dirty_candidate": true,
+    "release_candidate_version": "0.4.4",
+    "published": false,
+    "limitation": "File hashes describe the reviewed working tree; live server images came from the committed parent. Live CLI was a 0.4.3 source build with the recovery edits. Current 0.4.4 metadata and typed-change message are covered by local checks, not final release-artifact qualification.",
+    "files": [
+      {
+        "path": "Cargo.lock",
+        "sha256": "f68c5d66ab68de4740743c5cca175ff90563ac76e490464f006e2186bceff58b"
+      },
+      {
+        "path": "Cargo.toml",
+        "sha256": "ebcd158048423fd2aeb0abf7e7b6fd33e1d96fce01e1dcfcf2820bace311726a"
+      },
+      {
+        "path": "Makefile",
+        "sha256": "3a280f2fdbcb1c2fcb0a8ba2276120499d62085157e223af49b3d1b30c129d5e"
+      },
+      {
+        "path": "README.md",
+        "sha256": "542fe3e4d52c1ca7de920b40cd3efddd8740fff8e22e65b40e754e0802e21035"
+      },
+      {
+        "path": "adapters/claude-code/package.json",
+        "sha256": "2bd4e9724dbdb9b666cdd8b222d738bcf58ac2db7dd41a01599fe4219d32c20d"
+      },
+      {
+        "path": "adapters/claude-code/src/client.mts",
+        "sha256": "4410c6de2c4e9c521964483eef1add8bc2d49916f338dd9820dbdb5085999407"
+      },
+      {
+        "path": "adapters/codex/package.json",
+        "sha256": "fc4b854e8bc0fc69578e6dc8f8ebe92091f94308e73319471810066a779831da"
+      },
+      {
+        "path": "adapters/copilot-cli/package.json",
+        "sha256": "180a192f8d05ada4e16a4d865a34cc3b5e8d7b12abbb3f044e3c8310f761fe5e"
+      },
+      {
+        "path": "adapters/registry.json",
+        "sha256": "0f1e4a261e9a626aebe3491992c1ac839bc1847b09927d6c2e5d9c85a836a158"
+      },
+      {
+        "path": "console/package.json",
+        "sha256": "bdbc5b4a1ec69f87f80dd5663595743681e7d4fd58a2e859e6b18e16695ae0f4"
+      },
+      {
+        "path": "console/src/App.tsx",
+        "sha256": "1c6655610d515b3e533373448755aa73147ba46bb688868a3f716e58630c9b95"
+      },
+      {
+        "path": "console/src/Onboarding.tsx",
+        "sha256": "1664d0f0fc8a7d29bd8b6e412c26e3bd604bb449c870a4dfc96caed8c0ddbab8"
+      },
+      {
+        "path": "console/src/generated/adapter-clients.ts",
+        "sha256": "b8c80b676fce2c89e778cd28c3b243dc59cb5a5136b68c1f910c1452c8da98f8"
+      },
+      {
+        "path": "console/src/generated/api.ts",
+        "sha256": "6a18cd0b71c2438048d9e71269ea07c97549a6628b3b30c11573aed0085504f4"
+      },
+      {
+        "path": "console/src/onboarding.mts",
+        "sha256": "42cc417c6b0453023bdc00c22bda628c6a7f0f62ec289f40389439d9c67eefb6"
+      },
+      {
+        "path": "console/src/onboarding.test.mts",
+        "sha256": "066e4e70727884f13a1a53cbf75cd84b88733274b3f6fb147c1e2193028ac00b"
+      },
+      {
+        "path": "console/src/onboarding.test.tsx",
+        "sha256": "6d3cf782b9e798ca0347616e4ead97d320500892aa7071389bfc60e25cf24a4a"
+      },
+      {
+        "path": "crates/synveda-cli/src/demo/retry_review.rs",
+        "sha256": "e18d1df911ce9f43a9e5d5fc5a7bd7203e03527aa466a75a73fda855e84f2140"
+      },
+      {
+        "path": "crates/synveda-cli/src/main.rs",
+        "sha256": "4824396fde076ecc3caa98d6e02313c7501efdbce4d810fbb4883ad1823be513"
+      },
+      {
+        "path": "crates/synveda-cli/src/proposal.rs",
+        "sha256": "f6e20183aca86a9079b2770bf29223e775184990ab648ecc85031ff0b0c99b9b"
+      },
+      {
+        "path": "demos/evidence/ops11-console-first-use.png",
+        "sha256": "7a203288fef5d3d113513cbbd75c60bcb27f0c29ed8a58f50115a9f1d26d99f1"
+      },
+      {
+        "path": "demos/evidence/ops11-first-install-source.json",
+        "sha256": "12ab518ac284eb92a95d5f9c96bbbbf3b5adfdcd707c0ad38aa51c8eb173f8fd"
+      },
+      {
+        "path": "demos/fixtures/ops-2/local-evaluation.mjs",
+        "sha256": "94bcde554d16b383932b857f94e73a7b6ea0deb7fce6729179eab22873bc296c"
+      },
+      {
+        "path": "deploy/compose/CONSUMER.md",
+        "sha256": "bed9452fd86f9bf1a4b83a73f2783b3a042ef7e9e8d00d7d6c58afde85fd1c7e"
+      },
+      {
+        "path": "deploy/compose/PREBUILT.md",
+        "sha256": "d1e577085d589f3edc06d51154d34c262e9b358b975188e3e6d3b09455e69dd7"
+      },
+      {
+        "path": "deploy/helm/synveda/BUILD.md",
+        "sha256": "d251d1a581a7b4b36484cb80c108440aa58d774ad40999b9b9c8cc64f7cd6bf6"
+      },
+      {
+        "path": "deploy/helm/synveda/CONFIGURATION.md",
+        "sha256": "c4ef75aa04d364258c1bbc08bb1f08122c6f9e0bb7c1231d7fbfce796473d3f9"
+      },
+      {
+        "path": "deploy/helm/synveda/Chart.yaml",
+        "sha256": "a92e6a5398976774928e18b3a41be04683eb887cc48b9c5568532c747c6f974f"
+      },
+      {
+        "path": "deploy/helm/synveda/FIRST_LOGIN.md",
+        "sha256": "64ec1ad6badf57eb124c97784178476b7c57c7567bb1f957ff29bc0e554d5a92"
+      },
+      {
+        "path": "deploy/helm/synveda/FIRST_USE.md",
+        "sha256": "a7ea15dfe212326c3eb54a48196903dd85c1290b309372536ed037f0e65fbf75"
+      },
+      {
+        "path": "deploy/helm/synveda/MANUAL.md",
+        "sha256": "58c65df845459408274f57d3f942cb2a37c3d5be4f58f62d7978414e80032bbb"
+      },
+      {
+        "path": "deploy/helm/synveda/OPERATIONS.md",
+        "sha256": "a4e3ad04e9ff568567e3eb4ebc15701051942c805194ce6fdc37cc3a1e63efb8"
+      },
+      {
+        "path": "deploy/helm/synveda/README.md",
+        "sha256": "25f2a5efa99275ce396baff3a61d7b959fc675070dc53d856ba088b3e69db089"
+      },
+      {
+        "path": "deploy/helm/synveda/STARTER.md",
+        "sha256": "bd29eef9bd842328d85f44b49a9d9da134cb7df453c173d51ed3397655554c2d"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/README.md",
+        "sha256": "f3f435ec65be1061e572f43760a66be37134cd3f95e3bb6c2ad69eff34a5919e"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/bundled-database.json",
+        "sha256": "021c1332cff71a62b87e2d13807dcab6db15b3da9f2f27004940db5356a7c29f"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/bundled-identity.json",
+        "sha256": "8ec360b9049377c0ff3b5b1aecbce06101533d470c9187919f983ea2026feebd"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/existing-cnpg.json",
+        "sha256": "054a34a9c35e7fe5647f0a2c5c0137af287875d0732693cb3aeb3333355fb15a"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/external-database.json",
+        "sha256": "2f4b9bdfd037be64f2601465f5fb4ddc15a5d8fa6dc80e746f3273ad23535117"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/operator.mjs",
+        "sha256": "e16460323a83339ecf6979327947d99e67e669ee06c5094f1c629dabc5810290"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/prepare-local.mjs",
+        "sha256": "ef721e2be6b3a97413074f128aca7a8994b4a2c6f1f555d966e1c946369cb912"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/prepare-local.sh",
+        "sha256": "0cdbc4445ff0624397e08510a0af2ae0af99908bdd926f69a7e724345d562de2"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/prepare.mjs",
+        "sha256": "09513acbc663b40cb1e498148974dad6b490499741e6a73c8bc203c9c077aeab"
+      },
+      {
+        "path": "deploy/helm/synveda/templates/NOTES.txt",
+        "sha256": "efa2ae8c0782deee45183671d6b4910537dbae2fedd78c2fd970c22ba366c6c9"
+      },
+      {
+        "path": "deploy/helm/synveda/templates/_helpers.tpl",
+        "sha256": "8d97abab4c3880974bc3349e2ff4c6035205254e283c2b4b9d8c2ca8461f22dc"
+      },
+      {
+        "path": "deploy/helm/synveda/templates/tests/readiness.yaml",
+        "sha256": "081b842de103d430b9d6930a77ed2e1b953214263757db90ddefeceb02b49273"
+      },
+      {
+        "path": "deploy/helm/synveda/values.yaml",
+        "sha256": "a5f0a6067e53e8d411a2ee0d622e818befc1198cb245110771e8bcf1898748bb"
+      },
+      {
+        "path": "docs/DEVELOPMENT.md",
+        "sha256": "bfc2df820919464cab1c8ef05126383775b9b7d1521af0c2be90afded49959a9"
+      },
+      {
+        "path": "docs/INSTALL.md",
+        "sha256": "721fd32570321f97c5fbcd8280fe8eb4187ab4c6413651f19c0e59fc8411b9ec"
+      },
+      {
+        "path": "docs/PRODUCTION_READINESS.md",
+        "sha256": "15244e5873960ba31313a40e6316f674afd55c417e3d1b4da4de394d53a3ec98"
+      },
+      {
+        "path": "docs/adr/README.md",
+        "sha256": "22c78cc353288860ba227f901bf62c5c4cd5c632da71ee886141fa2a64ee1c9d"
+      },
+      {
+        "path": "docs/adr/adr-0100-public-api-pulseboard-demo.md",
+        "sha256": "824300a03ee373c556735e65325591bd663d6f8bdf7eb93dfa49464ca939e133"
+      },
+      {
+        "path": "docs/adr/adr-0137-repeatable-kubernetes-preparation.md",
+        "sha256": "556fe2b103a1009d4cdac693d676bec06fb5233a0dbc5c8db7e96f83ebbe7802"
+      },
+      {
+        "path": "docs/api/openapi.json",
+        "sha256": "62d550af54de74d1ecf18e3917b289e1cd0f02a7e0ac32622862b394bb6960e1"
+      },
+      {
+        "path": "docs/backlog/OPS-11.md",
+        "sha256": "d2760c2fa537b5328f5b1d3fb55926c1f14cc7e21a988ee94f6861ef37be9d93"
+      },
+      {
+        "path": "docs/backlog/OPS-12.md",
+        "sha256": "27e2119395072eb9d83188844bb40d461344c21790455649d329c8703f4bdec1"
+      },
+      {
+        "path": "docs/backlog/STATUS.md",
+        "sha256": "c80e2d97dc3e4aede390519c0d50b4c40187cb7a69e42995a3190cd12ac441d6"
+      },
+      {
+        "path": "docs/installation.json",
+        "sha256": "d0e740546b07f93021344552897086181ddaa13d3d7a2c25809f326c0ec8a6c8"
+      },
+      {
+        "path": "scripts/check-adapter-conformance.mjs",
+        "sha256": "de63ac97fe027862304dfb893b642f02a69c5793de5a2d035d341ecb7f1b6f07"
+      },
+      {
+        "path": "scripts/check-adapter-conformance.test.mjs",
+        "sha256": "7dacd49bb1a0056aa5c3d4dba0c677a11de2b2181f082550c3d52c70a49ad5bf"
+      },
+      {
+        "path": "scripts/check-helm-contract.mjs",
+        "sha256": "5cb2db84ed9cdf1629a7e297d9937564033ffc7b9cc3da659f2e40b1a3e1d135"
+      },
+      {
+        "path": "scripts/check-portability-contract.mjs",
+        "sha256": "097c8b2e11799bb257139fea4a3f78331f15e2d42919716eb6b54530b5c05983"
+      },
+      {
+        "path": "scripts/check-release-parity.mjs",
+        "sha256": "ccdd88eff1ac72e9bd0901fc8684cb231480b6abdb2bb7b2d8a264a184f4264d"
+      },
+      {
+        "path": "scripts/check-release-parity.test.mjs",
+        "sha256": "4a4029726a329873c96d6aa0b8b806a383123c1523599e0af0c14a3d1aed91af"
+      },
+      {
+        "path": "scripts/check-starter-contract.mjs",
+        "sha256": "0315e7aae46c90470c8be8ba81d10247b79212bdea1ba95dead5495152aa2e92"
+      },
+      {
+        "path": "scripts/kubernetes-onboarding.test.mjs",
+        "sha256": "9f4f95fdac9caae446a70ea21153111f6c1319487ee0d3bb7ff1372102721618"
+      },
+      {
+        "path": "scripts/package-chart.sh",
+        "sha256": "53b225afc54164d000bbf3db1876084e79c0af7c1a30e53bf62a1b2ce2acbbbb"
+      },
+      {
+        "path": "sdks/README.md",
+        "sha256": "b5c14fc60c3c832907ff35b9081d03f463807b8a7003f524c0b78b12ccaf6f73"
+      },
+      {
+        "path": "sdks/python/synveda/contract.json",
+        "sha256": "02e84891a854badc50c05a522db5ab0584642ea17f85b56d909f4ac3260bf9d0"
+      },
+      {
+        "path": "sdks/typescript/src/generated/api.ts",
+        "sha256": "fb60c83657c3cdc36eea4fdbb57fe7c34945214910b65d48edc08d0bddea43da"
+      },
+      {
+        "path": "sdks/typescript/src/generated/contract.ts",
+        "sha256": "5d5787fbfdba585b155ed65902e8dc6064f61d15ee2a7f43d6ee8c6a517c311f"
+      }
+    ]
+  },
+  "live_artifacts": {
+    "image_source_commit": "9f4ab800a51350ff168c29632706c143bea11acc",
+    "version_at_live_build": "0.4.3",
+    "image_platform": "linux/arm64",
+    "product": "synveda/first-use-candidate@sha256:dd80c0e2f0951ecfb239a4f3053776a3fe4d7ca6ad5b8523d93605e87a5f4693",
+    "postgres": "synveda/first-use-postgres@sha256:1b448c188a27068f3c7278ce678953859296483799ff160c23daa3f0bcf2c3df",
+    "keycloak": "synveda/first-use-keycloak@sha256:639c961dc92bd1bf72fc8ed3ab0c177552c1812b2a392dfafc29f8fb3a988704",
+    "native_cli_platform": "darwin/arm64",
+    "native_cli_sha256": "5e39fe3598577bd42fb34c08232dfa40217839e529d198c7e1125665303cdcfb",
+    "source_chart_archive_sha256": "8eeeb5e89a15d0c092f79b257c78a1e172fdb2ff7d050a20436130b06ad23a76",
+    "release_package_version": "0.4.4",
+    "release_package_sha256": "39f92c92f8e5866771c70fd8891a93230f5ca8a5aae8b7876db76d9445fc68b3",
+    "publisher_verified": false
+  },
+  "target": {
+    "owner_selected": true,
+    "context": "orbstack",
+    "namespace": "synveda-first-use-9f4ab800",
+    "release": "guide-trial",
+    "orbstack": "2.2.3 (2020300), c83556b0ef8f1ba9a33abbb194622b6b7a1c0307",
+    "kubernetes": "v1.35.6+orb1",
+    "kubectl": "v1.35.6",
+    "helm": "v4.2.3+g43e8b7f",
+    "docker": "29.4.0",
+    "installer": "namespace-only guide-installer ServiceAccount/Role; no cluster-wide grant",
+    "route": "bundled PostgreSQL and Keycloak, two explicit loopback forwards",
+    "ingress": "none installed; shared HTTPS not tested",
+    "storage_class": "guide-trial-9f4ab800",
+    "storage_provisioner": "rancher.io/local-path",
+    "binding_mode": "WaitForFirstConsumer",
+    "reclaim_policy": "Retain",
+    "pvc_requested_and_bound": "37Gi",
+    "network_policy_probe": {
+      "allowed_before_policy": true,
+      "denied_after_policy": true
+    },
+    "network_policy_implementation": "OrbStack bundled networking; HTTP allow-before/deny-after measured. No additional CNI implementation or shared egress claim."
+  },
+  "live_checks": {
+    "preparation_retry_preserved_private_state_and_keys": true,
+    "offline_checks": true,
+    "namespaced_preflight": true,
+    "helm_install_wait_and_installation_job": true,
+    "private_readiness": true,
+    "credential_free_helm_test": true,
+    "allowlisted_diagnostic_json": true,
+    "browser": {
+      "kind": "synthetic operator walkthrough",
+      "humanTimingTrial": false,
+      "manualCodexDiscoverable": true,
+      "actualOriginProjectTask": true,
+      "reloadPreservedProgress": true,
+      "exploreBeforeClient": true,
+      "pkceFreshLoginAdministratorAndLogout": true
+    },
+    "product": {
+      "kind": "synthetic ordinary public API and actual CLI acceptance",
+      "workspaceId": "01a105a5-fc7a-7201-9567-ae3368e044f9",
+      "projectId": "01a105a5-fcd3-7e90-867a-78380e0d6361",
+      "repositoryId": "01a105c1-de48-7401-898b-261a13a05982",
+      "knowledgeId": "01a105c1-de4d-77a2-ad40-b1c29aaad7bd",
+      "revisionId": "01a105c1-de4d-77a2-ad40-b1d9065371ab",
+      "contextSessionId": "01a105c3-1e50-7341-aa99-f0b0da307100",
+      "contextRunId": "01a105c3-1e79-7331-a9fe-d91879f7b403",
+      "governedOutcome": "applied",
+      "nativeCliMcpRecallExactRevision": true,
+      "exactRevisionContext": true,
+      "persistedSyntheticRepositorySource": true,
+      "validAuditChain": true,
+      "auditHeadSeq": 96,
+      "realClientVendorOrModel": "not run",
+      "humanTimingTrial": false
+    },
+    "retained_reinstall": {
+      "samePvcUid": "e1f11901-76f6-4f87-a2e8-f2d0a6c46086",
+      "sameVolumeName": "pvc-e1f11901-76f6-4f87-a2e8-f2d0a6c46086",
+      "originalNineSecretObjectsAndBytesPreserved": true,
+      "originalPrivateStatePreserved": true,
+      "reinstallReadyAndInstallationJobComplete": true,
+      "functionalAfterReinstall": {
+        "freshBrowserPkceAndLogout": true,
+        "originalProductAddressesPreserved": true,
+        "nativeCliMcpExactRevisionAndSource": true,
+        "originalContextRunAndSelection": true,
+        "validNonemptyAuditChain": true
+      },
+      "resetOrNamespaceDeletion": false
+    },
+    "optional_staged_sample": {
+      "console_setup_first": true,
+      "reproduced_previous_fresh_tenant_error": true,
+      "original_pending_request_and_change_persisted": true,
+      "viewer_review_denied": true,
+      "premature_apply_denied": true,
+      "two_distinct_administrator_reviews": true,
+      "author_effect_correctly_denied_by_separation": true,
+      "final_apply_and_resumed_seed": "pending separate admitted workspace administrator",
+      "capture_learning_skill_binding_and_reviewed_context": "not run in this after-console staged fixture",
+      "provider_administration": "proposed native temporary-admin bootstrap and brief identity-server stop rejected by automatic approval review; explicit owner permission pending; no provider-admin side effects performed"
+    }
+  },
+  "local_checks": {
+    "formatting": "pass",
+    "strict_cli_clippy": "pass at 0.4.4",
+    "cli_tests": "201 unit + 28 integration pass at 0.4.4",
+    "openapi": "6 pass; regenerated through the gateway test, then console and SDK generators",
+    "console": "263 pass with current locked TypeScript compiler",
+    "sdk": "10 TypeScript and 10 Python pass; generator drift pass; source checks only",
+    "package_and_onboarding": "31 pass, including byte-identical default packaging and missing-vendored-dependency refusal",
+    "check_deploy_chart_lint_release_parity": "pass; chart-schema initially unavailable on PATH, rerun using the existing pinned tool separately",
+    "chart_schema": "pass using existing task-owned pinned kubeconform v0.7.0 Go build",
+    "source_gates": "make check-fast check-deps check-api-types check-backlog check-demos check-adr-status check-docs pass",
+    "tool_limits": "Sandbox socket denials were rerun successfully with loopback permission. pnpm version switching refused its registry signature fetch; already installed lockfile-pinned TypeScript 5.9.3 and existing locked Python environment were used directly. No signature override or dependency update."
+  },
+  "remaining": [
+    "Three unfamiliar engineer guide-only trials and human setup timings",
+    "Separate effect actor to finish live pending Configuration/binding resume and staged learning tour",
+    "Shared HTTPS ingress, private first-human admission and bootstrap removal",
+    "External dependency live modes and OpenShift SCC/router qualification",
+    "Actual native vendor loading/model use",
+    "Full clean same-source main-push CI and nonpublishing Release drill",
+    "Authorised immutable v0.4.4 tagged publication"
+  ],
+  "production_readiness": "unchanged: Not ready",
+  "human_setup_timings": null,
+  "final_release_artifacts_qualified": false
+}

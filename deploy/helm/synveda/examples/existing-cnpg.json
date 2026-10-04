@@ -1,0 +1,7 @@
+{
+  "gateway": {"publicUrl": "https://synveda.example.com", "databaseExistingSecret": "synveda-gateway-db"},
+  "worker": {"databaseExistingSecret": "synveda-worker-db"},
+  "oidc": {"existingSecret": "synveda-oidc"}, "kms": {"existingSecret": "synveda-kms"},
+  "embedder": "deterministic",
+  "postgres": {"mode": "cnpg", "retain": true, "instances": 1, "storage": {"size": "20Gi", "storageClass": ""}}
+}

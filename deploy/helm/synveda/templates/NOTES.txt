@@ -20,11 +20,11 @@ Synveda {{ .Chart.AppVersion }} — one gateway/console host and one private wor
 {{- if .Values.keycloak.localEvaluation }}
 
 Start each loopback port-forward in its own terminal:
-  kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ include "synveda.fullname" . }} {{ (urlParse .Values.gateway.publicUrl).host | splitList ":" | last }}:8120
-  kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ default (printf "%s-keycloak" .Release.Name) .Values.keycloak.fullnameOverride }}-http {{ (urlParse .Values.keycloak.publicUrl).host | splitList ":" | last }}:80
+  kubectl --context "$CONTEXT" -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ include "synveda.fullname" . }} {{ (urlParse .Values.gateway.publicUrl).host | splitList ":" | last }}:{{ .Values.service.port }}
+  kubectl --context "$CONTEXT" -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ default (printf "%s-keycloak" .Release.Name) .Values.keycloak.fullnameOverride }}-http {{ (urlParse .Values.keycloak.publicUrl).host | splitList ":" | last }}:80
 {{- if .Values.keycloak.evaluationAccountsExistingSecret }}
   Evaluation login: synveda-demo-admin. Retrieve only in a private terminal:
-  kubectl -n {{ .Release.Namespace }} get secret {{ .Values.keycloak.evaluationAccountsExistingSecret }} -o jsonpath='{.data.admin}' | base64 --decode
+  kubectl --context "$CONTEXT" -n {{ .Release.Namespace }} get secret {{ .Values.keycloak.evaluationAccountsExistingSecret }} -o jsonpath='{.data.admin}' | base64 --decode
   The chart never prints passwords. See examples/README.md for sample identities.
 {{- end }}
 {{- end }}
@@ -33,8 +33,8 @@ The normal Job {{ include "synveda.fullname" . }}-install-{{ .Release.Revision }
 performs bounded preflight, advisory-locked migration and optional idempotent
 admission. Gateway and worker receive only their own non-owner database Secrets.
 
-  kubectl -n {{ .Release.Namespace }} logs job/{{ include "synveda.fullname" . }}-install-{{ .Release.Revision }} -c database-preflight
-  kubectl -n {{ .Release.Namespace }} logs job/{{ include "synveda.fullname" . }}-install-{{ .Release.Revision }} -c migrate
+  kubectl --context "$CONTEXT" -n {{ .Release.Namespace }} logs job/{{ include "synveda.fullname" . }}-install-{{ .Release.Revision }} -c database-preflight
+  kubectl --context "$CONTEXT" -n {{ .Release.Namespace }} logs job/{{ include "synveda.fullname" . }}-install-{{ .Release.Revision }} -c migrate
 
 Register exactly {{ .Values.gateway.publicUrl }}/auth/callback with the issuer
 in {{ .Values.oidc.existingSecret }}. Its static tenant ID must match
@@ -45,7 +45,7 @@ administrator group, then public API invitations and governed grants.
 Secrets are mounted files and are never generated or printed by this chart.
 After externally rotating credentials or CA files, roll the affected process:
 
-  kubectl -n {{ .Release.Namespace }} rollout restart deployment/{{ include "synveda.fullname" . }} deployment/{{ include "synveda.fullname" . }}-worker
+  kubectl --context "$CONTEXT" -n {{ .Release.Namespace }} rollout restart deployment/{{ include "synveda.fullname" . }} deployment/{{ include "synveda.fullname" . }}-worker
 
 Back up {{ .Values.kms.existingSecret }} separately from the database. Replacing
 a KMS Secret is not a key-rotation ceremony. See deploy/helm/synveda/README.md.
@@ -53,3 +53,15 @@ a KMS Secret is not a key-rotation ceremony. See deploy/helm/synveda/README.md.
 Both processes use Recreate: upgrades interrupt service. Local qualification
 is recorded separately from published artifacts. No gateway HA, cloud/OpenShift
 certification, production backup/PITR or old-schema compatibility is claimed.
+
+Infrastructure verification (creates one bounded test Pod, no user credential):
+  helm test {{ .Release.Name }} --kube-context "$CONTEXT" -n {{ .Release.Namespace }} --logs --timeout 90s
+  node "$CHART/examples/operator.mjs" verify --prepared "$PREPARED" --architecture "$ARCHITECTURE"
+Use the prepared CONTEXT and administrator-confirmed amd64/arm64 ARCHITECTURE.
+For a safe support summary:
+  node "$CHART/examples/operator.mjs" diagnose --prepared "$PREPARED"
+
+Next: sign in at {{ .Values.gateway.publicUrl }}/console/, create/select a project,
+then follow Getting started to connect a client. Open Sessions and Context to
+verify actual context delivery and inspect its source. Readiness alone does
+not verify login, capture or client delivery. See FIRST_USE.md in the chart.

@@ -1,12 +1,12 @@
 // OPS-11: exercise the shipped preparation and loopback port-forward recipe.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const cluster = "synveda-ops11-local-evaluation";
-const scratch = mkdtempSync(join(tmpdir(), "synveda-local-chart-"));
+const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-local-chart-")));
 const env = { ...process.env, KUBECONFIG: join(scratch, "kubeconfig") };
 const product = process.env.PRODUCT_IMAGE ?? "synveda/installation-candidate:local";
 const postgres = process.env.POSTGRES_IMAGE ?? "synveda/postgres:ops11";
@@ -43,7 +43,14 @@ try {
     run("kind", ["load", "image-archive", "--name", cluster, archive], { timeout: 600_000 });
     rmSync(archive);
   }
-  run("sh", [`${chart}/examples/prepare-local.sh`, scratch], { env: { ...env, SYNVEDA_PRODUCT_IMAGE: product } });
+  if (existsSync(`${chart}/examples/prepare.mjs`)) {
+    // These IDs bind source-built bytes only. The Kind fixture loads them by
+    // local tags below; it makes no published-registry/digest qualification.
+    const imageId = (image) => run("docker", ["image", "inspect", image, "--format", "{{.Id}}"]).trim();
+    const overlay = join(scratch, "candidate-images.yaml");
+    writeFileSync(overlay, `image:\n  digest: ${imageId(product)}\npostgres:\n  bundled:\n    image: local/postgres@${imageId(postgres)}\nkeycloak:\n  image:\n    digest: ${imageId(keycloak)}\n`, { mode: 0o600 });
+    run("sh", [`${chart}/examples/prepare-local.sh`, scratch, "--context", `kind-${cluster}`, "--images", overlay, "--release", "synveda", "--namespace", namespace]);
+  } else run("sh", [`${chart}/examples/prepare-local.sh`, scratch], { env: { ...env, SYNVEDA_PRODUCT_IMAGE: product } });
   const values = JSON.parse(readFileSync(join(scratch, "values.json"), "utf8"));
   const imageValue = (image) => ({ repository: image.slice(0, image.lastIndexOf(":")), tag: image.slice(image.lastIndexOf(":") + 1), pullPolicy: "Never" });
   values.image = imageValue(product);
@@ -70,7 +77,7 @@ try {
   refusedMigration.containers = [refusedMigration.initContainers.find((container) => container.name === "migrate")];
   delete refusedMigration.initContainers;
   refusedMigration.volumes.find((volume) => volume.name === "migrator-database").secret = {
-    secretName: values.gateway.databaseExistingSecret, items: [{ key: values.gateway.databaseUrlSecretKey, path: "database_url" }],
+    secretName: values.gateway.databaseExistingSecret, items: [{ key: values.gateway.databaseUrlSecretKey ?? "DATABASE_URL", path: "database_url" }],
   };
   run("kubectl", ["-n", namespace, "apply", "-f", "-"], { input: JSON.stringify({ apiVersion: "batch/v1", kind: "Job", metadata: { name: "migration-role-refusal" }, spec: { backoffLimit: 0, activeDeadlineSeconds: 90, template: { spec: refusedMigration } } }) });
   k(["wait", "job/migration-role-refusal", "--for=condition=Failed", "--timeout=120s"]);
@@ -82,7 +89,7 @@ try {
   await forward("synveda-keycloak-http", "8081:80");
   const browserEnvironment = {
     SYNVEDA_BROWSER_APP_URL: "http://localhost:8120", SYNVEDA_BROWSER_ISSUER: "http://localhost:8081/realms/synveda",
-    SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7000-8000-000000000045",
+    SYNVEDA_BOOTSTRAP_TENANT_ID: values.install.tenant.id,
   };
   if (process.env.BROWSER_IMAGE) {
     assert.equal(process.platform, "linux", "container host networking is qualified only on Linux");
