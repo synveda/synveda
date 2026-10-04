@@ -1822,10 +1822,14 @@ and `CI Result` passed for `97c12bc1` in
 [run 37187270147](https://github.com/synveda/synveda/actions/runs/37187270147).
 That PR run intentionally skips Docker and is not main-push release evidence.
 
-**Next action:** resolve whether 0.4.4 waits for the three guide-only trials or
-ships as controlled evaluation with them explicitly pending, then qualify one
-clean committed source with full main-push CI and the existing nonpublishing
-Release drill. The owner authorised
+The owner authorised 0.4.4 as controlled evaluation with the three guide-only
+trials explicitly pending. Private chart staging now gives the archive's guides
+matching version/source pins and source-bound outside links, retaining exact
+tools, presets, dependency and licence bytes under ADR-0137.
+
+**Next action:** qualify one clean committed source with full main-push CI and
+the existing nonpublishing Release drill, then publish its new immutable tag.
+The owner authorised
 commit, push and a new release after the friction is resolved; 0.4.4 metadata
 and generated contracts are prepared as unreleased. No immutable tag or public
 release has been created. Do not borrow earlier source/run reports. Paused

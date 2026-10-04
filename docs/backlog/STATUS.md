@@ -315,7 +315,10 @@ now passes both original Configuration effects through a separate normally
 invited operator, then Capture, distinct Knowledge/Skill review/apply, pinned
 binding, revision/source Context, safe replay and audit verification. Temporary
 provider administration was removed. Selected PR checks pass at `97c12bc1`;
-three unfamiliar engineer participants remain unavailable.
+three unfamiliar engineer participants remain unavailable. The owner authorised
+0.4.4 as controlled evaluation with those trials explicitly pending. Archive
+guides carry matching version/source pins and source-bound outside links under
+ADR-0137, without editing the original chart tools or dependency.
 The [current checkpoint](OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04)
 owns the exact next action. Both features remain open; the coordinated 0.4.4
 candidate still needs exact-source hosted CI/Release qualification and authorised

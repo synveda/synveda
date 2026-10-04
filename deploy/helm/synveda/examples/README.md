@@ -2,8 +2,12 @@
 
 These files ship inside the chart archive. They are ordinary Helm values;
 `ci/` fixtures are unnecessary. Follow the [linear installation guide](../README.md)
-for context selection, verification and installation. The current files and
+for context selection, verification and installation.
+
+<!-- chart-package-source-status:start -->
+The current files and
 native utilities are source candidates, absent from the published v0.4.3 archive.
+<!-- chart-package-source-status:end -->
 
 Start with local evaluation for one person, shared HTTPS with bundled services
 for a team without service owners, or existing CNPG only when its operator

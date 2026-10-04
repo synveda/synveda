@@ -67,3 +67,19 @@ No change to Cedar, forced RLS, VedaFlow, audit, role separation, one-time group
 admission, shared Compose configuration or retained uninstall. Preparation
 does not contact the product or grant authority. Health tests hold no user
 credentials; functional verification uses the existing authenticated APIs.
+
+## Packaged guide identity (2026-10-04)
+
+Immutable chart guides name their archive version and exact reviewed source,
+independently of the checkout's changing publication status. The existing
+packager adapts only its private documentation copies: download pins match
+the archive, and links outside the chart point to that source revision.
+Preparation tools, presets, dependency and licence bytes remain unchanged.
+Missing guide boundaries or an unknown source refuse packaging. POSIX shell
+and awk retain the existing Git/Make/Helm workstation requirement.
+
+An archive identity is not publisher proof. Operators still verify the named
+release's attestation and checksum inventory and use matching image digests.
+Source packaging never announces publication. The owner authorised 0.4.4 as
+controlled evaluation with three human guide trials explicitly pending; this
+does not establish timings, new platform support or production readiness.

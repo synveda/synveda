@@ -27,7 +27,13 @@ SYNVEDA_CHART_OUTPUT="$PWD/target/chart-review" make chart-package
 ```
 
 Repeating either command packages identical source into identical archive
-bytes. Packaging does not create an image overlay or make product images
+bytes, including guides with the archive version and checkout's exact commit.
+Links outside the chart point to that source revision; local guides and tools
+remain usable after extraction. The original checkout is not edited. A source
+export without Git metadata must supply its independently reviewed commit as
+`SYNVEDA_BUILD_SOURCE_SHA`; an unknown source refuses packaging.
+
+Packaging does not create an image overlay or make product images
 available. Source acceptance requires images built from the same reviewed
 runtime/console source and an explicitly labelled candidate overlay. A version
 equal to an older release does not give source-built bytes its publisher proof.

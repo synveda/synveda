@@ -29,7 +29,10 @@ revision/source Context and audit checks also pass. Temporary provider
 administration was removed. Selected PR checks pass at `97c12bc1`; full
 main-push CI and same-source Release qualification remain pending.
 [OPS-11](backlog/OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04)
-owns these blockers and next actions.
+owns these blockers and next actions. The owner authorised 0.4.4 as controlled
+evaluation with the three guide-only trials explicitly pending. Private chart
+staging binds its guides to the archive version and source without changing
+tools, presets or locked dependencies.
 Published v0.4.3 lacks these new tools and instructions. This candidate changes
 neither the verdict nor HA, N-1, shared CNI/CSI/ingress, off-host recovery or
 publisher claims. The coordinated 0.4.4 source remains unreleased.

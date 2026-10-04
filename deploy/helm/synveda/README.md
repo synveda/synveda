@@ -17,6 +17,7 @@ The procedure below is the candidate's shipped operator guide. Set `CHART` to
 the extracted, reviewed candidate chart and use its matching digest overlay.
 The download ceremony also applies to a named published release, using that
 release's versioned instructions. Local source tests are not publisher proof.
+<!-- chart-package-source-status:end -->
 
 The service is available for controlled self-hosted evaluation. One gateway
 and one combined worker use planned downtime for upgrades. No HA, supported
@@ -123,10 +124,13 @@ remain a separate, matching source candidate.
 
 Run this **entire block** from a workstation directory for downloads. The
 subshell fails closed: extraction occurs only after publisher and all selected
-checksums pass. The directory must be new. The source commit shown is the
+checksums pass. The directory must be new.
+<!-- chart-package-source-identity:start -->
+The source commit shown is the
 published v0.4.3 source; take any future release's commit from its reviewed
 release record. Never copy an expected commit from an unverified downloaded
 inventory. GitHub CLI must be installed independently of these assets.
+<!-- chart-package-source-identity:end -->
 
 ```sh
 (
@@ -203,7 +207,7 @@ export IMAGES="$MERGED_IMAGES"
 
 Preserve the two verified originals and the derived overlay. If the derived
 file already exists, reuse the existing inspected file instead of replacing
-it. Candidate bytes are not published because their version string is 0.4.3.
+it. A matching version string alone does not establish publication.
 
 ## 4. Prepare the selected configuration
 

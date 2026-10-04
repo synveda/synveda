@@ -269,7 +269,7 @@ retain those bytes; do not delete/rebuild/overwrite them automatically. Recover
 using the original verified artifacts under an explicitly reviewed owner procedure,
 as done for v0.4.3 after its post-upload draft lookup failed. Do not move a
 published Git tag.
-Stable announcement now follows a draft upload and verification of all 35
+Stable announcement now follows a draft upload and verification of all 55
 expected asset names, sizes and completed upload states. An upload failure
 leaves the draft unpublished. For upload-only recovery after full qualification,
 use the original `verified-release-assets` artifact (30-day retention), which includes the

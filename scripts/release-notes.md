@@ -1,3 +1,20 @@
+This is a **controlled evaluation release**. It improves fresh installation
+with release-packaged Kubernetes preparation and customer recipes, one-command
+source chart packaging (`make chart-package`), prerequisite and storage checks,
+allowlisted diagnostics, resumable console setup and governed Configuration
+review/retry with separate effect actors.
+
+Version: `{{version}}`. Exact release source: `{{source}}`.
+
+Local OrbStack acceptance passed namespace-scoped installation, real browser
+and native CLI login/context, retained reinstall and the governed first-use
+walkthrough. Its exact source/runtime evidence is recorded in
+[OPS-11](https://github.com/{{repository}}/blob/{{source}}/docs/backlog/OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04).
+**The three unfamiliar engineers' guide-only trials are still pending.**
+No setup-time, additional platform-support or production-readiness claim follows
+from that local probe. Shared first-human/HTTPS admission and real vendor/model
+use remain separate acceptance work.
+
 Native client artifacts for Linux, macOS and Windows on x64 and ARM64,
 plus the digest-bound Docker reference deployment. Client installation does
 not start containers or install a server. For a server, extract the separate
@@ -12,8 +29,8 @@ checksum inventory authenticates these release bytes and registry digests.
 
 For a server, download only `synveda-reference-{{version}}.tar.gz`
 plus `SHA256SUMS` and `SHA256SUMS.sigstore.json`: no source checkout or compiler is needed. Follow
-the [prebuilt Docker guide](https://github.com/{{repository}}/blob/{{tag}}/deploy/compose/PREBUILT.md#version-042-release-bundle)
-for download verification, localhost first sign-in and lifecycle operations.
+the extracted bundle's `INSTALL.md` and `CONSUMER.md` for matching download
+verification, localhost first sign-in and lifecycle operations.
 
 Both Linux AMD64 and ARM64 jobs anonymously pulled the manifest-bound
 image set and passed isolated executable/asset smoke checks. Their
@@ -104,7 +121,10 @@ Helm chart: `synveda-{{version}}.tgz`.
 
 Kubernetes uses the checksummed `synveda-images-{{version}}.yaml`
 overlay; CNPG additionally uses `synveda-cnpg-image-{{version}}.yaml`.
-Follow the versioned [Kubernetes guide](https://github.com/{{repository}}/blob/{{tag}}/deploy/helm/synveda/README.md).
+After publisher/checksum verification, extract the chart and follow its
+`README.md` for this release's Kubernetes installation and first-use guides.
+The archive includes its locked dependency, customer presets and preparation
+tools; installing a release requires no chart compilation or dependency download.
 BuildKit emits image provenance and SBOM attestations. Publication retains
 their descriptors when copying the tested OCI candidates; the attached native
 deployment reports separately record installation and recovery qualification.

@@ -184,9 +184,9 @@ candidate. It is not final release-artifact qualification.
 **Blockers and next action:** all selected checks and `CI Result` passed for
 [PR #68](https://github.com/synveda/synveda/pull/68) at `97c12bc1`. This PR run
 does not replace full main-push CI: its Docker stage is intentionally unselected.
-Three unfamiliar engineer trials still need participants; the owner is deciding
-whether 0.4.4 waits for those trials or ships as controlled evaluation with them
-explicitly pending. Preserve the existing tenant/receipt and qualify one exact
+Three unfamiliar engineer trials still need participants. The owner authorised
+0.4.4 as a controlled evaluation release with those trials explicitly pending.
+Preserve the existing tenant/receipt and qualify one exact
 committed release source; no reset or automatic approval is needed.
 
 Shared HTTPS ingress, private first-human admission/bootstrap removal, external
@@ -195,6 +195,12 @@ checks. Qualify only the named local route from this evidence. The coordinated
 0.4.4 source remains unreleased until its exact committed source passes full
 main-push CI and the existing nonpublishing Release drill, followed by the
 authorised immutable tagged publication.
+
+The packaged guides now name their archive version and reviewed source rather
+than retaining the checkout's older publication notes and download pins.
+Outside links point to that source; tools, presets and locked dependency bytes
+are unchanged. ADR-0137 records this private staging adjustment. It adds no
+publisher proof, timing or platform claim.
 
 Three unfamiliar engineer trials also await participants. Give each only the
 shipped guide, its own authorised disposable namespace and fresh human identity

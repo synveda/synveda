@@ -27,12 +27,37 @@ test -f deploy/helm/synveda/charts/keycloakx-7.3.2.tgz || {
   printf '%s\n' 'package-chart: bundled Keycloak chart is missing; restore the matching source checkout or verified chart archive, then retry. No dependency update is required.' >&2
   exit 66
 }
+source_sha="${SYNVEDA_BUILD_SOURCE_SHA:-}"
+if [ -z "$source_sha" ]; then
+  source_sha=$(git rev-parse --verify HEAD 2>/dev/null) || {
+    printf '%s\n' 'package-chart: select an exact reviewed source commit before packaging' >&2
+    exit 64
+  }
+fi
+case "$source_sha" in ''|*[!a-f0-9]*)
+  printf '%s\n' 'package-chart: select an exact reviewed source commit before packaging' >&2
+  exit 64;;
+esac
+test "${#source_sha}" -eq 40 || {
+  printf '%s\n' 'package-chart: select an exact reviewed source commit before packaging' >&2
+  exit 64
+}
 case "$outdir" in /*) ;; *) outdir="$PWD/$outdir" ;; esac
 mkdir -p "$outdir"
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT INT TERM
 cp -R deploy/helm/synveda "$stage/synveda"
 cp LICENSE NOTICE "$stage/synveda/"
+for guide in "$stage/synveda/"*.md; do
+  main=0
+  test "$(basename "$guide")" != README.md || main=1
+  awk -v main="$main" -v version="$version" -v source="$source_sha" \
+    -f scripts/package-chart-guide.awk "$guide" > "$stage/guide.md"
+  mv "$stage/guide.md" "$guide"
+done
+awk -v examples=1 -v version="$version" -v source="$source_sha" \
+  -f scripts/package-chart-guide.awk "$stage/synveda/examples/README.md" > "$stage/guide.md"
+mv "$stage/guide.md" "$stage/synveda/examples/README.md"
 # OPS-12: Helm preserves file mtimes. The private copies need a fixed epoch
 # so packaging the same source does not depend on the copy's wall-clock second.
 find "$stage/synveda" -type f -exec env TZ=UTC touch -t 197001010000.00 {} +
