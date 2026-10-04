@@ -161,16 +161,33 @@ The [content-free record](../../demos/evidence/ops11-orbstack-first-use.json)
 names the source/image identities, checks and limits. These are local source
 probes, not qualification of the final 0.4.4 release artifacts.
 
-**Blockers and next action:** the optional staged sample after console setup
-correctly requires strict Configuration review. The CLI now persists its
-original request/change, names normal review and retry, and displays author/
-reviewer/effect separation. Two distinct reviews passed; applying as the author
-was correctly denied. Finishing that live resume test needs a separate admitted
-workspace administrator. Automatic approval review rejected the proposed
-temporary Keycloak provider-admin procedure and brief identity-service stop;
-explicit owner approval is pending. No provider bootstrap or extra authority
-was created. Keep the existing tenant/receipt and complete normal invitation,
-review/apply and retry after that input; never reset to evade the matrix.
+The owner subsequently approved isolated native Keycloak administration and a
+brief stop of this task's identity Pod. Provider maintenance used the owner's
+credentials because the ordinary installer could not patch the StatefulSet's
+scale subresource. The original Pod returned Ready. A fifth synthetic identity
+received no provider bootstrap membership or tenant roles, then accepted an
+ordinary audited workspace administrator invitation. The temporary provider
+administrator was deleted, its authentication refused, and its Job/Secret and
+private administrator files removed.
+
+The [reviewed resume record](../../demos/evidence/ops11-orbstack-reviewed-resume.json)
+shows the original Configuration and binding applied by that separate effect
+actor after two distinct reviews. Author/reviewer effects and premature binding
+effects were denied. Request/change addresses and the receipt stayed intact;
+seed resumed without a reset. The existing product runner then passed real
+CLI/browser PKCE, safe seed replay preserving console edits, Session capture,
+restricted-viewer denial, reviewed Knowledge and Skill publication/binding,
+exact-revision/source Context and audit verification. Its native CLI is 0.4.4
+source `97c12bc1`; live server images remain the earlier committed source
+candidate. It is not final release-artifact qualification.
+
+**Blockers and next action:** all selected checks and `CI Result` passed for
+[PR #68](https://github.com/synveda/synveda/pull/68) at `97c12bc1`. This PR run
+does not replace full main-push CI: its Docker stage is intentionally unselected.
+Three unfamiliar engineer trials still need participants; the owner is deciding
+whether 0.4.4 waits for those trials or ships as controlled evaluation with them
+explicitly pending. Preserve the existing tenant/receipt and qualify one exact
+committed release source; no reset or automatic approval is needed.
 
 Shared HTTPS ingress, private first-human admission/bootstrap removal, external
 providers, OpenShift SCC/router and actual vendor/model use remain separate live

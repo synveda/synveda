@@ -1,0 +1,172 @@
+{
+  "feature_ids": [
+    "OPS-11",
+    "OPS-12",
+    "CPR-45"
+  ],
+  "recorded_at": "2026-10-04T09:17:25.820Z",
+  "supersedes_pending_checks_in": "ops11-orbstack-first-use.json",
+  "source": {
+    "cli_source_commit": "97c12bc19f78d30b277b8884eabd363bd6f13863",
+    "cli_version": "0.4.4",
+    "cli_platform": "darwin/arm64",
+    "cli_build": "native source debug build; not a packaged release client",
+    "cli_sha256": "2fe5135f72c6e892b977fcb2d70330a56d60ab5a0840793c2c90722892ca7abb",
+    "runtime_image_source_commit": "9f4ab800a51350ff168c29632706c143bea11acc",
+    "runtime_version": "0.4.3",
+    "published": false,
+    "final_release_artifacts_qualified": false,
+    "files": [
+      {
+        "path": "crates/synveda-cli/src/demo/retry_review.rs",
+        "sha256": "e18d1df911ce9f43a9e5d5fc5a7bd7203e03527aa466a75a73fda855e84f2140"
+      },
+      {
+        "path": "crates/synveda-cli/src/proposal.rs",
+        "sha256": "f6e20183aca86a9079b2770bf29223e775184990ab648ecc85031ff0b0c99b9b"
+      },
+      {
+        "path": "deploy/compose/browser/product-demo-runner.mjs",
+        "sha256": "0e55c445f58947103bc97547d447b5c3a53efb3f366c3402a7d6264a0e28f530"
+      },
+      {
+        "path": "deploy/compose/browser/console-product-runner.mjs",
+        "sha256": "6227cbce75f8cef5d0930dd054ae6b7940920d286ee78e23fc58cb7bda9aa4c9"
+      },
+      {
+        "path": "docs/backlog/OPS-11.md",
+        "sha256": "5d2cb41ebe2279570e6413b275be801c7d3906f7b94b9b316956a66aef82b839"
+      },
+      {
+        "path": "docs/backlog/OPS-12.md",
+        "sha256": "56b386bae6f71611c7a72ec6255d0a3d290d7aa37771dfde1920d85038d87706"
+      },
+      {
+        "path": "docs/backlog/STATUS.md",
+        "sha256": "58646274e5f8ce3662c712a972527feac10f1186d4925fbf89b18c9c0b9d4ab4"
+      },
+      {
+        "path": "docs/PRODUCTION_READINESS.md",
+        "sha256": "69b7bb97b2636847bb5d80cb2c06280a9d21d58243600d742e1f4591131a783b"
+      }
+    ]
+  },
+  "target": {
+    "context": "orbstack",
+    "namespace": "synveda-first-use-9f4ab800",
+    "release": "guide-trial",
+    "local_loopback_ports": [
+      18240,
+      18081
+    ],
+    "installer": "ordinary namespace-only guide-installer",
+    "provider_maintenance": "explicit owner approval; owner credentials scoped by command to this task namespace/StatefulSet; installer scale permission remained unchanged"
+  },
+  "provider_procedure": {
+    "explicitlyApproved": true,
+    "nativeTemporaryAdministrator": true,
+    "identityServerRestored": true,
+    "syntheticOperatorCreated": true,
+    "operatorSubject": "010a2e79-4cdc-4b5e-924e-76e02554f79f",
+    "providerBootstrapMembership": false,
+    "temporaryAdministratorDeleted": true,
+    "deletedAdministratorAuthenticationDenied": true,
+    "temporaryJobAndSecretDeleted": true,
+    "productAuthorityMethod": "ordinary audited workspace invitation accepted by the separate operator",
+    "productSqlMutation": false
+  },
+  "operator_admission": {
+    "realPkceCliLogin": true,
+    "distinctSubject": true,
+    "noProviderBootstrapMembership": true,
+    "noTenantRolesBeforeInvitation": true,
+    "normalWorkspaceInvitationAccepted": true,
+    "workspaceId": "01a105a9-166c-7b40-a625-6a23938304e2",
+    "scopeId": "01a105a9-166c-7b40-a625-6a39d47d77a8",
+    "operatorSubject": "010a2e79-4cdc-4b5e-924e-76e02554f79f",
+    "invitedRole": "administrator",
+    "validAuditChain": true
+  },
+  "original_configuration_resume": {
+    "cliVersion": "0.4.4",
+    "changes": [
+      {
+        "name": "configuration",
+        "changeId": "01a105a9-167f-7bc1-bd37-6091f628ffd9",
+        "outcome": "applied",
+        "originalAddressesPreserved": true,
+        "authorEffectDenied": true,
+        "reviewerEffectDenied": true,
+        "separateInvitedEffectActor": "010a2e79-4cdc-4b5e-924e-76e02554f79f",
+        "priorCompletionVerified": true
+      },
+      {
+        "name": "configuration_binding",
+        "changeId": "01a1062c-6cad-7071-9218-86be56cc88c3",
+        "outcome": "applied",
+        "originalAddressesPreserved": true,
+        "authorEffectDenied": true,
+        "reviewerEffectDenied": true,
+        "separateInvitedEffectActor": "010a2e79-4cdc-4b5e-924e-76e02554f79f"
+      }
+    ],
+    "originalRequestPreserved": true,
+    "sameReceipt": true,
+    "tenantReset": false,
+    "seedState": "seeded",
+    "restrictedViewerUnchanged": true,
+    "providerBootstrapOrDirectProductSql": false
+  },
+  "staged_product_workflow": {
+    "cliVersion": "0.4.4",
+    "cliSourceCommit": "97c12bc19f78d30b277b8884eabd363bd6f13863",
+    "realCliPkce": true,
+    "fourDistinctSyntheticIdentities": true,
+    "freshBrowserSessions": true,
+    "capture": true,
+    "viewerReviewDenied": true,
+    "distinctReviewedLearningAndSkill": true,
+    "governedApply": true,
+    "exactRevisionContextAndProvenance": true,
+    "contentFreeAuditAndChain": true,
+    "seedReplayPreservesEditedState": true,
+    "realClientVendorOrModel": "not run",
+    "humanTrial": false
+  },
+  "final_receipt_state": "verified",
+  "verified_addresses": {
+    "knowledge_item_id": "01a10630-80e6-7112-a121-dbb701300c12",
+    "knowledge_revision_id": "01a10630-80e6-7112-a121-dbca4354d3e4",
+    "source_event_id": "01a1062f-a713-7290-b91b-06e743803582",
+    "skill_id": "01a1062f-a6fb-7df3-87f0-a7e5a86ba18a",
+    "skill_version_id": "01a1062f-a6fb-7df3-87f0-a7ffdcb933b6",
+    "skill_binding_id": "01a10630-896a-7320-a0bd-3084aa24c2f6",
+    "context_run_id": "01a10630-8a1c-70c3-9e8f-57d964b6b709",
+    "audit_head_seq": 325,
+    "verified_at": "2026-10-04T09:13:26.856941+00:00"
+  },
+  "hosted_checks": {
+    "source_commit": "97c12bc19f78d30b277b8884eabd363bd6f13863",
+    "event": "pull_request",
+    "url": "https://github.com/synveda/synveda/actions/runs/37187270147",
+    "conclusion": "success",
+    "ci_result": "success",
+    "limitation": "All selected PR checks passed. Docker was intentionally unselected; this is not full main-push CI or the same-source nonpublishing Release drill."
+  },
+  "helper_corrections": [
+    "Used Pod Ready for the chart OnDelete StatefulSet instead of rollout status",
+    "Checked removed administrator invalid_grant with actual OAuth HTTP 400 response",
+    "Compared applied timeline actor_id with public principal identity_id; actor_subject is optional",
+    "Allowed native credential refresh before direct public inspection; access tokens are short-lived"
+  ],
+  "remaining": [
+    "Three unfamiliar engineer guide-only trials and measured human setup times",
+    "Owner decision on waiting for those trials versus controlled-evaluation publication with trials pending",
+    "Shared HTTPS ingress, private first-human bootstrap removal, external dependency modes and OpenShift qualification",
+    "Actual native vendor loading/model use",
+    "Full exact-source main-push CI and nonpublishing Release drill",
+    "Authorised immutable tagged publication"
+  ],
+  "human_trial": false,
+  "production_readiness": "unchanged: Not ready"
+}

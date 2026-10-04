@@ -309,9 +309,13 @@ Knowledge/context/source delivery and retained uninstall/reinstall. The
 source/image bytes and excludes shared ingress, real vendor loading and human
 timings. `make chart-package` removes manual source packaging steps. ADR-0100's
 accepted amendment makes a pending sample Configuration resumable and exposes
-effect-actor separation. That live completion awaits a separate operator;
-automatic approval review rejected temporary provider administration without
-explicit permission. Three unfamiliar engineer participants remain unavailable.
+effect-actor separation. The owner-approved
+[reviewed continuation](../../demos/evidence/ops11-orbstack-reviewed-resume.json)
+now passes both original Configuration effects through a separate normally
+invited operator, then Capture, distinct Knowledge/Skill review/apply, pinned
+binding, revision/source Context, safe replay and audit verification. Temporary
+provider administration was removed. Selected PR checks pass at `97c12bc1`;
+three unfamiliar engineer participants remain unavailable.
 The [current checkpoint](OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04)
 owns the exact next action. Both features remain open; the coordinated 0.4.4
 candidate still needs exact-source hosted CI/Release qualification and authorised

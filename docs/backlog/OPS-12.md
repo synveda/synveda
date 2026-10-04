@@ -1811,14 +1811,21 @@ retained reinstall passed. Source packaging is one `make chart-package`, with
 the locked dependency and tools already included. ADR-0100 records pending
 Configuration request/change custody and normal matrix-aware review/apply retry.
 Three unfamiliar engineer trials, shared first-human/ingress acceptance and
-native harness loading remain pending. The optional after-console sample's
-strict apply needs another admitted operator; the proposed temporary provider
-administration was rejected by automatic approval review and awaits explicit
-owner permission.
+native harness loading remain pending. The owner approved isolated temporary
+provider administration; the separate synthetic operator received workspace
+authority by ordinary invitation, with no provider bootstrap membership. Both
+original Configuration effects and the full staged learning/Skill/context
+runner now pass; the temporary provider administrator and its resources were
+removed. The [continuation record](../../demos/evidence/ops11-orbstack-reviewed-resume.json)
+ties this source probe to its actual CLI/runtime bytes. All selected PR checks
+and `CI Result` passed for `97c12bc1` in
+[run 37187270147](https://github.com/synveda/synveda/actions/runs/37187270147).
+That PR run intentionally skips Docker and is not main-push release evidence.
 
-**Next action:** finish that normal reviewed resume without a reset, run the
-three guide-only trials, and qualify one clean committed 0.4.4 source with full
-main-push CI and the existing nonpublishing Release drill. The owner authorised
+**Next action:** resolve whether 0.4.4 waits for the three guide-only trials or
+ships as controlled evaluation with them explicitly pending, then qualify one
+clean committed source with full main-push CI and the existing nonpublishing
+Release drill. The owner authorised
 commit, push and a new release after the friction is resolved; 0.4.4 metadata
 and generated contracts are prepared as unreleased. No immutable tag or public
 release has been created. Do not borrow earlier source/run reports. Paused
