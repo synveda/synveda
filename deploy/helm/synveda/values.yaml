@@ -208,7 +208,7 @@ postgres:
     nodeSelector: {}
     tolerations: []
     affinity: {}
-  # Required in external mode; use the example in ci/external-values.yaml.
+  # Required in external mode; use examples/external-database.json.
   # host, port, database, migratorExistingSecret, migratorUrlSecretKey,
   # caExistingSecret, caSecretKey and roles select the existing SQLx contract.
   # Optional clientExistingSecret/clientCertSecretKey/clientKeySecretKey mount

@@ -1,0 +1,36 @@
+# OPS-11: an explicit temporary Helm test Pod, without customer credentials.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "synveda.fullname" . }}-readiness-test
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: verification
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  activeDeadlineSeconds: 60
+  automountServiceAccountToken: false
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    {{- include "synveda.podSecurity" (dict "root" . "context" .Values.podSecurityContext) | nindent 4 }}
+  containers:
+    - name: readiness
+      image: {{ include "synveda.image" . }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      resources:
+        requests: {cpu: 100m, memory: 128Mi}
+        limits: {memory: 1Gi}
+      command: [node, -e]
+      args:
+        - >-
+          fetch('http://{{ include "synveda.fullname" . }}:{{ .Values.service.port }}/readyz', {signal: AbortSignal.timeout(10000)})
+          .then(r => { console.log(r.ok ? 'PASS: private gateway readiness; login and client operations require authenticated verification.' : 'FAIL: gateway readiness; inspect the install stage and pod status.'); process.exit(r.ok ? 0 : 1); })
+          .catch(() => { console.error('FAIL: pod-to-Service readiness request; inspect DNS, NetworkPolicy and gateway status.'); process.exit(1); });

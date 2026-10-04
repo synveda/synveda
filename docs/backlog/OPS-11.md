@@ -14,7 +14,7 @@ joint logical restore have executable fixtures. See the
 [operations runbook](../../deploy/helm/synveda/OPERATIONS.md) and
 [CI record](../CI.md) for the current contract and reports.
 
-Two decisions remain. Routes, assigned-ID workloads and NetworkPolicies render,
+Two release/platform decisions remain. Routes, assigned-ID workloads and NetworkPolicies render,
 but only Kind and structural schema checks have run; no real OpenShift SCC,
 router, CNI or CSI target has been qualified. Separately, published v0.4.0 and
 v0.4.3 both use schema epoch 3 and baseline revision 3, but v0.4.3 changes the
@@ -37,6 +37,11 @@ OPS-6 / ADR-0121 now carries the exact v0.4.3 baseline plus a source-only
   work in [OPS-6](OPS-6.md). Do not treat same-source Helm reapply as an upgrade.
 - Keep installation, portability and release guidance aligned with the published
   artifacts and the selected support boundary.
+- Complete the human first-install journey under ADR-0137: repeatable native
+  preparation, customer presets, prerequisite checks, private first-human login,
+  truthful client setup, governed Knowledge retrieval and safe recovery. Qualify
+  the guide on a named self-managed target and with three unfamiliar engineers
+  before making platform or setup-time claims.
 
 ## Non-goals
 
@@ -99,6 +104,61 @@ artifact identities. Test the upgrade candidate with `synveda db migrate
 --check` against a restored published database before allowing a write. A
 missing cluster or supported release pair is an unmet acceptance item, not a
 passing test.
+
+### Fresh-install source checkpoint (2026-10-03)
+
+This uncommitted candidate starts at
+`d289fd46b2368eea9d305f06b67aab8a3b94e3be`. Accepted ADR-0137 precedes its
+implementation. The reproduced bundled-storage trap previously rendered a
+default 10Gi PVC after accepting CNPG-only `postgres.storage.*`. Correct bundled
+settings now render the selected 37Gi/class and wrong-mode non-default settings
+refuse. Tests consume packaged customer presets for all six ownership recipes.
+
+Node 22+/OpenSSL preparation replaces Docker on the Kubernetes workstation.
+Protected tenant/key/password/CA state is committed once before ordinary Helm
+and Secret outputs; interrupted outputs resume without rotating credentials.
+Offline checks, read-only namespaced API checks, explicit Secret creation and
+a temporary external-database authority probe are separate actions. The normal
+mutating install order remains bootstrap → three-role preflight → migration →
+tenant admission. Readiness tests carry no user credentials; support diagnostics
+include only allowlisted status. CPR-8/CPR-39 regenerate registry-backed manual
+Codex/Copilot choices and distinguish browser access, setup confirmation and
+authenticated Session evidence. The guide covers private first-human admission,
+shared Knowledge/review/context and an optional staged loopback sample.
+
+The [source validation record](../../demos/evidence/ops11-first-install-source.json)
+records exact gates/tool versions and limits. Controlled API fixtures cover
+namespaced RBAC, absent/default storage, missing keys, wrong CA/issuer, Secret
+conflicts, registry pull status, interruption/retry, quota/limits and retained
+claim rendering. These do not establish live retained-data continuity or login.
+Published v0.4.3 remains separate from this candidate.
+
+**Blockers and next action:** no authorised disposable context with a named
+distribution/patch, namespace allowance, actual ingress, StorageClass/driver
+and enforcing CNI has been supplied. The local Docker client has no running
+daemon, so candidate Kind/browser/product acceptance cannot run here. Obtain
+that explicit target, package one matching reviewed source/image set, run the
+guide in fresh namespaces and retain separate readiness, fresh-human login and
+bootstrap-removal, client context delivery, learning/review/provenance and
+retained-data evidence. Never use an arbitrary current context. A non-OpenShift
+target qualifies only its named environment; SCC/router acceptance remains open.
+
+Three unfamiliar engineer trials also await participants. Give each only the
+shipped guide, its own authorised disposable namespace and fresh human identity
+on the declared environment/artifact set. Start at route selection, record
+prerequisite delays separately, and stop at verified sign-in and the exact
+approved Knowledge revision delivered in client context. Count substitutions,
+documentation jumps, every error and guide resolution, and maintainer help.
+Retained recovery material stays with its trial owner.
+
+| Trial | Sign-in elapsed | Useful client context elapsed | Substitutions / doc jumps | Errors resolved by guide | Maintainer assistance |
+| --- | --- | --- | --- | --- | --- |
+| Engineer 1 | Not run | Not run | Not measured | Not measured | Not measured |
+| Engineer 2 | Not run | Not run | Not measured | Not measured | Not measured |
+| Engineer 3 | Not run | Not run | Not measured | Not measured | Not measured |
+
+No five-minute claim, new platform support or production qualification follows
+from these source tests. OPS-11 remains open.
 
 ## Rollout and rollback
 

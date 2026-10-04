@@ -19,6 +19,7 @@
  * a "create your first workspace" wizard.
  */
 
+import { canExplore } from "./onboarding.mjs";
 import { useCallback, useEffect, useState } from "react";
 
 import { SIGN_IN_URL, type Outcome } from "./api.mjs";
@@ -174,10 +175,11 @@ function SignedIn({ me, route }: { me: MeView; route: RouteMatch | null }) {
     me.onboarding.state === "needs_workspace" ||
     me.onboarding.state === "needs_project";
   useEffect(() => {
-    if (needsOnboarding && route?.id !== "welcome") {
+    const explore = canExplore(me.tenant.id, me.principal.subject);
+    if (needsOnboarding && !explore && route?.id !== "welcome") {
       navigate(hrefOf("welcome"), { replace: true });
     }
-  }, [needsOnboarding, route?.id]);
+  }, [needsOnboarding, route?.id, me.tenant.id, me.principal.subject]);
 
   return (
     <AppProvider value={context}>

@@ -59,10 +59,23 @@ test("a capture without an installer is not offered as an installable client", (
   const registry = copy();
   const client = registry.clients.find((client) => client.id === "zed");
   client.configuration = null;
+  delete client.onboarding;
   assert.deepEqual(validateRegistry(registry, root), []);
   assert.ok(!renderTypescript(registry).includes('"id": "zed"'));
   client.support_level = "configured";
   assert.match(validateRegistry(registry, root).join("\n"), /MCP configuration needs/);
   client.support_level = "verified";
   assert.match(validateRegistry(registry, root).join("\n"), /verified requires live-client evidence/);
+});
+
+test("a manual native registration remains discoverable without an automatic writer", () => {
+  for (const id of ["codex", "copilot-cli"]) {
+    const client = source.clients.find((entry) => entry.id === id);
+    assert.equal(client.configuration, null);
+    assert.equal(client.onboarding.registration, "manual");
+    assert.ok(renderTypescript(source).includes(`"id": "${id}"`));
+    const registry = copy();
+    registry.clients.find((entry) => entry.id === id).onboarding.registration = "automatic";
+    assert.match(validateRegistry(registry, root).join("\n"), /automatic onboarding requires a configuration writer/);
+  }
 });

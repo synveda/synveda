@@ -294,6 +294,22 @@ cross-process entity invalidation bus is not presumed necessary.
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open
 
+The 2026-10-03 OPS-11/OPS-12/OPS-8 candidate under Accepted ADR-0137 adds native
+repeatable Kubernetes preparation, packaged customer recipes, mode-specific
+storage refusal, prerequisite checks, private human admission, readiness tests
+and allowlisted diagnostics. CPR-8/CPR-39 regenerate registry-backed manual
+Codex/Copilot choices and distinguish browser access, setup confirmation and
+authenticated Session evidence. The guide carries shared and loopback first-use
+review paths. [Local validation](../../demos/evidence/ops11-first-install-source.json)
+is separate from immutable v0.4.3 and hosted release proof. No authorised named
+self-managed target or three unfamiliar engineer participants are available;
+the local Docker daemon is unavailable. Obtain the target's ingress,
+StorageClass/driver and enforcing CNI, then run fresh-identity client/product
+and retained-data trials from the shipped guide. The
+[OPS-11 checkpoint](OPS-11.md#fresh-install-source-checkpoint-2026-10-03) owns
+measurements and the exact next action. Both features remain open; setup time,
+new platform support and production readiness remain unclaimed.
+
 OPS-12 / ADR-0132 requires source installers to verify the signed checksum
 inventory with a trusted GitHub CLI, fixed publisher/workflow/tag/runner policy
 and expected source commit before remote code execution. Real macOS verification

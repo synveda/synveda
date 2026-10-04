@@ -94,3 +94,15 @@ test("a blocked caller gets an access explanation without a creation form", () =
   assert.match(html, /Ask your administrator for workspace access/);
   assert.doesNotMatch(html, /<form|Create workspace|Which agent client/);
 });
+
+test("onboarding offers manual native clients and separates access from delivery", () => {
+  const html = render("ready");
+  assert.match(html, /Codex CLI/);
+  assert.match(html, /GitHub Copilot CLI/);
+  assert.match(html, /Manual configuration available/);
+  assert.match(html, /Explore the console; connect a client later/);
+  assert.match(html, /Client setup completed: not confirmed/);
+  assert.match(html, /Client operation observed: not checked/);
+  assert.match(html, /selected; check below to verify current access/);
+  assert.doesNotMatch(html, /agent connected|client connected/i);
+});

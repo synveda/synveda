@@ -3,18 +3,18 @@
 For an operator-free installation, use the [bundled evaluation recipe](examples/README.md).
 
 The CNPG starter instructions are consolidated into the authoritative
-[Kubernetes installation guide](README.md#choose-the-preset).
+[Kubernetes installation guide](README.md#1-choose-a-route-and-dependency-owners).
 Use [starter-values.yaml](starter-values.yaml), the
 [configuration reference](CONFIGURATION.md), and the
 [operations runbook](OPERATIONS.md). Provider selection is not data migration.
 
 ## First use and membership
 
-Follow [owner, member and agent setup](README.md#first-use-and-membership).
+Follow [first human login](FIRST_LOGIN.md) and [first useful workflow](FIRST_USE.md).
 
 ## Agent credentials and revocation
 
-Follow [scoped agent credentials](README.md#agent-credentials-and-revocation).
+Follow [scoped client setup and credentials](../../../docs/CONSUMER_CLI.md).
 
 ## Maintenance, backup and retained reinstall
 

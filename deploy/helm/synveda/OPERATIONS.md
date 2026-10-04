@@ -414,3 +414,49 @@ Never paste `kubectl get secrets -o yaml`, `helm get all` containing private
 operator inputs, raw database URLs or unredacted provider diagnostics into a
 support report. Supply version/profile, timestamps, pod status and content-free
 error codes instead.
+
+## Installation-stage recovery
+
+Run commands on the workstation with the **saved** `CONTEXT`, `NAMESPACE`,
+`RELEASE`, `CHART` and `PREPARED`. Start with an allowlisted summary:
+
+```sh
+node "$CHART/examples/operator.mjs" diagnose --prepared "$PREPARED" > synveda-support.json
+```
+
+It includes only workload names/phases, container names/states/restarts,
+known reason codes, exit codes, Job counters/conditions and PVC class/size/phase.
+It excludes annotations, messages/events, logs, environments, Secrets,
+credential URLs, tokens/cookies and Session/Knowledge content. Unknown reason
+strings are classified rather than copied. API permission failure names the
+required list permission. Read raw logs/events privately; never append them
+unreviewed to this support file.
+
+| Failing stage/symptom | Likely cause | Exact next action | Retry |
+| --- | --- | --- | --- |
+| Preparation conflict/partial file | Different selections, changed recovery material, interrupted derived output | Preserve the directory; restore original `state.json`/overlay/files. If only a derived output is absent, repeat the original preparation. Remove an empty lock only after its process has stopped. | Original `prepare.mjs` command with identical inputs |
+| API/RBAC refusal | Namespaced installer lacks a listed permission | Request exactly that resource/verb from the namespace owner. Namespace/StorageClass listing is cluster-wide; obtain the specified administrator input when unavailable. | `operator.mjs preflight` |
+| Pending PVC | Missing class, quota/capacity, scheduling or storage driver | `kubectl --context "$CONTEXT" -n "$NAMESPACE" describe pvc "$RELEASE-pg-data"` privately; confirm class/provisioner with storage owner. WaitForFirstConsumer needs a scheduled consumer, so inspect its scheduling too. Preserve populated claims. | Preflight then original Helm command |
+| ImagePullBackOff/ErrImagePull | Wrong digest/platform, registry refusal or missing pull Secret | Inspect private Pod events. Confirm verified inventory/digest and architecture, namespace-local pull Secret keys and Pod registry egress. A source tag or workstation pull does not prove Pod pullability. | Correct referenced pull Secret/registry access, then original Helm command |
+| CreateContainerConfigError / Secret/key failure | Secret missing in this namespace, wrong key or conflicting credential | Restore the original matching protected Secret/key. `operator.mjs secrets` creates only absent generated Secrets and refuses conflicting bytes before writing. External Secrets remain their owner's responsibility. | Secrets action, preflight, then original Helm command |
+| Quota / LimitRange / FailedCreate | Missing install/replacement/verification headroom or required CPU limit | `kubectl --context "$CONTEXT" -n "$NAMESPACE" get resourcequota,limitrange`; use the printed per-recipe requests and limits. Resolve prior failed temporary probe Pods explicitly after diagnosis. | Preflight then original Helm command |
+| `database-bootstrap` | Bundled/CNPG provisioning or administrative credential/authority refusal | Inspect bounded logs from that init container privately. Check exact separate credentials, owner/ACL/extension contract and current provider readiness. Do not grant elevated authority to a runtime role. | Correct provider input; original Helm command creates a new revision Job |
+| `database-preflight` / external probe | Role, same-server proof, forbidden database, TLS/CA/hostname or pod connectivity refusal | Give the DBA its content-free reason/SQLSTATE. Verify the [DBA handoff](CONFIGURATION.md#dba-handoff), CA/SAN and Pod network path. Never weaken the authority verifier. | New external `database-probe`, require Complete, then original Helm command |
+| `migrate` | Wrong schema/checksum/owner role or competing migration | Inspect bounded migrate logs privately; DBA checks lock and exact compatibility. Use the migrator-only `db migrate --check` before a planned upgrade. Keep writers quiesced for recovery. | Verified compatible artifact and original Helm command; no SQLx history edits |
+| `tenant` | Original tenant/key material missing or conflicting | Restore the original tenant ID, KMS KEK/reference and issuer binding together. Do not generate a new tenant/key to bypass refusal. | Original Helm command after matching recovery is restored |
+| Readiness/TLS | Schema/key/policy gate, wrong CA/chain/SAN or startup | `operator.mjs verify` plus allowlisted diagnosis; privately inspect the exact failing container and trust files. Check expiry/hostname and certificate owner's chain. No insecure TLS switch. | Correct input, planned restart/reapply, then verify |
+| OIDC login/callback | Issuer/callback/audience/group mismatch, DNS, CA or provider SSO | Compare the [OIDC worksheet](CONFIGURATION.md#external-oidc-worksheet) and chosen human subject privately. Register exact callback; restore canonical issuer. Fresh private browser login avoids stale SSO. | First-login procedure and `whoami --capabilities`; readiness alone is insufficient |
+
+To locate the current install Job, `kubectl --context "$CONTEXT" -n
+"$NAMESPACE" get jobs -l app.kubernetes.io/component=install` shows its revision
+suffix. The failing init/container in diagnosis names the stage. Private logs
+use `kubectl ... logs job/JOB-NAME -c STAGE --tail=30`; replace both names with
+those actual names. Never paste a credential URL or provider token if a log
+contains one. The normal order stays bootstrap → authority preflight → migration
+→ tenant. Correction and a new Helm revision re-execute it under bounded waits.
+A Helm failure does not undo a completed migration or destroy retained data.
+
+After infrastructure recovery, repeat authenticated sign-in, selected-project
+access and the [first-use outcome](FIRST_USE.md). Record those separately from
+Job Complete, `/readyz` or `helm test` success. No automatic purge, credential
+regeneration or namespace deletion is an installation recovery action.

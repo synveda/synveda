@@ -1,6 +1,6 @@
 # Production readiness
 
-Assessment baseline: 2026-09-24; source claims reconciled 2026-10-01. Scope:
+Assessment baseline: 2026-09-24; source claims reconciled 2026-10-03. Scope:
 the current context-platform checkout as a self-hosted service. Passing
 repository gates establishes repeatable behaviour; it does not establish
 availability, recoverability, supportability or a releasable supply chain.
@@ -8,6 +8,19 @@ The [production roadmap](PRODUCTION_ROADMAP.md) proposes the order of work;
 this register owns the current readiness verdict and evidence.
 The [current Rust architecture review](RUST_ARCHITECTURE_REVIEW_2026-09-30.md)
 records source-level risks and limits separately from deployment qualification.
+
+The 2026-10-03 OPS-11/OPS-12 candidate under Accepted ADR-0137 improves human
+fresh installation: native repeatable preparation, packaged customer presets,
+storage-mode refusal, prerequisite checks, private human admission, truthful
+resumable client setup and Knowledge/review/context guidance.
+[Local validation](../demos/evidence/ops11-first-install-source.json) records
+offline renders, controlled API regressions and console checks. Candidate live
+Kind/first-login/client/product acceptance is unrun here: Docker has no running
+daemon and no authorised named self-managed target was supplied. Three unfamiliar
+engineer trials and measured setup times remain pending in
+[OPS-11](backlog/OPS-11.md#fresh-install-source-checkpoint-2026-10-03).
+Published v0.4.3 lacks these new tools and instructions. This candidate changes
+neither the verdict nor HA, N-1, CNI/CSI/ingress, recovery or publisher claims.
 
 The 2026-09-19 [Kubernetes deployment audit](../deploy/README.md#kubernetes-release-contract)
 defines OPS-11's narrower next release. The portable chart increment implements

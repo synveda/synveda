@@ -1777,3 +1777,39 @@ OCI/Compose/Helm sets before retaining proof. Preserve the separate `3beeb1cb`
 OCI qualification and temporary qualification branch until that corrected proof
 is retained. The plugin/chart slice follows this CI repair; external operator,
 issuer and notice-provenance gaps remain separate. Automation stays paused.
+
+### Kubernetes consumer first-use checkpoint (2026-10-03)
+
+The owner's fresh-install request adds the ADR-0137 candidate at base
+`d289fd46b2368eea9d305f06b67aab8a3b94e3be`, separate from hosted qualification
+above. OPS-11 owns target/human acceptance. OPS-12/OPS-8 extend the existing
+packaged chart utility with native Node 22+/OpenSSL, protected repeatable state
+and ordinary Helm/Secret outputs. No new deployment framework or `synveda init`
+behavior is introduced. Customer presets ship in the chart; all six ownership
+combinations render from the same files, including extracted-package parity.
+Preparation refuses missing selected dependency pins; publisher/checksum
+verification fails closed before extracting code.
+
+CPR-8/CPR-39 add registry onboarding metadata and regenerate manual Codex/Copilot
+choices with project/task binding. Non-secret progress and pending/refused
+Configuration actions survive reload. Browser access, sign-in, project access,
+user-confirmed setup and authenticated Session evidence are distinct. Readiness
+cannot establish vendor loading, model use or Capture. Shared users have a
+Knowledge/review/context path; the optional fictional sample uses the existing
+staged public-API commands and Kubernetes forwards, without a Docker launcher.
+
+The [source validation record](../../demos/evidence/ops11-first-install-source.json)
+lists exact local results and unavailable services. It establishes neither a
+clean hosted source/run pair nor changes to immutable v0.4.3. Candidate client,
+runtime and server bytes must match; published same-version client contracts
+must not be described as this candidate.
+
+**Next action:** obtain the authorised disposable target and three unfamiliar
+engineers in [OPS-11](OPS-11.md#fresh-install-source-checkpoint-2026-10-03), then
+qualify preparation → fresh-human login → project → client → reviewed
+Knowledge/context/source, correction/retry and retained reinstall. Kind also
+needs a running authorised Docker daemon. After candidate acceptance, select a
+clean source for the existing full same-source CI/nonpublishing Release proof.
+No publication, hosted dispatch, new source/run pair or external contact occurred
+here. Release-security continuation and paused automation remain unchanged.
+OPS-12 remains open.

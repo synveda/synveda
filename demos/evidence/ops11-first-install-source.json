@@ -1,0 +1,283 @@
+{
+  "feature_ids": [
+    "OPS-11",
+    "OPS-12",
+    "OPS-8",
+    "CPR-8",
+    "CPR-39"
+  ],
+  "decision": "ADR-0137 (Accepted)",
+  "recorded_at": "2026-10-03T23:10:08.272917+00:00",
+  "source": {
+    "base_commit": "d289fd46b2368eea9d305f06b67aab8a3b94e3be",
+    "dirty_candidate": true,
+    "published": false,
+    "files": [
+      {
+        "path": "Makefile",
+        "sha256": "7aa092189941315ef837abefeb4b0a165adea87bd7661bb4721301bb1bbeb327"
+      },
+      {
+        "path": "adapters/registry.json",
+        "sha256": "0f1e4a261e9a626aebe3491992c1ac839bc1847b09927d6c2e5d9c85a836a158"
+      },
+      {
+        "path": "console/src/App.tsx",
+        "sha256": "1c6655610d515b3e533373448755aa73147ba46bb688868a3f716e58630c9b95"
+      },
+      {
+        "path": "console/src/Onboarding.tsx",
+        "sha256": "1664d0f0fc8a7d29bd8b6e412c26e3bd604bb449c870a4dfc96caed8c0ddbab8"
+      },
+      {
+        "path": "console/src/generated/adapter-clients.ts",
+        "sha256": "b8c80b676fce2c89e778cd28c3b243dc59cb5a5136b68c1f910c1452c8da98f8"
+      },
+      {
+        "path": "console/src/onboarding.mts",
+        "sha256": "42cc417c6b0453023bdc00c22bda628c6a7f0f62ec289f40389439d9c67eefb6"
+      },
+      {
+        "path": "console/src/onboarding.test.mts",
+        "sha256": "066e4e70727884f13a1a53cbf75cd84b88733274b3f6fb147c1e2193028ac00b"
+      },
+      {
+        "path": "console/src/onboarding.test.tsx",
+        "sha256": "6d3cf782b9e798ca0347616e4ead97d320500892aa7071389bfc60e25cf24a4a"
+      },
+      {
+        "path": "demos/fixtures/ops-2/local-evaluation.mjs",
+        "sha256": "94bcde554d16b383932b857f94e73a7b6ea0deb7fce6729179eab22873bc296c"
+      },
+      {
+        "path": "deploy/helm/synveda/CONFIGURATION.md",
+        "sha256": "c4ef75aa04d364258c1bbc08bb1f08122c6f9e0bb7c1231d7fbfce796473d3f9"
+      },
+      {
+        "path": "deploy/helm/synveda/FIRST_LOGIN.md",
+        "sha256": "64ec1ad6badf57eb124c97784178476b7c57c7567bb1f957ff29bc0e554d5a92"
+      },
+      {
+        "path": "deploy/helm/synveda/FIRST_USE.md",
+        "sha256": "54674a5181817d17e15a881316846b3370149397f7bb5f3d9d47af757ab56644"
+      },
+      {
+        "path": "deploy/helm/synveda/MANUAL.md",
+        "sha256": "58c65df845459408274f57d3f942cb2a37c3d5be4f58f62d7978414e80032bbb"
+      },
+      {
+        "path": "deploy/helm/synveda/OPERATIONS.md",
+        "sha256": "a4e3ad04e9ff568567e3eb4ebc15701051942c805194ce6fdc37cc3a1e63efb8"
+      },
+      {
+        "path": "deploy/helm/synveda/README.md",
+        "sha256": "8117461e5de3273ebbc3c2aba03fa4e1ac9d10c500dd7ae1cfb001ce68fbc907"
+      },
+      {
+        "path": "deploy/helm/synveda/STARTER.md",
+        "sha256": "bd29eef9bd842328d85f44b49a9d9da134cb7df453c173d51ed3397655554c2d"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/README.md",
+        "sha256": "f3f435ec65be1061e572f43760a66be37134cd3f95e3bb6c2ad69eff34a5919e"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/bundled-database.json",
+        "sha256": "021c1332cff71a62b87e2d13807dcab6db15b3da9f2f27004940db5356a7c29f"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/bundled-identity.json",
+        "sha256": "8ec360b9049377c0ff3b5b1aecbce06101533d470c9187919f983ea2026feebd"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/existing-cnpg.json",
+        "sha256": "054a34a9c35e7fe5647f0a2c5c0137af287875d0732693cb3aeb3333355fb15a"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/external-database.json",
+        "sha256": "2f4b9bdfd037be64f2601465f5fb4ddc15a5d8fa6dc80e746f3273ad23535117"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/operator.mjs",
+        "sha256": "6de487d012ed932a50fa0bff3f32d8b480e264436a71ab1aed8d2a5492fb4abc"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/prepare-local.mjs",
+        "sha256": "ef721e2be6b3a97413074f128aca7a8994b4a2c6f1f555d966e1c946369cb912"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/prepare-local.sh",
+        "sha256": "0cdbc4445ff0624397e08510a0af2ae0af99908bdd926f69a7e724345d562de2"
+      },
+      {
+        "path": "deploy/helm/synveda/examples/prepare.mjs",
+        "sha256": "09513acbc663b40cb1e498148974dad6b490499741e6a73c8bc203c9c077aeab"
+      },
+      {
+        "path": "deploy/helm/synveda/templates/NOTES.txt",
+        "sha256": "efa2ae8c0782deee45183671d6b4910537dbae2fedd78c2fd970c22ba366c6c9"
+      },
+      {
+        "path": "deploy/helm/synveda/templates/_helpers.tpl",
+        "sha256": "8d97abab4c3880974bc3349e2ff4c6035205254e283c2b4b9d8c2ca8461f22dc"
+      },
+      {
+        "path": "deploy/helm/synveda/templates/tests/readiness.yaml",
+        "sha256": "081b842de103d430b9d6930a77ed2e1b953214263757db90ddefeceb02b49273"
+      },
+      {
+        "path": "deploy/helm/synveda/values.yaml",
+        "sha256": "e03e85dcc3c9fd13340c1981abca5b33310d387087f5c734b9040aa53d53b949"
+      },
+      {
+        "path": "docs/PRODUCTION_READINESS.md",
+        "sha256": "454fd73473b711905f8cdd97ab53c0e2852b29874c2e5b8a4f8773351956abf3"
+      },
+      {
+        "path": "docs/adr/README.md",
+        "sha256": "cb6968e3e417bee464dcddcb5b451ec7aae1f9ffca34ff24f336c3c7d03bc55a"
+      },
+      {
+        "path": "docs/adr/adr-0137-repeatable-kubernetes-preparation.md",
+        "sha256": "556fe2b103a1009d4cdac693d676bec06fb5233a0dbc5c8db7e96f83ebbe7802"
+      },
+      {
+        "path": "docs/backlog/OPS-11.md",
+        "sha256": "d44418f550abbf9277387005f81c883527be929b0f6ce8dc8c5b1d629593d3b9"
+      },
+      {
+        "path": "docs/backlog/OPS-12.md",
+        "sha256": "e24c1640e26769c2e52729835c7e6b153e4cd46acd32b3780aef636257e2530b"
+      },
+      {
+        "path": "docs/backlog/STATUS.md",
+        "sha256": "25bcd468a84e39876730134b3dafd9f719294ad2c36afd5d4f881b9e320795b5"
+      },
+      {
+        "path": "scripts/check-adapter-conformance.mjs",
+        "sha256": "de63ac97fe027862304dfb893b642f02a69c5793de5a2d035d341ecb7f1b6f07"
+      },
+      {
+        "path": "scripts/check-adapter-conformance.test.mjs",
+        "sha256": "7dacd49bb1a0056aa5c3d4dba0c677a11de2b2181f082550c3d52c70a49ad5bf"
+      },
+      {
+        "path": "scripts/check-helm-contract.mjs",
+        "sha256": "5cb2db84ed9cdf1629a7e297d9937564033ffc7b9cc3da659f2e40b1a3e1d135"
+      },
+      {
+        "path": "scripts/check-portability-contract.mjs",
+        "sha256": "097c8b2e11799bb257139fea4a3f78331f15e2d42919716eb6b54530b5c05983"
+      },
+      {
+        "path": "scripts/check-release-parity.mjs",
+        "sha256": "ccdd88eff1ac72e9bd0901fc8684cb231480b6abdb2bb7b2d8a264a184f4264d"
+      },
+      {
+        "path": "scripts/check-starter-contract.mjs",
+        "sha256": "0315e7aae46c90470c8be8ba81d10247b79212bdea1ba95dead5495152aa2e92"
+      },
+      {
+        "path": "scripts/kubernetes-onboarding.test.mjs",
+        "sha256": "61931f8053a69863a718d4dda45a3d8b8056895162b80225a6bb5170d1cbabb6"
+      }
+    ]
+  },
+  "host": {
+    "os": "macOS",
+    "architecture": "arm64",
+    "node": "24.18.0",
+    "helm": "4.2.3",
+    "kubectl_client": "1.33.9",
+    "openssl": "LibreSSL 3.3.6"
+  },
+  "validation": [
+    {
+      "command": "make chart-lint",
+      "status": "passed",
+      "focused_tests": 23,
+      "scope": "Actual Helm renders and native OpenSSL preparation; controlled kubectl command fixtures. Six packaged customer ownership combinations, custom release/namespace/ports/SAN/PVC class and size, wrong-mode refusal, no default StorageClass, namespaced RBAC, CA/issuer/Secret failures, frozen retry/interruption, exact manual preparation blocks, quota/limits, retained claim references, temporary external authority probe shape, registry pull diagnosis, API outage and allowlisted JSON. No live cluster."
+    },
+    {
+      "command": "make check-deploy",
+      "status": "passed",
+      "tests": 425,
+      "scope": "Release/chart packaging parity, image inventory, deterministic Compose/lifecycle/recovery/refusal tests, deployment convergence and uninstall. Initial sandbox loopback bind refusal was resolved by a full rerun with socket permission. No live Docker/Kind deployment."
+    },
+    {
+      "command": "node scripts/check-release-parity.mjs",
+      "status": "passed",
+      "scope": "Final chart bytes packaged reproducibly and extracted customer recipes rendered; no registry publication or publisher qualification."
+    },
+    {
+      "command": "make chart-schema (KUBECONFORM points to task-owned pinned v0.7.0 Go build)",
+      "status": "passed",
+      "resources": {
+        "OpenShift_4_19_Kubernetes_1_32": 28,
+        "OpenShift_4_20_Kubernetes_1_33": 28,
+        "Kubernetes_1_36_1": 8
+      },
+      "skipped": 0,
+      "scope": "Pinned OpenShift schema hashes and strict structural validation. Initial ENOENT resolved by building the repository-pinned validator in a private temporary tool directory; its version output is development. No live SCC/controller admission."
+    },
+    {
+      "command": "node console/node_modules/typescript/bin/tsc -p console/tsconfig.test.json && node --test --test-timeout=60000 'console/dist-test/*.test.mjs' 'console/dist-test/*.test.js'",
+      "status": "passed",
+      "tests": 263,
+      "scope": "Console suite including registry/manual choices, task/project binding, observation consent defaults, scoped evidence, progress and exploration."
+    },
+    {
+      "command": "node node_modules/typescript/bin/tsc --noEmit (console)",
+      "status": "passed"
+    },
+    {
+      "command": "NODE_PATH=<repository>/node_modules/.pnpm/node_modules node node_modules/vite/bin/vite.js build (console)",
+      "status": "passed",
+      "notes": "Uses existing locked local packages and intact SBOM/licence checks. Vite reports a chunk-size warning; no dependency or warning threshold was changed."
+    },
+    {
+      "command": "make check-docs check-backlog check-adr-status check-adapters check-deps",
+      "status": "passed"
+    },
+    {
+      "command": "cargo fmt --all --check; git diff --check",
+      "status": "passed"
+    },
+    {
+      "command": "strict Clippy for changed Rust crates",
+      "status": "not_applicable",
+      "reason": "No Rust crate source or Cargo manifest changed."
+    }
+  ],
+  "execution_limits": {
+    "pnpm_wrapper": "Pinned pnpm 11.13.1 bootstrap could not fetch/validate its package in this environment. Console tests/typecheck/build ran through the existing locked local TypeScript/Vite packages; pins and supply-chain gates were preserved.",
+    "docker": "Read-only docker info failed; no running daemon is available for the planned local Kind fixture.",
+    "live_kind_candidate": "not_run",
+    "named_self_managed_distribution": "not_run: no authorised disposable target supplied",
+    "fresh_human_login_and_bootstrap_removal": "not_run on this candidate",
+    "native_client_delivery": "not_run on this candidate",
+    "reviewed_learning_and_exact_context_provenance": "not_run on this candidate; guide uses existing public-API stages",
+    "live_retained_data_reinstall": "not_run on this candidate; rendered reference and matching credential reuse tested",
+    "three_unfamiliar_engineer_trials": "not_run: participants unavailable; no timing claim",
+    "publication_or_hosted_qualification": "not_run; no commit, push, tag, publish or hosted dispatch performed"
+  },
+  "before_after": [
+    {
+      "before": "Bundled PostgreSQL silently ignored non-default postgres.storage settings.",
+      "after": "Wrong-mode settings refuse; the actual PVC uses postgres.bundled size/class."
+    },
+    {
+      "before": "Docker-bound preparation and internal CI values exposed repeated choices and fragile manual retries.",
+      "after": "One packaged native entry point derives repeated selectors; customer presets and a tested manual equivalent preserve identifiers, passwords, CA and KMS material."
+    },
+    {
+      "before": "Manual Codex/Copilot choices were omitted and browser project access could be mistaken for client setup.",
+      "after": "Registry-generated manual routes, task/project arguments, resumable setup and separate authenticated evidence states."
+    },
+    {
+      "before": "Installation, private first-human admission, learning review and recovery required disconnected implementation knowledge.",
+      "after": "One linear operator guide links concrete private administration, DBA/OIDC worksheets, shared and loopback first-use, readiness and stage-specific recovery."
+    }
+  ],
+  "next_action": "Obtain an explicitly authorised disposable context with distribution/patch, namespace allowance, actual ingress, StorageClass/driver and enforcing CNI; package matching reviewed candidate bytes and run fresh identity/client/product and retained-data acceptance. Then have three unfamiliar engineers follow only the shipped guide and retain measured sign-in/context times, substitutions, documentation jumps, errors/resolutions and assistance. Keep OPS-11/OPS-12 open and all release/readiness boundaries intact."
+}

@@ -418,6 +418,7 @@ chart-lint:
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/lint-values.yaml
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
 	node scripts/check-helm-contract.mjs
+	node --test scripts/kubernetes-onboarding.test.mjs
 	node scripts/check-starter-contract.mjs
 	node scripts/check-ops5-backup-chart.mjs
 	node scripts/check-portability-contract.mjs
