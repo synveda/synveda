@@ -9,6 +9,26 @@ this register owns the current readiness verdict and evidence.
 The [current Rust architecture review](RUST_ARCHITECTURE_REVIEW_2026-09-30.md)
 records source-level risks and limits separately from deployment qualification.
 
+FLOW-8 now has source-tested [local and private GitHub export](integrations/git-bridge.md)
+under Accepted ADR-0138/0139. Real repositories/clones preserve Prompt and
+ContextPack topology/evidence; six exact-role API cases cover fresh Cedar,
+forced RLS, Configuration revocation, exact active encrypted-secret custody,
+prepared recovery, destination identity and content-free audit. Eleven Git tests
+include controlled verified HTTPS with real receive-pack, uncertain push
+recovery, old-head races, privacy/identity refusal, TLS trust, redirects, outages,
+native subprocess bounds and signature verification. Local operation requires
+installed Git and a private Unix root; GitHub runtime uses the existing TLS stack
+without a native Git prerequisite. Both remain disabled by default. No real
+GitHub repository/PAT was available; credentialed provider acceptance, published
+image/deployment egress, external retention and paired database/key recovery
+remain unqualified. FLOW-8 stays open and the readiness verdict is unchanged.
+
+The 2026-10-06 public-CLI canary runner adds thirteen passing controller tests,
+artifact/source-head preflight and content-free export/replay/clone evidence.
+Its report leaves live credential, failure/recovery and deployment checks
+separate. No live canary inputs were selected and no external Git write ran;
+this preparation changes no qualification or readiness claim.
+
 The 2026-10-03 OPS-11/OPS-12 candidate under Accepted ADR-0137 improves human
 fresh installation: native repeatable preparation, packaged customer presets,
 storage-mode refusal, prerequisite checks, private human admission, truthful

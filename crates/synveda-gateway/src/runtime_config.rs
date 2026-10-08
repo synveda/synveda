@@ -23,6 +23,26 @@ const MAX_SETTING_FILE_BYTES: u64 = 1_048_576;
 const DIRECTORY_CREDENTIAL_ROOT: &str = "/run/secrets/oidc_directory";
 const MAX_DIRECTORY_CREDENTIAL_BYTES: usize = 4_096;
 
+/// FLOW-8's optional local root and private GitHub destination allowlist.
+/// Unset settings disable both transports; malformed custody refuses startup.
+pub fn git_export_transport() -> Result<Option<Arc<synveda_git::ExportTransport>>, String> {
+    let local = setting("SYNVEDA_GIT_EXPORT_ROOT")?
+        .map(|root| synveda_git::LocalTransport::new(root.into())
+            .map_err(|_| "SYNVEDA_GIT_EXPORT_ROOT must name an existing private owned absolute directory on a supported Unix host".to_owned()))
+        .transpose()?;
+    let github = setting("SYNVEDA_GIT_EXPORT_REMOTES")?
+        .map(|document| synveda_git::GitHubTargets::parse(document.as_bytes())
+            .and_then(|targets| synveda_git::GitHubTransport::new(targets.into_targets()))
+            .map_err(|_| "SYNVEDA_GIT_EXPORT_REMOTES_FILE must contain a bounded valid GitHub destination allowlist".to_owned()))
+        .transpose()?;
+    if local.is_none() && github.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(Arc::new(synveda_git::ExportTransport::new(
+        local, github,
+    ))))
+}
+
 /// Canonical public application origin and its fixed OIDC callback.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicApplicationUrl {

@@ -34,6 +34,7 @@ mod demo;
 mod deployment_database;
 mod diff;
 mod directory;
+mod git_bridge;
 mod init;
 mod installer_state;
 mod keys;
@@ -95,6 +96,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Governed authored-channel Git export and independent evidence verification.
+    #[command(subcommand)]
+    GitBridge(git_bridge::Command),
     /// Internal Windows hook storage protocol; bounded local pipes only.
     #[command(hide = true)]
     PrivateState,
@@ -2203,6 +2207,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         None
     };
     match cli.command {
+        Command::GitBridge(command) => git_bridge::run(command).await,
         Command::PrivateState => private_state::run(),
         Command::InstallerState => installer_state::run(),
         Command::Up(options) => consumer::run(&options, consumer::Action::Up),

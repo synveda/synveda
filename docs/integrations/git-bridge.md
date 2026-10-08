@@ -1,0 +1,337 @@
+# Governed Git export (FLOW-8)
+
+The bridge exports the complete bounded ancestry of a Prompt or ContextPack
+channel into an operator-owned bare Git repository or pinned private GitHub.com
+repository. PostgreSQL and
+VedaFlow remain authoritative. The public endpoint is
+`POST /v1/channels/{scope_id}/git-export`; the CLI uses that same endpoint.
+Import and forge reviews are outside this export contract.
+[ADR-0138](../adr/adr-0138-governed-git-export.md) fixes its evidence and recovery
+contract; [ADR-0139](../adr/adr-0139-private-github-git-export.md) adds the private
+GitHub transport. Credentialed provider/deployment qualification remains tracked
+in [FLOW-8](../backlog/FLOW-8.md).
+
+## Enable a local destination
+
+Run the gateway on a Unix host with installed Git and a retained directory owned
+by the gateway's operating-system user, mode `0700`. Use an absolute physical
+path with no symlink components. Set `SYNVEDA_GIT_EXPORT_ROOT` to that directory
+before gateway startup. An unset variable disables local export; an invalid root
+refuses startup. The current bundled product image does not provide Git or an
+export volume, so this rollout requires an operator-prepared native gateway.
+
+Publish a complete governed Configuration document containing a sorted, unique
+`git_export_targets` array, for example `["review"]`, through the existing
+Configuration proposal/review/apply lifecycle, then bind it at the channel
+scope. The array defaults to empty and allows at most sixteen identifiers.
+Identifiers are 1–48 lowercase ASCII letters, digits or hyphens, beginning
+with a letter or digit. They contain no paths, URLs, credentials or forge
+settings. Inspect the selection with `synveda configuration effective SCOPE
+--json`. Configuration enables a destination but grants no access.
+
+Built-in packs require a scoped administrator's `channel.export` permission,
+`channel.read`, and sensitivity-aware read permission for every historical
+object at its original scope. A private or currently denied ancestor refuses
+the entire export, even if the head alone is readable. Custom packs must
+explicitly permit `Synveda::Action::"ChannelExport"` with its scope context.
+
+```sh
+synveda git-bridge export SCOPE --target review --channel prompt/published
+synveda git-bridge export SCOPE --target review --channel context-pack/published
+```
+
+`prompt/staged` and `context-pack/staged` are also supported. Each destination
+lives at `ROOT/TENANT/SCOPE/review.git`; the response supplies the exact
+`git_ref`, `git_head`, source head/pin and mapping digest without filesystem
+paths or source content. A successful retry returns `no_op` or `resumed`.
+Export is explicitly requested; no background synchronizer is installed.
+
+## Enable a private GitHub destination
+
+Use a dedicated, existing, non-fork private GitHub.com repository. Record its
+immutable numeric repository ID independently. Its owner must restrict changes
+to visibility, access and retention. Metadata checks establish observed privacy;
+GitHub's settings API and Git push cannot lock visibility together. Protect
+export branches as appropriate; provider protections are respected and never
+bypassed. GitHub Enterprise, SSH, repository creation, proxy and private-CA
+configuration are outside this transport's contract.
+
+Provision a fine-grained PAT restricted to that repository, with Metadata read
+and Contents read/write permissions and an operator-managed expiry/rotation.
+Keep this credential document in a private file or provide it on stdin:
+
+```json
+{
+  "format": "synveda-github-export-credential-v1",
+  "repository_id": 123456789,
+  "token": "github_pat_REPLACE_WITH_THE_REPOSITORY_TOKEN"
+}
+```
+
+Store it through the existing operator secret boundary, using the deployment's
+configured KMS and exact tenant/scope. The command prints only metadata, including
+the stable `synveda-secret://` reference. No credential is accepted in argv.
+
+```sh
+synveda tenant secret put --tenant TENANT --scope SCOPE --kind import_export \
+  --label git.review --provider github --from /private/github-export.json
+```
+
+Set `SYNVEDA_GIT_EXPORT_REMOTES_FILE` to a deployment-owned JSON allowlist before
+gateway startup. This file contains descriptors, never token values:
+
+```json
+{
+  "format": "synveda-github-export-targets-v1",
+  "targets": [
+    {
+      "tenant_id": "00000000-0000-0000-0000-000000000001",
+      "scope_id": "00000000-0000-0000-0000-000000000002",
+      "target": "github-review",
+      "owner": "example-owner",
+      "repository": "context-export",
+      "repository_id": 123456789,
+      "secret_reference": "synveda-secret://00000000-0000-0000-0000-000000000003"
+    }
+  ]
+}
+```
+
+Replace every example ID/name with the exact provisioned descriptor. Owner and
+repository names are lowercase ASCII; repository names omit `.git`. At most 128
+mappings and 64 KiB are accepted. Duplicate tenant/scope/target mappings, shared
+repository IDs/names, external secret references and caller-selected URLs refuse
+startup. A remote target reserved for another tenant/scope never falls back to
+local export. Changing an existing receipt's destination or stable credential ID
+refuses; create a new governed target for different custody.
+
+Publish/bind a complete governed Configuration allowing the target in
+`git_export_targets` and `github` in `allowed_external_providers`. Both defaults
+exclude outbound GitHub disclosure. The same scoped administrator, channel and
+every historical asset read permissions described above are required. The
+secret must be active, of kind `import_export`, provider `github`, and owned by
+the exact tenant/scope; its sealed document must bind the pinned repository ID.
+Missing/revoked/corrupt/foreign references share one non-oracular error. There is
+no fallback token.
+
+```sh
+synveda git-bridge export SCOPE --target github-review --channel prompt/published
+git clone --branch synveda/prompt/published https://github.com/example-owner/context-export.git review
+synveda git-bridge verify review --channel prompt/published
+```
+
+Use your own Git credential mechanism to clone; Synveda never returns its token.
+The export response adds `provider`, `destination_digest` and `repository_id`.
+On each request the gateway opens current custody, verifies private repository
+identity, discovers the branch and sends exactly one old-head-bound Git
+receive-pack update. An explicit successful unpack/ref report and rediscovery
+confirm completion. A lost/malformed acknowledgement retains prepared intent;
+retry accepts the exact prepared remote head without another commit or push.
+No force or deletion command exists.
+
+Runtime egress is restricted to constructed HTTPS requests to `api.github.com`
+and `github.com`, port 443, with public-PKI hostname verification. Redirects and
+environment proxies are disabled. Apply those same destinations to the
+deployment's network policy/firewall. Responses are bounded to 256 KiB, Git
+advertisements to 2,048 refs; connections have a five-second deadline and each
+HTTP request fifteen seconds, within the existing sixty-second export deadline.
+During export, tokens remain in memory, are redacted/wiped, and never reach native
+subprocess arguments, environment, transport files, exported history or audit.
+Remote export needs
+no installed Git or local root in the gateway; offline verification still uses
+installed Git. Source tests do not qualify a published image or deployment.
+
+Rotate by repeating the same `tenant secret put` command and label, preserving
+the reference; revoke with `synveda tenant secret revoke --tenant TENANT SECRET_ID`.
+To stop writes, remove the target/provider from governed Configuration or remove
+its deployment mapping and restart. Retain remote history, database receipts and
+tenant keys together. External retention, deletion and joint recovery remain
+operator responsibilities and require a provider/deployment drill.
+
+## Live GitHub canary
+
+`scripts/run-git-export-canary.mjs` runs the first live provider check on Linux
+or macOS with Node 22+, Git, an authenticated GitHub CLI and the current Synveda
+CLI. Provision the repository-restricted export credential and governed
+target/provider using the commands above. The runner uses the selected Synveda
+credential profile for public API calls. Independent metadata reads and clones
+use GitHub CLI authentication; that login supplies no gateway export credential.
+
+Use a dedicated canary tenant/scope with only non-sensitive synthetic Prompt and
+ContextPack history. Publish both channels through the existing governed review
+flow, quiesce all source writers, and record their exact heads with
+`synveda channel status SCOPE --profile git-canary --json`. Both published
+channels must be unpinned. The fixture must remain quiescent for the whole run;
+the export API freezes current source state and has no caller-supplied source
+head precondition.
+
+Build/select the CLI to test and independently record the running gateway's
+artifact SHA-256 through the selected deployment's diagnostics. A native binary
+hash or OCI digest is accepted as the operator pin. The report labels this pin
+as operator supplied; bind it independently to the running gateway before
+claiming deployment qualification.
+
+```sh
+SQLX_OFFLINE=true cargo build -p synveda-cli --bin synveda
+shasum -a 256 target/debug/synveda
+```
+
+Prepare a local JSON file with this contract. Replace every example identifier,
+digest and source head with the selected fixture's recorded values. The
+`synthetic_scope` field declares the fixture boundary; it grants no authority.
+Token values and unknown fields refuse.
+
+```json
+{
+  "format": "synveda-github-canary-v1",
+  "profile": "git-canary",
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "scope_id": "00000000-0000-0000-0000-000000000002",
+  "target": "github-canary",
+  "repository": "example-owner/context-export-canary",
+  "repository_id": 123456789,
+  "deployment_artifact": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "cli_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "source_heads": {
+    "prompt/published": "1111111111111111111111111111111111111111111111111111111111111111",
+    "context-pack/published": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "synthetic_scope": true
+}
+```
+
+For signed source history, add an absolute `trusted_keys_file` path containing
+the independently trusted public-key mapping described below. Set `SYNVEDA_BIN`
+to the selected CLI's absolute path when it is outside `target/debug/synveda`.
+Use a new evidence directory beneath an existing private operator directory:
+
+```sh
+node scripts/run-git-export-canary.mjs /private/flow8-canary.json /private/flow8-evidence
+```
+
+Before export, the runner checks actual CLI bytes, caller tenant, effective
+Configuration, both recorded source heads, and observed GitHub repository
+identity/privacy. It sends one export and one no-op replay per channel through
+the public CLI, independently clones both branches, compares the Git heads and
+verifies all retained source/mapping evidence. It rechecks repository metadata
+afterwards. Commands have a sixty-second deadline and bounded captured output;
+GitHub's reported repository size also gates this small canary. That reported
+size is a preflight check rather than a transfer or disk quota.
+
+The private `report.json` contains validated IDs, hashes, counts and outcomes.
+It records source revision/dirty state and actual CLI SHA-256, plus the operator
+gateway pin. Successful output is specifically `live_github_export_replay`.
+Failures retain `partial.json` with the last attempted phase; retry the same
+fixture to recover its existing prepared receipt. Temporary clones are removed.
+The runner never stores source content, provider bodies, bearer values or PATs
+in its evidence. Invocation without inputs exits 77 (`PENDING`), which is not
+a passing live check.
+
+Complete qualification still needs separately retained rotation/revocation,
+outage/uncertain-acknowledgement retry, branch-protection/divergence,
+deployment egress/retention and paired database/key recovery evidence. After a
+joint restore into an isolated destination, select its authenticated CLI profile
+and rerun with the same retained tenant/scope/target and recorded source heads.
+Compare the destination digest, Git heads and mapping digests against the
+original report; resumption must preserve repository/secret identity. Use the
+existing deployment recovery procedures and their ownership safeguards.
+
+## Inspect and independently verify
+
+```sh
+git clone --branch synveda/prompt/published /absolute/review.git review
+synveda git-bridge verify review --channel prompt/published
+```
+
+Files under `assets/` are the exact canonical source JSON bytes. Their filenames
+hex-encode UTF-8 source names, segmented into components of at most 120 hex
+characters with a final `.json` suffix. No source name becomes a checkout path.
+Each mapped source commit contains `.synveda/commit.json` and `tree.json`,
+including policy fingerprint, original identity and microsecond timestamp.
+Git author labels use that identity ID; Git timestamps retain whole seconds.
+Source parent order and merge topology are preserved.
+
+The branch tip is an unsigned export-state commit containing
+`.synveda/export.json`: the complete source snapshot, BLAKE3 evidence digest,
+source-to-Git blob/tree/commit maps, channel head/pin and previous exported state.
+Its first parent retains the preceding export state. This lets a source rollback
+or pin change advance Git without rewriting the original source DAG.
+
+For signed source evidence, supply a JSON object mapping independently trusted
+key IDs to arrays of exactly 32 public-key bytes:
+
+```sh
+synveda git-bridge verify review --channel prompt/published --keys trusted-public-keys.json
+```
+
+Verification recomputes every source object/tree/commit hash, every mapped Git
+object and the manifest digest. Every signed commit requires a trusted matching
+Ed25519 key. Unsigned evidence remains unsigned. These signatures are retained
+VedaFlow evidence, never native Git signatures. Verification needs neither
+database nor bearer. It validates the selected branch's retained export-state
+chain and its mappings;
+it does not establish that an independently supplied key is trustworthy or that
+the exporter currently holds authority.
+
+## Retry, divergence and rollback
+
+A content-free VedaFlow receipt and audit event commit before any Git content
+write. The gateway rechecks current Configuration and Cedar before that write.
+A prepared receipt survives a lost response, process cancellation or database
+completion failure. Retry the same command: it resumes the recorded exact
+source state first, even if the live channel advanced. Request another export
+afterwards to publish the newer source state.
+
+Git atomically compares the observed branch with the recorded old head or the
+exact prepared result. A changed/deleted ref, force-push, deleted repository,
+symbolic local ref, corrupt local object, changed destination custody, or
+non-private destination refuses. There is no
+destructive reconciliation/reset endpoint. Retain the old repository and
+receipt; approve a new target ID through Configuration for a separate export.
+
+To stop future writes, remove the target from effective governed Configuration
+or unset the root and restart the gateway. Existing Git content and receipts are
+retained; revocation cannot erase previously disclosed bytes. Back up the root
+and PostgreSQL together, retain their evidence, and verify before resuming.
+Automatic pruning and disaster recovery are not qualified here.
+
+Each snapshot admits at most 128 commits (all parents plus pin ancestry), 1,024
+distinct objects, 2,048 entries per tree and 8 MiB of serialized source evidence.
+Oversized histories refuse before preparing disclosure. Each native subprocess
+has bounded input/output and a 15-second timeout; the request has a 60-second
+deadline. Cancellation kills its active native child, preserving any prepared
+receipt. Git configuration, hooks, replacement objects and network protocols
+are isolated or disabled during transport/verification.
+
+Each target admits at most 1,024 retained export states and 64 MiB of cumulative
+manifest bytes. Both export and offline verification enforce this bound;
+verification checks historical signatures even after source rollback. Overflow
+refuses; retain the old target and approve a new one through Configuration.
+
+Audit action `vedaflow.git.exported` records actor, target ID, asset/channel,
+source head/pin, Git head, mapping digest, governing Configuration and phase.
+It also records provider/destination digest and the stable secret ID/value
+revision when remote custody is used.
+It excludes messages, source content, paths and credentials. Metrics
+`synveda_git_export_operations_total` and `synveda_git_export_operation_seconds`
+use only the closed response outcome labels.
+
+## Runnable acceptance
+
+```sh
+sh demos/flow-8-git-export.sh
+SQLX_OFFLINE=true cargo test -p synveda-git
+```
+
+The demo owns a disposable exact-role PostgreSQL fixture. It exports both
+families through the authenticated API, clones their branches, compares mapping
+evidence with source VedaFlow history, and checks replay/recovery, fresh Cedar,
+Configuration revocation, forced RLS and content-free audit. The leaf suite
+also checks signed evidence, merge ordering, rollback/pins, native Git integrity,
+divergence, path/size/custody, timeout and cancellation.
+Its controlled HTTPS/native Git backend checks both artifact families, uncertain
+push recovery, old-head races, remote deletion, privacy/repository-ID refusal,
+TLS trust, redirects, outages and malformed/oversized responses. API acceptance
+checks active exact-scope encrypted credentials, provider narrowing and refusal
+to retarget existing receipts. These tests use synthetic values and never call
+GitHub; a real private-repository canary is a separate qualification step.

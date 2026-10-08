@@ -3731,6 +3731,7 @@ dependencies = [
  "sqlx",
  "synveda-audit",
  "synveda-crypto",
+ "synveda-git",
  "synveda-identity",
  "synveda-okf",
  "synveda-policy",
@@ -3800,6 +3801,7 @@ dependencies = [
  "synveda-audit",
  "synveda-crypto",
  "synveda-gateway-test-support-enabler",
+ "synveda-git",
  "synveda-identity",
  "synveda-ingest",
  "synveda-okf",
@@ -3808,6 +3810,7 @@ dependencies = [
  "synveda-store",
  "synveda-types",
  "synveda-vedaflow",
+ "tempfile",
  "tokio",
  "tower",
  "tower-http 0.7.0",
@@ -3824,6 +3827,28 @@ name = "synveda-gateway-test-support-enabler"
 version = "0.0.0"
 dependencies = [
  "synveda-gateway",
+]
+
+[[package]]
+name = "synveda-git"
+version = "0.4.4"
+dependencies = [
+ "base64",
+ "blake3",
+ "chrono",
+ "flate2",
+ "native-tls",
+ "reqwest",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha1",
+ "synveda-types",
+ "synveda-vedaflow",
+ "tempfile",
+ "tokio",
+ "tokio-native-tls",
+ "zeroize",
 ]
 
 [[package]]

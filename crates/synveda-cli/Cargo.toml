@@ -42,6 +42,7 @@ synveda-vedaflow = { workspace = true }
 # directory/archive before packaging inert bytes for the public API. It has no
 # store, PDP, VedaFlow, audit, process or network authority of its own.
 synveda-okf = { workspace = true }
+synveda-git = { workspace = true }
 
 base64 = { workspace = true }
 chrono = { workspace = true }

@@ -432,6 +432,7 @@ fn oidc_state_with_cookie_mode(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
         context_embed_timeout: std::time::Duration::from_millis(100),
+        git_exports: None,
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -1690,6 +1691,7 @@ async fn auth_plane_is_404_when_oidc_is_not_configured() {
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
         context_embed_timeout: std::time::Duration::from_millis(100),
+        git_exports: None,
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.

@@ -315,6 +315,34 @@ pub async fn set_trace_retention(
     select_document(tx, tenant, scope_id, binding, document).await
 }
 
+pub async fn set_git_export_targets(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    targets: Vec<String>,
+) -> Selection {
+    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
+        .await
+        .expect("read Configuration binding")
+        .into_iter()
+        .next()
+        .expect("binding exists");
+    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
+        .await
+        .expect("read Configuration artifact")
+        .expect("artifact exists");
+    let selected = binding
+        .pinned_version_id
+        .unwrap_or(artifact.current_version_id);
+    let mut document = configuration::version(tx, tenant, selected)
+        .await
+        .expect("read Configuration version")
+        .expect("version exists")
+        .document;
+    document.git_export_targets = targets;
+    select_document(tx, tenant, scope_id, binding, document).await
+}
+
 pub async fn set_optimization_mode(
     tx: &mut PgConnection,
     tenant: TenantId,
@@ -340,6 +368,43 @@ pub async fn set_optimization_mode(
         .expect("Configuration fixture version exists");
     let mut document = current.document;
     document.context.optimization_mode = mode;
+    select_document(tx, tenant, scope_id, binding, document).await
+}
+
+pub async fn set_github_exports(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    enabled: bool,
+) -> Selection {
+    use synveda_types::configuration::ExternalProvider;
+    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let selected = binding
+        .pinned_version_id
+        .unwrap_or(artifact.current_version_id);
+    let mut document = configuration::version(tx, tenant, selected)
+        .await
+        .unwrap()
+        .unwrap()
+        .document;
+    document
+        .allowed_external_providers
+        .retain(|provider| *provider != ExternalProvider::Github);
+    if enabled {
+        document
+            .allowed_external_providers
+            .push(ExternalProvider::Github);
+        document.allowed_external_providers.sort();
+    }
     select_document(tx, tenant, scope_id, binding, document).await
 }
 

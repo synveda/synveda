@@ -648,7 +648,7 @@ namespace Synveda {
     // trust boundary. Never a tenant-level action: a channel belongs to a
     // node. FLOW-3 puts required approvals in front of ChannelPublish; it
     // does not replace it.
-    action ChannelRead, ChannelPublish
+    action ChannelRead, ChannelPublish, ChannelExport
         appliesTo {
             principal: [Principal],
             resource: [Scope],

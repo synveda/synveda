@@ -2430,6 +2430,113 @@
         ]
       }
     },
+    "/v1/channels/{scope_id}/git-export": {
+      "post": {
+        "tags": [
+          "channels"
+        ],
+        "summary": "Export the complete bounded authored-channel graph to a governed local or private GitHub\ndestination. Replays repeat current Cedar and per-artifact read decisions.\nA prepared receipt survives cancellation and is resumed before new heads.",
+        "operationId": "export_channel_to_git",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitExportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Verified local or private GitHub advancement or no-op replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitExportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid selector, disabled destination or source bound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Disclosure or an exact artifact read is denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scope or channel is absent or foreign",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Git destination diverged or cursor changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Git transport, integrity or deadline failure; prepared receipt retained",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/channels/{scope_id}/history": {
       "get": {
         "tags": [
@@ -15886,7 +15993,7 @@
             "items": {
               "type": "string"
             },
-            "description": "`anthropic`, `vllm`, `tei`, or `remote_mcp`, sorted and unique."
+            "description": "`anthropic`, `vllm`, `tei`, `remote_mcp`, or `github`, sorted and unique."
           },
           "capture": {
             "$ref": "#/components/schemas/CaptureConfigurationBody"
@@ -15896,6 +16003,13 @@
           },
           "freshness": {
             "$ref": "#/components/schemas/FreshnessConfigurationBody"
+          },
+          "git_export_targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Governed local or private GitHub destination IDs; empty disables disclosure."
           },
           "policy_pack": {
             "type": "string"
@@ -18609,6 +18723,96 @@
               "type": "string"
             },
             "description": "Stable type-specific verification signals."
+          }
+        }
+      },
+      "GitExportBody": {
+        "type": "object",
+        "required": [
+          "target",
+          "asset",
+          "channel"
+        ],
+        "properties": {
+          "asset": {
+            "type": "string",
+            "description": "`prompt` or `context-pack`."
+          },
+          "channel": {
+            "type": "string",
+            "description": "`published` or `staged`."
+          },
+          "target": {
+            "type": "string",
+            "description": "Governed destination ID. The deployment fixes local or private GitHub custody."
+          }
+        },
+        "additionalProperties": false
+      },
+      "GitExportResponse": {
+        "type": "object",
+        "required": [
+          "target",
+          "provider",
+          "destination_digest",
+          "source_head",
+          "git_ref",
+          "git_head",
+          "mapping_digest",
+          "commits",
+          "objects",
+          "outcome"
+        ],
+        "properties": {
+          "commits": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "destination_digest": {
+            "type": "string",
+            "description": "Content-free binding to exact destination and credential custody."
+          },
+          "git_head": {
+            "type": "string"
+          },
+          "git_ref": {
+            "type": "string"
+          },
+          "mapping_digest": {
+            "type": "string"
+          },
+          "objects": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "outcome": {
+            "type": "string",
+            "description": "`completed`, `resumed`, or `no_op`. No content or filesystem path."
+          },
+          "provider": {
+            "type": "string",
+            "description": "`local` or `github`."
+          },
+          "repository_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Pinned GitHub repository ID, absent for local export.",
+            "minimum": 0
+          },
+          "source_head": {
+            "type": "string"
+          },
+          "source_pin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "type": "string"
           }
         }
       },

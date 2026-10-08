@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select name, object_hash, subtree_hash from vedaflow_tree_entries\n         where tenant_id = $1 and tree_hash = $2 order by name collate \"C\" limit $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "object_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "subtree_hash",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "76ae59d296f0a622b6709a3192680208bab8d416e31e63d2938665c320d2dd2a"
+}

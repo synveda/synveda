@@ -184,6 +184,12 @@ cache churn. The route catalogue, OpenAPI and console client must remain peers.
 
 ## Code map
 
+The optional [FLOW-8 Git export](integrations/git-bridge.md) uses the
+`synveda-git` deployment leaf, the public gateway endpoint and CLI. Core domain
+crates do not execute Git. Its local native gateway prerequisite, pinned private
+GitHub/tenant-secret configuration and disposable HTTPS/database acceptance demo
+are documented in that operator guide.
+
 | Area | Starting point |
 | --- | --- |
 | Types / scopes / roles | [synveda-types](../crates/synveda-types/src) |

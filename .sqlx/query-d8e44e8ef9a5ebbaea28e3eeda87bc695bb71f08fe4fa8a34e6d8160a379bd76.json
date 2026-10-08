@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select tree_hash, author_id, message, committed_at, policy_snapshot_hash,\n                signature, signer_key_id from vedaflow_commits\n         where tenant_id = $1 and hash = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tree_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 1,
+        "name": "author_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "committed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "policy_snapshot_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 5,
+        "name": "signature",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 6,
+        "name": "signer_key_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "d8e44e8ef9a5ebbaea28e3eeda87bc695bb71f08fe4fa8a34e6d8160a379bd76"
+}

@@ -231,6 +231,7 @@ define_routes! {
 
     "/v1/channels/{scope_id}" => [GET crate::channels::list],
     "/v1/channels/{scope_id}/publish" => [POST crate::channels::publish],
+    "/v1/channels/{scope_id}/git-export" => [POST crate::git_bridge::export],
     "/v1/channels/{scope_id}/history" => [GET crate::channels::history],
     "/v1/channels/{scope_id}/rollback" => [POST crate::channels::rollback],
     "/v1/channels/{scope_id}/pin" => [POST crate::channels::pin],
