@@ -57,6 +57,18 @@ warnings denied, and the fast/dependency/demo repository gates pass. The fixture
 is removed after success. This adds current source evidence only; live provider
 and deployment qualification still requires the inputs below.
 
+The current review follow-up corrects the product image's cached manifest graph,
+advertised symbolic-destination refusal and the transport-specific stop guidance.
+Eighteen Git/API acceptance cases now pass, including the symbolic-ref regression
+that permits a direct branch's ordinary HEAD alias. All thirteen canary-controller
+cases pass in the pinned Linux Node 22 runtime without network access. Native
+macOS controller and broader deployment fixture reruns hit subprocess deadlines;
+those reruns are not passing validation. Required checks on
+[PR #70](https://github.com/synveda/synveda/pull/70) must pass before merging.
+Provider/deployment qualification must also measure large-export upload deadlines
+and connection pressure: transport currently retains a gateway tenant transaction
+until completion. The initial synthetic canary should run serially.
+
 The remaining blocker is a dedicated private GitHub repository, restricted
 fine-grained PAT and owner-approved deployment egress/retention/joint-recovery
 fixture. Next provision its same-scope sealed reference, pin its repository ID,

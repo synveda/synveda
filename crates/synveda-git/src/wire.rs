@@ -89,11 +89,16 @@ pub(crate) fn advertisement(bytes: &[u8], reference: &str) -> Result<Advertiseme
             {
                 return Err(failure());
             }
-            if caps
-                .iter()
-                .any(|cap| cap.starts_with(&format!("symref:{reference}:")))
-            {
-                return Err(divergence());
+            for cap in &caps {
+                if let Some(pair) = cap.strip_prefix("symref=") {
+                    let (symbolic, target) = pair.split_once(':').ok_or_else(failure)?;
+                    if symbolic.is_empty() || target.is_empty() || target.contains(':') {
+                        return Err(failure());
+                    }
+                    if symbolic == reference {
+                        return Err(divergence());
+                    }
+                }
             }
             object_format = caps.contains("object-format=sha1");
         }
@@ -185,6 +190,52 @@ pub(crate) fn report(bytes: &[u8], reference: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advertisement_refuses_symbolic_destination_but_allows_its_head_alias() {
+        let reference = "refs/heads/synveda/prompt/published";
+        let oid = "1111111111111111111111111111111111111111";
+        let advertise = |capability: &str| {
+            let mut bytes = packet(b"# service=git-receive-pack\n").unwrap();
+            bytes.extend_from_slice(b"0000");
+            bytes.extend(
+                packet(format!("{oid} {reference}\0report-status {capability}\n").as_bytes())
+                    .unwrap(),
+            );
+            bytes.extend_from_slice(b"0000");
+            bytes
+        };
+        for capability in [
+            format!("symref={reference}:refs/heads/other"),
+            format!("symref={reference}:HEAD"),
+        ] {
+            assert!(matches!(
+                advertisement(&advertise(&capability), reference),
+                Err(Error::Conflict { .. })
+            ));
+        }
+        // HEAD pointing at a direct branch does not make that branch symbolic.
+        for capability in [
+            format!("symref=HEAD:{reference}"),
+            "symref=refs/heads/unrelated:refs/heads/other".into(),
+        ] {
+            assert_eq!(
+                advertisement(&advertise(&capability), reference)
+                    .unwrap()
+                    .head
+                    .as_deref(),
+                Some(oid)
+            );
+        }
+        for malformed in [
+            "symref=HEAD",
+            "symref=HEAD:",
+            "symref=:refs/heads/other",
+            "symref=HEAD:refs/heads/other:refs/heads/another",
+        ] {
+            assert!(advertisement(&advertise(malformed), reference).is_err());
+        }
+    }
 
     #[test]
     fn receive_pack_parser_refuses_unframed_ambiguous_or_secret_bearing_results() {

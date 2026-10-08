@@ -86,6 +86,7 @@ COPY crates/synveda-crypto/Cargo.toml      crates/synveda-crypto/
 COPY crates/synveda-eval/Cargo.toml        crates/synveda-eval/
 COPY crates/synveda-gateway/Cargo.toml     crates/synveda-gateway/
 COPY crates/synveda-gateway/test-support-enabler/Cargo.toml crates/synveda-gateway/test-support-enabler/
+COPY crates/synveda-git/Cargo.toml         crates/synveda-git/
 COPY crates/synveda-identity/Cargo.toml    crates/synveda-identity/
 COPY crates/synveda-ingest/Cargo.toml      crates/synveda-ingest/
 COPY crates/synveda-okf/Cargo.toml         crates/synveda-okf/

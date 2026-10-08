@@ -122,10 +122,16 @@ from recovery. No live target, restricted credential or deployment is selected.
 The 2026-10-08 pre-commit checks repeat all seventeen Git/API cases on a fresh
 disposable exact-role database, plus focused unit/OpenAPI/controller tests,
 strict Clippy, Rustdoc and fast/dependency/demo gates; all pass.
-Next provision those inputs, run the documented non-sensitive live canary,
+The review follow-up passes eighteen Git/API cases, including advertised
+symbolic-destination refusal, and corrects product image inputs and stop guidance.
+The thirteen canary-controller cases pass in pinned Linux Node 22 without network
+access; native macOS controller/deployment fixture reruns hit subprocess deadlines.
+Next pass the required [PR #70 checks](https://github.com/synveda/synveda/pull/70),
+provision those inputs, run the documented non-sensitive live canary,
 then retain rotation/revocation, outage/divergence and paired database/key
-recovery evidence on the chosen artifact. Synthetic source acceptance does not
-qualify the live forge or published product image.
+recovery evidence on the chosen artifact. Large-export deadlines and gateway
+connection pressure also need deployment qualification. Synthetic source
+acceptance does not qualify the live forge or published product image.
 
 CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes, and a passing create/read/use/capture policy matrix including revocation and foreign-tenant comparisons. Four predeclared synthetic task probes pass in the fresh-database 23-scenario product suite: 12/12 Session facts and four exact Knowledge bodies retained, provenance intact, local assisted preview p95 below the 500 ms guard. A separate combined-mode gate preserves checkpoint source attribution and exact required Knowledge in both off and conservative modes, omitting optional restart text under a tight shared budget. An opt-in export now prepares the actual paired synthetic ContextRun blocks against a fixed JSON-answer rubric without calling a model, and a capped no-tools runner passes a fake-client end-to-end test. This does not measure model task success or provider usage. A live proprietary-client run remains open. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision. An isolated hostname handoff and resolver check passed without resetting retained interop state, and the original mapping was restored. The pinned product source image built on 2026-09-29 after official Cargo index/archive access recovered. Fresh CTX-6/CTX-8 Compose/browser acceptance and held-out model quality remain open. Next rerun paired deployment checks, then the bounded factual/model and live Claude probes when credentials and spend permission are available. The open briefs hold the exact evidence and limits.
 

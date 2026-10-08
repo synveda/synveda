@@ -141,6 +141,13 @@ Remote export needs
 no installed Git or local root in the gateway; offline verification still uses
 installed Git. Source tests do not qualify a published image or deployment.
 
+An export currently retains one pooled gateway database connection during
+transport. Run the initial canary serially and measure slow-export connection
+pressure before enabling concurrent use on the selected deployment. The
+request deadline bounds an export, but does not reserve capacity for other API
+requests. Upload throughput within the fifteen-second HTTP deadline also needs
+qualification with that deployment's expected export sizes.
+
 Rotate by repeating the same `tenant secret put` command and label, preserving
 the reference; revoke with `synveda tenant secret revoke --tenant TENANT SECRET_ID`.
 To stop writes, remove the target/provider from governed Configuration or remove
@@ -289,11 +296,13 @@ non-private destination refuses. There is no
 destructive reconciliation/reset endpoint. Retain the old repository and
 receipt; approve a new target ID through Configuration for a separate export.
 
-To stop future writes, remove the target from effective governed Configuration
-or unset the root and restart the gateway. Existing Git content and receipts are
-retained; revocation cannot erase previously disclosed bytes. Back up the root
-and PostgreSQL together, retain their evidence, and verify before resuming.
-Automatic pruning and disaster recovery are not qualified here.
+To stop future writes, remove the target from effective governed Configuration.
+Unsetting `SYNVEDA_GIT_EXPORT_ROOT` and restarting stops local export only. For
+private GitHub destinations, remove the governed target or `github` provider,
+or remove the deployment mapping and restart. Existing Git content and receipts
+are retained; revocation cannot erase previously disclosed bytes. Retain Git
+repositories, PostgreSQL receipts and tenant keys together, and verify before
+resuming. Automatic pruning and disaster recovery are not qualified here.
 
 Each snapshot admits at most 128 commits (all parents plus pin ancestry), 1,024
 distinct objects, 2,048 entries per tree and 8 MiB of serialized source evidence.
