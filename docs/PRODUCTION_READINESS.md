@@ -33,11 +33,23 @@ governed synthetic revision produces two first-request completed exports,
 exact no-op replays and independent full-history clone verification. The public
 audit chain passes a 137-event snapshot; nineteen Git events and eight successful
 corrected-gateway operation/duration samples are retained without content or
-credentials. The isolated operator fixture is stopped with paired state
-retained. Its explicit source gateway/provider override is not published
-consumer upgrade or broader platform qualification. Published image/deployment egress,
-external retention, credential failure drills and paired database/key recovery
-remain unqualified. FLOW-8 stays open and the readiness verdict is unchanged.
+credentials. A subsequent unchanged canonical paired logical-recovery drill
+restores the database pair and original keys into a fresh private project on
+macOS/OrbStack. Ordinary tenant verification checks all 139 restored audit
+events, opens the original key and refuses an unrelated key. Four new PKCE
+logins preserve issuer/subjects after old CLI refresh is refused. The recovered
+sealed secret/reference/revision works without reprovisioning; both channels
+return the original exact no-op receipts on first request and replay, with
+independent clone verification and unchanged heads. The frozen 137-event public
+audit prefix and nineteen Git event hashes match; a new 147-event snapshot
+verifies, and four successful operation/duration samples are retained. Both
+isolated projects are stopped with source, backup and restored volumes retained.
+This explicit source gateway/provider/loopback override is same-host
+completed-receipt recovery evidence, not published consumer upgrade, off-host
+recovery or broader platform qualification. Credential rotation/provider
+revocation, controlled outage/divergence, prepared-receipt restore, deployment
+egress, external retention and large-export connection/deadline qualification
+remain open. FLOW-8 stays open and the readiness verdict is unchanged.
 
 The 2026-10-06 public-CLI canary runner adds thirteen passing controller tests,
 artifact/source-head preflight and content-free export/replay/clone evidence.

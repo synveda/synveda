@@ -155,6 +155,42 @@ its deployment mapping and restart. Retain remote history, database receipts and
 tenant keys together. External retention, deletion and joint recovery remain
 operator responsibilities and require a provider/deployment drill.
 
+## Qualify recovery on the selected deployment
+
+Use the deployment's existing paired database/key recovery ceremony. The
+[Compose logical recovery guide](../../deploy/compose/README.md#logical-backup-and-isolated-restore)
+owns the source lifecycle prerequisites; the
+[consumer named-volume command](../../deploy/compose/scripts/consumer-recovery.sh)
+restores only into a different empty project with an exact source/backup/target
+confirmation. Retain the running gateway artifact and deployment-owned GitHub
+destination descriptors separately from the database/key set. An operator
+provider override is not part of the canonical consumer configuration backup.
+
+Before backup, quiesce synthetic source writers and retain the exact source
+heads, completed export receipts, independently verified clones and a frozen
+public audit prefix. After restore, verify the original tenant key and the
+expected unrelated-key refusal through the ordinary tenant recovery command.
+Reapply the exact destination descriptors and qualified gateway artifact, then
+independently bind the running image and executable to their original hashes.
+Keep the source stopped while using its original loopback issuer in the restored
+fixture. If CLI refresh is refused, repeat real OIDC/PKCE login and check that
+issuer, tenant and subject identities are preserved.
+
+Run the public-CLI canary against the unchanged source heads using the restored
+sealed secret under its original reference. Both first requests and replays
+must return the original exact `no_op` receipts, and independent clones must
+verify unchanged Git heads and evidence. Verify the restored public audit chain,
+compare the frozen prefix and prior Git event hashes, and retain content-free
+metrics. Keep this enclosing recovery report separate from the canary runner's
+`live_github_export_replay` report, which does not itself measure recovery.
+
+A completed-receipt replay proves only that recovery case. Qualify a prepared
+receipt separately after an uncertain remote write, requiring the same frozen
+projection to resume without extra commits. Same-host logical recovery does not
+measure encrypted off-host custody, PITR, production RPO/RTO or a published
+deployment. Stop only the owned fixture projects and retain their paired state
+and verified backup until the recovery work is complete.
+
 ## Live GitHub canary
 
 `scripts/run-git-export-canary.mjs` runs the first live provider check on Linux

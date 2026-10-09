@@ -148,14 +148,24 @@ recover; second governed source revisions advance both remote branches with
 verification of four source commits and two objects per channel. The public
 audit verifier passes a 137-event snapshot; nineteen Git events and eight
 successful corrected-gateway metric/duration samples are retained privately.
-The operator fixture is stopped with its paired named volumes retained. This
-source gateway/provider override does not qualify a published consumer upgrade.
-Next obtain a second restricted PAT and run genuine same-reference rotation
-and revocation, then retain outage/divergence and paired database/key
-recovery evidence on the chosen artifact. Large-export deadlines and gateway
-connection pressure also need deployment qualification. Live export/replay
-evidence is limited to this isolated synthetic fixture; published deployment
-and failure/recovery qualification remain separate.
+The subsequent canonical paired logical backup/restore passes into a fresh
+private macOS/OrbStack project. Ordinary tenant verification checks all 139
+restored audit events, opens the original key and refuses an unrelated key.
+Four new real PKCE logins preserve issuer/subjects after old CLI refresh is
+refused. The original sealed GitHub credential/reference/revision works without
+reprovisioning; both first exports and replays return the original exact no-op
+receipts and independent clones verify unchanged heads. The frozen 137-event
+audit prefix and nineteen prior Git event hashes match, and a new 147-event
+snapshot verifies. Four successful export operation/duration samples are
+retained. Both isolated projects are stopped with source, backup and restored
+volumes retained. The required [CI run](https://github.com/synveda/synveda/actions/runs/37895821790)
+passes at `65fdc6516d140f1e988d35fb9167889179d54bc9`.
+This source gateway/provider/loopback override does not qualify a published
+consumer upgrade or off-host recovery. Next obtain a second restricted PAT
+for genuine same-reference rotation and provider revocation, then retain
+controlled outage/divergence and prepared-receipt restore evidence. Owned
+egress/retention, large-export deadlines and gateway connection pressure also
+need qualification. FLOW-8 remains open for those provider/deployment checks.
 
 CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes, and a passing create/read/use/capture policy matrix including revocation and foreign-tenant comparisons. Four predeclared synthetic task probes pass in the fresh-database 23-scenario product suite: 12/12 Session facts and four exact Knowledge bodies retained, provenance intact, local assisted preview p95 below the 500 ms guard. A separate combined-mode gate preserves checkpoint source attribution and exact required Knowledge in both off and conservative modes, omitting optional restart text under a tight shared budget. An opt-in export now prepares the actual paired synthetic ContextRun blocks against a fixed JSON-answer rubric without calling a model, and a capped no-tools runner passes a fake-client end-to-end test. This does not measure model task success or provider usage. A live proprietary-client run remains open. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision. An isolated hostname handoff and resolver check passed without resetting retained interop state, and the original mapping was restored. The pinned product source image built on 2026-09-29 after official Cargo index/archive access recovered. Fresh CTX-6/CTX-8 Compose/browser acceptance and held-out model quality remain open. Next rerun paired deployment checks, then the bounded factual/model and live Claude probes when credentials and spend permission are available. The open briefs hold the exact evidence and limits.
 

@@ -113,14 +113,36 @@ with no error counter. Private reports, artifact bindings and audit/metric
 evidence are retained outside tracked project files. The isolated Docker
 project is stopped with its paired installation/database/browser volumes retained.
 
+The subsequent same-host recovery drill passes through the unchanged canonical
+consumer logical-recovery commands. The paired Synveda/Keycloak archives and
+original keys restore into a fresh private project; ordinary tenant verification
+checks all 139 restored audit events before runtime convergence, opens the
+original tenant key and refuses an unrelated key. The original source remains
+stopped while an explicit loopback/provider overlay activates the same pinned
+gateway image and executable on the restored project. Old CLI refresh is
+refused; four fresh browser/PKCE logins preserve the exact issuer, tenant and
+subjects. The recovered sealed GitHub secret remains at its original reference
+and value revision 1, without reprovisioning. Both channels return the original
+exact no-op receipts on first request and replay; independent clones verify
+unchanged remote/source heads. The frozen 137-event public audit prefix and all
+nineteen prior Git event hashes match, and the public verifier passes a new
+147-event snapshot. Four successful export operation/duration samples are
+retained. Backup takes 9.065 seconds and canonical restore 236.124 seconds on
+macOS/OrbStack; these are local ceremony durations, not RPO/RTO objectives.
+Both isolated projects are stopped with the source backup and restored volumes
+retained. Private content-free reports remain outside tracked project files.
+The required [CI run](https://github.com/synveda/synveda/actions/runs/37895821790)
+passes at `65fdc6516d140f1e988d35fb9167889179d54bc9`.
+
 Next provision a second restricted PAT for a genuine same-reference rotation
-and revocation drill. Remaining qualification also needs owned egress/retention
-and isolated recovery controls, with separately retained outage/retry,
-branch protection/divergence and paired database/key recovery against the chosen
-deployment artifact. The basic serial canary does not qualify provider failure
-recovery, a published deployment, external retention or joint recovery. Both transports stay
-disabled by default; real credentials and writes are enabled only in this
-explicit synthetic operator fixture.
+and provider-revocation drill. Remaining qualification needs owned
+egress/retention, controlled outage/retry and branch protection/divergence,
+including a separate restore while an export receipt remains prepared.
+Completed-receipt replay after same-host logical restore does not qualify that
+uncertain-write window, a published deployment or encrypted off-host recovery.
+Large-export deadlines and gateway connection pressure remain unmeasured.
+Both transports stay disabled by default; real credentials and writes are
+enabled only in this explicit synthetic operator fixture.
 
 ## Scope
 
