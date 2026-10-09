@@ -20,7 +20,7 @@ native subprocess bounds and signature verification. Local operation requires
 installed Git and a private Unix root; GitHub runtime uses the existing TLS stack
 without a native Git prerequisite. Both remain disabled by default. The
 2026-10-09 isolated operator fixture now has a private canary repository,
-sealed restricted PAT, real OIDC/PKCE logins and governed synthetic asset
+sealed fine-grained PAT, real OIDC/PKCE logins and governed synthetic asset
 publications. Initial writes reveal GitHub's additional HTTP flush terminator;
 the parser fix has fourteen passing Git adapter tests, with two regressions
 that fail before the fix. Prompt retry resumes the prepared remote head and
@@ -48,7 +48,7 @@ This explicit source gateway/provider/loopback override is same-host
 completed-receipt recovery evidence, not published consumer upgrade, off-host
 recovery or broader platform qualification. The separate credential drill on
 the retained restored fixture passes
-genuine rotation between distinct restricted PATs at the same secret reference,
+genuine rotation between distinct fine-grained PATs at the same secret reference,
 preserving exact receipts/destination identity at revision 2. Fresh reviewed
 synthetic publications complete both exports, with exact replay and independent
 verification of six source commits and three objects per channel. Local custody
@@ -88,6 +88,23 @@ Live post-write acknowledgement loss, branch protection/divergence,
 prepared-receipt paired restore, deployment
 egress, external retention and large-export connection/deadline qualification
 remain open. FLOW-8 stays open and the readiness verdict is unchanged.
+
+The private GitHub branch-protection preflight now receives HTTP 403 for both
+export branches because the repository plan lacks that capability. Live
+protection is unqualified; no visibility or billing change is made. Another
+baseline passes four exact no-op receipts and two clones. A 331-event public
+preparation snapshot verifies, preserving the 295-event prefix and 69 prior Git
+hashes. Reviewed
+fifth synthetic source revisions, a separate empty private recovery repository
+and an approved but unapplied new-target Configuration are ready. Read-only
+GitHub settings show that both current working and new recovery PATs cover all
+owner repositories. Earlier prose overstated the working token's repository
+restriction; the measured pinned-destination cases remain valid, while provider
+credential least privilege is unqualified. Confirmation to restrict both tokens
+to their respective canary repositories is pending. The recovery token is not
+sealed or used by the gateway. No live
+divergence fault or new-target recovery is yet qualified. Original GitHub tips,
+effective Configuration and active credential revision 6 remain unchanged.
 
 The 2026-10-06 public-CLI canary runner adds thirteen passing controller tests,
 artifact/source-head preflight and content-free export/replay/clone evidence.

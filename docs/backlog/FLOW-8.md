@@ -80,7 +80,7 @@ loopback Docker fixture now passes its ordinary database, issuer and runtime
 readiness gates. Four synthetic users sign in through real OIDC/PKCE; public
 Configuration proposals and scope bindings enable only `github-canary` for the
 dedicated scope, and curator-reviewed Prompt/ContextPack publications supply
-both channels. The repository-restricted PAT is sealed under the matching
+both channels. The fine-grained PAT is sealed under the matching
 tenant key; its deployment descriptor contains only the stable secret reference.
 The existing development hostname marker remains untouched.
 
@@ -135,7 +135,7 @@ The required [CI run](https://github.com/synveda/synveda/actions/runs/3789582179
 passes at `65fdc6516d140f1e988d35fb9167889179d54bc9`.
 
 The subsequent credential drill on that retained restored project passes a
-genuine rotation between two distinct repository-restricted PATs. Both resolve
+genuine rotation between two distinct fine-grained PATs. Both resolve
 the exact private repository before the transition. Four fresh real PKCE logins
 preserve issuer, tenant and subjects. The stable secret reference, destination
 digest and original exact no-op receipts survive value revision 1 to 2. A third
@@ -205,10 +205,43 @@ macOS/OrbStack). Both owned projects are stopped with all eight volumes retained
 Private content-free outage evidence remains separate from the export/replay
 runner's tier. Operator preflight corrections are retained with the drill.
 
-Next qualify branch-protection and unexpected remote-head refusal/recovery on
-the dedicated canary, preserving retained history without destructive
-reconciliation. Separately restore a paired backup while an export receipt
-remains prepared. This pre-write egress interruption and process restart do not
+Branch-protection preflight now independently receives HTTP 403 for both private
+export branches: GitHub requires an eligible plan. No billing or repository
+visibility changes are made, and live protection remains unqualified. The
+retained fixture passes another four exact no-op receipts, two verified clones
+and a 304-event baseline audit snapshot. Preparation then verifies a 331-event
+public snapshot; the prior 295-event prefix and all 69 Git event hashes remain
+intact. Fifth synthetic Prompt/ContextPack revisions pass ordinary authoring,
+distinct curator review and publication. A separate
+empty private recovery repository, ID `1412116922`, is ready; a Configuration
+version replacing `github-canary` with `github-canary-recovery` passes distinct
+administrator review but remains unapplied.
+
+Read-only GitHub settings show that both the current working canary PAT and the
+distinct new recovery PAT have access to all owner repositories; an independent
+Git-ref read confirms the new token can access the original private repository.
+Earlier prose overstated the working PAT's repository restriction. The measured
+pinned-destination, custody, protocol and recovery cases remain valid, but the
+provider credential's least-privilege gate is unqualified. The recovery token
+has not been sealed or used by the gateway. Owner confirmation to narrow the
+working token to `sujitn/synveda-git-export-canary` and the new token to
+`sujitn/synveda-git-export-canary-recovery` is pending. No divergence fault or
+new-target export has run; both original GitHub tips and effective Configuration
+remain unchanged, and original sealed custody stays active at revision 6.
+The owned restored fixture remains running for the approval handoff; the original
+source project stays stopped and all retained volumes remain intact.
+
+Next confirm both token restrictions and independently verify their access;
+retain original custody revision 6 and seal the new token under a separate
+exact-scope secret. Then inject same-tree, append-only foreign
+heads with retained checkpoint refs, require both repeated public refusals and
+stable prepared intent, apply the reviewed new-target Configuration, and qualify
+completed exports, exact replays, independent clones and a new paired backup.
+The [operator procedure](../integrations/git-bridge.md#qualify-branch-protection-and-divergence)
+keeps the old destination and receipts intact. Protection separately needs a
+capable private fixture. Subsequently restore a paired backup while an export
+receipt remains prepared. The pre-write egress interruption and process restart
+do not
 qualify live acknowledgement loss after a provider write, that prepared-receipt
 restore window, a published deployment or encrypted off-host recovery.
 Owned egress/retention also remains open.

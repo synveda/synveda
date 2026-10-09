@@ -202,8 +202,26 @@ and five failed operations with matching duration samples. A new canonical
 paired backup verifies; both owned fixtures are stopped with all eight volumes
 retained. The open brief records operator preflight corrections and the exact
 fault/recovery boundary.
-Next qualify branch protection and unexpected remote-head refusal/recovery,
-then the separate prepared-receipt restore case. This source
+Branch-protection preflight receives HTTP 403 for both private export branches
+because GitHub requires an eligible plan; visibility and billing stay unchanged.
+Another four exact no-op receipts and two clones pass. Preparation verifies a
+331-event public snapshot, preserved 295-event prefix and all 69 prior Git hashes.
+Fifth
+curator-reviewed synthetic revisions and a new empty private recovery repository
+are ready. A new-target Configuration passes distinct administrator review and
+remains unapplied. Read-only GitHub settings reveal that both the current working
+and new recovery PATs cover all owner repositories; earlier prose overstated the
+working token's repository restriction. The measured pinned-destination cases
+remain valid, but provider credential least privilege is unqualified.
+Confirmation to restrict both dedicated tokens to their respective canary
+repositories is pending. The recovery token is not sealed, no divergence fault/new-target export has run, and original
+remote tips, effective Configuration and active credential revision 6 remain
+unchanged. The owned restored fixture remains running for the approval handoff,
+with the original source stopped and all volumes retained. Next narrow/verify
+both credentials and seal the new one, measure append-only unexpected
+heads and repeated refusal, then apply the reviewed new target and qualify
+replay/clones/backup. Live protection needs a capable private fixture; the
+separate prepared-receipt restore follows. This source
 gateway/provider/loopback override and pre-write interruption do not qualify a
 published consumer upgrade, live post-write acknowledgement loss or off-host
 recovery. Those remaining provider/deployment cases stay open. Owned

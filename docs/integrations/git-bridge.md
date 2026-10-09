@@ -246,6 +246,63 @@ acknowledgements after a write, remote divergence/protection and a paired restor
 with prepared intent require separate drills. This fault injection does not
 qualify an owned production egress policy, retention, RPO/RTO or other hosts.
 
+## Qualify branch protection and divergence
+
+Start with the dedicated synthetic fixture, pinned gateway/CLI artifacts,
+current credential metadata, exact receipts, source heads and independently
+verified clones. Inspect the repository's actual protection capability and
+existing rules before changing them. GitHub requires an eligible paid plan for
+[protected private branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
+A provider capability refusal is an unqualified gate; retain private visibility
+and select a protection-capable private fixture before claiming that case.
+
+For protection, use a temporary requirement on the exact synthetic export
+branches that the export credential cannot bypass, including administrators.
+Record the original rule and an unsatisfied required check or review. Publish
+fresh synthetic revisions through ordinary authoring and distinct review, then
+require public export refusal without source/remote movement. Retain matching
+`prepared`, `transport_failed` and retry audit phases. Restore only the temporary
+rule or satisfy its requirement, then require recovery of the same prepared
+intent, exact no-op replay and independent clone verification. Inspect the
+provider result; a transport error alone does not prove protection enforcement.
+
+For divergence, first prepare a separate private repository, immutable repository
+ID, new target identifier and distinct repository-restricted credential. Verify
+the token's selected repositories and relevant Contents permission; metadata
+visibility alone does not establish its content restriction. Keep the new target
+inactive until refusal is measured. Retain checkpoint refs at the original
+verified tips. Through the independent fixture operator, fast-forward each
+synthetic branch with a single-parent, same-tree commit whose parent is that
+original tip. Record the exact parent/tree/head and `force: false`. This preserves
+all source history while presenting an unexpected head to the exporter.
+
+With newly reviewed source revisions ready, repeat both public exports. Require
+the destination-divergence conflict, unchanged source and foreign remote heads,
+and exact prepared intent across `prepared`, `transport_failed`,
+`resume_prepared`, `transport_failed` events. Independently clone the retained
+checkpoints and verify their original evidence. The same-tree foreign tips must
+fail projection verification: matching files do not make an arbitrary commit a
+valid export state. The verifier uses canonical channel refs; a checkpoint can
+be verified by creating an absent canonical alias in a fresh independent clone,
+without rewriting any retained or remote ref.
+
+Recover through the normal reviewed Configuration lifecycle: disable the old
+target and enable the separate new identifier. Seal the new credential through
+the exact tenant/scope secret boundary, add its distinct repository mapping and
+restart the gateway using the same artifact. Require two first-request
+`completed` exports, exact no-op replays and independently verified full source
+history at the new destination. Confirm old-target requests refuse at the
+Configuration boundary and the retained diverged destination stays unchanged.
+Neither an old receipt nor its repository identity is retargeted or reset.
+
+Retain both custody references, public audit continuity and metrics from each
+process interval when descriptor activation recreates the gateway. Preserve the
+completed recovery state in a new verified paired backup, retaining destination
+descriptors separately. Report protection capability, append-only divergence
+and new-target recovery separately. This drill does not measure a live
+force-push/deletion race, prepared-receipt paired restore, post-write
+acknowledgement loss or off-host recovery.
+
 ## Qualify recovery on the selected deployment
 
 Use the deployment's existing paired database/key recovery ceremony. The
