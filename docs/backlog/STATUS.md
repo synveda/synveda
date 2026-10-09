@@ -175,10 +175,20 @@ owned fixtures are stopped with all volumes retained. Required
 [CI](https://github.com/synveda/synveda/actions/runs/37903182003) passes at
 `aef89e78af9ea12a308bbf1eb4426c787bfd3b3b` after retrying a failed pinned Syft
 download without weakening binary inspection.
-Provider revocation remains blocked on GitHub owner reauthentication/deletion
-of the original PAT; both PATs still return repository metadata HTTP 200. Next
-revoke only the superseded PAT, verify old HTTP 401/new HTTP 200, then qualify
-public export refusal and same-reference replacement recovery. This source
+Provider revocation now passes after the owner deletes the original PAT:
+verified HTTPS observes old HTTP 401/new HTTP 200, and active sealed custody
+with the revoked PAT at revision 5 refuses both public exports without moving
+source/remote refs or using the independent clone credential. The working
+replacement at the same reference/revision 6 restores all four exact no-op
+receipts and both verified clones. The frozen 210-event public prefix and all
+41 prior Git event hashes match; a 235-event chain verifies with 49 Git export
+events. Eight successful and two expected rejected operation/duration samples
+are retained. A new canonical paired backup of revision 6 verifies; both owned
+projects are stopped with all eight volumes retained. Required
+[CI](https://github.com/synveda/synveda/actions/runs/37914720349) passes at
+`4a015e1ae6ecade7e3635dead83b4d2c3fe2bab8`.
+Next qualify controlled transport outage/retry with retained prepared intent,
+independent remote-head observations and exact replay. This source
 gateway/provider/loopback override does not qualify a published consumer
 upgrade or off-host recovery. Controlled outage/divergence and prepared-receipt
 restore evidence remain open. Owned

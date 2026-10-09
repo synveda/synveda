@@ -59,8 +59,18 @@ all 27 baseline Git event hashes persist, and a 210-event public chain verifies
 with 41 Git export events. Sixteen successful and two expected rejected
 operation/duration samples are retained. A new canonical paired backup of the
 replacement state verifies, with owned fixtures stopped and all volumes retained.
-GitHub provider revocation still needs owner reauthentication/deletion of the
-superseded PAT; both credentials remain accepted at the final metadata check.
+GitHub provider revocation also passes after owner deletion: independent HTTPS
+observes old-credential HTTP 401 and replacement HTTP 200. Active sealed custody
+with the revoked PAT at revision 5 refuses both public exports without moving
+source/remote refs or falling back to the independent clone credential.
+The working replacement at the same reference/revision 6 recovers all four
+exact no-op receipts and both verified clones. The frozen 210-event public
+prefix and all 41 prior Git event hashes match; a 235-event public chain verifies
+with 49 Git export events. Eight successful and two expected rejected
+operation/duration samples are retained. A new canonical paired backup of the
+recovered revision 6 verifies, with both owned projects stopped and all eight
+volumes retained. These measured credential cases use the same source artifact
+and synthetic same-host fixture.
 Controlled outage/divergence, prepared-receipt restore, deployment
 egress, external retention and large-export connection/deadline qualification
 remain open. FLOW-8 stays open and the readiness verdict is unchanged.

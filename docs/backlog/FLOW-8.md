@@ -157,12 +157,30 @@ distinct rotation, local custody revocation and provider revocation. Required
 `aef89e78af9ea12a308bbf1eb4426c787bfd3b3b` after rerunning the native ARM64 job
 whose pinned Syft download initially failed; binary inspection remains required.
 
-GitHub provider revocation is blocked on the owner's reauthentication and
-deletion of the original canary PAT; both credentials still receive repository
-metadata HTTP 200 at the final check. Next revoke only that superseded PAT,
-independently require old-credential HTTP 401 and replacement HTTP 200, then
-retain public export refusal with provider-revoked custody and same-reference
-replacement recovery. Remaining qualification needs owned
+Provider revocation passes after owner deletion of the superseded PAT.
+Independent verified HTTPS checks observe old-credential HTTP 401 and
+replacement HTTP 200 for the same private
+repository. The restarted fixture passes ordinary readiness, running artifact
+binding and four new PKCE logins with unchanged identities. Its revision-4
+replacement returns the retained exact no-op receipts and verified clones.
+Sealing the provider-revoked PAT under that same reference at active revision 5
+then refuses both public exports with the uniform credential-unavailable error;
+source and GitHub refs remain unchanged despite a usable independent clone
+credential. Restoring the replacement at revision 6 recovers all four exact
+no-op receipts, the unchanged destination digest and both independently verified
+clones. Public custody audit records identify revisions 5 and 6. The frozen
+210-event public prefix and all 41 prior Git event hashes match; the verifier
+passes a 235-event snapshot containing 49 Git export events. Eight successful
+and two expected rejected operation/duration samples are retained. A new
+canonical paired backup of revision 6 passes verification; both owned projects
+are stopped with all eight volumes retained. Private content-free credential
+reports remain separate from the export/replay runner's evidence tier. Required
+[CI](https://github.com/synveda/synveda/actions/runs/37914720349) passes at
+`4a015e1ae6ecade7e3635dead83b4d2c3fe2bab8`.
+
+Next run a controlled transport outage/retry on this isolated canary, retaining
+prepared intent, independent remote-head observations and exact replay.
+Remaining qualification needs owned
 egress/retention, controlled outage/retry and branch protection/divergence,
 including a separate restore while an export receipt remains prepared.
 Completed-receipt replay after same-host logical restore does not qualify that

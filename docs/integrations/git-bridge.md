@@ -182,13 +182,16 @@ is reactivation; its increased value revision is not another distinct token
 rotation.
 
 Separately, the GitHub owner must revoke the superseded PAT after replacement
-writes have passed. Verify that GitHub refuses the old credential while the
-replacement still resolves the exact private repository. In the isolated
-synthetic fixture, seal the provider-revoked document under the stable reference
-and confirm that both public exports refuse without moving either ref. Restore
-the working replacement and verify exact receipt/clone recovery. Synveda secret
-revocation and GitHub PAT revocation are separate checks; neither substitutes
-for the other. The gateway must never fall back to the independent clone user's
+writes have passed. Require old-credential HTTP 401 and replacement HTTP 200 for
+the exact private repository. In the isolated synthetic fixture, seal the
+provider-revoked document under the stable reference
+and check that `tenant key status --tenant TENANT` still reports active custody
+at the expected new value revision. Then confirm that both public exports refuse
+with the uniform credential-unavailable error without moving either ref. An
+already-revoked Synveda secret would exercise only the local custody check.
+Restore the working replacement and verify exact receipt/clone recovery.
+Synveda secret revocation and GitHub PAT revocation are separate checks; neither
+substitutes for the other. The gateway must never fall back to the independent clone user's
 GitHub CLI credential.
 
 Retain content-free custody metadata, receipts, Git event hashes, public audit
