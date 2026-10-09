@@ -63,15 +63,32 @@ Eighteen Git/API acceptance cases now pass, including the symbolic-ref regressio
 that permits a direct branch's ordinary HEAD alias. All thirteen canary-controller
 cases pass in the pinned Linux Node 22 runtime without network access. Native
 macOS controller and broader deployment fixture reruns hit subprocess deadlines;
-those reruns are not passing validation. Required checks on
+those reruns are not passing validation. The complete required
+[CI run](https://github.com/synveda/synveda/actions/runs/37844684400) passes at
+`98241b902a4e3773e9321c54eb5454169577d720`, including all six native CLI targets
+and all three Helm deployment jobs. Required checks on
 [PR #70](https://github.com/synveda/synveda/pull/70) must pass before merging.
 Provider/deployment qualification must also measure large-export upload deadlines
 and connection pressure: transport currently retains a gateway tenant transaction
 until completion. The initial synthetic canary should run serially.
 
-The remaining blocker is a dedicated private GitHub repository, restricted
-fine-grained PAT and owner-approved deployment egress/retention/joint-recovery
-fixture. Next provision its same-scope sealed reference, pin its repository ID,
+On 2026-10-09, the dedicated
+[sujitn/synveda-git-export-canary](https://github.com/sujitn/synveda-git-export-canary)
+repository was created and independently checked as private, empty, non-fork,
+unarchived and enabled, with immutable repository ID `1411339644`. The next
+canary setup uses a fresh isolated local Docker project and separate CLI login
+profiles. The native `make compose-config` prerequisite suite now passes,
+including all 173 lifecycle/helper cases; this is static and modelled evidence,
+not startup of the named canary. The development hostname preflight refuses an
+existing managed-marker collision. Next use the documented loopback consumer
+graph for the isolated fixture. A private credential document is prepared
+without a token; no live export, sealed credential provisioning or canary
+deployment startup has run.
+
+The remaining blocker is the repository-restricted fine-grained PAT and a ready
+isolated deployment egress/retention/joint-recovery fixture. Next prepare that
+source-pinned loopback deployment and its authenticated CLI profile, provision the same-scope
+sealed reference, bind repository ID `1411339644` in its deployment allowlist,
 approve the target/provider through Configuration, and run the documented
 non-sensitive public-CLI canary with clone verification. Then retain separate
 rotation/revocation, outage/retry,

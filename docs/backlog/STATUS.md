@@ -114,11 +114,11 @@ recoverable VedaFlow receipts and content-free audit/telemetry (ADR-0138/0139).
 The 2026-10-05 source demo passes six exact-role API cases and eleven Git tests,
 including controlled verified HTTPS with real receive-pack, uncertain push
 recovery, force-push races and exact encrypted-secret custody. Both transports
-remain disabled by default. The feature stays open: a dedicated private GitHub
-repository, restricted PAT and owned egress/retention/recovery fixture are still
-needed. The 2026-10-06 public-CLI canary runner has thirteen passing controller
+remain disabled by default. The feature stays open: a restricted PAT and owned
+egress/retention/recovery fixture are still needed. The 2026-10-06 public-CLI
+canary runner has thirteen passing controller
 tests and records export/replay plus independent clone verification separately
-from recovery. No live target, restricted credential or deployment is selected.
+from recovery.
 The 2026-10-08 pre-commit checks repeat all seventeen Git/API cases on a fresh
 disposable exact-role database, plus focused unit/OpenAPI/controller tests,
 strict Clippy, Rustdoc and fast/dependency/demo gates; all pass.
@@ -126,8 +126,19 @@ The review follow-up passes eighteen Git/API cases, including advertised
 symbolic-destination refusal, and corrects product image inputs and stop guidance.
 The thirteen canary-controller cases pass in pinned Linux Node 22 without network
 access; native macOS controller/deployment fixture reruns hit subprocess deadlines.
-Next pass the required [PR #70 checks](https://github.com/synveda/synveda/pull/70),
-provision those inputs, run the documented non-sensitive live canary,
+The complete required [CI run](https://github.com/synveda/synveda/actions/runs/37844684400)
+passes at `98241b902a4e3773e9321c54eb5454169577d720`, including all six native CLI
+targets and three Helm jobs. On 2026-10-09, the private, empty, non-fork
+[sujitn/synveda-git-export-canary](https://github.com/sujitn/synveda-git-export-canary)
+was created and its repository ID `1411339644` verified. The next setup uses a
+fresh isolated local Docker project and separate CLI login profiles. Native
+Compose prerequisite checks now pass, but development hostname ownership
+refuses an existing managed-marker collision; use the documented loopback
+consumer graph for the new fixture. No canary deployment, sealed export
+credential or live Git export is ready yet. Next prepare that source-pinned
+loopback deployment and CLI login, supply the repository-restricted PAT,
+seal its same-scope reference and enable the pinned target through Configuration,
+then run the documented non-sensitive live canary,
 then retain rotation/revocation, outage/divergence and paired database/key
 recovery evidence on the chosen artifact. Large-export deadlines and gateway
 connection pressure also need deployment qualification. Synthetic source
