@@ -84,9 +84,9 @@ both channels. The repository-restricted PAT is sealed under the matching
 tenant key; its deployment descriptor contains only the stable secret reference.
 The existing development hostname marker remains untouched.
 
-Initial live writes expose a GitHub framing incompatibility: successful
+Initial live writes exposed a GitHub framing incompatibility: successful
 receive-pack status reports end with two flush packets. The strict parser
-rejects the second terminator, leaving prepared receipts despite the remote
+rejected the second terminator, leaving prepared receipts despite the remote
 write. A same-head, empty-pack probe confirms that framing without changing
 the ref or retaining provider text. Retrying the Prompt export resumes its
 prepared head, and an independent clone verifies its retained evidence.
@@ -94,14 +94,31 @@ Two regression cases reproduce the failure before the parser change, then
 pass with the bounded one-or-two-flush grammar; all fourteen Git adapter tests
 pass, including real native Git/TLS interoperability and refusal/recovery cases.
 
-The immediate next action is to run the corrected, independently pinned
-gateway in the isolated operator fixture, recover the remaining prepared
-receipt and verify fresh advancements plus exact replays for both channels.
-Then retain separate
-rotation/revocation, outage/retry,
+The corrected source at `29566928bb3cbaaa4fccc08d9c5aecf3d477b7ce` now passes
+the complete live canary. Its locally built Linux/ARM64 gateway is independently
+bound to OCI digest
+`sha256:128b38a9c6177ac8f30fd751a504676faca2945b3122cf223e27ac325fe79d82`
+and the running executable hash. The explicit operator gateway/provider
+override preserves the original consumer installation, database and keys;
+this is source-candidate evidence, not published consumer upgrade qualification.
+The initial runner recovers the remaining prepared ContextPack receipt and
+verifies both clones. After a second governed synthetic publication, both fresh
+exports return `completed` on their first request, both exact replays return
+`no_op`, and independent clones verify four source commits and two objects per
+channel. Repository identity/privacy and quiescent source heads are rechecked.
+The public audit verifier passes a 137-event snapshot; nineteen content-free
+Git export events include prepared, failed, resumed, completed and no-op phases.
+The corrected gateway records eight successful operations and duration samples
+with no error counter. Private reports, artifact bindings and audit/metric
+evidence are retained outside tracked project files. The isolated Docker
+project is stopped with its paired installation/database/browser volumes retained.
+
+Next provision a second restricted PAT for a genuine same-reference rotation
+and revocation drill. Remaining qualification also needs owned egress/retention
+and isolated recovery controls, with separately retained outage/retry,
 branch protection/divergence and paired database/key recovery against the chosen
-deployment artifact. Source acceptance does not qualify the live GitHub service,
-bundled image, external retention or joint recovery. Both transports stay
+deployment artifact. The basic serial canary does not qualify provider failure
+recovery, a published deployment, external retention or joint recovery. Both transports stay
 disabled by default; real credentials and writes are enabled only in this
 explicit synthetic operator fixture.
 

@@ -114,8 +114,8 @@ recoverable VedaFlow receipts and content-free audit/telemetry (ADR-0138/0139).
 The 2026-10-05 source demo passes six exact-role API cases and eleven Git tests,
 including controlled verified HTTPS with real receive-pack, uncertain push
 recovery, force-push races and exact encrypted-secret custody. Both transports
-remain disabled by default. The feature stays open: a restricted PAT and owned
-egress/retention/recovery fixture are still needed. The 2026-10-06 public-CLI
+remain disabled by default. The feature stays open for provider and deployment
+failure/recovery qualification. The 2026-10-06 public-CLI
 canary runner has thirteen passing controller
 tests and records export/replay plus independent clone verification separately
 from recovery.
@@ -139,12 +139,23 @@ report; the original parser refuses it, retaining prepared intent. A same-head
 empty-pack probe verifies the framing without changing the ref. Prompt retry
 resumes and its independent clone verifies. Two regressions fail before the
 bounded parser fix and pass afterwards; all fourteen Git adapter cases pass.
-Next pin and run the corrected gateway, recover the remaining prepared receipt
-and check fresh advancements, exact replays and independent clones for both
-channels. Then retain rotation/revocation, outage/divergence and paired database/key
+The corrected source at `29566928bb3cbaaa4fccc08d9c5aecf3d477b7ce` now passes
+the complete live canary on the locally built Linux/ARM64 gateway at OCI digest
+`sha256:128b38a9c6177ac8f30fd751a504676faca2945b3122cf223e27ac325fe79d82`,
+independently bound to its running image/executable. Existing prepared receipts
+recover; second governed source revisions advance both remote branches with
+`completed` on the first request, exact `no_op` replays and independent clone
+verification of four source commits and two objects per channel. The public
+audit verifier passes a 137-event snapshot; nineteen Git events and eight
+successful corrected-gateway metric/duration samples are retained privately.
+The operator fixture is stopped with its paired named volumes retained. This
+source gateway/provider override does not qualify a published consumer upgrade.
+Next obtain a second restricted PAT and run genuine same-reference rotation
+and revocation, then retain outage/divergence and paired database/key
 recovery evidence on the chosen artifact. Large-export deadlines and gateway
-connection pressure also need deployment qualification. Synthetic source
-acceptance does not qualify the live forge or published product image.
+connection pressure also need deployment qualification. Live export/replay
+evidence is limited to this isolated synthetic fixture; published deployment
+and failure/recovery qualification remain separate.
 
 CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes, and a passing create/read/use/capture policy matrix including revocation and foreign-tenant comparisons. Four predeclared synthetic task probes pass in the fresh-database 23-scenario product suite: 12/12 Session facts and four exact Knowledge bodies retained, provenance intact, local assisted preview p95 below the 500 ms guard. A separate combined-mode gate preserves checkpoint source attribution and exact required Knowledge in both off and conservative modes, omitting optional restart text under a tight shared budget. An opt-in export now prepares the actual paired synthetic ContextRun blocks against a fixed JSON-answer rubric without calling a model, and a capped no-tools runner passes a fake-client end-to-end test. This does not measure model task success or provider usage. A live proprietary-client run remains open. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision. An isolated hostname handoff and resolver check passed without resetting retained interop state, and the original mapping was restored. The pinned product source image built on 2026-09-29 after official Cargo index/archive access recovered. Fresh CTX-6/CTX-8 Compose/browser acceptance and held-out model quality remain open. Next rerun paired deployment checks, then the bounded factual/model and live Claude probes when credentials and spend permission are available. The open briefs hold the exact evidence and limits.
 

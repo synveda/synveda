@@ -13,7 +13,7 @@ FLOW-8 now has source-tested [local and private GitHub export](integrations/git-
 under Accepted ADR-0138/0139. Real repositories/clones preserve Prompt and
 ContextPack topology/evidence; six exact-role API cases cover fresh Cedar,
 forced RLS, Configuration revocation, exact active encrypted-secret custody,
-prepared recovery, destination identity and content-free audit. Eleven Git tests
+prepared recovery, destination identity and content-free audit. Fourteen Git tests
 include controlled verified HTTPS with real receive-pack, uncertain push
 recovery, old-head races, privacy/identity refusal, TLS trust, redirects, outages,
 native subprocess bounds and signature verification. Local operation requires
@@ -24,15 +24,25 @@ sealed restricted PAT, real OIDC/PKCE logins and governed synthetic asset
 publications. Initial writes reveal GitHub's additional HTTP flush terminator;
 the parser fix has fourteen passing Git adapter tests, with two regressions
 that fail before the fix. Prompt retry resumes the prepared remote head and
-independent clone verification passes. Complete two-channel live acceptance
-on the corrected artifact is pending. Published image/deployment egress,
+independent clone verification passes. The corrected source at
+`29566928bb3cbaaa4fccc08d9c5aecf3d477b7ce` passes complete two-channel live
+acceptance on the local Linux/ARM64 gateway at OCI digest
+`sha256:128b38a9c6177ac8f30fd751a504676faca2945b3122cf223e27ac325fe79d82`,
+independently checked against its running image and executable. A second
+governed synthetic revision produces two first-request completed exports,
+exact no-op replays and independent full-history clone verification. The public
+audit chain passes a 137-event snapshot; nineteen Git events and eight successful
+corrected-gateway operation/duration samples are retained without content or
+credentials. The isolated operator fixture is stopped with paired state
+retained. Its explicit source gateway/provider override is not published
+consumer upgrade or broader platform qualification. Published image/deployment egress,
 external retention, credential failure drills and paired database/key recovery
 remain unqualified. FLOW-8 stays open and the readiness verdict is unchanged.
 
 The 2026-10-06 public-CLI canary runner adds thirteen passing controller tests,
 artifact/source-head preflight and content-free export/replay/clone evidence.
-Its report leaves credential failure/recovery and deployment checks separate;
-the initial live partial reports above do not establish complete qualification.
+Its report labels the observed tier `live_github_export_replay`; credential
+failure/recovery and deployment checks above remain separate.
 
 The 2026-10-03 OPS-11/OPS-12 candidate under Accepted ADR-0137 improves human
 fresh installation: native repeatable preparation, packaged customer presets,
