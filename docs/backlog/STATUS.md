@@ -207,23 +207,35 @@ because GitHub requires an eligible plan; visibility and billing stay unchanged.
 Another four exact no-op receipts and two clones pass. Preparation verifies a
 331-event public snapshot, preserved 295-event prefix and all 69 prior Git hashes.
 Fifth
-curator-reviewed synthetic revisions and a new empty private recovery repository
-are ready. A new-target Configuration passes distinct administrator review and
-remains unapplied. Read-only GitHub settings reveal that both the current working
-and new recovery PATs cover all owner repositories; earlier prose overstated the
-working token's repository restriction. The measured pinned-destination cases
-remain valid, but provider credential least privilege is unqualified.
-Confirmation to restrict both dedicated tokens to their respective canary
-repositories is pending. The recovery token is not sealed, no divergence fault/new-target export has run, and original
-remote tips, effective Configuration and active credential revision 6 remain
-unchanged. The owned restored fixture remains running for the approval handoff,
-with the original source stopped and all volumes retained. Next narrow/verify
-both credentials and seal the new one, measure append-only unexpected
-heads and repeated refusal, then apply the reviewed new target and qualify
-replay/clones/backup. Live protection needs a capable private fixture; the
-separate prepared-receipt restore follows. This source
+curator-reviewed synthetic revisions and a separate private recovery repository
+now pass append-only divergence/new-target recovery. Preflight discovered both
+dedicated tokens covered all owner repositories, correcting earlier scope claims.
+After explicit owner approval, saved GitHub settings restrict each token to its
+own canary repository; verified HTTPS refuses cross-canary Git content access
+with HTTP 404. Original custody stays active at revision 6; the new credential
+is separately sealed at the exact scope/revision 1.
+Two same-tree, single-parent foreign fast-forwards preserve original history and
+checkpoint refs. Four public conflict refusals leave source/remote heads unchanged
+and retain exact prepared intent across retries. Independent clones verify both
+retained projections and refuse both foreign tips. The new Configuration version
+and the existing pinned binding's revision 1-to-2 update each pass distinct
+administrator review and apply. The separate new target completes both exports,
+exact replays and independent clones with ten source commits/five objects per
+channel. Old-target requests refuse at the Configuration boundary; the retained
+diverged repository and original destination mapping stay unchanged.
+A 377-event public chain verifies with 87 Git events, preserving the 295-event
+prefix and all 69 prior Git hashes. Metrics across both gateway process intervals
+total eight successes/six expected rejections/no errors with matching durations.
+A new canonical paired backup verifies; both owned projects are stopped with all
+eight volumes retained. Required
+[preparation CI](https://github.com/synveda/synveda/actions/runs/37961537501) passes
+at `06e994a76c587b36ffb66c847284ee6c9b5af95c`. Next qualify paired restore and
+resumption of newly prepared intent at the active recovery target, using fresh
+reviewed revisions and controlled pre-write interruption. Live protection remains
+blocked on an eligible private fixture. This source
 gateway/provider/loopback override and pre-write interruption do not qualify a
-published consumer upgrade, live post-write acknowledgement loss or off-host
+published consumer upgrade, live post-write acknowledgement loss, a live
+force-push/deletion race or off-host
 recovery. Those remaining provider/deployment cases stay open. Owned
 egress/retention, large-export deadlines and gateway connection pressure also
 need qualification. FLOW-8 remains open for those provider/deployment checks.

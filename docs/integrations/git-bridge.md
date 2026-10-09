@@ -287,7 +287,12 @@ be verified by creating an absent canonical alias in a fresh independent clone,
 without rewriting any retained or remote ref.
 
 Recover through the normal reviewed Configuration lifecycle: disable the old
-target and enable the separate new identifier. Seal the new credential through
+target and enable the separate new identifier. Inspect the existing scope binding:
+if it pins the old version, publishing the new document does not change effective
+Configuration. Submit an exact-revision binding update pinning the approved new
+version, obtain its required distinct review, and apply it through VedaFlow.
+Verify the effective version, target list and binding revision before exporting.
+Seal the new credential through
 the exact tenant/scope secret boundary, add its distinct repository mapping and
 restart the gateway using the same artifact. Require two first-request
 `completed` exports, exact no-op replays and independently verified full source

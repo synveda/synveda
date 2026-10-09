@@ -213,37 +213,61 @@ and a 304-event baseline audit snapshot. Preparation then verifies a 331-event
 public snapshot; the prior 295-event prefix and all 69 Git event hashes remain
 intact. Fifth synthetic Prompt/ContextPack revisions pass ordinary authoring,
 distinct curator review and publication. A separate
-empty private recovery repository, ID `1412116922`, is ready; a Configuration
-version replacing `github-canary` with `github-canary-recovery` passes distinct
-administrator review but remains unapplied.
+private recovery repository, ID `1412116922`, provides a new immutable destination
+for `github-canary-recovery`.
 
-Read-only GitHub settings show that both the current working canary PAT and the
-distinct new recovery PAT have access to all owner repositories; an independent
-Git-ref read confirms the new token can access the original private repository.
-Earlier prose overstated the working PAT's repository restriction. The measured
-pinned-destination, custody, protocol and recovery cases remain valid, but the
-provider credential's least-privilege gate is unqualified. The recovery token
-has not been sealed or used by the gateway. Owner confirmation to narrow the
-working token to `sujitn/synveda-git-export-canary` and the new token to
-`sujitn/synveda-git-export-canary-recovery` is pending. No divergence fault or
-new-target export has run; both original GitHub tips and effective Configuration
-remain unchanged, and original sealed custody stays active at revision 6.
-The owned restored fixture remains running for the approval handoff; the original
-source project stays stopped and all retained volumes remain intact.
+Preflight discovered that both dedicated PATs covered all owner repositories;
+earlier prose overstated the working PAT's repository restriction. With explicit
+owner approval, GitHub now restricts the working token to
+`sujitn/synveda-git-export-canary` and the distinct recovery token to
+`sujitn/synveda-git-export-canary-recovery`. Saved settings and independent
+verified-HTTPS checks confirm each destination and refuse cross-canary Git
+content access with HTTP 404. Token values and expiry dates are unchanged.
+Original sealed custody remains active at revision 6; the recovery credential
+is separately sealed at the exact tenant/scope under its own reference/revision 1.
 
-Next confirm both token restrictions and independently verify their access;
-retain original custody revision 6 and seal the new token under a separate
-exact-scope secret. Then inject same-tree, append-only foreign
-heads with retained checkpoint refs, require both repeated public refusals and
-stable prepared intent, apply the reviewed new-target Configuration, and qualify
-completed exports, exact replays, independent clones and a new paired backup.
+The live append-only divergence and governed new-target recovery drill passes.
+Checkpoint refs retain both verified original projections. The independent
+operator fast-forwards each export branch to a single-parent, same-tree foreign
+commit, without forcing, deleting or resetting any ref. Four public exports
+(first request and retry per channel) return the destination-divergence conflict,
+leave source/foreign heads unchanged, and preserve exact prepared intent across
+`prepared`, `transport_failed`, `resume_prepared`, `transport_failed` audit phases.
+Independent clones verify both retained projections and ancestry; both foreign
+tips fail projection verification despite their unchanged files.
+
+The new Configuration version and the existing pinned binding's revision 1-to-2
+update each pass distinct administrator review and normal VedaFlow apply.
+Publishing the version alone correctly leaves the old pin effective. The reviewed
+binding change disables `github-canary` and enables `github-canary-recovery`.
+Adding its separate repository/secret descriptor and recreating only the gateway
+preserves the pinned product artifact and original mapping. Both new-target
+exports complete on first request; exact no-op replays and independent clones
+verify ten source commits and five objects per channel. Two old-target requests
+refuse at the Configuration boundary, and the retained diverged repository stays
+unchanged. No old receipt, destination identity or prepared intent is retargeted.
+
+The 295-event public prefix and all 69 prior Git event hashes match; a 377-event
+chain verifies with 87 Git export events. Metrics across the two gateway process
+intervals total eight successes, six expected rejections and no errors, with
+matching duration samples. A new canonical paired backup of the recovered state
+verifies (24.527 seconds for backup, 0.500 for verification on macOS/OrbStack).
+Both owned projects are stopped with all eight volumes retained. Private
+content-free qualification evidence has a verified 60-file SHA-256 inventory,
+including the token-scope, expired-login and pinned-binding preflight corrections.
+Required [preparation CI](https://github.com/synveda/synveda/actions/runs/37961537501)
+passes at `06e994a76c587b36ffb66c847284ee6c9b5af95c`.
+
 The [operator procedure](../integrations/git-bridge.md#qualify-branch-protection-and-divergence)
-keeps the old destination and receipts intact. Protection separately needs a
-capable private fixture. Subsequently restore a paired backup while an export
-receipt remains prepared. The pre-write egress interruption and process restart
-do not
+keeps the old destination and receipts intact. Live protection remains blocked
+on an eligible private fixture. Next use fresh reviewed revisions at the active
+recovery target, retain a newly prepared receipt during controlled pre-write
+egress interruption, and qualify paired restore/resumption into a separate owned
+project using the existing recovery custody and exact frozen projection. The
+measured pre-write interruption, process restart and append-only divergence do not
 qualify live acknowledgement loss after a provider write, that prepared-receipt
-restore window, a published deployment or encrypted off-host recovery.
+restore window, a live force-push/deletion race, a published deployment or
+encrypted off-host recovery.
 Owned egress/retention also remains open.
 Large-export deadlines and gateway connection pressure remain unmeasured.
 Both transports stay disabled by default; real credentials and writes are

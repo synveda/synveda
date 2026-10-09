@@ -84,7 +84,7 @@ events. Metrics across the two process intervals record eight successes/five
 errors with matching duration samples. A new canonical paired backup verifies;
 both owned projects are stopped with all eight volumes retained. This proves
 pre-write egress interruption and process-restart recovery on the same host.
-Live post-write acknowledgement loss, branch protection/divergence,
+Live post-write acknowledgement loss, branch protection,
 prepared-receipt paired restore, deployment
 egress, external retention and large-export connection/deadline qualification
 remain open. FLOW-8 stays open and the readiness verdict is unchanged.
@@ -95,16 +95,32 @@ protection is unqualified; no visibility or billing change is made. Another
 baseline passes four exact no-op receipts and two clones. A 331-event public
 preparation snapshot verifies, preserving the 295-event prefix and 69 prior Git
 hashes. Reviewed
-fifth synthetic source revisions, a separate empty private recovery repository
-and an approved but unapplied new-target Configuration are ready. Read-only
-GitHub settings show that both current working and new recovery PATs cover all
-owner repositories. Earlier prose overstated the working token's repository
-restriction; the measured pinned-destination cases remain valid, while provider
-credential least privilege is unqualified. Confirmation to restrict both tokens
-to their respective canary repositories is pending. The recovery token is not
-sealed or used by the gateway. No live
-divergence fault or new-target recovery is yet qualified. Original GitHub tips,
-effective Configuration and active credential revision 6 remain unchanged.
+fifth synthetic source revisions and a separate private recovery repository now
+pass append-only divergence/new-target recovery. Preflight corrected earlier
+credential-scope claims: both dedicated tokens initially covered all owner
+repositories. After explicit owner approval, GitHub settings restrict each to its
+own canary repository, and verified HTTPS refuses cross-canary Git content access
+with HTTP 404. Original sealed custody remains active at revision 6; separate
+exact-scope recovery custody uses revision 1.
+Two same-tree, single-parent foreign fast-forwards preserve original history and
+checkpoint refs. Four public conflict refusals retain exact prepared intent and
+leave source/foreign heads unchanged. Independent clones verify the retained
+projections and refuse the foreign tips. Both the new Configuration version and
+the existing pinned binding's revision 1-to-2 update pass distinct administrator
+review and normal apply. Using the same gateway artifact and a separate mapping,
+the new target completes both exports, exact replays and independently verified
+clones with ten source commits/five objects per channel. Old-target requests
+refuse through effective Configuration; the diverged repository stays unchanged.
+A 377-event public chain verifies with 87 Git events, preserving the 295-event
+prefix and all 69 prior Git hashes. Metrics across both gateway process intervals
+record eight successes/six expected rejections/no errors with matching duration
+samples. A new canonical paired backup verifies; both owned projects are stopped
+with all eight volumes retained. This synthetic same-host drill qualifies
+append-only unexpected-head refusal and governed recovery to a new destination.
+Live branch protection still needs an eligible private fixture; prepared-receipt
+paired restore, live force-push/deletion races, post-write acknowledgement loss
+and broader deployment qualification remain open. FLOW-8 and the readiness
+verdict remain unchanged.
 
 The 2026-10-06 public-CLI canary runner adds thirteen passing controller tests,
 artifact/source-head preflight and content-free export/replay/clone evidence.
