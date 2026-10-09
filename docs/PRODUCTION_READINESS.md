@@ -46,8 +46,22 @@ verifies, and four successful operation/duration samples are retained. Both
 isolated projects are stopped with source, backup and restored volumes retained.
 This explicit source gateway/provider/loopback override is same-host
 completed-receipt recovery evidence, not published consumer upgrade, off-host
-recovery or broader platform qualification. Credential rotation/provider
-revocation, controlled outage/divergence, prepared-receipt restore, deployment
+recovery or broader platform qualification. The separate credential drill on
+the retained restored fixture passes
+genuine rotation between distinct restricted PATs at the same secret reference,
+preserving exact receipts/destination identity at revision 2. Fresh reviewed
+synthetic publications complete both exports, with exact replay and independent
+verification of six source commits and three objects per channel. Local custody
+revocation at revision 3 refuses both exports without moving source/remote
+heads; reactivation of the working replacement at revision 4 restores exact
+receipts and clones. Content-free custody audit records identify the transitions,
+all 27 baseline Git event hashes persist, and a 210-event public chain verifies
+with 41 Git export events. Sixteen successful and two expected rejected
+operation/duration samples are retained. A new canonical paired backup of the
+replacement state verifies, with owned fixtures stopped and all volumes retained.
+GitHub provider revocation still needs owner reauthentication/deletion of the
+superseded PAT; both credentials remain accepted at the final metadata check.
+Controlled outage/divergence, prepared-receipt restore, deployment
 egress, external retention and large-export connection/deadline qualification
 remain open. FLOW-8 stays open and the readiness verdict is unchanged.
 

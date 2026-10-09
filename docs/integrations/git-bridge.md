@@ -155,6 +155,49 @@ its deployment mapping and restart. Retain remote history, database receipts and
 tenant keys together. External retention, deletion and joint recovery remain
 operator responsibilities and require a provider/deployment drill.
 
+## Qualify credential rotation and revocation
+
+Use the dedicated synthetic fixture and retain the exact destination descriptor,
+running gateway/CLI hashes, source heads and completed receipts. Obtain a second,
+distinct fine-grained PAT restricted to the same repository and permissions.
+An unchanged export alone does not prove that the replacement can write.
+
+Repeat `tenant secret put` with the same tenant, scope, kind, label and provider,
+reading the replacement document from a private file or stdin. Check that the
+returned secret ID/reference stays fixed and its value revision increases.
+The descriptor and destination digest must remain unchanged. Both first exports
+and replays of the existing heads must return the original exact `no_op`
+receipts, and independent clones must still verify. Then author, review and
+publish fresh synthetic Prompt and ContextPack revisions through their ordinary
+public workflows. Require both exports to complete, exact no-op replays and
+independent verification of the expanded source history. Git export audit
+events must identify the replacement's value revision without its value.
+
+Revoke that stable secret through `tenant secret revoke`, then confirm that both
+public exports refuse unavailable custody and source/remote heads remain fixed.
+The operator metadata must report a revoked state and no envelope key version.
+Put the working replacement document under the same label to recover, and
+require the original receipts and clones to verify again. Reusing that same PAT
+is reactivation; its increased value revision is not another distinct token
+rotation.
+
+Separately, the GitHub owner must revoke the superseded PAT after replacement
+writes have passed. Verify that GitHub refuses the old credential while the
+replacement still resolves the exact private repository. In the isolated
+synthetic fixture, seal the provider-revoked document under the stable reference
+and confirm that both public exports refuse without moving either ref. Restore
+the working replacement and verify exact receipt/clone recovery. Synveda secret
+revocation and GitHub PAT revocation are separate checks; neither substitutes
+for the other. The gateway must never fall back to the independent clone user's
+GitHub CLI credential.
+
+Retain content-free custody metadata, receipts, Git event hashes, public audit
+verification and operation/duration metrics in an enclosing credential report.
+The export/replay runner's report does not itself measure these transitions.
+Preserve the recovered replacement in a new verified paired backup, retaining
+the operator destination descriptor separately. A historical backup can contain
+a superseded PAT; restoring it does not restore that PAT's GitHub authority.
+
 ## Qualify recovery on the selected deployment
 
 Use the deployment's existing paired database/key recovery ceremony. The

@@ -134,8 +134,35 @@ retained. Private content-free reports remain outside tracked project files.
 The required [CI run](https://github.com/synveda/synveda/actions/runs/37895821790)
 passes at `65fdc6516d140f1e988d35fb9167889179d54bc9`.
 
-Next provision a second restricted PAT for a genuine same-reference rotation
-and provider-revocation drill. Remaining qualification needs owned
+The subsequent credential drill on that retained restored project passes a
+genuine rotation between two distinct repository-restricted PATs. Both resolve
+the exact private repository before the transition. Four fresh real PKCE logins
+preserve issuer, tenant and subjects. The stable secret reference, destination
+digest and original exact no-op receipts survive value revision 1 to 2. A third
+curator-reviewed synthetic publication then advances both channels with
+first-request `completed`, exact no-op replays and independent clone verification
+of six source commits and three objects per channel. Local custody revocation
+at revision 3 removes the envelope key version and refuses both public exports
+without changing source or GitHub heads. Resealing the same replacement at
+revision 4 restores the exact receipts and verified clones; this is reactivation,
+not another distinct PAT rotation. Public custody audit records identify stored
+revisions 1, 2 and 4 and cleared revision 3. All 27 baseline Git event hashes
+remain intact; the public verifier passes a 210-event snapshot containing 41 Git
+export events. Sixteen successful and two expected rejected operation/duration
+samples are retained. A new canonical paired backup retains the recovered
+replacement and passes verification. The owned fixture is stopped with all
+source, restored and backup volumes retained. The operator guide now separates
+distinct rotation, local custody revocation and provider revocation. Required
+[CI](https://github.com/synveda/synveda/actions/runs/37903182003) passes at
+`aef89e78af9ea12a308bbf1eb4426c787bfd3b3b` after rerunning the native ARM64 job
+whose pinned Syft download initially failed; binary inspection remains required.
+
+GitHub provider revocation is blocked on the owner's reauthentication and
+deletion of the original canary PAT; both credentials still receive repository
+metadata HTTP 200 at the final check. Next revoke only that superseded PAT,
+independently require old-credential HTTP 401 and replacement HTTP 200, then
+retain public export refusal with provider-revoked custody and same-reference
+replacement recovery. Remaining qualification needs owned
 egress/retention, controlled outage/retry and branch protection/divergence,
 including a separate restore while an export receipt remains prepared.
 Completed-receipt replay after same-host logical restore does not qualify that

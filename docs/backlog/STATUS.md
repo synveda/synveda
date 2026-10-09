@@ -160,10 +160,28 @@ snapshot verifies. Four successful export operation/duration samples are
 retained. Both isolated projects are stopped with source, backup and restored
 volumes retained. The required [CI run](https://github.com/synveda/synveda/actions/runs/37895821790)
 passes at `65fdc6516d140f1e988d35fb9167889179d54bc9`.
-This source gateway/provider/loopback override does not qualify a published
-consumer upgrade or off-host recovery. Next obtain a second restricted PAT
-for genuine same-reference rotation and provider revocation, then retain
-controlled outage/divergence and prepared-receipt restore evidence. Owned
+The retained restored fixture now passes a genuine distinct-PAT rotation:
+the secret reference, destination digest and exact no-op receipts survive
+revision 1 to 2, then fresh curator-reviewed synthetic revisions export with
+first-request `completed`, exact replay and independent clone verification of
+six commits and three objects per channel. Local secret revocation at revision
+3 refuses both exports without moving source/remote heads; reactivation with
+the same replacement at revision 4 recovers exact receipts and clones. Public
+custody audit records identify each revision, all 27 baseline Git event hashes
+remain intact, and a 210-event public chain verifies with 41 Git export events.
+Sixteen successful and two expected rejected operation/duration samples are
+retained. A new canonical paired backup of the replacement state verifies;
+owned fixtures are stopped with all volumes retained. Required
+[CI](https://github.com/synveda/synveda/actions/runs/37903182003) passes at
+`aef89e78af9ea12a308bbf1eb4426c787bfd3b3b` after retrying a failed pinned Syft
+download without weakening binary inspection.
+Provider revocation remains blocked on GitHub owner reauthentication/deletion
+of the original PAT; both PATs still return repository metadata HTTP 200. Next
+revoke only the superseded PAT, verify old HTTP 401/new HTTP 200, then qualify
+public export refusal and same-reference replacement recovery. This source
+gateway/provider/loopback override does not qualify a published consumer
+upgrade or off-host recovery. Controlled outage/divergence and prepared-receipt
+restore evidence remain open. Owned
 egress/retention, large-export deadlines and gateway connection pressure also
 need qualification. FLOW-8 remains open for those provider/deployment checks.
 
