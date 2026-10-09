@@ -338,11 +338,55 @@ metrics. Keep this enclosing recovery report separate from the canary runner's
 `live_github_export_replay` report, which does not itself measure recovery.
 
 A completed-receipt replay proves only that recovery case. Qualify a prepared
-receipt separately after an uncertain remote write, requiring the same frozen
-projection to resume without extra commits. Same-host logical recovery does not
-measure encrypted off-host custody, PITR, production RPO/RTO or a published
-deployment. Stop only the owned fixture projects and retain their paired state
-and verified backup until the recovery work is complete.
+receipt separately in the procedure below, requiring the same frozen projection
+to resume without extra commits. Same-host logical recovery does not measure
+encrypted off-host custody, PITR, production RPO/RTO or a published deployment.
+Stop only the owned fixture projects and retain their paired state and verified
+backup until the recovery work is complete.
+
+### Qualify prepared intent across paired restore
+
+Start with exact no-op receipts and independently verified clones at the active
+governed target. Record its Configuration version/hash, sealed-secret reference/
+revision/key, source and remote heads, gateway/CLI/descriptor hashes and frozen
+public audit prefix. Author, distinctly review and publish fresh synthetic
+revisions for both channels, then quiesce source writers.
+
+For the pre-write case, use the controlled egress procedure above to interrupt
+only the owned gateway's GitHub access while keeping public authentication and
+internal dependencies available. First requests and retries must fail without
+moving source or remote heads. Require `prepared`, `transport_failed`,
+`resume_prepared`, `transport_failed` events per channel, with identical source,
+Git head, mapping, destination, Configuration and secret revision. Export and
+independently verify the entire frozen public audit prefix. Save metrics before
+the source process stops.
+
+Restore the exact network attachment and verify ordinary HTTPS, then make no
+further export request on the source. Create and verify a new immutable paired
+backup through the canonical ceremony. Keep that source stopped and restore
+into a different empty owned project with exact source/backup/target confirmation.
+Require ordinary tenant audit/key verification and unrelated-key refusal.
+Apply the retained provider descriptor and qualified gateway artifact separately
+from the canonical backup, and bind the actual running image, executable and CLI
+to the original hashes. Fresh PKCE logins must preserve issuer, tenant and
+subjects. Before resumption, verify unchanged source/remote heads, exact effective
+Configuration and original secret metadata without resealing. Compare every
+event of the frozen public prefix and every prepared Git event hash.
+
+The restored first requests must return `resumed` with the prepared source,
+Git head, mapping and destination digest; exact replays must return `no_op`.
+Independent clones must verify all expected history without duplicate commits.
+Require `resume_prepared`, `resumed`, `no_op` audit phases with the original
+identity, verify the complete final audit chain offline and retain metrics from
+both process intervals. Preserve a separate completed-state paired backup and
+stop only the owned fixtures with their volumes retained.
+
+Report this pre-write case separately from a prepared receipt after a provider
+write whose acknowledgement was lost. That case additionally requires observed
+remote advancement before backup and exact frozen-projection recovery without
+another commit. Keep the enclosing recovery report separate from the runner's
+export/replay evidence tier, and retain the same-host/published-artifact/off-host
+qualification limits above.
 
 ## Live GitHub canary
 

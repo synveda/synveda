@@ -229,16 +229,37 @@ total eight successes/six expected rejections/no errors with matching durations.
 A new canonical paired backup verifies; both owned projects are stopped with all
 eight volumes retained. Required
 [preparation CI](https://github.com/synveda/synveda/actions/runs/37961537501) passes
-at `06e994a76c587b36ffb66c847284ee6c9b5af95c`. Next qualify paired restore and
-resumption of newly prepared intent at the active recovery target, using fresh
-reviewed revisions and controlled pre-write interruption. Live protection remains
-blocked on an eligible private fixture. This source
-gateway/provider/loopback override and pre-write interruption do not qualify a
-published consumer upgrade, live post-write acknowledgement loss, a live
-force-push/deletion race or off-host
-recovery. Those remaining provider/deployment cases stay open. Owned
-egress/retention, large-export deadlines and gateway connection pressure also
-need qualification. FLOW-8 remains open for those provider/deployment checks.
+at `06e994a76c587b36ffb66c847284ee6c9b5af95c`.
+Prepared-receipt paired restore now passes at the active recovery target with
+sixth synthetic revisions reviewed by a distinct curator and unchanged sealed
+custody at revision 1/key 1. Four expected failures during interruption of only
+the owned
+gateway egress retain exact prepared source, Git head, mapping, destination and
+Configuration; sampled public readiness/authentication, internal networks and
+source/remote heads remain unchanged. The restored attachment receives no further
+export request before a new canonical paired backup. Restore into a separate
+empty project verifies all 426 restored audit events, original-key opening and
+unrelated-key refusal. Gateway/CLI/descriptor hashes, effective Configuration,
+secret metadata and issuer/tenant/subjects match without reprovisioning.
+Before resumption, the complete 421-event frozen public prefix and all 99 Git
+hashes at that checkpoint match the restored copy. Both exports resume the exact
+intent, replay
+as exact no-ops and pass independent clone verification of twelve source commits/
+six objects per channel without duplication. The retained diverged destination
+stays unchanged. Public verification passes 446 events; a 447-event frozen export
+independently verifies, preserving the full prepared prefix and all 87 prior Git
+hashes, with 105 Git events retained. Metrics across both process intervals total
+eight successes/four expected transport errors/no rejections with matching
+durations. Prepared and completed-state paired backups verify; all three owned
+projects are stopped with all twelve volumes retained. Required
+[CI](https://github.com/synveda/synveda/actions/runs/37968302068) passes at
+`389e893fb3dfa0f8d22e470df8895af7b55a4cb9`. Current protection reads still return
+HTTP 403 for both active recovery branches; an eligible private fixture remains
+required. Next qualify controlled live post-write acknowledgement loss and exact
+frozen-intent recovery, then live old-head/force-push/deletion races on retained
+synthetic fixtures. Published deployment, encrypted off-host recovery, owned
+egress/retention, large-export deadlines and gateway connection pressure remain
+open. FLOW-8 remains open for those provider/deployment checks.
 
 CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes, and a passing create/read/use/capture policy matrix including revocation and foreign-tenant comparisons. Four predeclared synthetic task probes pass in the fresh-database 23-scenario product suite: 12/12 Session facts and four exact Knowledge bodies retained, provenance intact, local assisted preview p95 below the 500 ms guard. A separate combined-mode gate preserves checkpoint source attribution and exact required Knowledge in both off and conservative modes, omitting optional restart text under a tight shared budget. An opt-in export now prepares the actual paired synthetic ContextRun blocks against a fixed JSON-answer rubric without calling a model, and a capped no-tools runner passes a fake-client end-to-end test. This does not measure model task success or provider usage. A live proprietary-client run remains open. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision. An isolated hostname handoff and resolver check passed without resetting retained interop state, and the original mapping was restored. The pinned product source image built on 2026-09-29 after official Cargo index/archive access recovered. Fresh CTX-6/CTX-8 Compose/browser acceptance and held-out model quality remain open. Next rerun paired deployment checks, then the bounded factual/model and live Claude probes when credentials and spend permission are available. The open briefs hold the exact evidence and limits.
 

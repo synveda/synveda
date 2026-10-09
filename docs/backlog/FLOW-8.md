@@ -258,18 +258,54 @@ including the token-scope, expired-login and pinned-binding preflight correction
 Required [preparation CI](https://github.com/synveda/synveda/actions/runs/37961537501)
 passes at `06e994a76c587b36ffb66c847284ee6c9b5af95c`.
 
-The [operator procedure](../integrations/git-bridge.md#qualify-branch-protection-and-divergence)
-keeps the old destination and receipts intact. Live protection remains blocked
-on an eligible private fixture. Next use fresh reviewed revisions at the active
-recovery target, retain a newly prepared receipt during controlled pre-write
-egress interruption, and qualify paired restore/resumption into a separate owned
-project using the existing recovery custody and exact frozen projection. The
-measured pre-write interruption, process restart and append-only divergence do not
-qualify live acknowledgement loss after a provider write, that prepared-receipt
-restore window, a live force-push/deletion race, a published deployment or
-encrypted off-host recovery.
-Owned egress/retention also remains open.
-Large-export deadlines and gateway connection pressure remain unmeasured.
+The subsequent prepared-receipt paired restore drill passes at the active
+`github-canary-recovery` target. Sixth synthetic revisions pass distinct curator
+review and publication. Only the owned gateway egress interface is interrupted;
+four public export failures (first request and retry per channel) leave source
+and GitHub heads unchanged and retain the same prepared source, Git head,
+mapping, destination, Configuration and credential revision. Sampled public
+readiness/authentication and all internal networks remain available. The exact
+egress attachment is restored without another export request before backup.
+
+The unchanged canonical consumer ceremony verifies a new paired backup and
+restores into a separate empty project with exact source/backup/target
+confirmation. Ordinary tenant recovery verifies all 426 restored audit events,
+opens the original key and refuses an unrelated key. The retained gateway,
+executable, CLI and two-target descriptor match their original hashes; both prior
+projects stay stopped. Four fresh real PKCE logins preserve issuer, tenant and
+subjects. Effective Configuration and the original recovery secret metadata
+(same reference, active revision 1/key 1) match exactly, without reprovisioning.
+Before resumption, all 421 events of the frozen public audit export and all 99
+Git event hashes at that checkpoint match the restored copy; source and remote
+heads remain unchanged. Both first exports return `resumed` for the exact frozen
+projection;
+exact no-op replays and independent clones verify twelve source commits/six
+objects per channel without duplicate commits. The retained diverged destination
+also stays unchanged.
+
+Public verification passes a 446-event snapshot; an independently verified
+447-event frozen export preserves the full prepared prefix. All 87 Git hashes
+from the previous divergence case remain intact, with 105 Git events now retained.
+Both channels preserve exact identity across prepared/failure/retry and restored
+resume/replay phases. Metrics from source and restored process intervals total
+eight successes/four expected transport errors/no rejections with matching
+duration samples. Prepared backup/verification take 24.655/0.611 seconds and
+restore takes 243.105 seconds on macOS/OrbStack; these are ceremony durations.
+A separate completed-state paired backup verifies (23.249/0.523 seconds).
+All three owned projects are stopped with all twelve volumes retained. Private
+content-free evidence has an independently checked 67-file SHA-256 inventory,
+including the early read-only artifact-probe sequencing correction. Required
+[CI](https://github.com/synveda/synveda/actions/runs/37968302068) passes at
+`389e893fb3dfa0f8d22e470df8895af7b55a4cb9`.
+
+The [prepared restore procedure](../integrations/git-bridge.md#qualify-prepared-intent-across-paired-restore)
+records this pre-write window separately from uncertain acknowledgement after a
+provider write. Current protection reads also return HTTP 403 for both active
+recovery branches; an eligible private fixture remains required. Next qualify
+controlled live post-write acknowledgement loss and exact frozen-intent recovery,
+then live old-head races and force-push/deletion refusal on retained synthetic
+fixtures. Published deployment, encrypted off-host recovery, owned egress/
+retention, large-export deadlines and gateway connection pressure remain open.
 Both transports stay disabled by default; real credentials and writes are
 enabled only in this explicit synthetic operator fixture.
 

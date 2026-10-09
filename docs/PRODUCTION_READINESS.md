@@ -84,10 +84,9 @@ events. Metrics across the two process intervals record eight successes/five
 errors with matching duration samples. A new canonical paired backup verifies;
 both owned projects are stopped with all eight volumes retained. This proves
 pre-write egress interruption and process-restart recovery on the same host.
-Live post-write acknowledgement loss, branch protection,
-prepared-receipt paired restore, deployment
-egress, external retention and large-export connection/deadline qualification
-remain open. FLOW-8 stays open and the readiness verdict is unchanged.
+At that checkpoint, live post-write acknowledgement loss, branch protection,
+prepared-receipt paired restore and broader deployment qualification remained
+open; the later prepared restore result below covers its pre-write window.
 
 The private GitHub branch-protection preflight now receives HTTP 403 for both
 export branches because the repository plan lacks that capability. Live
@@ -117,10 +116,35 @@ record eight successes/six expected rejections/no errors with matching duration
 samples. A new canonical paired backup verifies; both owned projects are stopped
 with all eight volumes retained. This synthetic same-host drill qualifies
 append-only unexpected-head refusal and governed recovery to a new destination.
-Live branch protection still needs an eligible private fixture; prepared-receipt
-paired restore, live force-push/deletion races, post-write acknowledgement loss
-and broader deployment qualification remain open. FLOW-8 and the readiness
-verdict remain unchanged.
+Live branch protection still needs an eligible private fixture.
+
+Prepared-receipt paired restore now passes at that active recovery target with
+sixth curator-reviewed synthetic revisions and unchanged credential revision
+1/key 1. Four expected failures during interruption of only the owned gateway
+egress retain exact prepared intent; public readiness/authentication and internal
+networks remain available, and source/GitHub heads stay unchanged. Restoring the
+egress attachment leaves the receipts pending until canonical paired backup.
+The unchanged consumer ceremony restores into a separate empty project and
+verifies all 426 restored audit events, original-key opening and unrelated-key
+refusal. The gateway, executable, CLI and descriptor hashes match; four fresh
+PKCE logins preserve issuer/tenant/subjects, and Configuration and sealed-secret
+metadata match without reprovisioning. Before export, the complete 421-event
+frozen public prefix and all 99 Git hashes at that checkpoint match the restored
+copy.
+Both exports resume the exact prepared projection, replay as exact no-ops and
+pass independent clone verification of twelve source commits/six objects per
+channel without duplication. The retained diverged destination stays unchanged.
+Public verification passes 446 events; a 447-event frozen export independently
+verifies, preserving the prepared prefix and all 87 prior Git hashes, with 105
+Git events retained. Metrics across both process intervals record eight successes/
+four expected transport errors/no rejections with matching durations. Separate
+prepared and completed-state paired backups verify; all three owned projects
+are stopped with all twelve volumes retained. These are synthetic same-host
+pre-write recovery results. Current reads still receive HTTP 403 for protection
+on both active recovery branches. Controlled live post-write acknowledgement
+loss, live ref mutation races, published deployment, encrypted off-host recovery
+and broader egress/retention/load qualification remain open. FLOW-8 and the
+readiness verdict remain unchanged.
 
 The 2026-10-06 public-CLI canary runner adds thirteen passing controller tests,
 artifact/source-head preflight and content-free export/replay/clone evidence.
