@@ -171,7 +171,12 @@ pub(crate) fn report(bytes: &[u8], reference: &str) -> Result<()> {
         return Err(failure());
     }
     let packets = packets(bytes)?;
-    if packets.len() != 3 || packets[2].is_some() {
+    // GitHub terminates the HTTP stream with an additional flush after the
+    // report's own flush. Both forms still require exactly two status lines.
+    if !matches!(
+        packets.as_slice(),
+        [Some(_), Some(_), None] | [Some(_), Some(_), None, None]
+    ) {
         return Err(failure());
     }
     if line(packets[0].ok_or_else(failure)?)? != "unpack ok" {
@@ -235,6 +240,43 @@ mod tests {
         ] {
             assert!(advertisement(&advertise(malformed), reference).is_err());
         }
+    }
+
+    #[test]
+    fn report_accepts_github_http_flush_but_requires_exact_unambiguous_statuses() {
+        let reference = "refs/heads/synveda/prompt/published";
+        let status = b"000eunpack ok\n002bok refs/heads/synveda/prompt/published\n";
+        for ending in [b"0000".as_slice(), b"00000000"] {
+            let mut valid = status.to_vec();
+            valid.extend_from_slice(ending);
+            report(&valid, reference).unwrap();
+
+            let mut rejected = packet(b"unpack ok\n").unwrap();
+            rejected.extend(packet(format!("ng {reference} source-secret\n").as_bytes()).unwrap());
+            rejected.extend_from_slice(ending);
+            let error = report(&rejected, reference).unwrap_err();
+            assert!(matches!(error, Error::Conflict { .. }));
+            assert!(!error.to_string().contains("source-secret"));
+        }
+        for ending in [
+            b"".as_slice(),
+            b"000000000000",
+            b"00000004",
+            b"00000000source-secret",
+            b"00010000",
+        ] {
+            let mut invalid = status.to_vec();
+            invalid.extend_from_slice(ending);
+            let error = report(&invalid, reference).unwrap_err();
+            assert!(!error.to_string().contains("source-secret"));
+        }
+        let mut duplicate = status.to_vec();
+        duplicate.extend(packet(format!("ok {reference}\n").as_bytes()).unwrap());
+        duplicate.extend_from_slice(b"00000000");
+        assert!(report(&duplicate, reference).is_err());
+        let mut valid = status.to_vec();
+        valid.extend_from_slice(b"00000000");
+        assert!(report(&valid, "refs/heads/other").is_err());
     }
 
     #[test]

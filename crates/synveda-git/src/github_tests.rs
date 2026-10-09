@@ -30,6 +30,7 @@ const REFERENCE: &str = "refs/heads/synveda/prompt/published";
 #[derive(Clone)]
 enum Mode {
     Normal,
+    HttpFlush,
     Public,
     Replaced,
     Archived,
@@ -352,12 +353,17 @@ async fn serve(
     if method == "POST" && matches!(mode, Mode::DropAfterPush) {
         return;
     }
-    let body = if method == "POST" && matches!(mode, Mode::MissingReport) {
+    let mut body = if method == "POST" && matches!(mode, Mode::MissingReport) {
         b"0000".as_slice()
     } else {
         &output.stdout[end + 4..]
-    };
-    reply(&mut stream, 200, content_type, "", body).await;
+    }
+    .to_vec();
+    if method == "POST" && matches!(mode, Mode::HttpFlush) {
+        assert!(body.ends_with(b"0000"));
+        body.extend_from_slice(b"0000");
+    }
+    reply(&mut stream, 200, content_type, "", &body).await;
 }
 
 async fn reply(
@@ -496,6 +502,25 @@ async fn https_receive_pack_preserves_real_git_and_recovers_uncertain_pushes() {
     verify_repository(&clone, REFERENCE, &BTreeMap::new())
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn https_receive_pack_accepts_github_http_terminal_flush() {
+    let fixture = Fixture::new().await;
+    fixture.mode(Mode::HttpFlush);
+    for asset in [AssetKind::Prompt, AssetKind::ContextPack] {
+        let source = snapshot(&fixture.target, asset);
+        let projection = Projection::render(source.clone(), None).unwrap();
+        assert!(fixture.advance(&projection, None, false).await.unwrap());
+        assert!(!fixture.advance(&projection, None, true).await.unwrap());
+        let verified = verify_repository(&fixture.repo, &source.git_ref(), &BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(verified.snapshot.head, source.head);
+        assert_eq!(verified.snapshot.asset, asset);
+    }
+    assert_eq!(fixture.pushes.load(Ordering::SeqCst), 2);
+    git(&fixture.repo, &["fsck", "--strict"]).await;
 }
 
 #[tokio::test]

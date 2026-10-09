@@ -75,27 +75,35 @@ until completion. The initial synthetic canary should run serially.
 On 2026-10-09, the dedicated
 [sujitn/synveda-git-export-canary](https://github.com/sujitn/synveda-git-export-canary)
 repository was created and independently checked as private, empty, non-fork,
-unarchived and enabled, with immutable repository ID `1411339644`. The next
-canary setup uses a fresh isolated local Docker project and separate CLI login
-profiles. The native `make compose-config` prerequisite suite now passes,
-including all 173 lifecycle/helper cases; this is static and modelled evidence,
-not startup of the named canary. The development hostname preflight refuses an
-existing managed-marker collision. Next use the documented loopback consumer
-graph for the isolated fixture. A private credential document is prepared
-without a token; no live export, sealed credential provisioning or canary
-deployment startup has run.
+unarchived and enabled, with immutable repository ID `1411339644`. The isolated
+loopback Docker fixture now passes its ordinary database, issuer and runtime
+readiness gates. Four synthetic users sign in through real OIDC/PKCE; public
+Configuration proposals and scope bindings enable only `github-canary` for the
+dedicated scope, and curator-reviewed Prompt/ContextPack publications supply
+both channels. The repository-restricted PAT is sealed under the matching
+tenant key; its deployment descriptor contains only the stable secret reference.
+The existing development hostname marker remains untouched.
 
-The remaining blocker is the repository-restricted fine-grained PAT and a ready
-isolated deployment egress/retention/joint-recovery fixture. Next prepare that
-source-pinned loopback deployment and its authenticated CLI profile, provision the same-scope
-sealed reference, bind repository ID `1411339644` in its deployment allowlist,
-approve the target/provider through Configuration, and run the documented
-non-sensitive public-CLI canary with clone verification. Then retain separate
+Initial live writes expose a GitHub framing incompatibility: successful
+receive-pack status reports end with two flush packets. The strict parser
+rejects the second terminator, leaving prepared receipts despite the remote
+write. A same-head, empty-pack probe confirms that framing without changing
+the ref or retaining provider text. Retrying the Prompt export resumes its
+prepared head, and an independent clone verifies its retained evidence.
+Two regression cases reproduce the failure before the parser change, then
+pass with the bounded one-or-two-flush grammar; all fourteen Git adapter tests
+pass, including real native Git/TLS interoperability and refusal/recovery cases.
+
+The immediate next action is to run the corrected, independently pinned
+gateway in the isolated operator fixture, recover the remaining prepared
+receipt and verify fresh advancements plus exact replays for both channels.
+Then retain separate
 rotation/revocation, outage/retry,
 branch protection/divergence and paired database/key recovery against the chosen
 deployment artifact. Source acceptance does not qualify the live GitHub service,
 bundled image, external retention or joint recovery. Both transports stay
-disabled by default; no real credentials or external writes were enabled here.
+disabled by default; real credentials and writes are enabled only in this
+explicit synthetic operator fixture.
 
 ## Scope
 

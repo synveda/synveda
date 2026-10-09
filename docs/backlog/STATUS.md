@@ -130,16 +130,18 @@ The complete required [CI run](https://github.com/synveda/synveda/actions/runs/3
 passes at `98241b902a4e3773e9321c54eb5454169577d720`, including all six native CLI
 targets and three Helm jobs. On 2026-10-09, the private, empty, non-fork
 [sujitn/synveda-git-export-canary](https://github.com/sujitn/synveda-git-export-canary)
-was created and its repository ID `1411339644` verified. The next setup uses a
-fresh isolated local Docker project and separate CLI login profiles. Native
-Compose prerequisite checks now pass, but development hostname ownership
-refuses an existing managed-marker collision; use the documented loopback
-consumer graph for the new fixture. No canary deployment, sealed export
-credential or live Git export is ready yet. Next prepare that source-pinned
-loopback deployment and CLI login, supply the repository-restricted PAT,
-seal its same-scope reference and enable the pinned target through Configuration,
-then run the documented non-sensitive live canary,
-then retain rotation/revocation, outage/divergence and paired database/key
+was created and its repository ID `1411339644` verified. The fresh loopback
+operator fixture passes readiness and real OIDC/PKCE login for four synthetic
+users. Normal Configuration review/binding, scoped curator grants and reviewed
+Prompt/ContextPack publications enable its exact sealed-credential target.
+Initial GitHub writes reveal a second HTTP flush after the successful status
+report; the original parser refuses it, retaining prepared intent. A same-head
+empty-pack probe verifies the framing without changing the ref. Prompt retry
+resumes and its independent clone verifies. Two regressions fail before the
+bounded parser fix and pass afterwards; all fourteen Git adapter cases pass.
+Next pin and run the corrected gateway, recover the remaining prepared receipt
+and check fresh advancements, exact replays and independent clones for both
+channels. Then retain rotation/revocation, outage/divergence and paired database/key
 recovery evidence on the chosen artifact. Large-export deadlines and gateway
 connection pressure also need deployment qualification. Synthetic source
 acceptance does not qualify the live forge or published product image.
