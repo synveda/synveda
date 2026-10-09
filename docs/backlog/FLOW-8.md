@@ -178,13 +178,40 @@ reports remain separate from the export/replay runner's evidence tier. Required
 [CI](https://github.com/synveda/synveda/actions/runs/37914720349) passes at
 `4a015e1ae6ecade7e3635dead83b4d2c3fe2bab8`.
 
-Next run a controlled transport outage/retry on this isolated canary, retaining
-prepared intent, independent remote-head observations and exact replay.
-Remaining qualification needs owned
-egress/retention, controlled outage/retry and branch protection/divergence,
-including a separate restore while an export receipt remains prepared.
-Completed-receipt replay after same-host logical restore does not qualify that
-uncertain-write window, a published deployment or encrypted off-host recovery.
+The controlled outage/retry drill now passes on the same source gateway and
+retained restored fixture, with unchanged active credential revision 6. Fourth
+curator-reviewed synthetic revisions advance both source channels. Disconnecting
+only the gateway's owned `application-egress` interface makes both GitHub hosts
+unreachable while its four internal networks remain unchanged; sampled public
+readiness and authenticated API checks pass between attempts. Three Prompt and
+two ContextPack requests fail with the public generic internal error. Public
+`prepared`, `transport_failed` and `resume_prepared` events retain each exact
+source head, Git head, mapping and destination digest. The first Prompt failure
+preceded correction of an operator error-message assertion and remains counted.
+A gateway restart during the outage preserves that intent and leaves egress
+disconnected. The restarted image/executable still match their original hashes.
+Reconnecting the original address, aliases and gateway priority restores verified
+GitHub HTTPS. Both first successful requests return `resumed` for the frozen
+intent; exact no-op replays and independent clones verify eight source commits
+and four objects per channel, with no duplicate source history.
+
+The frozen 235-event public prefix and all 49 prior Git event hashes match; a
+295-event chain verifies with 69 Git export events. Metrics collected before
+and after the process restart respectively record four successes/three errors
+and four successes/two errors, with matching duration samples; the restart
+resets these process-local counters. A new canonical paired backup of the
+recovered state verifies (23.575 seconds for backup, 0.647 for verification on
+macOS/OrbStack). Both owned projects are stopped with all eight volumes retained.
+Private content-free outage evidence remains separate from the export/replay
+runner's tier. Operator preflight corrections are retained with the drill.
+
+Next qualify branch-protection and unexpected remote-head refusal/recovery on
+the dedicated canary, preserving retained history without destructive
+reconciliation. Separately restore a paired backup while an export receipt
+remains prepared. This pre-write egress interruption and process restart do not
+qualify live acknowledgement loss after a provider write, that prepared-receipt
+restore window, a published deployment or encrypted off-host recovery.
+Owned egress/retention also remains open.
 Large-export deadlines and gateway connection pressure remain unmeasured.
 Both transports stay disabled by default; real credentials and writes are
 enabled only in this explicit synthetic operator fixture.

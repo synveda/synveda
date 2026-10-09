@@ -201,6 +201,51 @@ Preserve the recovered replacement in a new verified paired backup, retaining
 the operator destination descriptor separately. A historical backup can contain
 a superseded PAT; restoring it does not restore that PAT's GitHub authority.
 
+## Qualify controlled outage and retry
+
+Use the dedicated synthetic fixture, bind the running gateway/CLI artifacts and
+retain completed receipts, independent clone results and credential metadata.
+Author, distinctly review and publish new Prompt and ContextPack revisions
+through their ordinary public workflows, then quiesce writers and record both
+heads. An unchanged completed export exercises no-op failure; it cannot prove
+that a new prepared receipt survives interruption.
+
+On the canonical Compose graph, the gateway's `application-egress` network is
+separate from its internal database, identity, proxy and telemetry networks.
+Record the owned gateway container ID and every network attachment, including
+the egress address, aliases and gateway priority. Arrange reconnection in the
+operator's cleanup before disconnecting only that container from the egress
+network. Verify the internal attachments stay unchanged and bounded probes to
+both `api.github.com` and `github.com` fail. Sample public readiness and an
+authenticated API between export attempts; independently observe GitHub heads
+through the separate clone credential.
+
+Request both exports through `synveda git-bridge export`, which already emits
+JSON and accepts no `--json` flag. Require failure without changed source/remote
+heads, plus public `prepared` and `transport_failed` audit events binding the
+exact source head, Git head, mapping, destination and active secret revision.
+Internal transport errors expose the generic public internal error; the audit
+phase identifies the transport failure. Restart the owned gateway while egress
+remains disconnected, recheck artifact binding, topology and ordinary readiness,
+then repeat both exports. Require `resume_prepared` and `transport_failed` with
+the same frozen evidence. Capture metrics before restart because process-local
+counters reset; retain and verify operation/duration counts for both intervals.
+
+Reconnect using the recorded address, every alias and original gateway priority.
+Verify the restored topology and ordinary verified GitHub HTTPS, then run the
+public-CLI canary against the recorded new heads. Both first successful requests
+must return `resumed` matching the prepared evidence, both replays must return
+the exact `no_op`, and independent clones must verify the expected expanded
+history without duplicate source commits. Verify the public audit chain and
+prior event hashes, preserve a new verified paired backup, and stop the owned
+fixture with its volumes retained.
+
+Keep this enclosing outage report separate from `live_github_export_replay`.
+Blocking egress before a write proves that interruption case; live lost
+acknowledgements after a write, remote divergence/protection and a paired restore
+with prepared intent require separate drills. This fault injection does not
+qualify an owned production egress policy, retention, RPO/RTO or other hosts.
+
 ## Qualify recovery on the selected deployment
 
 Use the deployment's existing paired database/key recovery ceremony. The

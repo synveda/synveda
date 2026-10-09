@@ -187,11 +187,26 @@ are retained. A new canonical paired backup of revision 6 verifies; both owned
 projects are stopped with all eight volumes retained. Required
 [CI](https://github.com/synveda/synveda/actions/runs/37914720349) passes at
 `4a015e1ae6ecade7e3635dead83b4d2c3fe2bab8`.
-Next qualify controlled transport outage/retry with retained prepared intent,
-independent remote-head observations and exact replay. This source
-gateway/provider/loopback override does not qualify a published consumer
-upgrade or off-host recovery. Controlled outage/divergence and prepared-receipt
-restore evidence remain open. Owned
+Controlled outage/retry now passes with unchanged active credential revision 6
+and fourth curator-reviewed synthetic revisions. Disconnecting only the owned
+gateway egress interface blocks both GitHub hosts while preserving its internal
+networks and sampled public readiness/authentication. Five failed requests,
+including retries across a gateway restart, retain the exact prepared source,
+Git head, mapping and destination digest; public audit records prepared, failed
+and resumed intent. Restoring the original network attachment produces two
+`resumed` exports, exact no-op replays and independent clone verification of
+eight source commits and four objects per channel. The frozen 235-event public
+prefix and all 49 prior Git event hashes match; a 295-event chain verifies with
+69 Git events. Metrics from the two process intervals total eight successful
+and five failed operations with matching duration samples. A new canonical
+paired backup verifies; both owned fixtures are stopped with all eight volumes
+retained. The open brief records operator preflight corrections and the exact
+fault/recovery boundary.
+Next qualify branch protection and unexpected remote-head refusal/recovery,
+then the separate prepared-receipt restore case. This source
+gateway/provider/loopback override and pre-write interruption do not qualify a
+published consumer upgrade, live post-write acknowledgement loss or off-host
+recovery. Those remaining provider/deployment cases stay open. Owned
 egress/retention, large-export deadlines and gateway connection pressure also
 need qualification. FLOW-8 remains open for those provider/deployment checks.
 

@@ -71,7 +71,21 @@ operation/duration samples are retained. A new canonical paired backup of the
 recovered revision 6 verifies, with both owned projects stopped and all eight
 volumes retained. These measured credential cases use the same source artifact
 and synthetic same-host fixture.
-Controlled outage/divergence, prepared-receipt restore, deployment
+The controlled outage/retry drill now passes on that source artifact with
+unchanged active credential revision 6 and fourth reviewed synthetic revisions.
+Only the gateway egress interface is disconnected; GitHub becomes unreachable
+while its internal networks and sampled public readiness/authentication remain
+available. Five failed requests retain exact prepared intent across a gateway
+restart. Restoring the original network attachment produces two resumed
+exports, exact no-op replays and independent clones verifying eight source
+commits and four objects per channel. The frozen 235-event prefix and all 49
+prior Git event hashes match; a 295-event public chain verifies with 69 Git
+events. Metrics across the two process intervals record eight successes/five
+errors with matching duration samples. A new canonical paired backup verifies;
+both owned projects are stopped with all eight volumes retained. This proves
+pre-write egress interruption and process-restart recovery on the same host.
+Live post-write acknowledgement loss, branch protection/divergence,
+prepared-receipt paired restore, deployment
 egress, external retention and large-export connection/deadline qualification
 remain open. FLOW-8 stays open and the readiness verdict is unchanged.
 
