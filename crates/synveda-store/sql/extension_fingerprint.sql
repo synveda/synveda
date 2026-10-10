@@ -2,6 +2,7 @@ with extension_state as materialized (
   select extension.oid,
          extension.extowner as owner_oid,
          extension.extname,
+         extension.extversion,
          jsonb_build_array(
            extension.extname,
            extension.extversion,
@@ -466,6 +467,7 @@ with extension_state as materialized (
    limit 200
 ), fingerprints as (
 select extension.extname,
+       extension.extversion,
        pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
          jsonb_build_object(
            'metadata', extension.metadata,
@@ -511,14 +513,17 @@ select (
   select 1
     from fingerprints actual
     left join (values
-      ('btree_gin', 145::bigint, 145::bigint, 145::bigint,
+      ('btree_gin', '1.3', 145::bigint, 145::bigint, 145::bigint,
        'de5d37023e87c8306c325d8b361c08220a7d77e2cd59e2407ebe01caa881577d'),
-      ('plpgsql', 4::bigint, 0::bigint, 0::bigint,
+      ('plpgsql', '1.0', 4::bigint, 0::bigint, 0::bigint,
        '1a4cf221e73829cba2b8eb8b659e951670d04c5eb13578cfa21d06624b3eb178'),
-      ('vector', 237::bigint, 36::bigint, 54::bigint,
+      ('vector', '0.8.2', 237::bigint, 36::bigint, 54::bigint,
+       '327a24aaa912c72a161947332ad96f30431eba9e9a6e300419bda3c3a743812c'),
+      ('vector', '0.8.6', 237::bigint, 36::bigint, 54::bigint,
        '5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980')
-    ) expected(extension_name, member_count, access_count, support_count, fingerprint)
+    ) expected(extension_name, extension_version, member_count, access_count, support_count, fingerprint)
       on expected.extension_name = actual.extname
+     and expected.extension_version = actual.extversion
    where expected.extension_name is null
       or expected.member_count <> (
         select count(*) from extension_members member

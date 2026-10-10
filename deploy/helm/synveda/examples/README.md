@@ -102,9 +102,11 @@ combinations still require live qualification; see [platform evidence](../PORTAB
 
 **Check the database first.** As checked on 2026-10-10,
 [Microsoft lists pgvector 0.8.2 for PostgreSQL 17](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-versions#vector).
-That Azure Database for PostgreSQL Flexible Server combination is refused by
-Synveda's current exact 0.8.6 contract. Stop before preparation or installation
-if that is all your server offers. External mode can reuse a database hosted
+The source compatibility candidate admits that exact 0.8.2 catalogue profile;
+released v0.4.4 still refuses it. Use an application image and CLI containing
+[ADR-0140](../../../../docs/adr/adr-0140-finite-pgvector-catalogue-profiles.md)
+for evaluation, and read the known native maintenance/security limits in the
+compatibility contract. External mode can reuse a database hosted
 in Azure only when it meets the same [compatibility contract](../../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
 and [provisioning requirements](../CONFIGURATION.md#provisioning-and-privileges).
 The [issue #72 plan](../../../../docs/backlog/OPS-11.md#issue-72-postgresql-extension-compatibility-plan)
@@ -132,7 +134,7 @@ records the separate patched-version and provider qualification work.
 
    If the database does not exist yet, inspect available versions through the
    DBA's maintenance connection first; installed extensions belong to that
-   selected database. Current admission requires PostgreSQL 17, `vector` 0.8.6
+   selected database. Source admission requires PostgreSQL 17, `vector` 0.8.2 or 0.8.6
    and `btree_gin` 1.3 in `public`, and `plpgsql` 1.0 in `pg_catalog`, plus
    the required ownership/catalogue proof. A version match alone is insufficient.
    Do not downgrade a patched server to satisfy the pin or edit its catalogue.
@@ -153,6 +155,12 @@ records the separate patched-version and provider qualification work.
    portal. Preserve the existing selection when allowing `vector` and
    `btree_gin`. Allowlisting does not supply a missing version or establish
    compatibility; Microsoft [does not permit custom extension packages](https://learn.microsoft.com/en-us/azure/postgresql/extensions/how-to-create-extensions).
+
+   For a new Synveda database offering 0.8.2, the declared extension
+   administrator preinstalls `vector` with
+   `CREATE EXTENSION vector WITH SCHEMA public VERSION '0.8.2';`
+   and `btree_gin` 1.3 before application migration. Keep a verified existing
+   installation; the application performs no automatic version change.
 
    The identity owner completes the [OIDC worksheet](../CONFIGURATION.md#external-oidc-worksheet):
    public authorization-code/S256 PKCE client, exact issuer and API audience,

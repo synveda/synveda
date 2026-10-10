@@ -2349,6 +2349,22 @@ test("evaluation uses the bounded exact-role fixture and proxy-free loopback", (
   assert.deepEqual(evalFixtureFindings(dbTest, evalLib, ci, nightly), []);
   assert.ok(
     evalFixtureFindings(
+      dbTest.replace("\n    demo)\n", "\n    demo)\n      main_owner_file=forbidden\n"),
+      evalLib,
+      ci,
+      nightly,
+    ).includes("fast fixture exposes owner/lifecycle authority"),
+  );
+  assert.ok(
+    evalFixtureFindings(
+      dbTest.replace("\n    pgvector-0.8.2)\n", "\n    pgvector-0.8.2|demo)\n"),
+      evalLib,
+      ci,
+      nightly,
+    ).includes("pgvector owner authority is not confined to the reviewed case"),
+  );
+  assert.ok(
+    evalFixtureFindings(
       dbTest.replace(
         "compose run --rm --no-deps keycloak-database-bootstrap-main",
         "# missing Keycloak convergence",
@@ -2423,7 +2439,7 @@ test("shared demos execute through the fresh exact-role fixture", () => {
       "SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file",
       "SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_gateway_file",
     ),
-    dbTest.replace(
+    dbTest.replaceAll(
       "          SQLX_OFFLINE=true \\\n",
       "",
     ),
@@ -2568,7 +2584,7 @@ test("authority fingerprints use one isolated report-only catalogue snapshot", (
 
   for (const mutated of [
     dbTest.replace(
-      "  authority-fingerprints|sqlx-prepare) fast_fixture=true ;;",
+      "  authority-fingerprints|sqlx-prepare|pgvector-0.8.2) fast_fixture=true ;;",
       "  sqlx-prepare) fast_fixture=true ;;",
     ),
     dbTest.replace(

@@ -474,40 +474,38 @@ cross-process entity invalidation bus is not presumed necessary.
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open
 
-OPS-11 / CPR-45 now records the [issue #72 extension compatibility plan](OPS-11.md#issue-72-postgresql-extension-compatibility-plan).
-The source correction implements truthful provider/version documentation and
-fixed, content-free diagnostics while preserving the exact catalogue contract.
-CLI preflight currently proves roles/targets; migration/runtime proves
-extensions. Azure's documented PostgreSQL 17/pgvector 0.8.2 combination remains
-refused/unqualified. The [Azure reuse walkthrough](../../deploy/helm/synveda/examples/README.md#reuse-existing-services-on-azure)
-now documents existing AKS/external-service and VM/Compose alternatives, the
-early database stop and the minimal application footprint. It creates no new
-provider stack and claims no Azure/Entra qualification. Formatting, strict
-store/CLI Clippy, eight CLI preflight tests, three private-URL process tests,
-44 convergence tests, 28 live epoch cases, five runtime-authority cases,
-263 console tests, deployment constituent checks, chart lint/onboarding and
-the fast/dependency gates pass. The live recorder refreshed three stale FLOW-8
-explorer corpus files for existing Git export fields; exact gateway parity passes.
-Full database acceptance previously stopped on CPR-17's immediate archive/search
-assertion. The archive applies; default collection reads were selecting historical
-heads using the application clock. The current source correction selects current
-heads unless `as_known_at` explicitly requests transaction history, consistently
-through all search legs, hydration and current-state consumers. New ordinary-role
-regressions cover archive exclusion and both vector dimensions; the public case
-checks the applied outcome and historical revision. The new four-leg store
-regression, six Knowledge lifecycle cases and four Knowledge API unit cases
-pass. Fresh SQLx prepare/check and strict store/ingest/gateway/CLI Clippy pass;
-exactly four query hashes changed, with identical parameter/result descriptions.
-Unfiltered `bash scripts/db-test.sh` now passes, including the previously failing
-archive/search case, serial authority/audit/lifecycle checks, all 28 live epoch
-cases and final readiness refusal. Its owned resources and the retained debug
-fixture were cleaned through the immutable ownership receipts. The database
-blocker is resolved. Next qualify a patched pgvector release with reviewed
-catalogues and retained-data transition. Live Azure qualification is outside
-this issue #72 correction; provider support still requires a real assessment.
-No live target, credentials or qualification evidence has been supplied.
-These diagnostics do not change runtime admission
-or provider support.
+OPS-11 / CPR-45 now records the [issue #72 extension compatibility plan](OPS-11.md#issue-72-postgresql-extension-compatibility-plan)
+and [Accepted ADR-0140](../adr/adr-0140-finite-pgvector-catalogue-profiles.md).
+Current source admits exactly pgvector 0.8.2 or 0.8.6 with separate reviewed
+catalogue fingerprints; bundled packages and fresh creation remain pinned to
+0.8.6. All existing member bounds, owner/role/schema proof, Cedar, forced RLS
+and audit remain. Published migrations and application fingerprints are unchanged.
+CLI preflight proves roles/targets; migration/runtime proves extensions.
+The [Azure reuse walkthrough](../../deploy/helm/synveda/examples/README.md#reuse-existing-services-on-azure)
+supports the existing AKS/external-service and VM/Compose recipes. Azure's
+advertised 0.8.2 now fits source version admission, but catalogue/authority,
+TLS and recovery still require independent proof. Published v0.4.4 continues
+to refuse that version. No live Azure/Entra qualification is claimed or required
+for this source implementation.
+
+Fresh SQLx prepare/check passes; four extension-authority query hashes were
+reviewed with unchanged parameter/result descriptions. Genuine upstream native
+0.8.2 passes seven Knowledge store tests and all six API lifecycle cases.
+All four genuine 0.8.2 schema/native cases also pass; the default unfiltered
+0.8.6 wrapper passes its workspace, serial authority/audit/lifecycle checks,
+all 29 live epoch cases and final readiness refusal. Both fixtures clean their
+owned resources. Formatting, strict store/CLI/gateway Clippy, fast/dependency
+gates, every deployment-check constituent, chart lint, 23 onboarding tests,
+44 convergence tests, 53 CI tests and actionlint 1.7.7 pass. The repeatable
+closed fixture is documented in DEVELOPMENT and runs in Rust CI; local proof
+is macOS ARM64/OrbStack source acceptance. The earlier CPR-17 current-head
+archive/search correction and FLOW-8 live explorer refresh remain in
+[PR #75](https://github.com/synveda/synveda/pull/75) with their assertions preserved.
+Next review the completed finite profiles; no local validation blocker remains. Supporting
+0.8.2 is controlled-evaluation compatibility: known HNSW maintenance fixes in
+0.8.3/0.8.4 and the IVFFlat fix in 0.8.7 are absent upstream. Patched artifact,
+retained-data transition/recovery and provider qualification remain open in
+OPS-11; these source checks do not establish production support.
 
 The 2026-10-03 OPS-11/OPS-12/OPS-8 candidate under Accepted ADR-0137 adds native
 repeatable Kubernetes preparation, packaged customer recipes, mode-specific

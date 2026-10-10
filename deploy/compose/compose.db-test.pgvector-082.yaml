@@ -1,0 +1,22 @@
+# Fixture-only override selected by scripts/db-test.sh's closed task name.
+# Roles, credentials, networking, receipts and cleanup reuse the normal fixture.
+x-synveda-build-proxy-closure: &synveda-build-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+services:
+  postgres-main:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/postgres/Dockerfile
+      target: vector-082-fixture
+      args:
+        <<: *synveda-build-proxy-closure

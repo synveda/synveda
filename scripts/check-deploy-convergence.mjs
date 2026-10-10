@@ -201,7 +201,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "58899712df5154e716bb57d7b4f6fb4fe2b9b4ec74694efc2c20707631c7ef09"
+    "c4b973dca55d02ec2d810bde7e7e591f607d15885f580be812be0497cfe906ef"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }
@@ -308,6 +308,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
     'command -v "$docker_bin" >/dev/null 2>&1 || {',
     'if "$docker_bin" network create \\',
     'if "$docker_bin" network create \\',
+    '"$docker_bin" compose --project-name "$project" --file "$manifest" \\',
     '"$docker_bin" compose --project-name "$project" --file "$manifest" "$@"',
     '"$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null',
     '"$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null',
@@ -324,21 +325,21 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
     JSON.stringify(directDockerLines.sort()) !==
       JSON.stringify(expectedDirectDockerLines.sort()) ||
     occurrenceCount(activeDbTest, "SYNVEDA_DOCKER_BIN") !== 1 ||
-    (activeDbTest.match(/\bdocker_bin\b/g) ?? []).length !== 9 ||
+    (activeDbTest.match(/\bdocker_bin\b/g) ?? []).length !== 10 ||
     (activeDbTest.match(/\bdocker\b/g) ?? []).length !== 1 ||
     !activeDbTest.includes("docker_bin=${SYNVEDA_DOCKER_BIN:-docker}") ||
     /\bdocker["']?\s+(?:rm|rmi|image|network|system|container|volume|builder|compose)\b/.test(
       activeDbTest,
     ) ||
     aliasesDockerBinary ||
-    (activeDbTest.match(/\bcompose\b/g) ?? []).length !== 168 ||
-    composeSubcommands.length !== 159 ||
+    (activeDbTest.match(/\bcompose\b/g) ?? []).length !== 174 ||
+    composeSubcommands.length !== 163 ||
     composeSubcommands.some((subcommand) => !allowedComposeSubcommands.has(subcommand)) ||
     (activeLogicalDbTest.match(/\bnetwork\s+create\b/g) ?? []).length !== 2 ||
     (activeLogicalDbTest.match(/\bnetwork\s+rm\b/g) ?? []).length !== 1 ||
     /\bnetwork\s+(?:ls|inspect|prune|connect|disconnect)\b/.test(activeLogicalDbTest) ||
     /\bnetwork\s+(?:["']?\$|\$\{|`)/.test(activeLogicalDbTest) ||
-    occurrenceCount(activeLogicalDbTest, '"$docker_bin" compose ') !== 1 ||
+    occurrenceCount(activeLogicalDbTest, '"$docker_bin" compose ') !== 2 ||
     (activeLogicalDbTest.match(/\bdown\b/g) ?? []).length !== 1 ||
     (activeCleanup.match(/\bdown\b/g) ?? []).length !== 1 ||
     (activeLogicalDbTest.match(/\bimage\s+rm\b/g) ?? []).length !== 1 ||
@@ -709,7 +710,23 @@ export function evalFixtureFindings(dbTest, evalLib, ciWorkflow, evalWorkflow) {
   if (!fast.includes("for _ in 1 2; do")) {
     findings.push("fast fixture does not prove idempotent migration");
   }
-  if (fast.includes("main_owner_file") || fast.includes("postgres-lifecycle")) {
+  // Only the reviewed pgvector case may hold an owner URL for independent
+  // schema/drift probes. Demos and evaluations retain ordinary-role authority.
+  const nativeStart = fast.indexOf("\n    pgvector-0.8.2)\n");
+  const nativeEnd = fast.indexOf("\n    demo)\n", nativeStart);
+  const nativeCase =
+    nativeStart >= 0 && nativeEnd > nativeStart
+      ? fast.slice(nativeStart, nativeEnd)
+      : "";
+  const reviewedNativeCase =
+    occurrenceCount(fast, "\n    pgvector-0.8.2)\n") === 1 &&
+    shellBlockDigest(nativeCase) ===
+      "9036cd0e03e7f69a98c244b637fecf2d51594cc96d8257f090372550103c0764";
+  if (!reviewedNativeCase) {
+    findings.push("pgvector owner authority is not confined to the reviewed case");
+  }
+  const ordinaryFast = reviewedNativeCase ? fast.replace(nativeCase, "") : fast;
+  if (ordinaryFast.includes("main_owner_file") || ordinaryFast.includes("postgres-lifecycle")) {
     findings.push("fast fixture exposes owner/lifecycle authority");
   }
   if (!fast.includes("env -u SYNVEDA_DB_TEST_SECRETS_DIR")) {
@@ -800,12 +817,12 @@ export function sqlxPrepareFixtureFindings(dbTest) {
   const findings = [];
   if (
     !dbTest.includes(
-      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare)",
+      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2)",
     )
   ) {
     findings.push("SQLx prepare task is not explicitly allow-listed");
   }
-  if (!dbTest.includes("  authority-fingerprints|sqlx-prepare) fast_fixture=true ;;")) {
+  if (!dbTest.includes("  authority-fingerprints|sqlx-prepare|pgvector-0.8.2) fast_fixture=true ;;")) {
     findings.push("SQLx prepare task does not select the fresh exact-role fixture");
   }
   if (!dbTest.includes('if [ "$db_test_task" = sqlx-prepare ] && [ "$#" -ne 0 ]; then')) {
@@ -895,11 +912,11 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
   const findings = [];
   const taskVocabulary =
     "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|" +
-    "authority-fingerprints|sqlx-prepare)";
+    "authority-fingerprints|sqlx-prepare|pgvector-0.8.2)";
   if (!dbTest.includes(taskVocabulary)) {
     findings.push("authority fingerprint task is not explicitly allow-listed");
   }
-  if (!dbTest.includes("  authority-fingerprints|sqlx-prepare) fast_fixture=true ;;")) {
+  if (!dbTest.includes("  authority-fingerprints|sqlx-prepare|pgvector-0.8.2) fast_fixture=true ;;")) {
     findings.push("authority fingerprint task does not select the fresh exact-role fixture");
   }
   if (
@@ -1081,7 +1098,7 @@ export function demoFixtureFindings(dbTest, demoHarness, ciWorkflow) {
   const findings = [];
   if (
     !dbTest.includes(
-      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare)",
+      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2)",
     ) ||
     !dbTest.includes("  demo|product-evaluation|evaluation|longmemeval-evaluation) fast_fixture=true ;;")
   ) {

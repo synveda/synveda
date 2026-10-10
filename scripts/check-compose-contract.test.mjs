@@ -4766,7 +4766,7 @@ test("database authority helper contracts are copied and fail closed", () => {
 
   const extension = readFileSync(EXTENSION_CONTRACT, "utf8");
   assert.match(extension, /extension\.extname = 'btree_gin'[\s\S]*extension\.extversion = '1\.3'/);
-  assert.match(extension, /extension\.extname = 'vector'[\s\S]*extension\.extversion = '0\.8\.6'/);
+  assert.match(extension, /extension\.extname = 'vector'[\s\S]*extension\.extversion in \('0\.8\.2', '0\.8\.6'\)/);
   const extensionSearchPath = extension.indexOf("set search_path = pg_catalog, public;");
   const fingerprintInclude = extension.indexOf(
     "\\i /usr/local/share/synveda/extension-fingerprint-assert.psql",
@@ -4783,11 +4783,17 @@ test("database authority helper contracts are copied and fail closed", () => {
   for (const digest of [
     "de5d37023e87c8306c325d8b361c08220a7d77e2cd59e2407ebe01caa881577d",
     "1a4cf221e73829cba2b8eb8b659e951670d04c5eb13578cfa21d06624b3eb178",
+    "327a24aaa912c72a161947332ad96f30431eba9e9a6e300419bda3c3a743812c",
     "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
   ]) {
     assert.ok(fingerprint.includes(digest), `extension fingerprint lacks ${digest}`);
   }
   assert.match(fingerprint, /extension\.extname in \('plpgsql', 'btree_gin', 'vector'\)/);
+  assert.match(fingerprint, /expected\.extension_name = actual\.extname\s+and expected\.extension_version = actual\.extversion/);
+  assert.deepEqual(
+    [...fingerprint.matchAll(/\('vector', '([^']+)'/g)].map((match) => match[1]),
+    ["0.8.2", "0.8.6"],
+  );
   assert.match(fingerprint, /routine\.proowner = extension\.owner_oid/);
   assert.match(fingerprint, /language\.lanowner = extension\.owner_oid/);
   assert.match(fingerprint, /pg_identify_object_as_address/);

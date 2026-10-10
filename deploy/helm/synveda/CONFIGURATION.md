@@ -78,7 +78,7 @@ contract.
 
 The validated server is **PostgreSQL 17.11**; the runtime targets PostgreSQL 17.
 Other major versions are unqualified. The current authority contract requires
-`vector` **0.8.6**, `btree_gin` **1.3**, and standard `plpgsql` **1.0** in their
+`vector` **0.8.2 or 0.8.6**, `btree_gin` **1.3**, and standard `plpgsql` **1.0** in their
 expected schemas/ownership. The [PostgreSQL compatibility contract](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
 defines the exact catalogue and provider qualification boundary. These are
 mandatory for lexical operation as well. No AGE, PGMQ, Redis, separate vector database,
@@ -112,7 +112,8 @@ migration/operator headroom against the provider's connection limit.
 The [Azure reuse walkthrough](examples/README.md#reuse-existing-services-on-azure)
 checks available extensions before installation and reuses existing database,
 OIDC and cluster owners. Azure Flexible Server's documented PostgreSQL 17 /
-pgvector 0.8.2 combination is currently refused; the recipe does not qualify it.
+pgvector 0.8.2 combination fits the source version profile; the recipe does not
+qualify its catalogue or authority. Released v0.4.4 still refuses 0.8.2.
 
 CNPG and bundled modes run the existing bounded administrator bootstrap, then the
 same ordinary-role preflight/migrator. The bundled preparation recipe supplies
@@ -222,7 +223,7 @@ proceeding. Never run this recipe against an unrelated retained database.
 
 | DBA supplies | Required result |
 | --- | --- |
-| Server and extension versions | PostgreSQL 17 (qualified 17.11); vector 0.8.6 and btree_gin 1.3 in `public`; plpgsql 1.0 in `pg_catalog`; no extra extension/operator dependencies |
+| Server and extension versions | PostgreSQL 17 (reference qualified 17.11); vector 0.8.2 or 0.8.6 and btree_gin 1.3 in `public`; plpgsql 1.0 in `pg_catalog`; no extra extension/operator dependencies |
 | Ownership | `synveda_migrator` owns only `synveda` and its public schema/application objects; extensions retain the trusted administrator owner |
 | Runtime roles | Distinct `synveda_gateway` and `synveda_worker`; neither owns schema/data; both inherit only NOLOGIN `synveda_app` |
 | Authority | All four application roles: no superuser, BYPASSRLS, CREATEROLE, CREATEDB or replication; no privileged/default/global-object grants; ordinary logins can read the required catalogue/cluster identity proof |
@@ -238,6 +239,13 @@ also acceptable for the server owner. The provider's password ceremony must
 prevent plaintext credentials from being captured in SQL/client logs.
 
 Create the empty roles and database once:
+
+The example preinstalls the reference version 0.8.6. For a provider offering
+0.8.2 and an application/CLI candidate containing ADR-0140, replace only the
+vector creation statement with
+`CREATE EXTENSION vector WITH SCHEMA public VERSION '0.8.2';`.
+Choose one admitted version before provisioning; preserve a verified existing
+installation and its recovery material. The application does not update it.
 
 ```sh
 psql 'service=synveda-provisioning' -X -v ON_ERROR_STOP=1 <<'SQL'

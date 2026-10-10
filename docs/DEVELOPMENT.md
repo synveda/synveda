@@ -135,6 +135,7 @@ model credential:
 bash scripts/db-test.sh -p synveda-gateway --test sessions_api -- --test-threads=1
 
 make db-test                      # full fresh database suite
+SYNVEDA_DB_TEST_TASK=pgvector-0.8.2 bash scripts/db-test.sh  # genuine older-version compatibility fixture
 make claude-acceptance            # captured real frames replayed through gateway
 make eval                        # deterministic evaluation, isolated PostgreSQL
 make compose-acceptance           # fresh named project; source guide prerequisites
@@ -144,6 +145,14 @@ The database wrapper generates private credentials, migrates disposable clusters
 uses ordinary tenant transactions, and refuses skipped required database tests.
 Successful fixtures are removed; failures retain their task-owned state and
 print recovery locations. It never targets your deployment database.
+
+The pgvector 0.8.2 task uses the normal PostgreSQL 17.11 fixture and a genuine
+digest-pinned upstream native extension overlay, not a changed version string.
+It preinstalls the extension as an external DBA would, then runs normal
+bootstrap, repeated migration, Knowledge/current-history and governed API
+acceptance plus fresh/retained catalogue-drift and native HNSW maintenance
+checks. The overlaid fixture is not a release image or native-package attestation.
+The default full database gate continues to use the pinned 0.8.6 reference.
 
 `SQLX_OFFLINE=true make ci` is the broad **local aggregate**, after installing
 Rust, the pnpm workspace, cargo-deny, Helm, Docker Compose and the SDK development

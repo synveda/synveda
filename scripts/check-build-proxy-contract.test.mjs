@@ -219,7 +219,7 @@ test("the build assertion accepts only absent or empty proxy values", () => {
   }
 });
 
-test("all fourteen deployment image stages assert proxy closure first", () => {
+test("all sixteen deployment image stages assert proxy closure first", () => {
   assert.deepEqual(DOCKERFILES.toSorted(), dockerfilesBelow(join(ROOT, "deploy")));
   let stageCount = 0;
   for (const path of DOCKERFILES) {
@@ -251,7 +251,7 @@ test("all fourteen deployment image stages assert proxy closure first", () => {
       );
     }
   }
-  assert.equal(stageCount, 14);
+  assert.equal(stageCount, 16);
 });
 
 test("stage mutants cannot omit, rename, default or defer the assertion", () => {
@@ -324,6 +324,7 @@ test("every deployment Compose build supplies the exact empty proxy arguments", 
     [
       "deploy/compose/compose.apalis.dev.yaml",
       "deploy/compose/compose.browser-acceptance.dev.yaml",
+      "deploy/compose/compose.db-test.pgvector-082.yaml",
       "deploy/compose/compose.db-test.yaml",
       "deploy/compose/compose.dev.yaml",
       "deploy/compose/compose.keycloak.dev.yaml",

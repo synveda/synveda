@@ -315,7 +315,7 @@ Migration ownership remains separate: Synveda runs migrate; Keycloak owns its
 schema lifecycle. Keycloak realm export is not a database backup.
 
 In external-PostgreSQL mode, the provider/operator supplies PostgreSQL 17,
-database `synveda`, `btree_gin` 1.3 and `vector` 0.8.6 in `public`, the declared
+database `synveda`, `btree_gin` 1.3 and admitted `vector` 0.8.2 or 0.8.6 in `public`, the declared
 database owner, NOLOGIN capability role `synveda_app`, and the least-privilege
 migrator, gateway and worker logins with the exact memberships, ownership and
 ACL shape required by the role contract. The bounded `database-preflight`
@@ -333,9 +333,9 @@ The runtime targets PostgreSQL **17**; the recorded server qualification is
 External PostgreSQL is independently owned and need not use the bundled image,
 but it must satisfy the same mandatory runtime authority contract:
 
-| Extension | Exact admitted version | Schema |
+| Extension | Exact admitted versions | Schema |
 | --- | --- | --- |
-| `vector` (pgvector) | `0.8.6` | `public` |
+| `vector` (pgvector) | `0.8.2`, `0.8.6` | `public` |
 | `btree_gin` | `1.3` | `public` |
 | `plpgsql` | `1.0` | `pg_catalog` |
 
@@ -350,14 +350,21 @@ identity through `pg_control_system()` without elevated runtime authority.
 Even the deterministic lexical starter needs these extensions because its
 schema includes vector types and HNSW indexes.
 
-The exact pgvector version is the current tested catalogue contract, not a
+The finite pgvector profiles are the catalogue contract, not a
 universal functional minimum or security floor. The fingerprint verifies
 catalogue definitions and native-library references, not the loaded native
 binary. Package provenance and evidence for any vendor backport remain necessary.
-An equality change alone cannot admit another version: the version-containing
-fingerprint would still refuse it. Catalogue edits, copying a production
+Each admitted version has its own fingerprint. An equality change alone cannot
+admit another version: the version-containing fingerprint would still refuse
+it. Catalogue edits, copying a production
 fingerprint into the verifier, disabling checks and downgrading a patched
 server are not supported installation or recovery steps.
+
+[ADR-0140](adr/adr-0140-finite-pgvector-catalogue-profiles.md) adds 0.8.2 source
+compatibility for preinstalled external databases. Fresh bundled creation and
+image/package pins remain 0.8.6; ordinary startup never changes an extension
+version. Published v0.4.4 binaries still require 0.8.6. Evaluating 0.8.2 needs
+an application image and CLI containing this source change.
 
 Provider assessment checked on **2026-10-10**:
 
@@ -365,13 +372,15 @@ Provider assessment checked on **2026-10-10**:
 | --- | --- | --- |
 | Reference Compose and operator-free Kind recipes | Exact versions and authority contract above | Only the artifacts/environments in the [release record](../demos/evidence/ops12-044-controlled-release.json) and [platform reports](../deploy/helm/synveda/PORTABILITY.md#environments-and-evidence); these reports do not certify managed providers. |
 | Independently operated PostgreSQL 17 | Same exact extension, role, TLS and catalogue requirements | The existing external-service fixtures have local Kind evidence; a different server/provider needs its own live proof. |
-| Azure Database for PostgreSQL Flexible Server, PostgreSQL 17 with advertised pgvector 0.8.2 | Refused: does not match current admission | No live Azure qualification. [Microsoft's extension table](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-versions#vector) supplies the advertised version; inspect the selected server before installation. |
+| Azure Database for PostgreSQL Flexible Server, PostgreSQL 17 with advertised pgvector 0.8.2 | Version eligible under the 0.8.2 source profile; catalogue and authority must still match | No live Azure qualification. [Microsoft's extension table](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-versions#vector) supplies the advertised version; inspect the selected server before installation. Released v0.4.4 still refuses 0.8.2. |
 | Other managed PostgreSQL, including AWS RDS or Cloud SQL | No inferred admission from provider name or advertised version | No provider-specific qualification is established here. |
 
 Upstream fixed HNSW vacuum corruption after 0.8.2, with further vacuum/insert
 fixes in 0.8.4 ([changelog](https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md)).
-Admitting Azure's listed version needs evidence addressing those defects as
-well as catalogue and provider authority. Upstream also reports an IVFFlat
+The 0.8.2 compatibility profile does not include these native fixes. Its
+controlled-evaluation admission does not establish production correctness under
+concurrent index maintenance; passing bounded regressions cannot erase known
+upstream defects. Upstream also reports an IVFFlat
 index-build vulnerability affecting 0.8.6 and earlier, fixed in 0.8.7
 ([report](https://github.com/pgvector/pgvector/issues/1036)). Current HNSW use
 does not establish safety for other database principals. Patched-release

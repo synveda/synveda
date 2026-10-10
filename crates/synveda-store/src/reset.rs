@@ -682,7 +682,7 @@ async fn verify_target_schema(
                    )
                    and (
                      extension.extname = 'btree_gin' and extension.extversion = '1.3'
-                     or extension.extname = 'vector' and extension.extversion = '0.8.6'
+                     or extension.extname = 'vector' and extension.extversion in ('0.8.2', '0.8.6')
                    )
               ) = 2
               and not exists (
@@ -700,7 +700,7 @@ async fn verify_target_schema(
     })?;
     if !safe {
         return Err(Error::Invalid {
-            message: "the reset target public schema and exact vector 0.8.6 and btree_gin 1.3 prerequisites in public did not converge under the configured owners; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility"
+            message: "the reset target public schema and admitted vector 0.8.2 or 0.8.6 and btree_gin 1.3 prerequisites in public did not converge under the configured owners; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility"
                 .to_owned(),
         });
     }

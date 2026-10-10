@@ -100,6 +100,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: make check-rustdoc
       - run: cargo test --workspace --locked
+      - name: Test genuine pgvector 0.8.2 compatibility
+        run: SYNVEDA_DB_TEST_TASK=pgvector-0.8.2 bash scripts/db-test.sh
       - run: cargo build --workspace --locked
       - name: Check executable documentation
         run: make check-demos

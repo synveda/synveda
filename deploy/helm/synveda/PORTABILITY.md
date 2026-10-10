@@ -18,7 +18,8 @@ One gateway and one worker remain intentional; upgrades interrupt service.
 
 Database admission is a separate [PostgreSQL compatibility contract](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility).
 Azure Flexible Server's advertised PostgreSQL 17/pgvector 0.8.2 combination
-is currently refused even when the Kubernetes overlay renders. Other managed
+fits a source version profile but is not provider-qualified when the Kubernetes
+overlay renders. Released v0.4.4 still refuses 0.8.2. Other managed
 database support cannot be inferred from a matching version or cluster brand.
 
 The named OpenShift minors are API/policy targets, not a support promise.

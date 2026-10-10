@@ -85,7 +85,7 @@ select 1 / case when (
       join pg_catalog.pg_namespace namespace on namespace.oid = extension.extnamespace
       join pg_catalog.pg_roles owner on owner.oid = extension.extowner
      where extension.extname = 'vector'
-       and extension.extversion = '0.8.6'
+       and extension.extversion in ('0.8.2', '0.8.6')
        and namespace.nspname = 'public'
        and owner.rolname = session_user
   )
