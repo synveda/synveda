@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Method, Request, StatusCode};
-use chrono::Utc;
+use chrono::{Timelike, Utc};
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -1971,7 +1971,9 @@ async fn conflicts_are_transitional_governed_and_temporally_queryable() {
     command_as(&state, &tenant, subject, release_schedule)
         .await
         .expect("create current release schedule");
-    let transition_at = Utc::now() + chrono::Duration::days(7);
+    let transition_at = (Utc::now() + chrono::Duration::days(7))
+        .with_nanosecond(123_456_789)
+        .expect("future time has valid nanoseconds");
     let (mut future_schedule, future_id, future_revision, _) = create_command(
         alice.scope_id,
         Some(subject),
@@ -1986,14 +1988,22 @@ async fn conflicts_are_transitional_governed_and_temporally_queryable() {
     command_as(&state, &tenant, subject, future_schedule)
         .await
         .expect("open future transition");
+    let future_challenger = snapshot(&state.pool, tenant.id, future_id)
+        .await
+        .expect("future challenger retained");
     assert_eq!(
-        snapshot(&state.pool, tenant.id, future_id)
-            .await
-            .expect("future challenger retained")
-            .item
-            .lifecycle_state,
+        future_challenger.item.lifecycle_state,
         KnowledgeLifecycleState::Transitional
     );
+    // PostgreSQL stores microseconds. Resolve against the persisted revision
+    // time returned to callers, including when creation supplied nanoseconds.
+    let stored_transition_at = future_challenger.revision.content.valid_from;
+    assert_eq!(
+        stored_transition_at.timestamp_micros(),
+        transition_at.timestamp_micros()
+    );
+    assert_eq!(stored_transition_at.timestamp_subsec_nanos(), 123_456_000);
+    let transition_at = stored_transition_at;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id)
         .await
         .expect("begin transition conflict read");

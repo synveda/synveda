@@ -134,8 +134,9 @@ records the separate patched-version and provider qualification work.
 
    If the database does not exist yet, inspect available versions through the
    DBA's maintenance connection first; installed extensions belong to that
-   selected database. Source admission requires PostgreSQL 17, `vector` 0.8.2 or 0.8.6
-   and `btree_gin` 1.3 in `public`, and `plpgsql` 1.0 in `pg_catalog`, plus
+   selected database. Source admission requires PostgreSQL 17, `vector` 0.8.2,
+   0.8.3, 0.8.4, 0.8.5 or 0.8.6 and `btree_gin` 1.3 in `public`, and
+   `plpgsql` 1.0 in `pg_catalog`, plus
    the required ownership/catalogue proof. A version match alone is insufficient.
    Do not downgrade a patched server to satisfy the pin or edit its catalogue.
 

@@ -389,7 +389,7 @@ fn missing_extensions_are_refused_before_baseline_ddl() {
                 .expect_err("missing extensions must refuse before SQLx DDL");
             let message = error.to_string();
             for requirement in [
-                "vector 0.8.2 or 0.8.6 and btree_gin 1.3 in public",
+                "vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6 and btree_gin 1.3 in public",
                 "plpgsql 1.0 in pg_catalog",
                 "declared trusted extension owners and no event triggers",
                 "docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility",
@@ -437,7 +437,7 @@ fn extension_executable_drift_is_refused_on_fresh_and_current_databases() {
             let message = error.to_string();
             for requirement in [
                 "extension catalogue member identities and executable definitions",
-                "vector 0.8.2 or 0.8.6, btree_gin 1.3 and plpgsql 1.0",
+                "vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6, btree_gin 1.3 and plpgsql 1.0",
                 "docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility",
             ] {
                 assert!(message.contains(requirement), "{message}");

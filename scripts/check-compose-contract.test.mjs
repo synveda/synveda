@@ -4766,7 +4766,7 @@ test("database authority helper contracts are copied and fail closed", () => {
 
   const extension = readFileSync(EXTENSION_CONTRACT, "utf8");
   assert.match(extension, /extension\.extname = 'btree_gin'[\s\S]*extension\.extversion = '1\.3'/);
-  assert.match(extension, /extension\.extname = 'vector'[\s\S]*extension\.extversion in \('0\.8\.2', '0\.8\.6'\)/);
+  assert.match(extension, /extension\.extname = 'vector'[\s\S]*extension\.extversion in \('0\.8\.2', '0\.8\.3', '0\.8\.4', '0\.8\.5', '0\.8\.6'\)/);
   const extensionSearchPath = extension.indexOf("set search_path = pg_catalog, public;");
   const fingerprintInclude = extension.indexOf(
     "\\i /usr/local/share/synveda/extension-fingerprint-assert.psql",
@@ -4784,6 +4784,9 @@ test("database authority helper contracts are copied and fail closed", () => {
     "de5d37023e87c8306c325d8b361c08220a7d77e2cd59e2407ebe01caa881577d",
     "1a4cf221e73829cba2b8eb8b659e951670d04c5eb13578cfa21d06624b3eb178",
     "327a24aaa912c72a161947332ad96f30431eba9e9a6e300419bda3c3a743812c",
+    "ac60015ce1363b2e7a8e3361cad9dec990b2d6ecc6dbe1960a7b01a283a7af14",
+    "315535f951b8aea94d1dc841c5f800d95458feef94b9071962bdd1ae27e0a83c",
+    "b49e95e1bab2a81603ba73722a0ebd2daed082208a27fdd2d64170df51b99a6f",
     "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
   ]) {
     assert.ok(fingerprint.includes(digest), `extension fingerprint lacks ${digest}`);
@@ -4792,7 +4795,7 @@ test("database authority helper contracts are copied and fail closed", () => {
   assert.match(fingerprint, /expected\.extension_name = actual\.extname\s+and expected\.extension_version = actual\.extversion/);
   assert.deepEqual(
     [...fingerprint.matchAll(/\('vector', '([^']+)'/g)].map((match) => match[1]),
-    ["0.8.2", "0.8.6"],
+    ["0.8.2", "0.8.3", "0.8.4", "0.8.5", "0.8.6"],
   );
   assert.match(fingerprint, /routine\.proowner = extension\.owner_oid/);
   assert.match(fingerprint, /language\.lanowner = extension\.owner_oid/);

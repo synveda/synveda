@@ -24,7 +24,7 @@ esac
 
 db_test_task=${SYNVEDA_DB_TEST_TASK:-workspace}
 case "$db_test_task" in
-  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2) ;;
+  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) ;;
   *)
     echo "db-test: unknown SYNVEDA_DB_TEST_TASK" >&2
     exit 64
@@ -32,8 +32,15 @@ case "$db_test_task" in
 esac
 case "$db_test_task" in
   demo|product-evaluation|evaluation|longmemeval-evaluation) fast_fixture=true ;;
-  authority-fingerprints|sqlx-prepare|pgvector-0.8.2) fast_fixture=true ;;
+  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) fast_fixture=true ;;
   workspace) fast_fixture=false ;;
+esac
+pgvector_fixture_version=
+case "$db_test_task" in
+  pgvector-0.8.2) pgvector_fixture_version=0.8.2 ;;
+  pgvector-0.8.3) pgvector_fixture_version=0.8.3 ;;
+  pgvector-0.8.4) pgvector_fixture_version=0.8.4 ;;
+  pgvector-0.8.5) pgvector_fixture_version=0.8.5 ;;
 esac
 if [ "$db_test_task" = authority-fingerprints ] && [ "$#" -ne 0 ]; then
   echo "db-test: authority-fingerprints takes no cargo-test arguments" >&2
@@ -43,12 +50,12 @@ if [ "$db_test_task" = sqlx-prepare ] && [ "$#" -ne 0 ]; then
   echo "db-test: sqlx-prepare takes no cargo-test arguments" >&2
   exit 64
 fi
-if [ "$db_test_task" = pgvector-0.8.2 ] && [ "$#" -ne 0 ]; then
-  echo "db-test: pgvector-0.8.2 takes no cargo-test arguments" >&2
+if [ -n "$pgvector_fixture_version" ] && [ "$#" -ne 0 ]; then
+  echo "db-test: pgvector compatibility tasks take no cargo-test arguments" >&2
   exit 64
 fi
-if [ "$db_test_task" = pgvector-0.8.2 ] && [ -n "${SYNVEDA_DB_TEST_POSTGRES_IMAGE:-}" ]; then
-  echo "db-test: pgvector-0.8.2 requires the reviewed genuine fixture image" >&2
+if [ -n "$pgvector_fixture_version" ] && [ -n "${SYNVEDA_DB_TEST_POSTGRES_IMAGE:-}" ]; then
+  echo "db-test: pgvector compatibility requires the reviewed genuine fixture image" >&2
   exit 64
 fi
 if [ "$db_test_task" = demo ] && [ "$#" -lt 1 ]; then
@@ -378,12 +385,27 @@ fi
 export SYNVEDA_DB_TEST_POSTGRES_IMAGE
 
 compose() {
-  if [ "$db_test_task" = pgvector-0.8.2 ]; then
-    "$docker_bin" compose --project-name "$project" --file "$manifest" \
-      --file deploy/compose/compose.db-test.pgvector-082.yaml "$@"
-  else
-    "$docker_bin" compose --project-name "$project" --file "$manifest" "$@"
-  fi
+  case "$db_test_task" in
+    pgvector-0.8.2)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" \
+        --file deploy/compose/compose.db-test.pgvector-082.yaml "$@"
+      ;;
+    pgvector-0.8.3)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" \
+        --file deploy/compose/compose.db-test.pgvector-083.yaml "$@"
+      ;;
+    pgvector-0.8.4)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" \
+        --file deploy/compose/compose.db-test.pgvector-084.yaml "$@"
+      ;;
+    pgvector-0.8.5)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" \
+        --file deploy/compose/compose.db-test.pgvector-085.yaml "$@"
+      ;;
+    *)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" "$@"
+      ;;
+  esac
 }
 
 validate_owned_network_ledger() {
@@ -766,11 +788,12 @@ fi
 # product order, prove its peer witness, migrate idempotently, then dispatch.
 # The workspace task continues below through every hostile/two-cluster case.
 if [ "$fast_fixture" = true ]; then
-  if [ "$db_test_task" = pgvector-0.8.2 ]; then
+  if [ -n "$pgvector_fixture_version" ]; then
     # Model an external DBA's preinstalled extension. The real bootstrap must
     # verify it without changing its version or the pinned fresh-create path.
     compose exec -T postgres-main \
-      psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres <<'SQL'
+      psql -X -q -v ON_ERROR_STOP=1 -v vector_version="$pgvector_fixture_version" \
+      --username synveda_owner --dbname postgres <<'SQL'
 revoke connect, temporary on database postgres, template1 from public;
 create role synveda_migrator nologin;
 create database synveda owner synveda_migrator template template0 encoding 'UTF8';
@@ -781,14 +804,14 @@ reset role;
 \connect synveda
 alter schema public owner to synveda_migrator;
 revoke all on schema public from public;
-create extension vector with schema public version '0.8.2';
+create extension vector with schema public version :'vector_version';
 create extension btree_gin with schema public version '1.3';
 SQL
     vector_version=$(compose exec -T postgres-main \
       psql -X -qAt -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda \
       --command "select extversion from pg_catalog.pg_extension where extname = 'vector'")
-    [ "$vector_version" = '0.8.2' ] || {
-      echo "db-test: genuine pgvector 0.8.2 fixture was not installed" >&2
+    [ "$vector_version" = "$pgvector_fixture_version" ] || {
+      echo "db-test: the selected genuine pgvector fixture was not installed" >&2
       exit 1
     }
     unset vector_version
@@ -896,7 +919,7 @@ SQL
   status=0
   case "$db_test_task" in
     authority-fingerprints|sqlx-prepare) ;;
-    pgvector-0.8.2)
+    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)
       main_owner_file=$state_dir/main-owner.url
       write_database_url synveda_owner "$secret_dir/postgres_owner_password" \
         "$main_port" postgres "$main_owner_file"

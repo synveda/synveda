@@ -519,6 +519,12 @@ select (
        '1a4cf221e73829cba2b8eb8b659e951670d04c5eb13578cfa21d06624b3eb178'),
       ('vector', '0.8.2', 237::bigint, 36::bigint, 54::bigint,
        '327a24aaa912c72a161947332ad96f30431eba9e9a6e300419bda3c3a743812c'),
+      ('vector', '0.8.3', 237::bigint, 36::bigint, 54::bigint,
+       'ac60015ce1363b2e7a8e3361cad9dec990b2d6ecc6dbe1960a7b01a283a7af14'),
+      ('vector', '0.8.4', 237::bigint, 36::bigint, 54::bigint,
+       '315535f951b8aea94d1dc841c5f800d95458feef94b9071962bdd1ae27e0a83c'),
+      ('vector', '0.8.5', 237::bigint, 36::bigint, 54::bigint,
+       'b49e95e1bab2a81603ba73722a0ebd2daed082208a27fdd2d64170df51b99a6f'),
       ('vector', '0.8.6', 237::bigint, 36::bigint, 54::bigint,
        '5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980')
     ) expected(extension_name, extension_version, member_count, access_count, support_count, fingerprint)

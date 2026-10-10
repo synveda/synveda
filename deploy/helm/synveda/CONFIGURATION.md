@@ -78,7 +78,8 @@ contract.
 
 The validated server is **PostgreSQL 17.11**; the runtime targets PostgreSQL 17.
 Other major versions are unqualified. The current authority contract requires
-`vector` **0.8.2 or 0.8.6**, `btree_gin` **1.3**, and standard `plpgsql` **1.0** in their
+`vector` **0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6**, `btree_gin` **1.3**, and
+standard `plpgsql` **1.0** in their
 expected schemas/ownership. The [PostgreSQL compatibility contract](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
 defines the exact catalogue and provider qualification boundary. These are
 mandatory for lexical operation as well. No AGE, PGMQ, Redis, separate vector database,
@@ -223,7 +224,7 @@ proceeding. Never run this recipe against an unrelated retained database.
 
 | DBA supplies | Required result |
 | --- | --- |
-| Server and extension versions | PostgreSQL 17 (reference qualified 17.11); vector 0.8.2 or 0.8.6 and btree_gin 1.3 in `public`; plpgsql 1.0 in `pg_catalog`; no extra extension/operator dependencies |
+| Server and extension versions | PostgreSQL 17 (reference qualified 17.11); vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6 and btree_gin 1.3 in `public`; plpgsql 1.0 in `pg_catalog`; no extra extension/operator dependencies |
 | Ownership | `synveda_migrator` owns only `synveda` and its public schema/application objects; extensions retain the trusted administrator owner |
 | Runtime roles | Distinct `synveda_gateway` and `synveda_worker`; neither owns schema/data; both inherit only NOLOGIN `synveda_app` |
 | Authority | All four application roles: no superuser, BYPASSRLS, CREATEROLE, CREATEDB or replication; no privileged/default/global-object grants; ordinary logins can read the required catalogue/cluster identity proof |

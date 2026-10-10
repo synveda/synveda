@@ -862,7 +862,8 @@ DNS and does not run the hosts targets.
 
 The executable external mode currently pairs external PostgreSQL with external
 OIDC. The provider/operator must first provide PostgreSQL 17, create database
-`synveda`, install `btree_gin` 1.3 and admitted `vector` 0.8.2 or 0.8.6 in `public`, and create
+`synveda`, install `btree_gin` 1.3 and admitted `vector` 0.8.2, 0.8.3, 0.8.4,
+0.8.5 or 0.8.6 in `public`, and create
 the database owner plus the exact protected role shape: NOLOGIN capability role
 `synveda_app` and the least-privilege migrator, gateway and worker logins with
 the memberships, ownership and ACLs required by the selected role contract.

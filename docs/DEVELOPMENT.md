@@ -135,7 +135,9 @@ model credential:
 bash scripts/db-test.sh -p synveda-gateway --test sessions_api -- --test-threads=1
 
 make db-test                      # full fresh database suite
-SYNVEDA_DB_TEST_TASK=pgvector-0.8.2 bash scripts/db-test.sh  # genuine older-version compatibility fixture
+for version in 0.8.2 0.8.3 0.8.4 0.8.5; do
+  SYNVEDA_DB_TEST_TASK="pgvector-$version" bash scripts/db-test.sh
+done                              # genuine older-version compatibility fixtures
 make claude-acceptance            # captured real frames replayed through gateway
 make eval                        # deterministic evaluation, isolated PostgreSQL
 make compose-acceptance           # fresh named project; source guide prerequisites
@@ -146,10 +148,11 @@ uses ordinary tenant transactions, and refuses skipped required database tests.
 Successful fixtures are removed; failures retain their task-owned state and
 print recovery locations. It never targets your deployment database.
 
-The pgvector 0.8.2 task uses the normal PostgreSQL 17.11 fixture and a genuine
-digest-pinned upstream native extension overlay, not a changed version string.
-It preinstalls the extension as an external DBA would, then runs normal
-bootstrap, repeated migration, Knowledge/current-history and governed API
+Each closed pgvector 0.8.2, 0.8.3, 0.8.4 or 0.8.5 task uses the normal
+PostgreSQL 17.11 fixture and its own genuine digest-pinned upstream native
+extension overlay, not a changed version string. It preinstalls the extension
+as an external DBA would, then runs normal bootstrap, repeated migration,
+Knowledge/current-history and governed API
 acceptance plus fresh/retained catalogue-drift and native HNSW maintenance
 checks. The overlaid fixture is not a release image or native-package attestation.
 The default full database gate continues to use the pinned 0.8.6 reference.

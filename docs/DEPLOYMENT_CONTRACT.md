@@ -315,7 +315,8 @@ Migration ownership remains separate: Synveda runs migrate; Keycloak owns its
 schema lifecycle. Keycloak realm export is not a database backup.
 
 In external-PostgreSQL mode, the provider/operator supplies PostgreSQL 17,
-database `synveda`, `btree_gin` 1.3 and admitted `vector` 0.8.2 or 0.8.6 in `public`, the declared
+database `synveda`, `btree_gin` 1.3 and admitted `vector` 0.8.2, 0.8.3, 0.8.4,
+0.8.5 or 0.8.6 in `public`, the declared
 database owner, NOLOGIN capability role `synveda_app`, and the least-privilege
 migrator, gateway and worker logins with the exact memberships, ownership and
 ACL shape required by the role contract. The bounded `database-preflight`
@@ -335,7 +336,7 @@ but it must satisfy the same mandatory runtime authority contract:
 
 | Extension | Exact admitted versions | Schema |
 | --- | --- | --- |
-| `vector` (pgvector) | `0.8.2`, `0.8.6` | `public` |
+| `vector` (pgvector) | `0.8.2`, `0.8.3`, `0.8.4`, `0.8.5`, `0.8.6` | `public` |
 | `btree_gin` | `1.3` | `public` |
 | `plpgsql` | `1.0` | `pg_catalog` |
 
@@ -360,11 +361,12 @@ it. Catalogue edits, copying a production
 fingerprint into the verifier, disabling checks and downgrading a patched
 server are not supported installation or recovery steps.
 
-[ADR-0140](adr/adr-0140-finite-pgvector-catalogue-profiles.md) adds 0.8.2 source
+[ADR-0140](adr/adr-0140-finite-pgvector-catalogue-profiles.md) adds explicit
+0.8.2, 0.8.3, 0.8.4 and 0.8.5 source
 compatibility for preinstalled external databases. Fresh bundled creation and
 image/package pins remain 0.8.6; ordinary startup never changes an extension
-version. Published v0.4.4 binaries still require 0.8.6. Evaluating 0.8.2 needs
-an application image and CLI containing this source change.
+version. Published v0.4.4 binaries still require 0.8.6. Evaluating an older
+admitted version needs an application image and CLI containing this source change.
 
 Provider assessment checked on **2026-10-10**:
 
