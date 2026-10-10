@@ -2158,7 +2158,7 @@ async fn verify_application_acl(
     .map_err(|error| authority_sql_error("verify application database ACL and ownership", error))?;
     if !safe {
         return Err(Error::Invalid {
-            message: "the public application schema, objects, trusted extension ownership and synveda_app ACLs must match the migration-owned closed privilege surface".to_owned(),
+            message: "the public application schema, objects and synveda_app ACLs must match the migration-owned closed privilege surface, including trusted vector 0.8.6 and btree_gin 1.3 in public; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility".to_owned(),
         });
     }
     verify_extension_authority_connection(connection, database_roles).await?;
@@ -2223,7 +2223,7 @@ async fn verify_extension_authority_connection(
     })?;
     if !safe {
         return Err(Error::Invalid {
-            message: "the database must have no event trigger and its exact plpgsql, btree_gin and vector extension owners must be declared deployment trust roots".to_owned(),
+            message: "the database requires vector 0.8.6 and btree_gin 1.3 in public, plpgsql 1.0 in pg_catalog, declared trusted extension owners and no event triggers; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility".to_owned(),
         });
     }
     verify_extension_fingerprint(connection).await
@@ -2238,7 +2238,7 @@ async fn verify_extension_fingerprint(connection: &mut PgConnection) -> Result<(
         })?;
     if safe != Some(true) {
         return Err(Error::Invalid {
-            message: "the trusted extension member identities and executable definitions do not match the pinned PostgreSQL 17 contract".to_owned(),
+            message: "the extension catalogue member identities and executable definitions do not match the pinned PostgreSQL 17 contract for vector 0.8.6, btree_gin 1.3 and plpgsql 1.0; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility".to_owned(),
         });
     }
     Ok(())

@@ -201,7 +201,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "31d334dcabb5b999caaa5fd4605a5b9ee21696e64b3425ffea2780a640ca8d1d"
+    "58899712df5154e716bb57d7b4f6fb4fe2b9b4ec74694efc2c20707631c7ef09"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }
@@ -1442,7 +1442,7 @@ export function lifecyclePeerWitnessFindings(dbTest, dbTestCompose) {
     '[ "$preflight_status" -eq 1 ]',
     "SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed",
     "SYNVEDA_MIGRATOR_DATABASE_URL_FILE preflight timed out",
-    "SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed",
+    "SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility for PostgreSQL, extension, role and catalogue requirements",
     "return 75",
   ]) {
     if (!classifierHelper.includes(marker)) {

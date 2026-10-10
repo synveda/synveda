@@ -700,7 +700,7 @@ async fn verify_target_schema(
     })?;
     if !safe {
         return Err(Error::Invalid {
-            message: "the reset target public schema and exact extension prerequisites did not converge under the configured owners"
+            message: "the reset target public schema and exact vector 0.8.6 and btree_gin 1.3 prerequisites in public did not converge under the configured owners; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility"
                 .to_owned(),
         });
     }

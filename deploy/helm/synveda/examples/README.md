@@ -90,6 +90,123 @@ Use `postgres.storage.size/storageClass` for CNPG and
 for the other mode are refused; Helm's merged default fields cannot reveal
 whether a caller explicitly repeated a default.
 
+### Reuse existing services on Azure
+
+For a small team with an existing AKS cluster, select **external PostgreSQL +
+external OIDC** using the recipe above. Reuse its namespace, ingress, DNS/TLS,
+database and identity owners. Synveda installs one gateway serving the console,
+one worker and the bounded installation Job, with ordinary namespaced resources.
+This combination creates no PostgreSQL, Keycloak, CNPG operator or application
+data PVC. Preparation runs natively without Docker. AKS and Azure service
+combinations still require live qualification; see [platform evidence](../PORTABILITY.md#environments-and-evidence).
+
+**Check the database first.** As checked on 2026-10-10,
+[Microsoft lists pgvector 0.8.2 for PostgreSQL 17](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-versions#vector).
+That Azure Database for PostgreSQL Flexible Server combination is refused by
+Synveda's current exact 0.8.6 contract. Stop before preparation or installation
+if that is all your server offers. External mode can reuse a database hosted
+in Azure only when it meets the same [compatibility contract](../../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
+and [provisioning requirements](../CONFIGURATION.md#provisioning-and-privileges).
+The [issue #72 plan](../../../../docs/backlog/OPS-11.md#issue-72-postgresql-extension-compatibility-plan)
+records the separate patched-version and provider qualification work.
+
+1. **Inspect the existing database without changing it.** The DBA uses a
+   private `pg_service.conf` and password file with `sslmode=verify-full` and
+   the issuing CA, as in the [DBA handoff](../CONFIGURATION.md#dba-handoff).
+   The service below must select the intended application database:
+
+   ```sh
+   psql 'service=synveda-provisioning' -X -v ON_ERROR_STOP=1 <<'SQL'
+   SHOW server_version;
+   SELECT name, version, installed
+   FROM pg_available_extension_versions
+   WHERE name IN ('vector', 'btree_gin')
+   ORDER BY name, version;
+   SELECT e.extname, e.extversion, n.nspname,
+          pg_get_userbyid(e.extowner) AS owner
+   FROM pg_extension e
+   JOIN pg_namespace n ON n.oid = e.extnamespace
+   ORDER BY e.extname;
+   SQL
+   ```
+
+   If the database does not exist yet, inspect available versions through the
+   DBA's maintenance connection first; installed extensions belong to that
+   selected database. Current admission requires PostgreSQL 17, `vector` 0.8.6
+   and `btree_gin` 1.3 in `public`, and `plpgsql` 1.0 in `pg_catalog`, plus
+   the required ownership/catalogue proof. A version match alone is insufficient.
+   Do not downgrade a patched server to satisfy the pin or edit its catalogue.
+
+2. **Complete the service-owner handoff.** After the version gate, the DBA
+   provisions the exact ordinary roles and supplies three distinct credential
+   URL Secrets plus the PostgreSQL CA Secret. Each URL includes
+   `sslmode=verify-full&sslrootcert=/run/secrets/synveda-postgres/ca.crt`.
+   Edit `SERVICE_VALUES` with the actual host, Secret references and role
+   contract; the example administrator `postgres` is not an Azure mapping.
+   Provider-owned extension owners, administrator/grantor memberships,
+   `pg_control_system()` access and effective denial of maintenance/peer
+   database CONNECT must also pass. On a shared server, the DBA arranges that
+   contract without copying the dedicated-server revocations onto other users.
+
+   Flexible Server's [extension allow list](https://learn.microsoft.com/en-us/azure/postgresql/extensions/how-to-allow-extensions)
+   is managed under **Settings → Parameters → azure.extensions** in the Azure
+   portal. Preserve the existing selection when allowing `vector` and
+   `btree_gin`. Allowlisting does not supply a missing version or establish
+   compatibility; Microsoft [does not permit custom extension packages](https://learn.microsoft.com/en-us/azure/postgresql/extensions/how-to-create-extensions).
+
+   The identity owner completes the [OIDC worksheet](../CONFIGURATION.md#external-oidc-worksheet):
+   public authorization-code/S256 PKCE client, exact issuer and API audience,
+   callback `$APP_URL/auth/callback`, required groups and stable tenant UUIDv7.
+   Entra ID needs real token, group-claim and human-admission qualification;
+   no working Entra recipe or managed-identity database authentication is claimed.
+
+3. **Prepare the application.** Use the installation guide's verified matching
+   chart/image overlay and exported inputs, then run the external/external
+   preparation command above. Review its `values.json` and preserve the private
+   `PREPARED` directory and original KMS/issuer recovery material. Keep one
+   gateway, one worker and the deterministic starter providers. An existing
+   private OTLP/gRPC collector is optional through `otel.endpoint`; its
+   transport and forwarding contract is in [configuration](../CONFIGURATION.md).
+
+4. **Validate, probe and install.** Run the guide's [offline, Secrets, API
+   preflight and Helm lint commands](../README.md#5-validate-and-install)
+   sequentially. Ensure Pods can reach the database and issuer through the
+   existing private network/firewall; workstation reachability is insufficient.
+   Then run:
+
+   ```sh
+   node "$CHART/examples/operator.mjs" database-probe \
+     --prepared "$PREPARED" --architecture "$ARCHITECTURE"
+   ```
+
+   Require the printed context/namespace-pinned `kubectl wait` command to
+   complete. This probe checks connectivity, TLS, roles and database identity;
+   migration performs the complete extension proof before application DDL.
+   Only after these prerequisites pass, install:
+
+   ```sh
+   helm upgrade --install "$RELEASE" "$CHART" \
+     --kube-context "$CONTEXT" -n "$NAMESPACE" \
+     -f "$PREPARED/values.json" -f "$PREPARED/release-images.yaml" \
+     --wait --wait-for-jobs --timeout 15m
+   ```
+
+5. **Verify first use.** Follow [browser sign-in](../README.md#6-open-the-console-and-sign-in),
+   `synveda whoami --capabilities`, the governed Knowledge/context workflow and
+   [private readiness verification](../README.md#8-verify-retry-stop-and-uninstall-safely).
+   For failure, run `node "$CHART/examples/operator.mjs" diagnose --prepared "$PREPARED"`,
+   correct the named prerequisite and retry with the original files.
+
+For a team with an existing Azure VM and container engine instead of a cluster,
+use [Compose with existing infrastructure](../../../compose/PREBUILT.md#use-existing-infrastructure)
+and select `SYNVEDA_POSTGRES_MODE=external` and `SYNVEDA_OIDC_MODE=external`.
+Follow its protected-file, issuer and reference-HTTPS inputs. From the extracted
+release bundle run `./synveda-compose config`, `./synveda-compose up` and
+`./synveda-compose smoke`; a source checkout uses the guide's `make compose-*`
+equivalents. This omits bundled PostgreSQL/Keycloak while retaining the canonical
+proxy, private collector and lifecycle services. The same database compatibility
+gate applies. Neither route provisions Azure infrastructure.
+
 ## Preparation and retry
 
 `node "$CHART/examples/prepare.mjs" ...` is the single entry point. The

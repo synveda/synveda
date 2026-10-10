@@ -39,6 +39,14 @@ Customer presets in `examples/` are ordinary Helm values, packaged with the
 chart and used by tests. [The preset index](examples/README.md) lists the
 advanced combinations. No customer command depends on `ci/` fixtures.
 
+For a small team reusing an AKS cluster, PostgreSQL and OIDC, follow the
+[Azure existing-services walkthrough](examples/README.md#reuse-existing-services-on-azure).
+It checks database compatibility first, then uses the ordinary external/external
+recipe without bundled database or identity services.
+Every external database must satisfy the [PostgreSQL compatibility contract](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility),
+including the exact extension catalogue; a passing role/target probe alone
+does not establish admission.
+
 ## 2. Check prerequisites with your cluster administrator
 
 All commands below run in a **workstation terminal**, as an ordinary account.
@@ -288,6 +296,8 @@ explicitly creates a bounded temporary Job/ConfigMap, using the existing
 three-role authority verifier and no administrator credentials or DDL. Require
 its printed `kubectl wait ... Complete` command to succeed. Failure goes to
 the DBA handoff before a long Helm wait.
+The probe proves roles and target identity; migration performs the complete
+extension catalogue proof before application DDL.
 
 Now install on the workstation after every prerequisite has passed:
 

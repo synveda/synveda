@@ -694,7 +694,7 @@ classify_main_database_authority_preflight() {
   for retryable_error in \
     'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed' \
     'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE preflight timed out' \
-    'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed'; do
+    'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility for PostgreSQL, extension, role and catalogue requirements'; do
     if cmp -s -- <(printf '%s\n' "$retryable_error") "$stderr_file"; then
       return 75
     fi
@@ -3336,7 +3336,7 @@ run_main_database_preflight "$main_witness_file"
 compose exec -T postgres-main \
   psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres \
   --command 'grant synveda_owner to keycloak granted by synveda_owner'
-authority_error='synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed'
+authority_error='synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility for PostgreSQL, extension, role and catalogue requirements'
 expect_main_preflight_refusal inherited-peer-authority "$main_witness_file" "$authority_error"
 compose exec -T postgres-main \
   psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres \
@@ -3365,7 +3365,7 @@ fi
 preflight_error=
 IFS= read -r preflight_error < "$preflight_stderr" || [ -n "$preflight_error" ]
 [ "$preflight_error" = \
-  'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed' ] \
+  'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility for PostgreSQL, extension, role and catalogue requirements' ] \
   && [ "$(wc -l < "$preflight_stderr" | tr -d ' ')" -eq 1 ] || {
     echo "db-test: refused database preflight did not return one generic error" >&2
     exit 1

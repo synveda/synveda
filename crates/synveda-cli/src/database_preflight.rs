@@ -545,7 +545,7 @@ async fn inspect_connected_target(
     .await
     .map_err(|_| {
         format!(
-            "{} authority or writable-target verification failed",
+            "{} authority or writable-target verification failed; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility for PostgreSQL, extension, role and catalogue requirements",
             target.file_setting
         )
     });

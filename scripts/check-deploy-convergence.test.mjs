@@ -2855,14 +2855,26 @@ test("post-restart database readiness classifier is closed and byte-exact", () =
   };
 
   try {
+    const authorityError =
+      "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility for PostgreSQL, extension, role and catalogue requirements";
     assert.equal(classify(0, "", "database target preflight complete\n"), 0);
     for (const error of [
       "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed",
       "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE preflight timed out",
-      "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed",
+      authorityError,
     ]) {
       assert.equal(classify(1, "", `${error}\n`), 75, error);
     }
+    for (const stderr of [
+      "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed\n",
+      authorityError,
+      `${authorityError}\nextra\n`,
+      `${authorityError}\n${authorityError}\n`,
+    ]) {
+      assert.equal(classify(1, "", stderr), 1, stderr);
+    }
+    assert.equal(classify(1, "unexpected\n", `${authorityError}\n`), 1);
+    assert.equal(classify(0, "", `${authorityError}\n`), 1);
     assert.equal(classify(0, "unexpected\n", "database target preflight complete\n"), 1);
     assert.equal(classify(1, "", "database target preflight complete\n"), 1);
     assert.equal(

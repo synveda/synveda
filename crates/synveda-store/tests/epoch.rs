@@ -370,6 +370,95 @@ async fn remove_epoch_marker(pool: &PgPool) {
 
 // ── a fresh database ─────────────────────────────────────────────────────
 
+#[test]
+fn missing_extensions_are_refused_before_baseline_ddl() {
+    let Some(server) = server() else { return };
+    for statement in ["drop extension vector", "drop extension btree_gin"] {
+        let scratch = Scratch::empty(&server);
+        scratch.block_on(async {
+            let admin = connect_pool(&scratch.admin.clone().database(&scratch.name)).await;
+            sqlx::query(statement)
+                .execute(&admin)
+                .await
+                .expect("remove one extension from the isolated empty database");
+            admin.close().await;
+            let pool = connect_pool(&scratch.options).await;
+
+            let error = synveda_store::migrate(&pool, &scratch.roles)
+                .await
+                .expect_err("missing extensions must refuse before SQLx DDL");
+            let message = error.to_string();
+            for requirement in [
+                "vector 0.8.6 and btree_gin 1.3 in public",
+                "plpgsql 1.0 in pg_catalog",
+                "declared trusted extension owners and no event triggers",
+                "docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility",
+            ] {
+                assert!(message.contains(requirement), "{message}");
+            }
+            assert!(!has_marker(&pool).await);
+            let no_ledger: bool = sqlx::query_scalar(
+                "select pg_catalog.to_regclass('public._sqlx_migrations') is null",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("inspect the absent migration ledger");
+            assert!(no_ledger, "extension refusal must precede baseline DDL");
+            pool.close().await;
+        });
+    }
+}
+
+#[test]
+fn extension_executable_drift_is_refused_on_fresh_and_current_databases() {
+    let Some(server) = server() else { return };
+    for migrated in [false, true] {
+        let scratch = Scratch::empty(&server);
+        scratch.block_on(async {
+            let pool = connect_pool(&scratch.options).await;
+            let before = if migrated {
+                synveda_store::migrate(&pool, &scratch.roles)
+                    .await
+                    .expect("migrate the isolated database before drift");
+                migration_ledger(&pool).await
+            } else {
+                Vec::new()
+            };
+            let admin = connect_pool(&scratch.admin.clone().database(&scratch.name)).await;
+            sqlx::query("alter function public.vector_dims(public.vector) volatile")
+                .execute(&admin)
+                .await
+                .expect("change an extension executable property in the isolated database");
+            admin.close().await;
+
+            let error = synveda_store::migrate(&pool, &scratch.roles)
+                .await
+                .expect_err("matching versions must not admit executable drift");
+            let message = error.to_string();
+            for requirement in [
+                "extension catalogue member identities and executable definitions",
+                "vector 0.8.6, btree_gin 1.3 and plpgsql 1.0",
+                "docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility",
+            ] {
+                assert!(message.contains(requirement), "{message}");
+            }
+            assert_eq!(has_marker(&pool).await, migrated);
+            if migrated {
+                assert_eq!(migration_ledger(&pool).await, before);
+            } else {
+                let no_ledger: bool = sqlx::query_scalar(
+                    "select pg_catalog.to_regclass('public._sqlx_migrations') is null",
+                )
+                .fetch_one(&pool)
+                .await
+                .expect("inspect the absent migration ledger");
+                assert!(no_ledger, "catalogue refusal must precede baseline DDL");
+            }
+            pool.close().await;
+        });
+    }
+}
+
 /// The first install: an empty database, migrated, accepted, and carrying a
 /// marker that says who made it and when.
 #[test]

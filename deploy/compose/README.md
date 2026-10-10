@@ -871,6 +871,13 @@ Compose validates this authority and applies Synveda migrations; it does not
 provision, reset, back up or restore an externally owned cluster. Bundled
 Keycloak with external PostgreSQL remains outside this slice.
 
+Read the [PostgreSQL compatibility contract](../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
+before provisioning: exact versions, schemas, trusted owners and catalogue
+proof are required even for lexical operation. Azure Flexible Server's listed
+PostgreSQL 17/pgvector 0.8.2 combination is currently refused/unqualified.
+The CLI preflight proves roles/target identity; migration and full runtime
+authority perform the complete extension proof. Keep those checks enabled.
+
 Prepare an absolute mode-0700 secret directory owned by the configured runtime
 UID:GID. Its path must end in the exact selected project and `/secrets`, for
 example `/absolute/private/synveda-development/secrets`; a reference or
