@@ -15,6 +15,7 @@
       "viewer"
     ],
     "actions": {
+      "channel.export": true,
       "channel.pin": true,
       "channel.publish": true,
       "channel.read": true,

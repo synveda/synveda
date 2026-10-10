@@ -638,7 +638,7 @@ fn knowledge_filters(project_id: ProjectId, lifecycle: KnowledgeLifecycleState) 
         updated_before: None,
         stale: None,
         at: Utc::now(),
-        as_known_at: Utc::now(),
+        as_known_at: None,
         include_history: false,
         include_transitional: false,
     }

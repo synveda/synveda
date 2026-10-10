@@ -98,6 +98,160 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 COPY --chmod=0555 deploy/compose/postgres/synveda-pgbackrest-entrypoint /usr/local/bin/synveda-pgbackrest-entrypoint
 
+# Genuine native inputs for the isolated compatibility fixtures only.
+# The copied library and bitcode use the same PostgreSQL 17/Debian 12 ABI.
+FROM pgvector/pgvector:0.8.2-pg17-bookworm@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966 AS vector-082-source
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+
+FROM runtime AS vector-082-fixture
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+# Remove the reference installation scripts before copying the actual older
+# native extension. Package metadata belongs to the reference base; this
+# deliberately overlaid test image is never a release/provenance artifact.
+RUN rm -f /usr/share/postgresql/17/extension/vector* \
+    && rm -rf /usr/lib/postgresql/17/lib/bitcode/vector \
+    && rm -f /usr/lib/postgresql/17/lib/bitcode/vector.index.bc
+COPY --from=vector-082-source /usr/lib/postgresql/17/lib/vector.so /usr/lib/postgresql/17/lib/vector.so
+COPY --from=vector-082-source /usr/lib/postgresql/17/lib/bitcode/vector/ /usr/lib/postgresql/17/lib/bitcode/vector/
+COPY --from=vector-082-source /usr/lib/postgresql/17/lib/bitcode/vector.index.bc /usr/lib/postgresql/17/lib/bitcode/vector.index.bc
+COPY --from=vector-082-source /usr/share/postgresql/17/extension/vector* /usr/share/postgresql/17/extension/
+
+FROM pgvector/pgvector:0.8.3-pg17-bookworm@sha256:be400b50812ab2cc908ed78593fda2e51e3b45fe774fa637f1c7b16e68531d95 AS vector-083-source
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+
+FROM runtime AS vector-083-fixture
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+# Remove the reference installation scripts before copying the actual older
+# native extension. Package metadata belongs to the reference base; this
+# deliberately overlaid test image is never a release/provenance artifact.
+RUN rm -f /usr/share/postgresql/17/extension/vector* \
+    && rm -rf /usr/lib/postgresql/17/lib/bitcode/vector \
+    && rm -f /usr/lib/postgresql/17/lib/bitcode/vector.index.bc
+COPY --from=vector-083-source /usr/lib/postgresql/17/lib/vector.so /usr/lib/postgresql/17/lib/vector.so
+COPY --from=vector-083-source /usr/lib/postgresql/17/lib/bitcode/vector/ /usr/lib/postgresql/17/lib/bitcode/vector/
+COPY --from=vector-083-source /usr/lib/postgresql/17/lib/bitcode/vector.index.bc /usr/lib/postgresql/17/lib/bitcode/vector.index.bc
+COPY --from=vector-083-source /usr/share/postgresql/17/extension/vector* /usr/share/postgresql/17/extension/
+
+FROM pgvector/pgvector:0.8.4-pg17-bookworm@sha256:dd467f03ca5c5581222490e5217e48a262864ccb659be559f8491bbafdc97da0 AS vector-084-source
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+
+FROM runtime AS vector-084-fixture
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+# Remove the reference installation scripts before copying the actual older
+# native extension. Package metadata belongs to the reference base; this
+# deliberately overlaid test image is never a release/provenance artifact.
+RUN rm -f /usr/share/postgresql/17/extension/vector* \
+    && rm -rf /usr/lib/postgresql/17/lib/bitcode/vector \
+    && rm -f /usr/lib/postgresql/17/lib/bitcode/vector.index.bc
+COPY --from=vector-084-source /usr/lib/postgresql/17/lib/vector.so /usr/lib/postgresql/17/lib/vector.so
+COPY --from=vector-084-source /usr/lib/postgresql/17/lib/bitcode/vector/ /usr/lib/postgresql/17/lib/bitcode/vector/
+COPY --from=vector-084-source /usr/lib/postgresql/17/lib/bitcode/vector.index.bc /usr/lib/postgresql/17/lib/bitcode/vector.index.bc
+COPY --from=vector-084-source /usr/share/postgresql/17/extension/vector* /usr/share/postgresql/17/extension/
+
+FROM pgvector/pgvector:0.8.5-pg17-bookworm@sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0 AS vector-085-source
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+
+FROM runtime AS vector-085-fixture
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+# Remove the reference installation scripts before copying the actual older
+# native extension. Package metadata belongs to the reference base; this
+# deliberately overlaid test image is never a release/provenance artifact.
+RUN rm -f /usr/share/postgresql/17/extension/vector* \
+    && rm -rf /usr/lib/postgresql/17/lib/bitcode/vector \
+    && rm -f /usr/lib/postgresql/17/lib/bitcode/vector.index.bc
+COPY --from=vector-085-source /usr/lib/postgresql/17/lib/vector.so /usr/lib/postgresql/17/lib/vector.so
+COPY --from=vector-085-source /usr/lib/postgresql/17/lib/bitcode/vector/ /usr/lib/postgresql/17/lib/bitcode/vector/
+COPY --from=vector-085-source /usr/lib/postgresql/17/lib/bitcode/vector.index.bc /usr/lib/postgresql/17/lib/bitcode/vector.index.bc
+COPY --from=vector-085-source /usr/share/postgresql/17/extension/vector* /usr/share/postgresql/17/extension/
+
 # Default final stage for development, reference, tests and release builds.
 # Database creation and extensions always use the reviewed bootstrap command;
 # no image-level initdb hook owns schema or role lifecycle.

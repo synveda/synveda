@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Method, Request, StatusCode};
-use chrono::Utc;
+use chrono::{Timelike, Utc};
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -1480,7 +1480,8 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
     )
     .await;
     assert_eq!(archive_status, StatusCode::CREATED, "{archived}");
-    let (_, _, active_search) = api(
+    assert_eq!(archived["outcome"], "applied", "{archived}");
+    let (active_search_status, _, active_search) = api(
         &app,
         Method::GET,
         "/v1/knowledge?query=provider%20event%20id",
@@ -1489,7 +1490,12 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
         None,
     )
     .await;
-    assert_eq!(active_search["items"], json!([]));
+    assert_eq!(active_search_status, StatusCode::OK, "{active_search}");
+    assert_eq!(active_search["items"], json!([]), "{active_search}");
+    let (active_list_status, _, active_list) =
+        api(&app, Method::GET, "/v1/knowledge", &bob_token, None, None).await;
+    assert_eq!(active_list_status, StatusCode::OK, "{active_list}");
+    assert_eq!(active_list["items"], json!([]), "{active_list}");
     let (_, _, archived_search) = api(
         &app,
         Method::GET,
@@ -1500,6 +1506,28 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
     )
     .await;
     assert_eq!(archived_search["items"][0]["id"], shared_id.to_string());
+    assert_eq!(archived_search["items"][0]["lifecycle_state"], "archived");
+    let known_at_creation = detail["updated_at"]
+        .as_str()
+        .expect("database-stamped first head time")
+        .replace(':', "%3A")
+        .replace('+', "%2B");
+    let (historical_status, _, historical) = api(
+        &app,
+        Method::GET,
+        &format!("/v1/knowledge?query=webhook&as_known_at={known_at_creation}"),
+        &bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(historical_status, StatusCode::OK, "{historical}");
+    assert_eq!(historical["items"][0]["id"], shared_id.to_string());
+    assert_eq!(historical["items"][0]["lifecycle_state"], "active");
+    assert_eq!(
+        historical["items"][0]["current_revision"]["id"],
+        first_revision.to_string()
+    );
     let restore_body = json!({
         "expected_revision_id": second_revision,
         "reason": "acceptance restore"
@@ -1555,7 +1583,7 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
             updated_before: None,
             stale: None,
             at: Utc::now(),
-            as_known_at: Utc::now(),
+            as_known_at: None,
             include_history: false,
             include_transitional: false,
         },
@@ -1943,7 +1971,9 @@ async fn conflicts_are_transitional_governed_and_temporally_queryable() {
     command_as(&state, &tenant, subject, release_schedule)
         .await
         .expect("create current release schedule");
-    let transition_at = Utc::now() + chrono::Duration::days(7);
+    let transition_at = (Utc::now() + chrono::Duration::days(7))
+        .with_nanosecond(123_456_789)
+        .expect("future time has valid nanoseconds");
     let (mut future_schedule, future_id, future_revision, _) = create_command(
         alice.scope_id,
         Some(subject),
@@ -1958,14 +1988,22 @@ async fn conflicts_are_transitional_governed_and_temporally_queryable() {
     command_as(&state, &tenant, subject, future_schedule)
         .await
         .expect("open future transition");
+    let future_challenger = snapshot(&state.pool, tenant.id, future_id)
+        .await
+        .expect("future challenger retained");
     assert_eq!(
-        snapshot(&state.pool, tenant.id, future_id)
-            .await
-            .expect("future challenger retained")
-            .item
-            .lifecycle_state,
+        future_challenger.item.lifecycle_state,
         KnowledgeLifecycleState::Transitional
     );
+    // PostgreSQL stores microseconds. Resolve against the persisted revision
+    // time returned to callers, including when creation supplied nanoseconds.
+    let stored_transition_at = future_challenger.revision.content.valid_from;
+    assert_eq!(
+        stored_transition_at.timestamp_micros(),
+        transition_at.timestamp_micros()
+    );
+    assert_eq!(stored_transition_at.timestamp_subsec_nanos(), 123_456_000);
+    let transition_at = stored_transition_at;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id)
         .await
         .expect("begin transition conflict read");

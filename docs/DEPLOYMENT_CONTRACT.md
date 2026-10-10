@@ -315,7 +315,8 @@ Migration ownership remains separate: Synveda runs migrate; Keycloak owns its
 schema lifecycle. Keycloak realm export is not a database backup.
 
 In external-PostgreSQL mode, the provider/operator supplies PostgreSQL 17,
-database `synveda`, `btree_gin` 1.3 and `vector` 0.8.6 in `public`, the declared
+database `synveda`, `btree_gin` 1.3 and admitted `vector` 0.8.2, 0.8.3, 0.8.4,
+0.8.5 or 0.8.6 in `public`, the declared
 database owner, NOLOGIN capability role `synveda_app`, and the least-privilege
 migrator, gateway and worker logins with the exact memberships, ownership and
 ACL shape required by the role contract. The bounded `database-preflight`
@@ -325,6 +326,84 @@ this is hostname-and-chain verification, not exclusive certificate pinning.
 The current SQLx native-TLS path is documented for one PEM root certificate
 until a larger bundle is live-proven. External backup, restore, reset and
 bundled-Keycloak database bootstrap remain refused.
+
+### PostgreSQL compatibility
+
+The runtime targets PostgreSQL **17**; the recorded server qualification is
+**17.11**. Bundled image digests and package versions pin reproducible artifacts.
+External PostgreSQL is independently owned and need not use the bundled image,
+but it must satisfy the same mandatory runtime authority contract:
+
+| Extension | Exact admitted versions | Schema |
+| --- | --- | --- |
+| `vector` (pgvector) | `0.8.2`, `0.8.3`, `0.8.4`, `0.8.5`, `0.8.6` | `public` |
+| `btree_gin` | `1.3` | `public` |
+| `plpgsql` | `1.0` | `pg_catalog` |
+
+Declared deployment trust roots own the extensions. No extra extensions or
+event triggers are admitted. The [shared extension fingerprint](../crates/synveda-store/sql/extension_fingerprint.sql)
+binds versions, member identities, routine definitions, operators and support
+functions. The [runtime verifier](../crates/synveda-store/src/runtime_role.rs)
+also checks exact ownership, grants, role isolation and forced RLS. Provider
+administrator/member/grantor identities must be declared accurately; the
+ordinary roles must be able to read the required catalogues and cluster
+identity through `pg_control_system()` without elevated runtime authority.
+Even the deterministic lexical starter needs these extensions because its
+schema includes vector types and HNSW indexes.
+
+The finite pgvector profiles are the catalogue contract, not a
+universal functional minimum or security floor. The fingerprint verifies
+catalogue definitions and native-library references, not the loaded native
+binary. Package provenance and evidence for any vendor backport remain necessary.
+Each admitted version has its own fingerprint. An equality change alone cannot
+admit another version: the version-containing fingerprint would still refuse
+it. Catalogue edits, copying a production
+fingerprint into the verifier, disabling checks and downgrading a patched
+server are not supported installation or recovery steps.
+
+[ADR-0140](adr/adr-0140-finite-pgvector-catalogue-profiles.md) adds explicit
+0.8.2, 0.8.3, 0.8.4 and 0.8.5 source
+compatibility for preinstalled external databases. Fresh bundled creation and
+image/package pins remain 0.8.6; ordinary startup never changes an extension
+version. Published v0.4.4 binaries still require 0.8.6. Evaluating an older
+admitted version needs an application image and CLI containing this source change.
+
+Provider assessment checked on **2026-10-10**:
+
+| Target | Current admission | Qualification boundary |
+| --- | --- | --- |
+| Reference Compose and operator-free Kind recipes | Exact versions and authority contract above | Only the artifacts/environments in the [release record](../demos/evidence/ops12-044-controlled-release.json) and [platform reports](../deploy/helm/synveda/PORTABILITY.md#environments-and-evidence); these reports do not certify managed providers. |
+| Independently operated PostgreSQL 17 | Same exact extension, role, TLS and catalogue requirements | The existing external-service fixtures have local Kind evidence; a different server/provider needs its own live proof. |
+| Azure Database for PostgreSQL Flexible Server, PostgreSQL 17 with advertised pgvector 0.8.2 | Version eligible under the 0.8.2 source profile; catalogue and authority must still match | No live Azure qualification. [Microsoft's extension table](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-versions#vector) supplies the advertised version; inspect the selected server before installation. Released v0.4.4 still refuses 0.8.2. |
+| Other managed PostgreSQL, including AWS RDS or Cloud SQL | No inferred admission from provider name or advertised version | No provider-specific qualification is established here. |
+
+Upstream fixed HNSW vacuum corruption after 0.8.2, with further vacuum/insert
+fixes in 0.8.4 ([changelog](https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md)).
+The 0.8.2 compatibility profile does not include these native fixes. Its
+controlled-evaluation admission does not establish production correctness under
+concurrent index maintenance; passing bounded regressions cannot erase known
+upstream defects. Upstream also reports an IVFFlat
+index-build vulnerability affecting 0.8.6 and earlier, fixed in 0.8.7
+([report](https://github.com/pgvector/pgvector/issues/1036)). Current HNSW use
+does not establish safety for other database principals. Patched-release
+qualification and a reviewed retained-data transition are tracked in the
+[issue #72 follow-up](backlog/OPS-11.md#separately-gated-patched-version-and-azure-qualification).
+
+`synveda db preflight` checks the declared endpoint, verified external TLS,
+roles and writable database identity. Its fixed authority error links here
+without disclosing private connection facts or identifying an extension mismatch.
+The preflight does **not** currently prove the complete extension catalogue.
+Clean migration performs that proof before SQLx application DDL; existing-schema
+migration and full runtime authority/readiness also require it. A successful
+role/target probe must still be followed by normal migration and readiness.
+
+Managed services can also fail on provider-controlled extension owners, extra
+extensions, administrator grantors, catalogue/cluster-identity access or
+effective maintenance/peer database CONNECT. Service owners must arrange those
+prerequisites without granting superuser or `BYPASSRLS` to application roles.
+Use the [small-team Azure reuse instructions](../deploy/helm/synveda/examples/README.md#reuse-existing-services-on-azure)
+for the existing AKS/external-services or VM/Compose recipes. They provision
+no Azure infrastructure and do not change these qualification boundaries.
 
 ## OIDC contract
 

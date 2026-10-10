@@ -68,6 +68,179 @@ issuer contracts without an SCC exception or authority bypass. The
 platform inputs; the [runbook](../../deploy/helm/synveda/OPERATIONS.md) owns
 backup, restore and rollback procedure.
 
+### Issue #72: PostgreSQL extension compatibility plan
+
+[Issue #72](https://github.com/synveda/synveda/issues/72) identifies the reference
+pgvector 0.8.6 pin as a blocker for existing Azure PostgreSQL deployments.
+The owner subsequently requests genuine pgvector 0.8.2, 0.8.3, 0.8.4 and
+0.8.5 source compatibility, with live Azure qualification excluded from this
+implementation.
+[Accepted ADR-0140](../adr/adr-0140-finite-pgvector-catalogue-profiles.md) records
+that finite admission decision. OPS-11 owns the external-provider boundary;
+CPR-45 owns the shared deployment contract.
+
+#### Current admission and evidence
+
+Current source admits exactly `vector` 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6
+in `public`, `btree_gin` 1.3 in `public` and `plpgsql` 1.0 in `pg_catalog`,
+under declared trusted owners.
+The [shared fingerprint](../../crates/synveda-store/sql/extension_fingerprint.sql)
+joins extension name and exact version to separate reviewed digests. All five
+vector profiles contain 237 members, 36 access operators and 54 support
+functions; all original traversal bounds remain. No range, suffix, provider
+exception, authority bypass or relaxed executable check is admitted.
+
+The upstream `v0.8.2...v0.8.6` SQL comparison adds only empty update scripts.
+An independent inventory from genuine upstream 0.8.2 differs only in its
+version-bearing metadata; its native catalogue digest is recorded in ADR-0140.
+Positive acceptance uses the actual digest-pinned native 0.8.2 library, bitcode
+and installation scripts, never a relabelled `pg_extension.extversion`.
+The [image inventory](../../deploy/helm/IMAGES.md) records its PostgreSQL licence.
+The fixture overlays those inputs on the reference PostgreSQL 17.11 base and
+is never a release image or package-provenance claim.
+
+Bundled packages and fresh administrative creation stay pinned to 0.8.6.
+An external DBA may preinstall an admitted version; ordinary migration and
+retained bootstrap verify it without changing its version. Published `0001`, additive `0002`/`0003`,
+SQLx ledger checksums, schema epoch and application catalogue fingerprints
+remain immutable. External destructive reset and automatic extension update
+or downgrade are outside the supported lifecycle.
+
+The baseline uses cosine HNSW indexes at 16 and 1024 dimensions. No inspected
+current query or setting requires a feature introduced in 0.8.6. This is
+source compatibility for controlled evaluation, not production or provider
+certification: [upstream](https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md)
+fixes HNSW vacuum corruption in 0.8.3 and further vacuum/insert errors in 0.8.4.
+All admitted versions also have the IVFFlat index-build vulnerability fixed
+in 0.8.7 ([upstream report](https://github.com/pgvector/pgvector/issues/1036)).
+Runtime roles have no DDL and product indexes use HNSW; those boundaries do not
+prove native defects absent. Fingerprints check catalogue definitions and
+library references, not loaded binaries or provider backports.
+
+#### Preflight and runtime expectations
+
+The [CLI preflight](../../crates/synveda-cli/src/database_preflight.rs) proves
+roles, memberships, target identity and peer isolation. Clean migration proves
+extensions before baseline DDL; retained migration and full runtime authority
+prove the extension catalogue through application ACL verification. A passed
+`db preflight` alone therefore does not establish extension compatibility.
+The fixed content-free authority refusals link to
+[the complete contract](../DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
+without exposing credentials, private paths or existence-sensitive details.
+The restart wrapper retains its exact status/stdout/stderr classifier.
+
+Catalogue drift, extra extensions, wrong schema/owner, event triggers, unsafe
+roles, peer CONNECT, old epochs and wrong migration checksums still refuse.
+Cedar, forced RLS, VedaFlow and content-free audit remain mandatory on the
+ordinary tenant and authenticated API paths.
+
+#### Small-team Azure reuse
+
+[The Azure walkthrough](../../deploy/helm/synveda/examples/README.md#reuse-existing-services-on-azure)
+uses the maintained external/external Helm recipe or VM/Compose alternative.
+An existing AKS deployment needs one gateway/console, one worker and the
+bounded installation Job. PostgreSQL, the issuer, storage, network, credentials
+and recovery may remain with the team's existing services; no new provider
+stack or operator is required.
+
+[Microsoft's current extension table](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-versions#vector)
+lists a version for PostgreSQL 17 that fits the 0.8.2 source profile. That
+removes the version blocker only. The DBA must still prove allowed schemas/extensions, trusted
+administrator/grantor identities, ordinary-role catalogue and cluster-identity
+access, effective peer isolation and verified TLS before product installation.
+Do not run dedicated-server revocations against unrelated shared deployments.
+AKS, Entra, managed-identity database login and Azure recovery have no live
+qualification here. Published v0.4.4 still requires 0.8.6; a source candidate
+containing ADR-0140 is needed to exercise the new profile.
+
+#### Runnable acceptance and current checkpoint
+
+```sh
+make check-fast check-deps check-ci
+cargo fmt --all --check
+SQLX_OFFLINE=true cargo clippy -p synveda-store --all-targets -- -D warnings
+SYNVEDA_DB_TEST_TASK=sqlx-prepare bash scripts/db-test.sh
+for version in 0.8.2 0.8.3 0.8.4 0.8.5; do
+  SYNVEDA_DB_TEST_TASK="pgvector-$version" bash scripts/db-test.sh
+done
+make check-deploy chart-lint
+bash scripts/db-test.sh
+git diff --check
+```
+
+Each closed compatibility task provisions its own genuine extension installation, runs
+normal bootstrap twice, preflight and repeated migration, then ordinary-role
+Knowledge and authenticated API acceptance. After those tests it removes only
+its owned product database so independent scratch-schema tests do not create
+forbidden cross-database role dependencies. Those cases cover fresh/repeated
+migration, missing extensions, executable drift before DDL and on current
+schema, and native indexed cosine results at both dimensions after
+insert/update/delete, vacuum and reindex. Basic maintenance checks do not
+address the known concurrent-vacuum defects. The Rust CI job runs all four
+closed tasks; the unfiltered default wrapper separately exercises 0.8.6 and
+all authority/audit/lifecycle cases. Missing services are validation gaps.
+
+Fresh SQLx prepare/check passes. Exactly four generated query replacements
+were reviewed for extension fingerprint, runtime version/ACL proof and reset
+schema proof; parameter/result descriptions are unchanged. Each genuine 0.8.2,
+0.8.3, 0.8.4 and 0.8.5 task passes seven Knowledge store tests, all six API
+lifecycle cases and all four schema/native cases, including an actual indexed
+vector update before vacuum/reindex at both dimensions. Successful profile
+and SQLx wrappers remove their owned resources; the failed timestamp reproduction
+was separately removed after immutable receipt, ID and label verification.
+The full default 0.8.6 wrapper passes its workspace and serial authority/audit/
+lifecycle phases, all 29 live epoch cases and the final readiness refusal.
+Its owned containers, volumes and reserved networks are cleaned successfully.
+
+Formatting, strict store/CLI/gateway Clippy, fast/dependency gates and the
+aggregate `make check-deploy chart-lint check-ci` pass, including 23 onboarding,
+45 convergence and 53 CI tests. Pinned actionlint 1.7.7 also passes. The proxy
+inventory includes all 22 guarded image stages and fixed fixture overrides;
+canonical context, genuine targets and exact empty proxy arguments remain
+mandatory. The reviewed native
+case alone may hold an owner URL; mutation tests preserve the ordinary-role
+boundary for demos/evaluations and reject dispatch aliases. These are local
+macOS ARM64/OrbStack source checks, not new release/provider qualification.
+The Rust CI job supplies the repeatable genuine fixtures on Linux AMD64.
+The earlier CPR-17 archive/search and FLOW-8 explorer-fixture corrections are
+included in [PR #75](https://github.com/synveda/synveda/pull/75); their existing
+assertions remain intact.
+
+#### CI timestamp regression
+
+[CI 38070493612](https://github.com/synveda/synveda/actions/runs/38070493612)
+failed only its Rust job: a future-conflict fixture reused a nanosecond timestamp
+after PostgreSQL persisted microseconds. A forced-nanosecond reproduction fails
+before the fixture correction. All six lifecycle cases then pass against the
+persisted revision timestamp with explicit microsecond assertions; production
+transition equality, Cedar, VedaFlow, forced RLS and audit checks remain intact.
+Hosted Linux validation of the profiles and fixture correction is tracked in
+[PR #75](https://github.com/synveda/synveda/pull/75), separately from local evidence.
+
+#### Separately gated patched-version and Azure qualification
+
+Qualify 0.8.7 or a subsequently verified patched native release with genuine
+pinned AMD64/ARM64 and CNPG inputs, reviewed SQL/native differences and package
+provenance. Derive each digest from clean installations and preserve every
+catalogue bound. Supporting several external profiles does not require
+floating bundled dependencies or automatic native transitions.
+
+Retained-data extension transition needs writer quiescence, joint recovery
+material, a deliberate DBA update, candidate migration and verified restart.
+Old binaries refuse changed fingerprints; rollback and failed-transition
+recovery require independent proof. Include concurrent write/vacuum acceptance
+addressing the upstream defects, tenant isolation, governed writes, audit and
+retrieval before changing production claims.
+
+Live Azure qualification remains outside this implementation. A selected
+real PostgreSQL 17 target must independently prove authority, TLS, migration,
+Cedar/forced RLS, governed writes, retrieval, restart and recovery before an
+Azure support claim. Coordinate that work with OPS-6, OPS-12, CPR-45 and CTX-7.
+**Current next action:** review PR #75's completed finite profiles and hosted
+check results. No local source-validation blocker remains. Patched native
+artifact/catalogue and retained-data transition qualification remain the
+technical follow-up. Live provider proof stays excluded from this implementation.
+
 ## Acceptance criteria
 
 - The published chart and image digests remain tied to the tested source.

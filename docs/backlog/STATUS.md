@@ -474,6 +474,43 @@ cross-process entity invalidation bus is not presumed necessary.
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open
 
+OPS-11 / CPR-45 now records the [issue #72 extension compatibility plan](OPS-11.md#issue-72-postgresql-extension-compatibility-plan)
+and [Accepted ADR-0140](../adr/adr-0140-finite-pgvector-catalogue-profiles.md).
+Current source admits exactly pgvector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6
+with separate reviewed catalogue fingerprints; bundled packages and fresh
+creation remain pinned to 0.8.6. All existing member bounds, owner/role/schema proof, Cedar, forced RLS
+and audit remain. Published migrations and application fingerprints are unchanged.
+CLI preflight proves roles/targets; migration/runtime proves extensions.
+The [Azure reuse walkthrough](../../deploy/helm/synveda/examples/README.md#reuse-existing-services-on-azure)
+supports the existing AKS/external-service and VM/Compose recipes. Azure's
+advertised 0.8.2 now fits source version admission, but catalogue/authority,
+TLS and recovery still require independent proof. Published v0.4.4 continues
+to refuse that version. No live Azure/Entra qualification is claimed or required
+for this source implementation.
+
+Fresh SQLx prepare/check passes; four extension-authority query hashes were
+reviewed with unchanged parameter/result descriptions. Genuine upstream native
+0.8.2, 0.8.3, 0.8.4 and 0.8.5 each pass seven Knowledge store tests, all six
+API lifecycle cases and all four schema/native cases. The default unfiltered
+0.8.6 wrapper passes its workspace, serial authority/audit/lifecycle checks,
+all 29 live epoch cases and final readiness refusal. Successful fixtures clean
+their owned resources.
+Formatting, strict store/CLI/gateway Clippy, fast/dependency gates and the
+aggregate deployment/chart/CI gates pass, including 23 onboarding, 45 convergence
+and 53 CI tests, plus actionlint 1.7.7. The repeatable closed fixtures are
+documented in DEVELOPMENT and run in Rust CI; local proof
+is macOS ARM64/OrbStack source acceptance. The earlier CPR-17 current-head
+archive/search correction and FLOW-8 live explorer refresh remain in
+[PR #75](https://github.com/synveda/synveda/pull/75) with their assertions preserved.
+The prior Rust CI failure reproduces a nanosecond fixture mismatch; the corrected
+persisted-time fixture passes all six lifecycle cases with explicit microsecond
+assertions. Next review the completed profiles and hosted PR checks; no local
+source-validation blocker remains. Supporting
+0.8.2 is controlled-evaluation compatibility: known HNSW maintenance fixes in
+0.8.3/0.8.4 and the IVFFlat fix in 0.8.7 are absent upstream. Patched artifact,
+retained-data transition/recovery and provider qualification remain open in
+OPS-11; these source checks do not establish production support.
+
 The 2026-10-03 OPS-11/OPS-12/OPS-8 candidate under Accepted ADR-0137 adds native
 repeatable Kubernetes preparation, packaged customer recipes, mode-specific
 storage refusal, prerequisite checks, private human admission, readiness tests

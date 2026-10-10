@@ -832,8 +832,8 @@ fn parse_filters(params: &ListKnowledgeParams, now: DateTime<Utc>) -> Result<Fil
         ),
         None => None,
     };
-    let as_known_at = params.as_known_at.unwrap_or(now);
-    if as_known_at > now {
+    let as_known_at = params.as_known_at;
+    if as_known_at.is_some_and(|cutoff| cutoff > now) {
         return Err(Error::Invalid {
             message: "as_known_at cannot be in the future".to_owned(),
         });
@@ -1322,7 +1322,7 @@ struct VisibilityPage<'a> {
     more_candidates: bool,
     filter_digest: &'a str,
     at: DateTime<Utc>,
-    as_known_at: DateTime<Utc>,
+    as_known_at: Option<DateTime<Utc>>,
     stale_filter: Option<bool>,
 }
 
@@ -1330,9 +1330,12 @@ async fn hydrate_candidate(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     item_id: KnowledgeItemId,
-    as_known_at: DateTime<Utc>,
+    as_known_at: Option<DateTime<Utc>>,
 ) -> Result<Option<KnowledgeSnapshot>> {
-    store::as_known_at(&mut *tx, tenant_id, item_id, as_known_at).await
+    match as_known_at {
+        Some(cutoff) => store::as_known_at(&mut *tx, tenant_id, item_id, cutoff).await,
+        None => store::current(&mut *tx, tenant_id, item_id).await,
+    }
 }
 
 async fn snapshot_freshness(
@@ -2094,6 +2097,31 @@ pub(crate) async fn usage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn valid_time_does_not_implicitly_select_transaction_history() {
+        let now = Utc::now();
+        let past = now - chrono::Duration::days(1);
+        let mut params = ListKnowledgeParams {
+            as_of: Some(past),
+            ..ListKnowledgeParams::default()
+        };
+        let filters = parse_filters(&params, now).expect("current heads at past valid time");
+        assert_eq!(filters.at, past);
+        assert_eq!(filters.as_known_at, None);
+        params.as_known_at = Some(past);
+        assert_eq!(
+            parse_filters(&params, now)
+                .expect("explicit transaction history")
+                .as_known_at,
+            Some(past)
+        );
+        params.as_known_at = Some(now + chrono::Duration::seconds(1));
+        assert!(matches!(
+            parse_filters(&params, now),
+            Err(Error::Invalid { .. })
+        ));
+    }
 
     #[test]
     fn cursor_is_bound_to_filters_and_mode() {

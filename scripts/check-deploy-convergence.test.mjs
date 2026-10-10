@@ -2341,12 +2341,74 @@ test("database fixtures reject an unsafe physical temp root before mutation", ()
   }
 });
 
+test("pgvector compatibility tasks refuse caller images and arguments before Docker", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-pgvector-input-refusal-"));
+  try {
+    installPoisonDocker(scratch);
+    const fixtureEnv = {
+      ...process.env,
+      KEEP_TEST_DB: "",
+      SYNVEDA_DOCKER_BIN: join(scratch, "docker"),
+      SYNVEDA_DB_TEST_POSTGRES_IMAGE: "",
+    };
+    for (const version of ["0.8.2", "0.8.3", "0.8.4", "0.8.5"]) {
+      const task = `pgvector-${version}`;
+      const argumentsResult = spawnSync("bash", [DB_TEST, "--unreviewed-argument"], {
+        encoding: "utf8",
+        timeout: SUBPROCESS_TIMEOUT_MS,
+        env: { ...fixtureEnv, SYNVEDA_DB_TEST_TASK: task },
+      });
+      assert.equal(argumentsResult.status, 64, argumentsResult.stderr);
+      assert.match(argumentsResult.stderr, /take no cargo-test arguments/);
+      const imageResult = spawnSync("bash", [DB_TEST], {
+        encoding: "utf8",
+        timeout: SUBPROCESS_TIMEOUT_MS,
+        env: {
+          ...fixtureEnv,
+          SYNVEDA_DB_TEST_TASK: task,
+          SYNVEDA_DB_TEST_POSTGRES_IMAGE: "unreviewed-native-image",
+        },
+      });
+      assert.equal(imageResult.status, 64, imageResult.stderr);
+      assert.match(imageResult.stderr, /requires the reviewed genuine fixture image/);
+    }
+    for (const task of ["pgvector-0.8.1", "pgvector-0.8.7", "pgvector-0.8.3-extra"]) {
+      const result = spawnSync("bash", [DB_TEST], {
+        encoding: "utf8",
+        timeout: SUBPROCESS_TIMEOUT_MS,
+        env: { ...fixtureEnv, SYNVEDA_DB_TEST_TASK: task },
+      });
+      assert.equal(result.status, 64, result.stderr);
+      assert.match(result.stderr, /unknown SYNVEDA_DB_TEST_TASK/);
+    }
+    assertPoisonDockerUntouched(scratch);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test("evaluation uses the bounded exact-role fixture and proxy-free loopback", () => {
   const dbTest = readFileSync(DB_TEST, "utf8");
   const evalLib = readFileSync(EVAL_LIB, "utf8");
   const ci = readFileSync(CI_WORKFLOW, "utf8");
   const nightly = readFileSync(EVAL_WORKFLOW, "utf8");
   assert.deepEqual(evalFixtureFindings(dbTest, evalLib, ci, nightly), []);
+  assert.ok(
+    evalFixtureFindings(
+      dbTest.replace("\n    demo)\n", "\n    demo)\n      main_owner_file=forbidden\n"),
+      evalLib,
+      ci,
+      nightly,
+    ).includes("fast fixture exposes owner/lifecycle authority"),
+  );
+  assert.ok(
+    evalFixtureFindings(
+      dbTest.replace("\n    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)\n", "\n    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|demo)\n"),
+      evalLib,
+      ci,
+      nightly,
+    ).includes("pgvector owner authority is not confined to the reviewed case"),
+  );
   assert.ok(
     evalFixtureFindings(
       dbTest.replace(
@@ -2423,7 +2485,7 @@ test("shared demos execute through the fresh exact-role fixture", () => {
       "SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file",
       "SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_gateway_file",
     ),
-    dbTest.replace(
+    dbTest.replaceAll(
       "          SQLX_OFFLINE=true \\\n",
       "",
     ),
@@ -2568,7 +2630,7 @@ test("authority fingerprints use one isolated report-only catalogue snapshot", (
 
   for (const mutated of [
     dbTest.replace(
-      "  authority-fingerprints|sqlx-prepare) fast_fixture=true ;;",
+      "  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) fast_fixture=true ;;",
       "  sqlx-prepare) fast_fixture=true ;;",
     ),
     dbTest.replace(
@@ -2855,14 +2917,26 @@ test("post-restart database readiness classifier is closed and byte-exact", () =
   };
 
   try {
+    const authorityError =
+      "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility for PostgreSQL, extension, role and catalogue requirements";
     assert.equal(classify(0, "", "database target preflight complete\n"), 0);
     for (const error of [
       "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed",
       "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE preflight timed out",
-      "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed",
+      authorityError,
     ]) {
       assert.equal(classify(1, "", `${error}\n`), 75, error);
     }
+    for (const stderr of [
+      "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed\n",
+      authorityError,
+      `${authorityError}\nextra\n`,
+      `${authorityError}\n${authorityError}\n`,
+    ]) {
+      assert.equal(classify(1, "", stderr), 1, stderr);
+    }
+    assert.equal(classify(1, "unexpected\n", `${authorityError}\n`), 1);
+    assert.equal(classify(0, "", `${authorityError}\n`), 1);
     assert.equal(classify(0, "unexpected\n", "database target preflight complete\n"), 1);
     assert.equal(classify(1, "", "database target preflight complete\n"), 1);
     assert.equal(

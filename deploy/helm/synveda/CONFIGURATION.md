@@ -78,14 +78,17 @@ contract.
 
 The validated server is **PostgreSQL 17.11**; the runtime targets PostgreSQL 17.
 Other major versions are unqualified. The current authority contract requires
-`vector` **0.8.6**, `btree_gin` **1.3**, and standard `plpgsql` **1.0** in their
-expected schemas/ownership. No AGE, PGMQ, Redis, separate vector database,
+`vector` **0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6**, `btree_gin` **1.3**, and
+standard `plpgsql` **1.0** in their
+expected schemas/ownership. The [PostgreSQL compatibility contract](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
+defines the exact catalogue and provider qualification boundary. These are
+mandatory for lexical operation as well. No AGE, PGMQ, Redis, separate vector database,
 object store, pooler or model server is needed for the lexical core.
 
 An external database administrator must provision the database, extensions and
 roles **before installation**. Ordinary startup never creates administrative
 extensions or roles in external mode. The existing reference for the exact
-contract is [the shared database bootstrap](../../compose/postgres/synveda-database-bootstrap)
+provisioning is [the shared database bootstrap](../../compose/postgres/synveda-database-bootstrap)
 and [runtime role verifier](../../../crates/synveda-store/src/runtime_role.rs):
 
 - The migrator is an ordinary, non-superuser owner of only the application
@@ -103,8 +106,15 @@ Managed-service branding does not establish compatibility with this exact
 contract. An ordinary database user need not be a superuser, but the provider
 must expose the required administrative provisioning and read-only identity
 proof. Run the existing `database-preflight` before promotion; do not relax the
-verifier to accommodate a managed service. Budget the two runtime pools plus
+verifier to accommodate a managed service. This role/target probe must still
+be followed by migration and full runtime extension proof. Budget the two runtime pools plus
 migration/operator headroom against the provider's connection limit.
+
+The [Azure reuse walkthrough](examples/README.md#reuse-existing-services-on-azure)
+checks available extensions before installation and reuses existing database,
+OIDC and cluster owners. Azure Flexible Server's documented PostgreSQL 17 /
+pgvector 0.8.2 combination fits the source version profile; the recipe does not
+qualify its catalogue or authority. Released v0.4.4 still refuses 0.8.2.
 
 CNPG and bundled modes run the existing bounded administrator bootstrap, then the
 same ordinary-role preflight/migrator. The bundled preparation recipe supplies
@@ -202,6 +212,9 @@ TEI remains optional and its outage does not gate core gateway/worker readiness.
 ## DBA handoff
 
 Give this section to the existing PostgreSQL service owner before installation.
+Check [PostgreSQL compatibility](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
+first; version strings alone do not prove trusted extension catalogues,
+ownership or provider authority.
 The example below provisions a **new dedicated PostgreSQL 17 database/server**
 with administrator `postgres`. It is not a convergence script for an existing
 team database. On a shared server, revoking PUBLIC maintenance-database access
@@ -211,7 +224,7 @@ proceeding. Never run this recipe against an unrelated retained database.
 
 | DBA supplies | Required result |
 | --- | --- |
-| Server and extension versions | PostgreSQL 17 (qualified 17.11); vector 0.8.6 and btree_gin 1.3 in `public`; plpgsql 1.0 in `pg_catalog`; no extra extension/operator dependencies |
+| Server and extension versions | PostgreSQL 17 (reference qualified 17.11); vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6 and btree_gin 1.3 in `public`; plpgsql 1.0 in `pg_catalog`; no extra extension/operator dependencies |
 | Ownership | `synveda_migrator` owns only `synveda` and its public schema/application objects; extensions retain the trusted administrator owner |
 | Runtime roles | Distinct `synveda_gateway` and `synveda_worker`; neither owns schema/data; both inherit only NOLOGIN `synveda_app` |
 | Authority | All four application roles: no superuser, BYPASSRLS, CREATEROLE, CREATEDB or replication; no privileged/default/global-object grants; ordinary logins can read the required catalogue/cluster identity proof |
@@ -227,6 +240,13 @@ also acceptable for the server owner. The provider's password ceremony must
 prevent plaintext credentials from being captured in SQL/client logs.
 
 Create the empty roles and database once:
+
+The example preinstalls the reference version 0.8.6. For a provider offering
+0.8.2 and an application/CLI candidate containing ADR-0140, replace only the
+vector creation statement with
+`CREATE EXTENSION vector WITH SCHEMA public VERSION '0.8.2';`.
+Choose one admitted version before provisioning; preserve a verified existing
+installation and its recovery material. The application does not update it.
 
 ```sh
 psql 'service=synveda-provisioning' -X -v ON_ERROR_STOP=1 <<'SQL'
@@ -304,8 +324,10 @@ Run the exact context/namespace-pinned `kubectl wait` command it prints and
 require Complete before Helm installation. The Job uses the chart's existing
 `database-preflight` product container with only three ordinary credential/CA
 mounts and the expected role document. It checks pod connectivity, verified TLS,
-all three principals, the same writable database generation and exact catalogue
-contracts. It performs no administrator bootstrap or DDL. Job/ConfigMap creation
+all three principals, the same writable database generation and the role/target
+authority contract. It does not prove the complete extension catalogue;
+migration performs that proof before application DDL. It performs no
+administrator bootstrap or DDL. Job/ConfigMap creation
 is a Kubernetes mutation, not a read-only API check. Default request is
 100m/128Mi with a 1Gi memory limit and a 120-second deadline. The selected
 network policy and provider ingress must admit that probe exactly as they admit

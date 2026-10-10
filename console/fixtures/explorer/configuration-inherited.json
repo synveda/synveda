@@ -59,7 +59,8 @@
         "vllm",
         "tei",
         "remote_mcp"
-      ]
+      ],
+      "git_export_targets": []
     },
     "fail_safe": false
   }

@@ -370,6 +370,196 @@ async fn remove_epoch_marker(pool: &PgPool) {
 
 // ── a fresh database ─────────────────────────────────────────────────────
 
+#[test]
+fn missing_extensions_are_refused_before_baseline_ddl() {
+    let Some(server) = server() else { return };
+    for statement in ["drop extension vector", "drop extension btree_gin"] {
+        let scratch = Scratch::empty(&server);
+        scratch.block_on(async {
+            let admin = connect_pool(&scratch.admin.clone().database(&scratch.name)).await;
+            sqlx::query(statement)
+                .execute(&admin)
+                .await
+                .expect("remove one extension from the isolated empty database");
+            admin.close().await;
+            let pool = connect_pool(&scratch.options).await;
+
+            let error = synveda_store::migrate(&pool, &scratch.roles)
+                .await
+                .expect_err("missing extensions must refuse before SQLx DDL");
+            let message = error.to_string();
+            for requirement in [
+                "vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6 and btree_gin 1.3 in public",
+                "plpgsql 1.0 in pg_catalog",
+                "declared trusted extension owners and no event triggers",
+                "docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility",
+            ] {
+                assert!(message.contains(requirement), "{message}");
+            }
+            assert!(!has_marker(&pool).await);
+            let no_ledger: bool = sqlx::query_scalar(
+                "select pg_catalog.to_regclass('public._sqlx_migrations') is null",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("inspect the absent migration ledger");
+            assert!(no_ledger, "extension refusal must precede baseline DDL");
+            pool.close().await;
+        });
+    }
+}
+
+#[test]
+fn extension_executable_drift_is_refused_on_fresh_and_current_databases() {
+    let Some(server) = server() else { return };
+    for migrated in [false, true] {
+        let scratch = Scratch::empty(&server);
+        scratch.block_on(async {
+            let pool = connect_pool(&scratch.options).await;
+            let before = if migrated {
+                synveda_store::migrate(&pool, &scratch.roles)
+                    .await
+                    .expect("migrate the isolated database before drift");
+                migration_ledger(&pool).await
+            } else {
+                Vec::new()
+            };
+            let admin = connect_pool(&scratch.admin.clone().database(&scratch.name)).await;
+            sqlx::query("alter function public.vector_dims(public.vector) volatile")
+                .execute(&admin)
+                .await
+                .expect("change an extension executable property in the isolated database");
+            admin.close().await;
+
+            let error = synveda_store::migrate(&pool, &scratch.roles)
+                .await
+                .expect_err("matching versions must not admit executable drift");
+            let message = error.to_string();
+            for requirement in [
+                "extension catalogue member identities and executable definitions",
+                "vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6, btree_gin 1.3 and plpgsql 1.0",
+                "docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility",
+            ] {
+                assert!(message.contains(requirement), "{message}");
+            }
+            assert_eq!(has_marker(&pool).await, migrated);
+            if migrated {
+                assert_eq!(migration_ledger(&pool).await, before);
+            } else {
+                let no_ledger: bool = sqlx::query_scalar(
+                    "select pg_catalog.to_regclass('public._sqlx_migrations') is null",
+                )
+                .fetch_one(&pool)
+                .await
+                .expect("inspect the absent migration ledger");
+                assert!(no_ledger, "catalogue refusal must precede baseline DDL");
+            }
+            pool.close().await;
+        });
+    }
+}
+
+#[test]
+fn native_vector_distance_and_hnsw_maintenance_remain_consistent() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("admit the genuine extension profile and migrate");
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("repeat migration without changing the extension");
+        pool.close().await;
+
+        // This bounded, migrator-owned temporary probe exercises the native
+        // extension itself. Product Knowledge/RLS/PDP acceptance separately
+        // uses ordinary tenant transactions and the authenticated gateway.
+        let mut connection = scratch.options.connect().await.expect("native probe");
+        for dimension in [16, 1024] {
+            sqlx::query(&format!(
+                "create temporary table synveda_vector_probe \
+                 (id integer primary key, embedding public.vector({dimension}) not null)"
+            ))
+            .execute(&mut connection)
+            .await
+            .expect("create owned native probe");
+            sqlx::query(&format!(
+                "insert into synveda_vector_probe \
+                 select value, array_prepend(1::real, array_prepend(value::real / 100, \
+                 array_fill(0::real, array[{}])))::public.vector({dimension}) \
+                 from generate_series(1, 32) value",
+                dimension - 2
+            ))
+            .execute(&mut connection)
+            .await
+            .expect("insert bounded distinct cosine vectors");
+            sqlx::query(
+                "create index synveda_vector_probe_hnsw on synveda_vector_probe \
+                 using hnsw (embedding public.vector_cosine_ops)",
+            )
+            .execute(&mut connection)
+            .await
+            .expect("build genuine HNSW index");
+            sqlx::query("set enable_seqscan = off")
+                .execute(&mut connection)
+                .await
+                .expect("require the indexed probe plan");
+            let query = format!(
+                "select id from synveda_vector_probe order by embedding <=> \
+                 array_prepend(1::real, array_fill(0::real, array[{}]))::public.vector limit 4",
+                dimension - 1
+            );
+            let plan: serde_json::Value =
+                sqlx::query_scalar(&format!("explain (format json) {query}"))
+                    .fetch_one(&mut connection)
+                    .await
+                    .expect("inspect native HNSW plan");
+            assert!(
+                plan.to_string().contains("synveda_vector_probe_hnsw"),
+                "{plan}"
+            );
+            let initial: Vec<i32> = sqlx::query_scalar(&query)
+                .fetch_all(&mut connection)
+                .await
+                .expect("ordered native cosine candidates");
+            assert_eq!(initial, [1, 2, 3, 4]);
+            sqlx::query("delete from synveda_vector_probe where id = 1")
+                .execute(&mut connection)
+                .await
+                .expect("delete nearest vector");
+            sqlx::query(&format!(
+                "update synveda_vector_probe set embedding = \
+                 array_prepend(1::real, array_prepend(0.025::real, \
+                 array_fill(0::real, array[{}])))::public.vector({dimension}) where id = 2",
+                dimension - 2
+            ))
+            .execute(&mut connection)
+            .await
+            .expect("exercise an indexed vector update");
+            for maintenance in [
+                "vacuum synveda_vector_probe",
+                "reindex index synveda_vector_probe_hnsw",
+            ] {
+                sqlx::query(maintenance)
+                    .execute(&mut connection)
+                    .await
+                    .expect("maintain the owned native index");
+                let maintained: Vec<i32> = sqlx::query_scalar(&query)
+                    .fetch_all(&mut connection)
+                    .await
+                    .expect("cosine candidates after maintenance");
+                assert_eq!(maintained, [2, 3, 4, 5]);
+            }
+            sqlx::query("drop table synveda_vector_probe")
+                .execute(&mut connection)
+                .await
+                .expect("remove owned native probe");
+        }
+    });
+}
+
 /// The first install: an empty database, migrated, accepted, and carrying a
 /// marker that says who made it and when.
 #[test]

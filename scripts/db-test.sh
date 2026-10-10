@@ -24,7 +24,7 @@ esac
 
 db_test_task=${SYNVEDA_DB_TEST_TASK:-workspace}
 case "$db_test_task" in
-  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare) ;;
+  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) ;;
   *)
     echo "db-test: unknown SYNVEDA_DB_TEST_TASK" >&2
     exit 64
@@ -32,8 +32,15 @@ case "$db_test_task" in
 esac
 case "$db_test_task" in
   demo|product-evaluation|evaluation|longmemeval-evaluation) fast_fixture=true ;;
-  authority-fingerprints|sqlx-prepare) fast_fixture=true ;;
+  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) fast_fixture=true ;;
   workspace) fast_fixture=false ;;
+esac
+pgvector_fixture_version=
+case "$db_test_task" in
+  pgvector-0.8.2) pgvector_fixture_version=0.8.2 ;;
+  pgvector-0.8.3) pgvector_fixture_version=0.8.3 ;;
+  pgvector-0.8.4) pgvector_fixture_version=0.8.4 ;;
+  pgvector-0.8.5) pgvector_fixture_version=0.8.5 ;;
 esac
 if [ "$db_test_task" = authority-fingerprints ] && [ "$#" -ne 0 ]; then
   echo "db-test: authority-fingerprints takes no cargo-test arguments" >&2
@@ -41,6 +48,14 @@ if [ "$db_test_task" = authority-fingerprints ] && [ "$#" -ne 0 ]; then
 fi
 if [ "$db_test_task" = sqlx-prepare ] && [ "$#" -ne 0 ]; then
   echo "db-test: sqlx-prepare takes no cargo-test arguments" >&2
+  exit 64
+fi
+if [ -n "$pgvector_fixture_version" ] && [ "$#" -ne 0 ]; then
+  echo "db-test: pgvector compatibility tasks take no cargo-test arguments" >&2
+  exit 64
+fi
+if [ -n "$pgvector_fixture_version" ] && [ -n "${SYNVEDA_DB_TEST_POSTGRES_IMAGE:-}" ]; then
+  echo "db-test: pgvector compatibility requires the reviewed genuine fixture image" >&2
   exit 64
 fi
 if [ "$db_test_task" = demo ] && [ "$#" -lt 1 ]; then
@@ -370,7 +385,27 @@ fi
 export SYNVEDA_DB_TEST_POSTGRES_IMAGE
 
 compose() {
-  "$docker_bin" compose --project-name "$project" --file "$manifest" "$@"
+  case "$db_test_task" in
+    pgvector-0.8.2)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" \
+        --file deploy/compose/compose.db-test.pgvector-082.yaml "$@"
+      ;;
+    pgvector-0.8.3)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" \
+        --file deploy/compose/compose.db-test.pgvector-083.yaml "$@"
+      ;;
+    pgvector-0.8.4)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" \
+        --file deploy/compose/compose.db-test.pgvector-084.yaml "$@"
+      ;;
+    pgvector-0.8.5)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" \
+        --file deploy/compose/compose.db-test.pgvector-085.yaml "$@"
+      ;;
+    *)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" "$@"
+      ;;
+  esac
 }
 
 validate_owned_network_ledger() {
@@ -694,7 +729,7 @@ classify_main_database_authority_preflight() {
   for retryable_error in \
     'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed' \
     'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE preflight timed out' \
-    'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed'; do
+    'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility for PostgreSQL, extension, role and catalogue requirements'; do
     if cmp -s -- <(printf '%s\n' "$retryable_error") "$stderr_file"; then
       return 75
     fi
@@ -753,6 +788,34 @@ fi
 # product order, prove its peer witness, migrate idempotently, then dispatch.
 # The workspace task continues below through every hostile/two-cluster case.
 if [ "$fast_fixture" = true ]; then
+  if [ -n "$pgvector_fixture_version" ]; then
+    # Model an external DBA's preinstalled extension. The real bootstrap must
+    # verify it without changing its version or the pinned fresh-create path.
+    compose exec -T postgres-main \
+      psql -X -q -v ON_ERROR_STOP=1 -v vector_version="$pgvector_fixture_version" \
+      --username synveda_owner --dbname postgres <<'SQL'
+revoke connect, temporary on database postgres, template1 from public;
+create role synveda_migrator nologin;
+create database synveda owner synveda_migrator template template0 encoding 'UTF8';
+set role synveda_migrator;
+revoke all on database synveda from public;
+grant connect on database synveda to synveda_owner;
+reset role;
+\connect synveda
+alter schema public owner to synveda_migrator;
+revoke all on schema public from public;
+create extension vector with schema public version :'vector_version';
+create extension btree_gin with schema public version '1.3';
+SQL
+    vector_version=$(compose exec -T postgres-main \
+      psql -X -qAt -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda \
+      --command "select extversion from pg_catalog.pg_extension where extname = 'vector'")
+    [ "$vector_version" = "$pgvector_fixture_version" ] || {
+      echo "db-test: the selected genuine pgvector fixture was not installed" >&2
+      exit 1
+    }
+    unset vector_version
+  fi
   compose run --rm --no-deps database-bootstrap-main
   compose run --rm --no-deps keycloak-database-bootstrap-main
   compose run --rm --no-deps database-bootstrap-main
@@ -856,6 +919,49 @@ if [ "$fast_fixture" = true ]; then
   status=0
   case "$db_test_task" in
     authority-fingerprints|sqlx-prepare) ;;
+    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)
+      main_owner_file=$state_dir/main-owner.url
+      write_database_url synveda_owner "$secret_dir/postgres_owner_password" \
+        "$main_port" postgres "$main_owner_file"
+      env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+        SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
+        SQLX_OFFLINE=true \
+        SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+        SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
+        SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+          scripts/cargo-with-database-url-file \
+          cargo test -p synveda-store --test knowledge -- --test-threads=1 || status=$?
+      if [ "$status" -eq 0 ]; then
+        env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+          SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
+          SQLX_OFFLINE=true \
+          SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+          SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
+          SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+            scripts/cargo-with-database-url-file \
+            cargo test -p synveda-gateway --test knowledge_lifecycle -- --test-threads=1 || status=$?
+      fi
+      if [ "$status" -eq 0 ]; then
+        # Product acceptance has finished. Remove only this fixture's product
+        # database before the independent schema cases: the authority contract
+        # forbids synveda_app dependencies spanning application databases.
+        compose exec -T postgres-main \
+          psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres \
+          --command 'drop database synveda with (force)'
+        for profile_case in \
+          a_fresh_empty_database_bootstraps_to_the_current_epoch \
+          missing_extensions_are_refused_before_baseline_ddl \
+          extension_executable_drift_is_refused_on_fresh_and_current_databases \
+          native_vector_distance_and_hnsw_maintenance_remain_consistent; do
+          SQLX_OFFLINE=true \
+          SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+          SYNVEDA_EPOCH_TEST_ADMIN_DATABASE_URL_FILE=$main_owner_file \
+          SYNVEDA_EPOCH_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+            cargo test -p synveda-store --test epoch "$profile_case" \
+            -- --exact --test-threads=1 || { status=$?; break; }
+        done
+      fi
+      ;;
     demo)
       demo_script=$1
       shift
@@ -3336,7 +3442,7 @@ run_main_database_preflight "$main_witness_file"
 compose exec -T postgres-main \
   psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres \
   --command 'grant synveda_owner to keycloak granted by synveda_owner'
-authority_error='synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed'
+authority_error='synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility for PostgreSQL, extension, role and catalogue requirements'
 expect_main_preflight_refusal inherited-peer-authority "$main_witness_file" "$authority_error"
 compose exec -T postgres-main \
   psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres \
@@ -3365,7 +3471,7 @@ fi
 preflight_error=
 IFS= read -r preflight_error < "$preflight_stderr" || [ -n "$preflight_error" ]
 [ "$preflight_error" = \
-  'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed' ] \
+  'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility for PostgreSQL, extension, role and catalogue requirements' ] \
   && [ "$(wc -l < "$preflight_stderr" | tr -d ' ')" -eq 1 ] || {
     echo "db-test: refused database preflight did not return one generic error" >&2
     exit 1

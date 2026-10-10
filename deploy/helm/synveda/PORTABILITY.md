@@ -16,6 +16,12 @@ One gateway and one worker remain intentional; upgrades interrupt service.
 | Self-managed Kubernetes | The exact local Kind version above | No other distribution, storage or ingress implementation qualified |
 | EKS / AKS / GKE | No account, cluster version or provider combination supplied | Common [managed-Kubernetes overlay](examples/managed-kubernetes.yaml) render/schema checked; cloud examples remain unqualified |
 
+Database admission is a separate [PostgreSQL compatibility contract](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility).
+Azure Flexible Server's advertised PostgreSQL 17/pgvector 0.8.2 combination
+fits a source version profile but is not provider-qualified when the Kubernetes
+overlay renders. Released v0.4.4 still refuses 0.8.2. Other managed
+database support cannot be inferred from a matching version or cluster brand.
+
 The named OpenShift minors are API/policy targets, not a support promise.
 [4.19's SCC documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html-single/authentication_and_authorization/index)
 describes restricted-v2; [4.20's documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/authentication_and_authorization/managing-pod-security-policies)

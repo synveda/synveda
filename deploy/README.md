@@ -16,6 +16,15 @@ For the current release, see the [Kubernetes release contract](#kubernetes-relea
 The [portable chart guide](helm/synveda/README.md) covers the implemented external-services
 installation and starter; the feature brief records remaining release/platform work.
 
+Small teams can [reuse existing services on Azure](helm/synveda/examples/README.md#reuse-existing-services-on-azure)
+through the external PostgreSQL/OIDC chart recipe on an existing AKS cluster,
+or the linked Compose route on an existing VM. Check database compatibility
+before installing; the source admits an exact pgvector 0.8.2 profile, but Azure
+authority/catalogue qualification remains open and released v0.4.4 still refuses
+it. These instructions provision no cloud infrastructure.
+The [PostgreSQL compatibility contract](../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
+owns exact extension/authority requirements and dated provider evidence.
+
 Synveda has one context-platform runtime. Direct binaries, source/release
 Compose services and Helm Deployments use the same product commands, schema
 epoch, generated `/v1` contract, embedded Cedar PDP, VedaFlow effects and
