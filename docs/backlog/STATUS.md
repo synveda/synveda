@@ -272,6 +272,14 @@ are stopped with all twelve volumes retained. Full
 [CI](https://github.com/synveda/synveda/actions/runs/37982221842)
 passes at `8b2d09b09bf2ed850d9884b108c56b7cdd4eed5b`.
 
+The pre-merge upload-timeout fix keeps metadata/discovery at 15 seconds and the
+overall export at 60 seconds, with a separate 45-second receive-pack budget.
+Its controlled TLS/native-Git regression reproduces the old failure and verifies
+slow-response success plus unchanged metadata refusal. All fifteen adapter tests,
+strict Clippy, formatting and fast repository gates pass. Live measurements remain
+bound to their recorded gateway artifacts; large uploads and connection pressure
+remain open.
+
 Next qualify live old-head/force-push/deletion races on retained synthetic
 fixtures; post-write paired restore remains a separate case. Published deployment,
 encrypted off-host recovery, owned egress/retention, large-export deadlines and

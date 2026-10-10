@@ -133,8 +133,9 @@ Runtime egress is restricted to constructed HTTPS requests to `api.github.com`
 and `github.com`, port 443, with public-PKI hostname verification. Redirects and
 environment proxies are disabled. Apply those same destinations to the
 deployment's network policy/firewall. Responses are bounded to 256 KiB, Git
-advertisements to 2,048 refs; connections have a five-second deadline and each
-HTTP request fifteen seconds, within the existing sixty-second export deadline.
+advertisements to 2,048 refs; connections have a five-second deadline. Metadata
+and discovery requests have fifteen seconds; the receive-pack upload and response
+have forty-five seconds, within the existing sixty-second export deadline.
 During export, tokens remain in memory, are redacted/wiped, and never reach native
 subprocess arguments, environment, transport files, exported history or audit.
 Remote export needs

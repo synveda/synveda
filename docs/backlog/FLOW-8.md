@@ -324,6 +324,16 @@ volumes retained. Private evidence has a verified 26-file SHA-256 inventory. Ful
 [CI](https://github.com/synveda/synveda/actions/runs/37982221842) passes at
 `8b2d09b09bf2ed850d9884b108c56b7cdd4eed5b`.
 
+The pre-merge review gives receive-pack uploads a separate 45-second request
+budget. Metadata/discovery retain 15 seconds and the gateway retains its
+60-second overall deadline. A controlled TLS/native-Git regression fails before
+the fix, then accepts a response slower than the metadata budget while still
+refusing stalled metadata without another push. All fifteen adapter tests pass
+without skips, along with strict Clippy, formatting and the fast repository
+gates. Earlier live evidence remains bound to its recorded gateway artifact;
+large slow uploads and concurrent
+connection pressure still need provider/deployment measurement.
+
 Next qualify live old-head races and force-push/deletion refusal on retained
 synthetic fixtures. Published deployment, encrypted off-host recovery, owned
 egress/retention, large-export deadlines and gateway connection pressure remain open.

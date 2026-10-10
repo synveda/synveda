@@ -336,6 +336,9 @@ impl GitHubTransport {
         let response = self
             .client
             .post(format!("{}/git-receive-pack", target.git_url()))
+            // Pack upload and processing need more time than metadata; leave
+            // room for final checks within the gateway's 60-second deadline.
+            .timeout(Duration::from_secs(45))
             .basic_auth("x-access-token", Some(credential.token.as_str()))
             .header("Content-Type", "application/x-git-receive-pack-request")
             .header("Accept", "application/x-git-receive-pack-result")

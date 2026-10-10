@@ -40,6 +40,7 @@ enum Mode {
     Forbidden,
     Outage,
     Stall,
+    SlowPush,
     DropAfterPush,
     Race(String),
     MissingReport,
@@ -353,6 +354,9 @@ async fn serve(
     if method == "POST" && matches!(mode, Mode::DropAfterPush) {
         return;
     }
+    if method == "POST" && matches!(mode, Mode::SlowPush) {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
     let mut body = if method == "POST" && matches!(mode, Mode::MissingReport) {
         b"0000".as_slice()
     } else {
@@ -521,6 +525,39 @@ async fn https_receive_pack_accepts_github_http_terminal_flush() {
     }
     assert_eq!(fixture.pushes.load(Ordering::SeqCst), 2);
     git(&fixture.repo, &["fsck", "--strict"]).await;
+}
+
+#[tokio::test]
+async fn receive_pack_has_its_own_timeout_without_extending_metadata_requests() {
+    let mut fixture = Fixture::new().await;
+    let cert = std::fs::read(fixture._root.path().join("cert.pem")).unwrap();
+    fixture.transport.client = client_builder()
+        .timeout(Duration::from_secs(2))
+        .add_root_certificate(reqwest::Certificate::from_pem(&cert).unwrap())
+        .resolve("api.github.com", fixture.address)
+        .resolve("github.com", fixture.address)
+        .build()
+        .unwrap();
+    let source = snapshot(&fixture.target, AssetKind::Prompt);
+    let projection = Projection::render(source, None).unwrap();
+
+    fixture.mode(Mode::SlowPush);
+    let advanced = fixture.advance(&projection, None, false).await;
+    assert_eq!(fixture.pushes.load(Ordering::SeqCst), 1);
+    assert!(advanced.unwrap());
+    verify_repository(&fixture.repo, REFERENCE, &BTreeMap::new())
+        .await
+        .unwrap();
+
+    fixture.mode(Mode::Stall);
+    assert!(fixture.advance(&projection, None, true).await.is_err());
+    assert_eq!(fixture.pushes.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        String::from_utf8(git(&fixture.repo, &["rev-parse", REFERENCE]).await)
+            .unwrap()
+            .trim(),
+        projection.head
+    );
 }
 
 #[tokio::test]
