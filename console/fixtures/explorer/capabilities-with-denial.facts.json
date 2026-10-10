@@ -1,5 +1,6 @@
 {
   "must_name": [
+    "channel.export",
     "channel.pin",
     "channel.publish",
     "channel.read",
