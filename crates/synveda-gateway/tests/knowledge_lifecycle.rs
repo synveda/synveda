@@ -1480,7 +1480,8 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
     )
     .await;
     assert_eq!(archive_status, StatusCode::CREATED, "{archived}");
-    let (_, _, active_search) = api(
+    assert_eq!(archived["outcome"], "applied", "{archived}");
+    let (active_search_status, _, active_search) = api(
         &app,
         Method::GET,
         "/v1/knowledge?query=provider%20event%20id",
@@ -1489,7 +1490,12 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
         None,
     )
     .await;
-    assert_eq!(active_search["items"], json!([]));
+    assert_eq!(active_search_status, StatusCode::OK, "{active_search}");
+    assert_eq!(active_search["items"], json!([]), "{active_search}");
+    let (active_list_status, _, active_list) =
+        api(&app, Method::GET, "/v1/knowledge", &bob_token, None, None).await;
+    assert_eq!(active_list_status, StatusCode::OK, "{active_list}");
+    assert_eq!(active_list["items"], json!([]), "{active_list}");
     let (_, _, archived_search) = api(
         &app,
         Method::GET,
@@ -1500,6 +1506,28 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
     )
     .await;
     assert_eq!(archived_search["items"][0]["id"], shared_id.to_string());
+    assert_eq!(archived_search["items"][0]["lifecycle_state"], "archived");
+    let known_at_creation = detail["updated_at"]
+        .as_str()
+        .expect("database-stamped first head time")
+        .replace(':', "%3A")
+        .replace('+', "%2B");
+    let (historical_status, _, historical) = api(
+        &app,
+        Method::GET,
+        &format!("/v1/knowledge?query=webhook&as_known_at={known_at_creation}"),
+        &bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(historical_status, StatusCode::OK, "{historical}");
+    assert_eq!(historical["items"][0]["id"], shared_id.to_string());
+    assert_eq!(historical["items"][0]["lifecycle_state"], "active");
+    assert_eq!(
+        historical["items"][0]["current_revision"]["id"],
+        first_revision.to_string()
+    );
     let restore_body = json!({
         "expected_revision_id": second_revision,
         "reason": "acceptance restore"
@@ -1555,7 +1583,7 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
             updated_before: None,
             stale: None,
             at: Utc::now(),
-            as_known_at: Utc::now(),
+            as_known_at: None,
             include_history: false,
             include_transitional: false,
         },

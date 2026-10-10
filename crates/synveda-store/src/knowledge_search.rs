@@ -76,8 +76,9 @@ pub struct Filters {
     pub stale: Option<bool>,
     /// Valid-time instant at which aggregate state is evaluated.
     pub at: DateTime<Utc>,
-    /// Transaction-time instant whose aggregate head is authoritative.
-    pub as_known_at: DateTime<Utc>,
+    /// Explicit transaction-time cutoff. Omission selects current heads;
+    /// application wall-clock time must not rewind database-stamped state.
+    pub as_known_at: Option<DateTime<Utc>>,
     /// Admit historical lifecycle heads (stale, superseded and archived).
     pub include_history: bool,
     /// Admit unresolved/future transitional heads.
@@ -178,8 +179,9 @@ pub async fn list_candidates(
          and revision.knowledge_item_id = current.id
          and revision.id = current.current_revision_id
         where current.tenant_id = $1
-          and current.tx_from <= $19
-          and (current.tx_to is null or $19 < current.tx_to)
+          and (($19::timestamptz is null and current.tx_to is null)
+               or (current.tx_from <= $19
+                   and (current.tx_to is null or $19 < current.tx_to)))
           and ($2::uuid is null or exists (
               select 1
               from workspaces workspace
@@ -233,8 +235,9 @@ pub async fn list_candidates(
                 join knowledge_item_versions successor
                   on successor.tenant_id = transition.tenant_id
                  and successor.id = transition.source_item_id
-                 and successor.tx_from <= $19
-                 and (successor.tx_to is null or $19 < successor.tx_to)
+                 and (($19::timestamptz is null and successor.tx_to is null)
+                      or (successor.tx_from <= $19
+                          and (successor.tx_to is null or $19 < successor.tx_to)))
                 join knowledge_revisions successor_revision
                   on successor_revision.tenant_id = successor.tenant_id
                  and successor_revision.knowledge_item_id = successor.id
@@ -242,7 +245,7 @@ pub async fn list_candidates(
                where transition.tenant_id = current.tenant_id
                  and transition.target_item_id = current.id
                  and transition.relation_type = 'transitions_to'
-                 and transition.created_at <= $19
+                 and ($19::timestamptz is null or transition.created_at <= $19)
                  and successor.lifecycle_state = 'active'
                  and successor_revision.valid_from <= $14
                  and (successor_revision.valid_to is null
@@ -319,8 +322,9 @@ pub async fn lexical_candidates(
          and revision.knowledge_item_id = current.id
          and revision.id = current.current_revision_id
         where current.tenant_id = $1
-          and current.tx_from <= $18
-          and (current.tx_to is null or $18 < current.tx_to)
+          and (($18::timestamptz is null and current.tx_to is null)
+               or (current.tx_from <= $18
+                   and (current.tx_to is null or $18 < current.tx_to)))
           and revision.search_document @@ websearch_to_tsquery('simple'::regconfig, $2)
           and ($3::uuid is null or exists (
               select 1
@@ -372,8 +376,9 @@ pub async fn lexical_candidates(
                 join knowledge_item_versions successor
                   on successor.tenant_id = transition.tenant_id
                  and successor.id = transition.source_item_id
-                 and successor.tx_from <= $18
-                 and (successor.tx_to is null or $18 < successor.tx_to)
+                 and (($18::timestamptz is null and successor.tx_to is null)
+                      or (successor.tx_from <= $18
+                          and (successor.tx_to is null or $18 < successor.tx_to)))
                 join knowledge_revisions successor_revision
                   on successor_revision.tenant_id = successor.tenant_id
                  and successor_revision.knowledge_item_id = successor.id
@@ -381,7 +386,7 @@ pub async fn lexical_candidates(
                where transition.tenant_id = current.tenant_id
                  and transition.target_item_id = current.id
                  and transition.relation_type = 'transitions_to'
-                 and transition.created_at <= $18
+                 and ($18::timestamptz is null or transition.created_at <= $18)
                  and successor.lifecycle_state = 'active'
                  and successor_revision.valid_from <= $15
                  and (successor_revision.valid_to is null
@@ -800,7 +805,7 @@ mod tests {
             updated_before: None,
             stale: None,
             at: Utc::now(),
-            as_known_at: Utc::now(),
+            as_known_at: None,
             include_history: false,
             include_transitional: false,
         };

@@ -11,8 +11,9 @@ join knowledge_revisions revision
  and revision.knowledge_item_id = current.id
  and revision.id = current.current_revision_id
 where embedding.tenant_id = $1
-  and current.tx_from <= $19
-  and (current.tx_to is null or $19 < current.tx_to)
+  and (($19::timestamptz is null and current.tx_to is null)
+       or (current.tx_from <= $19
+           and (current.tx_to is null or $19 < current.tx_to)))
   and embedding.model = $2
   and embedding.dim = 1024
   and ($4::uuid is null or exists (
@@ -67,8 +68,9 @@ where embedding.tenant_id = $1
         join knowledge_item_versions successor
           on successor.tenant_id = transition.tenant_id
          and successor.id = transition.source_item_id
-         and successor.tx_from <= $19
-         and (successor.tx_to is null or $19 < successor.tx_to)
+         and (($19::timestamptz is null and successor.tx_to is null)
+              or (successor.tx_from <= $19
+                  and (successor.tx_to is null or $19 < successor.tx_to)))
         join knowledge_revisions successor_revision
           on successor_revision.tenant_id = successor.tenant_id
          and successor_revision.knowledge_item_id = successor.id
@@ -76,7 +78,7 @@ where embedding.tenant_id = $1
        where transition.tenant_id = current.tenant_id
          and transition.target_item_id = current.id
          and transition.relation_type = 'transitions_to'
-         and transition.created_at <= $19
+         and ($19::timestamptz is null or transition.created_at <= $19)
          and successor.lifecycle_state = 'active'
          and successor_revision.valid_from <= $16
          and (successor_revision.valid_to is null

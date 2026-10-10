@@ -20,7 +20,7 @@ use synveda_store::knowledge::{
 };
 use synveda_store::sessions::{NewSession, NewSessionEvent};
 use synveda_store::workspaces::NewWorkspace;
-use synveda_store::{rls, scopes, sessions, workspaces};
+use synveda_store::{knowledge_search, rls, scopes, sessions, workspaces};
 use synveda_types::knowledge::{
     KnowledgeLifecycleState, KnowledgeOrigin, KnowledgeRelationType, KnowledgeRevisionContent,
     KnowledgeSourceType, KnowledgeType,
@@ -150,6 +150,128 @@ async fn create_item(
     knowledge::create_item(&mut *tx, new, new_revision, &[source_id])
         .await
         .expect("create Knowledge item")
+}
+
+#[test]
+fn current_search_heads_and_explicit_transaction_history_stay_distinct() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant_id, root_scope_id) = new_tenant(&db.pool).await;
+        let source = manual_source(tenant_id, root_scope_id);
+        let new_item = item(tenant_id, root_scope_id, KnowledgeType::Convention);
+        let mut new_revision = revision("Request correlation", "Propagate request correlation.");
+        new_revision.content.valid_from = Utc::now() - chrono::Duration::days(1);
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
+        knowledge::create_source(&mut tx, &source)
+            .await
+            .expect("create source");
+        let active = create_item(&mut tx, &new_item, &new_revision, source.id).await;
+        for dimension in [16, 1024] {
+            knowledge_search::insert_embedding(
+                &mut tx,
+                tenant_id,
+                new_revision.id,
+                &format!("cpr17-current-{dimension}"),
+                &vec![1.0; dimension],
+            )
+            .await
+            .expect("insert immutable revision embedding");
+        }
+        tx.commit().await.expect("commit active Knowledge");
+
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
+        let archived = knowledge::set_lifecycle(
+            &mut tx,
+            tenant_id,
+            new_item.id,
+            new_revision.id,
+            KnowledgeLifecycleState::Archived,
+            Some("test:knowledge"),
+        )
+        .await
+        .expect("archive Knowledge")
+        .expect("item exists");
+        tx.commit().await.expect("commit archived Knowledge");
+
+        // Hold valid time before the archive. Only an explicit transaction
+        // cutoff may rewind its database-stamped lifecycle or aggregate head.
+        let mut filters = knowledge_search::Filters {
+            scope_ids: vec![root_scope_id],
+            workspace_id: None,
+            project_id: None,
+            scope_id: None,
+            owner_principal_id: None,
+            knowledge_type: None,
+            origin: None,
+            lifecycle: None,
+            tag: None,
+            source_type: None,
+            updated_from: None,
+            updated_before: None,
+            stale: None,
+            at: active.item.transaction_from,
+            as_known_at: None,
+            include_history: false,
+            include_transitional: false,
+        };
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
+        for (cutoff, lifecycle, expected) in [
+            (None, None, None),
+            (Some(active.item.transaction_from), None, Some(&active)),
+            (
+                None,
+                Some(KnowledgeLifecycleState::Archived),
+                Some(&archived),
+            ),
+            (
+                Some(active.item.transaction_from),
+                Some(KnowledgeLifecycleState::Archived),
+                None,
+            ),
+        ] {
+            filters.as_known_at = cutoff;
+            filters.lifecycle = lifecycle;
+            let mut legs = vec![
+                knowledge_search::list_candidates(&mut tx, tenant_id, &filters, None, 10)
+                    .await
+                    .expect("list selected heads"),
+                knowledge_search::lexical_candidates(
+                    &mut tx,
+                    tenant_id,
+                    &filters,
+                    "correlation",
+                    10,
+                )
+                .await
+                .expect("search selected heads lexically"),
+            ];
+            for dimension in [16, 1024] {
+                legs.push(
+                    knowledge_search::semantic_candidates(
+                        &mut tx,
+                        tenant_id,
+                        &filters,
+                        &format!("cpr17-current-{dimension}"),
+                        &vec![1.0; dimension],
+                        10,
+                    )
+                    .await
+                    .expect("search selected heads by revision vector"),
+                );
+            }
+            for candidates in legs {
+                match expected {
+                    Some(snapshot) => {
+                        assert_eq!(candidates.len(), 1);
+                        assert_eq!(candidates[0].item_id, new_item.id);
+                        assert_eq!(candidates[0].updated_at, snapshot.item.updated_at);
+                    }
+                    None => assert!(candidates.is_empty(), "{candidates:?}"),
+                }
+            }
+        }
+        tx.commit().await.expect("commit selected-head reads");
+    });
 }
 
 #[test]

@@ -1150,7 +1150,7 @@ fn context_filters(
         updated_before: None,
         stale: None,
         at,
-        as_known_at: at,
+        as_known_at: None,
         include_history: false,
         include_transitional: false,
     }
