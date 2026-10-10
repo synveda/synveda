@@ -301,11 +301,32 @@ including the early read-only artifact-probe sequencing correction. Required
 The [prepared restore procedure](../integrations/git-bridge.md#qualify-prepared-intent-across-paired-restore)
 records this pre-write window separately from uncertain acknowledgement after a
 provider write. Current protection reads also return HTTP 403 for both active
-recovery branches; an eligible private fixture remains required. Next qualify
-controlled live post-write acknowledgement loss and exact frozen-intent recovery,
-then live old-head races and force-push/deletion refusal on retained synthetic
-fixtures. Published deployment, encrypted off-host recovery, owned egress/
-retention, large-export deadlines and gateway connection pressure remain open.
+recovery branches; an eligible private fixture remains required.
+
+On 2026-10-10, controlled live post-write response loss passes for both channels.
+A temporary fixture-only TCP relay forwards opaque TLS bytes to GitHub and
+drops the response after the export pack is sent; public-PKI verification stays
+enabled. Two bounded public export failures retain exact prepared intent while
+independent GitHub reads prove both remote heads advanced to that intent.
+Recreating only the owned gateway with its normal configuration removes the
+fault and preserves the artifact, descriptor, effective Configuration and sealed
+credential revision 1/key 1. Both retries resume the frozen projection, both
+replays are exact no-ops, and independent clones verify fourteen source commits/
+seven objects per channel. Recovery leaves the already-written GitHub heads
+unchanged. Public verification passes 507 events; a 508-event frozen export
+verifies offline, preserving the full 489-event uncertain prefix and all prior
+Git evidence, with 119 Git events retained. The two process intervals record
+eight successes/two expected transport errors/no rejections with matching
+duration samples. This qualifies post-write recovery across a gateway restart;
+post-write paired restore remains a separate case. A new canonical completed-state
+paired backup verifies; all three owned projects are stopped with all twelve
+volumes retained. Private evidence has a verified 26-file SHA-256 inventory. Full
+[CI](https://github.com/synveda/synveda/actions/runs/37982221842) passes at
+`8b2d09b09bf2ed850d9884b108c56b7cdd4eed5b`.
+
+Next qualify live old-head races and force-push/deletion refusal on retained
+synthetic fixtures. Published deployment, encrypted off-host recovery, owned
+egress/retention, large-export deadlines and gateway connection pressure remain open.
 Both transports stay disabled by default; real credentials and writes are
 enabled only in this explicit synthetic operator fixture.
 

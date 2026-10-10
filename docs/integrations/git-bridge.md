@@ -388,6 +388,26 @@ another commit. Keep the enclosing recovery report separate from the runner's
 export/replay evidence tier, and retain the same-host/published-artifact/off-host
 qualification limits above.
 
+### Qualify post-write response loss across a gateway restart
+
+After distinctly reviewed synthetic publication, use a temporary fault confined
+to the owned gateway to drop GitHub's response after forwarding the export pack.
+Keep public-PKI hostname verification enabled; an opaque TCP relay can inject
+loss without decrypting TLS. Both public exports must fail within their deadline,
+retain identical `prepared`/`transport_failed` intent, and leave source heads
+unchanged. Independently read GitHub to prove each remote head is already the
+exact prepared result, and retain content-free proof that the responses were
+dropped. Sample ordinary public readiness/authentication and save metrics.
+
+Remove the fault and restart only the owned gateway with its normal configuration.
+Check its artifact/descriptor hashes, effective Configuration and original sealed
+custody. Both retries must return `resumed`, exact replays must return `no_op`,
+and independent clones must verify all expected history. GitHub heads must stay
+unchanged during recovery. Verify the complete public audit prefix and exact
+`resume_prepared`/`resumed`/`no_op` evidence, retain metrics from both process
+intervals, then preserve a canonical paired backup and stop the owned fixture.
+This restart case is separate from a post-write paired restore.
+
 ## Live GitHub canary
 
 `scripts/run-git-export-canary.mjs` runs the first live provider check on Linux

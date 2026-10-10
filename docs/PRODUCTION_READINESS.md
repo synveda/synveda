@@ -141,10 +141,23 @@ four expected transport errors/no rejections with matching durations. Separate
 prepared and completed-state paired backups verify; all three owned projects
 are stopped with all twelve volumes retained. These are synthetic same-host
 pre-write recovery results. Current reads still receive HTTP 403 for protection
-on both active recovery branches. Controlled live post-write acknowledgement
-loss, live ref mutation races, published deployment, encrypted off-host recovery
-and broader egress/retention/load qualification remain open. FLOW-8 and the
-readiness verdict remain unchanged.
+on both active recovery branches.
+
+Controlled live post-write response loss now passes for both channels. A
+fixture-only relay drops the encrypted provider responses with public-PKI
+verification enabled; independent reads prove both GitHub heads match the frozen
+prepared projection. A normal gateway restart removes the fault, and exact
+resumption/replay plus independent clones verify fourteen source commits/seven
+objects per channel without further remote advancement. Artifacts, Configuration
+and sealed custody stay unchanged. Public verification passes 507 events and a
+508-event frozen export verifies offline, preserving the entire uncertain prefix
+with 119 Git events retained. Both process intervals record eight successes/two
+expected transport errors/no rejections. A new canonical paired backup verifies;
+all three owned projects are stopped with all twelve volumes retained. This
+qualifies recovery across a gateway restart. Post-write paired restore, live ref
+mutation races, published deployment, encrypted off-host recovery and broader
+egress/retention/load qualification remain open. FLOW-8 and the readiness verdict
+remain unchanged.
 
 The 2026-10-06 public-CLI canary runner adds thirteen passing controller tests,
 artifact/source-head preflight and content-free export/replay/clone evidence.

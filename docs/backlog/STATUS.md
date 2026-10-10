@@ -255,11 +255,28 @@ projects are stopped with all twelve volumes retained. Required
 [CI](https://github.com/synveda/synveda/actions/runs/37968302068) passes at
 `389e893fb3dfa0f8d22e470df8895af7b55a4cb9`. Current protection reads still return
 HTTP 403 for both active recovery branches; an eligible private fixture remains
-required. Next qualify controlled live post-write acknowledgement loss and exact
-frozen-intent recovery, then live old-head/force-push/deletion races on retained
-synthetic fixtures. Published deployment, encrypted off-host recovery, owned
-egress/retention, large-export deadlines and gateway connection pressure remain
-open. FLOW-8 remains open for those provider/deployment checks.
+required.
+
+Controlled live post-write response loss now passes for both channels after
+seventh distinctly reviewed synthetic revisions. A fixture-only opaque TLS relay
+drops the provider responses while preserving public-PKI verification; independent
+reads prove both GitHub heads advanced to their exact prepared intent. The normal
+gateway restart removes the fault. Both exports resume exactly, replay as no-ops
+and pass independent clone verification of fourteen source commits/seven objects
+per channel, with no further remote advancement. Configuration, artifacts and
+sealed custody remain unchanged. A 507-event public snapshot and 508-event frozen
+export verify, preserving the full uncertain prefix with 119 Git events retained.
+Metrics across both process intervals record eight successes/two expected errors/
+no rejections. A new canonical paired backup verifies; all three owned projects
+are stopped with all twelve volumes retained. Full
+[CI](https://github.com/synveda/synveda/actions/runs/37982221842)
+passes at `8b2d09b09bf2ed850d9884b108c56b7cdd4eed5b`.
+
+Next qualify live old-head/force-push/deletion races on retained synthetic
+fixtures; post-write paired restore remains a separate case. Published deployment,
+encrypted off-host recovery, owned egress/retention, large-export deadlines and
+gateway connection pressure remain open. FLOW-8 remains open for those provider/
+deployment checks.
 
 CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes, and a passing create/read/use/capture policy matrix including revocation and foreign-tenant comparisons. Four predeclared synthetic task probes pass in the fresh-database 23-scenario product suite: 12/12 Session facts and four exact Knowledge bodies retained, provenance intact, local assisted preview p95 below the 500 ms guard. A separate combined-mode gate preserves checkpoint source attribution and exact required Knowledge in both off and conservative modes, omitting optional restart text under a tight shared budget. An opt-in export now prepares the actual paired synthetic ContextRun blocks against a fixed JSON-answer rubric without calling a model, and a capped no-tools runner passes a fake-client end-to-end test. This does not measure model task success or provider usage. A live proprietary-client run remains open. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision. An isolated hostname handoff and resolver check passed without resetting retained interop state, and the original mapping was restored. The pinned product source image built on 2026-09-29 after official Cargo index/archive access recovered. Fresh CTX-6/CTX-8 Compose/browser acceptance and held-out model quality remain open. Next rerun paired deployment checks, then the bounded factual/model and live Claude probes when credentials and spend permission are available. The open briefs hold the exact evidence and limits.
 
