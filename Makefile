@@ -325,7 +325,7 @@ check-backlog:
 # generated OpenAPI document, then checks every shell script without executing
 # it. The fixture test deliberately adds one dead command and one dead path.
 check-demos:
-	node --test scripts/check-demos.test.mjs
+	node --test scripts/check-demos.test.mjs scripts/run-git-export-canary.test.mjs
 	node scripts/check-demos.mjs
 
 # CPR-39: a config recipe, captured protocol and a fully verified client are

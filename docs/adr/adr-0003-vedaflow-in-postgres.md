@@ -14,6 +14,11 @@
 > fast-forward by default. `proposals` remains unbuilt; it lands with
 > FLOW-3.
 
+> **FLOW-8 export (ADR-0138).** The current local bridge uses installed Git
+> plumbing in a deployment leaf, superseding this ADR's prospective gitoxide
+> choice. It exports Prompt/ContextPack evidence only; PostgreSQL remains
+> authoritative. Remote-provider rollout and any import remain separate work.
+
 ## Context
 
 VedaFlow treats organisational knowledge like code: memories, context

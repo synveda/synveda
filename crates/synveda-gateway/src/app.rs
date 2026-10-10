@@ -151,6 +151,9 @@ pub struct AppState {
     /// `Kms::Disabled` when `SYNVEDA_KMS_KEY` is unset, in which case the
     /// surfaces that need a key fail closed and `/v1` is untouched.
     pub keys: Arc<synveda_store::keys::KeyRing>,
+    /// Disabled by default. Private local root and pinned GitHub destinations;
+    /// effective governed Configuration and Cedar independently gate each use.
+    pub git_exports: Option<Arc<synveda_git::ExportTransport>>,
 }
 
 impl AppState {

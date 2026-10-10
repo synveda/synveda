@@ -67,6 +67,7 @@ fn state(url: &str) -> AppState {
         service_token_max_ttl: Duration::from_secs(3_600),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
         context_embed_timeout: Duration::from_millis(100),
+        git_exports: None,
         keys: Arc::new(synveda_store::keys::KeyRing::new(
             synveda_crypto::Kms::Local(
                 synveda_crypto::LocalKms::from_hex(&"31".repeat(32), "local:cpr31")

@@ -9,6 +9,161 @@ this register owns the current readiness verdict and evidence.
 The [current Rust architecture review](RUST_ARCHITECTURE_REVIEW_2026-09-30.md)
 records source-level risks and limits separately from deployment qualification.
 
+FLOW-8 now has source-tested [local and private GitHub export](integrations/git-bridge.md)
+under Accepted ADR-0138/0139. Real repositories/clones preserve Prompt and
+ContextPack topology/evidence; six exact-role API cases cover fresh Cedar,
+forced RLS, Configuration revocation, exact active encrypted-secret custody,
+prepared recovery, destination identity and content-free audit. Fourteen Git tests
+include controlled verified HTTPS with real receive-pack, uncertain push
+recovery, old-head races, privacy/identity refusal, TLS trust, redirects, outages,
+native subprocess bounds and signature verification. Local operation requires
+installed Git and a private Unix root; GitHub runtime uses the existing TLS stack
+without a native Git prerequisite. Both remain disabled by default. The
+2026-10-09 isolated operator fixture now has a private canary repository,
+sealed fine-grained PAT, real OIDC/PKCE logins and governed synthetic asset
+publications. Initial writes reveal GitHub's additional HTTP flush terminator;
+the parser fix has fourteen passing Git adapter tests, with two regressions
+that fail before the fix. Prompt retry resumes the prepared remote head and
+independent clone verification passes. The corrected source at
+`29566928bb3cbaaa4fccc08d9c5aecf3d477b7ce` passes complete two-channel live
+acceptance on the local Linux/ARM64 gateway at OCI digest
+`sha256:128b38a9c6177ac8f30fd751a504676faca2945b3122cf223e27ac325fe79d82`,
+independently checked against its running image and executable. A second
+governed synthetic revision produces two first-request completed exports,
+exact no-op replays and independent full-history clone verification. The public
+audit chain passes a 137-event snapshot; nineteen Git events and eight successful
+corrected-gateway operation/duration samples are retained without content or
+credentials. A subsequent unchanged canonical paired logical-recovery drill
+restores the database pair and original keys into a fresh private project on
+macOS/OrbStack. Ordinary tenant verification checks all 139 restored audit
+events, opens the original key and refuses an unrelated key. Four new PKCE
+logins preserve issuer/subjects after old CLI refresh is refused. The recovered
+sealed secret/reference/revision works without reprovisioning; both channels
+return the original exact no-op receipts on first request and replay, with
+independent clone verification and unchanged heads. The frozen 137-event public
+audit prefix and nineteen Git event hashes match; a new 147-event snapshot
+verifies, and four successful operation/duration samples are retained. Both
+isolated projects are stopped with source, backup and restored volumes retained.
+This explicit source gateway/provider/loopback override is same-host
+completed-receipt recovery evidence, not published consumer upgrade, off-host
+recovery or broader platform qualification. The separate credential drill on
+the retained restored fixture passes
+genuine rotation between distinct fine-grained PATs at the same secret reference,
+preserving exact receipts/destination identity at revision 2. Fresh reviewed
+synthetic publications complete both exports, with exact replay and independent
+verification of six source commits and three objects per channel. Local custody
+revocation at revision 3 refuses both exports without moving source/remote
+heads; reactivation of the working replacement at revision 4 restores exact
+receipts and clones. Content-free custody audit records identify the transitions,
+all 27 baseline Git event hashes persist, and a 210-event public chain verifies
+with 41 Git export events. Sixteen successful and two expected rejected
+operation/duration samples are retained. A new canonical paired backup of the
+replacement state verifies, with owned fixtures stopped and all volumes retained.
+GitHub provider revocation also passes after owner deletion: independent HTTPS
+observes old-credential HTTP 401 and replacement HTTP 200. Active sealed custody
+with the revoked PAT at revision 5 refuses both public exports without moving
+source/remote refs or falling back to the independent clone credential.
+The working replacement at the same reference/revision 6 recovers all four
+exact no-op receipts and both verified clones. The frozen 210-event public
+prefix and all 41 prior Git event hashes match; a 235-event public chain verifies
+with 49 Git export events. Eight successful and two expected rejected
+operation/duration samples are retained. A new canonical paired backup of the
+recovered revision 6 verifies, with both owned projects stopped and all eight
+volumes retained. These measured credential cases use the same source artifact
+and synthetic same-host fixture.
+The controlled outage/retry drill now passes on that source artifact with
+unchanged active credential revision 6 and fourth reviewed synthetic revisions.
+Only the gateway egress interface is disconnected; GitHub becomes unreachable
+while its internal networks and sampled public readiness/authentication remain
+available. Five failed requests retain exact prepared intent across a gateway
+restart. Restoring the original network attachment produces two resumed
+exports, exact no-op replays and independent clones verifying eight source
+commits and four objects per channel. The frozen 235-event prefix and all 49
+prior Git event hashes match; a 295-event public chain verifies with 69 Git
+events. Metrics across the two process intervals record eight successes/five
+errors with matching duration samples. A new canonical paired backup verifies;
+both owned projects are stopped with all eight volumes retained. This proves
+pre-write egress interruption and process-restart recovery on the same host.
+At that checkpoint, live post-write acknowledgement loss, branch protection,
+prepared-receipt paired restore and broader deployment qualification remained
+open; the later prepared restore result below covers its pre-write window.
+
+The private GitHub branch-protection preflight now receives HTTP 403 for both
+export branches because the repository plan lacks that capability. Live
+protection is unqualified; no visibility or billing change is made. Another
+baseline passes four exact no-op receipts and two clones. A 331-event public
+preparation snapshot verifies, preserving the 295-event prefix and 69 prior Git
+hashes. Reviewed
+fifth synthetic source revisions and a separate private recovery repository now
+pass append-only divergence/new-target recovery. Preflight corrected earlier
+credential-scope claims: both dedicated tokens initially covered all owner
+repositories. After explicit owner approval, GitHub settings restrict each to its
+own canary repository, and verified HTTPS refuses cross-canary Git content access
+with HTTP 404. Original sealed custody remains active at revision 6; separate
+exact-scope recovery custody uses revision 1.
+Two same-tree, single-parent foreign fast-forwards preserve original history and
+checkpoint refs. Four public conflict refusals retain exact prepared intent and
+leave source/foreign heads unchanged. Independent clones verify the retained
+projections and refuse the foreign tips. Both the new Configuration version and
+the existing pinned binding's revision 1-to-2 update pass distinct administrator
+review and normal apply. Using the same gateway artifact and a separate mapping,
+the new target completes both exports, exact replays and independently verified
+clones with ten source commits/five objects per channel. Old-target requests
+refuse through effective Configuration; the diverged repository stays unchanged.
+A 377-event public chain verifies with 87 Git events, preserving the 295-event
+prefix and all 69 prior Git hashes. Metrics across both gateway process intervals
+record eight successes/six expected rejections/no errors with matching duration
+samples. A new canonical paired backup verifies; both owned projects are stopped
+with all eight volumes retained. This synthetic same-host drill qualifies
+append-only unexpected-head refusal and governed recovery to a new destination.
+Live branch protection still needs an eligible private fixture.
+
+Prepared-receipt paired restore now passes at that active recovery target with
+sixth curator-reviewed synthetic revisions and unchanged credential revision
+1/key 1. Four expected failures during interruption of only the owned gateway
+egress retain exact prepared intent; public readiness/authentication and internal
+networks remain available, and source/GitHub heads stay unchanged. Restoring the
+egress attachment leaves the receipts pending until canonical paired backup.
+The unchanged consumer ceremony restores into a separate empty project and
+verifies all 426 restored audit events, original-key opening and unrelated-key
+refusal. The gateway, executable, CLI and descriptor hashes match; four fresh
+PKCE logins preserve issuer/tenant/subjects, and Configuration and sealed-secret
+metadata match without reprovisioning. Before export, the complete 421-event
+frozen public prefix and all 99 Git hashes at that checkpoint match the restored
+copy.
+Both exports resume the exact prepared projection, replay as exact no-ops and
+pass independent clone verification of twelve source commits/six objects per
+channel without duplication. The retained diverged destination stays unchanged.
+Public verification passes 446 events; a 447-event frozen export independently
+verifies, preserving the prepared prefix and all 87 prior Git hashes, with 105
+Git events retained. Metrics across both process intervals record eight successes/
+four expected transport errors/no rejections with matching durations. Separate
+prepared and completed-state paired backups verify; all three owned projects
+are stopped with all twelve volumes retained. These are synthetic same-host
+pre-write recovery results. Current reads still receive HTTP 403 for protection
+on both active recovery branches.
+
+Controlled live post-write response loss now passes for both channels. A
+fixture-only relay drops the encrypted provider responses with public-PKI
+verification enabled; independent reads prove both GitHub heads match the frozen
+prepared projection. A normal gateway restart removes the fault, and exact
+resumption/replay plus independent clones verify fourteen source commits/seven
+objects per channel without further remote advancement. Artifacts, Configuration
+and sealed custody stay unchanged. Public verification passes 507 events and a
+508-event frozen export verifies offline, preserving the entire uncertain prefix
+with 119 Git events retained. Both process intervals record eight successes/two
+expected transport errors/no rejections. A new canonical paired backup verifies;
+all three owned projects are stopped with all twelve volumes retained. This
+qualifies recovery across a gateway restart. Post-write paired restore, live ref
+mutation races, published deployment, encrypted off-host recovery and broader
+egress/retention/load qualification remain open. FLOW-8 and the readiness verdict
+remain unchanged.
+
+The 2026-10-06 public-CLI canary runner adds thirteen passing controller tests,
+artifact/source-head preflight and content-free export/replay/clone evidence.
+Its report labels the observed tier `live_github_export_replay`; credential
+failure/recovery and deployment checks above remain separate.
+
 The 2026-10-03 OPS-11/OPS-12 candidate under Accepted ADR-0137 improves human
 fresh installation: native repeatable preparation, packaged customer presets,
 storage-mode refusal, prerequisite checks, private human admission, truthful

@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select r.commit_hash, r.updated_at, r.updated_by,\n                  p.commit_hash as \"pinned_commit?\", p.updated_at as \"pinned_at?\",\n                  p.updated_by as \"pinned_by?\"\n           from vedaflow_refs r left join vedaflow_refs p\n             on p.tenant_id = r.tenant_id and p.scope_id = r.scope_id and p.name = 'pin/' || r.name\n           where r.tenant_id = $1 and r.scope_id = $2 and r.name = $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "commit_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 1,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "pinned_commit?",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 4,
+        "name": "pinned_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "pinned_by?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "454d5498fb1e1e87c9ff8c9b6ef83515ec014cd4b2f098c0750a67e731c7e9fc"
+}

@@ -117,6 +117,8 @@ pub enum ExternalProvider {
     Tei,
     /// Remote Streamable-HTTP MCP servers.
     RemoteMcp,
+    /// Private GitHub.com authored-channel Git exports.
+    Github,
 }
 
 closed_vocabulary!(
@@ -125,7 +127,8 @@ closed_vocabulary!(
         Anthropic => "anthropic",
         Vllm => "vllm",
         Tei => "tei",
-        RemoteMcp => "remote_mcp"
+        RemoteMcp => "remote_mcp",
+        Github => "github"
     ],
     "external provider family"
 );
@@ -455,6 +458,10 @@ pub struct ConfigurationDocument {
     pub relaxations: RelaxationConfiguration,
     /// Sorted, duplicate-free provider-family allowlist.
     pub allowed_external_providers: Vec<ExternalProvider>,
+    /// Git disclosure destinations enabled by governed Configuration.
+    /// Empty disables export and is omitted to preserve immutable old hashes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub git_export_targets: Vec<String>,
 }
 
 impl ConfigurationDocument {
@@ -594,6 +601,7 @@ impl ConfigurationDocument {
                 allowed_actions: vec![RelaxationAction::KnowledgeRead],
             },
             allowed_external_providers: providers,
+            git_export_targets: Vec::new(),
         }
     }
 
@@ -618,6 +626,24 @@ impl ConfigurationDocument {
         self.context.validate()?;
         self.freshness.validate()?;
         self.relaxations.validate()?;
+        if self.git_export_targets.len() > 16
+            || self
+                .git_export_targets
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+            || self.git_export_targets.iter().any(|target| {
+                target.is_empty()
+                    || target.len() > 48
+                    || !target.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                    })
+                    || !target.as_bytes()[0].is_ascii_alphanumeric()
+            })
+        {
+            return Err(Error::Invalid {
+                message: "git_export_targets must contain at most 16 sorted unique destination IDs of 1..=48 lowercase ASCII letters, digits or hyphens, starting with a letter or digit".to_owned(),
+            });
+        }
         if self
             .allowed_external_providers
             .windows(2)
@@ -1004,5 +1030,33 @@ mod tests {
             token_budget: 0,
         };
         document.validate().unwrap();
+    }
+    #[test]
+    fn git_destinations_default_to_disabled_and_only_narrow_configuration() {
+        let original = ConfigurationDocument::template(ConfigurationTemplate::Personal);
+        let bytes = serde_json::to_vec(&original).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("git_export_targets"));
+        let decoded: ConfigurationDocument = serde_json::from_slice(&bytes).unwrap();
+        assert!(decoded.git_export_targets.is_empty());
+        assert_eq!(
+            decoded.content_hash().unwrap(),
+            original.content_hash().unwrap()
+        );
+        let mut enabled = original.clone();
+        enabled.git_export_targets = vec!["review".into()];
+        enabled.validate().unwrap();
+        assert_ne!(
+            enabled.content_hash().unwrap(),
+            original.content_hash().unwrap()
+        );
+        for destinations in [
+            vec!["../escape".into()],
+            vec!["b".into(), "a".into()],
+            vec!["a".into(), "a".into()],
+            vec!["https://token@host".into()],
+        ] {
+            enabled.git_export_targets = destinations;
+            assert!(enabled.validate().is_err());
+        }
     }
 }

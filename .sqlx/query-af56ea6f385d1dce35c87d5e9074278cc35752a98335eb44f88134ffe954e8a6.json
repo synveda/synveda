@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select kind, case when octet_length(content)::bigint <= $3 then content else null end as content\n         from vedaflow_objects where tenant_id = $1 and hash = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "content",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "af56ea6f385d1dce35c87d5e9074278cc35752a98335eb44f88134ffe954e8a6"
+}

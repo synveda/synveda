@@ -329,6 +329,9 @@ pub enum AuditAction {
     /// A standing pin was released and the channel serves its head again.
     /// The one ref deletion the `vedaflow_refs` guard permits.
     ChannelUnpinned,
+    /// Governed Git disclosure intent/result; destination IDs, source hashes and
+    /// mapping digests only, never repository paths, content or credentials.
+    GitExported,
     /// A proposal was opened against a scope's published channel
     /// (FLOW-3, ADR-0032 decision 18). Payload carries the target, asset
     /// kind, member ids and addresses, the proposal commit, the maximum
@@ -520,7 +523,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 98] = [
+    pub const ALL: [AuditAction; 99] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -581,6 +584,7 @@ impl AuditAction {
         AuditAction::ChannelRolledBack,
         AuditAction::ChannelPinned,
         AuditAction::ChannelUnpinned,
+        AuditAction::GitExported,
         AuditAction::ProposalOpened,
         AuditAction::ProposalApproved,
         AuditAction::ProposalRejected,
@@ -685,6 +689,7 @@ impl AuditAction {
             AuditAction::ChannelPublished => "vedaflow.channel.published",
             AuditAction::ChannelRolledBack => "vedaflow.channel.rolled_back",
             AuditAction::ChannelPinned => "vedaflow.channel.pinned",
+            AuditAction::GitExported => "vedaflow.git.exported",
             AuditAction::ChannelUnpinned => "vedaflow.channel.unpinned",
             AuditAction::ProposalOpened => "vedaflow.proposal.opened",
             AuditAction::ProposalApproved => "vedaflow.proposal.approved",

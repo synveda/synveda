@@ -1,0 +1,30 @@
+[package]
+name = "synveda-git"
+description = "Bounded, verifiable authored-channel Git export adapter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+synveda-types = { workspace = true }
+synveda-vedaflow = { workspace = true }
+blake3 = { workspace = true }
+chrono = { workspace = true }
+flate2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+zeroize = { workspace = true }
+sha1 = "0.10"
+tokio = { workspace = true, features = ["process", "io-util"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+native-tls = "0.2"
+tokio-native-tls = "0.3"
+base64 = { workspace = true }

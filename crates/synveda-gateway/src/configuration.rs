@@ -163,8 +163,11 @@ pub(crate) struct ConfigurationDocumentBody {
     pub freshness: FreshnessConfigurationBody,
     pub advertisement: AdvertisementConfigurationBody,
     pub relaxations: RelaxationConfigurationBody,
-    /// `anthropic`, `vllm`, `tei`, or `remote_mcp`, sorted and unique.
+    /// `anthropic`, `vllm`, `tei`, `remote_mcp`, or `github`, sorted and unique.
     pub allowed_external_providers: Vec<String>,
+    /// Governed local or private GitHub destination IDs; empty disables disclosure.
+    #[serde(default)]
+    pub git_export_targets: Vec<String>,
 }
 
 impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
@@ -229,6 +232,7 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
                 .into_iter()
                 .map(|name| name.parse())
                 .collect::<Result<Vec<ExternalProvider>>>()?,
+            git_export_targets: value.git_export_targets,
         };
         document.validate()?;
         Ok(document)
@@ -295,6 +299,7 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
                 .into_iter()
                 .map(|provider| provider.as_str().to_owned())
                 .collect(),
+            git_export_targets: value.git_export_targets,
         }
     }
 }

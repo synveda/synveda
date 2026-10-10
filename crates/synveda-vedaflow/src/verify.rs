@@ -236,10 +236,11 @@ async fn walk(conn: &mut PgConnection, tenant: TenantId) -> Result<StoreVerifica
     })
 }
 
-/// Re-derives a tree's address from the entries as read back. The read is
-/// already in canonical (name) order, so no re-sorting is needed — and if the
-/// stored order were wrong, that too would show up as a different address.
-fn recompute_tree(entries: &[TreeEntry]) -> TreeHash {
+/// Re-derive a tree address from bytewise name-sorted immutable evidence.
+/// This database-free seam also verifies FLOW-8 exports. The caller must
+/// reject duplicate names and validate canonical order before calling it.
+#[must_use]
+pub fn recompute_tree(entries: &[TreeEntry]) -> TreeHash {
     tree_hash_from(
         &entries
             .iter()
@@ -255,6 +256,20 @@ fn recompute_tree(entries: &[TreeEntry]) -> TreeHash {
                 },
             })
             .collect::<Vec<_>>(),
+    )
+}
+
+/// Recompute a commit address from immutable evidence, without a database.
+/// Signatures cover this address separately and are not part of its encoding.
+#[must_use]
+pub fn recompute_commit(commit: &crate::StoredCommit) -> CommitHash {
+    commit_hash_from(
+        commit.tree,
+        &commit.parents,
+        commit.author,
+        truncate_to_micros(commit.committed_at),
+        &commit.message,
+        commit.policy_snapshot_hash,
     )
 }
 

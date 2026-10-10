@@ -107,6 +107,185 @@ remain in Git and the linked release evidence.
 
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
 
+FLOW-8 now implements local bare-repository and pinned private GitHub export
+through the same authenticated API/CLI, deterministic Prompt/ContextPack
+evidence, independent verification, fresh Cedar/Configuration checks,
+recoverable VedaFlow receipts and content-free audit/telemetry (ADR-0138/0139).
+The 2026-10-05 source demo passes six exact-role API cases and eleven Git tests,
+including controlled verified HTTPS with real receive-pack, uncertain push
+recovery, force-push races and exact encrypted-secret custody. Both transports
+remain disabled by default. The feature stays open for provider and deployment
+failure/recovery qualification. The 2026-10-06 public-CLI
+canary runner has thirteen passing controller
+tests and records export/replay plus independent clone verification separately
+from recovery.
+The 2026-10-08 pre-commit checks repeat all seventeen Git/API cases on a fresh
+disposable exact-role database, plus focused unit/OpenAPI/controller tests,
+strict Clippy, Rustdoc and fast/dependency/demo gates; all pass.
+The review follow-up passes eighteen Git/API cases, including advertised
+symbolic-destination refusal, and corrects product image inputs and stop guidance.
+The thirteen canary-controller cases pass in pinned Linux Node 22 without network
+access; native macOS controller/deployment fixture reruns hit subprocess deadlines.
+The complete required [CI run](https://github.com/synveda/synveda/actions/runs/37844684400)
+passes at `98241b902a4e3773e9321c54eb5454169577d720`, including all six native CLI
+targets and three Helm jobs. On 2026-10-09, the private, empty, non-fork
+[sujitn/synveda-git-export-canary](https://github.com/sujitn/synveda-git-export-canary)
+was created and its repository ID `1411339644` verified. The fresh loopback
+operator fixture passes readiness and real OIDC/PKCE login for four synthetic
+users. Normal Configuration review/binding, scoped curator grants and reviewed
+Prompt/ContextPack publications enable its exact sealed-credential target.
+Initial GitHub writes reveal a second HTTP flush after the successful status
+report; the original parser refuses it, retaining prepared intent. A same-head
+empty-pack probe verifies the framing without changing the ref. Prompt retry
+resumes and its independent clone verifies. Two regressions fail before the
+bounded parser fix and pass afterwards; all fourteen Git adapter cases pass.
+The corrected source at `29566928bb3cbaaa4fccc08d9c5aecf3d477b7ce` now passes
+the complete live canary on the locally built Linux/ARM64 gateway at OCI digest
+`sha256:128b38a9c6177ac8f30fd751a504676faca2945b3122cf223e27ac325fe79d82`,
+independently bound to its running image/executable. Existing prepared receipts
+recover; second governed source revisions advance both remote branches with
+`completed` on the first request, exact `no_op` replays and independent clone
+verification of four source commits and two objects per channel. The public
+audit verifier passes a 137-event snapshot; nineteen Git events and eight
+successful corrected-gateway metric/duration samples are retained privately.
+The subsequent canonical paired logical backup/restore passes into a fresh
+private macOS/OrbStack project. Ordinary tenant verification checks all 139
+restored audit events, opens the original key and refuses an unrelated key.
+Four new real PKCE logins preserve issuer/subjects after old CLI refresh is
+refused. The original sealed GitHub credential/reference/revision works without
+reprovisioning; both first exports and replays return the original exact no-op
+receipts and independent clones verify unchanged heads. The frozen 137-event
+audit prefix and nineteen prior Git event hashes match, and a new 147-event
+snapshot verifies. Four successful export operation/duration samples are
+retained. Both isolated projects are stopped with source, backup and restored
+volumes retained. The required [CI run](https://github.com/synveda/synveda/actions/runs/37895821790)
+passes at `65fdc6516d140f1e988d35fb9167889179d54bc9`.
+The retained restored fixture now passes a genuine distinct-PAT rotation:
+the secret reference, destination digest and exact no-op receipts survive
+revision 1 to 2, then fresh curator-reviewed synthetic revisions export with
+first-request `completed`, exact replay and independent clone verification of
+six commits and three objects per channel. Local secret revocation at revision
+3 refuses both exports without moving source/remote heads; reactivation with
+the same replacement at revision 4 recovers exact receipts and clones. Public
+custody audit records identify each revision, all 27 baseline Git event hashes
+remain intact, and a 210-event public chain verifies with 41 Git export events.
+Sixteen successful and two expected rejected operation/duration samples are
+retained. A new canonical paired backup of the replacement state verifies;
+owned fixtures are stopped with all volumes retained. Required
+[CI](https://github.com/synveda/synveda/actions/runs/37903182003) passes at
+`aef89e78af9ea12a308bbf1eb4426c787bfd3b3b` after retrying a failed pinned Syft
+download without weakening binary inspection.
+Provider revocation now passes after the owner deletes the original PAT:
+verified HTTPS observes old HTTP 401/new HTTP 200, and active sealed custody
+with the revoked PAT at revision 5 refuses both public exports without moving
+source/remote refs or using the independent clone credential. The working
+replacement at the same reference/revision 6 restores all four exact no-op
+receipts and both verified clones. The frozen 210-event public prefix and all
+41 prior Git event hashes match; a 235-event chain verifies with 49 Git export
+events. Eight successful and two expected rejected operation/duration samples
+are retained. A new canonical paired backup of revision 6 verifies; both owned
+projects are stopped with all eight volumes retained. Required
+[CI](https://github.com/synveda/synveda/actions/runs/37914720349) passes at
+`4a015e1ae6ecade7e3635dead83b4d2c3fe2bab8`.
+Controlled outage/retry now passes with unchanged active credential revision 6
+and fourth curator-reviewed synthetic revisions. Disconnecting only the owned
+gateway egress interface blocks both GitHub hosts while preserving its internal
+networks and sampled public readiness/authentication. Five failed requests,
+including retries across a gateway restart, retain the exact prepared source,
+Git head, mapping and destination digest; public audit records prepared, failed
+and resumed intent. Restoring the original network attachment produces two
+`resumed` exports, exact no-op replays and independent clone verification of
+eight source commits and four objects per channel. The frozen 235-event public
+prefix and all 49 prior Git event hashes match; a 295-event chain verifies with
+69 Git events. Metrics from the two process intervals total eight successful
+and five failed operations with matching duration samples. A new canonical
+paired backup verifies; both owned fixtures are stopped with all eight volumes
+retained. The open brief records operator preflight corrections and the exact
+fault/recovery boundary.
+Branch-protection preflight receives HTTP 403 for both private export branches
+because GitHub requires an eligible plan; visibility and billing stay unchanged.
+Another four exact no-op receipts and two clones pass. Preparation verifies a
+331-event public snapshot, preserved 295-event prefix and all 69 prior Git hashes.
+Fifth
+curator-reviewed synthetic revisions and a separate private recovery repository
+now pass append-only divergence/new-target recovery. Preflight discovered both
+dedicated tokens covered all owner repositories, correcting earlier scope claims.
+After explicit owner approval, saved GitHub settings restrict each token to its
+own canary repository; verified HTTPS refuses cross-canary Git content access
+with HTTP 404. Original custody stays active at revision 6; the new credential
+is separately sealed at the exact scope/revision 1.
+Two same-tree, single-parent foreign fast-forwards preserve original history and
+checkpoint refs. Four public conflict refusals leave source/remote heads unchanged
+and retain exact prepared intent across retries. Independent clones verify both
+retained projections and refuse both foreign tips. The new Configuration version
+and the existing pinned binding's revision 1-to-2 update each pass distinct
+administrator review and apply. The separate new target completes both exports,
+exact replays and independent clones with ten source commits/five objects per
+channel. Old-target requests refuse at the Configuration boundary; the retained
+diverged repository and original destination mapping stay unchanged.
+A 377-event public chain verifies with 87 Git events, preserving the 295-event
+prefix and all 69 prior Git hashes. Metrics across both gateway process intervals
+total eight successes/six expected rejections/no errors with matching durations.
+A new canonical paired backup verifies; both owned projects are stopped with all
+eight volumes retained. Required
+[preparation CI](https://github.com/synveda/synveda/actions/runs/37961537501) passes
+at `06e994a76c587b36ffb66c847284ee6c9b5af95c`.
+Prepared-receipt paired restore now passes at the active recovery target with
+sixth synthetic revisions reviewed by a distinct curator and unchanged sealed
+custody at revision 1/key 1. Four expected failures during interruption of only
+the owned
+gateway egress retain exact prepared source, Git head, mapping, destination and
+Configuration; sampled public readiness/authentication, internal networks and
+source/remote heads remain unchanged. The restored attachment receives no further
+export request before a new canonical paired backup. Restore into a separate
+empty project verifies all 426 restored audit events, original-key opening and
+unrelated-key refusal. Gateway/CLI/descriptor hashes, effective Configuration,
+secret metadata and issuer/tenant/subjects match without reprovisioning.
+Before resumption, the complete 421-event frozen public prefix and all 99 Git
+hashes at that checkpoint match the restored copy. Both exports resume the exact
+intent, replay
+as exact no-ops and pass independent clone verification of twelve source commits/
+six objects per channel without duplication. The retained diverged destination
+stays unchanged. Public verification passes 446 events; a 447-event frozen export
+independently verifies, preserving the full prepared prefix and all 87 prior Git
+hashes, with 105 Git events retained. Metrics across both process intervals total
+eight successes/four expected transport errors/no rejections with matching
+durations. Prepared and completed-state paired backups verify; all three owned
+projects are stopped with all twelve volumes retained. Required
+[CI](https://github.com/synveda/synveda/actions/runs/37968302068) passes at
+`389e893fb3dfa0f8d22e470df8895af7b55a4cb9`. Current protection reads still return
+HTTP 403 for both active recovery branches; an eligible private fixture remains
+required.
+
+Controlled live post-write response loss now passes for both channels after
+seventh distinctly reviewed synthetic revisions. A fixture-only opaque TLS relay
+drops the provider responses while preserving public-PKI verification; independent
+reads prove both GitHub heads advanced to their exact prepared intent. The normal
+gateway restart removes the fault. Both exports resume exactly, replay as no-ops
+and pass independent clone verification of fourteen source commits/seven objects
+per channel, with no further remote advancement. Configuration, artifacts and
+sealed custody remain unchanged. A 507-event public snapshot and 508-event frozen
+export verify, preserving the full uncertain prefix with 119 Git events retained.
+Metrics across both process intervals record eight successes/two expected errors/
+no rejections. A new canonical paired backup verifies; all three owned projects
+are stopped with all twelve volumes retained. Full
+[CI](https://github.com/synveda/synveda/actions/runs/37982221842)
+passes at `8b2d09b09bf2ed850d9884b108c56b7cdd4eed5b`.
+
+The pre-merge upload-timeout fix keeps metadata/discovery at 15 seconds and the
+overall export at 60 seconds, with a separate 45-second receive-pack budget.
+Its controlled TLS/native-Git regression reproduces the old failure and verifies
+slow-response success plus unchanged metadata refusal. All fifteen adapter tests,
+strict Clippy, formatting and fast repository gates pass. Live measurements remain
+bound to their recorded gateway artifacts; large uploads and connection pressure
+remain open.
+
+Next qualify live old-head/force-push/deletion races on retained synthetic
+fixtures; post-write paired restore remains a separate case. Published deployment,
+encrypted off-host recovery, owned egress/retention, large-export deadlines and
+gateway connection pressure remain open. FLOW-8 remains open for those provider/
+deployment checks.
+
 CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path, a passing source demo, direct capture-candidate and scoped retention probes, and a passing create/read/use/capture policy matrix including revocation and foreign-tenant comparisons. Four predeclared synthetic task probes pass in the fresh-database 23-scenario product suite: 12/12 Session facts and four exact Knowledge bodies retained, provenance intact, local assisted preview p95 below the 500 ms guard. A separate combined-mode gate preserves checkpoint source attribution and exact required Knowledge in both off and conservative modes, omitting optional restart text under a tight shared budget. An opt-in export now prepares the actual paired synthetic ContextRun blocks against a fixed JSON-answer rubric without calling a model, and a capped no-tools runner passes a fake-client end-to-end test. This does not measure model task success or provider usage. A live proprietary-client run remains open. CTX-8's conservative path is implemented and its optional learned backend has a no-go promotion decision. An isolated hostname handoff and resolver check passed without resetting retained interop state, and the original mapping was restored. The pinned product source image built on 2026-09-29 after official Cargo index/archive access recovered. Fresh CTX-6/CTX-8 Compose/browser acceptance and held-out model quality remain open. Next rerun paired deployment checks, then the bounded factual/model and live Claude probes when credentials and spend permission are available. The open briefs hold the exact evidence and limits.
 
 ## Phase 4 — Clients and operations

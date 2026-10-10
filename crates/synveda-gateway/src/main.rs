@@ -220,6 +220,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         embedder,
         context_embed_timeout: Duration::from_millis(context_embed_timeout_ms),
         keys: Arc::clone(&keys),
+        git_exports: runtime_config::git_export_transport()?,
     };
 
     let authority = AuthorityMonitor::new(

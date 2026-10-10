@@ -2,7 +2,7 @@
 export const contract = {
   "sdk_version": "0.1.0",
   "api_version": "0.4.4",
-  "openapi_sha256": "62d550af54de74d1ecf18e3917b289e1cd0f02a7e0ac32622862b394bb6960e1",
+  "openapi_sha256": "3528dec96c1b5bb1667aab04816edacca6fcb4c29151dba0bcf52eb9941fd076",
   "operations": {
     "list_audit_events": {
       "path": "/v1/audit/events",

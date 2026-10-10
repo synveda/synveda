@@ -45,6 +45,7 @@ pub mod database_url;
 pub mod directory;
 pub mod directory_sync;
 pub mod epoch;
+pub mod git_exports;
 pub mod idempotency;
 pub mod identities;
 pub mod imports;

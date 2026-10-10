@@ -725,3 +725,14 @@ permit (
 ) when {
     resource == principal.tenant
 };
+
+// FLOW-8 disclosure authority is deliberately separate from channel reading.
+// Configuration and exact artifact reads can only narrow this permission.
+permit (
+    principal,
+    action == Synveda::Action::"ChannelExport",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.contains("administrator")
+};

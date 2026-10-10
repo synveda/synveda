@@ -33,6 +33,7 @@ mod curators;
 mod directory_admin;
 pub mod directory_sync;
 mod error;
+mod git_bridge;
 mod idempotency;
 pub mod knowledge;
 mod knowledge_api;

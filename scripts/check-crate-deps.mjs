@@ -55,12 +55,15 @@ const ALLOWED = {
   // they understand shared value types but cannot see storage, policy,
   // VedaFlow, audit or the gateway (CPR-27, ADR-0087 decision 2).
   "synveda-okf": ["synveda-types"],
+  // FLOW-8 transport leaf: immutable VedaFlow evidence, no store/PDP authority.
+  "synveda-git": ["synveda-types", "synveda-vedaflow"],
   "synveda-gateway": [
     ...BASE,
     ...MIDDLE,
     "synveda-retrieval",
     "synveda-ingest",
     "synveda-okf",
+    "synveda-git",
   ],
   // Experimental queue transports are replaceable process leaves. They may
   // call the gateway's narrow execution seam; no domain or public-API crate
@@ -109,6 +112,7 @@ const ALLOWED = {
     "synveda-audit",
     "synveda-vedaflow",
     "synveda-okf",
+    "synveda-git",
   ],
 };
 

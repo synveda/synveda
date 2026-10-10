@@ -767,6 +767,15 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
          outcome (ok/rejected/error)"
     );
     metrics::describe_counter!(
+        crate::git_bridge::OPERATIONS_TOTAL,
+        "Governed local Git export attempts by closed outcome"
+    );
+    metrics::describe_histogram!(
+        crate::git_bridge::OPERATION_SECONDS,
+        metrics::Unit::Seconds,
+        "Bounded local Git export duration by closed outcome"
+    );
+    metrics::describe_counter!(
         SKILL_OPERATIONS_TOTAL,
         "Skills registry operations by op (author/resolve/list) and \
          outcome (ok/rejected/error)"

@@ -205,6 +205,7 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
         context_embed_timeout: std::time::Duration::from_millis(100),
+        git_exports: None,
     }
 }
 

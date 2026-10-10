@@ -503,6 +503,8 @@ pub enum Action {
     /// releasing is never the more dangerous half — it can only return
     /// readers to material that was approved more recently.
     ChannelPin,
+    /// Disclose authored-channel history to a governed external destination.
+    ChannelExport,
     /// Read proposals targeting the resource scope — `GET /v1/proposals`
     /// and `GET /v1/proposals/{id}` (FLOW-3, ADR-0032 decision 16).
     ProposalRead,
@@ -526,7 +528,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 46] = [
+    pub const ALL: [Action; 47] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -570,6 +572,7 @@ impl Action {
         Action::ChannelPublish,
         Action::ChannelRollback,
         Action::ChannelPin,
+        Action::ChannelExport,
         Action::ProposalRead,
         Action::ProposalOpen,
         Action::ProposalReview,
@@ -590,7 +593,7 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 37] = [
+    pub const PROBED_AT_SCOPE: [Action; 38] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -625,6 +628,7 @@ impl Action {
         Action::ChannelPublish,
         Action::ChannelRollback,
         Action::ChannelPin,
+        Action::ChannelExport,
         Action::ProposalRead,
         Action::ProposalOpen,
         Action::ProposalReview,
@@ -723,6 +727,7 @@ impl Action {
             Action::ChannelPublish => "channel.publish",
             Action::ChannelRollback => "channel.rollback",
             Action::ChannelPin => "channel.pin",
+            Action::ChannelExport => "channel.export",
             Action::ProposalRead => "proposal.read",
             Action::ProposalOpen => "proposal.open",
             Action::ProposalReview => "proposal.review",
@@ -775,6 +780,7 @@ impl Action {
             Action::ChannelPublish => "ChannelPublish",
             Action::ChannelRollback => "ChannelRollback",
             Action::ChannelPin => "ChannelPin",
+            Action::ChannelExport => "ChannelExport",
             Action::ProposalRead => "ProposalRead",
             Action::ProposalOpen => "ProposalOpen",
             Action::ProposalReview => "ProposalReview",

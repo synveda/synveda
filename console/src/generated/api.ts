@@ -1209,12 +1209,16 @@ export type ConfigurationComparisonView = {
 export type ConfigurationDocumentBody = {
     advertisement: AdvertisementConfigurationBody;
     /**
-     * `anthropic`, `vllm`, `tei`, or `remote_mcp`, sorted and unique.
+     * `anthropic`, `vllm`, `tei`, `remote_mcp`, or `github`, sorted and unique.
      */
     allowed_external_providers: string[];
     capture: CaptureConfigurationBody;
     context: ContextConfigurationBody;
     freshness: FreshnessConfigurationBody;
+    /**
+     * Governed local or private GitHub destination IDs; empty disables disclosure.
+     */
+    git_export_targets?: string[];
     policy_pack: string;
     relaxations: RelaxationConfigurationBody;
   };
@@ -2667,6 +2671,48 @@ export type FreshnessPolicyView = {
      * Stable type-specific verification signals.
      */
     triggers: string[];
+  };
+
+export type GitExportBody = {
+    /**
+     * `prompt` or `context-pack`.
+     */
+    asset: string;
+    /**
+     * `published` or `staged`.
+     */
+    channel: string;
+    /**
+     * Governed destination ID. The deployment fixes local or private GitHub custody.
+     */
+    target: string;
+  };
+
+export type GitExportResponse = {
+    commits: number;
+    /**
+     * Content-free binding to exact destination and credential custody.
+     */
+    destination_digest: string;
+    git_head: string;
+    git_ref: string;
+    mapping_digest: string;
+    objects: number;
+    /**
+     * `completed`, `resumed`, or `no_op`. No content or filesystem path.
+     */
+    outcome: string;
+    /**
+     * `local` or `github`.
+     */
+    provider: string;
+    /**
+     * Pinned GitHub repository ID, absent for local export.
+     */
+    repository_id?: number | null;
+    source_head: string;
+    source_pin?: string | null;
+    target: string;
   };
 
 /**
@@ -6903,6 +6949,17 @@ export type Operations = {
     readonly response: ChannelListResponse;
   };
   /**
+   * Export the complete bounded authored-channel graph to a governed local or private GitHub
+   * destination. Replays repeat current Cedar and per-artifact read decisions.
+   * A prepared receipt survives cancellation and is resumed before new heads.
+   */
+  readonly export_channel_to_git: {
+    readonly path: "/v1/channels/{scope_id}/git-export";
+    readonly method: "POST";
+    readonly body: GitExportBody;
+    readonly response: GitExportResponse;
+  };
+  /**
    * `GET /v1/channels/{scope_id}/history` — the states this channel has
    * held, newest first.
    */
@@ -8261,6 +8318,7 @@ export const OPERATIONS = {
   merge_capture_candidate: { path: "/v1/capture-candidates/{id}/merge", method: "POST", idempotent: true },
   replace_capture_candidate: { path: "/v1/capture-candidates/{id}/replace", method: "POST", idempotent: true },
   list_channels: { path: "/v1/channels/{scope_id}", method: "GET" },
+  export_channel_to_git: { path: "/v1/channels/{scope_id}/git-export", method: "POST" },
   get_channel_history: { path: "/v1/channels/{scope_id}/history", method: "GET" },
   pin_channel: { path: "/v1/channels/{scope_id}/pin", method: "POST" },
   publish_channel: { path: "/v1/channels/{scope_id}/publish", method: "POST" },

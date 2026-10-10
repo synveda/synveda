@@ -73,8 +73,11 @@ with approval authority derived from governed scopes and grants. Nothing reaches
 
 Git-*like*, implemented natively in Postgres rather than on bare git repos, because approvals,
 policy checks, audit chaining, and row-level tenant isolation must be transactional with the
-content. A Git export bridge is open work under [FLOW-8](backlog/FLOW-8.md);
-no repository mirroring is implemented.
+content. A governed local Git export bridge is implemented under
+[FLOW-8](backlog/FLOW-8.md), with [operator instructions](integrations/git-bridge.md);
+private GitHub HTTPS transport is source-tested while credentialed provider and
+deployment qualification remain open. Git-native signature translation
+is not performed.
 
 Conceptual VedaFlow storage (the epoch-3 migration is authoritative; proposal
 references are validated typed JSON, not free-form source/target strings):
@@ -157,8 +160,8 @@ recording the act. Rules can require the reviewer to differ from the author and
 the effect actor to differ from both author and counting reviewers. Applying or
 publishing remains a separate PDP-authorised act and repeats artifact revision
 checks. The author cancels through the one withdrawal transition; rejection is
-a reviewer verdict with a reason. A future Git bridge could surface authored-channel reviews as pull requests;
-that integration remains FLOW-8 work.
+a reviewer verdict with a reason. The Git bridge exports authored-channel evidence;
+forge pull-request review is outside the current FLOW-8 export contract.
 
 ### 2.4.1 Approval threat boundary
 
