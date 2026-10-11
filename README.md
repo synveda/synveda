@@ -93,7 +93,13 @@ proposed learning. It uses the public API and needs no model key:
 ./synveda-compose sample
 ```
 
-In the console, open **New Learnings** and inspect the ingestion retry finding.
+After **Getting started**, the sample can pause for a Configuration review
+before creating its source session or learning. Follow the
+[Configuration review steps](deploy/compose/PREBUILT.md#pending-sample-configuration),
+then rerun the same command with its existing state.
+
+When the command completes, open **New Learnings** and inspect the ingestion
+retry finding.
 Sign out, run `./synveda-compose credential reviewer`, and sign in as
 `synveda-demo-member` to review it. Approve and apply the proposal in
 **Advanced → Reviews**. Then request context for **Northstar Delivery →

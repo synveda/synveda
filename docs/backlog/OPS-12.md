@@ -1845,7 +1845,9 @@ No earlier source/run report supplied missing evidence. Immutable v0.4.0–v0.4.
 artifacts and the [v0.4.4 record](../../demos/evidence/ops12-044-controlled-release.json)
 remain unchanged.
 
-**Next action:** recruit the three unfamiliar engineers for guide-only trials;
+**Next action:** complete the published sample's pending Configuration through
+normal admission, review and separate effect authority, then verify its
+learning/Skill/context path. Recruit the three unfamiliar engineers for guide-only trials;
 qualify shared first-human/HTTPS admission and installed native real issuer/
 vendor/model use separately. Resolve the documented notice-provenance and
 coverage gaps without expanding this release's claims. Paused
@@ -1880,3 +1882,64 @@ onboarding tests. The deployment convergence suite's loopback case initially
 hit sandbox socket refusal; the complete 50-case convergence/uninstall run then
 passed with loopback access. The OpenAPI diff is only 0.4.4 to 0.4.5; all 177
 operation shapes and the SDK's 15 operations/53 schemas are unchanged.
+
+### Published v0.4.5 clean-install probe (2026-10-11)
+
+The owner's clean-install request used freshly downloaded public v0.4.5 assets
+and the updated installation guide at `58e34d85110cf65158cf690e5b377ba5aab71e8c`.
+The exact README download block verified the publisher, source/tag and unique
+reference checksum before extraction. The immutable-source client installer
+independently verified and installed the published macOS ARM64 archive into a
+fresh private root; the actual CLI is 0.4.5 with private Node 24.21.0. No product
+source build or shell/harness configuration change was used.
+
+Existing `synveda-evaluation` volumes were preserved. The documented plain-Compose
+route and matching native lifecycle CLI selected a fresh
+`synveda-local-acceptance-v045-3veznggo` project on macOS ARM64/OrbStack, Docker
+29.4.0 and Compose 5.1.2. All seven long-running services were healthy and all
+seven startup gates completed successfully. Real console PKCE login, workspace/
+project creation and personal Configuration adoption passed, as did published
+native CLI PKCE login and authenticated API access. Ordinary `down`/`up` kept the
+same three volumes, identities, console-created project, sample receipt and
+pending change. Audit verification passed before and after restart; the packaged
+browser gate passed exact issuer, API access, console logout and post-logout 401.
+Native logout removed its profile and subsequent `whoami` refused absent
+credentials. Final ordinary shutdown left no project containers/networks and
+retained all data and keys. Generated password and login-handoff output logs
+were removed; unrelated deployments and global Docker context were untouched.
+
+The probe exposed a guide omission, not a Configuration bypass opportunity.
+After console setup had adopted the first canonical profile, the optional sample
+returned exit 78 at its team Configuration, before creating its source Session
+or learning. The durable receipt remains `starting`; public inspection shows
+change `01a12c80-9d86-7583-8716-f36ef798624e`, commit
+`190efe9a9d3312727db2cbaf59063d99f336c4e71386db229cfe488f79fae420`,
+requiring two distinct administrator reviewers, no author approval and a
+separate administrator effect actor. Its address, matrix and public resources
+were identical after restart. No additional principal was admitted, viewer
+authority elevated, proposal approved/applied or completed-learning/context
+claim made. This is the existing Accepted ADR-0100 resumption boundary.
+
+Current README, INSTALL, PREBUILT and plain-Compose instructions now describe
+that review and stable-receipt resumption. Native consumer examples/source pins
+and the source Compose guide's stale current-release claim were corrected to
+v0.4.5. Published archives, tag, images and chart remain unchanged.
+The [install record](../../demos/evidence/ops12-045-clean-install.json) retains
+actual asset hashes, source identities, exit codes, HTTP results, approval
+matrix, audit heads and cleanup evidence.
+
+This is an agent-run fresh deployment on an existing host with cached image
+layers, not an empty physical host, cold-download timing or an unfamiliar
+engineer's guide-only trial. Docker automatically selected `osxkeychain` in the
+fresh config, so this probe makes no anonymous registry authentication claim;
+the tagged release's anonymous registry evidence remains separate. External
+issuers, native vendor/model use, Helm/CNPG and broader readiness remain open.
+
+**Blocker and next action:** the four sample accounts cannot satisfy the separate
+effect actor while preserving the restricted viewer. An operator must admit an
+additional OIDC identity through normal People/Access, grant workspace
+administrator, inspect/review/apply the original Configuration with the displayed
+distinct actors, and rerun the same sample receipt. Complete any pending binding
+the same way, then verify Capture, learning review/apply, Skill binding and exact
+revision/source Context. Recruit the three unfamiliar engineers separately.
+OPS-11/OPS-12 remain open; readiness and paused automation are unchanged.

@@ -65,9 +65,14 @@ live. You can attach a repository and choose an agent client afterward.
 ./synveda-compose sample
 ```
 
-This creates fictional **Northstar Delivery → Ingestion API** data through
-Synveda's public API. In **Sessions**, inspect the source session. In **New
-Learnings**, open its proposed ingestion retry finding. The sample does not
+The sample can pause for a Configuration review if **Getting started** already
+adopted the tenant's first canonical profile. Follow the
+[Configuration review steps](../deploy/compose/PREBUILT.md#pending-sample-configuration),
+then rerun the same command. Its existing receipt preserves the pending change.
+
+When complete, this creates fictional **Northstar Delivery → Ingestion API**
+data through Synveda's public API. In **Sessions**, inspect the source session.
+In **New Learnings**, open its proposed ingestion retry finding. The sample does not
 approve its own proposal.
 
 To complete the review, sign out and use `./synveda-compose credential reviewer`

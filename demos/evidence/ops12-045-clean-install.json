@@ -1,0 +1,635 @@
+{
+  "schema_version": 1,
+  "feature_ids": [
+    "OPS-12",
+    "OPS-11"
+  ],
+  "recorded_at": "2026-10-11T20:06:02.384644+00:00",
+  "qualification": "Published v0.4.5 isolated local installation and ordinary restart on macOS ARM64/OrbStack; optional sample stops at governed Configuration review.",
+  "outcome": {
+    "core_install": "passed",
+    "published_native_client_login": "passed",
+    "retained_restart": "passed",
+    "browser_and_cli_logout": "passed",
+    "complete_sample_learning_and_context": "blocked_pending_configuration_review"
+  },
+  "version": "0.4.5",
+  "tag": "v0.4.5",
+  "source_sha": "5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed",
+  "guide_source_sha": "58e34d85110cf65158cf690e5b377ba5aab71e8c",
+  "release": {
+    "url": "https://github.com/synveda/synveda/releases/tag/v0.4.5",
+    "id": 409802677,
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-10-11T17:04:49Z"
+  },
+  "downloads": {
+    "assets": [
+      {
+        "name": "synveda-reference-0.4.5.tar.gz",
+        "id": 631300319,
+        "bytes": 115021,
+        "sha256": "8f553414f9a7ec5f3bc923256fb4c2a6fa87ff3fb310c6fdc125adf2acc8843e"
+      },
+      {
+        "name": "synveda-client-0.4.5-darwin-arm64.tar.gz",
+        "id": 631300365,
+        "bytes": 48760530,
+        "sha256": "2fd258896b1048397905a6c7cae43100ad6e6a7e4c1c059340d74f6bdfc4a010"
+      },
+      {
+        "name": "SHA256SUMS",
+        "id": 631300632,
+        "bytes": 5539,
+        "sha256": "d73672c6a7d663c90b1a50d3c20d1c99742a64e727c893f6e97feb1abcda08a4"
+      },
+      {
+        "name": "SHA256SUMS.sigstore.json",
+        "id": 631300634,
+        "bytes": 10522,
+        "sha256": "a53b218176a025c42ba4bdc27d84a61d65d59e2f050d7640126d4c0e5d977370"
+      }
+    ],
+    "reference_download": "Exact README shell block with fresh public HTTPS downloads; extraction followed trusted publisher and checksum verification.",
+    "client_download": "Inspected immutable-source install.sh in client-only mode, expected source pinned, fresh private SYNVEDA_HOME and SYNVEDA_BIN.",
+    "installer_sha256": "27d7999b9a568b552316bd2e18ee21d68fae3ab4ba4f39b918d2e2fb9f5780fa"
+  },
+  "publisher_verification": {
+    "result": "passed for reference and native client installation",
+    "repo": "synveda/synveda",
+    "signer_workflow": "synveda/synveda/.github/workflows/release.yml",
+    "source_ref": "refs/tags/v0.4.5",
+    "source_digest": "5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed",
+    "cert_oidc_issuer": "https://token.actions.githubusercontent.com",
+    "predicate_type": "https://slsa.dev/provenance/v1",
+    "deny_self_hosted_runners": true,
+    "checksum_inventory_sha256": "d73672c6a7d663c90b1a50d3c20d1c99742a64e727c893f6e97feb1abcda08a4",
+    "attestation_bundle_sha256": "a53b218176a025c42ba4bdc27d84a61d65d59e2f050d7640126d4c0e5d977370"
+  },
+  "host": {
+    "os": "macOS",
+    "os_version": "26.7.1",
+    "architecture": "arm64",
+    "container_engine": "OrbStack Linux ARM64",
+    "docker_engine": "29.4.0",
+    "compose": "5.1.2",
+    "docker_os": "linux",
+    "docker_architecture": "aarch64",
+    "docker_memory_bytes": 16817168384,
+    "cached_image_layers_present": true,
+    "scope": "New project, volumes, keys, identities and client state on an existing host; no empty-OS-host or cold-download claim."
+  },
+  "route": {
+    "project": "synveda-local-acceptance-v045-3veznggo",
+    "selection": "Documented plain-Compose bundle and matching published native lifecycle CLI with --project-name. Existing fixed synveda-evaluation volumes were preserved.",
+    "initial_project_resources": "No containers, networks or volumes for this selected project before first up; native ownership preflight passed.",
+    "docker_context": "Task-private context to the existing local Unix socket; global context unchanged.",
+    "docker_config": {
+      "fresh_directory": true,
+      "inline_auth_entries": 0,
+      "auto_selected_credential_helper": "osxkeychain",
+      "anonymous_registry_pull_not_claimed": true
+    },
+    "host_source_build": false,
+    "harness_or_shell_configuration_changed": false
+  },
+  "native_client": {
+    "target": "darwin-arm64",
+    "version": "synveda 0.4.5",
+    "source_sha": "5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed",
+    "source_tree_dirty": false,
+    "private_node_version": "24.21.0",
+    "private_install": true,
+    "cli_pkce_login_to_bundled_keycloak": true,
+    "same_authenticated_subject_and_tenant_after_restart": true,
+    "logout": "Local profile credentials removed; subsequent whoami returned exit 1. Issuer tokens remain valid until expiry."
+  },
+  "runtime": {
+    "images": [
+      "docker.io/synveda/browser-acceptance@sha256:5195dff15aed015e2e4032491bc2d1a4942f07030527148862863894f48ed7a5",
+      "docker.io/synveda/keycloak@sha256:6a5a4ae69d7afde766d079dddd23ed86d4e509d7a1fa380b61672d7d65085271",
+      "docker.io/synveda/postgres@sha256:798b0ba14875d0d106ed541a3dac0a43ea9fee44a9012697380ec52340340fba",
+      "docker.io/synveda/product@sha256:123686cb892d279736b86cb65e9da19d56f95dae5c0617ad96771a6033ec3a35",
+      "docker.io/synveda/proxy@sha256:2a870d4b85646e57a561e4b85d9b85246d3924306b7605c290484d3a98c5bd44",
+      "otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc"
+    ],
+    "running_image_identities": [
+      {
+        "name": "docker.io/synveda/keycloak@sha256:6a5a4ae69d7afde766d079dddd23ed86d4e509d7a1fa380b61672d7d65085271",
+        "os": "linux",
+        "architecture": "arm64",
+        "source": "5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed"
+      },
+      {
+        "name": "docker.io/synveda/postgres@sha256:798b0ba14875d0d106ed541a3dac0a43ea9fee44a9012697380ec52340340fba",
+        "os": "linux",
+        "architecture": "arm64",
+        "source": "5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed"
+      },
+      {
+        "name": "docker.io/synveda/product@sha256:123686cb892d279736b86cb65e9da19d56f95dae5c0617ad96771a6033ec3a35",
+        "os": "linux",
+        "architecture": "arm64",
+        "source": "5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed"
+      },
+      {
+        "name": "docker.io/synveda/proxy@sha256:2a870d4b85646e57a561e4b85d9b85246d3924306b7605c290484d3a98c5bd44",
+        "os": "linux",
+        "architecture": "arm64",
+        "source": "5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed"
+      },
+      {
+        "name": "otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc",
+        "os": "linux",
+        "architecture": "arm64",
+        "source": "f817832365a9a2b829bc7c25feffcf8834585dea"
+      }
+    ],
+    "services_after_restart": [
+      {
+        "service": "database-bootstrap",
+        "image": "docker.io/synveda/postgres@sha256:798b0ba14875d0d106ed541a3dac0a43ea9fee44a9012697380ec52340340fba",
+        "state": "exited",
+        "exit_code": 0,
+        "health": null
+      },
+      {
+        "service": "database-preflight",
+        "image": "docker.io/synveda/product@sha256:123686cb892d279736b86cb65e9da19d56f95dae5c0617ad96771a6033ec3a35",
+        "state": "exited",
+        "exit_code": 0,
+        "health": null
+      },
+      {
+        "service": "gateway",
+        "image": "docker.io/synveda/product@sha256:123686cb892d279736b86cb65e9da19d56f95dae5c0617ad96771a6033ec3a35",
+        "state": "running",
+        "exit_code": 0,
+        "health": "healthy"
+      },
+      {
+        "service": "initialize",
+        "image": "docker.io/synveda/product@sha256:123686cb892d279736b86cb65e9da19d56f95dae5c0617ad96771a6033ec3a35",
+        "state": "exited",
+        "exit_code": 0,
+        "health": null
+      },
+      {
+        "service": "issuer-diagnostic",
+        "image": "docker.io/synveda/product@sha256:123686cb892d279736b86cb65e9da19d56f95dae5c0617ad96771a6033ec3a35",
+        "state": "exited",
+        "exit_code": 0,
+        "health": null
+      },
+      {
+        "service": "keycloak",
+        "image": "docker.io/synveda/keycloak@sha256:6a5a4ae69d7afde766d079dddd23ed86d4e509d7a1fa380b61672d7d65085271",
+        "state": "running",
+        "exit_code": 0,
+        "health": "healthy"
+      },
+      {
+        "service": "keycloak-database-bootstrap",
+        "image": "docker.io/synveda/postgres@sha256:798b0ba14875d0d106ed541a3dac0a43ea9fee44a9012697380ec52340340fba",
+        "state": "exited",
+        "exit_code": 0,
+        "health": null
+      },
+      {
+        "service": "keycloak-realm-convergence",
+        "image": "docker.io/synveda/keycloak@sha256:6a5a4ae69d7afde766d079dddd23ed86d4e509d7a1fa380b61672d7d65085271",
+        "state": "running",
+        "exit_code": 0,
+        "health": "healthy"
+      },
+      {
+        "service": "migrate",
+        "image": "docker.io/synveda/product@sha256:123686cb892d279736b86cb65e9da19d56f95dae5c0617ad96771a6033ec3a35",
+        "state": "exited",
+        "exit_code": 0,
+        "health": null
+      },
+      {
+        "service": "otel-collector",
+        "image": "otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc",
+        "state": "running",
+        "exit_code": 0,
+        "health": "healthy"
+      },
+      {
+        "service": "postgres",
+        "image": "docker.io/synveda/postgres@sha256:798b0ba14875d0d106ed541a3dac0a43ea9fee44a9012697380ec52340340fba",
+        "state": "running",
+        "exit_code": 0,
+        "health": "healthy"
+      },
+      {
+        "service": "proxy",
+        "image": "docker.io/synveda/proxy@sha256:2a870d4b85646e57a561e4b85d9b85246d3924306b7605c290484d3a98c5bd44",
+        "state": "running",
+        "exit_code": 0,
+        "health": "healthy"
+      },
+      {
+        "service": "tenant-convergence",
+        "image": "docker.io/synveda/product@sha256:123686cb892d279736b86cb65e9da19d56f95dae5c0617ad96771a6033ec3a35",
+        "state": "exited",
+        "exit_code": 0,
+        "health": null
+      },
+      {
+        "service": "worker",
+        "image": "docker.io/synveda/product@sha256:123686cb892d279736b86cb65e9da19d56f95dae5c0617ad96771a6033ec3a35",
+        "state": "running",
+        "exit_code": 0,
+        "health": "healthy"
+      }
+    ],
+    "healthy_services": 7,
+    "completed_startup_gates": 7,
+    "http_after_restart": [
+      {
+        "path": "/console/",
+        "status": 200
+      },
+      {
+        "path": "/healthz",
+        "status": 200
+      },
+      {
+        "path": "/readyz",
+        "status": 200
+      },
+      {
+        "path": "/metrics",
+        "status": 404
+      },
+      {
+        "path": "/v1/workspaces",
+        "status": 401
+      },
+      {
+        "path": "/realms/synveda/.well-known/openid-configuration",
+        "status": 200,
+        "issuer": "http://localhost:8080/realms/synveda"
+      }
+    ],
+    "volumes_before_restart": [
+      {
+        "name": "synveda-local-acceptance-v045-3veznggo_browser-acceptance-state",
+        "created_at": "2026-10-11T20:46:21+01:00",
+        "project": "synveda-local-acceptance-v045-3veznggo"
+      },
+      {
+        "name": "synveda-local-acceptance-v045-3veznggo_installation",
+        "created_at": "2026-10-11T20:38:50+01:00",
+        "project": "synveda-local-acceptance-v045-3veznggo"
+      },
+      {
+        "name": "synveda-local-acceptance-v045-3veznggo_postgres-data",
+        "created_at": "2026-10-11T20:38:50+01:00",
+        "project": "synveda-local-acceptance-v045-3veznggo"
+      }
+    ],
+    "volumes_after_restart": [
+      {
+        "name": "synveda-local-acceptance-v045-3veznggo_browser-acceptance-state",
+        "created_at": "2026-10-11T20:46:21+01:00",
+        "project": "synveda-local-acceptance-v045-3veznggo"
+      },
+      {
+        "name": "synveda-local-acceptance-v045-3veznggo_installation",
+        "created_at": "2026-10-11T20:38:50+01:00",
+        "project": "synveda-local-acceptance-v045-3veznggo"
+      },
+      {
+        "name": "synveda-local-acceptance-v045-3veznggo_postgres-data",
+        "created_at": "2026-10-11T20:38:50+01:00",
+        "project": "synveda-local-acceptance-v045-3veznggo"
+      }
+    ],
+    "volumes_identical": true
+  },
+  "console": {
+    "real_browser_login": true,
+    "created_workspace": "v0.4.5 install verification",
+    "created_project": "Published assets check",
+    "personal_configuration_adoption": "done",
+    "workspace_project_and_authenticated_browser_session_retained_after_restart": true,
+    "signed_out_page": "Welcome to Synveda; Sign in visible",
+    "published_browser_fixture": "Exact issuer, PKCE, console cookie, tenant admission, authenticated API operation, console logout and post-logout 401 passed."
+  },
+  "sample": {
+    "command": "docker compose run --rm --no-deps --entrypoint node browser-acceptance product-demo.mjs sample",
+    "exit_code": 78,
+    "wrapper_error": "compose-product: product-demo failed",
+    "causal_diagnostic": "Canonical team Configuration needs ordinary review before seed can continue.",
+    "receipt_state": "starting",
+    "resource_keys": [
+      "configuration",
+      "configuration_request",
+      "grant_administrator",
+      "grant_approver",
+      "grant_reviewer",
+      "grant_viewer",
+      "project",
+      "repository",
+      "workspace"
+    ],
+    "pending_configuration": {
+      "id": "01a12c80-9d86-7583-8716-f36ef798624e",
+      "target_scope_id": "01a12c80-9d2e-7603-8f8f-21572e18dc3e",
+      "source_scope_id": "01a12c80-9d2e-7603-8f8f-21572e18dc3e",
+      "asset": "configuration",
+      "effect": "apply",
+      "state": "open",
+      "commit": "190efe9a9d3312727db2cbaf59063d99f336c4e71386db229cfe488f79fae420",
+      "required": {
+        "roles": [
+          {
+            "role": "administrator",
+            "count": 2
+          }
+        ],
+        "distinct_approvers": 2,
+        "forbid_author_approval": true,
+        "separate_effect_actor": true,
+        "origins": [
+          "pack"
+        ]
+      },
+      "approvals": []
+    },
+    "persistence": {
+      "sample_receipt_identical": true,
+      "sample_public_resources_identical": true,
+      "pending_configuration_identical": true,
+      "pending_configuration_id": "01a12c80-9d86-7583-8716-f36ef798624e",
+      "pending_configuration_commit": "190efe9a9d3312727db2cbaf59063d99f336c4e71386db229cfe488f79fae420",
+      "pending_configuration_required": {
+        "roles": [
+          {
+            "role": "administrator",
+            "count": 2
+          }
+        ],
+        "distinct_approvers": 2,
+        "forbid_author_approval": true,
+        "separate_effect_actor": true,
+        "origins": [
+          "pack"
+        ]
+      }
+    },
+    "source_session_created": false,
+    "learning_and_context_verified": false,
+    "additional_principal_admitted": false,
+    "restricted_viewer_elevated": false,
+    "next_action": "Admit an additional normal OIDC identity and grant workspace administrator through People/Access. Inspect and review the original Configuration with two distinct administrators other than its author, apply with the separate administrator, then rerun the same sample/receipt. Repeat ordinary review for a pending binding, then verify Capture, learning review/apply, Skill binding and revision/source Context."
+  },
+  "audit": [
+    {
+      "phase": "audit-before-restart",
+      "valid": true,
+      "events": 56,
+      "head_sequence": 56,
+      "head_hash": "e2faa6d83b7f140e7ee3d5e743a492dd5b53823aced80c1e9f9db7b74a23c1d6"
+    },
+    {
+      "phase": "audit-after-restart",
+      "valid": true,
+      "events": 58,
+      "head_sequence": 58,
+      "head_hash": "acd7d0d8918145779c3fd18558b79af3e6b8e514b84598711dbe89e711d7b97a"
+    }
+  ],
+  "steps": [
+    {
+      "step": "first-up",
+      "started": "2026-10-11T19:38:37.493016+00:00",
+      "finished": "2026-10-11T19:43:30.615850+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 293.123
+    },
+    {
+      "step": "first-status",
+      "started": "2026-10-11T19:44:08.989281+00:00",
+      "finished": "2026-10-11T19:44:09.431370+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 0.442
+    },
+    {
+      "step": "credential-retrieval",
+      "started": "2026-10-11T19:44:10.197394+00:00",
+      "finished": "2026-10-11T19:44:10.744486+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 0.547
+    },
+    {
+      "step": "native-login",
+      "started": "2026-10-11T19:46:42.997683+00:00",
+      "finished": "2026-10-11T19:47:47.936575+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 64.939
+    },
+    {
+      "step": "native-whoami",
+      "started": "2026-10-11T19:48:08.668178+00:00",
+      "finished": "2026-10-11T19:48:08.689228+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 0.021
+    },
+    {
+      "step": "sample",
+      "started": "2026-10-11T19:46:20.886261+00:00",
+      "finished": "2026-10-11T19:46:28.991293+00:00",
+      "exit_code": 78,
+      "elapsed_seconds": 8.105
+    },
+    {
+      "step": "sample-seed-diagnostic",
+      "started": "2026-10-11T19:49:16.259310+00:00",
+      "finished": "2026-10-11T19:49:16.995741+00:00",
+      "exit_code": 1,
+      "elapsed_seconds": 0.736
+    },
+    {
+      "step": "sample-configuration-inspect",
+      "started": "2026-10-11T19:50:42.045470+00:00",
+      "finished": "2026-10-11T19:50:42.735166+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 0.69
+    },
+    {
+      "step": "audit-before-restart",
+      "started": "2026-10-11T19:52:17.255727+00:00",
+      "finished": "2026-10-11T19:52:17.336553+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 0.081
+    },
+    {
+      "step": "lifecycle-down",
+      "started": "2026-10-11T19:53:37.557963+00:00",
+      "finished": "2026-10-11T19:53:53.387667+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 15.83
+    },
+    {
+      "step": "lifecycle-up",
+      "started": "2026-10-11T19:54:42.810383+00:00",
+      "finished": "2026-10-11T19:58:26.853477+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 224.044
+    },
+    {
+      "step": "restart-status",
+      "started": "2026-10-11T19:58:45.331357+00:00",
+      "finished": "2026-10-11T19:58:45.695447+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 0.364
+    },
+    {
+      "step": "native-whoami-after-restart",
+      "started": "2026-10-11T19:59:12.610837+00:00",
+      "finished": "2026-10-11T19:59:12.687892+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 0.077
+    },
+    {
+      "step": "audit-after-restart",
+      "started": "2026-10-11T19:59:14.263639+00:00",
+      "finished": "2026-10-11T19:59:14.284122+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 0.02
+    },
+    {
+      "step": "sample-configuration-after-restart",
+      "started": "2026-10-11T19:59:16.168909+00:00",
+      "finished": "2026-10-11T19:59:16.820194+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 0.651
+    },
+    {
+      "step": "sample-status-after-restart",
+      "started": "2026-10-11T19:59:35.094915+00:00",
+      "finished": "2026-10-11T19:59:36.639471+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 1.543
+    },
+    {
+      "step": "browser-login-logout",
+      "started": "2026-10-11T19:59:38.474842+00:00",
+      "finished": "2026-10-11T19:59:40.088156+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 1.613
+    },
+    {
+      "step": "native-logout",
+      "started": "2026-10-11T20:00:59.198485+00:00",
+      "finished": "2026-10-11T20:00:59.222176+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 0.024
+    },
+    {
+      "step": "native-after-logout",
+      "started": "2026-10-11T20:00:59.285403+00:00",
+      "finished": "2026-10-11T20:00:59.297261+00:00",
+      "exit_code": 1,
+      "elapsed_seconds": 0.012
+    },
+    {
+      "step": "final-down",
+      "started": "2026-10-11T20:01:02.259811+00:00",
+      "finished": "2026-10-11T20:01:16.397067+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 14.137
+    }
+  ],
+  "cleanup": {
+    "containers_remaining": 0,
+    "networks_remaining": 0,
+    "volumes_retained": [
+      {
+        "name": "synveda-local-acceptance-v045-3veznggo_browser-acceptance-state",
+        "created_at": "2026-10-11T20:46:21+01:00",
+        "project": "synveda-local-acceptance-v045-3veznggo"
+      },
+      {
+        "name": "synveda-local-acceptance-v045-3veznggo_installation",
+        "created_at": "2026-10-11T20:38:50+01:00",
+        "project": "synveda-local-acceptance-v045-3veznggo"
+      },
+      {
+        "name": "synveda-local-acceptance-v045-3veznggo_postgres-data",
+        "created_at": "2026-10-11T20:38:50+01:00",
+        "project": "synveda-local-acceptance-v045-3veznggo"
+      }
+    ],
+    "existing_evaluation_volumes_preserved": [
+      "synveda-evaluation_browser-acceptance-state",
+      "synveda-evaluation_postgres-data"
+    ],
+    "docker_config_inline_auth_entries": 0,
+    "docker_auto_selected_credentials_store": "osxkeychain",
+    "anonymous_registry_pull_claim": false,
+    "credential_output_removed": [
+      "credential-retrieval.log",
+      "native-login.log"
+    ]
+  },
+  "screenshots": [
+    {
+      "view": "persisted authenticated console",
+      "private_filename": "clean-install-console.png",
+      "sha256": "845058eab69bb89ce21719dce4f7715b648e70fc996254020b2db543ee78409d"
+    },
+    {
+      "view": "signed-out console",
+      "private_filename": "clean-install-signed-out.png",
+      "sha256": "ad4fcd428b05c878b63f62703f1cb26edf1697004774e425ab9b6311187c9fe7"
+    }
+  ],
+  "documentation_corrections": [
+    "Native consumer examples and immutable source pin updated from v0.4.4 to v0.4.5.",
+    "Compose source guide current-release claim updated to v0.4.5.",
+    "README, INSTALL, PREBUILT and plain-Compose guide explain pending Configuration after Getting started and normal resumption with a separate admitted administrator."
+  ],
+  "unverified": [
+    "Complete sample learning/Skill/context path after reviewed Configuration in this published installation.",
+    "Fresh empty physical host and cold-download timing.",
+    "Anonymous Docker registry authentication for this probe: Docker auto-selected osxkeychain; tagged release anonymous registry evidence remains separate.",
+    "Three unfamiliar engineers guide-only trials.",
+    "Published Helm/CNPG installation in this probe.",
+    "External production OIDC, real vendor/harness/model use from published clients, HA, off-host recovery and cross-release upgrade qualification."
+  ],
+  "publication": "This installation probe retained the immutable v0.4.5 release tag, archives, images and chart. The documentation corrections and evidence are a separate OPS-12 change.",
+  "validation": {
+    "make check-docs check-backlog check-adr-status": {
+      "result": "passed",
+      "documentation_tests": 8,
+      "backlog_tests": 3,
+      "markdown_files": 224,
+      "features": 151,
+      "delivered": 114,
+      "open": 37,
+      "adrs": 134,
+      "proposed_adrs": 3
+    },
+    "make check-release-parity": {
+      "result": "passed",
+      "tests": 89,
+      "failed": 0,
+      "skipped": 0,
+      "release_version": "0.4.5"
+    },
+    "git diff --check": {
+      "result": "passed"
+    },
+    "change_scope": "Documentation and content-free evidence only; no Rust or generated contract changes.",
+    "make check-fast": {
+      "result": "passed",
+      "scope": "Documentation, backlog/ADRs, API peers, adapters, context boundaries, product evaluation, corpus licences and published benchmarks."
+    }
+  }
+}
