@@ -5,7 +5,7 @@ People can inspect its source, review proposed changes and choose what later
 sessions may use. The web console handles everyday work; the CLI and public API
 support automation and advanced administration.
 
-<!-- installation-version: 0.4.4; publication: published -->
+<!-- installation-version: 0.4.5; publication: unreleased -->
 The current published release is **[v0.4.4](https://github.com/synveda/synveda/releases/tag/v0.4.4)**,
 for controlled evaluation. The three unfamiliar engineers' guide-only trials
 remain [pending](backlog/OPS-11.md); setup time and production readiness are

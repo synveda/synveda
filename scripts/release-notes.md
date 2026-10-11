@@ -1,8 +1,14 @@
-This is a **controlled evaluation release**. It improves fresh installation
-with release-packaged Kubernetes preparation and customer recipes, one-command
-source chart packaging (`make chart-package`), prerequisite and storage checks,
-allowlisted diagnostics, resumable console setup and governed Configuration
-review/retry with separate effect actors.
+This is a **controlled evaluation release**. It adds governed Git export to
+local and private GitHub repositories, selects current Knowledge heads by
+default, and admits the finite pgvector 0.8.2–0.8.6 profiles. Helm customers get
+parent-chart globals, KMS key backup warnings and clearer managed PostgreSQL
+extension ownership and provisioning guidance. Managed-provider catalogue and
+authority qualification remain required; no live Azure or RDS support claim
+follows from version admission.
+
+Git export requires the operator-owned native gateway and governed target
+configuration described in the
+[Git bridge guide](https://github.com/{{repository}}/blob/{{source}}/docs/integrations/git-bridge.md).
 
 Version: `{{version}}`. Exact release source: `{{source}}`.
 
