@@ -22,6 +22,20 @@ credentials. On retry it validates and reuses every existing file. Its small
 filesystem and UUID helpers are from that same verified chart, not downloaded
 separately. No resource is applied.
 
+> **Warning: Back up the KMS key before installation.** As soon as the block
+> below generates `$MANUAL/kms-key`, make an encrypted offline backup of that
+> original key, separate from the cluster and database backups. Before applying
+> Secrets or installing Synveda, also back up the complete private `$MANUAL`
+> preparation directory, including the later `secrets.json` containing its
+> stable `SYNVEDA_KMS_KEY_REF`. Losing every copy of the original key makes the
+> encrypted state that depends on it permanently unrecoverable, even with a
+> database backup. Replacing the key in a Kubernetes Secret does not rewrap
+> existing data keys or re-encrypt existing state.
+
+Keep the key and reference with the [complete recovery set](OPERATIONS.md#complete-recovery-set).
+The [backup procedure](OPERATIONS.md#bounded-write-quiescing-backup) covers
+subsequent database and identity recovery.
+
 ```sh
 export MANUAL="${MANUAL:-$HOME/.synveda-manual-$RELEASE}"
 (

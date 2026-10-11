@@ -371,6 +371,81 @@ check results. No local source-validation blocker remains. Patched native
 artifact/catalogue and retained-data transition qualification remain the
 technical follow-up. Live provider proof stays excluded from this implementation.
 
+### Issue #74: KMS key backup warning before installation
+
+[Issue #74](https://github.com/synveda/synveda/issues/74) asks for a prominent
+key-loss and backup warning during initial setup. This plan was prepared with
+GPT-6 Astra at max reasoning on 2026-10-11. OPS-11 owns the documentation fix;
+the existing key and recovery contracts require no new ADR.
+
+#### Verified behavior and wording
+
+`SYNVEDA_KMS_KEY` is the local deployment key-encryption key (KEK), wrapping
+deployment and tenant data keys. Losing every recoverable copy makes dependent
+encrypted state permanently unrecoverable from ciphertext or database backups
+alone. Searchable Knowledge is not application-encrypted; the warning must not
+claim that every database row is lost. Replacing a Kubernetes Secret neither
+rewraps existing data keys nor re-encrypts payloads. Tenant-DEK rotation under
+[ADR-0094](../adr/adr-0094-context-platform-key-and-secret-plane.md) is a separate
+operation and does not rotate the deployment KEK.
+
+Automatic preparation generates the key before contacting the cluster and
+preserves it in `state.json` and `secrets.json`. The latter carries
+`SYNVEDA_KMS_KEY_REF` as `<release>:primary-v1` in the `<release>-kms` Secret,
+selected by `kms.existingSecret`. Manual preparation uses a `kms-key` input
+file; that filename is not a universal Kubernetes Secret name. Recovery needs
+the original key and reference as well as the matching database/identity set.
+
+#### Implementation order
+
+1. Add a prominent warning in the [Helm setup guide](../../deploy/helm/synveda/README.md#4-prepare-the-selected-configuration)
+   before preparation commands. Immediately after generation, require an
+   encrypted offline backup of the complete private preparation directory,
+   including `state.json` and `secrets.json`, before installation or data writes.
+2. Move and strengthen the existing [configuration warning](../../deploy/helm/synveda/CONFIGURATION.md#identity-and-secret-formats)
+   so it precedes Secret creation. Identify the 64-hex-character KEK and stable
+   reference; remove the implied KEK rotation ceremony. Link the existing
+   [complete recovery set](../../deploy/helm/synveda/OPERATIONS.md#complete-recovery-set)
+   and [backup procedure](../../deploy/helm/synveda/OPERATIONS.md#bounded-write-quiescing-backup).
+3. Put the same warning before [manual key generation](../../deploy/helm/synveda/MANUAL.md#generate-private-material-once).
+   Preserve `kms-key` immediately and the complete private preparation set,
+   including the later `secrets.json` carrying the reference, before applying
+   Secrets or installing. Keep all generation/retry commands unchanged.
+4. Add a short backup requirement and setup-warning link after the
+   [existing-services preparation command](../../deploy/helm/synveda/examples/README.md#existing-services).
+   It covers the external, bundled and CNPG variants without duplicating the
+   full warning.
+
+Keep the fix to these four Helm guides and the existing OPS-11 inventory. Do
+not add backup commands, print keys, change runtime/manifest/generated files,
+or imply a KEK migration workflow. The root README's Docker first-start path
+generates keys during `up`; a backup-before-`up` instruction there would be
+incorrect and is outside this Helm correction.
+
+#### Validation and checkpoint
+
+Review warning placement and key/reference names, then run:
+
+```sh
+make check-fast
+git diff --check
+node --test --test-name-pattern='one-command source chart packaging' scripts/check-release-parity.test.mjs
+```
+
+The focused archive test checks reproducible packaging and rewritten guide
+identities/links. No new prose-matching tests, Rust checks, database or live
+cluster operations are required.
+
+The four guide edits are implemented. Review confirms the warnings precede
+key generation or Secret creation/installation and name the actual private
+recovery files. On 2026-10-11, `make check-fast`, `git diff --check` and the
+focused source-chart packaging test pass with Node 24.18.0 and Helm 4.2.3.
+The archive test packages twice and checks reproducibility and guide links.
+Next review the documentation correction for a subsequent chart release.
+Published v0.4.4 remains unchanged; OPS-11 stays open for its existing platform,
+human-installation and recovery qualification. These documentation checks do
+not change production-readiness claims.
+
 ## Acceptance criteria
 
 - The published chart and image digests remain tied to the tested source.

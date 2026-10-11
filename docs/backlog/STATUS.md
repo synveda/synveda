@@ -485,6 +485,13 @@ with its temporary loopback listener permitted; the restricted aggregate's
 environment failure is recorded in the brief. Next review for a future chart
 release. OPS-11 remains open; published v0.4.4 is unchanged.
 
+OPS-11 records the [issue #74 KMS key backup warning plan](OPS-11.md#issue-74-kms-key-backup-warning-before-installation),
+prepared with GPT-6 Astra at max reasoning. Four Helm guides now require an
+encrypted offline backup before key use and explain key loss and Secret
+replacement. Fast checks, the focused reproducible chart-packaging test and
+diff checks pass. Next review for a subsequent chart release; published
+v0.4.4, OPS-11's qualification and its open state are unchanged.
+
 OPS-11 / CPR-45 now records the [issue #72 extension compatibility plan](OPS-11.md#issue-72-postgresql-extension-compatibility-plan)
 and [Accepted ADR-0140](../adr/adr-0140-finite-pgvector-catalogue-profiles.md).
 Current source admits exactly pgvector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6
