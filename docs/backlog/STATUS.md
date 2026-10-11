@@ -14,6 +14,10 @@ tracks deployment and recovery gaps; the generated [client support matrix](../CL
 tracks tested agent versions. The release history and implementation diaries
 remain in Git and the linked release evidence.
 
+The next patch release is being prepared under the
+[OPS-12 v0.4.5 checkpoint](OPS-12.md#v045-release-preparation-2026-10-11).
+Publication awaits exact-source main CI and the nonpublishing release drill.
+
 ## Phase 0 — Foundation
 
 - [x] FND-1: Workspace scaffold — delivered

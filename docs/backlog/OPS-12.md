@@ -1845,3 +1845,32 @@ qualify shared first-human/HTTPS admission and installed native real issuer/
 vendor/model use separately. Resolve the documented notice-provenance and
 coverage gaps without expanding this release's claims. Paused
 automation remains unchanged. OPS-12 remains open.
+
+### v0.4.5 release preparation (2026-10-11)
+
+The owner authorized checking main CI after PR #78 and cutting the next release.
+The starting main commit is `1de2a888ec8e57804d584aed97847b2cec13146e`;
+its [full main-push CI](https://github.com/synveda/synveda/actions/runs/38134705749)
+is running. v0.4.4 is already published, so this candidate coordinates the
+workspace, adapters, console, chart, provider image and generated API/SDK
+metadata at the next unused patch version, 0.4.5. Existing published download
+commands retain v0.4.4 until the new release is verified. The new notes cover
+governed Git export, current Knowledge heads, finite pgvector profiles and the
+Helm/managed PostgreSQL fixes without expanding provider or readiness claims.
+
+Before tagging, require the release-preparation PR checks, a successful full
+main-push CI with no skipped jobs for its merged SHA, and a successful
+nonpublishing Release drill for that same SHA. Push a new immutable v0.4.5 tag
+only after those gates pass. Then review the protected release deployments,
+native candidate reports, anonymous registry/chart checks and final signed
+55-asset inventory before updating public installation guidance. No old tag,
+image or chart may be replaced.
+
+Local validation passed on macOS ARM64: formatting, strict workspace/all-target
+Clippy, six OpenAPI peer tests, seven CLI credential/platform tests, fast and
+dependency gates, 53 CI/release regression tests, both SDK source and installed
+package suites, release/chart/Compose contracts and strict chart lint plus 23
+onboarding tests. The deployment convergence suite's loopback case initially
+hit sandbox socket refusal; the complete 50-case convergence/uninstall run then
+passed with loopback access. The OpenAPI diff is only 0.4.4 to 0.4.5; all 177
+operation shapes and the SDK's 15 operations/53 schemas are unchanged.
