@@ -1827,17 +1827,22 @@ trials explicitly pending. Private chart staging now gives the archive's guides
 matching version/source pins and source-bound outside links, retaining exact
 tools, presets, dependency and licence bytes under ADR-0137.
 
-**Current release checkpoint:** v0.4.4 is published as controlled evaluation
-from exact source `95139842af512faf2dad711fdff14e471e93a3ba`.
-[Full main-push CI](https://github.com/synveda/synveda/actions/runs/37200002514),
-[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/37200048266) and
-[tagged qualification/publication](https://github.com/synveda/synveda/actions/runs/37207056495) passed for that source.
-The [retained record](../../demos/evidence/ops12-044-controlled-release.json)
-binds all 55 public assets and same-run reports to the attested inventory.
+**Current release checkpoint:** v0.4.5 is published as controlled evaluation
+from exact source `5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed`.
+[Full main-push CI](https://github.com/synveda/synveda/actions/runs/38138717332),
+[nonpublishing Release](https://github.com/synveda/synveda/actions/runs/38138846401) and
+[tagged qualification/publication](https://github.com/synveda/synveda/actions/runs/38148387737) passed for that source.
+The [retained record](../../demos/evidence/ops12-045-controlled-release.json)
+retains all 55 public files and binds the 53 payloads and same-run reports to
+the attested checksum inventory.
 All six native clients and Rust sidecars, both OCI/Compose/consumer recovery
 sets and all four Helm ownership modes per architecture passed; the published
-images and byte-identical OCI chart passed anonymous verification. No earlier
-source/run report supplied missing evidence. Immutable v0.4.0–v0.4.3 artifacts
+images and byte-identical OCI chart passed anonymous verification. Independent
+public downloads matched all 55 server asset digests and the signed inventory;
+trusted GitHub CLI verification bound its attestation to this exact source/tag.
+Published chart bytes also match the same-source nonpublishing drill.
+No earlier source/run report supplied missing evidence. Immutable v0.4.0–v0.4.4
+artifacts and the [v0.4.4 record](../../demos/evidence/ops12-044-controlled-release.json)
 remain unchanged.
 
 **Next action:** recruit the three unfamiliar engineers for guide-only trials;
@@ -1846,25 +1851,26 @@ vendor/model use separately. Resolve the documented notice-provenance and
 coverage gaps without expanding this release's claims. Paused
 automation remains unchanged. OPS-12 remains open.
 
-### v0.4.5 release preparation (2026-10-11)
+### v0.4.5 release checkpoint (2026-10-11)
 
 The owner authorized checking main CI after PR #78 and cutting the next release.
-The starting main commit is `1de2a888ec8e57804d584aed97847b2cec13146e`;
-its [full main-push CI](https://github.com/synveda/synveda/actions/runs/38134705749)
-is running. v0.4.4 is already published, so this candidate coordinates the
-workspace, adapters, console, chart, provider image and generated API/SDK
-metadata at the next unused patch version, 0.4.5. Existing published download
-commands retain v0.4.4 until the new release is verified. The new notes cover
-governed Git export, current Knowledge heads, finite pgvector profiles and the
-Helm/managed PostgreSQL fixes without expanding provider or readiness claims.
+Its main commit `1de2a888ec8e57804d584aed97847b2cec13146e` passed
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/38134705749)
+and Pages with all 26 checks successful and none skipped. [PR #79](https://github.com/synveda/synveda/pull/79)
+then coordinated the workspace, adapters, console, chart, provider image and
+generated API/SDK metadata at the next unused patch version, 0.4.5. Its merged
+source is `5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed`.
 
-Before tagging, require the release-preparation PR checks, a successful full
-main-push CI with no skipped jobs for its merged SHA, and a successful
-nonpublishing Release drill for that same SHA. Push a new immutable v0.4.5 tag
-only after those gates pass. Then review the protected release deployments,
-native candidate reports, anonymous registry/chart checks and final signed
-55-asset inventory before updating public installation guidance. No old tag,
-image or chart may be replaced.
+That exact source passed all 23 main CI jobs and Pages, then all 15 qualification
+jobs of the nonpublishing drill; only its final publisher was intentionally
+skipped. The new immutable v0.4.5 tag ran all 16 tagged jobs successfully with
+none skipped. Protected publication copied the qualified native OCI candidates,
+verified both public registries and chart bytes, and published the signed
+53-payload inventory and its attestation bundle. Independent public download,
+canonical inventory checks and publisher verification passed before installation guidance and site metadata
+were updated. The notes cover governed Git export, current Knowledge heads,
+finite pgvector profiles and Helm/managed PostgreSQL fixes without expanding
+provider or readiness claims. No earlier tag, image or chart was replaced.
 
 Local validation passed on macOS ARM64: formatting, strict workspace/all-target
 Clippy, six OpenAPI peer tests, seven CLI credential/platform tests, fast and

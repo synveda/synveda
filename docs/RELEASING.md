@@ -25,20 +25,26 @@ anonymous download. Its upload-only failure was recovered from the original
 workflow artifacts; that workflow remains failed while its installation jobs
 and recovered release are verified. v0.3.0 also remains immutable.
 
-## Controlled evaluation v0.4.4
+## Controlled evaluation v0.4.5
 
-The [controlled evaluation v0.4.4 release](https://github.com/synveda/synveda/releases/tag/v0.4.4)
-uses exact source `95139842af512faf2dad711fdff14e471e93a3ba`. Its
-[full main-push CI](https://github.com/synveda/synveda/actions/runs/37200002514),
-[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/37200048266) and
-[tagged publication](https://github.com/synveda/synveda/actions/runs/37207056495) passed. The release contains 55 attested assets,
-all six native client reports and Rust sidecars, both native OCI/Compose/consumer
+The [controlled evaluation v0.4.5 release](https://github.com/synveda/synveda/releases/tag/v0.4.5)
+uses exact source `5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/38138717332),
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/38138846401) and
+[tagged publication](https://github.com/synveda/synveda/actions/runs/38148387737) passed. The release contains 55 public files and a
+signed checksum inventory covering 53 payloads. Qualification covers all six
+native client reports and Rust sidecars, both native OCI/Compose/consumer
 recovery sets, all four Helm ownership modes per architecture and anonymous
-two-registry/image/chart verification. The [retained record](../demos/evidence/ops12-044-controlled-release.json)
+two-registry/image/chart verification. The [retained record](../demos/evidence/ops12-045-controlled-release.json)
 binds source, run IDs, inventory/report hashes and published chart bytes.
+All 55 public files were independently downloaded and checked against GitHub's
+asset digests; the checksum inventory's workflow attestation was verified for
+the exact tag and source. Published chart bytes match the same-source dry run.
 These gates do not establish production readiness, OS signing, complete
 third-party coverage, a published N-1 upgrade or native vendor/model use.
 Three unfamiliar engineers' guide-only trials remain pending in OPS-11.
+The [v0.4.4 record](../demos/evidence/ops12-044-controlled-release.json) retains
+the previous immutable release's evidence.
 
 ## Native CLI release artifacts
 
@@ -428,7 +434,7 @@ before extracting it. A checksum from an unauthenticated download does not
 establish publisher identity. Failed or absent attestation is not permission to
 skip verification. GitHub documents [attestation verification](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
-The published v0.4.4 installers enforce this boundary under
+The published v0.4.5 installers enforce this boundary under
 [ADR-0132](adr/adr-0132-verify-publisher-before-installing-release-code.md): remote
 installs require a trusted GitHub CLI and an expected source commit, with fixed
 publisher/workflow/tag/runner policy and no checksum-only fallback. Unix uses
@@ -436,7 +442,7 @@ curl for HTTPS redirects. Release notes render the source commit and
 fetch the inspected bootstrap by that commit. An absolute local asset directory
 without an expected commit remains a clearly labelled development candidate;
 it is not publisher verification. Both native Windows targets and all six
-archive targets passed the v0.4.4 qualification gates; changed source requires
+archive targets passed the v0.4.5 qualification gates; changed source requires
 fresh qualification. The
 published v0.4.3 tag-bound scripts still require the manual verification above.
 Artifact authentication also does not prove
