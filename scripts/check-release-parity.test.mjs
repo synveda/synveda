@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -106,6 +107,54 @@ test("one-command source chart packaging includes its dependency and native tool
   assert.equal(dependency.status, 0, dependency.stderr);
   assert.match(dependency.stdout, /name: keycloakx/);
   assert.ok(dependency.stdout.includes(`version: ${version}`));
+
+  const parent = join(scratch, "parent");
+  mkdirSync(join(parent, "charts"), { recursive: true });
+  mkdirSync(join(parent, "templates"));
+  copyFileSync(archive, join(parent, "charts", `synveda-${version}.tgz`));
+  writeFileSync(join(parent, "Chart.yaml"), JSON.stringify({
+    apiVersion: "v2", name: "issue71-parent", version: "0.1.0",
+    dependencies: [{ name: "synveda", version }],
+  }));
+  const external = JSON.parse(guide("examples/external-database.json"));
+  const identity = JSON.parse(guide("examples/bundled-identity.json"));
+  const shared = {
+    environment: { name: "issue71", enabled: true, retryLimit: 3, zones: ["one", { name: "two" }] },
+    imageRegistry: "registry.example.test",
+    gateway: { replicaCount: 99 },
+  };
+  const parentHelm = (args) => spawnSync("helm", args, {
+    cwd: ROOT, encoding: "utf8", timeout: 30_000,
+  });
+  for (const [mode, settings] of [
+    ["external identity", external],
+    ["packaged Keycloak", { ...external, ...identity }],
+  ]) {
+    let baseline;
+    for (const [name, globals] of [["automatic", undefined], ["empty", {}], ["populated", shared]]) {
+      const parentValues = { synveda: settings };
+      if (globals !== undefined) parentValues.global = globals;
+      writeFileSync(join(parent, "values.yaml"), JSON.stringify(parentValues));
+      const rendered = parentHelm(["template", "issue71", parent]);
+      assert.equal(rendered.status, 0, `${mode}, ${name} globals: ${rendered.stderr}`);
+      for (const [kind, component] of [["Deployment", "gateway"], ["Deployment", "worker"], ["Job", "install"]]) {
+        assert.ok(rendered.stdout.split(/^---\s*$/m).some(document =>
+          document.includes(`kind: ${kind}\n`) && document.includes(`app.kubernetes.io/component: ${component}`)),
+        `${mode}, ${name} globals: missing ${component} ${kind}`);
+      }
+      if (mode === "packaged Keycloak") assert.match(rendered.stdout, /^kind: StatefulSet$/m);
+      if (baseline !== undefined) assert.equal(rendered.stdout, baseline, "unrelated globals must not change manifests");
+      baseline = rendered.stdout;
+      const linted = parentHelm(["lint", parent, "--strict"]);
+      assert.equal(linted.status, 0, `${mode}, ${name} globals: ${linted.stdout}\n${linted.stderr}`);
+    }
+  }
+  writeFileSync(join(parent, "values.yaml"), JSON.stringify({ global: shared, synveda: external }));
+  for (const [setting, expected] of [["synveda.redis.enabled=true", "redis"], ["synveda.gateway.replicaCount=2", "replicaCount"]]) {
+    const refused = parentHelm(["template", "issue71", parent, "--set", setting]);
+    assert.notEqual(refused.status, 0, `${setting} must still be refused through a parent chart`);
+    assert.ok(`${refused.stdout}\n${refused.stderr}`.includes(expected), refused.stderr);
+  }
 });
 
 test("unknown chart source refuses before creating an archive output directory", (t) => {
