@@ -119,20 +119,26 @@ Upload failure leaves a draft. `verified-release-assets` retains the signed set
 for 30 days; candidate OCI files retain seven days and diagnostic reports 14.
 Follow [RELEASING](RELEASING.md) for reviewed recovery and immutable-tag rules.
 
-## Controlled evaluation v0.4.4
+## Controlled evaluation v0.4.5
 
-The [controlled evaluation v0.4.4 release](https://github.com/synveda/synveda/releases/tag/v0.4.4)
-uses exact source `95139842af512faf2dad711fdff14e471e93a3ba`. Its
-[full main-push CI](https://github.com/synveda/synveda/actions/runs/37200002514),
-[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/37200048266) and
-[tagged publication](https://github.com/synveda/synveda/actions/runs/37207056495) passed. The release contains 55 attested assets,
-all six native client reports and Rust sidecars, both native OCI/Compose/consumer
+The [controlled evaluation v0.4.5 release](https://github.com/synveda/synveda/releases/tag/v0.4.5)
+uses exact source `5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/38138717332),
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/38138846401) and
+[tagged publication](https://github.com/synveda/synveda/actions/runs/38148387737) passed. The release contains 55 public files and a
+signed checksum inventory covering 53 payloads. Qualification covers all six
+native client reports and Rust sidecars, both native OCI/Compose/consumer
 recovery sets, all four Helm ownership modes per architecture and anonymous
-two-registry/image/chart verification. The [retained record](../demos/evidence/ops12-044-controlled-release.json)
+two-registry/image/chart verification. The [retained record](../demos/evidence/ops12-045-controlled-release.json)
 binds source, run IDs, inventory/report hashes and published chart bytes.
+All 55 public files were independently downloaded and checked against GitHub's
+asset digests; the checksum inventory's workflow attestation was verified for
+the exact tag and source. Published chart bytes match the same-source dry run.
 These gates do not establish production readiness, OS signing, complete
 third-party coverage, a published N-1 upgrade or native vendor/model use.
 Three unfamiliar engineers' guide-only trials remain pending in OPS-11.
+The [v0.4.4 record](../demos/evidence/ops12-044-controlled-release.json) retains
+the previous immutable release's evidence.
 
 ## Evidence and remaining qualification
 
@@ -205,7 +211,7 @@ checksums were verified after download. Its registry inventory explicitly says
 `published: false`. The native candidate and public-distribution reports and
 checksum attestation only exist on a successful tagged publication path; that
 path at that checkpoint required all 35 assets before making the draft stable.
-The v0.4.4 inventory above includes the subsequent native Rust sidecars.
+The v0.4.5 inventory above includes the subsequent native Rust sidecars.
 
 The final PR ARM64 fresh launcher took 577s, and AMD64 took 769s; the exact-source
 Release dry run took 588s and 769s respectively. An older published run's

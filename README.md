@@ -27,8 +27,8 @@ utility. Allow at least 6 GiB for Docker. No source build, cloud account or
 model subscription is required. Start on Linux AMD64/ARM64; see
 [platform limits](docs/PRODUCTION_READINESS.md) for other hosts.
 
-<!-- installation-version: 0.4.5; publication: unreleased -->
-Download the [controlled evaluation v0.4.4 release](https://github.com/synveda/synveda/releases/tag/v0.4.4)
+<!-- installation-version: 0.4.5; publication: published -->
+Download the [controlled evaluation v0.4.5 release](https://github.com/synveda/synveda/releases/tag/v0.4.5)
 into a new directory. Run this whole block; extraction follows successful
 publisher and checksum verification. Its expected source comes from the reviewed
 release record, independently of the downloaded inventory. The three unfamiliar
@@ -37,8 +37,8 @@ engineers' guide-only trials remain [pending](docs/backlog/OPS-11.md).
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.4
-  SOURCE_SHA=95139842af512faf2dad711fdff14e471e93a3ba
+  RELEASE_VERSION=0.4.5
+  SOURCE_SHA=5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-$RELEASE_VERSION" || exit 1
   cd "synveda-$RELEASE_VERSION" || exit 1
@@ -61,7 +61,7 @@ engineers' guide-only trials remain [pending](docs/backlog/OPS-11.md).
     sha256sum --check reference.sha256 || exit 1
   fi
   tar -xzf "synveda-reference-$RELEASE_VERSION.tar.gz" || exit 1
-) && cd synveda-0.4.4/synveda-reference-0.4.4
+) && cd synveda-0.4.5/synveda-reference-0.4.5
 ```
 
 Before the first start, open `evaluation.json`. Its defaults use port `8080`,

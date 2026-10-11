@@ -7,16 +7,16 @@ implementation briefs.
 
 114 delivered; 37 open. CI checks the counts, IDs and open-brief contract.
 
-The current [v0.4.4 release](https://github.com/synveda/synveda/releases/tag/v0.4.4)
+The current [v0.4.5 release](https://github.com/synveda/synveda/releases/tag/v0.4.5)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
 guide-only trials remain pending. [Production readiness](../PRODUCTION_READINESS.md)
 tracks deployment and recovery gaps; the generated [client support matrix](../CLIENT_SUPPORT.md)
 tracks tested agent versions. The release history and implementation diaries
 remain in Git and the linked release evidence.
 
-The next patch release is being prepared under the
-[OPS-12 v0.4.5 checkpoint](OPS-12.md#v045-release-preparation-2026-10-11).
-Publication awaits exact-source main CI and the nonpublishing release drill.
+The [OPS-12 v0.4.5 checkpoint](OPS-12.md#v045-release-checkpoint-2026-10-11)
+and [release record](../../demos/evidence/ops12-045-controlled-release.json) retain
+the exact-source CI, native qualification and verified publication evidence.
 
 ## Phase 0 — Foundation
 
@@ -486,8 +486,8 @@ passes on Helm 4.2.3, including enabled Keycloak and unchanged manifests.
 Focused contract checks, `make check-fast` and `make chart-lint` pass.
 All deployment components pass after rerunning the full convergence suite
 with its temporary loopback listener permitted; the restricted aggregate's
-environment failure is recorded in the brief. Next review for a future chart
-release. OPS-11 remains open; published v0.4.4 is unchanged.
+environment failure is recorded in the brief. The fix is included in the
+published v0.4.5 chart. OPS-11 remains open.
 
 OPS-11 records the [issue #73 managed PostgreSQL extension ownership plan](OPS-11.md#issue-73-managed-postgresql-extension-ownership-documentation),
 prepared with GPT-6 Astra at max reasoning. The configuration and operations
@@ -495,15 +495,15 @@ guides now distinguish trusted administrator-owned extensions from ordinary
 migration, explain bootstrap session identity and give Azure/RDS provisioning
 and refusal diagnosis. Fast checks, the focused reproducible chart-packaging
 test and diff checks pass; Astra's source/diff review finds no actionable gaps.
-Next review for a subsequent chart release. Published v0.4.4, managed-provider
-qualification and OPS-11's open state remain unchanged.
+The guides ship in v0.4.5. Managed-provider qualification and OPS-11's open
+state remain unchanged.
 
 OPS-11 records the [issue #74 KMS key backup warning plan](OPS-11.md#issue-74-kms-key-backup-warning-before-installation),
 prepared with GPT-6 Astra at max reasoning. Four Helm guides now require an
 encrypted offline backup before key use and explain key loss and Secret
 replacement. Fast checks, the focused reproducible chart-packaging test and
-diff checks pass. Next review for a subsequent chart release; published
-v0.4.4, OPS-11's qualification and its open state are unchanged.
+diff checks pass. The guides ship in v0.4.5; OPS-11's qualification and open
+state are unchanged.
 
 OPS-11 / CPR-45 now records the [issue #72 extension compatibility plan](OPS-11.md#issue-72-postgresql-extension-compatibility-plan)
 and [Accepted ADR-0140](../adr/adr-0140-finite-pgvector-catalogue-profiles.md).
@@ -515,9 +515,9 @@ CLI preflight proves roles/targets; migration/runtime proves extensions.
 The [Azure reuse walkthrough](../../deploy/helm/synveda/examples/README.md#reuse-existing-services-on-azure)
 supports the existing AKS/external-service and VM/Compose recipes. Azure's
 advertised 0.8.2 now fits source version admission, but catalogue/authority,
-TLS and recovery still require independent proof. Published v0.4.4 continues
-to refuse that version. No live Azure/Entra qualification is claimed or required
-for this source implementation.
+TLS and recovery still require independent proof. Published v0.4.5 includes
+this finite version admission. No live Azure/Entra qualification is claimed or
+required for this source implementation.
 
 Fresh SQLx prepare/check passes; four extension-authority query hashes were
 reviewed with unchanged parameter/result descriptions. Genuine upstream native
@@ -569,10 +569,10 @@ guides carry matching version/source pins and source-bound outside links under
 ADR-0137, without editing the original chart tools or dependency.
 The [current checkpoint](OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04)
 owns the exact next action. Both features remain open. The controlled evaluation
-v0.4.4 release now passes
+v0.4.5 release passes
 exact-source full main-push CI, the nonpublishing drill and tagged publication
-at `95139842af512faf2dad711fdff14e471e93a3ba`; the
-[release record](../../demos/evidence/ops12-044-controlled-release.json) retains its proof.
+at `5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed`; the
+[release record](../../demos/evidence/ops12-045-controlled-release.json) retains its proof.
 Next recruit the three guide-only trial participants and qualify shared
 first-human/HTTPS admission separately. Setup time, shared platform support and
 production readiness remain unclaimed.

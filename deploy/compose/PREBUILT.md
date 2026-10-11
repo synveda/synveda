@@ -4,8 +4,8 @@ Run the prebuilt bundle for local evaluation, or use reference HTTPS with
 infrastructure you already operate. Both use the same Synveda services and
 access controls.
 
-<!-- installation-version: 0.4.5; publication: unreleased -->
-**v0.4.4 is the current controlled evaluation bundle.** It downloads images by digest from
+<!-- installation-version: 0.4.5; publication: published -->
+**v0.4.5 is the current controlled evaluation bundle.** It downloads images by digest from
 the public registry. Installing the server bundle does not require a native
 Synveda CLI or registry credentials.
 
@@ -20,8 +20,8 @@ dependency of the bundle.
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.4
-  SOURCE_SHA=95139842af512faf2dad711fdff14e471e93a3ba
+  RELEASE_VERSION=0.4.5
+  SOURCE_SHA=5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-$RELEASE_VERSION" || exit 1
   cd "synveda-$RELEASE_VERSION" || exit 1
@@ -44,7 +44,7 @@ dependency of the bundle.
     sha256sum --check reference.sha256 || exit 1
   fi
   tar -xzf "synveda-reference-$RELEASE_VERSION.tar.gz" || exit 1
-) && cd synveda-0.4.4/synveda-reference-0.4.4
+) && cd synveda-0.4.5/synveda-reference-0.4.5
 ```
 
 Review `evaluation.json` before starting the installation, as described below.
@@ -198,8 +198,9 @@ deployment must retain `SYNVEDA_COMPOSE_RUNTIME=reference`. Switching to the
 loopback evaluation creates a separate deployment; it does not migrate the
 reference volume, realm or issuer. The current published baseline is **epoch
 3**. Earlier epochs fail with reset guidance and have no data migrator. The
-v0.4.4 forward migrations preserve the exact v0.4.3 baseline, but that published
-upgrade pair is not qualified. Preserve v0.4.3 data until OPS-6 proves the joint
+v0.4.5 forward migrations preserve the exact v0.4.3 baseline, but no published
+upgrade pair or joint recovery drill is qualified, including v0.4.4-to-v0.4.5.
+Preserve retained customer data until OPS-6 proves the intended joint
 upgrade/recovery procedure. There is no supported v0.2.0 → current data upgrade.
 Helm/application rollback never reverses SQL migrations.
 
