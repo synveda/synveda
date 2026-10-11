@@ -1,8 +1,8 @@
 # Kubernetes configuration reference
 
 Use the [installation guide](README.md) and save one non-secret values file.
-[values.yaml](values.yaml) is the complete field reference;
-[values.schema.json](values.schema.json) rejects unknown or inapplicable inputs.
+[values.yaml](values.yaml) is the complete Synveda field reference;
+[values.schema.json](values.schema.json) rejects unknown or inapplicable Synveda inputs.
 Helm values never carry passwords, keys or tokens.
 
 | Change for every installation | Meaning |
@@ -32,6 +32,32 @@ the runtime's localhost default and reports bounded export failures when no
 collector exists; it does not change liveness/readiness. Gateway `/metrics`
 remains private. Worker health/metrics bind loopback; operator access uses
 `kubectl exec`, not an additional public Service.
+
+## Parent charts and globals
+
+Current source accepts Helm's optional reserved `global` object, including
+arbitrary nested parent-owned values. Helm propagates this namespace into
+dependencies even when the parent supplies no globals. Synveda templates do
+not consume it; explicit image, Secret, replica and infrastructure fields
+retain their existing contracts. Unknown Synveda fields still fail validation.
+Keep credentials out of all Helm values, including globals.
+
+Place application settings under the dependency name, or its alias if the
+parent declares one. For example, this parent-values override sets Synveda's
+application origin while passing an unrelated shared value:
+
+```yaml
+global:
+  environment: evaluation
+synveda:
+  gateway:
+    publicUrl: https://synveda.example.com
+```
+
+Supply the remaining required Synveda fields from the selected installation
+recipe under that same dependency name. Published v0.4.4 remains unchanged
+and still rejects injected globals; use a reviewed source archive containing
+this correction until a subsequent release includes it.
 
 ## External PostgreSQL
 

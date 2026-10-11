@@ -3,6 +3,11 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Helm global values inherited from a parent chart. Synveda templates do not consume these values."
+    },
     "image": {
       "type": "object",
       "additionalProperties": false,

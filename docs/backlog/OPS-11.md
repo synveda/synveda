@@ -68,6 +68,136 @@ issuer contracts without an SCC exception or authority bypass. The
 platform inputs; the [runbook](../../deploy/helm/synveda/OPERATIONS.md) owns
 backup, restore and rollback procedure.
 
+### Issue #71: Helm parent-chart compatibility plan
+
+[Issue #71](https://github.com/synveda/synveda/issues/71) reports that Helm's
+injected `global` value prevents a parent chart from consuming Synveda as a
+dependency. This plan was prepared with GPT-6 Astra at max reasoning on
+2026-10-11. OPS-11 owns the fix, reusing OPS-2's existing chart contract.
+
+#### Verified cause and contract
+
+The pre-fix 0.4.4 source had root `additionalProperties: false` in
+`values.schema.json` without a `global` property. A temporary parent chart
+failed on Helm 4.2.3 with `additional properties 'global' not allowed` when
+globals were omitted, explicitly empty or populated. The direct render with
+`--set-json 'global={}'` failed for the same reason. Helm's
+[coalescing implementation](https://github.com/helm/helm/blob/v3.19.0/pkg/chartutil/coalesce.go#L97-L171)
+copies the [reserved shared namespace](https://helm.sh/docs/chart_template_guide/subcharts_and_globals/#global-chart-values)
+into dependencies, including an empty map when the parent supplies none.
+Synveda templates do not consume globals; the unchanged locked Keycloak 7.3.2
+schema already permits them. The preceding tests rendered Synveda directly
+and missed this dependency boundary.
+
+Admit one optional root `global` object with arbitrary contents and retain
+root `additionalProperties: false`. Use `type: object` and explicit
+`additionalProperties: true` for that property; add neither a required field
+nor a default in `values.yaml`. Synveda settings continue to use their
+declared fields under the dependency name or alias. Global contents do not
+select application images, replicas, credentials or product behavior.
+
+#### Implementation order
+
+1. Extend the existing source-chart packaging test in
+   `scripts/check-release-parity.test.mjs`. Reuse its canonical archive,
+   temporary directory, cleanup and reproducibility assertions. Create a
+   minimal parent chart with the dynamic workspace dependency version and
+   place the actual archive in `charts/`; no dependency download is needed.
+   Use the packaged external-database recipe under `synveda`. Confirm the
+   parent emits gateway, worker and installation resources.
+2. Demonstrate the new parent regression against the unchanged schema.
+   Cover automatic globals, explicit `{}` and arbitrary nested values
+   containing strings, numbers, booleans, arrays and objects. Strictly lint
+   and render with schema validation enabled. Also exercise the packaged
+   bundled-identity recipe and confirm its Keycloak workload exists.
+   Otherwise identical absent/empty/populated globals must produce identical
+   application manifests. Valid globals must still reject
+   `synveda.redis.enabled` and `synveda.gateway.replicaCount`.
+3. Add the optional permissive `global` property to
+   `deploy/helm/synveda/values.schema.json`. Preserve all other schema,
+   template, image and dependency contracts.
+4. Extend `scripts/check-helm-contract.mjs` with direct empty/populated-object
+   success and string, number, boolean and array refusal. Malformed cases
+   must target Synveda's own `global`, because Helm may discard a malformed
+   parent global before passing it down. Null can be removed during Helm
+   coalescing; the contract applies to the final value validated by the
+   schema and introduces no custom null handling.
+5. Update `deploy/helm/synveda/CONFIGURATION.md` to distinguish Synveda fields
+   from the optional parent-owned namespace and show ordinary parent values
+   under the dependency name or alias. Keep credentials out of Helm values.
+   Record the actual validation result here and link it from STATUS.
+
+This schema correction changes no architecture decision, runtime code,
+Cedar, forced RLS, VedaFlow, audit, bootstrap ordering, SQL or generated API
+contracts. No ADR, SQLx regeneration, new telemetry/audit event, dependency
+update or chart-version bump is needed. Keep released 0.4.3/0.4.4 coordinates
+immutable and publish through the normal future release process. Root schema
+relaxation, disabled validation and an empty-only global schema do not meet
+the intended contract.
+
+#### Runnable acceptance and checkpoint
+
+```sh
+# Before the schema edit: the new packaged-parent case must fail on global.
+node --test --test-name-pattern='one-command source chart packaging' scripts/check-release-parity.test.mjs
+
+# After the schema edit:
+node --test --test-name-pattern='one-command source chart packaging' scripts/check-release-parity.test.mjs
+node scripts/check-helm-contract.mjs
+make check-fast
+make check-deploy chart-lint
+git diff --check
+```
+
+Acceptance requires the canonically packaged dependency to render and strictly
+lint with automatic and populated globals, including enabled Keycloak;
+unrelated globals preserve manifests, malformed Synveda globals and unknown
+settings refuse, existing deployment checks pass and operator documentation
+states the boundary. The existing CI job pins Helm 4.2.3 and runs the affected
+gates; no new job is needed. A focused checksum-verified Helm 3 rerun is useful
+additional evidence for the reported version, but must be recorded separately
+from Helm 4 execution. Rust/database suites and live cluster mutations are
+unnecessary for this schema-only change. Optional Kubernetes schema validation
+retains its existing tool/network prerequisites.
+
+**Current checkpoint:** current source admits the optional shared object while
+retaining the strict root schema and unchanged templates/defaults/dependency.
+The canonical packaging test reproduces the automatic-global refusal before
+the schema correction and passes afterwards on Helm 4.2.3 with Node 24.18.0.
+All six parent combinations render and strictly lint: automatic, empty and
+populated globals with external or packaged Keycloak identity. Unrelated
+globals preserve exact manifests; unsupported root/nested Synveda fields and
+four direct non-object global values refuse. Focused contract checks and
+`make check-fast` pass. Astra's read-only review finds no code or test gaps.
+
+The `make check-deploy chart-lint` run passes all deployment prerequisites,
+including 89 release/packaging tests, 51 Compose contract tests and 173
+entrypoint/lifecycle/recovery tests. Its convergence suite initially stops at
+the sandbox's refusal to bind an existing temporary `127.0.0.1` fixture.
+With loopback networking enabled, the full 45-case convergence suite passes:
+
+```sh
+node --test scripts/check-deploy-convergence.test.mjs
+node --test scripts/uninstall.test.mjs
+node scripts/check-deploy-convergence.mjs
+make chart-lint
+make check-docs check-backlog
+git diff --check
+```
+
+The remaining five uninstall tests, deployment convergence check and complete
+chart-lint gate pass, including both strict lint profiles, 23 onboarding tests,
+six ownership recipes, backup refusals and portability checks. Final
+documentation/backlog and diff checks pass. All required deployment components
+therefore pass after the affected suite's environment-only rerun; the full
+aggregate was not repeated from the beginning.
+
+**Next action:** review this source correction for a future chart release;
+no local implementation or validation blocker remains. Helm 3 and live cluster
+execution are not claimed. OPS-11 remains open for its existing platform,
+recovery and human-acceptance work; this source correction changes no readiness
+or published-release claim.
+
 ### Issue #72: PostgreSQL extension compatibility plan
 
 [Issue #72](https://github.com/synveda/synveda/issues/72) identifies the reference

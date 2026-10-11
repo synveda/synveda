@@ -474,6 +474,17 @@ cross-process entity invalidation bus is not presumed necessary.
 - [ ] [OPS-11: Small-team Kubernetes release](OPS-11.md) — open
 - [ ] [OPS-12: Consumer installation and harness setup](OPS-12.md) — open
 
+OPS-11 also records the [issue #71 Helm parent-chart compatibility plan](OPS-11.md#issue-71-helm-parent-chart-compatibility-plan),
+prepared with GPT-6 Astra at max reasoning. The strict root schema currently
+admits the optional shared `global` object while preserving unsupported-setting
+refusals. The canonical packaged-parent regression fails before the fix and
+passes on Helm 4.2.3, including enabled Keycloak and unchanged manifests.
+Focused contract checks, `make check-fast` and `make chart-lint` pass.
+All deployment components pass after rerunning the full convergence suite
+with its temporary loopback listener permitted; the restricted aggregate's
+environment failure is recorded in the brief. Next review for a future chart
+release. OPS-11 remains open; published v0.4.4 is unchanged.
+
 OPS-11 / CPR-45 now records the [issue #72 extension compatibility plan](OPS-11.md#issue-72-postgresql-extension-compatibility-plan)
 and [Accepted ADR-0140](../adr/adr-0140-finite-pgvector-catalogue-profiles.md).
 Current source admits exactly pgvector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6

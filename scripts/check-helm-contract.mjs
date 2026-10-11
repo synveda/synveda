@@ -87,6 +87,23 @@ function forbidMarkers(name, document, markers) {
 const valid = render();
 requireSuccess("minimal chart", valid);
 
+// Helm propagates this reserved namespace into every dependency, even empty.
+for (const [name, global] of [
+  ["empty", {}],
+  ["populated", { environment: { name: "issue71", enabled: true, retryLimit: 3, zones: ["one", { name: "two" }] } }],
+]) {
+  const inherited = render(["--set-json", `global=${JSON.stringify(global)}`]);
+  requireSuccess(`${name} Helm globals`, inherited);
+  if (inherited.stdout !== valid.stdout) throw new Error("unrelated Helm globals changed Synveda manifests");
+}
+for (const global of ["unexpected", false, 3, []]) {
+  const refused = render(["--set-json", `global=${JSON.stringify(global)}`]);
+  const output = `${refused.stdout}\n${refused.stderr}`;
+  if (refused.status === 0 || !output.includes("global") || !output.includes("object")) {
+    throw new Error(`non-object Helm globals did not produce their expected refusal:\n${output}`);
+  }
+}
+
 const cluster = resourceByKind(valid.stdout, "Cluster");
 const gateway = resource(valid.stdout, "Deployment", "gateway");
 const worker = resource(valid.stdout, "Deployment", "worker");
