@@ -49,6 +49,11 @@ node "$CHART/examples/prepare.mjs" --route shared --database external --identity
   --values "$SERVICE_VALUES" --issuer-file "$ISSUER_FILE" --images "$IMAGES" --output "$PREPARED"
 ```
 
+After preparation, make the encrypted offline backup of the complete private
+`$PREPARED` directory before installing, as required by the
+[KMS key warning](../README.md#4-prepare-the-selected-configuration); this also
+applies to the variants below.
+
 For **bundled database and external identity**, remove `--values` unless you
 need ordinary advanced values, use `--database bundled`, and add
 `--storage-class "$STORAGE_CLASS" --storage-size 20Gi`. The issuer file is

@@ -221,6 +221,21 @@ recovery set. Repeating the same command preserves tenant UUIDv7, passwords,
 CA/private keys and issuer binding; interrupted derived outputs resume from
 saved state. Conflicting inputs/files stop with a recovery action.
 
+> **Warning: Back up the KMS key before installation.** As soon as preparation
+> generates the key, make an encrypted offline backup of `SYNVEDA_KMS_KEY` and
+> its stable `SYNVEDA_KMS_KEY_REF`, separate from the cluster and database
+> backups, before installing Synveda or writing data. Losing every copy of the
+> original key makes the encrypted state that depends on it permanently
+> unrecoverable, even with a database backup. Replacing the key in a Kubernetes
+> Secret does not rewrap existing data keys or re-encrypt existing state.
+
+After preparation succeeds, back up the complete private `$PREPARED` directory,
+including `state.json` and `secrets.json`, before proceeding to step 5. These
+files preserve the generated key and reference without printing them. Follow
+the [complete recovery set](OPERATIONS.md#complete-recovery-set) and
+[backup procedure](OPERATIONS.md#bounded-write-quiescing-backup) for subsequent
+database and identity recovery.
+
 **Local evaluation** (recommended for one person): choose two unused ports and
 explicitly opt into four unique synthetic evaluation identities.
 

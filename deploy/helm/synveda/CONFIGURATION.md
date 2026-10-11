@@ -13,7 +13,7 @@ Helm values never carry passwords, keys or tokens.
 | `postgres.mode` | `external`, `bundled` (one persistent instance), or `cnpg` with a preinstalled operator |
 | Database Secret names and external host/CA/roles | Three distinct credentials: migrator, gateway and worker |
 | `oidc.existingSecret`, optional `oidc.caExistingSecret` | Exact trusted issuer/client/audience and optional private root |
-| `kms.existingSecret` | Original 64-hex KEK plus stable reference; keep a protected recovery copy |
+| `kms.existingSecret` | Original 64-hex KEK plus stable reference; [back up before installation](#kms-key-backup-warning) |
 | Packaged Keycloak URL, Secrets, trusted proxy addresses | Required only with `keycloak.enabled`; a separate database/owner |
 | CNPG storage size/class, registry pull Secrets | Real cluster/provider inputs; no universal class name |
 
@@ -201,6 +201,24 @@ workspace membership or administrative authority. Invitations, membership,
 grants, Knowledge publication and configuration changes still use the public
 API, Cedar, forced RLS, VedaFlow and content-free audit.
 
+<a id="kms-key-backup-warning"></a>
+
+> **Warning: Back up the KMS key before installation.** `SYNVEDA_KMS_KEY` is
+> the 64-hex-character deployment key-encryption key (KEK). As soon as it is
+> generated, make an encrypted offline backup of it and its stable
+> `SYNVEDA_KMS_KEY_REF`, separate from the cluster and database backups, before
+> installing Synveda or writing data. Losing every copy of the original key
+> makes the encrypted state that depends on it permanently unrecoverable,
+> even with a database backup. Replacing the key in a Kubernetes Secret does
+> not rewrap existing data keys or re-encrypt existing state.
+
+Keep the original key and reference with the matching
+[complete recovery set](OPERATIONS.md#complete-recovery-set); follow the
+[backup procedure](OPERATIONS.md#bounded-write-quiescing-backup) for subsequent
+database and identity recovery. The existing tenant data-key (DEK) rotation
+command rotates a tenant DEK, not this deployment KEK; it does not permit
+discarding the KEK.
+
 Create Secrets from private operator files, for example:
 
 ```sh
@@ -213,10 +231,6 @@ kubectl -n synveda create secret generic synveda-kms --from-file=SYNVEDA_KMS_KEY
 ```
 
 These commands assume the namespace and actual private files already exist.
-Keep the KMS key (64 hex characters) and stable reference together and backed up
-separately from the database. Rotating a Secret does **not** rotate encrypted
-state: use the existing key-management ceremony; replacing the KEK arbitrarily
-makes wrapped keys unreadable.
 
 All runtime credentials use the existing bounded `*_FILE` loader. Projected
 files are readable by arbitrary non-root UIDs, only in containers mounting that
