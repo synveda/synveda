@@ -401,7 +401,8 @@ kubectl delete namespace "$PURGE_NAMESPACE" --wait=true --timeout=180s
 |---|---|
 | Issuer/redirect mismatch or login loop | Compare the public origin, exact `/auth/callback`, discovery issuer and provider client settings privately. Preserve issuer/subject identity; fix DNS/proxy/client configuration, never token verification. |
 | Internal CA/hostname failure | Verify SAN/chain and mount the right PostgreSQL or OIDC PEM Secret. Use `openssl s_client -connect HOST:443 -servername HOST -CAfile private/ca.pem -verify_return_error`; do not use insecure TLS switches. Roll pods after CA changes. |
-| PostgreSQL unavailable/extension refusal | Check network/DNS and bounded `database-preflight` logs. DBA verifies PostgreSQL 17, exact extension versions/owners, three distinct roles and provider identity proof. Do not grant superuser/BYPASSRLS to the application. |
+| PostgreSQL unavailable | Check network/DNS, verified TLS and bounded `database-preflight` logs. DBA verifies three distinct ordinary logins, target identity and peer isolation. |
+| Extension ownership/catalogue refusal | Follow the [extension diagnostic path](#extension-ownership-and-catalogue-refusals). Public extensions belong to declared trusted administrators; migration/readiness perform the full proof after role/target preflight. |
 | Migration Job failure | `helm history synveda -n synveda`; inspect the matching `job/synveda-install-REVISION` preflight/migrate logs and Job status. Check a competing migration/lock holder with the DBA. Keep maintenance active; preserve data and use compatibility/restore guidance. |
 | Insufficient quota | `kubectl -n synveda get resourcequota,limitrange` and warning events. Request headroom for the install Job and provider pods; do not remove memory limits blindly. |
 | Pending PVC | `kubectl -n synveda describe pvc CLAIM`; inspect events, storage class, capacity, access mode and CSI permissions with the storage owner. Never delete a populated claim to unstick scheduling. |
@@ -414,6 +415,38 @@ Never paste `kubectl get secrets -o yaml`, `helm get all` containing private
 operator inputs, raw database URLs or unredacted provider diagnostics into a
 support report. Supply version/profile, timestamps, pod status and content-free
 error codes instead.
+
+### Extension ownership and catalogue refusals
+
+Have the DBA follow the [ownership rule](CONFIGURATION.md#extension-ownership),
+[managed-provider procedure](CONFIGURATION.md#managed-postgresql-provisioning)
+and protected read-only inventory in the [DBA handoff](CONFIGURATION.md#dba-handoff).
+Identify the failing stage before changing privileges:
+
+1. **Bundled/CNPG `database-bootstrap`:** public extension `extowner` must
+   equal the bootstrap administrator's `session_user`; the bootstrap also
+   requires `current_user = session_user`. Its administrator credential is
+   separate from the migrator credential. `SET ROLE synveda_migrator` changes
+   the effective role and cannot satisfy this bootstrap contract.
+2. **`database-preflight` or external `database-probe`:** inspect ordinary
+   roles, declared administrator/grantor identities, cluster identity, peer
+   isolation, TLS and connectivity. This stage does not prove the full
+   extension catalogue. A Complete probe still needs normal migration and
+   runtime readiness.
+3. **`migrate` or runtime authority/readiness:** inspect the intended database's
+   exact versions, schemas and owners. `vector` and `btree_gin` in `public`
+   belong to a declared administrator; the migrator owns application objects
+   and has no role memberships. Verify member ownership as well: a provider's
+   trusted installation can assign members a different owner despite successful
+   creation. Normal migration and runtime checks are the authoritative proof.
+
+Provider allowlisting, temporary privileges or `CREATE EXTENSION IF NOT EXISTS`
+do not repair an existing ownership/catalogue mismatch. Removing temporary
+provider membership from a migrator that created an extension leaves the
+extension migrator-owned and refused. Preserve retained data, credentials and
+recovery material; have the provider DBA diagnose the exact unmet contract.
+Do not elevate an application role, add event triggers or edit the catalogue
+to pass. A provider that cannot meet the full contract remains unqualified.
 
 ## Installation-stage recovery
 
@@ -442,7 +475,7 @@ unreviewed to this support file.
 | Quota / LimitRange / FailedCreate | Missing install/replacement/verification headroom or required CPU limit | `kubectl --context "$CONTEXT" -n "$NAMESPACE" get resourcequota,limitrange`; use the printed per-recipe requests and limits. Resolve prior failed temporary probe Pods explicitly after diagnosis. | Preflight then original Helm command |
 | `database-bootstrap` | Bundled/CNPG provisioning or administrative credential/authority refusal | Inspect bounded logs from that init container privately. Check exact separate credentials, owner/ACL/extension contract and current provider readiness. Do not grant elevated authority to a runtime role. | Correct provider input; original Helm command creates a new revision Job |
 | `database-preflight` / external probe | Role, same-server proof, forbidden database, TLS/CA/hostname or pod connectivity refusal | Give the DBA its content-free reason/SQLSTATE. Verify the [DBA handoff](CONFIGURATION.md#dba-handoff), CA/SAN and Pod network path. Never weaken the authority verifier. | New external `database-probe`, require Complete, then original Helm command |
-| `migrate` | Wrong schema/checksum/owner role or competing migration | Inspect bounded migrate logs privately; DBA checks lock and exact compatibility. Use the migrator-only `db migrate --check` before a planned upgrade. Keep writers quiesced for recovery. | Verified compatible artifact and original Helm command; no SQLx history edits |
+| `migrate` | Wrong schema/checksum/owner role, extension ownership/catalogue refusal or competing migration | Inspect bounded migrate logs privately; DBA checks lock, [extension proof](#extension-ownership-and-catalogue-refusals) and exact compatibility. Use the migrator-only `db migrate --check` before a planned upgrade. Keep writers quiesced for recovery. | Verified compatible artifact and original Helm command; no SQLx history edits |
 | `tenant` | Original tenant/key material missing or conflicting | Restore the original tenant ID, KMS KEK/reference and issuer binding together. Do not generate a new tenant/key to bypass refusal. | Original Helm command after matching recovery is restored |
 | Readiness/TLS | Schema/key/policy gate, wrong CA/chain/SAN or startup | `operator.mjs verify` plus allowlisted diagnosis; privately inspect the exact failing container and trust files. Check expiry/hostname and certificate owner's chain. No insecure TLS switch. | Correct input, planned restart/reapply, then verify |
 | OIDC login/callback | Issuer/callback/audience/group mismatch, DNS, CA or provider SSO | Compare the [OIDC worksheet](CONFIGURATION.md#external-oidc-worksheet) and chosen human subject privately. Register exact callback; restore canonical issuer. Fresh private browser login avoids stale SSO. | First-login procedure and `whoami --capabilities`; readiness alone is insufficient |

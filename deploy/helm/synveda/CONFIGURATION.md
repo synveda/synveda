@@ -118,8 +118,8 @@ provisioning is [the shared database bootstrap](../../compose/postgres/synveda-d
 and [runtime role verifier](../../../crates/synveda-store/src/runtime_role.rs):
 
 - The migrator is an ordinary, non-superuser owner of only the application
-  database/public schema and resulting application objects, with no elevated
-  role memberships.
+  database/public schema and resulting application objects, with no role
+  memberships.
 - `synveda_app` is the NOLOGIN capability role. Gateway and worker are distinct
   non-owner LOGIN roles that inherit only that capability; neither may have
   `BYPASSRLS`, superuser, role/database-creation or replication privileges.
@@ -127,6 +127,11 @@ and [runtime role verifier](../../../crates/synveda-store/src/runtime_role.rs):
   grantor pairs and forbidden/peer databases must match `roles`. Runtime
   checks include the cluster identity proof and the installed function, grant
   and forced-RLS catalogue. These are mandatory, including on managed servers.
+
+Public extensions belong to a separate declared trusted administrator. Follow
+the [extension ownership rule](#extension-ownership) and
+[managed PostgreSQL procedure](#managed-postgresql-provisioning) before handing
+off application credentials.
 
 Managed-service branding does not establish compatibility with this exact
 contract. An ordinary database user need not be a superuser, but the provider
@@ -272,6 +277,26 @@ proceeding. Never run this recipe against an unrelated retained database.
 | TLS | Actual host/SAN, issuing PEM root, verified chain, SCRAM passwords; each URL uses verify-full and the fixed mounted CA path; optional client certificate/key separately |
 | Capacity and recovery | Connection budget for gateway/worker pools plus migration/operator headroom, durable storage/backups, separately recoverable exact roles, original credential files and TLS custody |
 
+### Extension ownership
+
+For `vector` and `btree_gin` in `public`, `pg_extension.extowner` must identify
+a role explicitly listed in `postgres.external.roles.administrators`. The
+migrator, gateway, worker and `synveda_app` must remain distinct from these
+administrators. `plpgsql` in `pg_catalog` may belong to a declared administrator
+or an exact declared `administrative_memberships.grantor`. Declare only
+operator-selected trusted identities; investigate an unexpected owner before
+changing the role contract.
+
+PostgreSQL records the [extension creator as its owner](https://www.postgresql.org/docs/17/sql-createextension.html).
+`SET ROLE` changes `current_user`, while `session_user` remains the authenticated
+login. The bundled/CNPG administrator bootstrap requires
+`current_user = session_user` and public extension `extowner = session_user`:
+that session belongs to the **bootstrap administrator**. External mode instead
+checks the installed public extension owners against the declared administrator
+list. The migrator authenticates directly as its own ordinary login; it does
+not install extensions. Creating them as the migrator, even with temporary
+provider elevation later revoked, leaves an owner the verifier refuses.
+
 The DBA uses PostgreSQL 17 `psql` from an approved administration host with a
 mode-0600 password file and `pg_service.conf`. Its service contains the actual
 host/port/admin/database, `sslmode=verify-full` and its host CA path. No password
@@ -287,6 +312,11 @@ vector creation statement with
 `CREATE EXTENSION vector WITH SCHEMA public VERSION '0.8.2';`.
 Choose one admitted version before provisioning; preserve a verified existing
 installation and its recovery material. The application does not update it.
+
+In this dedicated-server example, `RESET ROLE` restores administrator `postgres`
+before extension creation. The surrounding `SET ROLE synveda_migrator` blocks
+establish application-owner ACL grantors. Keep extension creation under the
+separate administrator identity when adapting the recipe to a provider.
 
 ```sh
 psql 'service=synveda-provisioning' -X -v ON_ERROR_STOP=1 <<'SQL'
@@ -341,6 +371,9 @@ FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member
 JOIN pg_roles granted ON granted.oid=m.roleid
 WHERE member.rolname LIKE 'synveda_%' OR granted.rolname LIKE 'synveda_%';
 \connect synveda
+SELECT current_database(),session_user,current_user;
+SELECT name,version,installed FROM pg_available_extension_versions
+WHERE name IN ('vector','btree_gin') ORDER BY name,version;
 SELECT e.extname,e.extversion,n.nspname,pg_get_userbyid(e.extowner) AS owner
 FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace ORDER BY e.extname;
 SELECT r, d, has_database_privilege(r,d,'CONNECT') FROM
@@ -352,6 +385,75 @@ SQL
 Gateway/worker should CONNECT to `synveda` only. The NOLOGIN capability role
 need not have direct CONNECT. These inspection queries are a handoff check,
 not a replacement for Synveda's exact authority proof.
+
+### Managed PostgreSQL provisioning
+
+Azure Flexible Server and Amazon RDS provide administrative roles rather than
+a customer-accessible PostgreSQL superuser. Use the provider's administrator
+for extension installation, keeping application roles ordinary:
+
+1. Inspect the intended application database with the protected `psql` service
+   above. Check available and installed versions, schemas, owners and actual
+   administrator/member/grantor identities. Substitute the configured role
+   names for this guide's examples. Preserve a verified existing installation
+   and its recovery material.
+2. Select a separate durable provisioning administrator and connect directly
+   as that login. Declare its actual public extension-owner identity in
+   `postgres.external.roles.administrators`. The example `postgres` is not a
+   mapping for every provider. Keep its credential outside application Secrets.
+3. Arrange the provider allowlist and extension privileges described below.
+   Prefer an existing provider administrator. Any temporary delegation belongs
+   only to the separate provisioning administrator; never grant provider
+   administration to the migrator, gateway, worker or `synveda_app`.
+4. On a new dedicated application database, provision the ordinary roles,
+   database/schema ownership and ACLs, then create the selected admitted
+   `vector` and `btree_gin` versions in `public` as that administrator. Use the
+   creation statements above with the chosen supported version. Inspect the
+   resulting extension and member ownership. Revoke only delegation added for
+   this procedure when it is no longer needed; retain the durable owner role
+   and declare the final administrator/grantor contract. Revocation does not
+   reassign installed objects.
+5. Complete the ordinary-role installation checks below. A successful provider
+   `CREATE EXTENSION` or role/target probe is preliminary evidence; normal
+   migration and gateway/worker readiness must pass the full extension proof.
+
+Provider prerequisites, checked on 2026-10-11:
+
+- **Azure Flexible Server:** preserve the existing
+  [`azure.extensions` allowlist](https://learn.microsoft.com/en-us/azure/postgresql/extensions/how-to-allow-extensions)
+  when adding `vector` and `btree_gin`.
+  [Untrusted extension creation](https://learn.microsoft.com/en-us/azure/postgresql/extensions/how-to-create-extensions)
+  requires `azure_pg_admin` membership; trusted allowlisted extensions can use
+  database `CREATE` privilege. Apply these permissions to the separate
+  provisioning administrator. The
+  [server administrator](https://learn.microsoft.com/en-us/azure/postgresql/security/security-access-control)
+  already belongs to `azure_pg_admin`; its role is distinct from the provider's
+  internal superuser. Allowlisting supplies neither a missing version nor
+  Synveda compatibility.
+- **Amazon RDS:** check
+  [`rds.allowed_extensions`](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.PostgreSQL.CommonDBATasks.Extensions.html)
+  and available versions. Its
+  [`rds_superuser` administrator](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.PostgreSQL.CommonDBATasks.Roles.rds_superuser.html)
+  can install supported extensions without being a PostgreSQL superuser.
+  [Delegated extension support](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/RDS_delegated_ext.html)
+  uses `rds_extension` and a separate `rds.allowed_delegated_extensions` list;
+  it does not replace the main allowlist or establish compatible ownership.
+  Keep either provisioning mechanism on the separate administrator and inspect
+  its actual results. Synveda admits no event triggers, including optional
+  provider examples for automatic extension grants.
+
+PostgreSQL's trusted-extension installation can give contained objects a
+bootstrap-superuser owner while the extension itself belongs to the caller.
+Synveda requires the `vector`/`btree_gin` member routines, types, operators,
+operator classes and families to match their extension owner, as well as the
+exact catalogue fingerprint. Adding both identities to the administrator list
+does not repair a mismatched member-owner relationship. A provider installation
+that cannot satisfy this proof remains unqualified. Preserve its evidence and
+have the DBA resolve the provisioning boundary; do not edit catalogues, add
+blanket grants, reassign owners indiscriminately or drop retained extensions to
+silence a refusal.
+
+### Ordinary-role installation checks
 
 After protected Secrets and normal offline/API preflight pass, the installer
 runs the explicit **temporary in-cluster Job** on the workstation:

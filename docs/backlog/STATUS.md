@@ -485,6 +485,15 @@ with its temporary loopback listener permitted; the restricted aggregate's
 environment failure is recorded in the brief. Next review for a future chart
 release. OPS-11 remains open; published v0.4.4 is unchanged.
 
+OPS-11 records the [issue #73 managed PostgreSQL extension ownership plan](OPS-11.md#issue-73-managed-postgresql-extension-ownership-documentation),
+prepared with GPT-6 Astra at max reasoning. The configuration and operations
+guides now distinguish trusted administrator-owned extensions from ordinary
+migration, explain bootstrap session identity and give Azure/RDS provisioning
+and refusal diagnosis. Fast checks, the focused reproducible chart-packaging
+test and diff checks pass; Astra's source/diff review finds no actionable gaps.
+Next review for a subsequent chart release. Published v0.4.4, managed-provider
+qualification and OPS-11's open state remain unchanged.
+
 OPS-11 records the [issue #74 KMS key backup warning plan](OPS-11.md#issue-74-kms-key-backup-warning-before-installation),
 prepared with GPT-6 Astra at max reasoning. Four Helm guides now require an
 encrypted offline backup before key use and explain key loss and Secret
