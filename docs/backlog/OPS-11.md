@@ -371,6 +371,100 @@ check results. No local source-validation blocker remains. Patched native
 artifact/catalogue and retained-data transition qualification remain the
 technical follow-up. Live provider proof stays excluded from this implementation.
 
+### Issue #73: Managed PostgreSQL extension ownership documentation
+
+[Issue #73](https://github.com/synveda/synveda/issues/73) asks for explicit
+extension ownership and managed-provider provisioning guidance. This plan was
+prepared with GPT-6 Astra at max reasoning on 2026-10-11 and returned to the
+implementation session. OPS-11 owns the documentation correction within
+CPR-45's existing deployment authority contract.
+
+#### Verified ownership contract
+
+The current verifier requires `vector` and `btree_gin` in `public` to belong
+to an explicitly declared `roles.administrators` identity, **not the migrator**.
+`plpgsql` in `pg_catalog` may belong to a declared administrator or an exact
+declared administrative grantor. The
+[role constructor and verifier](../../crates/synveda-store/src/runtime_role.rs)
+reject administrator/migrator overlap and require the migrator to authenticate
+directly with no role memberships. Required versions remain those in
+[ADR-0140](../adr/adr-0140-finite-pgvector-catalogue-profiles.md); published
+v0.4.4 still requires vector 0.8.6.
+
+The `extowner = session_user` requirement in
+[the bootstrap extension check](../../deploy/compose/postgres/synveda-extension-contract.sql)
+refers to the **bootstrap administrator**. Its
+[caller](../../deploy/compose/postgres/synveda-database-bootstrap) resets the
+effective role, requires `current_user = session_user` and binds the
+administrator list to that session identity before extension creation.
+`SET ROLE synveda_migrator` changes `current_user`, not `session_user`; it
+does not satisfy this contract. Creating the extensions as the migrator and
+then removing temporary provider membership leaves the wrong owner.
+
+#### Implementation order
+
+1. Clarify the [configuration reference](../../deploy/helm/synveda/CONFIGURATION.md#provisioning-and-privileges):
+   the migrator has no role memberships, public extensions retain a separate
+   trusted administrator owner, and bootstrap identity differs from migration
+   identity. Preserve the existing dedicated-server SQL order, where extension
+   creation follows `RESET ROLE`; explain the surrounding application-owner
+   ACL steps. Extend the existing read-only inventory with database/session/
+   effective-role identity.
+2. Document a managed-service procedure in the DBA handoff: inspect the exact
+   target; select a separate durable, explicitly trusted extension administrator;
+   arrange provider allowlisting and privileges on that administrator; create
+   only the selected admitted extensions on a fresh target; then inspect owners
+   and complete ordinary-role preflight, migration and readiness. Preserve a
+   verified existing installation and its recovery material.
+3. Link current primary PostgreSQL, Azure and AWS instructions. Explain
+   `azure.extensions`/`azure_pg_admin`, RDS `rds.allowed_extensions`/
+   `rds_superuser`, and optional narrower delegated extension support. Successful
+   creation alone does not prove Synveda compatibility: trusted installation
+   can assign member objects to a bootstrap superuser, while the
+   [fingerprint](../../crates/synveda-store/sql/extension_fingerprint.sql)
+   checks their ownership relationship to the extension. Do not elevate an
+   application role or add ownership-reassignment, catalogue-edit, event-trigger
+   or destructive retained-data instructions.
+4. Give extension refusals a diagnostic path in the
+   [operations runbook](../../deploy/helm/synveda/OPERATIONS.md#troubleshooting-without-printing-credentials),
+   distinguishing administrator bootstrap, role/target preflight and migration/
+   runtime extension proof. Include extension ownership/catalogue failures in
+   installation-stage migration recovery.
+5. Run the checks below, review the guide and packaged links, and record the
+   actual result here and in STATUS. Keep the change to those two guides and
+   this existing feature inventory; the Azure example already uses the declared
+   extension administrator.
+
+This documents the existing ADR-0069, ADR-0102, ADR-0109 and ADR-0140 contracts.
+It changes no architecture decision, runtime, authoritative SQL, generated artifact,
+privilege grant or release coordinate. No new ADR, telemetry/audit event or
+prose-matching test is required. Provider-owned member/administrator/grantor
+identities, catalogue access, TLS and peer isolation still need independent
+live qualification.
+
+#### Validation and checkpoint
+
+```sh
+make check-fast
+git diff --check
+node --test --test-name-pattern='one-command source chart packaging' scripts/check-release-parity.test.mjs
+```
+
+Acceptance requires explicit administrator-owned public extensions, correct
+`session_user`/`current_user` semantics, provider prerequisite links, ordinary
+application roles and a clear distinction between inventory/preflight and full
+extension proof. Rust/database suites and live provider mutations are unnecessary
+for this documentation correction.
+
+**Current checkpoint:** both guide edits are implemented. On 2026-10-11,
+`make check-fast`, `git diff --check` and the focused source-chart packaging
+test pass with Node 24.18.0 and Helm 4.2.3. The package test checks reproducible
+archives and guide links; documentation checks validate the new local anchors.
+Astra's read-only source/diff review finds no actionable gaps. Next review the
+documentation correction for a subsequent chart release. Published v0.4.4
+remains unchanged; OPS-11 stays open for its existing qualification work.
+No live Azure/RDS execution or new managed-provider/readiness claim follows.
+
 ### Issue #74: KMS key backup warning before installation
 
 [Issue #74](https://github.com/synveda/synveda/issues/74) asks for a prominent
