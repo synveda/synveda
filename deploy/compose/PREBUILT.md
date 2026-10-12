@@ -103,6 +103,35 @@ revision, a proposed retry learning and a proposed Skill version. The command
 never approves a review and requires no model API. Repeat it safely: its durable
 receipt/idempotency keys preserve existing resources and reviewer edits.
 
+### Pending sample Configuration
+
+**Getting started** can already adopt the tenant's first canonical Configuration.
+The sample's later team Configuration and binding then follow the ordinary
+review matrix, before its source Session or learning exists. In v0.4.5 the
+sample wrapper reports `compose-product: product-demo failed` at this boundary.
+Select **Northstar Delivery** in the console and open **Advanced → Reviews**.
+Inspect the pending **create runtime configuration** change, its target scope
+and required reviewers.
+
+With the default unbound scope, two distinct administrators must approve,
+neither can be the author, and another administrator must apply. The supplied
+`reviewer` and `approver` accounts can review. The operator must admit an
+additional identity through the normal OIDC and **People** access workflow,
+grant it workspace administrator authority, and apply with that identity.
+Keep the fourth sample account's restricted viewer grants unchanged. Follow
+the displayed matrix if the deployment's policy differs.
+
+Rerun the same sample command with the same bundle and private receipt after
+the Configuration is applied. If its binding also requires review, complete
+that displayed matrix and rerun again. The receipt preserves the original
+request and change addresses; a pending change does not activate Configuration
+or imply that the learning exists. This is the accepted
+[Configuration resumption workflow](../../docs/adr/adr-0100-public-api-pulseboard-demo.md#amendment-resume-reviewed-configuration-after-console-setup-2026-10-04).
+
+### Inspect the completed sample
+
+Once the sample command completes:
+
 1. In **Sessions**, open the fictional ingestion retry session and inspect its
    synthetic evidence. **New Learnings** shows the captured candidate and its
    proposed-change state.

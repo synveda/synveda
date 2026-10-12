@@ -15,7 +15,7 @@ To run a server without a checkout or compiler, use the
 [prebuilt Docker guide](PREBUILT.md). It uses this same deployment graph and a
 release-pinned launcher. The published v0.4.0 bundle includes the reference
 archive. The v0.4.1 digest check and v0.4.2 public-verifier timeout prevented
-their publication; v0.4.3 is the current published release. Earlier pre-epoch-3
+their publication; v0.4.5 is the current published release. Earlier pre-epoch-3
 databases are deliberately refused.
 
 The [CI/release guide](../../docs/CI.md) describes candidate validation and

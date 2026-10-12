@@ -18,6 +18,16 @@ The [OPS-12 v0.4.5 checkpoint](OPS-12.md#v045-release-checkpoint-2026-10-11)
 and [release record](../../demos/evidence/ops12-045-controlled-release.json) retain
 the exact-source CI, native qualification and verified publication evidence.
 
+The [published v0.4.5 install probe](OPS-12.md#published-v045-clean-install-probe-2026-10-11)
+and [install record](../../demos/evidence/ops12-045-clean-install.json) add a fresh
+isolated macOS ARM64/OrbStack deployment, published CLI login, retained restart,
+audit verification and logout checks. After console onboarding, the optional
+sample remains at a pending Configuration: its matrix needs two reviewers other
+than the author and a separate administrator to apply. Next, admit that operator
+through normal OIDC/People access, complete the original changes and rerun the
+same receipt before claiming the learning/Skill/context path. The three unfamiliar
+engineers' guide-only trials and broader qualification remain pending.
+
 ## Phase 0 — Foundation
 
 - [x] FND-1: Workspace scaffold — delivered

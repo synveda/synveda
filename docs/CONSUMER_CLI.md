@@ -1,6 +1,6 @@
 # Native consumer commands
 
-These commands are in the published v0.4.4 client archive and matching plugin.
+These commands are in the published v0.4.5 client archive and matching plugin.
 Install the archive for your platform, or build the current CLI with
 `SQLX_OFFLINE=true cargo build -p synveda-cli`. The
 [client support matrix](CLIENT_SUPPORT.md) records tested agent versions and
@@ -9,7 +9,7 @@ platform limits.
 ## Release downloads
 
 The [release asset table](RELEASING.md#native-cli-release-artifacts) names the
-Linux, macOS and Windows archives for x64 and ARM64. Published v0.4.4 includes
+Linux, macOS and Windows archives for x64 and ARM64. Published v0.4.5 includes
 all six. The installers select the native archive and verify its publisher,
 tag, exact source and unique checksum entry before fetching or executing code.
 They require a trusted GitHub CLI, installed independently of these assets;
@@ -21,23 +21,23 @@ inspect it, then install only the CLI and adapters:
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.4
-  SOURCE_SHA=95139842af512faf2dad711fdff14e471e93a3ba
+  RELEASE_VERSION=0.4.5
+  SOURCE_SHA=5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed
   curl --fail --location --proto '=https' --proto-redir '=https' \
     "https://raw.githubusercontent.com/synveda/synveda/$SOURCE_SHA/scripts/install.sh" \
     --output synveda-install.sh
 )
 # Inspect synveda-install.sh before executing it.
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.4 \
-  SYNVEDA_SOURCE_SHA=95139842af512faf2dad711fdff14e471e93a3ba sh synveda-install.sh
+SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.5 \
+  SYNVEDA_SOURCE_SHA=5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed sh synveda-install.sh
 ```
 
 On Windows, download and inspect the same source's PowerShell installer:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/synveda/synveda/95139842af512faf2dad711fdff14e471e93a3ba/scripts/install.ps1 -OutFile synveda-install.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/synveda/synveda/5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed/scripts/install.ps1 -OutFile synveda-install.ps1
 # Inspect this script; use a host whose existing execution policy permits it.
-& ./synveda-install.ps1 -Version 0.4.4 -SourceSha 95139842af512faf2dad711fdff14e471e93a3ba
+& ./synveda-install.ps1 -Version 0.4.5 -SourceSha 5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed
 ```
 
 The expected source comes from the reviewed release record, never from an
@@ -51,9 +51,11 @@ Missing or failed proof stops installation, under
 
 The older v0.4.3 installer is unchanged and requires the manual attestation
 verification in its [versioned guide](https://github.com/synveda/synveda/blob/v0.4.3/docs/CONSUMER_CLI.md).
-Native execution reports establish archive installation and fixtures, not
-OS code signatures, native vendor loading or real issuer login from the client
-archives. See [production readiness](PRODUCTION_READINESS.md) for those limits.
+Native execution reports establish archive installation and fixtures. The
+[local v0.4.5 install probe](../demos/evidence/ops12-045-clean-install.json) also
+checks the published macOS ARM64 CLI's real PKCE login to bundled Keycloak.
+OS code signatures, native vendor loading and external issuer qualification
+remain open. See [production readiness](PRODUCTION_READINESS.md) for those limits.
 
 <a id="client-archive-candidate"></a>
 ## Client archive contents and local candidates
@@ -62,7 +64,7 @@ archives. See [production readiness](PRODUCTION_READINESS.md) for those limits.
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
-`windows-x86_64`. The v0.4.4 release includes all six archives. See the
+`windows-x86_64`. The v0.4.5 release includes all six archives. See the
 [readiness assessment](PRODUCTION_READINESS.md) for platform limits.
 On Windows, credentials, receipts and hook spool state use private local storage.
 Windows setup and vendor configuration writers, deployment and diagnostic logs
@@ -90,7 +92,7 @@ The existing installer has an explicit client mode. For **locally built**
 candidate assets and their `SHA256SUMS` in an absolute directory:
 
 ```sh
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.4 \
+SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.5 \
   SYNVEDA_BASE_URL=file:///absolute/path/to/candidate-assets \
   sh scripts/install.sh
 ```
@@ -113,7 +115,7 @@ On native Windows x64 or arm64, use the source PowerShell installer with
 existing PowerShell policy permits it; the installer never changes that policy:
 
 ```powershell
-& ./scripts/install.ps1 -Version 0.4.4 -BaseUrl 'file:///C:/candidate-assets'
+& ./scripts/install.ps1 -Version 0.4.5 -BaseUrl 'file:///C:/candidate-assets'
 ```
 
 PowerShell 5.1+ and a private local fixed-drive parent are required. The default
@@ -157,11 +159,11 @@ and Corepack. Build the existing adapters first, download the selected pinned
 archive, then run on that target's native host:
 
 ```sh
-node scripts/package-client.mjs 0.4.4 darwin-arm64 target/debug/synveda \
+node scripts/package-client.mjs 0.4.5 darwin-arm64 target/debug/synveda \
   /absolute/path/to/node-v24.21.0-darwin-arm64.tar.gz \
   /absolute/path/to/candidate-assets "$(git rev-parse HEAD)"
-node scripts/check-client-package.mjs 0.4.4 \
-  /absolute/path/to/candidate-assets/synveda-client-0.4.4-darwin-arm64.tar.gz \
+node scripts/check-client-package.mjs 0.4.5 \
+  /absolute/path/to/candidate-assets/synveda-client-0.4.5-darwin-arm64.tar.gz \
   /absolute/path/to/client-report.json
 ```
 
@@ -177,7 +179,7 @@ state.
 On each native Windows host, build the same adapters and CLI, then run:
 
 ```powershell
-node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.4 windows-arm64 C:/candidate-assets (git rev-parse HEAD)
+node scripts/windows-client-candidate.mjs target/debug/synveda.exe 0.4.5 windows-arm64 C:/candidate-assets (git rev-parse HEAD)
 ```
 
 Use `windows-x86_64` on x64. This downloads the pinned Node ZIP, packages the
@@ -195,11 +197,11 @@ when absent; the CLI does not build images.
 From a terminal, using the built CLI on PATH:
 
 ```sh
-synveda doctor --bundle /absolute/path/to/synveda-reference-0.4.4
-synveda up --bundle /absolute/path/to/synveda-reference-0.4.4
-synveda status --bundle /absolute/path/to/synveda-reference-0.4.4
-synveda logs --bundle /absolute/path/to/synveda-reference-0.4.4 --tail 100
-synveda down --bundle /absolute/path/to/synveda-reference-0.4.4
+synveda doctor --bundle /absolute/path/to/synveda-reference-0.4.5
+synveda up --bundle /absolute/path/to/synveda-reference-0.4.5
+synveda status --bundle /absolute/path/to/synveda-reference-0.4.5
+synveda logs --bundle /absolute/path/to/synveda-reference-0.4.5 --tail 100
+synveda down --bundle /absolute/path/to/synveda-reference-0.4.5
 ```
 
 Without `--bundle`, the commands look in `$SYNVEDA_HOME/reference/current`
