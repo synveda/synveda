@@ -402,6 +402,7 @@ function Inspector({
       ) : null}
 
       <TaskAndRendered run={run} />
+      <ContextHealth detail={detail} />
       <Selections
         detail={detail}
         cacheKey={cacheKey}
@@ -410,6 +411,46 @@ function Inspector({
       <Exclusions run={run} candidates={exclusions} />
       <FeedbackHistory feedback={detail.feedback} />
     </article>
+  );
+}
+
+function ContextHealth({ detail }: { detail: ContextRunDetailView }) {
+  return (
+    <section>
+      <h3>Context health</h3>
+      <p className="muted">Observed evidence and next actions, assessed {whenOf(detail.health.assessed_at)}. Unknown coverage is explicit.</p>
+      <ul>
+        {detail.health.findings.map((finding) => {
+          const revisionLink = finding.action === "inspect_revision" && finding.knowledge_item_id;
+          const destination = revisionLink
+            ? `${hrefOf("knowledge-item", { knowledge_id: finding.knowledge_item_id! })}${finding.knowledge_revision_id ? `#revision-${finding.knowledge_revision_id}` : ""}`
+            : finding.action === "inspect_candidate"
+              ? hrefOf("learnings")
+              : finding.action === "request_current_context"
+                ? hrefOf("context")
+                : hrefOf("session", { session_id: detail.run.session_id });
+          return (
+            <li key={finding.dimension}>
+              <strong>{finding.dimension}</strong>{" "}
+              <span className={`tag ${finding.status === "needs_attention" ? "warn" : ""}`}>{finding.status.replaceAll("_", " ")}</span>
+              <p>{finding.explanation}</p>
+              <p className="muted">Observed {whenOf(finding.observed_at)} · <Link href={destination}>{finding.action.replaceAll("_", " ")}</Link></p>
+            </li>
+          );
+        })}
+      </ul>
+      <details>
+        <summary>Pipeline observations</summary>
+        <dl className="facts">
+          {detail.health.pipeline.map((stage) => (
+            <div key={stage.stage}>
+              <dt>{stage.stage.replaceAll("_", " ")} · {stage.status.replaceAll("_", " ")}</dt>
+              <dd>{stage.explanation}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
+    </section>
   );
 }
 

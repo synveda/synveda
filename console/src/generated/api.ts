@@ -1552,6 +1552,57 @@ export type ContextGraphStepView = {
   };
 
 /**
+ * Supported existing workflow destinations; following one reauthorizes it.
+ */
+export type ContextHealthAction = "inspect_revision" | "inspect_candidate" | "inspect_trace" | "request_current_context";
+
+/**
+ * Separate observable dimensions; there is deliberately no aggregate score.
+ */
+export type ContextHealthDimension = "provenance" | "freshness" | "conflicts" | "budget" | "outcomes" | "review";
+
+/**
+ * One bounded finding with at most one already authorized evidence example.
+ */
+export type ContextHealthFindingView = {
+    action: ContextHealthAction;
+    capture_candidate_id?: string | null;
+    dimension: ContextHealthDimension;
+    explanation: string;
+    knowledge_item_id?: string | null;
+    knowledge_revision_id?: string | null;
+    /**
+     * Time of the trace/feedback observation, not a synchronization timestamp.
+     */
+    observed_at: string;
+    status: ContextHealthStatus;
+  };
+
+/**
+ * Evidence availability, rather than a claim of universal context quality.
+ */
+export type ContextHealthStatus = "observed" | "needs_attention" | "unknown";
+
+/**
+ * Current projection of a retained trace, without unrestricted store scans.
+ */
+export type ContextHealthView = {
+    /**
+     * When the current authorized view was assessed.
+     */
+    assessed_at: string;
+    /**
+     * Exactly six independent dimensions, each with bounded evidence.
+     */
+    findings: ContextHealthFindingView[];
+    /**
+     * Exactly five stages; unknown is explicit.
+     */
+    pipeline: ContextStageObservationView[];
+    schema_version: number;
+  };
+
+/**
  * Scoped Knowledge query/evaluation result.
  */
 export type ContextKnowledgeQueryView = {
@@ -1709,6 +1760,11 @@ export type ContextPackView = {
     updated_at: string;
     updated_by: string;
   };
+
+/**
+ * Distinct causal stages; multiple observations may require attention.
+ */
+export type ContextPipelineStage = "representation" | "eligibility" | "retrieval" | "assembly" | "delivery_use";
 
 /**
  * Authored chunk material selected by a preview.
@@ -1896,6 +1952,12 @@ export type ContextRunDetailView = {
      * Explicit feedback whose revision remains visible.
      */
     feedback: ContextFeedbackView[];
+    /**
+     * Actionable observations derived only from this freshly authorized
+     * trace. Unknown coverage, delivery acknowledgment and model use remain
+     * explicit; there is no tenant-wide health score or denied count.
+     */
+    health: ContextHealthView;
     /**
      * Aggregate revocation/policy notice with no denied count.
      */
@@ -2159,6 +2221,15 @@ export type ContextSelectionView = {
      */
     token_count: number;
     unreviewed_candidate?: null | CaptureCandidateView;
+  };
+
+/**
+ * A production observation cannot claim knowledge of missing oracle evidence.
+ */
+export type ContextStageObservationView = {
+    explanation: string;
+    stage: ContextPipelineStage;
+    status: ContextHealthStatus;
   };
 
 /**
@@ -3315,7 +3386,9 @@ export type KnowledgeRevisionView = {
      */
     knowledge_item_id: string;
     /**
-     * Forward-compatible product metadata.
+     * Product metadata. Optional `synveda_claims` v1 declares up to eight
+     * typed, source-span-bound claims; declarations never grant approval or
+     * verification. See the bounded claim contract in the operator guide.
      */
     metadata: Record<string, unknown>;
     /**

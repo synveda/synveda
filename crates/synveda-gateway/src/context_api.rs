@@ -50,7 +50,7 @@ use synveda_types::knowledge::{
     KnowledgeType,
 };
 use synveda_types::relaxation::CurrentRelaxation;
-use synveda_types::session::{ContextRun, Session, SessionEventType};
+use synveda_types::session::{ContextRun, Session};
 use synveda_types::{
     ArtifactFamily, ArtifactReference, CaptureCandidateId, ContextCandidate, ContextCandidateId,
     ContextCompletionStatus, ContextFeedback, ContextFeedbackId, ContextGraphStep, ContextRunId,
@@ -71,6 +71,13 @@ use crate::sessions::ContextRunView;
 use crate::workspaces::{ApiErrorBody, Decidable, subject};
 
 mod graph;
+mod health;
+mod replay;
+
+pub use health::{
+    ContextHealthAction, ContextHealthDimension, ContextHealthFindingView, ContextHealthStatus,
+    ContextHealthView, ContextPipelineStage, ContextStageObservationView,
+};
 
 /// Context API outcomes by operation and `ok|rejected|error`.
 pub const CONTEXT_API_OPERATIONS_TOTAL: &str = "synveda_context_api_operations_total";
@@ -328,6 +335,10 @@ pub struct ContextRunDetailView {
     pub selections: Vec<ContextSelectionView>,
     /// Explicit feedback whose revision remains visible.
     pub feedback: Vec<ContextFeedbackView>,
+    /// Actionable observations derived only from this freshly authorized
+    /// trace. Unknown coverage, delivery acknowledgment and model use remain
+    /// explicit; there is no tenant-wide health score or denied count.
+    pub health: ContextHealthView,
     /// Aggregate revocation/policy notice with no denied count.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_exclusion_message: Option<String>,
@@ -2199,7 +2210,7 @@ pub(crate) async fn preview_context(
         (status = 400, description = "Invalid body or idempotency key", body = ApiErrorBody),
         (status = 403, description = "The PDP denied session writing", body = ApiErrorBody),
         (status = 404, description = "No such session", body = ApiErrorBody),
-        (status = 409, description = "Idempotency conflict", body = ApiErrorBody),
+        (status = 409, description = "Idempotency conflict or saved delivery no longer admissible; use a new key to compose current context", body = ApiErrorBody),
     ),
     security(("bearer" = [])),
 )]
@@ -3175,6 +3186,17 @@ async fn replay_context_run(
         .await?
         .filter(|run| run.session_id == session_id)
         .ok_or_else(|| crate::idempotency::vanished(claim, run_id.as_uuid()))?;
+    let admissible = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        replay::admissible(state, &mut tx, tenant_id, &run),
+    )
+    .await
+    .unwrap_or(Ok(false))?;
+    if !admissible {
+        return Err(Error::Conflict {
+            message: "Saved context delivery is unavailable under current policy or source state; use a new idempotency key to compose current context".to_owned(),
+        });
+    }
     crate::sessions::read_event(
         &mut tx,
         tenant_id,
@@ -3264,9 +3286,7 @@ async fn stored_graph_path_view(
             step.asserting_revision_id,
         )
         else {
-            return Err(Error::Internal {
-                message: "an addressed context graph path lost an exact address".to_owned(),
-            });
+            return Ok((None, true));
         };
         let Some(relation) = knowledge::relation(&mut *tx, tenant_id, relation_id).await? else {
             return Ok((None, true));
@@ -3342,10 +3362,7 @@ async fn candidate_view(
             let (Some(item_id), Some(revision_id)) =
                 (candidate.knowledge_item_id, candidate.knowledge_revision_id)
             else {
-                return Err(Error::Internal {
-                    message: "an addressed Knowledge candidate lost its revision address"
-                        .to_owned(),
-                });
+                return Ok((None, true));
             };
             let Some(visible) = load_visible_revision(
                 state,
@@ -3432,10 +3449,7 @@ async fn selection_view(
             let (Some(item_id), Some(revision_id)) =
                 (selection.knowledge_item_id, selection.knowledge_revision_id)
             else {
-                return Err(Error::Internal {
-                    message: "an addressed Knowledge selection lost its revision address"
-                        .to_owned(),
-                });
+                return Ok((None, true));
             };
             let Some(visible) = load_visible_revision(
                 state,
@@ -3542,10 +3556,8 @@ pub(crate) async fn timeline_selection_visibility(
                     let (Some(item_id), Some(revision_id)) =
                         (selection.knowledge_item_id, selection.knowledge_revision_id)
                     else {
-                        return Err(Error::Internal {
-                            message: "an addressed Knowledge selection lost its revision address"
-                                .to_owned(),
-                        });
+                        policy_exclusion = true;
+                        continue;
                     };
                     load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
                         .await?
@@ -3659,32 +3671,12 @@ async fn detail_view(
     }
     let visible_selection_ids: HashSet<ContextSelectionId> =
         selections.iter().map(|selection| selection.id).collect();
-    let feedback = retained_feedback
+    let feedback: Vec<ContextFeedbackView> = retained_feedback
         .into_iter()
         .filter(|entry| visible_selection_ids.contains(&entry.context_selection_id))
         .map(Into::into)
         .collect();
-    let mut restart_detail_unavailable = false;
-    if let Some(checkpoint_id) = run.checkpoint_event_id {
-        restart_detail_unavailable = !crate::sessions::checkpoint::source_available(
-            tx,
-            tenant_id,
-            run.session_id,
-            checkpoint_id,
-        )
-        .await?;
-    }
-    for event_id in &run.restart_event_ids {
-        let event = sessions::event(&mut *tx, tenant_id, run.session_id, *event_id).await?;
-        if !event.is_some_and(|held| held.event_type == SessionEventType::MessageUser)
-            || !sessions::withheld_event_ids(&mut *tx, tenant_id, run.session_id, &[*event_id])
-                .await?
-                .is_empty()
-        {
-            restart_detail_unavailable = true;
-            break;
-        }
-    }
+    let restart_detail_unavailable = !replay::restart_available(state, tx, tenant_id, &run).await?;
     let mut run_view = ContextRunView::for_trace(run);
     run_view.candidate_count = i32::try_from(candidates.len()).unwrap_or(i32::MAX);
     run_view.selection_count = i32::try_from(selections.len()).unwrap_or(i32::MAX);
@@ -3699,11 +3691,13 @@ async fn detail_view(
         run_view.entry_count = run_view.selection_count;
         run_view.skills = json!([]);
     }
+    let health = health::assess(&run_view, &candidates, &selections, &feedback);
     Ok(ContextRunDetailView {
         run: run_view,
         candidates,
         selections,
         feedback,
+        health,
         policy_exclusion_message: policy_exclusion
             .then(|| "Some context detail is unavailable under current policy.".to_owned()),
     })

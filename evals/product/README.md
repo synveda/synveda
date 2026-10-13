@@ -5,6 +5,14 @@ required scenario to an exact acceptance test and keeps the eight outcome
 signals separate. `baseline.json` contains the reviewable floors and six
 zero-tolerance trust bounds.
 
+The source suite also includes saved-delivery admission, typed retry-cap conflict
+review and tight-budget exception preservation. These prove exact public-API
+behavior on fictional evidence, with unchanged quality floors. The focused
+`bash demos/mem-8-saved-delivery.sh` runs all saved-replay modes, independent private
+provenance, checkpoint source disposal, retry caps 3/5 and the payment exception
+on a fresh ordinary-role PostgreSQL fixture. It is deterministic API replay and
+does not establish native handoff, full source forgetting or model use.
+
 CTX-8 adds two paired off/conservative scenarios to this same disposable
 database run. Their separate `context_optimisation` report section records
 complete Synveda-rendered text tokens with the declared `o200k_base` encoding,

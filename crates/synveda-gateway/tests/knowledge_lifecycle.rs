@@ -1676,6 +1676,204 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
 }
 
 #[tokio::test]
+async fn typed_retry_claims_retain_exact_values_through_governed_conflict_review() {
+    let _guard = serial().await;
+    let Some((state, tenant)) = admitted_tenant().await else {
+        return;
+    };
+    use_standard(&state.pool, tenant.id).await;
+    let actor = seed_user(&state.pool, tenant.id, "claims-review@pulseboard.test").await;
+    let subject = actor.subject.as_deref().unwrap();
+    let token = Hs256Verifier::new(SECRET).issue(subject, tenant.id, Duration::from_secs(300));
+    let app = synveda_gateway::app::behavior_test_router(state.clone());
+    let request = |cap| {
+        let body = format!("Retry failed idempotent requests at most {cap} times.");
+        let mut revision = api_content("Reviewed retry cap", &body);
+        revision["metadata"] = json!({"synveda_claims": {"schema_version":1, "claims":[{
+            "subject":{"kind":"named","key":"payment-worker"}, "predicate":"retry_cap",
+            "assertion_status":"asserted", "applicability":{"environment":"production"}, "unit":"count",
+            "constraint":{"operator":"eq","value":{"kind":"decimal","coefficient":cap,"scale":0}},
+            "evidence":{"start_byte":0,"end_byte":body.len()},
+        }]}});
+        json!({"scope_id":actor.scope_id,"owner_principal_id":subject,
+            "knowledge_type":"procedure","origin":"authored","content":revision,
+            "sources":[{"scope_id":actor.scope_id,"source_type":"document",
+                "locator":"fictional:payment-worker/retries.md", "source_revision":format!("retry-cap-{cap}"),
+                "content_hash":blake3::hash(body.as_bytes()).to_hex().to_string()}]})
+    };
+    let (status, _, original) = api(
+        &app,
+        Method::POST,
+        "/v1/knowledge",
+        &token,
+        Some("claims-retry-3"),
+        Some(&request(3)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{original}");
+    assert_eq!(original["outcome"], "applied");
+    let item3: KnowledgeItemId = original["knowledge_item_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let held3 = snapshot(&state.pool, tenant.id, item3).await.unwrap();
+    let known3 = held3.item.transaction_from;
+    let (status, _, challenger) = api(
+        &app,
+        Method::POST,
+        "/v1/knowledge",
+        &token,
+        Some("claims-retry-5"),
+        Some(&request(5)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{challenger}");
+    let item5: KnowledgeItemId = challenger["knowledge_item_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let held5 = snapshot(&state.pool, tenant.id, item5).await.unwrap();
+    assert_eq!(
+        held3.revision.content.body_markdown,
+        "Retry failed idempotent requests at most 3 times."
+    );
+    assert_eq!(
+        held5.revision.content.body_markdown,
+        "Retry failed idempotent requests at most 5 times."
+    );
+    assert_eq!(
+        held5.item.lifecycle_state,
+        KnowledgeLifecycleState::Transitional
+    );
+    assert_eq!(
+        held5.revision.content.metadata["synveda_claims"]["claims"][0]["constraint"]["value"]["coefficient"],
+        5
+    );
+
+    let (status, _, conflicts) = api(
+        &app,
+        Method::GET,
+        "/v1/knowledge-conflicts?limit=20",
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{conflicts}");
+    let conflict = &conflicts["conflicts"][0];
+    assert_eq!(conflict["classification"], "contradiction");
+    assert!(
+        conflict["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|member| member["role"] == "current"
+                && member["reason_code"] == "claim_values_disjoint"),
+        "{conflict}"
+    );
+    let (status, _, listing) = api(
+        &app,
+        Method::GET,
+        "/v1/knowledge?limit=20",
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listing}");
+    assert!(
+        listing["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == item3.to_string())
+    );
+    assert!(
+        !listing["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == item5.to_string())
+    );
+    let (status, _, applied) = api(&app, Method::POST,
+        &format!("/v1/knowledge-conflicts/{}/resolve", conflict["id"].as_str().unwrap()), &token,
+        Some("claims-reviewed-five"), Some(&json!({"expected_revision":conflict["revision"],
+            "resolution":"supersede", "reason":"review the exact source-backed retry-cap correction"}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{applied}");
+    assert_eq!(applied["outcome"], "applied");
+    assert_eq!(
+        snapshot(&state.pool, tenant.id, item5)
+            .await
+            .unwrap()
+            .item
+            .lifecycle_state,
+        KnowledgeLifecycleState::Active
+    );
+    assert_eq!(
+        snapshot(&state.pool, tenant.id, item3)
+            .await
+            .unwrap()
+            .item
+            .lifecycle_state,
+        KnowledgeLifecycleState::Superseded
+    );
+
+    for (item, cap) in [(item3, 3), (item5, 5)] {
+        let (status, _, sources) = api(
+            &app,
+            Method::GET,
+            &format!("/v1/knowledge/{item}/sources"),
+            &token,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{sources}");
+        assert_eq!(
+            sources["sources"][0]["source_revision"],
+            format!("retry-cap-{cap}")
+        );
+    }
+    let historical_uri = format!(
+        "/v1/knowledge?include_history=true&as_known_at={}&limit=20",
+        known3.to_rfc3339().replace(':', "%3A").replace('+', "%2B")
+    );
+    let (status, _, historical) = api(&app, Method::GET, &historical_uri, &token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{historical}");
+    assert!(
+        historical["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == item3.to_string()
+                && item["current_revision"]["body_markdown"]
+                    == held3.revision.content.body_markdown)
+    );
+    assert!(
+        !historical["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == item5.to_string())
+    );
+    let mut fabricated = request(7);
+    fabricated["content"]["metadata"]["synveda_claims"]["claims"][0]["assertion_status"] =
+        json!("approved");
+    let (status, _, refused) = api(
+        &app,
+        Method::POST,
+        "/v1/knowledge",
+        &token,
+        Some("claims-fabricated-approval"),
+        Some(&fabricated),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+}
+
+#[tokio::test]
 async fn conflicts_are_transitional_governed_and_temporally_queryable() {
     let _guard = serial().await;
     let Some((state, tenant)) = admitted_tenant().await else {

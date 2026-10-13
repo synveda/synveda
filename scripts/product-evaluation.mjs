@@ -38,6 +38,9 @@ const REQUIRED_SCENARIOS = [
   "conservative_authority_dedup",
   "checkpoint_restart_held_out_tasks",
   "checkpoint_conservative_shared_budget",
+  "saved_delivery_admission",
+  "typed_value_conflict_review",
+  "retry_exception_preservation",
 ];
 const REQUIRED_MEASUREMENTS = [
   "retrieved",

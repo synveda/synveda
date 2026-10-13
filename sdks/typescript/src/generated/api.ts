@@ -1709,7 +1709,9 @@ export type KnowledgeRevisionView = {
      */
     knowledge_item_id: string;
     /**
-     * Forward-compatible product metadata.
+     * Product metadata. Optional `synveda_claims` v1 declares up to eight
+     * typed, source-span-bound claims; declarations never grant approval or
+     * verification. See the bounded claim contract in the operator guide.
      */
     metadata: Record<string, unknown>;
     /**

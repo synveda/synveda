@@ -164,6 +164,80 @@ or dismiss it. A governed change creates an immutable Knowledge revision only
 when it applies. **Knowledge** shows the current revision and source; **Context**
 shows which revisions a session received and why.
 
+Saved ContextRun replay repeats current authority and source checks. A `409`
+stating that saved delivery is unavailable means that its original receipt
+remains recorded but cannot be delivered again. Request current context with a
+new idempotency key. An archived, corrected, stale or removed revision is never
+silently replaced under the old key. Some authored/Skill deliveries and
+hashes-only/disabled traces do not retain enough dependency proof for replay;
+their fresh composition remains available under current policy. Exact-revision
+historical inspection retains its own authorization rules.
+
+The Context Inspector's **Context health** shows separate provenance,
+freshness, conflict, budget, outcome and review findings. Each observed concern
+links to an exact permitted revision, the learning review, the Session timeline
+or a fresh context request. It never counts denied evidence. Its pipeline
+observations separate eligibility, retrieval and assembly concerns; capture
+coverage, source synchronization, physical cleanup and actual model use remain
+unknown unless evidence establishes them. Feedback reports what an authenticated
+user said, without claiming independently verified task success.
+
+### Bounded claim declarations
+
+API clients may attach explicit claims inside a revision's `metadata` to improve
+conflict review. For `body_markdown: "Retry cap 3."`, this projection binds the
+whole twelve-byte statement:
+
+```json
+{
+  "synveda_claims": {
+    "schema_version": 1,
+    "claims": [{
+      "subject": {"kind": "named", "key": "payment-worker"},
+      "predicate": "retry_cap",
+      "assertion_status": "asserted",
+      "applicability": {"environment": "production"},
+      "unit": "count",
+      "constraint": {
+        "operator": "eq",
+        "value": {"kind": "decimal", "coefficient": 3, "scale": 0}
+      },
+      "evidence": {"start_byte": 0, "end_byte": 12}
+    }]
+  }
+}
+```
+
+The revision's existing provenance links name its sources; this metadata does
+not fetch or authorize any resource. `asserted` declares what the author says;
+`proposed` preserves a proposal. Neither means approved or verified. Unknown
+fields and fabricated statuses such as `approved` are refused.
+
+The envelope allows one to eight claims and up to eight applicability conditions
+per claim. Subject keys, predicates and condition keys/values preserve case.
+Values are fixed-point decimals (signed integer coefficient, zero to nine
+decimal places), text, booleans or version release triples. Decimal constraints
+require a unit; other values forbid one. Ordered comparisons/ranges accept only
+decimals and release triples, with nonempty ordered ranges. Text/boolean values
+support equality and inequality. Version `1.9` is explicitly represented as
+`1.9.0`, which differs from `1.10.0`; prerelease/build fields are unsupported.
+
+Supported numeric units are `ns`, `us`, `ms`, `s`, `byte`, `bytes`, `KiB`, `MiB`,
+`count` and `attempt`. Their finite conversions use exact checked integers.
+Unsupported units or incompletely comparable claims remain review hints.
+Disjoint values with overlapping subject, predicate, applicability and current
+valid time produce contradiction evidence; distinct environments/predicates or
+disjoint valid intervals do not become the same fact. Valid time comes from the
+revision. Every evidence span must be a nonempty UTF-8 byte slice of that body.
+
+Without annotations, lexical proximity suggests review and preserves the exact
+proposition; only an equal canonical content hash is a duplicate hint. Changed
+unparsed prose cannot be auto-resolved as support. Use the existing conflict
+review and VedaFlow resolution paths to decide the applicable current revision.
+The [claim decision](adr/adr-0142-bounded-revision-claims.md) records the limits.
+
+### Other governed artifacts
+
 The console also provides **Skills** for versioned Skill bundles, **Tools** for
 reviewed MCP server definitions, and **Import / Export** for bounded OKF v0.2
 project knowledge exchange. The gateway records external Tool metadata and

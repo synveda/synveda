@@ -21,6 +21,8 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod claims;
+
 use crate::{
     CaptureCandidateId, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId,
     ConflictMemberId, ConflictSetId, DurableOperationId, Error, KnowledgeItemId,
@@ -1054,6 +1056,19 @@ pub fn classify_knowledge_match(
             reason_code: "same_content_hash",
         });
     }
+    if proposed_type == existing_type {
+        match claims::compare(proposed, existing, as_of) {
+            claims::Comparison::Fallback => {}
+            claims::Comparison::Separate => return None,
+            claims::Comparison::Matched(classification, reason_code) => {
+                return Some(KnowledgeMatch {
+                    classification,
+                    similarity_permille: 1_000,
+                    reason_code,
+                });
+            }
+        }
+    }
     let proposed_tokens = knowledge_tokens(&format!(
         "{} {} {}",
         proposed.title, proposed.summary, proposed.body_markdown
@@ -1070,9 +1085,8 @@ pub fn classify_knowledge_match(
     let similarity = i32::try_from(intersection * 1_000 / union).unwrap_or(1_000);
     let same_type = proposed_type == existing_type;
     // Temporal intent and opposite polarity are stronger than lexical
-    // proximity. A one-word negation or a future validity boundary often
-    // leaves the token sets almost identical; classifying either as a near
-    // duplicate would silently discard the exact distinction review needs.
+    // proximity. Negation and future validity remain explicit review evidence;
+    // lexical closeness alone cannot prove that two propositions agree.
     let classification = if similarity >= 450
         && same_type
         && knowledge_has_negation(&proposed.body_markdown)
@@ -1087,17 +1101,14 @@ pub fn classify_knowledge_match(
             ConflictClassification::Transition,
             "shared_subject_future_validity",
         )
-    } else if similarity >= 850 {
-        (ConflictClassification::Duplicate, "lexical_near_duplicate")
-    } else if similarity >= 550 && same_type {
+    } else if same_type
+        && (similarity >= 550
+            || (similarity >= 400
+                && knowledge_value_terms(proposed) != knowledge_value_terms(existing)))
+    {
         (
             ConflictClassification::Supersession,
-            "shared_subject_new_statement",
-        )
-    } else if similarity >= 400 && same_type {
-        (
-            ConflictClassification::Support,
-            "shared_subject_supporting_statement",
+            "lexical_statement_requires_review",
         )
     } else {
         return None;
@@ -1109,10 +1120,43 @@ pub fn classify_knowledge_match(
     })
 }
 
+// Weak shared prose does not establish support or conflict. Literal values,
+// their neighboring words, comparators and single-character identifiers merit
+// review at that lower relatedness floor. These are case-preserving lexical
+// differences, not parsed claims or a truth decision.
+fn knowledge_value_terms(content: &KnowledgeRevisionContent) -> BTreeSet<String> {
+    let text = format!(
+        "{} {} {}",
+        content.title, content.summary, content.body_markdown
+    );
+    let tokens: Vec<_> = text
+        .split(|character: char| {
+            !character.is_alphanumeric() && !matches!(character, '.' | '-' | '+' | '<' | '>' | '=')
+        })
+        .map(|token| token.trim_end_matches('.'))
+        .filter(|token| !token.is_empty())
+        .collect();
+    let mut values = BTreeSet::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if token.bytes().any(|byte| byte.is_ascii_digit()) {
+            for neighbor in &tokens[index.saturating_sub(1)..(index + 2).min(tokens.len())] {
+                values.insert((*neighbor).to_owned());
+            }
+        } else if token.chars().count() == 1
+            || token
+                .chars()
+                .all(|character| matches!(character, '<' | '>' | '='))
+        {
+            values.insert((*token).to_owned());
+        }
+    }
+    values
+}
+
 fn knowledge_tokens(value: &str) -> BTreeSet<String> {
     value
         .split(|character: char| !character.is_alphanumeric())
-        .filter(|token| token.chars().count() >= 2)
+        .filter(|token| !token.is_empty())
         .map(str::to_lowercase)
         .collect()
 }
@@ -1582,7 +1626,8 @@ pub fn validate_knowledge_revision_content(content: &KnowledgeRevisionContent) -
         }
     }
     validate_metadata("verification metadata", &content.verification_metadata)?;
-    validate_metadata("Knowledge metadata", &content.metadata)
+    validate_metadata("Knowledge metadata", &content.metadata)?;
+    claims::validate(content)
 }
 
 /// Validates a normalised source descriptor's type-specific shape.
@@ -1870,6 +1915,79 @@ mod tests {
             assert!(!state.is_current(), "{state} is not ordinary current truth");
         }
         assert!("deleted".parse::<KnowledgeLifecycleState>().is_err());
+    }
+
+    #[test]
+    fn different_numeric_propositions_are_reviewed_instead_of_lexical_duplicates() {
+        let mut existing = content();
+        existing.title = "Retry cap".to_owned();
+        existing.body_markdown = "Retry cap 3".to_owned();
+        existing.summary = existing.body_markdown.clone();
+        let mut proposed = existing.clone();
+        proposed.body_markdown = "Retry cap 5".to_owned();
+        proposed.summary = proposed.body_markdown.clone();
+        let matched = classify_knowledge_match(
+            KnowledgeType::Procedure,
+            &proposed,
+            &knowledge_revision_content_hash(&proposed),
+            KnowledgeType::Procedure,
+            &existing,
+            &knowledge_revision_content_hash(&existing),
+            Utc::now(),
+        )
+        .unwrap();
+        assert_eq!(matched.classification, ConflictClassification::Supersession);
+        assert_eq!(proposed.body_markdown, "Retry cap 5");
+        assert_eq!(existing.body_markdown, "Retry cap 3");
+    }
+
+    #[test]
+    fn weak_overlap_preserves_complementary_facts_and_reviews_literal_changes() {
+        let mut existing = content();
+        existing.title = "Webhook identity".to_owned();
+        existing.summary = "Deduplicate by provider event ID.".to_owned();
+        existing.body_markdown = existing.summary.clone();
+        let mut proposed = existing.clone();
+        proposed.title = "Webhook retries".to_owned();
+        proposed.summary = "Retries preserve the provider event ID.".to_owned();
+        proposed.body_markdown = proposed.summary.clone();
+        let compare = |proposed: &KnowledgeRevisionContent, existing: &KnowledgeRevisionContent| {
+            classify_knowledge_match(
+                KnowledgeType::Procedure,
+                proposed,
+                &knowledge_revision_content_hash(proposed),
+                KnowledgeType::Procedure,
+                existing,
+                &knowledge_revision_content_hash(existing),
+                Utc::now(),
+            )
+        };
+        assert!(compare(&proposed, &existing).is_none());
+
+        existing.title = "Timeout".to_owned();
+        existing.summary = "Timeout 10 ms".to_owned();
+        existing.body_markdown = existing.summary.clone();
+        proposed.title = existing.title.clone();
+        proposed.summary = "Timeout 10 s".to_owned();
+        proposed.body_markdown = proposed.summary.clone();
+        assert_eq!(
+            compare(&proposed, &existing).unwrap().classification,
+            ConflictClassification::Supersession
+        );
+        assert_ne!(
+            knowledge_value_terms(&proposed),
+            knowledge_value_terms(&existing)
+        );
+        assert_eq!(
+            compare(&existing, &existing).unwrap().classification,
+            ConflictClassification::Duplicate
+        );
+        existing.body_markdown = "Use A <= 100".to_owned();
+        proposed.body_markdown = "Use a < 100".to_owned();
+        assert_ne!(
+            knowledge_value_terms(&proposed),
+            knowledge_value_terms(&existing)
+        );
     }
 
     #[test]

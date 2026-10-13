@@ -196,6 +196,27 @@
       "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "restart_and_required_knowledge_share_one_budget_with_required_priority", "--", "--exact"],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
       "measures": ["combined_mode_budget", "checkpoint_provenance", "required_knowledge_retention"]
+    },
+    {
+      "id": "saved_delivery_admission",
+      "title": "Saved delivery repeats exact current Knowledge authority without changing the receipt",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "saved_delivery_rechecks_exact_knowledge_before_idempotent_replay", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": ["saved_delivery_revocation", "current_revision_admission"]
+    },
+    {
+      "id": "typed_value_conflict_review",
+      "title": "Retry caps 3 and 5 retain exact values and sources through governed contradiction review",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "knowledge_lifecycle", "typed_retry_claims_retain_exact_values_through_governed_conflict_review", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/knowledge_lifecycle.rs",
+      "measures": ["typed_value_preservation", "governed_conflict_resolution"]
+    },
+    {
+      "id": "retry_exception_preservation",
+      "title": "Conservative tight-budget excerpts retain the retry limit and unknown-payment-outcome exception",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "conservative_excerpt_keeps_retry_exception_under_tight_budget", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": ["critical_fact_retention", "required_input_insufficiency"]
     }
   ]
 }

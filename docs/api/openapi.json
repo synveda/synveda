@@ -10184,7 +10184,7 @@
             }
           },
           "409": {
-            "description": "Idempotency conflict",
+            "description": "Idempotency conflict or saved delivery no longer admissible; use a new key to compose current context",
             "content": {
               "application/json": {
                 "schema": {
@@ -16722,6 +16722,124 @@
           }
         }
       },
+      "ContextHealthAction": {
+        "type": "string",
+        "description": "Supported existing workflow destinations; following one reauthorizes it.",
+        "enum": [
+          "inspect_revision",
+          "inspect_candidate",
+          "inspect_trace",
+          "request_current_context"
+        ]
+      },
+      "ContextHealthDimension": {
+        "type": "string",
+        "description": "Separate observable dimensions; there is deliberately no aggregate score.",
+        "enum": [
+          "provenance",
+          "freshness",
+          "conflicts",
+          "budget",
+          "outcomes",
+          "review"
+        ]
+      },
+      "ContextHealthFindingView": {
+        "type": "object",
+        "description": "One bounded finding with at most one already authorized evidence example.",
+        "required": [
+          "dimension",
+          "status",
+          "observed_at",
+          "explanation",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ContextHealthAction"
+          },
+          "capture_candidate_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "dimension": {
+            "$ref": "#/components/schemas/ContextHealthDimension"
+          },
+          "explanation": {
+            "type": "string"
+          },
+          "knowledge_item_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "knowledge_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Time of the trace/feedback observation, not a synchronization timestamp."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContextHealthStatus"
+          }
+        }
+      },
+      "ContextHealthStatus": {
+        "type": "string",
+        "description": "Evidence availability, rather than a claim of universal context quality.",
+        "enum": [
+          "observed",
+          "needs_attention",
+          "unknown"
+        ]
+      },
+      "ContextHealthView": {
+        "type": "object",
+        "description": "Current projection of a retained trace, without unrestricted store scans.",
+        "required": [
+          "schema_version",
+          "assessed_at",
+          "findings",
+          "pipeline"
+        ],
+        "properties": {
+          "assessed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the current authorized view was assessed."
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextHealthFindingView"
+            },
+            "description": "Exactly six independent dimensions, each with bounded evidence."
+          },
+          "pipeline": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextStageObservationView"
+            },
+            "description": "Exactly five stages; unknown is explicit."
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "ContextKnowledgeQueryView": {
         "type": "object",
         "description": "Scoped Knowledge query/evaluation result.",
@@ -17029,6 +17147,17 @@
           }
         }
       },
+      "ContextPipelineStage": {
+        "type": "string",
+        "description": "Distinct causal stages; multiple observations may require attention.",
+        "enum": [
+          "representation",
+          "eligibility",
+          "retrieval",
+          "assembly",
+          "delivery_use"
+        ]
+      },
       "ContextPreviewPackView": {
         "type": "object",
         "description": "Authored chunk material selected by a preview.",
@@ -17312,7 +17441,8 @@
           "run",
           "candidates",
           "selections",
-          "feedback"
+          "feedback",
+          "health"
         ],
         "properties": {
           "candidates": {
@@ -17328,6 +17458,10 @@
               "$ref": "#/components/schemas/ContextFeedbackView"
             },
             "description": "Explicit feedback whose revision remains visible."
+          },
+          "health": {
+            "$ref": "#/components/schemas/ContextHealthView",
+            "description": "Actionable observations derived only from this freshly authorized\ntrace. Unknown coverage, delivery acknowledgment and model use remain\nexplicit; there is no tenant-wide health score or denied count."
           },
           "policy_exclusion_message": {
             "type": [
@@ -17749,6 +17883,26 @@
                 "description": "Freshly authorised proposal detail in full mode."
               }
             ]
+          }
+        }
+      },
+      "ContextStageObservationView": {
+        "type": "object",
+        "description": "A production observation cannot claim knowledge of missing oracle evidence.",
+        "required": [
+          "stage",
+          "status",
+          "explanation"
+        ],
+        "properties": {
+          "explanation": {
+            "type": "string"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/ContextPipelineStage"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContextHealthStatus"
           }
         }
       },
@@ -19894,7 +20048,7 @@
           },
           "metadata": {
             "type": "object",
-            "description": "Forward-compatible product metadata."
+            "description": "Product metadata. Optional `synveda_claims` v1 declares up to eight\ntyped, source-span-bound claims; declarations never grant approval or\nverification. See the bounded claim contract in the operator guide."
           },
           "revision_number": {
             "type": "integer",

@@ -149,7 +149,9 @@ pub struct KnowledgeRevisionView {
     pub verification_metadata: Value,
     /// Canonical BLAKE3-256 digest.
     pub content_hash: String,
-    /// Forward-compatible product metadata.
+    /// Product metadata. Optional `synveda_claims` v1 declares up to eight
+    /// typed, source-span-bound claims; declarations never grant approval or
+    /// verification. See the bounded claim contract in the operator guide.
     #[schema(value_type = Object)]
     pub metadata: Value,
     /// Author label, when recorded.

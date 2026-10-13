@@ -245,6 +245,28 @@ function detail(overrides: Partial<ContextRunDetailView> = {}): ContextRunDetail
         created_at: "2026-08-24T10:02:00Z",
       },
     ],
+    health: {
+      schema_version: 1,
+      assessed_at: "2026-08-24T10:03:00Z",
+      findings: [{
+        dimension: "budget",
+        status: "unknown",
+        observed_at: "2026-08-24T10:00:01Z",
+        explanation: "Budget coverage outside the retained view is unknown.",
+        action: "inspect_trace",
+      }, {
+        dimension: "outcomes",
+        status: "unknown",
+        observed_at: "2026-08-24T10:00:01Z",
+        explanation: "Actual model use and independently verified task outcome are unknown.",
+        action: "inspect_trace",
+      }],
+      pipeline: [{
+        stage: "delivery_use",
+        status: "unknown",
+        explanation: "A ContextRun records offered context; feedback is a user assertion.",
+      }],
+    },
     ...overrides,
   };
 }
@@ -263,6 +285,26 @@ function render(): { markup: string; text: string } {
 }
 
 beforeEach(() => cache.clear());
+
+test("context health links exact evidence and keeps actual use unknown", async () => {
+  const view = detail();
+  view.health.findings[0] = {
+    dimension: "budget",
+    status: "needs_attention",
+    observed_at: view.run.created_at,
+    explanation: "Eligible visible evidence did not fit the allowance.",
+    action: "inspect_revision",
+    knowledge_item_id: "knowledge-candidate-budget",
+    knowledge_revision_id: "revision-candidate-budget",
+  };
+  await seed({ kind: "ok", body: view });
+  const { markup, text } = render();
+  assert.match(text, /Context health/);
+  assert.match(text, /Eligible visible evidence did not fit/);
+  assert.match(text, /Actual model use and independently verified task outcome are unknown/);
+  assert.match(markup, /knowledge\/knowledge-candidate-budget#revision-revision-candidate-budget/);
+  assert.match(text, /Pipeline observations/);
+});
 
 test("the Context workbench requests against a visible Session and lists recent exact runs", async () => {
   const session = {

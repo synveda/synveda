@@ -1,11 +1,11 @@
 # Feature inventory
 
-151 features in this index. This file owns feature identity and delivered/open
+154 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-114 delivered; 37 open. CI checks the counts, IDs and open-brief contract.
+114 delivered; 40 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.5 release](https://github.com/synveda/synveda/releases/tag/v0.4.5)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -313,6 +313,22 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [ ] [PRMT-3: Prompt experiment evidence](PRMT-3.md) — open
 - [ ] [SKIL-5: Authentic Skill usage reporting](SKIL-5.md) — open
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open
+- [ ] [MEM-8: Source lineage and lifecycle invalidation](MEM-8.md) — open
+- [ ] [MEM-9: Inbound Git source reconciliation](MEM-9.md) — open
+- [ ] [SKIL-6: Verified procedure improvement candidates](SKIL-6.md) — open
+
+The 2026-10-14 context increment on `codex/context-memory-improvements` repairs
+saved delivery admission (ADR-0141), adds bounded typed revision claims
+(ADR-0142), preserves exact applicability/exception passage groups (ADR-0118
+amendment), and adds authorized Inspector health (ADR-0143). The fresh 26-scenario
+product suite passes with existing quality floors and all six trust bounds at
+zero; affected public-API, Rust, console and SDK checks pass. The MEM-8 brief
+records exact source/patch identity, measured token/latency boundary and remaining
+work. Complete source withdrawal, private all-mode dependencies, admission
+ordering and durable cleanup remain open; inbound reconciliation, structured
+second-client handoff, procedure learning and the integrated domain demo are
+not delivered. Next implement all-mode dependency proof with a separately
+measured additive migration; no external credential blocks that local work.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
 OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL

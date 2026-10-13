@@ -704,6 +704,23 @@ verification.
 
 ## Context optimisation
 
+The 2026-10-14 source increment adds saved ContextRun reauthorization
+(ADR-0141), explicit typed revision claims (ADR-0142), exact
+applicability/exception passage groups (ADR-0118 amendment), and six authorized
+Inspector health dimensions with five stage observations (ADR-0143). Fresh
+ordinary-role PostgreSQL acceptance passes all 26 product scenarios and the
+unchanged six zero-tolerance trust gates. The current run measured 675/446
+off/conservative rendered-text tokens in one existing optional-content fixture
+and 12/12 declared restart facts at four-sample local p95 30.037625 ms. Absolute
+token counts include generated wrapper identifiers. Source health is limited
+to visible trace observations: synchronized source coverage, physical cleanup,
+acknowledged delivery and model use/outcome remain unknown. Full scoped source
+withdrawal, all-mode private delivery dependencies, final admission ordering,
+inbound reconciliation, structured second-client handoff and verified procedure
+learning are open under MEM-8/9, CTX-6 and SKIL-6. This changes no production or
+native-client qualification claim; the exact increment evidence and next action
+are in [MEM-8](backlog/MEM-8.md#first-implemented-increment-2026-10-14).
+
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |
 |---|---|---|---|---|---|---|---|---|
 | Current retrieval, provenance, freshness and graph bounds | Conditional | P1 | The bounded, PDP-filtered Knowledge planner remains the delivery path. CTX-8 adds an opt-in conservative mode with exact local `o200k_base` rendered-text counts when declared, labelled estimates otherwise, immutable source spans, explicit required revisions, shared Synveda allowance, preview and source/line hashes (`crates/synveda-gateway/src/context_api.rs`; `crates/synveda-retrieval/src/counting.rs`; `crates/synveda-retrieval/src/passage.rs`). The isolated 23-scenario product suite and CTX-8 demo pass in this source checkout; a combined gate tests checkpoint restart with required Knowledge in both governed optimisation modes. | `make eval-product`; `demos/ctx-8-context-optimisation.sh`; context-run/pack tests; planner-stage metrics | One fresh paired fixture measured 710 off versus 481 conservative local text tokens, 229 fewer; generated wrapper identifiers change absolute counts across runs. Provider request usage, host history, cache effects, cost and task success are unavailable. The four required-body tasks establish exact retention only. The combined gate retains an attributed checkpoint with room and omits it without losing required Knowledge under a tight exact budget. An isolated hostname handoff passed and was restored; the pinned source product image built on 2026-09-29 after official Cargo endpoints recovered, but CTX-8 Compose/browser acceptance and held-out task quality remain open. CTX-6 checkpoint/restart is separate. | Representative tasks retain critical facts and permissions under lower delivered text; source edits, revocation and conflicts fail closed; measured host usage and latency stay within an explicitly reviewed boundary before broader rollout. | Finish fresh source deployment acceptance and held-out quality/security cases, then run CTX-6 live compact/restart probes. | A supported client hook, model usage/quality evidence and checkpoint retention policy remain external decisions. |
