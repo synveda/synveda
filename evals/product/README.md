@@ -12,6 +12,11 @@ behavior on fictional evidence, with unchanged quality floors. The focused
 provenance, checkpoint source disposal, retry caps 3/5 and the payment exception
 on a fresh ordinary-role PostgreSQL fixture. It is deterministic API replay and
 does not establish native handoff, full source forgetting or model use.
+The suite now has 30 scenarios, including private all-mode lineage, physical
+delivery-copy erasure, authored channel changes and immutable Skill version
+changes. These checks retain the original quality floors and trust tolerances.
+The saved-delivery demo runs nine focused cases and never infers Skill execution
+from an advertisement.
 
 CTX-8 adds two paired off/conservative scenarios to this same disposable
 database run. Their separate `context_optimisation` report section records

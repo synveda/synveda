@@ -41,6 +41,7 @@ pub mod capture;
 pub mod configuration;
 pub mod console_sessions;
 pub mod context;
+pub mod context_dependencies;
 pub mod database_url;
 pub mod directory;
 pub mod directory_sync;
@@ -145,6 +146,9 @@ pub async fn check_migration_compatibility(
                 )
                 .await?;
             }
+            epoch::MigrationPreflight::Login => {
+                runtime_role::verify_login_migrator_read_only_connection(&mut compatibility, database_roles).await?;
+            }
             epoch::MigrationPreflight::Current => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
@@ -243,6 +247,10 @@ async fn migrate_locked_connection(
             }
             epoch::MigrationPreflight::PendingStampForward | epoch::MigrationPreflight::Forward => {
                 runtime_role::verify_forward_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampLogin | epoch::MigrationPreflight::Login => {
+                runtime_role::verify_login_migrator_connection(&mut authority, database_roles)
                     .await?;
             }
             epoch::MigrationPreflight::PendingStampCurrent | epoch::MigrationPreflight::Current => {

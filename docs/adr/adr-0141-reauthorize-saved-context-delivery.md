@@ -1,6 +1,6 @@
 # ADR-0141: Saved context delivery repeats source admission
 
-- **Status**: Accepted
+- **Status**: Accepted (proof storage extended by ADR-0144)
 - **Date**: 2026-10-14
 - **Feature(s)**: CPR-20, CTX-6, MEM-8
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra planning review
@@ -28,9 +28,10 @@ an approved shared conclusion. Checkpoint/tail content additionally requires
 current SessionRead and original event/hash/review proof. Graph path endpoints
 retain their independent decisions.
 
-Nonempty authored/Skill deliveries or Knowledge deliveries whose retention mode
-discarded their addresses fail closed until complete content-free delivery lineage
-exists. Safe empty contributions remain replayable. Historical diagnostic reads
+ADR-0144 provides private content-free delivery lineage for new receipts,
+independently of diagnostic retention, including authored context and Skills.
+Nonempty older receipts without that producer proof fail closed. Safe empty
+contributions remain replayable. Historical diagnostic reads
 and explicit temporal Knowledge queries retain their own data/authority contracts.
 
 ## Options considered
@@ -46,9 +47,9 @@ and explicit temporal Knowledge queries retain their own data/authority contract
 
 - Positive: saved delivery cannot knowingly repeat revoked or obsolete evidence.
 - Negative / accepted: some retained responses cannot prove safe replay and need
-  a new key. Complete lineage independent of diagnostics remains MEM-8 work.
-- Reversal trigger: reviewed all-mode dependency storage proves authored/Skill
-  replay without widening disclosure, allowing those exact cases.
+  a new key. Source-level suppression and final admission ordering remain MEM-8 work.
+- Reversal trigger: reviewed all-mode storage now proves authored/Skill replay
+  under ADR-0144 without widening diagnostic disclosure.
 
 ## Compliance notes
 

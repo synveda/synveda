@@ -41,6 +41,10 @@ const REQUIRED_SCENARIOS = [
   "saved_delivery_admission",
   "typed_value_conflict_review",
   "retry_exception_preservation",
+  "all_mode_saved_delivery",
+  "private_lineage_erasure",
+  "authored_saved_delivery",
+  "skill_saved_delivery",
 ];
 const REQUIRED_MEASUREMENTS = [
   "retrieved",

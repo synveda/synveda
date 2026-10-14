@@ -54,9 +54,14 @@ Saved ContextRun replay independently rechecks exact current Knowledge, disclose
 source descriptors, graph paths and checkpoint/tail Session evidence. It retains
 the original receipt and refuses an unavailable/unprovable contribution with one
 content-free conflict; a new key requests current composition. Proof is bounded
-by the rendered-byte limit, 1,024 selections, 2,048 graph rows, 16 tail events and
-a five-second deadline. Address-free traces and nonempty authored/Skill deliveries
-remain unprovable until complete delivery lineage exists. This request-time check
+by the rendered-byte limit, a 512 KiB private dependency manifest, 1,024 selections,
+2,048 graph rows, 64 channels, 1,024 authored chunks, 32 Skill advertisements,
+16 tail events and a five-second deadline. New deliveries retain exact private
+proof independently of all four diagnostic retention modes (ADR-0144). Current
+authored channels/pins and immutable Skill bindings/versions are checked as well.
+Older nonempty receipts without this producer proof refuse replay. Governed item
+erasure clears addressed delivery copies through this index; the content-free
+proof remains private and immutable. This request-time check
 does not yet establish serialization against a concurrently committing removal;
 [MEM-8](backlog/MEM-8.md) owns that admission/cleanup boundary. Already delivered
 bytes and external exports retain their separate contracts.

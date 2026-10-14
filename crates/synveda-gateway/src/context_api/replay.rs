@@ -9,7 +9,7 @@ use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgConnection;
 use synveda_policy::Action;
-use synveda_store::{configuration, context, knowledge, sessions};
+use synveda_store::{configuration, knowledge, sessions};
 use synveda_types::capture::CaptureCandidateState;
 use synveda_types::configuration::ConfigurationContextChannel;
 use synveda_types::session::{ContextRun, SessionEventType};
@@ -36,141 +36,158 @@ pub(super) async fn admissible(
     {
         return Ok(false);
     }
-    let has_restart = run.checkpoint_event_id.is_some() || !run.restart_event_ids.is_empty();
-    if run.entry_count != run.selection_count + i32::from(has_restart)
-        || !run.skills.as_array().is_some_and(Vec::is_empty)
-        || (run.selection_count > 0
-            && matches!(
-                run.trace_retention,
-                TraceRetentionMode::HashesOnly | TraceRetentionMode::Disabled
-            ))
+    if run.rendered.is_empty()
+        && run.entry_count == 0
+        && run.skills.as_array().is_some_and(Vec::is_empty)
     {
-        return Ok(false);
-    }
-    if run.rendered.is_empty() && run.entry_count == 0 {
         return Ok(true);
     }
+    let Some(manifest) = super::dependencies::Manifest::load(tx, tenant, run).await? else {
+        return Ok(false);
+    };
     let effective = configuration::effective_at_scope(tx, tenant, run.scope_id).await?;
     if effective.content_hash != run.configuration_hash
-        || !restart_available(state, tx, tenant, run).await?
+        || !manifest.restart_matches(state, tx, tenant, run).await?
+        || !manifest.authored_matches(state, tx, tenant, run).await?
     {
-        return Ok(false);
-    }
-    let selected = context::selections_for_run(&mut *tx, tenant, run.id).await?;
-    if selected.len() != run.selection_count as usize {
         return Ok(false);
     }
     let Some(disclosed) = disclosed_sources(&run.rendered) else {
         return Ok(false);
     };
-    if disclosed.len() != selected.len() {
+    if disclosed.len() != manifest.knowledge.len() + manifest.candidates.len() {
         return Ok(false);
-    }
-    let mut paths: HashMap<ContextCandidateId, Vec<ContextGraphStep>> = HashMap::new();
-    let steps = context::graph_steps_for_run(&mut *tx, tenant, run.id).await?;
-    if steps.len() > MAX_SAVED_SELECTIONS * 2 {
-        return Ok(false);
-    }
-    for step in steps {
-        paths
-            .entry(step.context_candidate_id)
-            .or_default()
-            .push(step);
     }
     let at = Utc::now();
-    for selection in selected {
-        if !effective.document.context.permits(selection.channel) {
-            return Ok(false);
-        }
-        let steps = paths
-            .remove(&selection.context_candidate_id)
-            .unwrap_or_default();
-        for step in &steps {
-            for address in [
-                step.from_item_id.zip(step.from_revision_id),
-                step.to_item_id.zip(step.to_revision_id),
-            ] {
-                let Some((item, revision)) = address else {
-                    return Ok(false);
-                };
-                let Some(current) = knowledge::current(&mut *tx, tenant, item).await? else {
-                    return Ok(false);
-                };
-                if current.revision.id != revision || !super::current_active_at(&current, at) {
-                    return Ok(false);
-                }
+    for step in manifest.graph {
+        for (item, revision) in [
+            (step.from_item_id, step.from_revision_id),
+            (step.to_item_id, step.to_revision_id),
+        ] {
+            let Some(current) = knowledge::current(&mut *tx, tenant, item).await? else {
+                return Ok(false);
+            };
+            if current.revision.id != revision || !super::current_active_at(&current, at) {
+                return Ok(false);
             }
         }
+        let held = ContextGraphStep {
+            tenant_id: tenant,
+            context_run_id: run.id,
+            context_candidate_id: ContextCandidateId::new(),
+            ordinal: 0,
+            hop: 1,
+            relation_id: Some(step.relation_id),
+            relation_hash: step.relation_hash,
+            relation_type: step.relation_type,
+            direction: step.direction,
+            from_item_id: Some(step.from_item_id),
+            from_revision_id: Some(step.from_revision_id),
+            to_item_id: Some(step.to_item_id),
+            to_revision_id: Some(step.to_revision_id),
+            asserting_revision_id: Some(step.asserting_revision_id),
+            from_content_hash: step.from_content_hash,
+            to_content_hash: step.to_content_hash,
+            edge_weight_micros: step.edge_weight_micros,
+            supporting: step.supporting,
+            created_at: run.created_at,
+        };
         let (path, _) =
-            super::stored_graph_path_view(state, tx, tenant, run.trace_retention, steps).await?;
+            super::stored_graph_path_view(state, tx, tenant, TraceRetentionMode::Full, vec![held])
+                .await?;
         if path.is_none() {
             return Ok(false);
         }
-        match selection.channel {
-            ConfigurationContextChannel::CurrentKnowledge => {
-                let Some((item, revision)) = selection
-                    .knowledge_item_id
-                    .zip(selection.knowledge_revision_id)
-                else {
-                    return Ok(false);
-                };
-                let Some(current) = knowledge::current(&mut *tx, tenant, item).await? else {
-                    return Ok(false);
-                };
-                if current.revision.id != revision
-                    || current.revision.content_hash != selection.content_hash
-                    || !super::current_active_at(&current, at)
-                {
-                    return Ok(false);
-                }
-                let Some(visible) =
-                    super::load_visible_revision(state, tx, tenant, item, revision, true).await?
-                else {
-                    return Ok(false);
-                };
-                if super::graph::stale_at(tx, tenant, &current, at).await? {
-                    return Ok(false);
-                }
-                let permitted: Vec<_> = visible.sources.iter().map(super::source_line).collect();
-                if !sources_still_visible(&disclosed, EvidenceKey::Knowledge(revision), &permitted)
-                {
-                    return Ok(false);
-                }
-            }
-            ConfigurationContextChannel::UnreviewedCandidates => {
-                let Some(id) = selection.capture_candidate_id else {
-                    return Ok(false);
-                };
-                let Some(candidate) = super::load_visible_capture_candidate(
-                    state,
-                    tx,
-                    tenant,
-                    id,
-                    &selection.content_hash,
-                    true,
-                )
-                .await?
-                else {
-                    return Ok(false);
-                };
-                if candidate.state != CaptureCandidateState::Pending {
-                    return Ok(false);
-                }
-                let permitted: Vec<_> = candidate
-                    .source_event_ids
+    }
+    for selection in manifest.knowledge {
+        if !effective
+            .document
+            .context
+            .permits(ConfigurationContextChannel::CurrentKnowledge)
+        {
+            return Ok(false);
+        }
+        let Some(current) = knowledge::current(&mut *tx, tenant, selection.item_id).await? else {
+            return Ok(false);
+        };
+        if current.revision.id != selection.revision_id
+            || current.revision.content_hash != selection.content_hash
+            || !super::current_active_at(&current, at)
+            || super::graph::stale_at(tx, tenant, &current, at).await?
+        {
+            return Ok(false);
+        }
+        let Some(visible) = super::load_visible_revision(
+            state,
+            tx,
+            tenant,
+            selection.item_id,
+            selection.revision_id,
+            true,
+        )
+        .await?
+        else {
+            return Ok(false);
+        };
+        if !selection
+            .source_ids
+            .iter()
+            .all(|id| visible.sources.iter().any(|source| source.id == *id))
+        {
+            return Ok(false);
+        }
+        let permitted: Vec<_> = visible.sources.iter().map(super::source_line).collect();
+        if !sources_still_visible(
+            &disclosed,
+            EvidenceKey::Knowledge(selection.revision_id),
+            &permitted,
+        ) {
+            return Ok(false);
+        }
+    }
+    for selection in manifest.candidates {
+        if !effective
+            .document
+            .context
+            .permits(ConfigurationContextChannel::UnreviewedCandidates)
+        {
+            return Ok(false);
+        }
+        let Some(candidate) = super::load_visible_capture_candidate(
+            state,
+            tx,
+            tenant,
+            selection.candidate_id,
+            &selection.content_hash,
+            true,
+        )
+        .await?
+        else {
+            return Ok(false);
+        };
+        if candidate.state != CaptureCandidateState::Pending
+            || candidate.source_event_ids != selection.source_event_ids
+            || candidate.source_artifact_ids != selection.source_artifact_ids
+        {
+            return Ok(false);
+        }
+        let permitted: Vec<_> = candidate
+            .source_event_ids
+            .iter()
+            .map(|id| format!("session-event:{id}"))
+            .chain(
+                candidate
+                    .source_artifact_ids
                     .iter()
-                    .map(|id| format!("session-event:{id}"))
-                    .chain(
-                        candidate
-                            .source_artifact_ids
-                            .iter()
-                            .map(|id| format!("import-artifact:{id}")),
-                    )
-                    .collect();
-                if !sources_still_visible(&disclosed, EvidenceKey::Candidate(id), &permitted) {
-                    return Ok(false);
-                }
-            }
+                    .map(|id| format!("import-artifact:{id}")),
+            )
+            .collect();
+        if !sources_still_visible(
+            &disclosed,
+            EvidenceKey::Candidate(selection.candidate_id),
+            &permitted,
+        ) {
+            return Ok(false);
         }
     }
     Ok(true)
@@ -187,7 +204,11 @@ enum EvidenceKey {
 
 fn disclosed_sources(rendered: &str) -> Option<HashMap<EvidenceKey, Vec<String>>> {
     let mut disclosed = HashMap::new();
-    for line in rendered.lines().filter_map(|line| line.strip_prefix("- ")) {
+    for line in rendered
+        .lines()
+        .filter_map(|line| line.strip_prefix("- "))
+        .filter(|line| line.starts_with('{'))
+    {
         let entry: Value = serde_json::from_str(line).ok()?;
         let key = match entry["kind"].as_str()? {
             "published_knowledge" => {

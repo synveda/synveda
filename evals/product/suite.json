@@ -217,6 +217,34 @@
       "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "conservative_excerpt_keeps_retry_exception_under_tight_budget", "--", "--exact"],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
       "measures": ["critical_fact_retention", "required_input_insufficiency"]
+    },
+    {
+      "id": "all_mode_saved_delivery",
+      "title": "Private lineage admits exact saved context in every diagnostic retention mode",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "saved_delivery_requires_source_proof_in_every_retention_mode", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": ["saved_delivery_revocation", "private_source_leakage"]
+    },
+    {
+      "id": "private_lineage_erasure",
+      "title": "Governed item erasure clears saved delivery copies independently of optional traces",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "all_mode_private_lineage_scrubs_forgotten_delivery_copies", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": ["item_erasure_delivery_copies", "saved_delivery_revocation"]
+    },
+    {
+      "id": "authored_saved_delivery",
+      "title": "Saved authored context retains its receipt and refuses a changed current channel",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_packs", "saved_authored_delivery_replays_exact_proof_and_refuses_a_changed_channel", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_packs.rs",
+      "measures": ["saved_delivery_revocation", "current_revision_admission"]
+    },
+    {
+      "id": "skill_saved_delivery",
+      "title": "A saved Skill advertisement refuses a changed immutable version without implying execution",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "skills", "saved_skill_advertisement_replays_exact_version_and_refuses_a_new_head", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/skills.rs",
+      "measures": ["saved_delivery_revocation", "unversioned_skill_or_tool_activation"]
     }
   ]
 }

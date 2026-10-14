@@ -70,6 +70,7 @@ use crate::request::{body, commit, tenant_id};
 use crate::sessions::ContextRunView;
 use crate::workspaces::{ApiErrorBody, Decidable, subject};
 
+mod dependencies;
 mod graph;
 mod health;
 mod replay;
@@ -897,7 +898,8 @@ struct PlannedCandidate {
     graph_path: Vec<PlannedGraphStep>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PlannedGraphStep {
     relation_id: KnowledgeRelationId,
     relation_hash: String,
@@ -985,18 +987,24 @@ async fn prepare_context(
     session_id: SessionId,
 ) -> Result<PreparedContext> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let (session, session_allowed, session_resource, input) = crate::sessions::load_with_input(
-        state,
-        &mut tx,
-        tenant_id,
-        session_id,
-        Action::SessionWrite,
-    )
-    .await?;
+    let prepared = prepare_context_in_tx(state, &mut tx, tenant_id, session_id).await?;
+    commit(tx).await?;
+    Ok(prepared)
+}
+
+async fn prepare_context_in_tx(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    session_id: SessionId,
+) -> Result<PreparedContext> {
+    let (session, session_allowed, session_resource, input) =
+        crate::sessions::load_with_input(state, tx, tenant_id, session_id, Action::SessionWrite)
+            .await?;
 
     let principal_ids: Vec<ScopeId> = input.principal_scopes.iter().map(|node| node.id).collect();
     let mut assignments: Vec<PolicyAssignment> = input.assignments.clone();
-    for assignment in policy_assignments::for_scopes(&mut tx, tenant_id, &principal_ids).await? {
+    for assignment in policy_assignments::for_scopes(&mut *tx, tenant_id, &principal_ids).await? {
         if !assignments
             .iter()
             .any(|held| held.scope_id == assignment.scope_id)
@@ -1029,7 +1037,7 @@ async fn prepare_context(
         },
     )?;
     let configuration =
-        configuration::effective_at_scope(&mut tx, tenant_id, session.scope_id).await?;
+        configuration::effective_at_scope(&mut *tx, tenant_id, session.scope_id).await?;
     plan.budget_tokens = plan
         .budget_tokens
         .min(configuration.document.context.token_budget);
@@ -1075,7 +1083,6 @@ async fn prepare_context(
     } else {
         Vec::new()
     };
-    commit(tx).await?;
     Ok(PreparedContext {
         session,
         session_allowed,
@@ -2782,6 +2789,24 @@ async fn plan_context_run(
         .record(select_started.elapsed().as_secs_f64());
 
     let block_hash = blake3::hash(rendered.as_bytes()).to_hex().to_string();
+    let dependencies = dependencies::Manifest::from_plan(
+        &mut tx,
+        tenant_id,
+        session_id,
+        dependencies::Inputs {
+            block_hash: &block_hash,
+            configuration_hash: &prepared.configuration.content_hash,
+            candidates: &candidates,
+            authored: &authored,
+            checkpoint: checkpoint_event_id,
+            tail: &restart_event_ids,
+            restart_contributed: !restart_text.is_empty(),
+            authored_budget: authored_request.budget_tokens,
+            sensitivity_ceiling: body.max_sensitivity,
+            counter: &counter,
+        },
+    )
+    .await?;
     let mut degraded = Vec::new();
     if let Some(reason) = &semantic_degradation {
         degraded.push(
@@ -2922,6 +2947,7 @@ async fn plan_context_run(
         &candidates,
     )
     .await?;
+    dependencies.persist(&mut tx, tenant_id, run_id).await?;
     claim.remember(&mut tx, tenant_id, run_id.as_uuid()).await?;
 
     let candidate_refs = match prepared.plan.trace_retention {

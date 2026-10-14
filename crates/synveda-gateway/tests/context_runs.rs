@@ -886,6 +886,97 @@ async fn conservative_excerpt_keeps_retry_exception_under_tight_budget() {
 }
 
 #[tokio::test]
+async fn all_mode_private_lineage_scrubs_forgotten_delivery_copies() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let fact = "The cobalt-29 private procedure must never survive item erasure.";
+    let (item, revision) = create_knowledge(
+        &world,
+        "mem8-private-lineage",
+        world.alice_scope,
+        None,
+        Some(ALICE),
+        "Private cobalt procedure",
+        fact,
+        None,
+    )
+    .await;
+    let path = format!("/v1/sessions/{}/context-runs", world.alice_session);
+    let mut receipts = Vec::new();
+    for mode in [
+        TraceRetentionMode::Full,
+        TraceRetentionMode::Redacted,
+        TraceRetentionMode::HashesOnly,
+        TraceRetentionMode::Disabled,
+    ] {
+        set_trace_mode(&world, mode).await;
+        let key = format!("mem8-erasure-{}", mode.as_str());
+        let body = json!({"query":"cobalt-29", "budget_tokens":1500});
+        let (status, run) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(&key),
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{run}");
+        assert!(run["rendered"].as_str().unwrap().contains(fact));
+        receipts.push((
+            key,
+            body,
+            run["id"]
+                .as_str()
+                .unwrap()
+                .parse::<synveda_types::ContextRunId>()
+                .unwrap(),
+        ));
+    }
+    let (status, erased) = call(&world.app, "DELETE", &format!("/v1/knowledge/{item}"), &world.alice_token,
+        Some("mem8-forget-all-modes"), Some(json!({"mode":"forget", "expected_revision_id":revision, "reason":"private all-mode erasure acceptance"}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{erased}");
+    assert_eq!(erased["outcome"], "applied", "{erased}");
+    for (key, body, id) in receipts {
+        let (status, replay) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(&key),
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{replay}");
+        assert!(!replay.to_string().contains(fact));
+        let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+            .await
+            .unwrap();
+        let retained = synveda_store::sessions::context_run(&mut *tx, world.tenant_id, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            retained.rendered.is_empty(),
+            "physical delivery copy remains in {}",
+            retained.trace_retention.as_str()
+        );
+        let proof = synveda_store::context_dependencies::for_run(&mut *tx, world.tenant_id, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(proof.dependency_version, 1);
+        assert!(
+            !proof.manifest.to_string().contains(fact),
+            "only content-free evidence is retained"
+        );
+        tx.commit().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn saved_delivery_requires_source_proof_in_every_retention_mode() {
     let _guard = serial().await;
     let Some(world) = admitted_world().await else {
@@ -932,16 +1023,14 @@ async fn saved_delivery_requires_source_proof_in_every_retention_mode() {
             Some(request),
         )
         .await;
-        if matches!(
-            mode,
-            TraceRetentionMode::Full | TraceRetentionMode::Redacted
-        ) {
-            assert_eq!(status, StatusCode::OK, "{replay}");
-            assert_eq!(replay, original);
-        } else {
-            assert_eq!(status, StatusCode::CONFLICT, "{replay}");
-            assert!(!replay.to_string().contains("amber-63"));
-        }
+        assert_eq!(status, StatusCode::OK, "{replay}");
+        assert_eq!(
+            replay, original,
+            "private proof is independent of diagnostic retention"
+        );
+        let trace = detail(&world, &world.alice_token, original["id"].as_str().unwrap()).await;
+        assert!(!trace.to_string().contains("dependency_version"));
+        assert!(!trace.to_string().contains("manifest_hash"));
         let empty_key = format!("mem8-empty-{}", mode.as_str());
         let empty_request = json!({"query": "zznonmatchingzz", "budget_tokens": 1500});
         let (status, empty) = call(

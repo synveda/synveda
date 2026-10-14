@@ -129,6 +129,7 @@ struct World {
     tenant: Tenant,
     project: ScopeId,
     project_id: ProjectId,
+    workspace_id: WorkspaceId,
     alice: String,
     reviewer: String,
     administrator: String,
@@ -227,6 +228,7 @@ async fn world() -> Option<World> {
         tenant,
         project: project.scope_id,
         project_id: project.id,
+        workspace_id: workspace.id,
         alice: issue("alice", tenant_id),
         reviewer: issue("reviewer", tenant_id),
         administrator: issue("administrator", tenant_id),
@@ -469,6 +471,92 @@ async fn install_skill(world: &World) -> (String, String) {
             .expect("installed Skill version id")
             .to_owned(),
     )
+}
+
+#[tokio::test]
+async fn saved_skill_advertisement_replays_exact_version_and_refuses_a_new_head() {
+    let _serial = serial().await;
+    let Some(world) = world().await else { return };
+    let (skill, version) = install_skill(&world).await;
+    let (status, binding) = call(
+        &world.app,
+        Method::POST,
+        "/v1/skill-bindings",
+        &world.alice,
+        Some(json!({"scope_id": world.project, "skill_id": skill,
+            "pinned_version_id": Value::Null, "enabled": true})),
+        Some("mem8-skill-bind"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{binding}");
+    let applied = approve_and_apply(&world, binding["change_id"].as_str().unwrap()).await;
+    assert_eq!(applied["outcome"], "applied");
+    let (status, session) = call(
+        &world.app,
+        Method::POST,
+        "/v1/sessions",
+        &world.alice,
+        Some(
+            json!({"workspace_id": world.workspace_id, "project_id": world.project_id,
+            "client_name": "codex"}),
+        ),
+        Some("mem8-skill-session"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{session}");
+    let uri = format!(
+        "/v1/sessions/{}/context-runs",
+        session["id"].as_str().unwrap()
+    );
+    let (status, original) = call(
+        &world.app,
+        Method::POST,
+        &uri,
+        &world.alice,
+        Some(json!({"query": "code review"})),
+        Some("mem8-skill-replay"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{original}");
+    assert_eq!(original["skills"][0]["version_id"], version, "{original}");
+    let (status, replay) = call(
+        &world.app,
+        Method::POST,
+        &uri,
+        &world.alice,
+        Some(json!({"query": "code review"})),
+        Some("mem8-skill-replay"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, original);
+    let opened = open_update(&world, &skill, &version, "mem8-skill-new-head").await;
+    let applied = approve_and_apply(&world, opened["change_id"].as_str().unwrap()).await;
+    assert_eq!(applied["outcome"], "applied");
+    let current = applied["version_id"].as_str().unwrap();
+    assert_ne!(current, version);
+    let (status, refused) = call(
+        &world.app,
+        Method::POST,
+        &uri,
+        &world.alice,
+        Some(json!({"query": "code review"})),
+        Some("mem8-skill-replay"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert!(!refused.to_string().contains(&version));
+    let (status, fresh) = call(
+        &world.app,
+        Method::POST,
+        &uri,
+        &world.alice,
+        Some(json!({"query": "code review"})),
+        Some("mem8-skill-current"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{fresh}");
+    assert_eq!(fresh["skills"][0]["version_id"], current, "{fresh}");
 }
 
 async fn enqueue_validation(world: &World, skill: &str, version: &str, key: &str) -> Value {

@@ -23,6 +23,8 @@ const EPOCH_3_FORWARD_SHA256 =
   "08932e958a8a90ebd53859703ab3a93ab87adce22ec8f1efec003f11b10cd435";
 const EPOCH_3_LOGIN_SHA256 =
   "313c002d6982eef961d9503135777c7f7acded91e51fc22aacd187e117de34db";
+const EPOCH_3_DELIVERY_SHA256 =
+  "6339e5518f08807ce7cf509e9c2e1644fb9536ebe17d2c0b4677062f41247631";
 
 const RETIRED_PATTERNS = [
   ["global runtime route", /\/v1\/(?:observe|inject|recall)\b/giu],
@@ -154,6 +156,13 @@ export function loginDigestFindings(source) {
       ];
 }
 
+export function deliveryDigestFindings(source) {
+  const actual = createHash("sha256").update(source).digest("hex");
+  return actual === EPOCH_3_DELIVERY_SHA256 ? [] : [
+    `0004_context_delivery_dependencies.sql SHA-256 changed (${actual}); MEM-8 / ADR-0144 requires an explicit migration and compatibility decision`,
+  ];
+}
+
 export function databaseBootstrapFindings(source) {
   const findings = [];
   const normalized = source.toLowerCase().replace(/\s+/gu, " ").trim();
@@ -217,7 +226,7 @@ export function main() {
     const source = readFileSync(path, "utf8");
     findings.push(...retiredProductionFindings(source, relative(ROOT, path)));
     for (const match of source.matchAll(/migrations\/(\d{4}_[A-Za-z0-9_-]+\.sql)/gu)) {
-      if (!["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql"].includes(match[1])) {
+      if (!["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql"].includes(match[1])) {
         const line = source.slice(0, match.index).split("\n").length;
         findings.push(`${relative(ROOT, path)}:${line}: references absent migration ${match[1]}`);
       }
@@ -230,8 +239,8 @@ export function main() {
 
   const migrationDir = join(ROOT, "crates/synveda-store/migrations");
   const migrations = readdirSync(migrationDir).filter((name) => name.endsWith(".sql")).sort();
-  if (JSON.stringify(migrations) !== JSON.stringify(["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql"])) {
-    findings.push(`migration inventory is ${migrations.join(", ") || "empty"}; expected the released epoch-3 baseline and two forward migrations`);
+  if (JSON.stringify(migrations) !== JSON.stringify(["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql"])) {
+    findings.push(`migration inventory is ${migrations.join(", ") || "empty"}; expected the released epoch-3 baseline and three forward migrations`);
   }
   const baseline = readFileSync(join(migrationDir, "0001_context_platform.sql"), "utf8");
   findings.push(...baselineFindings(baseline));
@@ -242,6 +251,9 @@ export function main() {
   const login = readFileSync(join(migrationDir, "0003_one_time_login_ledger.sql"), "utf8");
   findings.push(...retiredProductionFindings(login, "0003_one_time_login_ledger.sql").filter((finding) => finding.includes("retired table")));
   findings.push(...loginDigestFindings(login));
+  const delivery = readFileSync(join(migrationDir, "0004_context_delivery_dependencies.sql"), "utf8");
+  findings.push(...retiredProductionFindings(delivery, "0004_context_delivery_dependencies.sql").filter((finding) => finding.includes("retired table")));
+  findings.push(...deliveryDigestFindings(delivery));
   const databaseBootstrap = readFileSync(
     join(ROOT, "deploy/compose/postgres/synveda-database-bootstrap"),
     "utf8",
@@ -269,7 +281,7 @@ export function main() {
 
   if (findings.length > 0) fail(findings);
   console.log(
-    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline and two forward migrations, ` +
+    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline and three forward migrations, ` +
       "deployment-owned vector + btree_gin bootstrap, current OpenAPI and SQLx metadata",
   );
 }

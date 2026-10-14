@@ -168,9 +168,10 @@ Saved ContextRun replay repeats current authority and source checks. A `409`
 stating that saved delivery is unavailable means that its original receipt
 remains recorded but cannot be delivered again. Request current context with a
 new idempotency key. An archived, corrected, stale or removed revision is never
-silently replaced under the old key. Some authored/Skill deliveries and
-hashes-only/disabled traces do not retain enough dependency proof for replay;
-their fresh composition remains available under current policy. Exact-revision
+silently replaced under the old key. New deliveries retain private source proof
+in every trace retention mode, including authored context and Skill advertisements.
+Older nonempty receipts without this proof refuse replay; fresh composition remains
+available under current policy. Exact-revision
 historical inspection retains its own authorization rules.
 
 The Context Inspector's **Context health** shows separate provenance,
@@ -328,3 +329,9 @@ are refused. A reset deletes data and requires the exact confirmation in the
 Docker guide. Application rollback does not reverse a database migration.
 The [production readiness assessment](PRODUCTION_READINESS.md) states current
 platform, recovery and availability limits.
+
+This source branch adds `0004` for private ContextRun delivery dependencies
+(ADR-0144). Stop application writers and use the normal migration command before
+starting this binary. Exact `0001`, `0002` and `0003` prefix upgrades and supported
+pgvector profiles pass disposable local acceptance; this is not a published
+upgrade or production recovery qualification.

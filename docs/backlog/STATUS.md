@@ -324,11 +324,15 @@ amendment), and adds authorized Inspector health (ADR-0143). The fresh 26-scenar
 product suite passes with existing quality floors and all six trust bounds at
 zero; affected public-API, Rust, console and SDK checks pass. The MEM-8 brief
 records exact source/patch identity, measured token/latency boundary and remaining
-work. Complete source withdrawal, private all-mode dependencies, admission
-ordering and durable cleanup remain open; inbound reconciliation, structured
+work. ADR-0144 adds private all-mode delivery dependencies at additive head
+`0004`, exact authored/Skill replay and addressed item-erasure copies. The expanded
+30-scenario suite, prior-head migration/authority checks, genuine pgvector
+0.8.2–0.8.6 profiles and private-manifest RLS/tamper checks pass. Complete source
+withdrawal, admission ordering and durable cleanup remain open; inbound reconciliation, structured
 second-client handoff, procedure learning and the integrated domain demo are
-not delivered. Next implement all-mode dependency proof with a separately
-measured additive migration; no external credential blocks that local work.
+not delivered. Next implement a separately governed Session-event withdrawal
+with exact source locks, permanent suppression and all derivative disclosure/
+Capture fences; no external credential blocks that local work.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
 OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL

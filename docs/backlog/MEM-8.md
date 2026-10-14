@@ -14,8 +14,9 @@ At inspection, ContextRun replay checked SessionWrite but returned saved
 content without the independent source checks used by diagnostic reads. That
 disclosure defect is repaired under ADR-0141; the complete source-removal
 contract below remains open.
-Hashes-only and disabled traces lack exact Knowledge delivery addresses;
-authored-pack deliveries lack complete retained lineage. Checkpoints verify
+ADR-0144 now retains private exact delivery proof in every diagnostic mode,
+including authored packs and Skill advertisements. Older nonempty receipts
+without producer proof fail closed. Checkpoints verify
 their original event hashes and quarantine state, but item forget cannot be
 treated as a request to erase the entire originating event. Capture freezes
 event identities and reads live payloads; its completion fence does not yet
@@ -56,9 +57,9 @@ On `codex/context-memory-improvements`, the first source increment implements:
 
 - CPR-20/CTX-6: current independent Knowledge, disclosed provenance, graph and
   checkpoint admission on saved replay, with bounded proof and uniform 409.
-  Exact historical diagnostic reads remain independently authorized. Nonempty
-  hashes-only/disabled and authored/Skill receipts currently lack sufficient
-  proof and refuse replay; safe empty receipts still replay.
+  Exact historical diagnostic reads remain independently authorized. At this
+  first increment, nonempty hashes-only/disabled and authored/Skill receipts
+  lacked sufficient proof and refused replay; safe empty receipts replayed.
 - CPR-21: six health dimensions and five stage observations in the existing
   public detail/console, derived after authorization. Production recall,
   synchronization, cleanup, host acknowledgment and model outcome stay unknown.
@@ -93,13 +94,61 @@ facts and four-sample local assisted p95 30.037625 ms. It does not measure model
 quality, provider usage or cost. Reports remain under ignored
 `target/product-evaluation/`; this brief records their actual boundary.
 
-Full A remains incomplete: all-mode private delivery dependencies, final
-admission/removal ordering, scoped source withdrawal/suppression and crash-safe
-cleanup are not supplied by the replay repair. D and G are absent; E's structured
+Full A remains incomplete: final admission/removal ordering, scoped source
+withdrawal/suppression and crash-safe cleanup are not supplied by replay proof.
+D and G are absent; E's structured
 method and second-client receiving contract and H's integrated demonstration
 remain to implement. B's offline causal oracle cases and F's further task/host
 allowance contracts remain open. No external credential blocks these
 deterministic implementation steps.
+
+### Private delivery lineage increment (2026-10-14)
+
+ADR-0144 adds immutable private per-run manifests independent of optional trace
+retention. New saved deliveries replay their exact receipts in all four modes;
+Knowledge/graph/checkpoint evidence, current authored channels/pins and immutable
+Skill bindings/versions are rechecked. Older nonempty unproven receipts still
+refuse uniformly. No manifest fields enter public diagnostics. Governed item
+erasure clears addressed rendered copies in every mode; content-free dependency
+proof remains. This is item cleanup, not source-event erasure or suppression.
+
+Additive migration `0004` leaves published `0001`–`0003` unchanged. Exact baseline,
+forward and login prefixes retain their previous catalogue checks and additive
+upgrade path. The raw-migration authority reporter independently measured:
+
+| Inventory | Rows | BLAKE3 |
+| --- | ---: | --- |
+| Application ACL | 363 | `4ad61b01acec1e2bdf2e42ed369c76d2108daf9a3d27b9b18e8a1fc380604799` |
+| Routine | 71 | `20ab135f1741edb64af6e6df1d8dddb06b113db0cbf083238c3beb9db0b4c259` |
+| Trigger | 115 | `c3cd252d613d8a7f2be43f6a01e144b8a0dbb11b395855c791cd7407997fd60c` |
+| Forced RLS | 95 | `aa6f293275476565a187599c124e27d1db9363ee8ce0a023f55dc654545138f7` |
+
+The migration SHA-256 is
+`6339e5518f08807ce7cf509e9c2e1644fb9536ebe17d2c0b4677062f41247631`.
+The documented fresh `SYNVEDA_DB_TEST_TASK=sqlx-prepare bash scripts/db-test.sh`
+passes generation and metadata check; three new query hashes and the replaced
+ledger-bound hash were reviewed. Store epoch/runtime-authority acceptance and
+genuine pgvector 0.8.2, 0.8.3, 0.8.4 and 0.8.5 profiles pass; current 0.8.6 is used
+by the fresh API/evaluation fixture. Full current-head API acceptance passes
+20 ContextRun, 10 preexisting context-pack, 7 lifecycle and 28 Session cases;
+the new authored and Skill replay regressions also pass. Adversarial RLS passes
+65 ordinary cases (five deliberately separate administrator cases ignored),
+plus the explicit serial administrator trace/manifest tamper case. New private
+proof is included in the tenant-table completeness guard.
+
+The expanded fresh `make eval-product` passes all 30 scenarios and unchanged
+trust/quality gates. It binds HEAD
+`f8e8fdb9a5d0987c9357189fb45e09791f694eb7` and dirty patch SHA-256
+`6e74650cf46ac5e15d5ca76dffab5e5882d0007e187eeca905e3d2ff454301e2`.
+It measures 701/472 off/conservative rendered-text tokens (229 fewer), four
+exact required-body pairs, 12/12 declared checkpoint facts and four-sample
+local assisted p95 31.501542 ms. Absolute token counts vary with generated
+wrapper IDs. Provider/model correctness, host usage and monetary cost remain
+unmeasured. The expanded `bash demos/mem-8-saved-delivery.sh` passes nine focused
+public-API cases and removes its own volume. An initial focused invocation
+mistakenly used the demo task selector, then omitted a required tenant-fixture
+credential file; corrected ordinary-role runs pass. No product failure was
+inferred from those command setup failures.
 
 ## Non-goals
 
@@ -147,10 +196,11 @@ No external credential is needed for deterministic work. New source authority,
 suppression and delivery-admission ordering require accepted decisions before
 schema implementation. Real harness/model quality and inbound private-provider
 qualification require a named authorized environment and explicit spend if any.
-Next executable increment: accept the private delivery-dependency contract,
-add an additive `0004` without changing published `0001`–`0003`, extend prior-head
-guards, independently measure authority fingerprints with
-`SYNVEDA_DB_TEST_TASK=authority-fingerprints bash scripts/db-test.sh`, then generate
-SQLx metadata with `SYNVEDA_DB_TEST_TASK=sqlx-prepare bash scripts/db-test.sh`.
-Complete all-mode replay and admission proof before the separate governed source
-withdrawal/suppression operation and before persistent outcome learning.
+Next executable increment: accept a Session-event source-withdrawal contract,
+using exact source-event row locks and permanent scoped suppression. Implement
+the typed governed operation, final admission checks, per-revision/all-source
+eligibility and Capture completion/acceptance fences before enabling bounded
+cleanup or persistent outcome learning. Preserve the distinction between an
+undisclosed private descriptor's access revocation and explicit withdrawal of
+the source content supporting a conclusion. No external credential blocks this
+local source-family implementation.

@@ -20,8 +20,9 @@ use std::sync::OnceLock;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::{
-    access, configuration, context, idempotency, identities, knowledge, policy_packs, projects,
-    quarantine, relaxations, repositories, rls, scopes, sessions, workspaces,
+    access, configuration, context, context_dependencies, idempotency, identities, knowledge,
+    policy_packs, projects, quarantine, relaxations, repositories, rls, scopes, sessions,
+    workspaces,
 };
 // Keep the scope vocabulary qualified because `synveda_store::scopes` is also
 // imported above.
@@ -148,6 +149,7 @@ const COVERED: &[&str] = &[
     "context_pack_chunks",
     "context_pack_documents",
     "context_packs",
+    "context_run_delivery_dependencies",
     "context_selections",
     "directory_sync_state",
     // CPR-16 (ADR-0081): the reusable operation ledger is tenant-bound just
@@ -5043,6 +5045,22 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
     .await
     .expect("record context run");
 
+    // This fixture tests storage authority; only the gateway producer builds
+    // a complete replay manifest. These addresses must still remain private.
+    let manifest = serde_json::json!({"schema_version": 1,
+        "block_hash": run.block_hash, "configuration_hash": run.configuration_hash});
+    context_dependencies::record(
+        &mut tx,
+        tenant,
+        run.id,
+        blake3::hash(manifest.to_string().as_bytes())
+            .to_hex()
+            .as_ref(),
+        &manifest,
+    )
+    .await
+    .expect("retain private delivery dependency fixture");
+
     let item_id = KnowledgeItemId::new();
     let revision_id = KnowledgeRevisionId::new();
     let source = knowledge::create_source(
@@ -5291,6 +5309,18 @@ fn wrong_tenant_guc_sees_no_session_rows() {
             visible_context_rows(&mut tx, adversary.tenant).await,
             (1, 1, 1, 1)
         );
+        assert!(
+            context_dependencies::for_run(&mut *tx, victim.tenant, victim.run)
+                .await
+                .expect("query foreign private proof")
+                .is_none()
+        );
+        assert!(
+            context_dependencies::for_run(&mut *tx, adversary.tenant, adversary.run)
+                .await
+                .expect("query own private proof")
+                .is_some()
+        );
         // Not a count: the *content*. An event payload is a transcript and a
         // context run holds composed material, so a leak here is the leak this
         // whole product exists to prevent.
@@ -5317,6 +5347,36 @@ fn wrong_tenant_guc_sees_no_session_rows() {
             (0, 0, 0, 0),
             "planner trace rows visible without any tenant GUC"
         );
+        assert!(
+            context_dependencies::for_run(&mut *tx, victim.tenant, victim.run)
+                .await
+                .expect("query proof without a tenant")
+                .is_none()
+        );
+    });
+}
+
+#[test]
+fn cross_tenant_delivery_dependencies_are_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let mine = seed_session(&db.pool).await;
+        let theirs = seed_session(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(mine.tenant)).await;
+        let error = context_dependencies::record(
+            &mut tx,
+            theirs.tenant,
+            theirs.run,
+            &"0".repeat(64),
+            &serde_json::json!({"schema_version": 1}),
+        )
+        .await
+        .expect_err("foreign proof insert must fail");
+        assert!(
+            matches!(error, Error::Internal { .. }),
+            "RLS must reject the insert: {error:?}"
+        );
+        tx.rollback().await.expect("roll back denied insert");
     });
 }
 
@@ -5384,6 +5444,14 @@ fn the_app_role_cannot_rewrite_or_delete_a_transcript() {
             ),
             (
                 "delete from session_context_runs where id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "update context_run_delivery_dependencies set manifest = '{}'::jsonb where context_run_id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "delete from context_run_delivery_dependencies where context_run_id = $1",
                 fixture.run.as_uuid(),
             ),
             (
@@ -5476,6 +5544,8 @@ fn an_administrator_cannot_rewrite_context_trace_history() {
         for statement in [
             "update session_context_runs set rendered = '' where id = $1",
             "delete from session_context_runs where id = $1",
+            "update context_run_delivery_dependencies set manifest = '{}'::jsonb where context_run_id = $1",
+            "delete from context_run_delivery_dependencies where context_run_id = $1",
             "update context_candidates set final_score_micros = 0 where context_run_id = $1",
             "delete from context_candidates where context_run_id = $1",
             "update context_graph_steps set edge_weight_micros = 1 where context_run_id = $1",
