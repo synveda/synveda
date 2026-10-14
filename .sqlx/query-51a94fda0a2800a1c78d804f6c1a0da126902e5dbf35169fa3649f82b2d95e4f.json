@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id,payload_hash,request_hash,sequence from session_snapshot_headers\n       where tenant_id=$1 and session_id=$2 and client_event_id_digest=encode(sha256(convert_to($3,'UTF8')),'hex') and event_type='session.task_state'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "request_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "sequence",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "51a94fda0a2800a1c78d804f6c1a0da126902e5dbf35169fa3649f82b2d95e4f"
+}

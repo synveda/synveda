@@ -357,11 +357,20 @@ private GitHub transport and permanent provider identity through controlled TLS,
 including paused-fetch credential rotation/revocation and retained `0007` review
 plans. All 12 source cases, 33 epoch cases, ordinary RLS/source regression, genuine
 vector profiles and 31 product scenarios pass. Live private-source qualification,
-structured handoff and verified procedure learning remain open. Existing secret
+verified procedure learning and live handoff quality remain open. Existing secret
 reuse is owner-authorized; select suitable separate inbound custody for the
-retained synthetic canary. Next implement CTX-6 structured handoff and SKIL-6
-verification; that live check does not block implementation. Full A–H completion
-is not claimed.
+retained synthetic canary; its retained credential file has not been located and
+expired login profiles do not establish live access. That check does not block
+implementation. Accepted ADR-0150 at additive `0009` now qualifies exact-source
+TaskState, complete replacement checkpoints, explicit cross-Session handoff,
+fresh reported checkout comparison and transitive cleanup. Ten handoff cases,
+21 ContextRun, 28 Session, 14 Session-source, nine artifact-source, seven
+lifecycle, 34 serial epoch and one historical source-upgrade cases pass. RLS
+reports 66 passes with five existing administrator tamper cases excluded from
+the ordinary run. Captured Claude/Codex replay and the 31 product scenarios pass;
+live vendor/model quality remains open. Next implement SKIL-6 authenticated
+outcomes and qualified Procedure improvements, followed by health, budget and
+the integrated fictional demonstration. Full A–H completion is not claimed.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
 OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL

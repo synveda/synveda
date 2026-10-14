@@ -233,6 +233,7 @@ class NewEventBody(TypedDict, closed=True):
         'session.ended',
         'session.compaction_boundary',
         'session.checkpoint',
+        'session.task_state',
         'message.user',
         'message.assistant',
         'tool.invoked',
@@ -283,6 +284,22 @@ class WorkspaceView(TypedDict):
     slug: str
     status: Literal['active', 'archived']
     updated_at: str
+
+
+class CheckoutObservationBody(TypedDict, closed=True):
+    branch: NotRequired[str | None]
+    commit: NotRequired[str | None]
+    dirty: NotRequired[bool | None]
+    dirty_digest: NotRequired[str | None]
+    observed_at: str
+    ref: str
+    tree: NotRequired[str | None]
+
+
+class SessionHandoffBody(TypedDict, closed=True):
+    payload_hash: str
+    snapshot_event_id: str
+    source_session_id: str
 
 
 class SkillVersionFileView(TypedDict):
@@ -383,6 +400,7 @@ class SessionEventView(TypedDict):
         'session.ended',
         'session.compaction_boundary',
         'session.checkpoint',
+        'session.task_state',
         'message.user',
         'message.assistant',
         'tool.invoked',
@@ -477,6 +495,8 @@ class CreateKnowledgeBody(TypedDict, closed=True):
 
 class CreateContextRunBody(TypedDict, closed=True):
     budget_tokens: NotRequired[int | None]
+    checkout_observation: NotRequired[CheckoutObservationBody | None]
+    handoff: NotRequired[SessionHandoffBody | None]
     max_sensitivity: NotRequired[str | None]
     query: NotRequired[str | None]
     required_knowledge_revisions: NotRequired[list[RequiredKnowledgeRevision]]

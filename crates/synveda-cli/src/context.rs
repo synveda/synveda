@@ -15,6 +15,7 @@ pub struct PreviewOptions<'a> {
     pub budget_tokens: Option<u32>,
     pub tokenizer_encoding: Option<&'a str>,
     pub restart: bool,
+    pub handoff: Option<&'a str>,
     pub required_knowledge_revisions: &'a [String],
     pub max_sensitivity: Option<Sensitivity>,
     pub json: bool,
@@ -50,6 +51,33 @@ pub async fn preview(profile: &str, options: PreviewOptions<'_>) -> Result<(), S
         })
         .collect::<Result<Vec<_>, String>>()?;
     let api = connect(profile).await?;
+    let handoff = options
+        .handoff
+        .map(|address| {
+            let parts: Vec<_> = address.split('@').collect();
+            let [session, event, hash] = parts.as_slice() else {
+                return Err("--handoff expects SESSION_ID@EVENT_ID@PAYLOAD_HASH".to_owned());
+            };
+            let source_session_id: SessionId = session
+                .parse()
+                .map_err(|_| "--handoff has an invalid Session id".to_owned())?;
+            let snapshot_event_id: synveda_types::SessionEventId = event
+                .parse()
+                .map_err(|_| "--handoff has an invalid event id".to_owned())?;
+            if hash.len() != 64
+                || !hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
+            {
+                return Err("--handoff has an invalid payload hash".to_owned());
+            }
+            Ok(synveda_types::task_state::SessionHandoff {
+                source_session_id,
+                snapshot_event_id,
+                payload_hash: (*hash).to_owned(),
+            })
+        })
+        .transpose()?;
     let response = api
         .post(
             &format!("/v1/sessions/{}/context-preview", options.session),
@@ -58,6 +86,7 @@ pub async fn preview(profile: &str, options: PreviewOptions<'_>) -> Result<(), S
                 "budget_tokens": options.budget_tokens,
                 "tokenizer_encoding": options.tokenizer_encoding,
                 "restart": options.restart,
+                "handoff": handoff,
                 "required_knowledge_revisions": required,
                 "max_sensitivity": options.max_sensitivity,
             })),

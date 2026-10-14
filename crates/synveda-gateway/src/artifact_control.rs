@@ -237,6 +237,7 @@ fn stage(phase: i16) -> Result<&'static str> {
         0..=7 => crate::source_control::stage(phase),
         8 => Ok("import_mappings"),
         9 => Ok("artifact_copies"),
+        10 => Ok("session_copies"),
         _ => Err(Error::Internal {
             message: "unknown artifact cleanup stage".to_owned(),
         }),
@@ -255,6 +256,7 @@ fn artifact_stage_schema() -> utoipa::openapi::schema::Object {
             "source_descriptors",
             "import_mappings",
             "artifact_copies",
+            "session_copies",
         ]
         .into_iter(),
     )

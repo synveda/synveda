@@ -21,15 +21,17 @@ pub async fn record(
     run: ContextRunId,
     manifest_hash: &str,
     manifest: &Value,
+    dependency_version: i32,
 ) -> Result<()> {
     sqlx::query!(
         r#"insert into context_run_delivery_dependencies
               (tenant_id, context_run_id, dependency_version, manifest_hash, manifest)
-           values ($1, $2, 2, $3, $4)"#,
+           values ($1, $2, $5, $3, $4)"#,
         tenant.as_uuid(),
         run.as_uuid(),
         manifest_hash,
         manifest,
+        dependency_version,
     )
     .execute(connection)
     .await

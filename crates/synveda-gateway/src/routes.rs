@@ -149,6 +149,7 @@ define_routes! {
     ],
     "/v1/sessions/{session_id}" => [GET crate::sessions::get],
     "/v1/sessions/{session_id}/events" => [POST crate::sessions::append_events],
+    "/v1/sessions/{session_id}/task-state" => [POST crate::sessions::task_state::derive],
     "/v1/sessions/{session_id}/events/{event_id}" => [GET crate::sessions::get_event],
     "/v1/sessions/{session_id}/events/{event_id}/withdraw" => [POST crate::source_control::withdraw],
     "/v1/sessions/{session_id}/events/{event_id}/forget" => [POST crate::source_control::forget],

@@ -43,7 +43,7 @@ The requested implementation matrix records the existing contracts and gaps:
 | B: health/diagnosis | CPR-21 Inspector and feedback delivered | CPR-21/40: authorized findings, actionable links, stage diagnosis and unknown outcomes | Distinguish uncaptured evidence, retrieval miss, qualifier loss and wrong downstream answer without denied counts | ContextRun tests, console tests, `make eval-product` |
 | C: values/applicability | CPR-37 conflict review/freshness delivered; lexical classifier retains both propositions | CPR-37: bounded typed revision metadata, significant values/case, applicability overlap | Retry 3 vs 5 is reviewable contradiction; production vs development is separate applicability | Types tests, lifecycle/capture database tests, `demos/cpr-37-conflict-freshness.sh` |
 | D: inbound reconciliation | Repository identity and outbound FLOW-8 exist; inbound absent | [MEM-9](MEM-9.md): separately governed local/private Git reads and path/hash observations | Relevant path change proposes review once; unrelated change does not stale everything; crash does not advance cursor | New source-reconciliation database suite, Git tests, dependency/contract gates |
-| E: structured handoff | CTX-6 deterministic excerpt checkpoint implemented, live task quality open | [CTX-6](CTX-6.md): new verified method, structured evidence, explicit second-client receiving contract | Resume through Claude and the genuine Codex SessionStart/PreCompact interface with exact evidence and unknown operation outcomes | Session/context database tests, both adapters, registry checks; separate live qualification |
+| E: structured handoff | Grounded TaskState, v2 checkpoint and explicit handoff qualified at `0009`; live task quality open | [CTX-6](CTX-6.md): new verified method, structured evidence, explicit second-client receiving contract | Resume through Claude and the genuine Codex SessionStart/PreCompact interface with exact evidence and unknown operation outcomes | Session/context database tests, both adapters, registry checks; separate live qualification |
 | F: task selection | CTX-8 off/conservative, exact local counter, source spans and shared budget implemented; quality open | [CTX-8](CTX-8.md): preserve cross-paragraph qualifiers and bounded task needs | Tight budget preserves value/unit/negation/exception or reports insufficiency | Retrieval/context/pack tests, `make eval-product`; CTX-7 real 1024-dimensional evidence only if ranking SQL changes |
 | G: procedure learning | Skill versions/usage and feedback exist; outcome-to-proposal path absent | [SKIL-6](SKIL-6.md), [SKIL-5](SKIL-5.md): exact outcome evidence and deterministic review candidates after A | Verified outcome proposes one small edit; unsupported tests-passed claim stays unverified; removal invalidates proposal | New procedure-learning database suite, Skill/Capture/context tests and frozen held-out cases |
 | H: domain example/demo | CPR-41 public-API fictional demo and CPR-40 evaluation delivered | CPR-41/40: glossary, metric definition, approved ambiguity and integrated source-change/handoff/outcome/remove replay | Applicable approved definition with provenance; changed definition opens targeted review | `make eval-product`, `make check-demos`; separate real-harness command |
@@ -399,3 +399,19 @@ followed by the pinned private GitHub path and remaining CTX-6/SKIL-6/CPR-41
 increments. No external credential blocks local implementation. Live private
 GitHub and native/model qualification remain separate environment-dependent
 checks. No full A–H completion is claimed.
+
+
+### Qualified grounded handoff increment — 2026-10-14
+
+ADR-0150 extends the existing Session ledger with exact-evidence TaskState,
+complete replacement checkpoints and an independently authorized source
+snapshot. Ten handoff cases plus the existing ContextRun, Session, source and
+lifecycle suites pass on a fresh `0009` fixture. Current classification ceilings,
+both root families and indexed Knowledge copies govern disclosure and cleanup.
+Artifact cleanup includes its final copied-Session phase; retained headers
+prevent old-goal fallback and retain concurrency evidence after erasure.
+Same-window replacement, batched compaction markers and scoped-retention
+recovery have explicit regressions. `CTX-6.md` and the operator handoff guide
+own the contract and controlled evidence. Live vendor/model quality remains
+open. Next implement authenticated outcomes and qualified small Procedure
+candidates under SKIL-6, then the health/budget/domain demonstration slices.

@@ -75,6 +75,7 @@ pub mod sessions;
 pub mod skills;
 pub mod source_control;
 pub mod source_reconciliation;
+pub mod task_state;
 pub mod tenant_secrets;
 pub mod tenants;
 pub mod tool_registry;
@@ -163,6 +164,9 @@ pub async fn check_migration_compatibility(
             }
             epoch::MigrationPreflight::Reconcile => {
                 runtime_role::verify_reconcile_migrator_read_only_connection(&mut compatibility,database_roles).await?;
+            }
+            epoch::MigrationPreflight::GithubSource => {
+                runtime_role::verify_github_source_migrator_read_only_connection(&mut compatibility, database_roles).await?;
             }
             epoch::MigrationPreflight::Current => {
                 runtime_role::verify_migrator_read_only_connection(
@@ -286,6 +290,14 @@ async fn migrate_locked_connection(
             | epoch::MigrationPreflight::Reconcile => {
                 runtime_role::verify_reconcile_migrator_connection(&mut authority, database_roles)
                     .await?;
+            }
+            epoch::MigrationPreflight::PendingStampGithubSource
+            | epoch::MigrationPreflight::GithubSource => {
+                runtime_role::verify_github_source_migrator_connection(
+                    &mut authority,
+                    database_roles,
+                )
+                .await?;
             }
             epoch::MigrationPreflight::PendingStampCurrent | epoch::MigrationPreflight::Current => {
                 if matches!(preflight, epoch::MigrationPreflight::Current) {

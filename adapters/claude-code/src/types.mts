@@ -123,6 +123,7 @@ export interface ContextRunRequest {
   query?: string;
   budget_tokens?: number;
   restart?: boolean;
+  checkout_observation?: import("./git.mjs").CheckoutObservation;
 }
 
 /** `POST /v1/sessions/{id}/context-runs` — the composed block. */

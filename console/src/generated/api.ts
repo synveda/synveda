@@ -278,7 +278,7 @@ export type ArtifactControlView = {
      * Applied governed source control.
      */
     change_id: string;
-    cleanup_stage: "retention_check" | "delivery_copies" | "capture_copies" | "command_copies" | "knowledge_copies" | "embedding_copies" | "relation_metadata" | "source_descriptors" | "import_mappings" | "artifact_copies";
+    cleanup_stage: "retention_check" | "delivery_copies" | "capture_copies" | "command_copies" | "knowledge_copies" | "embedding_copies" | "relation_metadata" | "source_descriptors" | "import_mappings" | "artifact_copies" | "session_copies";
     cleanup_state: "pending" | "running" | "succeeded" | "failed" | "blocked" | "cancelled" | "dead_lettered";
     /**
      * Content-free hold or failure reason.
@@ -1208,6 +1208,40 @@ export type ChannelUnpinResponse = {
      */
     released?: string | null;
     scope_id: string;
+  };
+
+/**
+ * Current hook-time checkout observation, explicitly caller reported.
+ */
+export type CheckoutObservationBody = {
+    /**
+     * Reported branch.
+     */
+    branch?: string | null;
+    /**
+     * Reported immutable commit.
+     */
+    commit?: string | null;
+    /**
+     * Reported dirty state; omission stays unknown.
+     */
+    dirty?: boolean | null;
+    /**
+     * Digest of exact dirty bytes when supplied.
+     */
+    dirty_digest?: string | null;
+    /**
+     * Client observation time.
+     */
+    observed_at: string;
+    /**
+     * Installation-local opaque worktree reference.
+     */
+    ref: string;
+    /**
+     * Reported immutable tree when exposed.
+     */
+    tree?: string | null;
   };
 
 export type ConfigurationArtifactListView = {
@@ -2322,6 +2356,8 @@ export type CreateContextRunBody = {
      * Requested budget; the governed pack remains the ceiling.
      */
     budget_tokens?: number | null;
+    checkout_observation?: null | CheckoutObservationBody;
+    handoff?: null | SessionHandoffBody;
     /**
      * Optional sensitivity narrowing.
      */
@@ -3846,7 +3882,7 @@ export type NewEventBody = {
      * The payload shape this client declares. Defaults to the current one.
      */
     event_schema_version?: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * When the client says it happened.
      */
@@ -5468,7 +5504,7 @@ export type SessionEventView = {
      * The payload shape the client declared.
      */
     event_schema_version: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * The event's id in this deployment.
      */
@@ -5497,6 +5533,24 @@ export type SessionEventView = {
      * The session it belongs to.
      */
     session_id: string;
+  };
+
+/**
+ * Exact server-derived snapshot to transfer without copying private events.
+ */
+export type SessionHandoffBody = {
+    /**
+     * Exact admitted snapshot payload hash.
+     */
+    payload_hash: string;
+    /**
+     * Server TaskState or verified Checkpoint.
+     */
+    snapshot_event_id: string;
+    /**
+     * Independently authorized source Session.
+     */
+    source_session_id: string;
   };
 
 /**
@@ -6272,6 +6326,175 @@ export type SyncStatus = {
      */
     passes_completed: number;
     seal_authorisation?: null | AuthorisationView;
+  };
+
+/**
+ * Exact event containing the native `context.checkout` observation.
+ */
+export type TaskCheckoutBody = {
+    /**
+     * Source event in this Session.
+     */
+    event_id: string;
+    /**
+     * Exact redacted payload hash.
+     */
+    payload_hash: string;
+  };
+
+/**
+ * Exact existing context snapshot in this same Session.
+ */
+export type TaskContextBody = {
+    /**
+     * Exact block hash.
+     */
+    block_hash: string;
+    /**
+     * Saved run, independently reauthorized.
+     */
+    context_run_id: string;
+  };
+
+/**
+ * Closed source pointer. Text and epistemic class are server-derived.
+ */
+export type TaskEvidenceBody = {
+    /**
+     * Exact server event.
+     */
+    event_id: string;
+    /**
+     * `text` or `tool_text`; the latter needs `tool_index`.
+     */
+    field: string;
+    /**
+     * Admitted redacted payload hash.
+     */
+    payload_hash: string;
+    source_kind: "session_event";
+    /**
+     * Exact source bytes.
+     */
+    span: TaskSpanBody;
+    /**
+     * Bounded tool index, only for `tool_text`.
+     */
+    tool_index?: number | null;
+  } | {
+    /**
+     * Exact revision content hash.
+     */
+    content_hash: string;
+    /**
+     * Stable item.
+     */
+    item_id: string;
+    /**
+     * Exact current revision.
+     */
+    revision_id: string;
+    source_kind: "knowledge_revision";
+    /**
+     * Exact body bytes.
+     */
+    span: TaskSpanBody;
+  } | {
+    /**
+     * Exact source artifact.
+     */
+    artifact_id: string;
+    /**
+     * Exact source content hash.
+     */
+    content_hash: string;
+    source_kind: "import_artifact";
+    /**
+     * Exact body bytes.
+     */
+    span: TaskSpanBody;
+  };
+
+/**
+ * Exact UTF-8 byte range in already admitted source text.
+ */
+export type TaskSpanBody = {
+    /**
+     * Exclusive byte offset; at most 1024 bytes may be copied.
+     */
+    end: number;
+    /**
+     * Inclusive byte offset.
+     */
+    start: number;
+  };
+
+/**
+ * Bounded deterministic replacement of a Session's working state.
+ */
+export type TaskStateBody = {
+    checkout?: null | TaskCheckoutBody;
+    /**
+     * Stable retry key for this derivation.
+     */
+    client_event_id: string;
+    context_snapshot?: null | TaskContextBody;
+    expected_previous?: null | TaskStatePrecondition;
+    /**
+     * Exactly 1.
+     */
+    schema_version: number;
+    /**
+     * At most 32 exact-evidence statements.
+     */
+    statements: TaskStatementBody[];
+  };
+
+/**
+ * Exact prior state for serialized replacement, not inherited source evidence.
+ */
+export type TaskStatePrecondition = {
+    /**
+     * Exact preceding server TaskState.
+     */
+    event_id: string;
+    /**
+     * Exact payload hash.
+     */
+    payload_hash: string;
+  };
+
+/**
+ * Immutable event receipt. The caller can immediately hand its hash to a receiver.
+ */
+export type TaskStateView = {
+    /**
+     * Admitted server-derived event, under current source authority.
+     */
+    event: SessionEventView;
+    /**
+     * appended or duplicate.
+     */
+    outcome: string;
+  };
+
+/**
+ * Declared semantics over exact evidence, without a free-text summary field.
+ */
+export type TaskStatementBody = {
+    /**
+     * planned, attempted, succeeded, failed or unknown. This is a declaration.
+     */
+    declared_outcome?: string | null;
+    /**
+     * Exact source pointer; the server supplies text and evidence class.
+     */
+    evidence: TaskEvidenceBody;
+    /**
+     * objective, constraint, decision, proposal, observation, work, question,
+     * next_action, artifact or verification.
+     */
+    kind: string;
   };
 
 /**
@@ -8230,6 +8453,12 @@ export type Operations = {
     readonly body: KnowledgeQueryBody;
     readonly response: ContextKnowledgeQueryView;
   };
+  readonly derive_session_task_state: {
+    readonly path: "/v1/sessions/{session_id}/task-state";
+    readonly method: "POST";
+    readonly body: TaskStateBody;
+    readonly response: TaskStateView;
+  };
   /**
    * `GET /v1/sessions/{session_id}/timeline` — the projection.
    */
@@ -8791,6 +9020,7 @@ export const OPERATIONS = {
   withdraw_session_source: { path: "/v1/sessions/{session_id}/events/{event_id}/withdraw", method: "POST", idempotent: true },
   evaluate_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-evaluation", method: "POST" },
   query_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-query", method: "POST" },
+  derive_session_task_state: { path: "/v1/sessions/{session_id}/task-state", method: "POST" },
   get_session_timeline: { path: "/v1/sessions/{session_id}/timeline", method: "GET" },
   list_skill_bindings: { path: "/v1/skill-bindings", method: "GET" },
   create_skill_binding: { path: "/v1/skill-bindings", method: "POST", idempotent: true },

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select content_hash,body_markdown from import_artifacts\n       where tenant_id=$1 and id=$2 and not content_erased and synveda_source_admissible(tenant_id,'import_artifact',id)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "body_markdown",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ad83d1306868926c4f902ece50695395cb14b558b7a6630d86698141bfee53f7"
+}

@@ -503,7 +503,7 @@ fn released_v043_prefix_upgrades_without_resetting_tenant_data() {
         assert_eq!(upgraded.migration_head, epoch::CURRENT_MIGRATION_HEAD);
         assert_eq!(upgraded.created_by_version, "0.4.3");
         assert_eq!(upgraded.created_at, metadata_before.created_at);
-        assert_eq!(migration_ledger(&pool).await.len(), 8);
+        assert_eq!(migration_ledger(&pool).await.len(), 9);
         assert_eq!(migration_ledger(&pool).await[0], ledger_before[0]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -691,7 +691,7 @@ fn exact_forward_prefix_adds_login_state_without_rewriting_existing_rows() {
             epoch::CURRENT_MIGRATION_HEAD
         );
         let after = migration_ledger(&pool).await;
-        assert_eq!(after.len(), 8);
+        assert_eq!(after.len(), 9);
         assert_eq!(&after[..2], &before[..]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -741,7 +741,7 @@ fn exact_login_prefix_adds_delivery_proof_without_rewriting_existing_rows() {
             epoch::CURRENT_MIGRATION_HEAD
         );
         let after = migration_ledger(&pool).await;
-        assert_eq!(after.len(), 8);
+        assert_eq!(after.len(), 9);
         assert_eq!(&after[..3], &before[..]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -781,7 +781,7 @@ fn exact_delivery_prefix_backfills_source_addresses_without_rewriting_events() {
         let before=migration_ledger(&pool).await;assert_eq!(before.len(),4);
         synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap();
         synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
-        let after=migration_ledger(&pool).await;assert_eq!(after.len(),8);assert_eq!(&after[..4],&before[..]);
+        let after=migration_ledger(&pool).await;assert_eq!(after.len(),9);assert_eq!(&after[..4],&before[..]);
         let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
         let address=synveda_store::source_control::address(&mut tx,tenant,session.id,event).await.unwrap().unwrap();
         assert_eq!(address.payload_hash,hash);assert_eq!(address.scope_id,session.scope_id.as_uuid());assert_eq!(address.sequence,1);
@@ -818,7 +818,7 @@ fn exact_artifact_prefix_adds_empty_source_observations_and_preserves_existing_r
             .unwrap();
         synveda_store::migrate(&pool, &scratch.roles).await.unwrap();
         let after = migration_ledger(&pool).await;
-        assert_eq!(after.len(), 8);
+        assert_eq!(after.len(), 9);
         assert_eq!(&after[..6], &before);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -883,7 +883,7 @@ fn exact_source_prefix_backfills_complete_artifacts_and_preserves_generic_metada
         tx.commit().await.unwrap();let before=migration_ledger(&pool).await;assert_eq!(before.len(),5);
         synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap();
         synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
-        let after=migration_ledger(&pool).await;assert_eq!(after.len(),8);assert_eq!(&after[..5],&before[..]);
+        let after=migration_ledger(&pool).await;assert_eq!(after.len(),9);assert_eq!(&after[..5],&before[..]);
         let mut tx=synveda_store::rls::begin_tenant_tx(&ordinary,tenant).await.unwrap();
         let row:(Option<uuid::Uuid>,serde_json::Value)=sqlx::query_as("select import_artifact_id,metadata from knowledge_sources where tenant_id=$1 and id=$2")
           .bind(tenant.as_uuid()).bind(proven).fetch_one(&mut *tx).await.unwrap();assert_eq!(row.0,Some(artifact));assert_eq!(row.1,metadata);
@@ -918,8 +918,52 @@ fn an_unstamped_released_baseline_resumes_from_its_exact_sqlx_prefix() {
             epoch::verify(&pool).await.unwrap().migration_head,
             epoch::CURRENT_MIGRATION_HEAD
         );
-        assert_eq!(migration_ledger(&pool).await.len(), 8);
+        assert_eq!(migration_ledger(&pool).await.len(), 9);
         pool.close().await;
+    });
+}
+
+#[test]
+fn exact_github_prefix_backfills_snapshot_headers_without_rewriting_v1_payloads() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool=connect_pool(&scratch.options).await;
+        let mut connection=pool.acquire().await.unwrap();
+        sqlx::migrate::Migrator {migrations:std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..8].to_vec()),
+            ..sqlx::migrate::Migrator::DEFAULT}.run(&mut *connection).await.unwrap();
+        epoch::stamp_connection(&mut connection,"0.4.5").await.unwrap();drop(connection);
+        let tenant=admit_a_tenant(&pool).await;
+        let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
+        let workspace=synveda_store::workspaces::create(&mut tx,&synveda_store::workspaces::NewWorkspace {
+            id:synveda_types::WorkspaceId::new(),tenant_id:tenant,slug:"snapshot-prefix".to_owned(),display_name:"Snapshot prefix".to_owned(),description:None,created_by:None}).await.unwrap();
+        let session=synveda_store::sessions::create(&mut tx,&synveda_store::sessions::NewSession {
+            id:synveda_types::SessionId::new(),tenant_id:tenant,workspace_id:workspace.id,project_id:None,principal_id:"snapshot-reader".to_owned(),
+            client_name:"claude-code".to_owned(),client_version:None,client_installation_id:None,external_session_id:None,agent_name:None,
+            model_name:None,repository_id:None,branch:None,task_summary:None,metadata:serde_json::json!({})}).await.unwrap();
+        let boundary=serde_json::json!({"schema_version":1,"local_high_sequence":1,"expected_client_event_ids":[],"expected_ids_truncated":false});
+        let marker=synveda_store::sessions::append_events(&mut tx,tenant,session.id,&[synveda_store::sessions::NewSessionEvent {
+            event_type:synveda_types::session::SessionEventType::CompactionBoundary,event_schema_version:1,client_event_id:"old-boundary".to_owned(),
+            occurred_at:chrono::Utc::now(),source_payload_hash:synveda_store::sessions::payload_hash(&boundary),payload:boundary,redactions:None,quarantine:false}]).await.unwrap().remove(0).event;
+        let payload=serde_json::json!({"schema_version":1,"method":"deterministic_event_excerpts_v1","boundary_event_id":marker.id,
+            "previous_checkpoint_event_id":null,"source_first_sequence":null,"source_last_sequence":null,
+            "source_digest":blake3::hash(b"synveda.session.checkpoint.sources.v1\0").to_hex().to_string(),"sources":[],"coverage":"observed_window",
+            "declared_missing_count":0,"goals":[],"constraints":[],"decisions":[],"unresolved_questions":[],"artefact_references":[],
+            "verification_evidence":[],"labelled_excerpts":[]});
+        let old=synveda_store::sessions::append_events(&mut tx,tenant,session.id,&[synveda_store::sessions::NewSessionEvent {
+            event_type:synveda_types::session::SessionEventType::Checkpoint,event_schema_version:1,client_event_id:"old-checkpoint".to_owned(),
+            occurred_at:chrono::Utc::now(),source_payload_hash:synveda_store::sessions::payload_hash(&payload),payload:payload.clone(),redactions:None,quarantine:false}]).await.unwrap().remove(0).event;
+        tx.commit().await.unwrap();
+        let before=migration_ledger(&pool).await;assert_eq!(before.len(),8);
+        assert_eq!(synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap().migration_head,"0008");
+        synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
+        let after=migration_ledger(&pool).await;assert_eq!(&after[..8],&before);assert_eq!(after.len(),9);
+        let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
+        let retained=synveda_store::sessions::event(&mut *tx,tenant,session.id,old.id).await.unwrap().unwrap();
+        assert_eq!(retained.payload,payload);assert_eq!(retained.payload_hash,old.payload_hash);
+        let header=synveda_store::task_state::latest_checkpoint(&mut tx,tenant,session.id,None).await.unwrap().unwrap();
+        assert_eq!(header.id,old.id.as_uuid());assert_eq!(header.payload_hash,old.payload_hash);assert_eq!(header.sequence,old.sequence);
+        tx.commit().await.unwrap();pool.close().await;
     });
 }
 
@@ -947,7 +991,7 @@ fn a_committed_forward_migration_with_old_stamp_repairs_only_the_stamp() {
             .expect("commit forward DDL and SQLx row without marker stamp");
         drop(connection);
         let ledger_before = migration_ledger(&pool).await;
-        assert_eq!(ledger_before.len(), 8);
+        assert_eq!(ledger_before.len(), 9);
         assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0001");
         assert!(matches!(
             epoch::verify(&pool).await,
@@ -1781,7 +1825,7 @@ fn reset_refuses_a_database_name_it_will_not_quote() {
 
 // ── no old-to-new migrator ───────────────────────────────────────────────
 
-/// Epoch 3 has the released schema-only baseline and seven additive forward
+/// Epoch 3 has the released schema-only baseline and eight additive forward
 /// migrations: no pre-epoch translator, reversible pair or top-level statement
 /// that can carry or seed data. Function
 /// bodies may of course mutate current tables at runtime; the scanner removes
@@ -1814,9 +1858,10 @@ fn no_old_to_new_data_migrator_exists() {
             "0005_session_source_control.sql",
             "0006_import_artifact_source_control.sql",
             "0007_inbound_git_source_reconciliation.sql",
-            "0008_private_github_source_identity.sql"
+            "0008_private_github_source_identity.sql",
+            "0009_grounded_task_state_and_handoff.sql"
         ],
-        "epoch 3 has the released baseline and seven forward migrations"
+        "epoch 3 has the released baseline and eight forward migrations"
     );
 
     let down: Vec<_> = names

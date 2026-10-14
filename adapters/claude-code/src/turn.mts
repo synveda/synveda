@@ -29,6 +29,7 @@ import { resolveGateway, type AdapterConfig } from "./config.mjs";
 import { resolveBearer } from "./credentials.mjs";
 import { closeRun, deliver, recordDelta } from "./deliver.mjs";
 import { CLIENT_NAME } from "./client.mjs";
+import { supportsCheckpoint } from "./checkpoint-capability.mjs";
 import { installationId } from "./install-id.mjs";
 import { observeGit } from "./git.mjs";
 import { log } from "./log.mjs";
@@ -103,7 +104,7 @@ export async function turn(
   // Record first, always, and persist before anything touches the network.
   // This is the step the previous design did not have.
   let recorded = recordDelta(spool, input.transcript_path, readEntries, spool.checkout);
-  if (input.hook_event_name === "PreCompact" && (configured.clientName ?? CLIENT_NAME) === CLIENT_NAME) {
+  if (input.hook_event_name === "PreCompact" && supportsCheckpoint(configured.clientName ?? CLIENT_NAME)) {
     let previousBoundary = -1;
     for (let index = spool.entries.length - 1; index >= 0; index -= 1) {
       if (spool.entries[index]?.event_type === "session.compaction_boundary") {

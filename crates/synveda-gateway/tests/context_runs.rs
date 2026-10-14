@@ -417,7 +417,7 @@ async fn all_mode_private_lineage_scrubs_forgotten_delivery_copies() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(proof.dependency_version, 2);
+        assert_eq!(proof.dependency_version, 3);
         assert!(
             !proof.manifest.to_string().contains(fact),
             "only content-free evidence is retained"

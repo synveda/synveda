@@ -191,6 +191,7 @@ const COVERED: &[&str] = &[
     // are independently tenant-bound and member-filtered above this backstop.
     "knowledge_conflict_members",
     "knowledge_conflict_sets",
+    "knowledge_copy_dependencies",
     "knowledge_erasure_tombstones",
     "knowledge_index_invalidations",
     "knowledge_items",
@@ -238,6 +239,7 @@ const COVERED: &[&str] = &[
     "session_context_runs",
     "session_event_quarantine",
     "session_events",
+    "session_snapshot_headers",
     "sessions",
     "skill_bindings",
     "skill_changes",
@@ -5166,6 +5168,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
             .to_hex()
             .as_ref(),
         &manifest,
+        2,
     )
     .await
     .expect("retain private delivery dependency fixture");
@@ -5479,6 +5482,7 @@ fn cross_tenant_delivery_dependencies_are_rejected() {
             theirs.run,
             &"0".repeat(64),
             &serde_json::json!({"schema_version": 1}),
+            2,
         )
         .await
         .expect_err("foreign proof insert must fail");

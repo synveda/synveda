@@ -232,6 +232,9 @@ pub enum SessionEventType {
     /// A server-derived checkpoint over immutable, redacted Session evidence.
     #[serde(rename = "session.checkpoint")]
     Checkpoint,
+    /// Server-derived, exact-source working state (CTX-6, ADR-0150).
+    #[serde(rename = "session.task_state")]
+    TaskState,
     /// A person said something.
     #[serde(rename = "message.user")]
     MessageUser,
@@ -291,6 +294,7 @@ impl SessionEventType {
         SessionEventType::SessionEnded,
         SessionEventType::CompactionBoundary,
         SessionEventType::Checkpoint,
+        SessionEventType::TaskState,
         SessionEventType::MessageUser,
         SessionEventType::MessageAssistant,
         SessionEventType::ToolInvoked,
@@ -318,6 +322,7 @@ impl SessionEventType {
             SessionEventType::SessionEnded => "session.ended",
             SessionEventType::CompactionBoundary => "session.compaction_boundary",
             SessionEventType::Checkpoint => "session.checkpoint",
+            SessionEventType::TaskState => "session.task_state",
             SessionEventType::MessageUser => "message.user",
             SessionEventType::MessageAssistant => "message.assistant",
             SessionEventType::ToolInvoked => "tool.invoked",
@@ -364,6 +369,7 @@ impl SessionEventType {
             | SessionEventType::SessionEnded
             | SessionEventType::CompactionBoundary
             | SessionEventType::Checkpoint
+            | SessionEventType::TaskState
             | SessionEventType::FileRead
             | SessionEventType::SkillLoaded
             | SessionEventType::ContextRequested
@@ -381,6 +387,7 @@ impl SessionEventType {
             | SessionEventType::SessionEnded
             | SessionEventType::CompactionBoundary
             | SessionEventType::Checkpoint => "lifecycle",
+            SessionEventType::TaskState => "task",
             SessionEventType::MessageUser | SessionEventType::MessageAssistant => "message",
             SessionEventType::ToolInvoked | SessionEventType::ToolResult => "tool",
             SessionEventType::FileRead | SessionEventType::FileChanged => "file",
@@ -642,6 +649,9 @@ pub struct SessionCheckpoint {
     pub verification_evidence: Vec<CheckpointEvidence>,
     /// Bounded excerpts copied from admitted user-authored Session events.
     pub labelled_excerpts: Vec<CheckpointEvidence>,
+    /// Present only under the explicit v2 method; retained v1 lacks this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_state: Option<crate::task_state::CheckpointTaskState>,
 }
 
 /// One act of composing context for a session.
@@ -910,7 +920,7 @@ mod tests {
     }
 
     #[test]
-    fn every_event_type_has_a_family_and_the_families_are_the_nine_named() {
+    fn every_event_type_has_a_family_and_the_families_are_the_ten_named() {
         let mut families: Vec<&str> = SessionEventType::ALL
             .iter()
             .map(SessionEventType::family)
@@ -928,6 +938,7 @@ mod tests {
                 "memory",
                 "message",
                 "skill",
+                "task",
                 "tool"
             ]
         );

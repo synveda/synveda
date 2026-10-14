@@ -46,6 +46,7 @@
 //! first time one was written and the other was not.
 
 pub(crate) mod checkpoint;
+pub(crate) mod task_state;
 
 use std::collections::BTreeMap;
 
@@ -1502,7 +1503,17 @@ pub(crate) async fn get_event(
         )
         .await?;
         if event.event_type == SessionEventType::Checkpoint
-            && !checkpoint::source_available(&mut tx, tenant_id, session_id, event_id).await?
+            && !checkpoint::source_available(&state, &mut tx, tenant_id, session_id, event_id)
+                .await?
+        {
+            return Err(Error::NotFound {
+                entity: format!("event {event_id} of session {session_id}"),
+            });
+        }
+        if event.event_type == SessionEventType::TaskState
+            && task_state::verified(&state, &mut tx, tenant_id, session_id, &event)
+                .await?
+                .is_none()
         {
             return Err(Error::NotFound {
                 entity: format!("event {event_id} of session {session_id}"),
@@ -1562,9 +1573,13 @@ pub(crate) async fn append_events(
     let result = async {
         let body = body(payload)?;
         for event in &body.events {
-            if event.event_type == SessionEventType::Checkpoint {
+            if matches!(
+                event.event_type,
+                SessionEventType::Checkpoint | SessionEventType::TaskState
+            ) {
                 return Err(Error::Invalid {
-                    message: "checkpoint events are derived by the server".to_owned(),
+                    message: "checkpoint and task-state events are derived by the server"
+                        .to_owned(),
                 });
             }
             if event.event_type == SessionEventType::CompactionBoundary {
@@ -1575,7 +1590,7 @@ pub(crate) async fn append_events(
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let (session, authorized, _, input) =
             load_with_input(&state, &mut tx, tenant_id, id, Action::SessionWrite).await?;
-        if session.client_name != "claude-code"
+        if !checkpoint::supported_client(&session.client_name)
             && body
                 .events
                 .iter()
@@ -1701,7 +1716,8 @@ pub(crate) async fn append_events(
             }
             let boundary = checkpoint::validate_boundary(Some(&outcome.event.payload))?;
             if let Some(created) =
-                checkpoint::materialize(&mut tx, tenant_id, id, &outcome.event, &boundary).await?
+                checkpoint::materialize(&state, &mut tx, tenant_id, id, &outcome.event, &boundary)
+                    .await?
             {
                 checkpoint_ids.push(created.id);
             }

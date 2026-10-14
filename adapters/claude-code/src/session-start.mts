@@ -29,6 +29,7 @@ import { resolveBearer, SIGN_IN_MESSAGE } from "./credentials.mjs";
 import { recordDelta, retryBacklog, deliver } from "./deliver.mjs";
 import { installationId } from "./install-id.mjs";
 import { observeGit } from "./git.mjs";
+import { supportsCheckpoint } from "./checkpoint-capability.mjs";
 import { log } from "./log.mjs";
 import {
   bindGateway,
@@ -38,7 +39,7 @@ import {
   type Spool,
 } from "./spool.mjs";
 import { lastUserPrompt, readTranscript } from "./transcript.mjs";
-import type { HookInput, HookOutput } from "./types.mjs";
+import type { ContextRunRequest, HookInput, HookOutput } from "./types.mjs";
 
 /**
  * How long the backlog retry gets before the session start gives up on it.
@@ -119,9 +120,13 @@ export async function sessionStart(
   // 3. The context block.
   if (!configured.inject) return disclosureOnly(input, config);
 
-  const request: { query?: string; budget_tokens?: number; restart?: boolean } = {};
-  if (input.source === "compact" && (configured.clientName ?? CLIENT_NAME) === CLIENT_NAME) {
+  const request: ContextRunRequest = {};
+  if (input.source === "compact" && supportsCheckpoint(configured.clientName ?? CLIENT_NAME)) {
     request.restart = true;
+    // A fresh receiving observation belongs to this hook, not retrospectively
+    // to commands recorded under the spool's original checkout observation.
+    const checkout = observeGit(input.cwd, spool.client_installation_id);
+    if (checkout !== undefined) request.checkout_observation = checkout;
   }
   const task = deriveTask(input.source, spool.transcript_path, readEntries);
   if (task !== undefined) request.query = task;

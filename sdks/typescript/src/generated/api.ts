@@ -147,6 +147,8 @@ export type CreateContextRunBody = {
      * Requested budget; the governed pack remains the ceiling.
      */
     budget_tokens?: number | null;
+    checkout_observation?: null | CheckoutObservationBody;
+    handoff?: null | SessionHandoffBody;
     /**
      * Optional sensitivity narrowing.
      */
@@ -1079,7 +1081,7 @@ export type NewEventBody = {
      * The payload shape this client declares. Defaults to the current one.
      */
     event_schema_version?: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * When the client says it happened.
      */
@@ -1222,6 +1224,58 @@ export type WorkspaceView = {
      * When it last changed.
      */
     updated_at: string;
+  };
+
+/**
+ * Current hook-time checkout observation, explicitly caller reported.
+ */
+export type CheckoutObservationBody = {
+    /**
+     * Reported branch.
+     */
+    branch?: string | null;
+    /**
+     * Reported immutable commit.
+     */
+    commit?: string | null;
+    /**
+     * Reported dirty state; omission stays unknown.
+     */
+    dirty?: boolean | null;
+    /**
+     * Digest of exact dirty bytes when supplied.
+     */
+    dirty_digest?: string | null;
+    /**
+     * Client observation time.
+     */
+    observed_at: string;
+    /**
+     * Installation-local opaque worktree reference.
+     */
+    ref: string;
+    /**
+     * Reported immutable tree when exposed.
+     */
+    tree?: string | null;
+  };
+
+/**
+ * Exact server-derived snapshot to transfer without copying private events.
+ */
+export type SessionHandoffBody = {
+    /**
+     * Exact admitted snapshot payload hash.
+     */
+    payload_hash: string;
+    /**
+     * Server TaskState or verified Checkpoint.
+     */
+    snapshot_event_id: string;
+    /**
+     * Independently authorized source Session.
+     */
+    source_session_id: string;
   };
 
 /**
@@ -1645,7 +1699,7 @@ export type SessionEventView = {
      * The payload shape the client declared.
      */
     event_schema_version: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * The event's id in this deployment.
      */

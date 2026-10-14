@@ -43,6 +43,36 @@ ADR-0119 fixes the first checkpoint method as a server-derived typed Session eve
 
 Ship storage and ingestion dark, then enable checkpoint planning per adapter/profile after probe and privacy review. Rollback disables checkpoint creation and selection while leaving stored checkpoints inert for their governed retention period; the existing event-spool and Knowledge paths continue unchanged.
 
+### Grounded handoff increment — 2026-10-14
+
+Accepted ADR-0150 and additive `0009` implement server-derived TaskState,
+checkpoint method v2, explicit cross-Session handoff and fresh reported checkout
+comparison through the public API/CLI. Retained checkpoint v1 and Manifest v2
+keep their exact verifiers/encoding; new delivery uses private Manifest v3.
+Current source authority, classification narrowing, permanent suppression and
+bounded cleanup apply to all copied state. Complete replacement excludes older
+objectives even within one compact window. Immutable headers prevent fallback
+past an unavailable newer head and permit recovery after scoped retention.
+
+Ten ordinary-role public-API handoff cases pass alongside 21 ContextRun,
+28 Session, 14 Session-source, nine artifact-source and seven lifecycle cases.
+All 34 serial epoch cases, including exact `0008` retained-v1 upgrade, and the
+separate historical case-only source upgrade pass. RLS reports 66 passes with
+five pre-existing administrator tamper cases excluded from the ordinary run.
+The existing 31-scenario product oracle, captured Claude 122/Codex eight tests,
+fresh checked SQLx generation, generated public clients and strict all-target
+Clippy pass. These are controlled application/protocol observations, without
+model calls or provider usage.
+
+[Task handoff instructions](../integrations/task-handoff.md) specify exact
+requests, limits, retry/precondition behavior and logical versus physical
+removal. The independently measured head has ACL 416, routine 101, trigger 167
+and forced-RLS 128 inventory rows. All prior catalogue checks remain pinned.
+Native proprietary loading and model-observed task quality remain open under
+the existing bounded synthetic qualification. Next apply this lineage contract
+to SKIL-6 outcome-backed candidates and the integrated CPR-41 demonstration.
+
+
 ## Dependencies
 
 An accepted ADR must fix checkpoint identity, summary provenance, planner priority, and capture interaction. The owner must approve retention, sensitivity/redaction rules, summarizer policy and budget, recent-window bounds, and the probe corpus. Authentic hook evidence depends on access to a supported Claude client and credential.

@@ -217,7 +217,10 @@ fn disclosed_sources(rendered: &str) -> Option<HashMap<EvidenceKey, Vec<String>>
             "unreviewed_candidate" => {
                 EvidenceKey::Candidate(entry["capture_candidate_id"].as_str()?.parse().ok()?)
             }
-            "checkpoint_user_excerpt" | "recent_user_event" => continue,
+            "checkpoint_user_excerpt"
+            | "recent_user_event"
+            | "task_state_statement"
+            | "task_state_metadata" => continue,
             _ => return None,
         };
         if disclosed.len() >= MAX_SAVED_SELECTIONS {
@@ -262,7 +265,8 @@ pub(super) async fn restart_available(
         Err(error) => return Err(error),
     }
     if let Some(id) = run.checkpoint_event_id
-        && !crate::sessions::checkpoint::source_available(tx, tenant, run.session_id, id).await?
+        && !crate::sessions::checkpoint::source_available(state, tx, tenant, run.session_id, id)
+            .await?
     {
         return Ok(false);
     }

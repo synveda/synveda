@@ -36,6 +36,10 @@ pub(super) struct Manifest {
     authored_budget: u32,
     sensitivity_ceiling: Option<Sensitivity>,
     counter: Counter,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) handoff: Option<synveda_types::task_state::SessionHandoff>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    receiver_checkout_hash: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -112,9 +116,17 @@ pub(super) struct Inputs<'a> {
     pub authored_budget: u32,
     pub sensitivity_ceiling: Option<Sensitivity>,
     pub counter: &'a TokenCounter,
+    pub handoff: Option<synveda_types::task_state::SessionHandoff>,
+    pub receiver_checkout_hash: Option<String>,
 }
 
 impl Manifest {
+    pub(super) fn has_restart_ancestry(&self) -> bool {
+        self.restart_contributed
+            || self.handoff.is_some()
+            || self.checkpoint.is_some()
+            || !self.tail.is_empty()
+    }
     pub(super) async fn from_plan(
         tx: &mut PgConnection,
         tenant: TenantId,
@@ -167,7 +179,7 @@ impl Manifest {
             }
         }
         let manifest = Self {
-            schema_version: 2,
+            schema_version: 3,
             block_hash: inputs.block_hash.to_owned(),
             configuration_hash: inputs.configuration_hash.to_owned(),
             knowledge,
@@ -187,13 +199,21 @@ impl Manifest {
             } else {
                 Counter::O200k
             },
+            handoff: inputs.handoff,
+            receiver_checkout_hash: inputs.receiver_checkout_hash,
         };
         manifest.encode()?;
         Ok(manifest)
     }
 
     fn encode(&self) -> Result<(Value, String)> {
-        if self.schema_version != 2
+        if !matches!(self.schema_version, 2 | 3)
+            || (self.schema_version == 2
+                && (self.handoff.is_some() || self.receiver_checkout_hash.is_some()))
+            || (self.handoff.is_some()
+                && (!self.restart_contributed
+                    || self.checkpoint.is_some()
+                    || !self.tail.is_empty()))
             || self.knowledge.len() + self.candidates.len() > 1024
             || self.graph.len() > 2048
             || self.authored.len() > 1024
@@ -249,6 +269,9 @@ impl Manifest {
                     .iter()
                     .flat_map(|entry| [entry.bundle_digest.as_str(), entry.object_hash.as_str()]),
             );
+        let hashes = hashes
+            .chain(self.handoff.iter().map(|h| h.payload_hash.as_str()))
+            .chain(self.receiver_checkout_hash.iter().map(String::as_str));
         if hashes.into_iter().any(|hash| {
             hash.len() != 64
                 || !hash
@@ -277,7 +300,15 @@ impl Manifest {
         run: synveda_types::ContextRunId,
     ) -> Result<()> {
         let (value, hash) = self.encode()?;
-        context_dependencies::record(tx, tenant, run, &hash, &value).await
+        context_dependencies::record(
+            tx,
+            tenant,
+            run,
+            &hash,
+            &value,
+            i32::from(self.schema_version),
+        )
+        .await
     }
 
     pub(super) async fn load(
@@ -288,7 +319,8 @@ impl Manifest {
         let Some(stored) = context_dependencies::for_run(&mut *tx, tenant, run.id).await? else {
             return Ok(None);
         };
-        if stored.dependency_version != 2 || manifest_hash(&stored.manifest) != stored.manifest_hash
+        if !matches!(stored.dependency_version, 2 | 3)
+            || manifest_hash(&stored.manifest) != stored.manifest_hash
         {
             return Ok(None);
         }
@@ -296,6 +328,7 @@ impl Manifest {
             return Ok(None);
         };
         if manifest.encode().is_err()
+            || i32::from(manifest.schema_version) != stored.dependency_version
             || manifest.block_hash != run.block_hash
             || manifest.configuration_hash != run.configuration_hash
             || manifest.knowledge.len() + manifest.candidates.len()
@@ -326,6 +359,16 @@ impl Manifest {
         tenant: TenantId,
         run: &synveda_types::session::ContextRun,
     ) -> Result<bool> {
+        if let Some(handoff) = &self.handoff {
+            return crate::sessions::checkpoint::handoff_available(
+                state,
+                tx,
+                tenant,
+                handoff,
+                self.sensitivity_ceiling,
+            )
+            .await;
+        }
         if self.restart_contributed {
             match crate::sessions::load(
                 state,
@@ -339,6 +382,23 @@ impl Manifest {
                 Ok(_) => {}
                 Err(Error::NotFound { .. } | Error::PolicyDenied { .. }) => return Ok(false),
                 Err(error) => return Err(error),
+            }
+        }
+        for id in &self.restart_source_event_ids {
+            let Some(event) = sessions::event(&mut *tx, tenant, run.session_id, *id).await? else {
+                return Ok(false);
+            };
+            if !synveda_store::task_state::within_ceiling(tx, tenant, *id, self.sensitivity_ceiling)
+                .await?
+            {
+                return Ok(false);
+            }
+            if event.event_type == synveda_types::session::SessionEventType::TaskState
+                && crate::sessions::task_state::verified(state, tx, tenant, run.session_id, &event)
+                    .await?
+                    .is_none()
+            {
+                return Ok(false);
             }
         }
         for entry in self.checkpoint.iter().chain(&self.tail) {
@@ -465,6 +525,18 @@ mod tests {
     }
 
     #[test]
+    fn retained_v2_proof_keeps_its_exact_encoding_and_digest() {
+        let old = empty();
+        let manifest: Manifest = serde_json::from_value(old.clone()).unwrap();
+        let (encoded, digest) = manifest.encode().unwrap();
+        assert_eq!(encoded, old);
+        assert_eq!(manifest_hash(&encoded), manifest_hash(&old));
+        assert_eq!(digest, manifest_hash(&old));
+        assert!(encoded.get("handoff").is_none());
+        assert!(encoded.get("receiver_checkout_hash").is_none());
+    }
+
+    #[test]
     fn internal_lineage_refuses_plaintext_unknown_methods_and_exhausted_bounds() {
         let base = empty();
         assert!(
@@ -480,7 +552,7 @@ mod tests {
         value["counter"] = json!("external_model");
         assert!(serde_json::from_value::<Manifest>(value).is_err());
         for (key, mutation) in [
-            ("schema_version", json!(3)),
+            ("schema_version", json!(4)),
             ("block_hash", json!("plaintext is not a digest")),
             (
                 "tail",

@@ -2482,6 +2482,7 @@ async fn forget_scrubs_later_context_import_and_conflict_references() {
         run_id,
         proof_hash.finalize().to_hex().as_str(),
         &manifest,
+        2,
     )
     .await
     .unwrap();

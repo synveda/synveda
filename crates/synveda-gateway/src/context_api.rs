@@ -396,6 +396,13 @@ pub struct CreateContextRunBody {
     /// supported compact/restart hook. The same Session remains authoritative.
     #[serde(default)]
     pub restart: bool,
+    /// Explicit source snapshot in another independently authorized Session.
+    /// This is a manual public-API handoff, separate from native local restart.
+    #[serde(default)]
+    pub handoff: Option<SessionHandoffBody>,
+    /// Fresh client checkout report; it never attests to test execution.
+    #[serde(default)]
+    pub checkout_observation: Option<CheckoutObservationBody>,
     /// Optional exact text encoding selected by the caller. The only supported
     /// value is `o200k_base`; omission keeps an explicit estimate.
     #[serde(default)]
@@ -408,6 +415,76 @@ pub struct CreateContextRunBody {
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub max_sensitivity: Option<Sensitivity>,
+}
+
+/// Exact server-derived snapshot to transfer without copying private events.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionHandoffBody {
+    /// Independently authorized source Session.
+    #[schema(value_type=String,format="uuid")]
+    pub source_session_id: SessionId,
+    /// Server TaskState or verified Checkpoint.
+    #[schema(value_type=String,format="uuid")]
+    pub snapshot_event_id: synveda_types::SessionEventId,
+    /// Exact admitted snapshot payload hash.
+    pub payload_hash: String,
+}
+impl From<SessionHandoffBody> for synveda_types::task_state::SessionHandoff {
+    fn from(value: SessionHandoffBody) -> Self {
+        Self {
+            source_session_id: value.source_session_id,
+            snapshot_event_id: value.snapshot_event_id,
+            payload_hash: value.payload_hash,
+        }
+    }
+}
+
+/// Current hook-time checkout observation, explicitly caller reported.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CheckoutObservationBody {
+    /// Installation-local opaque worktree reference.
+    pub r#ref: String,
+    /// Client observation time.
+    pub observed_at: DateTime<Utc>,
+    /// Reported branch.
+    pub branch: Option<String>,
+    /// Reported immutable commit.
+    pub commit: Option<String>,
+    /// Reported immutable tree when exposed.
+    pub tree: Option<String>,
+    /// Reported dirty state; omission stays unknown.
+    pub dirty: Option<bool>,
+    /// Digest of exact dirty bytes when supplied.
+    pub dirty_digest: Option<String>,
+}
+impl CheckoutObservationBody {
+    fn validate(&self) -> Result<()> {
+        if self.r#ref.is_empty()
+            || self.r#ref.len() > 128
+            || self.r#ref.chars().any(char::is_control)
+            || self
+                .branch
+                .as_ref()
+                .is_some_and(|b| b.is_empty() || b.len() > 200 || b.chars().any(char::is_control))
+            || self.commit.iter().chain(&self.tree).any(|h| {
+                !matches!(h.len(), 40 | 64)
+                    || !h
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
+            })
+            || self
+                .dirty_digest
+                .as_deref()
+                .is_some_and(|h| !crate::sessions::task_state::hash_valid(h))
+        {
+            return Err(Error::Invalid {
+                message: "Invalid checkout observation".to_owned(),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Exact current Knowledge revision designated by the session caller.
@@ -762,7 +839,7 @@ pub(crate) async fn authorize_revision(
     )
 }
 
-async fn visible_sources_with_policy(
+pub(crate) async fn visible_sources_with_policy(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
@@ -2316,6 +2393,12 @@ fn context_run_request_identity(session_id: SessionId, body: &CreateContextRunBo
     if body.restart {
         identity["restart"] = json!(true);
     }
+    if let Some(handoff) = &body.handoff {
+        identity["handoff"] = json!(handoff);
+    }
+    if let Some(checkout) = &body.checkout_observation {
+        identity["checkout_observation"] = json!(checkout);
+    }
     if let Some(encoding) = &body.tokenizer_encoding {
         identity["tokenizer_encoding"] = json!(encoding);
     }
@@ -2630,8 +2713,39 @@ async fn plan_context_run(
     let mut restart_coverage = None;
     let mut restart_event_ids = Vec::new();
     let mut restart_source_event_ids = Vec::new();
+    if body.restart && body.handoff.is_some() {
+        return Err(Error::Invalid {
+            message: "Use one native restart or explicit handoff per context request".to_owned(),
+        });
+    }
+    if let Some(checkout) = &body.checkout_observation {
+        checkout.validate()?;
+    }
+    let handoff = body
+        .handoff
+        .clone()
+        .map(synveda_types::task_state::SessionHandoff::from);
+    if let Some(handoff) = &handoff {
+        let (text, source_ids) = crate::sessions::checkpoint::handoff_context(
+            state,
+            &mut tx,
+            tenant_id,
+            handoff,
+            crate::sessions::checkpoint::RestoreInputs {
+                receiver: &prepared.session,
+                checkout: body.checkout_observation.as_ref(),
+                ceiling: body.max_sensitivity,
+                budget,
+                counter: &counter,
+            },
+        )
+        .await?;
+        restart_text = text;
+        restart_source_event_ids = source_ids;
+        restart_coverage = Some("explicit_source_grounded_handoff".to_owned());
+    }
     if body.restart {
-        if prepared.session.client_name != "claude-code" {
+        if !crate::sessions::checkpoint::supported_client(&prepared.session.client_name) {
             return Err(Error::Invalid {
                 message: "checkpoint restart is unsupported for this client".to_owned(),
             });
@@ -2643,7 +2757,17 @@ async fn plan_context_run(
                 let allowance = budget.saturating_div(2).min(2_048);
                 let (text, id, coverage, tail_ids, source_ids) =
                     crate::sessions::checkpoint::restart_context(
-                        &mut tx, tenant_id, session_id, allowance, &counter,
+                        state,
+                        &mut tx,
+                        tenant_id,
+                        session_id,
+                        crate::sessions::checkpoint::RestoreInputs {
+                            receiver: &prepared.session,
+                            checkout: body.checkout_observation.as_ref(),
+                            ceiling: body.max_sensitivity,
+                            budget: allowance,
+                            counter: &counter,
+                        },
                     )
                     .await?;
                 restart_text = text;
@@ -2718,6 +2842,7 @@ async fn plan_context_run(
             restart_text.clear();
             checkpoint_event_id = None;
             restart_event_ids.clear();
+            restart_source_event_ids.clear();
             restart_coverage = Some("omitted_budget".to_owned());
             content_budget = budget;
             assemble_knowledge(
@@ -2755,7 +2880,7 @@ async fn plan_context_run(
         }
     }
     let mut rendered = combined_context(&restart_text, &knowledge_text, &authored.text);
-    if (mode == ContextOptimizationMode::Conservative || body.restart)
+    if (mode == ContextOptimizationMode::Conservative || body.restart || handoff.is_some())
         && counter.count(&rendered) > budget
     {
         // Tokenising the joined representation can cost more than the sum of
@@ -2773,9 +2898,16 @@ async fn plan_context_run(
             rendered = combined_context(&restart_text, &knowledge_text, "");
         }
         if counter.count(&rendered) > budget {
+            if handoff.is_some() {
+                return Err(Error::InsufficientBudget {
+                    required_tokens: counter.count(&rendered),
+                    budget_tokens: budget,
+                });
+            }
             restart_text.clear();
             checkpoint_event_id = None;
             restart_event_ids.clear();
+            restart_source_event_ids.clear();
             restart_coverage = Some("omitted_budget".to_owned());
             rendered = knowledge_text.clone();
         }
@@ -2820,6 +2952,11 @@ async fn plan_context_run(
             authored_budget: authored_request.budget_tokens,
             sensitivity_ceiling: body.max_sensitivity,
             counter: &counter,
+            handoff: handoff.clone(),
+            receiver_checkout_hash: body
+                .checkout_observation
+                .as_ref()
+                .map(|checkout| sessions::payload_hash(&json!(checkout))),
         },
     )
     .await?;
@@ -3722,7 +3859,11 @@ async fn detail_view(
         .filter(|entry| visible_selection_ids.contains(&entry.context_selection_id))
         .map(Into::into)
         .collect();
-    let restart_detail_unavailable = !replay::restart_available(state, tx, tenant_id, &run).await?;
+    let restart_detail_unavailable = match dependencies::Manifest::load(tx, tenant_id, &run).await?
+    {
+        Some(manifest) => !manifest.restart_matches(state, tx, tenant_id, &run).await?,
+        None => !run.rendered.is_empty(),
+    };
     let mut run_view = ContextRunView::for_trace(run);
     run_view.candidate_count = i32::try_from(candidates.len()).unwrap_or(i32::MAX);
     run_view.selection_count = i32::try_from(selections.len()).unwrap_or(i32::MAX);
@@ -4149,7 +4290,7 @@ async fn query_preflight(
     commit(tx).await
 }
 
-fn current_active_at(snapshot: &KnowledgeSnapshot, at: DateTime<Utc>) -> bool {
+pub(crate) fn current_active_at(snapshot: &KnowledgeSnapshot, at: DateTime<Utc>) -> bool {
     snapshot.item.lifecycle_state == KnowledgeLifecycleState::Active
         && snapshot.revision.content.valid_from <= at
         && snapshot
@@ -4157,6 +4298,33 @@ fn current_active_at(snapshot: &KnowledgeSnapshot, at: DateTime<Utc>) -> bool {
             .content
             .valid_to
             .is_none_or(|until| at < until)
+}
+
+/// TaskState may address one independent prior context snapshot, without
+/// recursive restart/handoff ancestry. It copies no rendered transcript text.
+pub(crate) async fn task_snapshot_available(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    session: SessionId,
+    snapshot: &synveda_types::task_state::TaskContextSnapshot,
+) -> Result<bool> {
+    if !crate::sessions::task_state::hash_valid(&snapshot.block_hash) {
+        return Ok(false);
+    }
+    let Some(run) = sessions::context_run(&mut *tx, tenant, snapshot.context_run_id).await? else {
+        return Ok(false);
+    };
+    if run.session_id != session || run.block_hash != snapshot.block_hash {
+        return Ok(false);
+    }
+    let Some(manifest) = dependencies::Manifest::load(tx, tenant, &run).await? else {
+        return Ok(false);
+    };
+    if manifest.has_restart_ancestry() {
+        return Ok(false);
+    }
+    replay::admissible(state, tx, tenant, &run).await
 }
 
 async fn visible_query_item(

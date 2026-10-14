@@ -11315,6 +11315,91 @@
         ]
       }
     },
+    "/v1/sessions/{session_id}/task-state": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "derive_session_task_state",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskStateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exact admitted event receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskStateView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported declaration, selector or bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current source or Session authority denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable Session or source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed state, source or retry key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/sessions/{session_id}/timeline": {
       "get": {
         "tags": [
@@ -14886,7 +14971,8 @@
               "relation_metadata",
               "source_descriptors",
               "import_mappings",
-              "artifact_copies"
+              "artifact_copies",
+              "session_copies"
             ]
           },
           "cleanup_state": {
@@ -16644,6 +16730,61 @@
             "format": "uuid"
           }
         }
+      },
+      "CheckoutObservationBody": {
+        "type": "object",
+        "description": "Current hook-time checkout observation, explicitly caller reported.",
+        "required": [
+          "ref",
+          "observed_at"
+        ],
+        "properties": {
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reported branch."
+          },
+          "commit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reported immutable commit."
+          },
+          "dirty": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Reported dirty state; omission stays unknown."
+          },
+          "dirty_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Digest of exact dirty bytes when supplied."
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Client observation time."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Installation-local opaque worktree reference."
+          },
+          "tree": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reported immutable tree when exposed."
+          }
+        },
+        "additionalProperties": false
       },
       "ConfigurationArtifactListView": {
         "type": "object",
@@ -18834,6 +18975,28 @@
             "format": "int32",
             "description": "Requested budget; the governed pack remains the ceiling.",
             "minimum": 0
+          },
+          "checkout_observation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CheckoutObservationBody",
+                "description": "Fresh client checkout report; it never attests to test execution."
+              }
+            ]
+          },
+          "handoff": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SessionHandoffBody",
+                "description": "Explicit source snapshot in another independently authorized Session.\nThis is a manual public-API handoff, separate from native local restart."
+              }
+            ]
           },
           "max_sensitivity": {
             "type": [
@@ -21576,6 +21739,7 @@
               "session.ended",
               "session.compaction_boundary",
               "session.checkpoint",
+              "session.task_state",
               "message.user",
               "message.assistant",
               "tool.invoked",
@@ -24718,6 +24882,7 @@
               "session.ended",
               "session.compaction_boundary",
               "session.checkpoint",
+              "session.task_state",
               "message.user",
               "message.assistant",
               "tool.invoked",
@@ -24765,6 +24930,32 @@
             "description": "The session it belongs to."
           }
         }
+      },
+      "SessionHandoffBody": {
+        "type": "object",
+        "description": "Exact server-derived snapshot to transfer without copying private events.",
+        "required": [
+          "source_session_id",
+          "snapshot_event_id",
+          "payload_hash"
+        ],
+        "properties": {
+          "payload_hash": {
+            "type": "string",
+            "description": "Exact admitted snapshot payload hash."
+          },
+          "snapshot_event_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Server TaskState or verified Checkpoint."
+          },
+          "source_session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Independently authorized source Session."
+          }
+        },
+        "additionalProperties": false
       },
       "SessionList": {
         "type": "object",
@@ -26112,6 +26303,313 @@
             ]
           }
         }
+      },
+      "TaskCheckoutBody": {
+        "type": "object",
+        "description": "Exact event containing the native `context.checkout` observation.",
+        "required": [
+          "event_id",
+          "payload_hash"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Source event in this Session."
+          },
+          "payload_hash": {
+            "type": "string",
+            "description": "Exact redacted payload hash."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskContextBody": {
+        "type": "object",
+        "description": "Exact existing context snapshot in this same Session.",
+        "required": [
+          "context_run_id",
+          "block_hash"
+        ],
+        "properties": {
+          "block_hash": {
+            "type": "string",
+            "description": "Exact block hash."
+          },
+          "context_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Saved run, independently reauthorized."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskEvidenceBody": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A supported string field in this same Session's admitted event.",
+            "required": [
+              "event_id",
+              "payload_hash",
+              "field",
+              "span",
+              "source_kind"
+            ],
+            "properties": {
+              "event_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Exact server event."
+              },
+              "field": {
+                "type": "string",
+                "description": "`text` or `tool_text`; the latter needs `tool_index`."
+              },
+              "payload_hash": {
+                "type": "string",
+                "description": "Admitted redacted payload hash."
+              },
+              "source_kind": {
+                "type": "string",
+                "enum": [
+                  "session_event"
+                ]
+              },
+              "span": {
+                "$ref": "#/components/schemas/TaskSpanBody",
+                "description": "Exact source bytes."
+              },
+              "tool_index": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "description": "Bounded tool index, only for `tool_text`.",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Exact current reviewed Knowledge body.",
+            "required": [
+              "item_id",
+              "revision_id",
+              "content_hash",
+              "span",
+              "source_kind"
+            ],
+            "properties": {
+              "content_hash": {
+                "type": "string",
+                "description": "Exact revision content hash."
+              },
+              "item_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable item."
+              },
+              "revision_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Exact current revision."
+              },
+              "source_kind": {
+                "type": "string",
+                "enum": [
+                  "knowledge_revision"
+                ]
+              },
+              "span": {
+                "$ref": "#/components/schemas/TaskSpanBody",
+                "description": "Exact body bytes."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Actual admitted import source, independently project-authorized.",
+            "required": [
+              "artifact_id",
+              "content_hash",
+              "span",
+              "source_kind"
+            ],
+            "properties": {
+              "artifact_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Exact source artifact."
+              },
+              "content_hash": {
+                "type": "string",
+                "description": "Exact source content hash."
+              },
+              "source_kind": {
+                "type": "string",
+                "enum": [
+                  "import_artifact"
+                ]
+              },
+              "span": {
+                "$ref": "#/components/schemas/TaskSpanBody",
+                "description": "Exact body bytes."
+              }
+            }
+          }
+        ],
+        "description": "Closed source pointer. Text and epistemic class are server-derived."
+      },
+      "TaskSpanBody": {
+        "type": "object",
+        "description": "Exact UTF-8 byte range in already admitted source text.",
+        "required": [
+          "start",
+          "end"
+        ],
+        "properties": {
+          "end": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Exclusive byte offset; at most 1024 bytes may be copied.",
+            "minimum": 0
+          },
+          "start": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Inclusive byte offset.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskStateBody": {
+        "type": "object",
+        "description": "Bounded deterministic replacement of a Session's working state.",
+        "required": [
+          "schema_version",
+          "client_event_id",
+          "statements"
+        ],
+        "properties": {
+          "checkout": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskCheckoutBody",
+                "description": "Optional source-bound client checkout observation."
+              }
+            ]
+          },
+          "client_event_id": {
+            "type": "string",
+            "description": "Stable retry key for this derivation."
+          },
+          "context_snapshot": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskContextBody",
+                "description": "Optional already saved context, without recursive handoff ancestry."
+              }
+            ]
+          },
+          "expected_previous": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskStatePrecondition",
+                "description": "Required to replace an existing available head; exact retries reuse it."
+              }
+            ]
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Exactly 1.",
+            "minimum": 0
+          },
+          "statements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskStatementBody"
+            },
+            "description": "At most 32 exact-evidence statements."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskStatePrecondition": {
+        "type": "object",
+        "description": "Exact prior state for serialized replacement, not inherited source evidence.",
+        "required": [
+          "event_id",
+          "payload_hash"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact preceding server TaskState."
+          },
+          "payload_hash": {
+            "type": "string",
+            "description": "Exact payload hash."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskStateView": {
+        "type": "object",
+        "description": "Immutable event receipt. The caller can immediately hand its hash to a receiver.",
+        "required": [
+          "outcome",
+          "event"
+        ],
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/SessionEventView",
+            "description": "Admitted server-derived event, under current source authority."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "appended or duplicate."
+          }
+        }
+      },
+      "TaskStatementBody": {
+        "type": "object",
+        "description": "Declared semantics over exact evidence, without a free-text summary field.",
+        "required": [
+          "kind",
+          "evidence"
+        ],
+        "properties": {
+          "declared_outcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "planned, attempted, succeeded, failed or unknown. This is a declaration."
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/TaskEvidenceBody",
+            "description": "Exact source pointer; the server supplies text and evidence class."
+          },
+          "kind": {
+            "type": "string",
+            "description": "objective, constraint, decision, proposal, observation, work, question,\nnext_action, artifact or verification."
+          }
+        },
+        "additionalProperties": false
       },
       "TenantCapabilities": {
         "type": "object",
