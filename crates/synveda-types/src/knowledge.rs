@@ -25,7 +25,7 @@ mod claims;
 
 use crate::{
     CaptureCandidateId, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId,
-    ConflictMemberId, ConflictSetId, DurableOperationId, Error, KnowledgeItemId,
+    ConflictMemberId, ConflictSetId, DurableOperationId, Error, ImportArtifactId, KnowledgeItemId,
     KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, Result,
     ScopeId, Sensitivity, SessionEventId, SessionId, TenantId,
 };
@@ -510,6 +510,9 @@ pub struct KnowledgeSource {
     pub source_type: KnowledgeSourceType,
     /// Real event id for a `session_event` source.
     pub session_event_id: Option<SessionEventId>,
+    /// Exact admitted import artifact; arbitrary metadata is not provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_artifact_id: Option<ImportArtifactId>,
     /// Logical document, repository, URL, OKF or derivation locator.
     pub locator: Option<String>,
     /// External repository, document or artifact revision.
@@ -1174,6 +1177,8 @@ fn knowledge_has_negation(value: &str) -> bool {
 pub enum KnowledgeCommandKind {
     /// Govern withdrawal or forgetting of exact Session evidence.
     ControlSource,
+    /// Control one exact imported source artifact.
+    ControlArtifact,
     /// Create a stable aggregate and first revision.
     Create,
     /// Append a new immutable revision.
@@ -1198,6 +1203,7 @@ impl KnowledgeCommandKind {
     /// Every command kind in storage order.
     pub const ALL: &'static [Self] = &[
         Self::ControlSource,
+        Self::ControlArtifact,
         Self::Create,
         Self::Edit,
         Self::Verify,
@@ -1214,6 +1220,7 @@ impl KnowledgeCommandKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ControlSource => "control_source",
+            Self::ControlArtifact => "control_artifact",
             Self::Create => "create",
             Self::Edit => "edit",
             Self::Verify => "verify",
@@ -1262,6 +1269,9 @@ pub struct KnowledgeSourceDraft {
     pub source_type: KnowledgeSourceType,
     /// Exact source event for an observed source.
     pub session_event_id: Option<SessionEventId>,
+    /// Exact admitted import artifact; arbitrary metadata is not provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_artifact_id: Option<ImportArtifactId>,
     /// Stable logical locator for located material.
     pub locator: Option<String>,
     /// External revision/version label.
@@ -1303,6 +1313,19 @@ pub enum KnowledgeCommand {
         /// Closed removal contract.
         mode: SourceControlMode,
         /// Bounded human reason; cleanup retains only its hash.
+        reason: String,
+    },
+    /// Withdraw an imported artifact; Forget also queues checked cleanup.
+    ControlArtifact {
+        /// Original admitted artifact.
+        artifact_id: ImportArtifactId,
+        /// Actual governing scope, independently checked at apply.
+        scope_id: ScopeId,
+        /// Original content hash the caller inspected.
+        expected_content_hash: String,
+        /// Closed source-removal contract.
+        mode: SourceControlMode,
+        /// Bounded human rationale.
         reason: String,
     },
     /// Create an aggregate.
@@ -1448,6 +1471,7 @@ impl KnowledgeCommand {
     pub const fn kind(&self) -> KnowledgeCommandKind {
         match self {
             Self::ControlSource { .. } => KnowledgeCommandKind::ControlSource,
+            Self::ControlArtifact { .. } => KnowledgeCommandKind::ControlArtifact,
             Self::Create { .. } => KnowledgeCommandKind::Create,
             Self::Edit { .. } => KnowledgeCommandKind::Edit,
             Self::Verify { .. } => KnowledgeCommandKind::Verify,
@@ -1488,7 +1512,9 @@ impl KnowledgeCommand {
                 .map(|input| input.item_id)
                 .chain(std::iter::once(*result_item_id))
                 .collect(),
-            Self::ResolveConflict { .. } | Self::ControlSource { .. } => Vec::new(),
+            Self::ResolveConflict { .. }
+            | Self::ControlSource { .. }
+            | Self::ControlArtifact { .. } => Vec::new(),
         }
     }
 }

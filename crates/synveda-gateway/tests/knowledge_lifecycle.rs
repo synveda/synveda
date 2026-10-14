@@ -347,6 +347,7 @@ fn source(scope_id: ScopeId) -> KnowledgeSourceDraft {
         scope_id,
         source_type: KnowledgeSourceType::Manual,
         session_event_id: None,
+        import_artifact_id: None,
         locator: None,
         source_revision: None,
         content_hash: None,
@@ -2613,6 +2614,7 @@ async fn forget_scrubs_later_context_import_and_conflict_references() {
             source_kind: "directory".to_owned(),
             source_locator: "cpr44-erasure-source".to_owned(),
             source_revision: None,
+            repository_id: None,
             bundle_digest: blake3::hash(b"cpr44-erasure-bundle").to_hex().to_string(),
             notices: Vec::new(),
             artifacts: vec![import_store::NewImportArtifact {

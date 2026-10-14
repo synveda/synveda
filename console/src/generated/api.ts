@@ -238,6 +238,64 @@ export type ApprovalRoleView = {
   };
 
 /**
+ * Exact imported source cleanup receipt.
+ */
+export type ArtifactCleanupOperationView = ArtifactControlView & {
+    /**
+     * Stable durable operation.
+     */
+    id: string;
+    kind: "source_cleanup";
+    /**
+     * Durable contract version.
+     */
+    operation_version: number;
+  };
+
+/**
+ * Exact source bytes and reviewed reason.
+ */
+export type ArtifactControlBody = {
+    /**
+     * Original admitted content hash previously inspected.
+     */
+    expected_content_hash: string;
+    /**
+     * Bounded rationale retained in the governed intent.
+     */
+    reason: string;
+  };
+
+/**
+ * Logical removal and physical cleanup are independently observable.
+ */
+export type ArtifactControlView = {
+    /**
+     * Exact inspected imported artifact.
+     */
+    artifact_id: string;
+    /**
+     * Applied governed source control.
+     */
+    change_id: string;
+    cleanup_stage: "retention_check" | "delivery_copies" | "capture_copies" | "command_copies" | "knowledge_copies" | "embedding_copies" | "relation_metadata" | "source_descriptors" | "import_mappings" | "artifact_copies";
+    cleanup_state: "pending" | "running" | "succeeded" | "failed" | "blocked" | "cancelled" | "dead_lettered";
+    /**
+     * Content-free hold or failure reason.
+     */
+    error_code?: string | null;
+    mode: "withdraw" | "forget";
+    /**
+     * Durable checked cleanup.
+     */
+    operation_id: string;
+    /**
+     * Logical removal commit time.
+     */
+    removed_at: string;
+  };
+
+/**
  * `POST /v1/projects/{project_id}/repositories`.
  *
  * The server derives `provider`, `canonical_uri`, `repository_owner` and
@@ -3443,6 +3501,10 @@ export type KnowledgeSourceBody = {
      */
     content_hash?: string | null;
     /**
+     * Exact admitted artifact for managed OKF provenance.
+     */
+    import_artifact_id?: string | null;
+    /**
      * Stable logical locator for located source families.
      */
     locator?: string | null;
@@ -3481,6 +3543,10 @@ export type KnowledgeSourceView = {
      * Stable source descriptor id.
      */
     id: string;
+    /**
+     * Exact admitted artifact for managed OKF provenance.
+     */
+    import_artifact_id?: string | null;
     /**
      * Logical locator; contains no source payload.
      */
@@ -4879,7 +4945,7 @@ export type ProposalTimelineEvent = {
  * Kind-specific public operation contract. Source cleanup does not require a
  * Skill version or a retained Session body to inspect its content-free receipt.
  */
-export type PublicOperationView = OperationView | SourceCleanupOperationView;
+export type PublicOperationView = OperationView | SourceCleanupOperationView | ArtifactCleanupOperationView;
 
 /**
  * Publish another complete immutable version.
@@ -7516,6 +7582,25 @@ export type Operations = {
     readonly method: "GET";
     readonly response: OkfImportPlanView;
   };
+  readonly forget_import_source: {
+    readonly path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/forget";
+    readonly method: "POST";
+    readonly body: ArtifactControlBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  readonly get_import_source_control: {
+    readonly path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/source-control";
+    readonly method: "GET";
+    readonly response: ArtifactControlView;
+  };
+  readonly withdraw_import_source: {
+    readonly path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/withdraw";
+    readonly method: "POST";
+    readonly body: ArtifactControlBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
   /**
    * Turn an immutable plan into reviewable candidates only.
    */
@@ -8522,6 +8607,9 @@ export const OPERATIONS = {
   get_me: { path: "/v1/me", method: "GET" },
   list_okf_imports: { path: "/v1/okf/imports", method: "GET" },
   get_okf_import: { path: "/v1/okf/imports/{id}", method: "GET" },
+  forget_import_source: { path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/forget", method: "POST", idempotent: true },
+  get_import_source_control: { path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/source-control", method: "GET" },
+  withdraw_import_source: { path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/withdraw", method: "POST", idempotent: true },
   materialize_okf_import: { path: "/v1/okf/imports/{id}/materialize", method: "POST", idempotent: true },
   list_operations: { path: "/v1/operations", method: "GET" },
   get_operation: { path: "/v1/operations/{id}", method: "GET" },

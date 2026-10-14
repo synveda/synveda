@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, project_id, scope_id, workspace_id, principal_id,\n               format, format_version, specification_commit, source_kind,\n               source_locator, source_revision, bundle_digest, state,\n               artifact_count, mapping_count, candidate_count, capture_batch_id,\n               error_code, notices, created_at, completed_at, updated_at\n        from import_jobs\n        where tenant_id = $1\n          and ($2::uuid is null or project_id = $2)\n          and ($3::text is null or state = $3)\n          and ($4::timestamptz is null or created_at < $4\n               or (created_at = $4 and id < $5))\n        order by created_at desc, id desc\n        limit $6\n        ",
+  "query": "\n        select id, tenant_id, project_id, scope_id, workspace_id, principal_id,\n               format, format_version, specification_commit, source_kind,\n               source_locator, source_revision, bundle_digest, state,\n               artifact_count, mapping_count, candidate_count, capture_batch_id,\n               error_code, case when exists(select 1 from source_artifact_addresses address\n                 join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest\n                 where address.tenant_id=import_jobs.tenant_id and address.job_id=import_jobs.id)\n                 then '[]'::jsonb else notices end as \"notices!\", created_at, completed_at, updated_at\n        from import_jobs\n        where tenant_id = $1 and project_id = $2 and source_kind = $3\n          and source_locator = $4 and bundle_digest = $5\n        ",
   "describe": {
     "columns": [
       {
@@ -100,7 +100,7 @@
       },
       {
         "ordinal": 19,
-        "name": "notices",
+        "name": "notices!",
         "type_info": "Jsonb"
       },
       {
@@ -124,9 +124,8 @@
         "Uuid",
         "Uuid",
         "Text",
-        "Timestamptz",
-        "Uuid",
-        "Int8"
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -149,11 +148,11 @@
       false,
       true,
       true,
-      false,
+      null,
       false,
       true,
       false
     ]
   },
-  "hash": "cb017eceeacc9b565bac3b2dbbe817cd0b7ecf526ec46157dc85bc3e6e59be83"
+  "hash": "85325bd7368e3a711a2fb619143fa7cc8deaca3c2408ef206c747a6daea4f4ea"
 }

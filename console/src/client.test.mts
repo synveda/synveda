@@ -176,6 +176,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "discover_tool_server",
     "dismiss_capture_candidate",
     "edit_knowledge",
+    "forget_import_source",
     "forget_session_source",
     "import_tool_client_config",
     "install_skill",
@@ -202,6 +203,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "update_tool_binding",
     "update_tool_server",
     "verify_knowledge",
+    "withdraw_import_source",
     "withdraw_session_source",
   ]);
 });

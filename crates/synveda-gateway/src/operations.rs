@@ -104,6 +104,8 @@ pub enum PublicOperationView {
     SkillValidation(OperationView),
     /// Governed source cleanup.
     SourceCleanup(SourceCleanupOperationView),
+    /// Governed imported evidence cleanup.
+    ArtifactCleanup(ArtifactCleanupOperationView),
 }
 
 /// Safe durable source cleanup receipt.
@@ -120,6 +122,22 @@ pub struct SourceCleanupOperationView {
     /// Source removal and physical cleanup are separate states.
     #[serde(flatten)]
     pub source_control: crate::source_control::SourceControlView,
+}
+
+/// Exact imported source cleanup receipt.
+#[derive(Serialize, ToSchema)]
+pub struct ArtifactCleanupOperationView {
+    /// Stable durable operation.
+    #[schema(value_type=String,format="uuid")]
+    pub id: DurableOperationId,
+    /// Closed source cleanup operation family.
+    #[schema(schema_with=source_operation_kind_schema)]
+    pub kind: String,
+    /// Durable contract version.
+    pub operation_version: u16,
+    /// Current logical removal and checked cleanup state.
+    #[serde(flatten)]
+    pub source_control: crate::artifact_control::ArtifactControlView,
 }
 
 fn source_operation_kind_schema() -> utoipa::openapi::schema::Object {
@@ -493,6 +511,16 @@ pub(crate) async fn get(
                 json!({"op":"operations.get","operation_id":operation_id,"authz":audit::decision_context(Action::SessionRead,&allowed)})).await?;
             commit(tx).await?;
             return Ok(Json(PublicOperationView::SourceCleanup(view)));
+        }
+        if let Some(address)=synveda_store::artifact_control::operation_source(&mut tx,tenant,operation_id).await? {
+            if let Err(error)=crate::artifact_control::authorize(&state,&mut tx,tenant,&address,Action::KnowledgeRead).await {
+                drop(tx);audit::record_rejection(&state,"operations.get",&error).await;
+                return Err(match error {Error::PolicyDenied {..}|Error::NotFound {..}=>operation_not_found(operation_id),other=>other});
+            }
+            let status=synveda_store::artifact_control::operation_status(&mut tx,tenant,operation_id).await?.ok_or_else(||operation_not_found(operation_id))?;
+            let view=ArtifactCleanupOperationView {id:operation_id,kind:OperationKind::SourceCleanup.as_str().to_owned(),operation_version:1,
+                source_control:crate::artifact_control::view(synveda_types::ImportArtifactId::from_uuid(address.artifact_id),status)?};
+            commit(tx).await?;return Ok(Json(PublicOperationView::ArtifactCleanup(view)));
         }
         let stored = store::read_skill_validation_operation(&mut *tx, tenant, operation_id)
             .await?

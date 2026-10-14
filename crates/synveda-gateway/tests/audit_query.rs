@@ -219,6 +219,7 @@ async fn seed_knowledge(
             scope_id: scope,
             source_type: KnowledgeSourceType::Manual,
             session_event_id: None,
+            import_artifact_id: None,
             locator: None,
             source_revision: None,
             content_hash: None,

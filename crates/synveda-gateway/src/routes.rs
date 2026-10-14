@@ -134,6 +134,9 @@ define_routes! {
     "/v1/projects/{project_id}/okf/imports" => [POST crate::okf::plan_import],
     "/v1/okf/imports" => [GET crate::okf::list_imports],
     "/v1/okf/imports/{id}" => [GET crate::okf::get_import],
+    "/v1/okf/imports/{id}/artifacts/{artifact_id}/withdraw" => [POST crate::artifact_control::withdraw],
+    "/v1/okf/imports/{id}/artifacts/{artifact_id}/forget" => [POST crate::artifact_control::forget],
+    "/v1/okf/imports/{id}/artifacts/{artifact_id}/source-control" => [GET crate::artifact_control::get],
     "/v1/okf/imports/{id}/materialize" => [POST crate::okf::materialize_import],
     "/v1/projects/{project_id}/okf/exports" => [POST crate::okf::export],
 

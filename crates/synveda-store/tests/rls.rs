@@ -116,6 +116,9 @@ async fn app_tx(pool: &PgPool, tenant: Option<TenantId>) -> Transaction<'static,
 /// tenant-keyed predicate would evaluate to false and hide the marker from
 /// the check that exists to read it.
 const COVERED: &[&str] = &[
+    "artifact_cleanup_targets",
+    "artifact_dependencies",
+    "artifact_suppressions",
     "audit_chain_heads",
     "audit_log",
     // CPR-25 (ADR-0086): trusted MCP catalogue metadata, immutable discovery
@@ -244,6 +247,7 @@ const COVERED: &[&str] = &[
     "skill_versions",
     "skills",
     // MEM-8 / ADR-0146: suppression and cleanup proofs disclose tenant state.
+    "source_artifact_addresses",
     "source_cleanup_targets",
     "source_dependencies",
     "source_event_addresses",
@@ -264,6 +268,7 @@ const COVERED: &[&str] = &[
     "tool_server_versions",
     "tool_servers",
     "tool_test_runs",
+    "unproven_artifact_dependencies",
     "unproven_context_deliveries",
     "vedaflow_commit_parents",
     "vedaflow_commits",
@@ -5169,6 +5174,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
             scope_id: workspace.scope_id,
             source_type: KnowledgeSourceType::Manual,
             session_event_id: None,
+            import_artifact_id: None,
             locator: None,
             source_revision: None,
             content_hash: None,

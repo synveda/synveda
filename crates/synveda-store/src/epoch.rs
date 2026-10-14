@@ -52,7 +52,8 @@ pub const CURRENT_EPOCH: i32 = 3;
 pub const CURRENT_BASELINE_REVISION: i32 = 3;
 
 /// The forward head needed before the current binary may serve requests.
-pub const CURRENT_MIGRATION_HEAD: &str = "0005";
+pub const CURRENT_MIGRATION_HEAD: &str = "0006";
+const SOURCE_MIGRATION_HEAD: &str = "0005";
 const DELIVERY_MIGRATION_HEAD: &str = "0004";
 const V043_MIGRATION_HEAD: &str = "0001";
 const FORWARD_MIGRATION_HEAD: &str = "0002";
@@ -69,7 +70,7 @@ pub struct SchemaMetadata {
     pub epoch: i32,
     /// The immutable baseline revision within the epoch.
     pub baseline_revision: i32,
-    /// The migration head reached, as its four-digit file prefix (`0005`).
+    /// The migration head reached, as its four-digit file prefix (`0006`).
     /// Diagnostic: it tells two databases at the same epoch apart.
     pub migration_head: String,
     /// When this database became a Synveda database.
@@ -355,7 +356,8 @@ pub async fn verify_connection(
         V043_MIGRATION_HEAD
         | FORWARD_MIGRATION_HEAD
         | LOGIN_MIGRATION_HEAD
-        | DELIVERY_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
+        | DELIVERY_MIGRATION_HEAD
+        | SOURCE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
             found: metadata.migration_head,
         }),
         found if found > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
@@ -392,6 +394,7 @@ pub(crate) async fn verify_embedded_head_connection(
             | MigrationPreflight::Forward
             | MigrationPreflight::Login
             | MigrationPreflight::Delivery
+            | MigrationPreflight::Source
             | MigrationPreflight::Current
     ) {
         return Err(SchemaEpochError::IncompatibleMigration);
@@ -440,7 +443,9 @@ pub(crate) enum MigrationPreflight {
     PendingStampLogin,
     /// All four migrations committed, but the marker needs its head stamp.
     PendingStampDelivery,
-    /// Source control committed, but the marker needs its head stamp.
+    /// Session source control committed, before its head stamp.
+    PendingStampSource,
+    /// Artifact source control committed, before its head stamp.
     PendingStampCurrent,
     /// The published v0.4.3 baseline and its exact SQLx row are present.
     Prior,
@@ -450,6 +455,7 @@ pub(crate) enum MigrationPreflight {
     Login,
     /// The current head and exact SQLx ledger are present.
     Delivery,
+    Source,
     Current,
 }
 
@@ -493,6 +499,7 @@ pub(crate) async fn migration_preflight_connection(
                 EmbeddedPrefix::Forward => MigrationPreflight::PendingStampForward,
                 EmbeddedPrefix::Login => MigrationPreflight::PendingStampLogin,
                 EmbeddedPrefix::Delivery => MigrationPreflight::PendingStampDelivery,
+                EmbeddedPrefix::Source => MigrationPreflight::PendingStampSource,
                 EmbeddedPrefix::Current => MigrationPreflight::PendingStampCurrent,
             }),
             Err(error) => Err(error),
@@ -525,6 +532,15 @@ pub(crate) async fn migration_preflight_connection(
                     | FORWARD_MIGRATION_HEAD
                     | LOGIN_MIGRATION_HEAD
                     | DELIVERY_MIGRATION_HEAD,
+                    EmbeddedPrefix::Source,
+                ) => Ok(MigrationPreflight::PendingStampSource),
+                (SOURCE_MIGRATION_HEAD, EmbeddedPrefix::Source) => Ok(MigrationPreflight::Source),
+                (
+                    V043_MIGRATION_HEAD
+                    | FORWARD_MIGRATION_HEAD
+                    | LOGIN_MIGRATION_HEAD
+                    | DELIVERY_MIGRATION_HEAD
+                    | SOURCE_MIGRATION_HEAD,
                     EmbeddedPrefix::Current,
                 ) => Ok(MigrationPreflight::PendingStampCurrent),
                 (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current) => {
@@ -551,6 +567,7 @@ enum EmbeddedPrefix {
     Forward,
     Login,
     Delivery,
+    Source,
     Current,
 }
 
@@ -559,7 +576,9 @@ enum EmbeddedPrefix {
 async fn exact_applied_prefix_connection(
     connection: &mut PgConnection,
 ) -> Result<Option<EmbeddedPrefix>, SchemaEpochError> {
-    let [baseline, forward, login, delivery, source] = crate::MIGRATOR.migrations.as_ref() else {
+    let [baseline, forward, login, delivery, source, artifact] =
+        crate::MIGRATOR.migrations.as_ref()
+    else {
         return Err(SchemaEpochError::IncompatibleMigration);
     };
     if baseline.no_tx
@@ -567,11 +586,13 @@ async fn exact_applied_prefix_connection(
         || login.no_tx
         || delivery.no_tx
         || source.no_tx
+        || artifact.no_tx
         || baseline.version != 1
         || forward.version != 2
         || login.version != 3
         || delivery.version != 4
         || source.version != 5
+        || artifact.version != 6
     {
         return Err(SchemaEpochError::IncompatibleMigration);
     }
@@ -580,7 +601,7 @@ async fn exact_applied_prefix_connection(
         select version, description, success, checksum, execution_time
           from public._sqlx_migrations
          order by version
-         limit 6
+         limit 7
         "#
     )
     .fetch_all(&mut *connection)
@@ -591,12 +612,12 @@ async fn exact_applied_prefix_connection(
         SchemaEpochError::Missing => SchemaEpochError::IncompatibleMigration,
         other => other,
     })?;
-    if rows.is_empty() || rows.len() > 5 {
+    if rows.is_empty() || rows.len() > 6 {
         return Ok(None);
     }
     for (row, migration) in rows
         .iter()
-        .zip([baseline, forward, login, delivery, source])
+        .zip([baseline, forward, login, delivery, source, artifact])
     {
         if row.version != migration.version
             || row.description != migration.description.as_ref()
@@ -612,7 +633,8 @@ async fn exact_applied_prefix_connection(
         2 => EmbeddedPrefix::Forward,
         3 => EmbeddedPrefix::Login,
         4 => EmbeddedPrefix::Delivery,
-        5 => EmbeddedPrefix::Current,
+        5 => EmbeddedPrefix::Source,
+        6 => EmbeddedPrefix::Current,
         _ => return Ok(None),
     }))
 }

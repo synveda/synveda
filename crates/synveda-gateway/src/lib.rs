@@ -18,6 +18,7 @@ mod access;
 mod admin_scopes;
 pub mod app;
 mod approvals;
+pub mod artifact_control;
 mod audit;
 mod audit_query;
 mod auth;

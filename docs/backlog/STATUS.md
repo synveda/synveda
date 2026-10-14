@@ -338,10 +338,18 @@ prior-head lifecycle and genuine supported vector profiles pass. The 31-scenario
 product evaluation, generated contracts, 264 console cases/build, fresh SQLx,
 strict Clippy and fast/dependency gates pass. The MEM-8 brief records measured
 catalogue identities and the next executable artifact-root step.
-ImportArtifact lineage/suppression remains open before inbound reconciliation,
-structured second-client handoff, procedure learning and the integrated domain
-demo. No new persistent procedure-learning producer is enabled. No external
-credential blocks the next local increment; full A–H remains unfinished.
+Accepted ADR-0147 at additive head `0006` now qualifies actual ImportArtifact
+lineage, permanent source/path/hash aliases, governed controls and cleanup.
+Nine artifact cases, all 32 real serial epoch cases, the 31-scenario product
+suite, current ordinary-role lifecycle/RLS, generated contracts, fresh SQLx,
+strict Clippy and every genuine supported vector profile pass. All seven retained
+artifact draft fixtures and private credential state were removed with exact
+ownership checks. MEM-8 stays open while its contract is applied to the new
+MEM-9 reconciliation, CTX-6 structured handoff and SKIL-6 outcome producers.
+Next implement governed inbound descriptors, durable local refresh and targeted
+path freshness, then pinned private GitHub and the remaining phases. No external
+credential blocks local work; no persistent procedure-learning producer or full
+A–H completion is claimed.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
 OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL

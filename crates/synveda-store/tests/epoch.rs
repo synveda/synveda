@@ -851,7 +851,7 @@ fn released_v043_prefix_upgrades_without_resetting_tenant_data() {
         assert_eq!(upgraded.migration_head, epoch::CURRENT_MIGRATION_HEAD);
         assert_eq!(upgraded.created_by_version, "0.4.3");
         assert_eq!(upgraded.created_at, metadata_before.created_at);
-        assert_eq!(migration_ledger(&pool).await.len(), 5);
+        assert_eq!(migration_ledger(&pool).await.len(), 6);
         assert_eq!(migration_ledger(&pool).await[0], ledger_before[0]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -1039,7 +1039,7 @@ fn exact_forward_prefix_adds_login_state_without_rewriting_existing_rows() {
             epoch::CURRENT_MIGRATION_HEAD
         );
         let after = migration_ledger(&pool).await;
-        assert_eq!(after.len(), 5);
+        assert_eq!(after.len(), 6);
         assert_eq!(&after[..2], &before[..]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -1089,7 +1089,7 @@ fn exact_login_prefix_adds_delivery_proof_without_rewriting_existing_rows() {
             epoch::CURRENT_MIGRATION_HEAD
         );
         let after = migration_ledger(&pool).await;
-        assert_eq!(after.len(), 5);
+        assert_eq!(after.len(), 6);
         assert_eq!(&after[..3], &before[..]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -1129,13 +1129,68 @@ fn exact_delivery_prefix_backfills_source_addresses_without_rewriting_events() {
         let before=migration_ledger(&pool).await;assert_eq!(before.len(),4);
         synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap();
         synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
-        let after=migration_ledger(&pool).await;assert_eq!(after.len(),5);assert_eq!(&after[..4],&before[..]);
+        let after=migration_ledger(&pool).await;assert_eq!(after.len(),6);assert_eq!(&after[..4],&before[..]);
         let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
         let address=synveda_store::source_control::address(&mut tx,tenant,session.id,event).await.unwrap().unwrap();
         assert_eq!(address.payload_hash,hash);assert_eq!(address.scope_id,session.scope_id.as_uuid());assert_eq!(address.sequence,1);
         let retained=synveda_store::sessions::event(&mut *tx,tenant,session.id,event).await.unwrap().unwrap();
         assert_eq!(retained.payload,payload);assert_eq!(retained.payload_hash,hash);
         tx.commit().await.unwrap();pool.close().await;
+    });
+}
+
+#[test]
+fn exact_source_prefix_backfills_complete_artifacts_and_preserves_generic_metadata() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    let gateway_url = private_database_url("SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE")
+        .expect("ordinary lifecycle gateway credential");
+    scratch.block_on(async {
+        let pool=connect_pool(&scratch.options).await;
+        let mut connection=pool.acquire().await.unwrap();
+        sqlx::migrate::Migrator {migrations:std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..5].to_vec()),
+          ..sqlx::migrate::Migrator::DEFAULT}.run(&mut *connection).await.unwrap();
+        epoch::stamp_connection(&mut connection,"0.4.5").await.unwrap();drop(connection);
+        let tenant=admit_a_tenant(&pool).await;
+        let ordinary=PgPool::connect(&replace_database(&gateway_url,&scratch.name)).await.unwrap();
+        let mut tx=synveda_store::rls::begin_tenant_tx(&ordinary,tenant).await.unwrap();
+        let workspace=synveda_store::workspaces::create(&mut tx,&synveda_store::workspaces::NewWorkspace {
+          id:synveda_types::WorkspaceId::new(),tenant_id:tenant,slug:"artifact-upgrade".to_owned(),display_name:"Artifact upgrade".to_owned(),description:None,created_by:None}).await.unwrap();
+        let project=synveda_store::projects::create(&mut tx,&synveda_store::projects::NewProject {
+          id:synveda_types::ProjectId::new(),tenant_id:tenant,workspace_id:workspace.id,slug:"artifact-upgrade".to_owned(),display_name:"Artifact upgrade".to_owned(),description:None,created_by:None}).await.unwrap();
+        let job=uuid::Uuid::now_v7();let artifact=uuid::Uuid::now_v7();let batch=uuid::Uuid::now_v7();let candidate=uuid::Uuid::now_v7();
+        let hash="a".repeat(64);let spec="ad30107c31c06aec8a7d5636e0d1058118604e6f";
+        sqlx::query("insert into import_jobs(id,tenant_id,project_id,scope_id,workspace_id,principal_id,format,format_version,specification_commit,source_kind,source_locator,source_revision,bundle_digest,artifact_count,mapping_count) values($1,$2,$3,$4,$5,'artifact-upgrade','okf','0.2',$6,'git','fixture:artifact-upgrade','commit-a',$7,1,1)")
+          .bind(job).bind(tenant.as_uuid()).bind(project.id.as_uuid()).bind(project.scope_id.as_uuid()).bind(workspace.id.as_uuid()).bind(spec).bind(&hash).execute(&mut *tx).await.unwrap();
+        sqlx::query("insert into import_artifacts(id,tenant_id,job_id,ordinal,logical_path,artifact_kind,content_hash,frontmatter,body_markdown) values($1,$2,$3,1,'rule.md','concept',$4,'{}','The exact retained fictional artifact.')")
+          .bind(artifact).bind(tenant.as_uuid()).bind(job).bind(&hash).execute(&mut *tx).await.unwrap();
+        sqlx::query("insert into capture_batches(id,tenant_id,scope_id,workspace_id,project_id,principal_id,input_hash,event_count,source_kind,import_job_id) values($1,$2,$3,$4,$5,'artifact-upgrade',$6,0,'okf_import',$7)")
+          .bind(batch).bind(tenant.as_uuid()).bind(project.scope_id.as_uuid()).bind(workspace.id.as_uuid()).bind(project.id.as_uuid()).bind(&hash).bind(job).execute(&mut *tx).await.unwrap();
+        sqlx::query("insert into capture_candidates(id,tenant_id,batch_id,ordinal,proposed_scope_id,proposed_project_id,knowledge_type,origin,title,body_markdown,summary,sensitivity,confidence_permille,valid_from,content_hash,source_kind,import_job_id) values($1,$2,$3,1,$4,$5,'procedure','imported','Legacy artifact','The exact retained fictional artifact.','Retained artifact','internal',900,clock_timestamp(),$6,'okf_import',$7)")
+          .bind(candidate).bind(tenant.as_uuid()).bind(batch).bind(project.scope_id.as_uuid()).bind(project.id.as_uuid()).bind(&hash).bind(job).execute(&mut *tx).await.unwrap();
+        sqlx::query("insert into capture_candidate_import_artifacts(tenant_id,candidate_id,import_job_id,artifact_id,ordinal) values($1,$2,$3,$4,1)")
+          .bind(tenant.as_uuid()).bind(candidate).bind(job).bind(artifact).execute(&mut *tx).await.unwrap();
+        let proven=uuid::Uuid::now_v7();let ambiguous=uuid::Uuid::now_v7();let generic=uuid::Uuid::now_v7();
+        let metadata=serde_json::json!({"import_job_id":job,"artifact_id":artifact,"bundle_digest":hash,"logical_path":"rule.md","artifact_kind":"concept","capture_batch_id":batch,"capture_candidate_id":candidate});
+        for (id,kind,locator,value) in [(proven,"okf","fixture:artifact-upgrade#rule.md",metadata.clone()),
+          (ambiguous,"okf","fixture:ambiguous",serde_json::json!({"artifact_id":"not-a-uuid"})),
+          (generic,"document","external:independent",serde_json::json!({"artifact_id":"external-system-id"}))] {
+            sqlx::query("insert into knowledge_sources(id,tenant_id,scope_id,source_type,locator,source_revision,content_hash,metadata) values($1,$2,$3,$4,$5,'commit-a',$6,$7)")
+              .bind(id).bind(tenant.as_uuid()).bind(project.scope_id.as_uuid()).bind(kind).bind(locator).bind(&hash).bind(value).execute(&mut *tx).await.unwrap();
+        }
+        tx.commit().await.unwrap();let before=migration_ledger(&pool).await;assert_eq!(before.len(),5);
+        synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap();
+        synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
+        let after=migration_ledger(&pool).await;assert_eq!(after.len(),6);assert_eq!(&after[..5],&before[..]);
+        let mut tx=synveda_store::rls::begin_tenant_tx(&ordinary,tenant).await.unwrap();
+        let row:(Option<uuid::Uuid>,serde_json::Value)=sqlx::query_as("select import_artifact_id,metadata from knowledge_sources where tenant_id=$1 and id=$2")
+          .bind(tenant.as_uuid()).bind(proven).fetch_one(&mut *tx).await.unwrap();assert_eq!(row.0,Some(artifact));assert_eq!(row.1,metadata);
+        let address=synveda_store::artifact_control::address(&mut tx,tenant,synveda_types::ImportArtifactId::from_uuid(artifact)).await.unwrap().unwrap();assert_eq!(address.content_hash,hash);assert_eq!(address.scope_id,project.scope_id.as_uuid());
+        let markers:Vec<uuid::Uuid>=sqlx::query_scalar("select dependent_id from unproven_artifact_dependencies where tenant_id=$1 order by dependent_id")
+          .bind(tenant.as_uuid()).fetch_all(&mut *tx).await.unwrap();assert_eq!(markers,vec![ambiguous]);
+        let retained:serde_json::Value=sqlx::query_scalar("select metadata from knowledge_sources where tenant_id=$1 and id=$2")
+          .bind(tenant.as_uuid()).bind(generic).fetch_one(&mut *tx).await.unwrap();assert_eq!(retained,serde_json::json!({"artifact_id":"external-system-id"}));
+        tx.commit().await.unwrap();ordinary.close().await;pool.close().await;
     });
 }
 
@@ -1161,7 +1216,7 @@ fn an_unstamped_released_baseline_resumes_from_its_exact_sqlx_prefix() {
             epoch::verify(&pool).await.unwrap().migration_head,
             epoch::CURRENT_MIGRATION_HEAD
         );
-        assert_eq!(migration_ledger(&pool).await.len(), 5);
+        assert_eq!(migration_ledger(&pool).await.len(), 6);
         pool.close().await;
     });
 }
@@ -1190,7 +1245,7 @@ fn a_committed_forward_migration_with_old_stamp_repairs_only_the_stamp() {
             .expect("commit forward DDL and SQLx row without marker stamp");
         drop(connection);
         let ledger_before = migration_ledger(&pool).await;
-        assert_eq!(ledger_before.len(), 5);
+        assert_eq!(ledger_before.len(), 6);
         assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0001");
         assert!(matches!(
             epoch::verify(&pool).await,
@@ -2054,9 +2109,10 @@ fn no_old_to_new_data_migrator_exists() {
             "0002_context_restart_and_excerpt.sql",
             "0003_one_time_login_ledger.sql",
             "0004_context_delivery_dependencies.sql",
-            "0005_session_source_control.sql"
+            "0005_session_source_control.sql",
+            "0006_import_artifact_source_control.sql"
         ],
-        "epoch 3 has the released baseline and four forward migrations"
+        "epoch 3 has the released baseline and five forward migrations"
     );
 
     let down: Vec<_> = names

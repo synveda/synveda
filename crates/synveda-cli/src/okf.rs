@@ -26,6 +26,52 @@ use synveda_types::{ImportJobId, KnowledgeItemId, ProjectId};
 
 use crate::api::{Api, Origin};
 
+/// Inspect the governed imported source receipt.
+pub async fn source_status(
+    profile: &str,
+    job: ImportJobId,
+    artifact: synveda_types::ImportArtifactId,
+) -> Result<(), String> {
+    let (api, _) = Api::connect(profile).await?;
+    let value = api
+        .get(&format!(
+            "/v1/okf/imports/{job}/artifacts/{artifact}/source-control"
+        ))
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+/// Submit an exact public-API source intent; review and cleanup are server-owned.
+pub async fn control_source(
+    profile: &str,
+    job: ImportJobId,
+    artifact: synveda_types::ImportArtifactId,
+    mode: &str,
+    hash: &str,
+    reason: &str,
+    key: &str,
+) -> Result<(), String> {
+    if !matches!(mode, "withdraw" | "forget") {
+        return Err("source mode must be withdraw or forget".to_owned());
+    }
+    let (api, _) = Api::connect(profile).await?;
+    let value: Value = api
+        .post_idempotent_as(
+            &format!("/v1/okf/imports/{job}/artifacts/{artifact}/{mode}"),
+            Some(json!({"expected_content_hash":hash,"reason":reason})),
+            key,
+        )
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
 #[derive(Debug)]
 struct LoadedBundle {
     inspection: BundleInspection,

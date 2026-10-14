@@ -290,10 +290,10 @@ pub(crate) async fn run(pool: sqlx::PgPool, stop: tokio::sync::watch::Receiver<b
     }
 }
 
-fn source_mode_schema() -> utoipa::openapi::schema::Object {
+pub(crate) fn source_mode_schema() -> utoipa::openapi::schema::Object {
     crate::workspaces::string_enum(["withdraw", "forget"].into_iter())
 }
-fn cleanup_state_schema() -> utoipa::openapi::schema::Object {
+pub(crate) fn cleanup_state_schema() -> utoipa::openapi::schema::Object {
     crate::workspaces::string_enum(OperationState::ALL.iter().map(|state| state.as_str()))
 }
 fn cleanup_stage_schema() -> utoipa::openapi::schema::Object {

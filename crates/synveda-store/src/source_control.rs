@@ -82,7 +82,9 @@ pub async fn available(
 ) -> Result<bool> {
     if !matches!(
         kind,
-        "session_event"
+        "import_artifact"
+            | "import_mapping"
+            | "session_event"
             | "knowledge_revision"
             | "knowledge_source"
             | "capture_candidate"
@@ -236,6 +238,8 @@ pub struct CleanupClaim {
     pub attempts: i32,
     /// The final expired attempt was terminalized; no page may execute.
     pub exhausted: bool,
+    /// Closed source family chosen from the exact durable target.
+    pub artifact: bool,
 }
 
 /// Claim or reclaim a page executor. Provider work is never performed here.
@@ -267,12 +271,14 @@ pub async fn claim(
             operation_id: exhausted.id,
             attempts: exhausted.attempts,
             exhausted: true,
+            artifact: false,
         }));
     }
     let row = sqlx::query!(
-        r#"select o.id,o.attempts,o.lease_owner,(o.state='running' and o.lease_owner=$2 and o.lease_expires_at>clock_timestamp()) as "continuing!" from durable_operations o
-        join source_cleanup_targets t on t.tenant_id=o.tenant_id and t.operation_id=o.id
+        r#"select o.id,o.attempts,o.lease_owner,exists(select 1 from artifact_cleanup_targets target where target.tenant_id=o.tenant_id and target.operation_id=o.id) as "artifact!",(o.state='running' and o.lease_owner=$2 and o.lease_expires_at>clock_timestamp()) as "continuing!" from durable_operations o
         where o.tenant_id=$1 and o.kind='source_cleanup'
+        and ((exists(select 1 from source_cleanup_targets target where target.tenant_id=o.tenant_id and target.operation_id=o.id))
+            <> (exists(select 1 from artifact_cleanup_targets target where target.tenant_id=o.tenant_id and target.operation_id=o.id)))
         and ((o.state='running' and o.lease_owner=$2 and o.lease_expires_at>clock_timestamp())
           or (o.attempts<5 and ((o.state in ('pending','failed') and o.next_attempt_at<=statement_timestamp())
           or (o.state='running' and o.lease_expires_at<=clock_timestamp()))))
@@ -288,6 +294,7 @@ pub async fn claim(
             operation_id: row.id,
             attempts: row.attempts,
             exhausted: false,
+            artifact: row.artifact,
         }));
     }
     sqlx::query!(r#"update operation_attempts set state='retry_scheduled',safe_error_code='lease_expired',completed_at=clock_timestamp()
@@ -314,6 +321,7 @@ pub async fn claim(
         operation_id: row.id,
         attempts,
         exhausted: false,
+        artifact: row.artifact,
     }))
 }
 
@@ -364,6 +372,9 @@ pub async fn chunk(
     claim: &CleanupClaim,
     owner: &str,
 ) -> Result<CleanupPage> {
+    if claim.artifact {
+        return crate::artifact_control::chunk(conn, tenant, claim, owner).await;
+    }
     sqlx::query_as!(
         CleanupPage,
         r#"select progress as "progress!",done as "done!",erased as "erased!"

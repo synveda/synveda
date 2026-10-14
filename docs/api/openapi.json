@@ -6401,6 +6401,261 @@
         ]
       }
     },
+    "/v1/okf/imports/{id}/artifacts/{artifact_id}/forget": {
+      "post": {
+        "tags": [
+          "okf"
+        ],
+        "operationId": "forget_import_source",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactControlBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exact intent replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Governed applied or pending change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid source control",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed source or key conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/okf/imports/{id}/artifacts/{artifact_id}/source-control": {
+      "get": {
+        "tags": [
+          "okf"
+        ],
+        "operationId": "get_import_source_control",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Applied removal and checked cleanup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactControlView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable source control",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/okf/imports/{id}/artifacts/{artifact_id}/withdraw": {
+      "post": {
+        "tags": [
+          "okf"
+        ],
+        "operationId": "withdraw_import_source",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactControlBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exact intent replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Governed applied or pending change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid source control",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed source or key conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/okf/imports/{id}/materialize": {
       "post": {
         "tags": [
@@ -14362,6 +14617,137 @@
           }
         }
       },
+      "ArtifactCleanupOperationView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ArtifactControlView",
+            "description": "Current logical removal and checked cleanup state."
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind",
+              "operation_version"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable durable operation."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "source_cleanup"
+                ]
+              },
+              "operation_version": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Durable contract version.",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "Exact imported source cleanup receipt."
+      },
+      "ArtifactControlBody": {
+        "type": "object",
+        "description": "Exact source bytes and reviewed reason.",
+        "required": [
+          "expected_content_hash",
+          "reason"
+        ],
+        "properties": {
+          "expected_content_hash": {
+            "type": "string",
+            "description": "Original admitted content hash previously inspected."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Bounded rationale retained in the governed intent."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArtifactControlView": {
+        "type": "object",
+        "description": "Logical removal and physical cleanup are independently observable.",
+        "required": [
+          "artifact_id",
+          "removed_at",
+          "change_id",
+          "operation_id",
+          "mode",
+          "cleanup_state",
+          "cleanup_stage"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact inspected imported artifact."
+          },
+          "change_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Applied governed source control."
+          },
+          "cleanup_stage": {
+            "type": "string",
+            "enum": [
+              "retention_check",
+              "delivery_copies",
+              "capture_copies",
+              "command_copies",
+              "knowledge_copies",
+              "embedding_copies",
+              "relation_metadata",
+              "source_descriptors",
+              "import_mappings",
+              "artifact_copies"
+            ]
+          },
+          "cleanup_state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed",
+              "blocked",
+              "cancelled",
+              "dead_lettered"
+            ]
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Content-free hold or failure reason."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "withdraw",
+              "forget"
+            ]
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Durable checked cleanup."
+          },
+          "removed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Logical removal commit time."
+          }
+        }
+      },
       "AttachRepositoryBody": {
         "type": "object",
         "description": "`POST /v1/projects/{project_id}/repositories`.\n\nThe server derives `provider`, `canonical_uri`, `repository_owner` and\n`repository_name`; a client sends what it knows and never what it\nconcluded, because two clients concluding separately is how one repository\nbecomes two rows.",
@@ -20414,6 +20800,14 @@
             ],
             "description": "Lower-case BLAKE3-256 source-content hash."
           },
+          "import_artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact admitted artifact for managed OKF provenance."
+          },
           "locator": {
             "type": [
               "string",
@@ -20490,6 +20884,14 @@
             "type": "string",
             "format": "uuid",
             "description": "Stable source descriptor id."
+          },
+          "import_artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact admitted artifact for managed OKF provenance."
           },
           "locator": {
             "type": [
@@ -22863,6 +23265,10 @@
           {
             "$ref": "#/components/schemas/SourceCleanupOperationView",
             "description": "Governed source cleanup."
+          },
+          {
+            "$ref": "#/components/schemas/ArtifactCleanupOperationView",
+            "description": "Governed imported evidence cleanup."
           }
         ],
         "description": "Kind-specific public operation contract. Source cleanup does not require a\nSkill version or a retained Session body to inspect its content-free receipt."

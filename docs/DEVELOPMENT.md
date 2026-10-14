@@ -90,14 +90,15 @@ make compose-up                   # reuse that same state
 project-bound confirmation. It is not a routine troubleshooting or migration
 step. Never remove existing volumes or key files to get a test green.
 Pre-epoch-3 databases are deliberately refused. The exact published v0.4.3
-epoch-3 baseline has four reviewed forward migrations (ADR-0121, ADR-0126,
-ADR-0144, ADR-0146); v0.4.0's
+epoch-3 baseline has five reviewed forward migrations (ADR-0121, ADR-0126,
+ADR-0144, ADR-0146, ADR-0147); v0.4.0's
 different baseline checksum remains refused. For a **new disposable database**,
 let the normal bootstrap apply [the released baseline](../crates/synveda-store/migrations/0001_context_platform.sql)
 and the [first](../crates/synveda-store/migrations/0002_context_restart_and_excerpt.sql),
 [second](../crates/synveda-store/migrations/0003_one_time_login_ledger.sql),
-[third](../crates/synveda-store/migrations/0004_context_delivery_dependencies.sql)
-and [fourth](../crates/synveda-store/migrations/0005_session_source_control.sql)
+[third](../crates/synveda-store/migrations/0004_context_delivery_dependencies.sql),
+[fourth](../crates/synveda-store/migrations/0005_session_source_control.sql)
+and [fifth](../crates/synveda-store/migrations/0006_import_artifact_source_control.sql)
 forward migrations.
 
 ## Validation

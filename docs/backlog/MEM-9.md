@@ -52,7 +52,9 @@ for safe recovery. Remote qualification is distinct from deterministic replay.
 
 ## Dependencies
 
-MEM-8 lineage/suppression and an accepted inbound permission/effect/credential
-ADR precede implementation. At the inspection checkpoint no inbound code is
-changed. Next: accept the bounded local descriptor/observation contract after
-MEM-8, then implement local public-API reconciliation before remote reads.
+MEM-8 Session and actual ImportArtifact lineage/suppression are qualified at
+additive `0006` under accepted ADR-0146/0147. The next implementation starts with
+a bounded descriptor/observation and inbound authority ADR, then durable local
+public-API reconciliation before remote reads. Reuse typed artifact provenance,
+Capture review and permanent aliases; do not label caller uploads as managed
+Git identity. No external credential blocks that local work.

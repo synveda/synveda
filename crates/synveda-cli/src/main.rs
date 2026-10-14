@@ -902,6 +902,9 @@ enum SkillCommand {
 
 #[derive(Subcommand)]
 enum OkfCommand {
+    /// Control exact imported evidence through governed public APIs.
+    #[command(subcommand)]
+    Source(OkfSourceCommand),
     /// Validate a local OKF v0.2 directory or archive without contacting a gateway.
     Validate {
         /// Directory, .zip, .tar, .tar.gz or .tgz bundle.
@@ -959,6 +962,32 @@ enum OkfCommand {
         #[arg(long)]
         json: bool,
         /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum OkfSourceCommand {
+    /// Inspect logical removal and checked physical cleanup.
+    Status {
+        job: synveda_types::ImportJobId,
+        artifact: synveda_types::ImportArtifactId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Propose withdrawal or forgetting of exact admitted bytes.
+    Control {
+        job: synveda_types::ImportJobId,
+        artifact: synveda_types::ImportArtifactId,
+        #[arg(long,value_parser=["withdraw","forget"])]
+        mode: String,
+        #[arg(long)]
+        expected_content_hash: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        idempotency_key: String,
         #[arg(long)]
         profile: Option<String>,
     },
@@ -3114,6 +3143,33 @@ async fn run(cli: Cli) -> Result<(), String> {
         },
 
         Command::Okf(command) => match command {
+            OkfCommand::Source(command) => match command {
+                OkfSourceCommand::Status {
+                    job,
+                    artifact,
+                    profile,
+                } => okf::source_status(&profile_name(profile)?, job, artifact).await,
+                OkfSourceCommand::Control {
+                    job,
+                    artifact,
+                    mode,
+                    expected_content_hash,
+                    reason,
+                    idempotency_key,
+                    profile,
+                } => {
+                    okf::control_source(
+                        &profile_name(profile)?,
+                        job,
+                        artifact,
+                        &mode,
+                        &expected_content_hash,
+                        &reason,
+                        &idempotency_key,
+                    )
+                    .await
+                }
+            },
             OkfCommand::Validate {
                 path,
                 source_revision,

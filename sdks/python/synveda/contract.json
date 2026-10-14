@@ -1,7 +1,7 @@
 {
   "sdk_version": "0.1.0",
   "api_version": "0.4.5",
-  "openapi_sha256": "45244a4e565f55b9dd23f250fc1c660ab88587a87b4229a71007fe2aba45cadb",
+  "openapi_sha256": "78fe174cfefdf42b00ecb9e8cd342eeff572386883a728c6f9eb5d6362d94d57",
   "operations": {
     "list_audit_events": {
       "path": "/v1/audit/events",

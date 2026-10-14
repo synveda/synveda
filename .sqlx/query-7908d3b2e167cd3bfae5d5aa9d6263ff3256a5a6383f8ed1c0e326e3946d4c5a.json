@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select s.removed_at,target.change_id,target.operation_id,op.state,target.phase,op.last_error_code,\n      (s.forget_change_id is not null) as \"forgetting!\" from source_artifact_addresses address\n      join artifact_suppressions s on s.tenant_id=address.tenant_id and s.source_key_digest=address.source_key_digest\n      join artifact_cleanup_targets target on target.tenant_id=s.tenant_id and target.source_key_digest=s.source_key_digest\n      join durable_operations op on op.tenant_id=target.tenant_id and op.id=target.operation_id\n      where address.tenant_id=$1 and address.artifact_id=$2\n      order by (target.change_id=coalesce(s.forget_change_id,s.change_id)) desc,op.created_at desc limit 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "removed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "change_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "operation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "phase",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "forgetting!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "7908d3b2e167cd3bfae5d5aa9d6263ff3256a5a6383f8ed1c0e326e3946d4c5a"
+}

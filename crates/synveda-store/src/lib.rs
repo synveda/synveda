@@ -37,6 +37,7 @@
 
 pub mod access;
 pub mod anchors;
+pub mod artifact_control;
 pub mod capture;
 pub mod configuration;
 pub mod console_sessions;
@@ -153,6 +154,9 @@ pub async fn check_migration_compatibility(
             epoch::MigrationPreflight::Delivery => {
                 runtime_role::verify_delivery_migrator_read_only_connection(&mut compatibility,database_roles).await?;
             }
+            epoch::MigrationPreflight::Source => {
+                runtime_role::verify_source_migrator_read_only_connection(&mut compatibility,database_roles).await?;
+            }
             epoch::MigrationPreflight::Current => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
@@ -260,6 +264,10 @@ async fn migrate_locked_connection(
             epoch::MigrationPreflight::PendingStampDelivery
             | epoch::MigrationPreflight::Delivery => {
                 runtime_role::verify_delivery_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampSource | epoch::MigrationPreflight::Source => {
+                runtime_role::verify_source_migrator_connection(&mut authority, database_roles)
                     .await?;
             }
             epoch::MigrationPreflight::PendingStampCurrent | epoch::MigrationPreflight::Current => {

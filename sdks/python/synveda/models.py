@@ -183,6 +183,7 @@ class AuditFrame(TypedDict):
 
 class KnowledgeSourceBody(TypedDict, closed=True):
     content_hash: NotRequired[str | None]
+    import_artifact_id: NotRequired[str | None]
     locator: NotRequired[str | None]
     metadata: NotRequired[dict[str, Any]]
     scope_id: NotRequired[str | None]
@@ -354,6 +355,7 @@ class KnowledgeSourceView(TypedDict):
     content_hash: NotRequired[str | None]
     created_at: str
     id: str
+    import_artifact_id: NotRequired[str | None]
     locator: NotRequired[str | None]
     metadata: dict[str, Any]
     scope_id: str

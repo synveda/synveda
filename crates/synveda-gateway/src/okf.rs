@@ -523,7 +523,7 @@ fn decode_cursor(raw: &str) -> Result<store::ImportCursor> {
     Ok(store::ImportCursor { created_at, id })
 }
 
-async fn authorize_project(
+pub(crate) async fn authorize_project(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
@@ -791,6 +791,7 @@ fn new_plan(
         source_kind: inspection.source.kind.as_str().to_owned(),
         source_locator: inspection.source.locator,
         source_revision: inspection.source.revision,
+        repository_id: None,
         bundle_digest: inspection.bundle_digest,
         notices: inspection.notices,
         artifacts,
@@ -853,6 +854,7 @@ pub(crate) async fn plan_import(
                 Action::KnowledgeRead,
             )
             .await?;
+            synveda_store::artifact_control::admit_job(&mut tx, tenant, &job).await?;
             let view = plan_view(&mut tx, tenant, job).await?;
             commit(tx).await?;
             return Ok((StatusCode::OK, Json(view)));

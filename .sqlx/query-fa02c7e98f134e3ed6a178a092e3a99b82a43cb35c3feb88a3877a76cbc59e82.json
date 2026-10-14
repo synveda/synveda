@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into artifact_cleanup_targets (tenant_id,operation_id,artifact_id,source_key_digest,change_id,input_hash) values ($1,$2,$3,$4,$5,$6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fa02c7e98f134e3ed6a178a092e3a99b82a43cb35c3feb88a3877a76cbc59e82"
+}

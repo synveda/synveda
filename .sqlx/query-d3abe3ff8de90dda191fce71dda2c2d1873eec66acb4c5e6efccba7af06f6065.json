@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into import_jobs\n            (id, tenant_id, project_id, scope_id, workspace_id, principal_id,\n             format, format_version, specification_commit, source_kind,\n             source_locator, source_revision, bundle_digest, artifact_count,\n             mapping_count, notices, repository_id)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,\n                $13, $14, $15, $16, $17)\n        on conflict on constraint import_jobs_source_digest_unique do nothing\n        returning id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d3abe3ff8de90dda191fce71dda2c2d1873eec66acb4c5e6efccba7af06f6065"
+}

@@ -870,6 +870,10 @@ export type KnowledgeSourceBody = {
      */
     content_hash?: string | null;
     /**
+     * Exact admitted artifact for managed OKF provenance.
+     */
+    import_artifact_id?: string | null;
+    /**
      * Stable logical locator for located source families.
      */
     locator?: string | null;
@@ -1594,6 +1598,10 @@ export type KnowledgeSourceView = {
      * Stable source descriptor id.
      */
     id: string;
+    /**
+     * Exact admitted artifact for managed OKF provenance.
+     */
+    import_artifact_id?: string | null;
     /**
      * Logical locator; contains no source payload.
      */

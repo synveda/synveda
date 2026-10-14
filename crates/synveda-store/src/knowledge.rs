@@ -45,6 +45,8 @@ pub struct NewKnowledgeSource {
     pub source_type: KnowledgeSourceType,
     /// Real event id for a session-event source.
     pub session_event_id: Option<SessionEventId>,
+    /// Exact admitted import source when this is managed artifact provenance.
+    pub import_artifact_id: Option<synveda_types::ImportArtifactId>,
     /// Bounded logical locator for located source types.
     pub locator: Option<String>,
     /// External source revision, when known.
@@ -313,6 +315,7 @@ struct SourceRow {
     scope_id: Uuid,
     source_type: String,
     session_event_id: Option<Uuid>,
+    import_artifact_id: Option<Uuid>,
     locator: Option<String>,
     source_revision: Option<String>,
     content_hash: Option<String>,
@@ -331,6 +334,9 @@ impl TryFrom<SourceRow> for KnowledgeSource {
             scope_id: ScopeId::from_uuid(row.scope_id),
             source_type: stored(&row.source_type)?,
             session_event_id: row.session_event_id.map(SessionEventId::from_uuid),
+            import_artifact_id: row
+                .import_artifact_id
+                .map(synveda_types::ImportArtifactId::from_uuid),
             locator: row.locator,
             source_revision: row.source_revision,
             content_hash: row.content_hash,
@@ -550,10 +556,10 @@ pub async fn create_source(
         SourceRow,
         r#"
         insert into knowledge_sources
-            (id, tenant_id, scope_id, source_type, session_event_id, locator,
+            (id, tenant_id, scope_id, source_type, session_event_id, import_artifact_id, locator,
              source_revision, content_hash, metadata, created_by)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        returning id, tenant_id, scope_id, source_type, session_event_id,
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        returning id, tenant_id, scope_id, source_type, session_event_id, import_artifact_id,
                   locator, source_revision, content_hash, metadata,
                   created_by, created_at
         "#,
@@ -562,6 +568,7 @@ pub async fn create_source(
         new.scope_id.as_uuid(),
         new.source_type.as_str(),
         new.session_event_id.map(|id| id.as_uuid()) as Option<Uuid>,
+        new.import_artifact_id.map(|id| id.as_uuid()) as Option<Uuid>,
         new.locator.as_deref() as Option<&str>,
         new.source_revision.as_deref() as Option<&str>,
         new.content_hash.as_deref() as Option<&str>,
@@ -1149,7 +1156,7 @@ pub async fn visible_sources(
         SourceRow,
         r#"
         select source.id, source.tenant_id, source.scope_id, source.source_type,
-               source.session_event_id, source.locator, source.source_revision,
+               source.session_event_id, source.import_artifact_id, source.locator, source.source_revision,
                source.content_hash, source.metadata, source.created_by,
                source.created_at
         from knowledge_revision_sources link
@@ -1488,6 +1495,7 @@ pub async fn export_tenant(
                        'scope_id', source.scope_id,
                        'source_type', source.source_type,
                        'session_event_id', source.session_event_id,
+                       'import_artifact_id', source.import_artifact_id,
                        'locator', source.locator,
                        'source_revision', source.source_revision,
                        'content_hash', source.content_hash,

@@ -39,7 +39,7 @@ The requested implementation matrix records the existing contracts and gaps:
 
 | Capability | Existing implementation / status | Actual gap and feature | Acceptance example | Validation |
 | --- | --- | --- | --- | --- |
-| A: lineage/lifecycle | Immutable revisions/sources, inline governed forget, Capture fences, checkpoint hashes; source removal incomplete | MEM-8; narrow CPR-16/20 and CTX-6 repairs | Revoke/remove evidence during replay and queued derivation; suppress unchanged reingest; preserve independent evidence | `bash scripts/db-test.sh -p synveda-gateway --test knowledge_lifecycle --test context_runs --test sessions_api --test capture_api -- --test-threads=1` |
+| A: lineage/lifecycle | Session and actual ImportArtifact removal qualified at `0006`; exact roots, permanent suppression, durable cleanup and admission fences | MEM-8; narrow CPR-16/20 and CTX-6 repairs | Revoke/remove evidence during replay and queued derivation; suppress unchanged reingest; preserve independent evidence | `bash scripts/db-test.sh -p synveda-gateway --test knowledge_lifecycle --test context_runs --test sessions_api --test capture_api -- --test-threads=1` |
 | B: health/diagnosis | CPR-21 Inspector and feedback delivered | CPR-21/40: authorized findings, actionable links, stage diagnosis and unknown outcomes | Distinguish uncaptured evidence, retrieval miss, qualifier loss and wrong downstream answer without denied counts | ContextRun tests, console tests, `make eval-product` |
 | C: values/applicability | CPR-37 conflict review/freshness delivered; lexical classifier retains both propositions | CPR-37: bounded typed revision metadata, significant values/case, applicability overlap | Retry 3 vs 5 is reviewable contradiction; production vs development is separate applicability | Types tests, lifecycle/capture database tests, `demos/cpr-37-conflict-freshness.sh` |
 | D: inbound reconciliation | Repository identity and outbound FLOW-8 exist; inbound absent | [MEM-9](MEM-9.md): separately governed local/private Git reads and path/hash observations | Relevant path change proposes review once; unrelated change does not stale everything; crash does not advance cursor | New source-reconciliation database suite, Git tests, dependency/contract gates |
@@ -345,3 +345,57 @@ pinned-private Git reconciliation, structured CTX-6 handoff, SKIL-6 outcome
 candidates and the integrated CPR-41 domain demo. No external credential blocks
 that local work. Real private GitHub and native-model qualification require
 their named authorized environment; no A–H completion is claimed.
+
+### Qualified ImportArtifact source-control increment (2026-10-14)
+
+Accepted ADR-0147 and byte-pinned additive `0006` extend source control to actual
+OKF artifacts. Typed provenance and parallel private flat roots preserve the
+qualified Session contract. Exact scoped source/path/hash aliases survive job
+recreation and managed repository detach/reattach. Suppression masks job notices
+and fences plan replay/materialization; changed bytes remain reviewable. All
+source controls use current Cedar, typed VedaFlow and the tenant admission gate.
+The same SourceCleanup worker erases affected service copies in pages of 100,
+checks holds before erasure and retains exact operation receipts. Item Forget
+retains its inert mapping replay contract in either cleanup order.
+
+Nine artifact cases, fourteen Session controls, twenty-one ContextRuns, seven
+Knowledge lifecycle cases, eight Capture cases and sixty-six RLS cases pass.
+Existing Capture/RLS ignored cases remain unchanged. All 32 actual serial epoch
+cases pass, including genuine `0005` complete provenance normalization,
+ambiguous lineage refusal and generic Document metadata preservation. Fresh
+SQLx prepare/check generated 22 reviewed replacement/new query hashes; product
+migration preflight and idempotent apply pass. Strict changed-crate Clippy,
+193 types cases, 264 console cases/build, generated OpenAPI/console/SDK checks,
+fast/dependency gates, all 31 product scenarios and genuine pgvector 0.8.2–0.8.5
+profiles pass alongside default 0.8.6. Earlier migration bytes and measured
+catalogues remain unchanged.
+
+Current-head catalogue: ACL 400
+`33ec00dcd21f3acb45db8c7e189d19d909dffdf54987acb382e7e4606dfa659f`;
+routines 93
+`ae644352f93d9e324c14a7f373f25863f3728eff05ada9ce33e1313cf20dba98`;
+triggers 154
+`4df9483d71839a52dbd982b177327e444767a98d244d6030e3be53f32c439042`;
+RLS 120
+`f772bf89cda01243e13a78f1a0ec2fc04693f646070dad8831521438dd6c1727`.
+Migration SHA-256:
+`28a9f6f3a510c50137f9c99a2b352b2065593690bd4d7fa03440db3693fef7f2`.
+All seven retained draft fixtures and private credentials were removed after
+exact Docker-label and immutable network-receipt ownership checks. Fresh
+qualification fixtures removed themselves through their normal lifecycle.
+
+Reproduce artifact acceptance with
+`bash scripts/db-test.sh -p synveda-gateway --test artifact_withdrawals --test source_withdrawals -- --test-threads=1`;
+use the workspace fixture's dedicated lifecycle role files for the serial epoch
+suite, and the documented `sqlx-prepare`, `product-evaluation` and genuine
+`pgvector-0.8.2` through `pgvector-0.8.5` tasks for deeper qualification.
+Operator interfaces are in `docs/CONSUMER_CLI.md` and the OKF console.
+
+Phase A's existing producer families are qualified. MEM-8 remains open to carry
+this contract into new reconciliation, structured handoff and procedure-outcome
+producers. Next: accept the MEM-9 descriptor/observation/inbound authority ADR,
+then implement durable local Git reconciliation and targeted path freshness,
+followed by the pinned private GitHub path and remaining CTX-6/SKIL-6/CPR-41
+increments. No external credential blocks local implementation. Live private
+GitHub and native/model qualification remain separate environment-dependent
+checks. No full A–H completion is claimed.

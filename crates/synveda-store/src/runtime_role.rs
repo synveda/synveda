@@ -835,6 +835,7 @@ enum CatalogueHead {
     Forward,
     Login,
     Delivery,
+    Source,
     Current,
 }
 
@@ -2008,8 +2009,8 @@ async fn verify_application_acl(
                         and acl.grantor = migrator.oid
                         and (acl.privilege_type = 'UPDATE' or (
                           acl.privilege_type = 'INSERT'
-                          and object.relname = 'source_cleanup_targets'
-                          and attribute.attname in ('tenant_id','operation_id','event_id','change_id','input_hash')
+                          and ((object.relname = 'source_cleanup_targets' and attribute.attname in ('tenant_id','operation_id','event_id','change_id','input_hash'))
+                            or (object.relname = 'artifact_cleanup_targets' and attribute.attname in ('tenant_id','operation_id','artifact_id','source_key_digest','change_id','input_hash')))
                         ))
                         and not acl.is_grantable
                       )
@@ -2305,7 +2306,8 @@ async fn verify_application_acl_fingerprint(
         }
         CatalogueHead::Login => (LOGIN_ACL_FINGERPRINT, LOGIN_ACL_ROW_COUNT),
         CatalogueHead::Delivery => (DELIVERY_ACL_FINGERPRINT, DELIVERY_ACL_ROW_COUNT),
-        CatalogueHead::Current => (SOURCE_ACL_FINGERPRINT, SOURCE_ACL_ROW_COUNT),
+        CatalogueHead::Source => (SOURCE_ACL_FINGERPRINT, SOURCE_ACL_ROW_COUNT),
+        CatalogueHead::Current => (ARTIFACT_ACL_FINGERPRINT, ARTIFACT_ACL_ROW_COUNT),
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -2455,7 +2457,8 @@ async fn verify_routine_catalog_fingerprint(
             (ROUTINE_CATALOG_FINGERPRINT, ROUTINE_CATALOG_ROW_COUNT)
         }
         CatalogueHead::Delivery => (DELIVERY_ROUTINE_FINGERPRINT, DELIVERY_ROUTINE_ROW_COUNT),
-        CatalogueHead::Current => (SOURCE_ROUTINE_FINGERPRINT, SOURCE_ROUTINE_ROW_COUNT),
+        CatalogueHead::Source => (SOURCE_ROUTINE_FINGERPRINT, SOURCE_ROUTINE_ROW_COUNT),
+        CatalogueHead::Current => (ARTIFACT_ROUTINE_FINGERPRINT, ARTIFACT_ROUTINE_ROW_COUNT),
     };
     let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2607,7 +2610,8 @@ async fn verify_trigger_catalog_fingerprint(
             (TRIGGER_CATALOG_FINGERPRINT, TRIGGER_CATALOG_ROW_COUNT)
         }
         CatalogueHead::Delivery => (DELIVERY_TRIGGER_FINGERPRINT, DELIVERY_TRIGGER_ROW_COUNT),
-        CatalogueHead::Current => (SOURCE_TRIGGER_FINGERPRINT, SOURCE_TRIGGER_ROW_COUNT),
+        CatalogueHead::Source => (SOURCE_TRIGGER_FINGERPRINT, SOURCE_TRIGGER_ROW_COUNT),
+        CatalogueHead::Current => (ARTIFACT_TRIGGER_FINGERPRINT, ARTIFACT_TRIGGER_ROW_COUNT),
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2796,7 +2800,11 @@ async fn verify_rls_catalog_fingerprint(
             DELIVERY_RLS_CATALOG_FINGERPRINT,
             DELIVERY_RLS_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::Current => (SOURCE_RLS_CATALOG_FINGERPRINT, SOURCE_RLS_CATALOG_ROW_COUNT),
+        CatalogueHead::Source => (SOURCE_RLS_CATALOG_FINGERPRINT, SOURCE_RLS_CATALOG_ROW_COUNT),
+        CatalogueHead::Current => (
+            ARTIFACT_RLS_CATALOG_FINGERPRINT,
+            ARTIFACT_RLS_CATALOG_ROW_COUNT,
+        ),
     };
     let actual = rls_catalog_fingerprint(connection, count).await?;
     if actual != expected {
@@ -3367,6 +3375,16 @@ pub(crate) async fn verify_delivery_migrator_connection(
     verify_selected_migrator_catalog(connection, database_roles).await
 }
 
+/// Verify the exact published Session source-control head before additive migration.
+pub(crate) async fn verify_source_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Source).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
 /// Pre-migration migrator proof used by deployment preflight.
 pub async fn verify_migrator_prerequisites_connection(
     connection: &mut PgConnection,
@@ -3437,6 +3455,16 @@ pub(crate) async fn verify_delivery_migrator_read_only_connection(
 ) -> Result<VerifiedRuntimeRole> {
     verify_read_only_primary_connection(connection).await?;
     verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Delivery).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Read-only compatibility proof for the exact Session source-control head.
+pub(crate) async fn verify_source_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Source).await?;
     verify_selected_migrator_catalog(connection, database_roles).await
 }
 
@@ -3614,6 +3642,20 @@ async fn verify_selected_migrator_catalog(
     verify_no_global_or_default_acl(connection, std::slice::from_ref(&facts.name)).await?;
     Ok(VerifiedRuntimeRole { name: facts.name })
 }
+
+// Independent raw current-database measurement for additive head0006.
+const ARTIFACT_ACL_FINGERPRINT: &str =
+    "33ec00dcd21f3acb45db8c7e189d19d909dffdf54987acb382e7e4606dfa659f";
+const ARTIFACT_ACL_ROW_COUNT: usize = 400;
+const ARTIFACT_ROUTINE_FINGERPRINT: &str =
+    "ae644352f93d9e324c14a7f373f25863f3728eff05ada9ce33e1313cf20dba98";
+const ARTIFACT_ROUTINE_ROW_COUNT: usize = 93;
+const ARTIFACT_TRIGGER_FINGERPRINT: &str =
+    "4df9483d71839a52dbd982b177327e444767a98d244d6030e3be53f32c439042";
+const ARTIFACT_TRIGGER_ROW_COUNT: usize = 154;
+const ARTIFACT_RLS_CATALOG_FINGERPRINT: &str =
+    "f772bf89cda01243e13a78f1a0ec2fc04693f646070dad8831521438dd6c1727";
+const ARTIFACT_RLS_CATALOG_ROW_COUNT: usize = 120;
 
 const SOURCE_ACL_FINGERPRINT: &str =
     "dabe07a6c9cb563fd6c8e32eb878a3e9dcf1357df43eeffff2f49964c0f00a8b";

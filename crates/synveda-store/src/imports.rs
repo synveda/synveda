@@ -103,6 +103,8 @@ pub struct NewImportPlan {
     pub source_locator: String,
     /// Explicit upstream revision when present.
     pub source_revision: Option<String>,
+    /// Canonical server-established repository attachment for managed imports.
+    pub repository_id: Option<synveda_types::RepositoryId>,
     /// Canonical admitted-bundle digest.
     pub bundle_digest: String,
     /// Content-free validation notices.
@@ -371,15 +373,16 @@ fn validate_plan(plan: &NewImportPlan) -> Result<()> {
 #[tracing::instrument(name = "store.imports.plan", skip_all, fields(tenant.id = %plan.tenant_id, import.job.id = %plan.id), err(Display))]
 pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Result<PlannedImport> {
     validate_plan(plan)?;
+    crate::artifact_control::admit_plan(conn, plan).await?;
     let inserted = sqlx::query_scalar!(
         r#"
         insert into import_jobs
             (id, tenant_id, project_id, scope_id, workspace_id, principal_id,
              format, format_version, specification_commit, source_kind,
              source_locator, source_revision, bundle_digest, artifact_count,
-             mapping_count, notices)
+             mapping_count, notices, repository_id)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16)
+                $13, $14, $15, $16, $17)
         on conflict on constraint import_jobs_source_digest_unique do nothing
         returning id
         "#,
@@ -399,6 +402,7 @@ pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Resul
         plan.artifacts.len() as i32,
         plan.mappings.len() as i32,
         serde_json::json!(plan.notices),
+        plan.repository_id.map(|id| id.as_uuid()) as Option<Uuid>,
     )
     .fetch_optional(&mut *conn)
     .await
@@ -489,6 +493,7 @@ pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Resul
     .ok_or_else(|| Error::Internal {
         message: "import plan insert produced no readable job".to_owned(),
     })?;
+    crate::artifact_control::admit_job(conn, plan.tenant_id, &job).await?;
     Ok(PlannedImport {
         job,
         created: inserted.is_some(),
@@ -508,7 +513,10 @@ pub async fn get_job(
                format, format_version, specification_commit, source_kind,
                source_locator, source_revision, bundle_digest, state,
                artifact_count, mapping_count, candidate_count, capture_batch_id,
-               error_code, notices, created_at, completed_at, updated_at
+               error_code, case when exists(select 1 from source_artifact_addresses address
+                 join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest
+                 where address.tenant_id=import_jobs.tenant_id and address.job_id=import_jobs.id)
+                 then '[]'::jsonb else notices end as "notices!", created_at, completed_at, updated_at
         from import_jobs where tenant_id = $1 and id = $2
         "#,
         tenant.as_uuid(),
@@ -535,7 +543,10 @@ async fn get_job_by_digest(
                format, format_version, specification_commit, source_kind,
                source_locator, source_revision, bundle_digest, state,
                artifact_count, mapping_count, candidate_count, capture_batch_id,
-               error_code, notices, created_at, completed_at, updated_at
+               error_code, case when exists(select 1 from source_artifact_addresses address
+                 join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest
+                 where address.tenant_id=import_jobs.tenant_id and address.job_id=import_jobs.id)
+                 then '[]'::jsonb else notices end as "notices!", created_at, completed_at, updated_at
         from import_jobs
         where tenant_id = $1 and project_id = $2 and source_kind = $3
           and source_locator = $4 and bundle_digest = $5
@@ -567,7 +578,10 @@ pub async fn list_jobs(
                format, format_version, specification_commit, source_kind,
                source_locator, source_revision, bundle_digest, state,
                artifact_count, mapping_count, candidate_count, capture_batch_id,
-               error_code, notices, created_at, completed_at, updated_at
+               error_code, case when exists(select 1 from source_artifact_addresses address
+                 join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest
+                 where address.tenant_id=import_jobs.tenant_id and address.job_id=import_jobs.id)
+                 then '[]'::jsonb else notices end as "notices!", created_at, completed_at, updated_at
         from import_jobs
         where tenant_id = $1
           and ($2::uuid is null or project_id = $2)
@@ -681,6 +695,7 @@ pub async fn materialize(
         .ok_or_else(|| Error::NotFound {
             entity: format!("import job {id}"),
         })?;
+    crate::artifact_control::admit_job(conn, tenant, &job).await?;
     if job.state == ImportJobState::Failed {
         return Err(Error::Conflict {
             message: format!("import job {id} is failed"),

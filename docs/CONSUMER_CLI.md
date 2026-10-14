@@ -358,3 +358,46 @@ which statement remains independently supported.
 Already admitted responses may finish after removal. External harness history,
 independent exports, remote Git history and backups follow their own retention
 contracts. Source controls do not retract bytes already delivered there.
+
+## Imported artifact source controls in the current source build
+
+Inspect an authorized OKF import plan to obtain its job id, artifact id and
+original `content_hash`. The console offers the same control on each visible
+artifact and retains the resulting operation receipt after the artifact becomes
+unavailable. The source CLI uses these public API routes:
+
+```sh
+synveda okf source control JOB_UUID ARTIFACT_UUID \
+  --mode withdraw --expected-content-hash ORIGINAL_CONTENT_HASH \
+  --reason 'Retire this imported evidence' --idempotency-key ARTIFACT_REQUEST_KEY
+synveda okf source status JOB_UUID ARTIFACT_UUID
+```
+
+Reuse the exact key and body on retry. Pending review removes nothing. Applied
+withdrawal hides all copies dependent on the inspected artifact, including
+accepted revisions, candidates and saved context. Unrelated artifacts and
+independently sourced revisions remain usable. `--mode forget` additionally
+queues physical cleanup through the same bounded SourceCleanup worker. Current
+project-scoped KnowledgeRead governs inspection; KnowledgeWrite and
+ProposalOpen govern the intent; KnowledgeForget additionally governs Forget.
+The existing approval matrix governs publication.
+
+Suppression binds scope, admitted source identity, path and original content
+hash. Changing the bundle, import job or upstream commit cannot restore the
+same source bytes. Managed imports use the server-established repository
+identity, which survives detach/reattach. Changed content may produce a new
+reviewable candidate. Plain uploads bind their admitted kind and locator;
+labelling an upload as Git does not establish a managed repository identity.
+Replaying a frozen plan with unavailable required source rows returns a
+conflict. An explicitly erased item mapping remains inert under item Forget.
+
+The worker checks every dependent revision's holds before erasing content and
+processes at most 100 targets per page. It clears affected service-owned
+delivery, candidate, pending command, revision, embedding, relation, descriptor,
+mapping and artifact copies. Erased artifacts retain hashes and ids with an
+inert `erased/ARTIFACT_UUID` path. Import notices are hidden at logical removal
+and cleared during cleanup. Unprovable legacy import lineage blocks cleanup
+with `lineage_unproven`; complete legacy producer tuples are normalized during
+upgrade. `/v1/operations/OPERATION_UUID` retains the exact addressed receipt,
+even after a later Forget upgrade. Its status does not claim erasure of remote
+Git history, independent exports, backups or already delivered harness bytes.

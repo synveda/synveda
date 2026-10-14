@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, project_id, scope_id, workspace_id, principal_id,\n               format, format_version, specification_commit, source_kind,\n               source_locator, source_revision, bundle_digest, state,\n               artifact_count, mapping_count, candidate_count, capture_batch_id,\n               error_code, notices, created_at, completed_at, updated_at\n        from import_jobs where tenant_id = $1 and id = $2\n        ",
+  "query": "\n        select id, tenant_id, project_id, scope_id, workspace_id, principal_id,\n               format, format_version, specification_commit, source_kind,\n               source_locator, source_revision, bundle_digest, state,\n               artifact_count, mapping_count, candidate_count, capture_batch_id,\n               error_code, case when exists(select 1 from source_artifact_addresses address\n                 join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest\n                 where address.tenant_id=import_jobs.tenant_id and address.job_id=import_jobs.id)\n                 then '[]'::jsonb else notices end as \"notices!\", created_at, completed_at, updated_at\n        from import_jobs where tenant_id = $1 and id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -100,7 +100,7 @@
       },
       {
         "ordinal": 19,
-        "name": "notices",
+        "name": "notices!",
         "type_info": "Jsonb"
       },
       {
@@ -145,11 +145,11 @@
       false,
       true,
       true,
-      false,
+      null,
       false,
       true,
       false
     ]
   },
-  "hash": "f24e5ba19955ab2186cfe178c5a237627775b2838ae7bfe02c0feb173a312fb1"
+  "hash": "33672ddac3ce5742df0cb6077522c375586fbf52ad6df7f57e8cf18ae98af966"
 }

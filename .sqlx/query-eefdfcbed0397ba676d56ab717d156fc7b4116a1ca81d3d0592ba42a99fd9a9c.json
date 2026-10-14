@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select\n       (select count(*) from import_artifacts where tenant_id=$1 and job_id=$2 and not content_erased)=$3\n       and (select count(*) from import_mappings where tenant_id=$1 and job_id=$2)=$4 as \"intact!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "intact!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "eefdfcbed0397ba676d56ab717d156fc7b4116a1ca81d3d0592ba42a99fd9a9c"
+}

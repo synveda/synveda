@@ -353,6 +353,10 @@ pub struct KnowledgeSourceView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub session_event_id: Option<SessionEventId>,
+    /// Exact admitted artifact for managed OKF provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub import_artifact_id: Option<synveda_types::ImportArtifactId>,
     /// Logical locator; contains no source payload.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locator: Option<String>,
@@ -376,6 +380,7 @@ impl From<KnowledgeSource> for KnowledgeSourceView {
             scope_id: source.scope_id,
             source_type: source.source_type.as_str().to_owned(),
             session_event_id: source.session_event_id,
+            import_artifact_id: source.import_artifact_id,
             locator: source.locator,
             source_revision: source.source_revision,
             content_hash: source.content_hash,
@@ -517,6 +522,10 @@ pub struct KnowledgeSourceBody {
     #[serde(default)]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub session_event_id: Option<SessionEventId>,
+    /// Exact admitted artifact for managed OKF provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub import_artifact_id: Option<synveda_types::ImportArtifactId>,
     /// Stable logical locator for located source families.
     #[serde(default)]
     pub locator: Option<String>,
@@ -1046,6 +1055,7 @@ fn sources(
             scope_id: Some(default_scope),
             source_type: "manual".to_owned(),
             session_event_id: None,
+            import_artifact_id: None,
             locator: None,
             source_revision: None,
             content_hash: None,
@@ -1091,6 +1101,7 @@ fn sources(
                 scope_id: source.scope_id.unwrap_or(default_scope),
                 source_type,
                 session_event_id: source.session_event_id,
+                import_artifact_id: source.import_artifact_id,
                 locator: source.locator.clone(),
                 source_revision: source.source_revision.clone(),
                 content_hash: source.content_hash.clone(),
@@ -2198,6 +2209,7 @@ mod tests {
             scope_id: None,
             source_type: "url".to_owned(),
             session_event_id: None,
+            import_artifact_id: None,
             locator: Some(format!("https://token:{secret}@example.test/docs")),
             source_revision: None,
             content_hash: None,

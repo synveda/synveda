@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select synveda_import_source_artifact($1,$2) as \"artifact_id?\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifact_id?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "50b0283c2de4cd904ffec8c71c7cb8d7fd4fe338faaf3d5c44947bf3fc969f95"
+}
