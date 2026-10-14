@@ -896,6 +896,8 @@ pub struct FreshnessEvidence {
     pub failed_use: bool,
     /// An immutable source descriptor reports that its source is stale.
     pub source_stale: bool,
+    /// Complete managed path evidence changed or proved this source absent.
+    pub managed_source_changed: bool,
 }
 
 /// Explainable freshness result for one exact immutable revision.
@@ -927,6 +929,9 @@ pub fn assess_freshness(
     }
     if stale_after.is_some_and(|due| due <= at) {
         reasons.push(FreshnessTrigger::ExplicitDate);
+    }
+    if evidence.managed_source_changed {
+        reasons.push(FreshnessTrigger::SourceFreshness);
     }
     match knowledge_type {
         KnowledgeType::Convention if evidence.repository_changed => {
@@ -2123,6 +2128,7 @@ mod tests {
                 repository_changed: true,
                 failed_use: true,
                 source_stale: true,
+                managed_source_changed: false,
             },
             at,
         );
@@ -2143,6 +2149,7 @@ mod tests {
                 repository_changed: true,
                 failed_use: true,
                 source_stale: true,
+                managed_source_changed: false,
             },
             at,
         );

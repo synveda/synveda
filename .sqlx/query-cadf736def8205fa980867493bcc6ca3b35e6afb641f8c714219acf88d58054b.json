@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select true as \"valid!\" from durable_operations op\n      where op.tenant_id=$1 and op.id=$2 and op.kind='source_reconcile' and op.state='running'\n       and op.attempts=$3 and op.lease_owner=$4 and op.lease_expires_at>clock_timestamp() and op.cancel_requested_at is null\n       and exists(select 1 from operation_attempts a where a.tenant_id=op.tenant_id and a.operation_id=op.id\n        and a.attempt_number=op.attempts and a.worker_id=op.lease_owner and a.state='running') for update of op",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "valid!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cadf736def8205fa980867493bcc6ca3b35e6afb641f8c714219acf88d58054b"
+}

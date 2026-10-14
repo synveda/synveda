@@ -168,6 +168,22 @@ pub(crate) struct ConfigurationDocumentBody {
     /// Governed local or private GitHub destination IDs; empty disables disclosure.
     #[serde(default)]
     pub git_export_targets: Vec<String>,
+    /// Inbound descriptors; setup and disconnect use the Configuration workflow.
+    #[serde(default)]
+    pub git_sources: Vec<GitSourceDescriptorBody>,
+}
+
+/// Exact project repository and bounded inert paths for inbound refresh.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GitSourceDescriptorBody {
+    pub source_id: String,
+    #[schema(value_type = String, format = "uuid")]
+    pub repository_id: synveda_types::RepositoryId,
+    pub read_target: String,
+    pub git_ref: String,
+    pub allowed_paths: Vec<String>,
+    pub enabled: bool,
 }
 
 impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
@@ -233,6 +249,18 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
                 .map(|name| name.parse())
                 .collect::<Result<Vec<ExternalProvider>>>()?,
             git_export_targets: value.git_export_targets,
+            git_sources: value
+                .git_sources
+                .into_iter()
+                .map(|s| synveda_types::source::GitSourceDescriptor {
+                    source_id: s.source_id,
+                    repository_id: s.repository_id,
+                    read_target: s.read_target,
+                    git_ref: s.git_ref,
+                    allowed_paths: s.allowed_paths,
+                    enabled: s.enabled,
+                })
+                .collect(),
         };
         document.validate()?;
         Ok(document)
@@ -300,6 +328,18 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
                 .map(|provider| provider.as_str().to_owned())
                 .collect(),
             git_export_targets: value.git_export_targets,
+            git_sources: value
+                .git_sources
+                .into_iter()
+                .map(|s| GitSourceDescriptorBody {
+                    source_id: s.source_id,
+                    repository_id: s.repository_id,
+                    read_target: s.read_target,
+                    git_ref: s.git_ref,
+                    allowed_paths: s.allowed_paths,
+                    enabled: s.enabled,
+                })
+                .collect(),
         }
     }
 }

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into source_observations(tenant_id,id,project_id,source_id,operation_id,previous_id,descriptor_hash,commit_oid,tree_oid,import_job_id)\n      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "43cd00c667fbdd05e0ea88c523a2b09c73dc3d7a8495b68b1248c79cb5777592"
+}

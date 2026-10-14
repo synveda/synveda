@@ -15,6 +15,18 @@ pub(crate) async fn current(
     tx: &mut PgConnection,
     tenant: TenantId,
 ) -> Result<AppState> {
+    let snapshot = current_pdp(&state.pdp, tx, tenant).await?;
+    let mut frozen = state.clone();
+    frozen.pdp = snapshot;
+    Ok(frozen)
+}
+
+/// The same bounded frozen engine for HTTP admission and durable workers.
+pub(crate) async fn current_pdp(
+    process: &Arc<synveda_policy::Pdp>,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+) -> Result<Arc<synveda_policy::Pdp>> {
     let slot = SNAPSHOT_SLOTS.try_acquire().map_err(|_| unavailable())?;
     let sources =
         policy_packs::for_snapshot(&mut *tx, tenant)
@@ -23,7 +35,7 @@ pub(crate) async fn current(
                 Error::Invalid { .. } => unavailable(),
                 other => other,
             })?;
-    let process = Arc::clone(&state.pdp);
+    let process = Arc::clone(process);
     // Local bounded Cedar compilation can outlive a cancelled request. Keep
     // its concurrency permit in that CPU task until the work actually ends.
     let snapshot = tokio::task::spawn_blocking(move || {
@@ -43,9 +55,7 @@ pub(crate) async fn current(
     .await
     .map_err(|_| unavailable())?
     .map_err(|_| unavailable())?;
-    let mut frozen = state.clone();
-    frozen.pdp = Arc::new(snapshot);
-    Ok(frozen)
+    Ok(Arc::new(snapshot))
 }
 
 pub(super) fn unavailable() -> Error {

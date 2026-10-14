@@ -131,6 +131,9 @@ define_routes! {
     ],
     "/v1/projects/{project_id}/repositories/{repository_id}" => [DELETE crate::workspaces::detach_repository],
 
+    "/v1/projects/{project_id}/sources" => [GET crate::source_reconciliation::list],
+    "/v1/projects/{project_id}/sources/{source_id}" => [GET crate::source_reconciliation::get],
+    "/v1/projects/{project_id}/sources/{source_id}/refresh" => [POST crate::source_reconciliation::refresh],
     "/v1/projects/{project_id}/okf/imports" => [POST crate::okf::plan_import],
     "/v1/okf/imports" => [GET crate::okf::list_imports],
     "/v1/okf/imports/{id}" => [GET crate::okf::get_import],

@@ -74,6 +74,8 @@ mod skill;
 mod skill_registry;
 mod skillquality;
 mod skillscan;
+/// Governed inbound source descriptors.
+pub mod source;
 mod tenant;
 // Trusted MCP server catalogue, immutable versions and exact project
 // bindings (CPR-25, ADR-0086).

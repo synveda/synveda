@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into source_reconcile_requests(tenant_id,operation_id,project_id,source_id,repository_id,\n      configuration_version_id,descriptor_hash,custody_digest,credential_revision,previous_observation_id,path_count)\n      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a211dbe6bc0b11f9f5209a454c72ccbea7e10dc0890f190d76c6c1ba5f61eec2"
+}

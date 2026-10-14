@@ -343,6 +343,62 @@ pub async fn set_git_export_targets(
     select_document(tx, tenant, scope_id, binding, document).await
 }
 
+pub async fn set_git_sources(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    sources: Vec<synveda_types::source::GitSourceDescriptor>,
+) -> Selection {
+    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
+        .await
+        .expect("read Configuration binding")
+        .into_iter()
+        .next()
+        .expect("binding exists");
+    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
+        .await
+        .expect("read Configuration artifact")
+        .expect("artifact exists");
+    let selected = binding
+        .pinned_version_id
+        .unwrap_or(artifact.current_version_id);
+    let mut document = configuration::version(tx, tenant, selected)
+        .await
+        .expect("read Configuration version")
+        .expect("version exists")
+        .document;
+    document.git_sources = sources;
+    select_document(tx, tenant, scope_id, binding, document).await
+}
+
+pub async fn set_source_policy(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    pack: &str,
+) -> Selection {
+    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
+        .await
+        .expect("read Configuration binding")
+        .into_iter()
+        .next()
+        .expect("binding exists");
+    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
+        .await
+        .expect("read Configuration artifact")
+        .expect("artifact exists");
+    let selected = binding
+        .pinned_version_id
+        .unwrap_or(artifact.current_version_id);
+    let mut document = configuration::version(tx, tenant, selected)
+        .await
+        .expect("read Configuration version")
+        .expect("version exists")
+        .document;
+    document.policy_pack = pack.to_owned();
+    select_document(tx, tenant, scope_id, binding, document).await
+}
+
 pub async fn set_optimization_mode(
     tx: &mut PgConnection,
     tenant: TenantId,

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into durable_operations(tenant_id,id,kind,input_hash,requested_by_identity_id,state,next_attempt_at)\n      values($1,$2,'source_reconcile',$3,$4,'pending',clock_timestamp())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ed5533014dcd452805f432f43eb111296c1fa04ca2b8b003149aab6e7222af2f"
+}

@@ -346,10 +346,16 @@ strict Clippy and every genuine supported vector profile pass. All seven retaine
 artifact draft fixtures and private credential state were removed with exact
 ownership checks. MEM-8 stays open while its contract is applied to the new
 MEM-9 reconciliation, CTX-6 structured handoff and SKIL-6 outcome producers.
-Next implement governed inbound descriptors, durable local refresh and targeted
-path freshness, then pinned private GitHub and the remaining phases. No external
-credential blocks local work; no persistent procedure-learning producer or full
-A–H completion is claimed.
+Accepted ADR-0148 at additive `0007` now qualifies governed local source refresh,
+immutable complete observations and exact path/hash freshness. Six real-Git cases,
+33 actual epoch cases, current source-removal/RLS regression, the 31 product
+scenarios, genuine vector profiles, fresh SQLx and generated/client gates pass.
+Public API, CLI and console setup/status/refresh use existing Capture review.
+[MEM-9](MEM-9.md#qualified-local-source-increment-2026-10-14) records measured
+catalogues and exact evidence. Private GitHub transport/identity qualification,
+structured handoff and verified procedure learning remain open; next implement
+provider-ID binding and separate inbound credential custody. No external credential
+blocks controlled fixture implementation; full A–H completion is not claimed.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
 OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL

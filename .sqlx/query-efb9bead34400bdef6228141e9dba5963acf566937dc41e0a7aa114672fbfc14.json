@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update source_reconcile_requests set commit_oid=$3,tree_oid=$4\n      where tenant_id=$1 and operation_id=$2 and commit_oid is null",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "efb9bead34400bdef6228141e9dba5963acf566937dc41e0a7aa114672fbfc14"
+}

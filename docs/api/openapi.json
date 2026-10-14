@@ -6891,7 +6891,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationView"
+                  "$ref": "#/components/schemas/PublicOperationView"
                 }
               }
             }
@@ -7719,6 +7719,185 @@
           },
           "404": {
             "description": "No such attachment on this project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/sources": {
+      "get": {
+        "tags": [
+          "sources"
+        ],
+        "operationId": "list_sources",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized configured sources",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceListView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/sources/{source_id}": {
+      "get": {
+        "tags": [
+          "sources"
+        ],
+        "operationId": "get_source",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Source and refresh state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/sources/{source_id}/refresh": {
+      "post": {
+        "tags": [
+          "sources"
+        ],
+        "operationId": "refresh_source",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact receipt replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceReconcileView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Durable refresh queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceReconcileView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed request or active refresh",
             "content": {
               "application/json": {
                 "schema": {
@@ -16682,6 +16861,13 @@
             },
             "description": "Governed local or private GitHub destination IDs; empty disables disclosure."
           },
+          "git_sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitSourceDescriptorBody"
+            },
+            "description": "Inbound descriptors; setup and disconnect use the Configuration workflow."
+          },
           "policy_pack": {
             "type": "string"
           },
@@ -19640,6 +19826,43 @@
             "type": "string"
           }
         }
+      },
+      "GitSourceDescriptorBody": {
+        "type": "object",
+        "description": "Exact project repository and bounded inert paths for inbound refresh.",
+        "required": [
+          "source_id",
+          "repository_id",
+          "read_target",
+          "git_ref",
+          "allowed_paths",
+          "enabled"
+        ],
+        "properties": {
+          "allowed_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "git_ref": {
+            "type": "string"
+          },
+          "read_target": {
+            "type": "string"
+          },
+          "repository_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "GrantList": {
         "type": "object",
@@ -23269,6 +23492,10 @@
           {
             "$ref": "#/components/schemas/ArtifactCleanupOperationView",
             "description": "Governed imported evidence cleanup."
+          },
+          {
+            "$ref": "#/components/schemas/SourceReconcileView",
+            "description": "Bounded operational source observation; publication remains Capture."
           }
         ],
         "description": "Kind-specific public operation contract. Source cleanup does not require a\nSkill version or a retained Session body to inspect its content-free receipt."
@@ -25560,6 +25787,172 @@
           }
         }
       },
+      "SourceListView": {
+        "type": "object",
+        "description": "Bounded source list from effective Configuration.",
+        "required": [
+          "sources"
+        ],
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceView"
+            },
+            "description": "At most sixteen authorized descriptors belonging to this project."
+          }
+        }
+      },
+      "SourceReconcileView": {
+        "type": "object",
+        "description": "Public content-free refresh receipt; import expansion uses its own API.",
+        "required": [
+          "id",
+          "kind",
+          "operation_version",
+          "project_id",
+          "source_id",
+          "state",
+          "attempts",
+          "created_at"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Persisted bounded attempt count."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Durable database request time."
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Safe failure code, never provider output."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable runtime operation address."
+          },
+          "import_job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Existing import review address, when changed bytes produced candidates."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "source_reconcile"
+            ]
+          },
+          "observation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Committed complete observation, absent for incomplete work."
+          },
+          "operation_version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Current immutable contract version.",
+            "minimum": 0
+          },
+          "pinned_revision": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact once-only observed commit when resolved."
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Actual project."
+          },
+          "source_id": {
+            "type": "string",
+            "description": "Stable configured source."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed",
+              "blocked",
+              "cancelled",
+              "dead_lettered"
+            ]
+          }
+        }
+      },
+      "SourceView": {
+        "type": "object",
+        "description": "Configured source and its last independently inspectable refresh receipt.",
+        "required": [
+          "source_id",
+          "repository_id",
+          "git_ref",
+          "allowed_paths",
+          "enabled"
+        ],
+        "properties": {
+          "allowed_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exact approved coverage; no inferred source inventory."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Disconnect retains previous approved Knowledge."
+          },
+          "git_ref": {
+            "type": "string",
+            "description": "Exact configured branch reference."
+          },
+          "observation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Last fully committed snapshot."
+          },
+          "operation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SourceReconcileView",
+                "description": "Latest runtime work, including failed or blocked work."
+              }
+            ]
+          },
+          "repository_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Actual project repository attachment."
+          },
+          "source_id": {
+            "type": "string",
+            "description": "Stable configured identity."
+          }
+        }
+      },
       "StageToolVersionBody": {
         "type": "object",
         "description": "Stage changed source, transport, auth or capability metadata.",
@@ -26994,7 +27387,11 @@
     },
     {
       "name": "operations",
-      "description": "Customer-safe durable Skill validation state"
+      "description": "Customer-safe durable validation, source cleanup and reconciliation state"
+    },
+    {
+      "name": "sources",
+      "description": "Governed inbound Git descriptors and bounded operational refresh"
     },
     {
       "name": "tools",

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into source_observation_paths(tenant_id,observation_id,path_digest,state,blob_oid,content_hash,artifact_id)\n          values($1,$2,encode(sha256(convert_to($3,'UTF8')),'hex'),$4,$5,$6,$7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b2cdea8d9072f9e64449c20c6b81108576dcbe18375936a0e266843f4297383d"
+}

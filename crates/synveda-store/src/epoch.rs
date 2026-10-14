@@ -52,7 +52,8 @@ pub const CURRENT_EPOCH: i32 = 3;
 pub const CURRENT_BASELINE_REVISION: i32 = 3;
 
 /// The forward head needed before the current binary may serve requests.
-pub const CURRENT_MIGRATION_HEAD: &str = "0006";
+pub const CURRENT_MIGRATION_HEAD: &str = "0007";
+const ARTIFACT_MIGRATION_HEAD: &str = "0006";
 const SOURCE_MIGRATION_HEAD: &str = "0005";
 const DELIVERY_MIGRATION_HEAD: &str = "0004";
 const V043_MIGRATION_HEAD: &str = "0001";
@@ -70,7 +71,7 @@ pub struct SchemaMetadata {
     pub epoch: i32,
     /// The immutable baseline revision within the epoch.
     pub baseline_revision: i32,
-    /// The migration head reached, as its four-digit file prefix (`0006`).
+    /// The migration head reached, as its four-digit file prefix (`0007`).
     /// Diagnostic: it tells two databases at the same epoch apart.
     pub migration_head: String,
     /// When this database became a Synveda database.
@@ -357,7 +358,8 @@ pub async fn verify_connection(
         | FORWARD_MIGRATION_HEAD
         | LOGIN_MIGRATION_HEAD
         | DELIVERY_MIGRATION_HEAD
-        | SOURCE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
+        | SOURCE_MIGRATION_HEAD
+        | ARTIFACT_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
             found: metadata.migration_head,
         }),
         found if found > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
@@ -395,6 +397,7 @@ pub(crate) async fn verify_embedded_head_connection(
             | MigrationPreflight::Login
             | MigrationPreflight::Delivery
             | MigrationPreflight::Source
+            | MigrationPreflight::Artifact
             | MigrationPreflight::Current
     ) {
         return Err(SchemaEpochError::IncompatibleMigration);
@@ -446,6 +449,8 @@ pub(crate) enum MigrationPreflight {
     /// Session source control committed, before its head stamp.
     PendingStampSource,
     /// Artifact source control committed, before its head stamp.
+    PendingStampArtifact,
+    /// Inbound reconciliation committed before its head stamp.
     PendingStampCurrent,
     /// The published v0.4.3 baseline and its exact SQLx row are present.
     Prior,
@@ -456,6 +461,7 @@ pub(crate) enum MigrationPreflight {
     /// The current head and exact SQLx ledger are present.
     Delivery,
     Source,
+    Artifact,
     Current,
 }
 
@@ -500,6 +506,7 @@ pub(crate) async fn migration_preflight_connection(
                 EmbeddedPrefix::Login => MigrationPreflight::PendingStampLogin,
                 EmbeddedPrefix::Delivery => MigrationPreflight::PendingStampDelivery,
                 EmbeddedPrefix::Source => MigrationPreflight::PendingStampSource,
+                EmbeddedPrefix::Artifact => MigrationPreflight::PendingStampArtifact,
                 EmbeddedPrefix::Current => MigrationPreflight::PendingStampCurrent,
             }),
             Err(error) => Err(error),
@@ -541,6 +548,18 @@ pub(crate) async fn migration_preflight_connection(
                     | LOGIN_MIGRATION_HEAD
                     | DELIVERY_MIGRATION_HEAD
                     | SOURCE_MIGRATION_HEAD,
+                    EmbeddedPrefix::Artifact,
+                ) => Ok(MigrationPreflight::PendingStampArtifact),
+                (ARTIFACT_MIGRATION_HEAD, EmbeddedPrefix::Artifact) => {
+                    Ok(MigrationPreflight::Artifact)
+                }
+                (
+                    V043_MIGRATION_HEAD
+                    | FORWARD_MIGRATION_HEAD
+                    | LOGIN_MIGRATION_HEAD
+                    | DELIVERY_MIGRATION_HEAD
+                    | SOURCE_MIGRATION_HEAD
+                    | ARTIFACT_MIGRATION_HEAD,
                     EmbeddedPrefix::Current,
                 ) => Ok(MigrationPreflight::PendingStampCurrent),
                 (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current) => {
@@ -568,6 +587,7 @@ enum EmbeddedPrefix {
     Login,
     Delivery,
     Source,
+    Artifact,
     Current,
 }
 
@@ -576,8 +596,15 @@ enum EmbeddedPrefix {
 async fn exact_applied_prefix_connection(
     connection: &mut PgConnection,
 ) -> Result<Option<EmbeddedPrefix>, SchemaEpochError> {
-    let [baseline, forward, login, delivery, source, artifact] =
-        crate::MIGRATOR.migrations.as_ref()
+    let [
+        baseline,
+        forward,
+        login,
+        delivery,
+        source,
+        artifact,
+        reconciliation,
+    ] = crate::MIGRATOR.migrations.as_ref()
     else {
         return Err(SchemaEpochError::IncompatibleMigration);
     };
@@ -587,12 +614,14 @@ async fn exact_applied_prefix_connection(
         || delivery.no_tx
         || source.no_tx
         || artifact.no_tx
+        || reconciliation.no_tx
         || baseline.version != 1
         || forward.version != 2
         || login.version != 3
         || delivery.version != 4
         || source.version != 5
         || artifact.version != 6
+        || reconciliation.version != 7
     {
         return Err(SchemaEpochError::IncompatibleMigration);
     }
@@ -601,7 +630,7 @@ async fn exact_applied_prefix_connection(
         select version, description, success, checksum, execution_time
           from public._sqlx_migrations
          order by version
-         limit 7
+         limit 8
         "#
     )
     .fetch_all(&mut *connection)
@@ -612,13 +641,18 @@ async fn exact_applied_prefix_connection(
         SchemaEpochError::Missing => SchemaEpochError::IncompatibleMigration,
         other => other,
     })?;
-    if rows.is_empty() || rows.len() > 6 {
+    if rows.is_empty() || rows.len() > 7 {
         return Ok(None);
     }
-    for (row, migration) in rows
-        .iter()
-        .zip([baseline, forward, login, delivery, source, artifact])
-    {
+    for (row, migration) in rows.iter().zip([
+        baseline,
+        forward,
+        login,
+        delivery,
+        source,
+        artifact,
+        reconciliation,
+    ]) {
         if row.version != migration.version
             || row.description != migration.description.as_ref()
             || !row.success
@@ -634,7 +668,8 @@ async fn exact_applied_prefix_connection(
         3 => EmbeddedPrefix::Login,
         4 => EmbeddedPrefix::Delivery,
         5 => EmbeddedPrefix::Source,
-        6 => EmbeddedPrefix::Current,
+        6 => EmbeddedPrefix::Artifact,
+        7 => EmbeddedPrefix::Current,
         _ => return Ok(None),
     }))
 }

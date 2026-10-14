@@ -186,6 +186,7 @@ async fn run_process(
             relaxation_interval,
             directory_config,
             execution_provider,
+            source_reader: crate::runtime_config::git_source_reader()?,
         })
     } else {
         None
@@ -504,6 +505,7 @@ struct MaintenanceRuntime {
     relaxation_interval: Duration,
     directory_config: Option<directory_sync::SyncConfig>,
     execution_provider: ExecutionProvider,
+    source_reader: Option<Arc<synveda_git::LocalSourceReader>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -650,6 +652,23 @@ async fn run_authority_generation(
                 work_stop_rx.clone(),
             ),
         );
+        if let Some(reader) = maintenance.source_reader.clone() {
+            spawn_governed_named(
+                &mut tasks,
+                "source-reconcile",
+                gate.clone(),
+                generation,
+                health.policy_ready.clone(),
+                crate::source_reconciliation::run(
+                    crate::source_reconciliation::Runtime::new(
+                        runtime.pool.clone(),
+                        Arc::clone(&runtime.pdp),
+                        reader,
+                    ),
+                    work_stop_rx.clone(),
+                ),
+            );
+        }
         spawn_governed_named(
             &mut tasks,
             "source-cleanup",

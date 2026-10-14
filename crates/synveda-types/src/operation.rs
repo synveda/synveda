@@ -25,6 +25,8 @@ pub const SKILL_VALIDATION_OPERATION_VERSION: u16 = 1;
 pub enum OperationKind {
     /// Erase exact source-backed service copies after logical suppression.
     SourceCleanup,
+    /// Observe a configured immutable Git snapshot and freeze Capture candidates.
+    SourceReconcile,
     /// Governed removal of one Knowledge aggregate's plaintext and indexes.
     KnowledgeErasure,
     /// Non-executing validation of one immutable Skill version.
@@ -37,6 +39,7 @@ impl OperationKind {
         Self::KnowledgeErasure,
         Self::SkillValidation,
         Self::SourceCleanup,
+        Self::SourceReconcile,
     ];
 
     /// Stable wire/storage name.
@@ -44,6 +47,7 @@ impl OperationKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SourceCleanup => "source_cleanup",
+            Self::SourceReconcile => "source_reconcile",
             Self::KnowledgeErasure => "knowledge_erasure",
             Self::SkillValidation => "skill_validation",
         }

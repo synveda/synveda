@@ -174,7 +174,7 @@ test("the normal editor is typed, scoped, and distinct from the effective versio
     "A governed version is effective",
     "proposed version or binding does not replace this evidence",
     "not proof this artifact is effective",
-    "Propose Capture and Context settings",
+    "Propose Capture, Context and source settings",
     "Minimum confidence (0–1000)",
     "Maximum candidates per batch (1–256)",
     "Maximum token budget (1–100000)",
@@ -184,7 +184,8 @@ test("the normal editor is typed, scoped, and distinct from the effective versio
   ]) {
     assert.ok(text.toLowerCase().includes(expected.toLowerCase()), expected);
   }
-  assert.doesNotMatch(markup, /<textarea/);
+  assert.equal((markup.match(/<textarea/g) ?? []).length, 1);
+  assert.match(toText(markup), /Source descriptors \(JSON\)/);
   assert.match(markup, /type="number" min="0" max="1000"/);
   assert.match(markup, /type="number" min="1" max="256"/);
   assert.match(markup, /type="number" min="1" max="100000"/);

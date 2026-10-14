@@ -186,6 +186,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "open_session",
     "plan_okf_import",
     "publish_configuration_version",
+    "refresh_source",
     "register_tool_server",
     "replace_capture_candidate",
     "resolve_knowledge_conflict",

@@ -57,6 +57,7 @@ mod session;
 mod settings;
 mod setup;
 mod skill;
+mod sources;
 mod spool;
 #[cfg(test)]
 mod testing;
@@ -399,6 +400,9 @@ enum Command {
     /// inert bytes, never a local path or permission to run Git/content.
     #[command(subcommand)]
     Okf(OkfCommand),
+    /// Governed inbound Git descriptors and durable refresh receipts.
+    #[command(subcommand)]
+    Sources(SourcesCommand),
     /// The durable observation spool (CPR-12, ADR-0078).
     ///
     /// An agent client records what happened into a local spool before it
@@ -895,6 +899,32 @@ enum SkillCommand {
         #[arg(long)]
         json: bool,
         /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SourcesCommand {
+    /// List sources from effective governed Configuration.
+    List {
+        project: synveda_types::ProjectId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Inspect the latest complete observation and runtime receipt.
+    Status {
+        project: synveda_types::ProjectId,
+        source: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Queue a read in the worker; this does not publish Knowledge.
+    Refresh {
+        project: synveda_types::ProjectId,
+        source: String,
+        #[arg(long)]
+        idempotency_key: String,
         #[arg(long)]
         profile: Option<String>,
     },
@@ -2021,7 +2051,7 @@ enum TenantSecretCommand {
         /// Exact governing scope. Immutable after the reference is minted.
         #[arg(long)]
         scope: ScopeId,
-        /// Consumer family: directory, tool_server, model_provider or import_export.
+        /// Consumer family: directory, tool_server, model_provider, import_export or source_read.
         #[arg(long)]
         kind: synveda_types::secret::TenantSecretKind,
         /// Credential-free dotted-lowercase operator label.
@@ -3139,6 +3169,25 @@ async fn run(cli: Cli) -> Result<(), String> {
                     json,
                 )
                 .await
+            }
+        },
+
+        Command::Sources(command) => match command {
+            SourcesCommand::List { project, profile } => {
+                sources::list(&profile_name(profile)?, project).await
+            }
+            SourcesCommand::Status {
+                project,
+                source,
+                profile,
+            } => sources::status(&profile_name(profile)?, project, &source).await,
+            SourcesCommand::Refresh {
+                project,
+                source,
+                idempotency_key,
+                profile,
+            } => {
+                sources::refresh(&profile_name(profile)?, project, &source, &idempotency_key).await
             }
         },
 

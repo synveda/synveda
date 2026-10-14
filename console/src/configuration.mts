@@ -40,6 +40,7 @@ export interface DemoConfigurationDraft {
   contextOptimizationMode: ContextOptimizationMode;
   contextTraceRetention: TraceRetention;
   contextIncludeUnreviewedCandidates: boolean;
+  gitSourcesJson: string;
 }
 
 /** Nearest product scope selected by the reader, then their own scope. */
@@ -84,6 +85,7 @@ export function demoConfigurationDraft(
     contextIncludeUnreviewedCandidates: document.context.channels.includes(
       "unreviewed_candidates",
     ),
+    gitSourcesJson: JSON.stringify(document.git_sources ?? [], null, 2),
   };
 }
 
@@ -133,9 +135,16 @@ export function applyDemoConfigurationDraft(
   if (draft.contextIncludeUnreviewedCandidates) {
     channels.push("unreviewed_candidates");
   }
+  const gitSources: unknown = JSON.parse(draft.gitSourcesJson);
+  if (!Array.isArray(gitSources) || gitSources.length > 16) {
+    throw new Error("Git sources must be a JSON array with at most sixteen descriptors.");
+  }
 
   return {
     ...document,
+    ...(gitSources.length > 0 || document.git_sources !== undefined
+      ? { git_sources: gitSources as NonNullable<ConfigurationDocumentBody["git_sources"]> }
+      : {}),
     capture: {
       ...document.capture,
       enabled: draft.captureEnabled,

@@ -1277,6 +1277,10 @@ export type ConfigurationDocumentBody = {
      * Governed local or private GitHub destination IDs; empty disables disclosure.
      */
     git_export_targets?: string[];
+    /**
+     * Inbound descriptors; setup and disconnect use the Configuration workflow.
+     */
+    git_sources?: GitSourceDescriptorBody[];
     policy_pack: string;
     relaxations: RelaxationConfigurationBody;
   };
@@ -2842,6 +2846,18 @@ export type GitExportResponse = {
     source_head: string;
     source_pin?: string | null;
     target: string;
+  };
+
+/**
+ * Exact project repository and bounded inert paths for inbound refresh.
+ */
+export type GitSourceDescriptorBody = {
+    allowed_paths: string[];
+    enabled: boolean;
+    git_ref: string;
+    read_target: string;
+    repository_id: string;
+    source_id: string;
   };
 
 /**
@@ -4945,7 +4961,7 @@ export type ProposalTimelineEvent = {
  * Kind-specific public operation contract. Source cleanup does not require a
  * Skill version or a retained Session body to inspect its content-free receipt.
  */
-export type PublicOperationView = OperationView | SourceCleanupOperationView | ArtifactCleanupOperationView;
+export type PublicOperationView = OperationView | SourceCleanupOperationView | ArtifactCleanupOperationView | SourceReconcileView;
 
 /**
  * Publish another complete immutable version.
@@ -6083,6 +6099,95 @@ export type SourceControlView = {
      * Committed logical removal time.
      */
     removed_at: string;
+  };
+
+/**
+ * Bounded source list from effective Configuration.
+ */
+export type SourceListView = {
+    /**
+     * At most sixteen authorized descriptors belonging to this project.
+     */
+    sources: SourceView[];
+  };
+
+/**
+ * Public content-free refresh receipt; import expansion uses its own API.
+ */
+export type SourceReconcileView = {
+    /**
+     * Persisted bounded attempt count.
+     */
+    attempts: number;
+    /**
+     * Durable database request time.
+     */
+    created_at: string;
+    /**
+     * Safe failure code, never provider output.
+     */
+    error_code?: string | null;
+    /**
+     * Stable runtime operation address.
+     */
+    id: string;
+    /**
+     * Existing import review address, when changed bytes produced candidates.
+     */
+    import_job_id?: string | null;
+    kind: "source_reconcile";
+    /**
+     * Committed complete observation, absent for incomplete work.
+     */
+    observation_id?: string | null;
+    /**
+     * Current immutable contract version.
+     */
+    operation_version: number;
+    /**
+     * Exact once-only observed commit when resolved.
+     */
+    pinned_revision?: string | null;
+    /**
+     * Actual project.
+     */
+    project_id: string;
+    /**
+     * Stable configured source.
+     */
+    source_id: string;
+    state: "pending" | "running" | "succeeded" | "failed" | "blocked" | "cancelled" | "dead_lettered";
+  };
+
+/**
+ * Configured source and its last independently inspectable refresh receipt.
+ */
+export type SourceView = {
+    /**
+     * Exact approved coverage; no inferred source inventory.
+     */
+    allowed_paths: string[];
+    /**
+     * Disconnect retains previous approved Knowledge.
+     */
+    enabled: boolean;
+    /**
+     * Exact configured branch reference.
+     */
+    git_ref: string;
+    /**
+     * Last fully committed snapshot.
+     */
+    observation_id?: string | null;
+    operation?: null | SourceReconcileView;
+    /**
+     * Actual project repository attachment.
+     */
+    repository_id: string;
+    /**
+     * Stable configured identity.
+     */
+    source_id: string;
   };
 
 /**
@@ -7632,7 +7737,7 @@ export type Operations = {
   readonly cancel_operation: {
     readonly path: "/v1/operations/{id}/cancel";
     readonly method: "POST";
-    readonly response: OperationView;
+    readonly response: PublicOperationView;
   };
   /**
    * List immutable pack sources available to Configuration documents.
@@ -7730,6 +7835,22 @@ export type Operations = {
     readonly path: "/v1/projects/{project_id}/repositories/{repository_id}";
     readonly method: "DELETE";
     readonly response: void;
+  };
+  readonly list_sources: {
+    readonly path: "/v1/projects/{project_id}/sources";
+    readonly method: "GET";
+    readonly response: SourceListView;
+  };
+  readonly get_source: {
+    readonly path: "/v1/projects/{project_id}/sources/{source_id}";
+    readonly method: "GET";
+    readonly response: SourceView;
+  };
+  readonly refresh_source: {
+    readonly path: "/v1/projects/{project_id}/sources/{source_id}/refresh";
+    readonly method: "POST";
+    readonly idempotent: true;
+    readonly response: SourceReconcileView;
   };
   /**
    * `GET /v1/projects/{project_id}/tool-config` — secret-free exact bindings.
@@ -8625,6 +8746,9 @@ export const OPERATIONS = {
   list_repositories: { path: "/v1/projects/{project_id}/repositories", method: "GET" },
   attach_repository: { path: "/v1/projects/{project_id}/repositories", method: "POST", idempotent: true },
   detach_repository: { path: "/v1/projects/{project_id}/repositories/{repository_id}", method: "DELETE" },
+  list_sources: { path: "/v1/projects/{project_id}/sources", method: "GET" },
+  get_source: { path: "/v1/projects/{project_id}/sources/{source_id}", method: "GET" },
+  refresh_source: { path: "/v1/projects/{project_id}/sources/{source_id}/refresh", method: "POST", idempotent: true },
   generate_tool_client_config: { path: "/v1/projects/{project_id}/tool-config", method: "GET" },
   list_prompts: { path: "/v1/prompts", method: "GET" },
   author_prompt: { path: "/v1/prompts", method: "POST" },

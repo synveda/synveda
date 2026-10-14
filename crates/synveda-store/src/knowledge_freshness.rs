@@ -71,7 +71,17 @@ pub async fn evidence(
                  where link.tenant_id = $1
                    and link.knowledge_revision_id = $2
                    and source.metadata->>'synveda_freshness_state' = 'stale'
-            ) as "source_stale!""#,
+            ) as "source_stale!",
+            exists (
+                select 1 from knowledge_revision_source_headers link
+                join knowledge_sources source on source.tenant_id=link.tenant_id and source.id=link.knowledge_source_id
+                join source_artifact_addresses address on address.tenant_id=source.tenant_id and address.artifact_id=source.import_artifact_id
+                join import_jobs job on job.tenant_id=address.tenant_id and job.id=address.job_id
+                join source_reconcile_heads head on head.tenant_id=job.tenant_id and head.project_id=job.project_id and head.source_id=job.managed_source_id
+                join source_observation_paths current on current.tenant_id=head.tenant_id and current.observation_id=head.observation_id and current.path_digest=address.path_digest
+                where link.tenant_id=$1 and link.knowledge_revision_id=$2
+                 and current.state in ('present','missing') and current.content_hash is distinct from source.content_hash
+            ) as "managed_source_changed!""#,
         tenant.as_uuid(),
         revision_id.as_uuid(),
         project_id.map(|id| id.as_uuid()),
@@ -83,5 +93,6 @@ pub async fn evidence(
         repository_changed: row.repository_changed,
         failed_use: row.failed_use,
         source_stale: row.source_stale,
+        managed_source_changed: row.managed_source_changed,
     })
 }

@@ -1,0 +1,125 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select r.operation_id,r.project_id,r.source_id,r.repository_id,r.configuration_version_id,\n      r.descriptor_hash,r.custody_digest,r.credential_revision,r.previous_observation_id,r.path_count,r.commit_oid,r.tree_oid,\n      op.requested_by_identity_id as \"requested_by!\",op.created_at,op.state,op.last_error_code as error_code,op.attempts,op.result\n      from source_reconcile_requests r join durable_operations op on op.tenant_id=r.tenant_id and op.id=r.operation_id\n      where r.tenant_id=$1 and r.operation_id=$2 and op.kind='source_reconcile'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "operation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "repository_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "configuration_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "descriptor_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "custody_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "credential_revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "previous_observation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "path_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "commit_oid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "tree_oid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "requested_by!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "result",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "9f1c3917b971f7b87ec70bf071bc598d9391209b598792054ea67a4f8471caf4"
+}

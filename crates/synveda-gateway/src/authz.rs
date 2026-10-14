@@ -613,6 +613,23 @@ pub(crate) fn decide_with_pdp(
     decide_inner_with_pdp(pdp, input, 0, action, resource, None)
 }
 
+/// Exact immutable Knowledge authority for durable producers using frozen Cedar.
+pub(crate) fn decide_knowledge_read_with_pdp(
+    pdp: &Pdp,
+    input: &DecisionInput,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_inner_with_pdp(
+        pdp,
+        input,
+        0,
+        Action::KnowledgeRead,
+        resource,
+        Some(sensitivity),
+    )
+}
+
 /// [`decide`] for a resource whose chain starts at `position` of the
 /// gathered chain (see [`DecisionInput::context_from`]). The audit
 /// event's role list is narrowed to that chain too — a binding at a scope

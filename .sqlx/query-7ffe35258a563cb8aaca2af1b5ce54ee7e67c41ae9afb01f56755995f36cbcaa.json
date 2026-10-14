@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select state,blob_oid,content_hash,artifact_id from source_observation_paths\n      where tenant_id=$1 and observation_id=$2 and path_digest=encode(sha256(convert_to($3,'UTF8')),'hex')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "blob_oid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "7ffe35258a563cb8aaca2af1b5ce54ee7e67c41ae9afb01f56755995f36cbcaa"
+}

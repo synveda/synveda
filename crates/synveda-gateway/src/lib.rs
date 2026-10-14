@@ -63,6 +63,7 @@ pub mod shutdown;
 pub mod skill_validation;
 mod skills;
 pub mod source_control;
+pub mod source_reconciliation;
 pub mod telemetry;
 mod tenant;
 mod tool_registry;

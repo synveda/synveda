@@ -474,7 +474,7 @@ function ArtifactControls({
       ) : null}
       {draft && current ? (
         <form className="stacked-form configuration-editor" noValidate onSubmit={(event) => void publish(event)}>
-          <h4>Propose Capture and Context settings</h4>
+          <h4>Propose Capture, Context and source settings</h4>
           <p className="muted">
             These are the demo's supported everyday settings. Every other field is copied
             unchanged from v{current.ordinal}; the gateway validates the complete document again.
@@ -618,6 +618,16 @@ function ArtifactControls({
             </label>
           </fieldset>
 
+          <fieldset>
+            <legend>Git sources</legend>
+            <p className="muted">Use an attached repository ID, an operator configured read target,
+              an exact branch ref and sorted Markdown paths. Set enabled to false to disconnect.
+              Publishing follows the current review policy.</p>
+            <label>Source descriptors (JSON)
+              <textarea rows={10} value={draft.gitSourcesJson}
+                onChange={(event) => updateDraft({ gitSourcesJson: event.target.value })} />
+            </label>
+          </fieldset>
           <details className="technical-details">
             <summary>Complete immutable document to propose</summary>
             {preview ? (

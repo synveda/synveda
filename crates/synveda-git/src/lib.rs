@@ -8,11 +8,16 @@
 mod destinations;
 mod github;
 mod projection;
+mod sources;
 mod transport;
 mod wire;
 
 pub use destinations::{Destination, ExportTransport};
 pub use github::{GitHubCredential, GitHubTarget, GitHubTargets, GitHubTransport};
+pub use sources::{
+    LocalSourceReader, MAX_SOURCE_BLOB_BYTES, MAX_SOURCE_BYTES, MAX_SOURCE_REQUESTS, SourceFile,
+    SourcePin, SourceSnapshot,
+};
 
 pub use projection::{
     CommitEvidence, EntryEvidence, MAX_BYTES, MAX_COMMITS, MAX_ENTRIES, MAX_OBJECTS, Manifest,

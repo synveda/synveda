@@ -26,6 +26,8 @@ pub enum TenantSecretKind {
     ModelProvider,
     /// Credential used by an explicitly credentialed import/export provider.
     ImportExport,
+    /// Contents-read credential for a pinned inbound Git source.
+    SourceRead,
 }
 
 impl TenantSecretKind {
@@ -37,6 +39,7 @@ impl TenantSecretKind {
             Self::ToolServer => "tool_server",
             Self::ModelProvider => "model_provider",
             Self::ImportExport => "import_export",
+            Self::SourceRead => "source_read",
         }
     }
 }
@@ -56,6 +59,7 @@ impl FromStr for TenantSecretKind {
             "tool_server" => Ok(Self::ToolServer),
             "model_provider" => Ok(Self::ModelProvider),
             "import_export" => Ok(Self::ImportExport),
+            "source_read" => Ok(Self::SourceRead),
             _ => Err(Error::Invalid {
                 message: format!("unknown tenant-secret kind: {value:?}"),
             }),

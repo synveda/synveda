@@ -105,6 +105,8 @@ pub struct NewImportPlan {
     pub source_revision: Option<String>,
     /// Canonical server-established repository attachment for managed imports.
     pub repository_id: Option<synveda_types::RepositoryId>,
+    /// Internal configured-source attribution; absent for public uploads.
+    pub managed_source_id: Option<String>,
     /// Canonical admitted-bundle digest.
     pub bundle_digest: String,
     /// Content-free validation notices.
@@ -374,15 +376,48 @@ fn validate_plan(plan: &NewImportPlan) -> Result<()> {
 pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Result<PlannedImport> {
     validate_plan(plan)?;
     crate::artifact_control::admit_plan(conn, plan).await?;
+    // Review identity includes the compared head, while suppression still uses
+    // the permanent repository/path/byte alias. A force-push can require a new
+    // review of familiar bytes against a subsequently approved revision.
+    let review_digest = if plan.managed_source_id.is_some() {
+        let mut comparisons = Vec::new();
+        for mapping in &plan.mappings {
+            let artifact = plan
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.id == mapping.artifact_id)
+                .ok_or_else(|| Error::Invalid {
+                    message: "Managed review mapping has no admitted artifact".to_owned(),
+                })?;
+            comparisons.push((
+                &artifact.logical_path,
+                mapping.classification.as_str(),
+                mapping.matched_item_id,
+                mapping.matched_revision_id,
+            ));
+        }
+        comparisons.sort_unstable();
+        Some(
+            blake3::hash(
+                serde_json::json!(["synveda.managed-review.v1", comparisons])
+                    .to_string()
+                    .as_bytes(),
+            )
+            .to_hex()
+            .to_string(),
+        )
+    } else {
+        None
+    };
     let inserted = sqlx::query_scalar!(
         r#"
         insert into import_jobs
             (id, tenant_id, project_id, scope_id, workspace_id, principal_id,
              format, format_version, specification_commit, source_kind,
              source_locator, source_revision, bundle_digest, artifact_count,
-             mapping_count, notices, repository_id)
+             mapping_count, notices, repository_id, managed_source_id, managed_review_digest)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17)
+                $13, $14, $15, $16, $17, $18, $19)
         on conflict on constraint import_jobs_source_digest_unique do nothing
         returning id
         "#,
@@ -403,6 +438,8 @@ pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Resul
         plan.mappings.len() as i32,
         serde_json::json!(plan.notices),
         plan.repository_id.map(|id| id.as_uuid()) as Option<Uuid>,
+        plan.managed_source_id,
+        review_digest,
     )
     .fetch_optional(&mut *conn)
     .await
@@ -487,6 +524,9 @@ pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Resul
             &plan.source_kind,
             &plan.source_locator,
             &plan.bundle_digest,
+            plan.repository_id,
+            plan.managed_source_id.as_deref(),
+            review_digest.as_deref(),
         )
         .await?
     }
@@ -528,6 +568,7 @@ pub async fn get_job(
     row.map(TryInto::try_into).transpose()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn get_job_by_digest(
     executor: impl PgExecutor<'_>,
     tenant: TenantId,
@@ -535,6 +576,9 @@ async fn get_job_by_digest(
     source_kind: &str,
     locator: &str,
     digest: &str,
+    repository: Option<synveda_types::RepositoryId>,
+    managed_source: Option<&str>,
+    review_digest: Option<&str>,
 ) -> Result<Option<ImportJob>> {
     let row = sqlx::query_as!(
         JobRow,
@@ -550,12 +594,20 @@ async fn get_job_by_digest(
         from import_jobs
         where tenant_id = $1 and project_id = $2 and source_kind = $3
           and source_locator = $4 and bundle_digest = $5
+          and repository_identity_digest is not distinct from (
+            select encode(sha256(convert_to(jsonb_build_array('synveda.repository.source.v1',r.tenant_id,r.project_id,lower(r.canonical_uri))::text,'UTF8')),'hex')
+            from project_repositories r where r.tenant_id=$1 and r.project_id=$2 and r.id=$6)
+          and managed_source_id is not distinct from $7
+          and managed_review_digest is not distinct from $8
         "#,
         tenant.as_uuid(),
         project.as_uuid(),
         source_kind,
         locator,
         digest,
+        repository.map(|id|id.as_uuid()) as Option<Uuid>,
+        managed_source,
+        review_digest,
     )
     .fetch_optional(executor)
     .await

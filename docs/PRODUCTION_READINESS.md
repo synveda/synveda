@@ -723,8 +723,10 @@ off/conservative rendered-text tokens in one existing optional-content fixture
 and 12/12 declared restart facts at four-sample local p95 32.929792 ms. Absolute
 token counts include generated wrapper identifiers. Source health is limited
 to visible trace observations: synchronized source coverage, physical cleanup,
-acknowledged delivery and model use/outcome remain unknown. Inbound reconciliation, structured second-client handoff and verified procedure
-learning are open under MEM-8/9, CTX-6 and SKIL-6. This changes no production or
+acknowledged delivery and model use/outcome remain unknown. ADR-0148 qualifies bounded local Git reconciliation at additive `0007` through
+six real-Git cases, 33 actual epoch cases, ordinary RLS/source regression and
+current product/client gates. Private GitHub reads, structured second-client
+handoff and verified procedure learning remain open under MEM-8/9, CTX-6 and SKIL-6. This changes no production or
 native-client qualification claim; the exact increment evidence and next action
 are in [MEM-8](backlog/MEM-8.md#first-implemented-increment-2026-10-14).
 

@@ -24,6 +24,9 @@ import type {
   OkfArtifactView,
   KnowledgeMutationView,
   ProjectView,
+  SourceListView,
+  SourceView,
+  SourceReconcileView,
 } from "./generated/api.js";
 
 type Notice = { error?: string; message?: string };
@@ -52,6 +55,7 @@ export function OkfExchange() {
           project={project}
           canWrite={mayAt(me.anchors, project.scope_id, "knowledge.write")}
           canRead={mayAt(me.anchors, project.scope_id, "knowledge.read")}
+          canReadSources={mayAt(me.anchors, project.scope_id, "source.read")}
           selectedJob={selectedJob}
           selectJob={setSelectedJob}
         />
@@ -64,17 +68,20 @@ function ProjectExchange({
   project,
   canWrite,
   canRead,
+  canReadSources,
   selectedJob,
   selectJob,
 }: {
   project: ProjectView;
   canWrite: boolean;
   canRead: boolean;
+  canReadSources: boolean;
   selectedJob: string | null;
   selectJob: (id: string | null) => void;
 }) {
   return (
     <>
+      {canReadSources && <ConfiguredSources projectId={project.id} canRefresh={canWrite} selectJob={selectJob} />}
       <section>
         <h2>Import source</h2>
         {canWrite ? (
@@ -93,6 +100,50 @@ function ProjectExchange({
       <ExportPanel project={project} canRead={canRead} />
     </>
   );
+}
+
+function ConfiguredSources({projectId,canRefresh,selectJob}: {projectId:string;canRefresh:boolean;selectJob:(id:string|null)=>void}) {
+  const path=`/v1/projects/${projectId}/sources`;
+  const entry=useQuery(path,()=>request("list_sources",{path:{project_id:projectId}}));
+  const retry=useRefresh(path);
+  return <section><h2>Connected Git sources</h2>
+    <p>Configure repository, branch and allowed files through <Link href={hrefOf("configuration")}>Configuration</Link>. Refresh freezes reviewable candidates; approval publishes Knowledge.</p>
+    <Loaded<SourceListView> entry={entry} what="configured sources" onRetry={retry}>{(view)=><>
+      {view.sources.length===0?<p className="muted">No Git sources are configured for this project.</p>:view.sources.map((source)=><ConfiguredSource key={source.source_id} projectId={projectId} source={source} canRefresh={canRefresh} selectJob={selectJob} />)}
+    </>}</Loaded>
+  </section>;
+}
+
+function ConfiguredSource({projectId,source,canRefresh,selectJob}: {projectId:string;source:SourceView;canRefresh:boolean;selectJob:(id:string|null)=>void}) {
+  const [receipt,setReceipt]=useState<SourceReconcileView|null>(source.operation??null);
+  const [key,setKey]=useState(()=>idempotencyKey());
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState<string|null>(null);
+  async function refresh() {
+    setBusy(true);setError(null);
+    const answer=await request("refresh_source",{path:{project_id:projectId,source_id:source.source_id},idempotencyKey:key});
+    setBusy(false);
+    if(answer.kind!=="ok"){setError(failedAnswerMessage(answer));return;}
+    setReceipt(answer.body);setKey(idempotencyKey());invalidate(`/v1/projects/${projectId}/sources`);
+  }
+  async function inspect() {
+    if(!receipt)return;
+    setBusy(true);setError(null);
+    const answer=await request("get_operation",{path:{id:receipt.id}});
+    setBusy(false);
+    if(answer.kind!=="ok"){setError(failedAnswerMessage(answer));return;}
+    if(answer.body.kind==="source_reconcile")setReceipt(answer.body);
+    invalidate(`/v1/projects/${projectId}/sources`,"/v1/okf/imports","/v1/capture-candidates");
+  }
+  return <article><h3>{source.source_id}</h3><p><code>{source.git_ref}</code> · {source.enabled?"Enabled":"Disconnected"}</p>
+    <p className="muted">Allowed files: {source.allowed_paths.join(", ")}</p>
+    {error&&<div className="banner error">{error}</div>}
+    {canRefresh&&<button type="button" disabled={!source.enabled||busy} onClick={()=>void refresh()}>{busy?"Working…":"Refresh source"}</button>}
+    {receipt&&<><p>Refresh: {receipt.state}{receipt.error_code?` (${receipt.error_code})`:""}. {source.observation_id?"A complete snapshot is retained.":"No complete snapshot is retained yet."}</p>
+      <button type="button" disabled={busy} onClick={()=>void inspect()}>Check status</button>
+      {receipt.import_job_id&&<button type="button" onClick={()=>selectJob(receipt.import_job_id??null)}>Inspect import and candidates</button>}
+    </>}
+  </article>;
 }
 
 function ImportPanel({ project, onPlanned }: { project: ProjectView; onPlanned: (id: string) => void }) {

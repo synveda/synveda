@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update durable_operations set state=$3,last_error_code=$4,result=$5,progress_percent=case when $3='succeeded' then 100 else progress_percent end,\n      completed_at=clock_timestamp(),updated_at=clock_timestamp(),lease_owner=null,lease_expires_at=null,next_attempt_at=null,\n      cancel_requested_at=case when $3='cancelled' then coalesce(cancel_requested_at,clock_timestamp()) else cancel_requested_at end\n      where tenant_id=$1 and id=$2 and ($3<>'succeeded' or (state='running' and lease_expires_at>clock_timestamp()))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "68987d8e105735ea0083830680d4f4dd38adb338c6c9350688f033c8c44e3ccd"
+}

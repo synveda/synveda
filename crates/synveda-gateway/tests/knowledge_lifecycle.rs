@@ -83,6 +83,7 @@ fn state(url: &str) -> AppState {
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
         context_embed_timeout: Duration::from_millis(100),
+        git_sources: None,
         git_exports: None,
         keys: Arc::new(synveda_store::keys::KeyRing::new(
             synveda_crypto::Kms::Disabled,
@@ -2615,6 +2616,7 @@ async fn forget_scrubs_later_context_import_and_conflict_references() {
             source_locator: "cpr44-erasure-source".to_owned(),
             source_revision: None,
             repository_id: None,
+            managed_source_id: None,
             bundle_digest: blake3::hash(b"cpr44-erasure-bundle").to_hex().to_string(),
             notices: Vec::new(),
             artifacts: vec![import_store::NewImportArtifact {

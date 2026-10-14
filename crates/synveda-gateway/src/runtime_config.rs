@@ -43,6 +43,20 @@ pub fn git_export_transport() -> Result<Option<Arc<synveda_git::ExportTransport>
     ))))
 }
 
+/// Disabled-by-default private inbound bare repository custody.
+pub fn git_source_reader() -> Result<Option<Arc<synveda_git::LocalSourceReader>>, String> {
+    setting("SYNVEDA_GIT_SOURCE_ROOT")?
+        .map(|root| {
+            synveda_git::LocalSourceReader::new(root.into())
+                .map(Arc::new)
+                .map_err(|_| {
+                    "SYNVEDA_GIT_SOURCE_ROOT must name an existing private owned absolute directory"
+                        .to_owned()
+                })
+        })
+        .transpose()
+}
+
 /// Canonical public application origin and its fixed OIDC callback.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicApplicationUrl {
