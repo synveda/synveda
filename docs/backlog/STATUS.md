@@ -326,9 +326,11 @@ zero; affected public-API, Rust, console and SDK checks pass. The MEM-8 brief
 records exact source/patch identity, measured token/latency boundary and remaining
 work. ADR-0144 adds private all-mode delivery dependencies at additive head
 `0004`, exact authored/Skill replay and addressed item-erasure copies. The expanded
-30-scenario suite, prior-head migration/authority checks, genuine pgvector
+31-scenario suite, prior-head migration/authority checks, genuine pgvector
 0.8.2–0.8.6 profiles and private-manifest RLS/tamper checks pass. Complete source
-withdrawal, admission ordering and durable cleanup remain open; inbound reconciliation, structured
+withdrawal, admission ordering and durable cleanup remain open. ADR-0145 adds
+exact frozen stored-policy replay before process refresh; independent readers
+retain their receipts. Inbound reconciliation, structured
 second-client handoff, procedure learning and the integrated domain demo are
 not delivered. Next implement a separately governed Session-event withdrawal
 with exact source locks, permanent suppression and all derivative disclosure/

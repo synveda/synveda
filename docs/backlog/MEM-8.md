@@ -150,6 +150,48 @@ mistakenly used the demo task selector, then omitted a required tenant-fixture
 credential file; corrected ordinary-role runs pass. No product failure was
 inferred from those command setup failures.
 
+### Exact policy replay increment (2026-10-14)
+
+ADR-0145 adds a frozen request-local evaluator for the exact stored source and
+typed configuration. It reuses a compile only on exact source/configuration
+equality under the same embedded schema/base, with at most 64 packs/1 MiB of
+source text and two concurrent local builders. Malformed or unavailable current
+policy refuses the original receipt; the process cache is not changed.
+
+The isolated `d59ad7d12753dd00ab8971c6cec63cd0096d6d67` baseline, with the new
+regression copied into a managed comparison checkout, returned 200 with Alice's
+saved plaintext after an Alice-only policy denial committed. The fixed focused
+test returned 409 for Alice and the exact original receipt for Bob while the
+process still held version 1. Test policy fixtures now persist their source in
+ordinary tenant transactions. The core policy suite has 79 passing tests, and
+ordinary RLS/inventory acceptance has 66 passes with five separate administrator
+cases ignored. The exact-policy SQLx query was generated and checked on a fresh
+current database and reviewed at hash
+`cbdfe5778887e21e7d2ebc828a80171a498dbbe4e0551f33c95a88b165d3c6d8`.
+
+The first comparison reused the primary Cargo target directory. Subsequent
+binaries reused baseline artifacts, and those failed repeat/evaluation runs do
+not qualify the fixed source. All affected workspace packages were rebuilt from
+the primary source; future comparisons must use a separate target directory.
+The seven saved Knowledge/checkpoint/authored/Skill cases then passed, strict
+Clippy passed for policy/store/gateway, the fresh 31-scenario product suite passed
+with unchanged trust/quality floors, and the ten-case demo passed and removed
+its owned volume. The primary implementation files remained intact. The managed
+comparison checkout is archived with its copied regression.
+
+The rebuilt product report binds HEAD
+`d59ad7d12753dd00ab8971c6cec63cd0096d6d67` and dirty patch SHA-256
+`70dfe58fa6c304709185693aec556a648ea1e33fa6fbd7769c71af9a98ba834b`.
+It measures 716/487 off/conservative rendered-text tokens (229 fewer), four
+exact required-body pairs, 12/12 checkpoint facts and four-sample assisted
+preview p95 32.929792 ms. It does not measure snapshot compile latency, model
+correctness, provider usage or cost.
+
+The shared/exclusive authority gate is still unimplemented. This snapshot closes
+the already-committed policy replay window; it does not serialize a policy change
+committing after its read, and fresh creation/other reads retain their current
+refresh contract. Full source withdrawal, suppression and cleanup remain open.
+
 ## Non-goals
 
 No second memory store, graph engine, context planner, scheduler or mandatory

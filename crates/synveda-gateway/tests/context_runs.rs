@@ -138,6 +138,28 @@ struct World {
     bob_session: String,
 }
 
+impl World {
+    async fn install_policy(&self, name: &str, version: i64, source: &str, config: PackConfig) {
+        self.state
+            .pdp
+            .compile_check(name, source)
+            .expect("validate fixture policy");
+        let mut tx = rls::begin_tenant_tx(&self.state.pool, self.tenant_id)
+            .await
+            .unwrap();
+        let pack =
+            synveda_store::policy_packs::apply(&mut *tx, self.tenant_id, name, source, &config)
+                .await
+                .expect("persist ordinary tenant policy fixture");
+        assert_eq!(pack.version, version);
+        tx.commit().await.expect("commit policy fixture");
+        self.state
+            .pdp
+            .install_source(self.tenant_id, name, pack.version, source, config)
+            .expect("compile exact persisted fixture policy");
+    }
+}
+
 async fn call(
     app: &Router,
     method: &str,
@@ -608,10 +630,7 @@ async fn audit_events(world: &World) -> Vec<synveda_audit::StoredEvent> {
 async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
     let name = format!("cpr20-{}", mode.as_str().replace('_', "-"));
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
+        .install_policy(
             &name,
             1,
             BLANKET,
@@ -623,7 +642,7 @@ async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
                 ..PackConfig::default()
             },
         )
-        .expect("install trace-mode pack");
+        .await;
     let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
         .expect("begin trace-mode Configuration");
@@ -634,6 +653,113 @@ async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
         .expect("trace-mode root exists");
     configuration_support::set_trace_retention(&mut tx, world.tenant_id, root.id, mode).await;
     tx.commit().await.expect("commit trace-mode Configuration");
+}
+
+#[tokio::test]
+async fn saved_delivery_uses_committed_policy_before_process_refresh() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let fact = "The iris-41 policy snapshot must be current at replay.";
+    let (_, revision) = create_knowledge(
+        &world,
+        "mem8-policy-snapshot-source",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Iris policy snapshot",
+        fact,
+        None,
+    )
+    .await;
+    world
+        .install_policy("mem8-stored-policy", 1, BLANKET, PackConfig::default())
+        .await;
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, "mem8-stored-policy").await;
+    tx.commit().await.unwrap();
+    let request = json!({"query":"iris-41", "budget_tokens":1500});
+    let alice_path = format!("/v1/sessions/{}/context-runs", world.alice_session);
+    let bob_path = format!("/v1/sessions/{}/context-runs", world.bob_session);
+    let (status, alice) = call(
+        &world.app,
+        "POST",
+        &alice_path,
+        &world.alice_token,
+        Some("mem8-stored-alice"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{alice}");
+    let (status, bob) = call(
+        &world.app,
+        "POST",
+        &bob_path,
+        &world.bob_token,
+        Some("mem8-stored-bob"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{bob}");
+    assert!(alice["rendered"].as_str().unwrap().contains(fact));
+    assert!(bob["rendered"].as_str().unwrap().contains(fact));
+    let source = format!(
+        "{BLANKET}\nforbid (principal == Synveda::Principal::\"{}/{ALICE}\", action == Synveda::Action::\"KnowledgeRead\", resource);",
+        world.tenant_id
+    );
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    let pack = synveda_store::policy_packs::apply(
+        &mut *tx,
+        world.tenant_id,
+        "mem8-stored-policy",
+        &source,
+        &PackConfig::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(pack.version, 2);
+    tx.commit().await.unwrap();
+    // The process refresher deliberately has not observed this commit.
+    assert_eq!(
+        world.state.pdp.installed_versions(world.tenant_id),
+        vec![("mem8-stored-policy".to_owned(), 1)]
+    );
+    let (status, denied) = call(
+        &world.app,
+        "POST",
+        &alice_path,
+        &world.alice_token,
+        Some("mem8-stored-alice"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{denied}");
+    assert!(!denied.to_string().contains(fact));
+    assert!(!denied.to_string().contains(&revision));
+    let (status, permitted) = call(
+        &world.app,
+        "POST",
+        &bob_path,
+        &world.bob_token,
+        Some("mem8-stored-bob"),
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{permitted}");
+    assert_eq!(
+        permitted, bob,
+        "independently authorized receipt remains exact"
+    );
+    assert_eq!(
+        world.state.pdp.installed_versions(world.tenant_id),
+        vec![("mem8-stored-policy".to_owned(), 1)],
+        "replay must not mutate the process cache"
+    );
 }
 
 #[tokio::test]
@@ -655,16 +781,8 @@ async fn saved_delivery_rechecks_exact_knowledge_before_idempotent_replay() {
     )
     .await;
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
-            "mem8-knowledge-replay",
-            1,
-            BLANKET,
-            PackConfig::default(),
-        )
-        .expect("install replay policy");
+        .install_policy("mem8-knowledge-replay", 1, BLANKET, PackConfig::default())
+        .await;
     let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
         .unwrap();
@@ -703,16 +821,8 @@ async fn saved_delivery_rechecks_exact_knowledge_before_idempotent_replay() {
         world.tenant_id,
     );
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
-            "mem8-knowledge-replay",
-            2,
-            &policy,
-            PackConfig::default(),
-        )
-        .expect("revoke Alice's Knowledge access only");
+        .install_policy("mem8-knowledge-replay", 2, &policy, PackConfig::default())
+        .await;
     let (status, denied) = call(
         &world.app,
         "POST",
@@ -739,16 +849,8 @@ async fn saved_delivery_rechecks_exact_knowledge_before_idempotent_replay() {
         "independently authorized readers keep their access"
     );
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
-            "mem8-knowledge-replay",
-            3,
-            BLANKET,
-            PackConfig::default(),
-        )
-        .expect("restore ordinary test policy");
+        .install_policy("mem8-knowledge-replay", 3, BLANKET, PackConfig::default())
+        .await;
 
     let (status, archived) = call(
         &world.app,
@@ -1142,16 +1244,8 @@ async fn saved_delivery_withholds_checkpoint_after_read_revocation_and_source_di
         ]}))).await;
     assert_eq!(status, StatusCode::OK, "{appended}");
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
-            "mem8-checkpoint-replay",
-            1,
-            BLANKET,
-            PackConfig::default(),
-        )
-        .expect("install checkpoint replay policy");
+        .install_policy("mem8-checkpoint-replay", 1, BLANKET, PackConfig::default())
+        .await;
     let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
         .unwrap();
@@ -1182,9 +1276,9 @@ async fn saved_delivery_withholds_checkpoint_after_read_revocation_and_source_di
     .await;
     assert_eq!(status, StatusCode::OK, "{replay}");
     assert_eq!(replay, original);
-    world.state.pdp.install_source(world.tenant_id, "mem8-checkpoint-replay", 2,
+    world.install_policy( "mem8-checkpoint-replay", 2,
         &format!("{BLANKET}\nforbid (principal, action == Synveda::Action::\"SessionRead\", resource);"),
-        PackConfig::default()).expect("revoke checkpoint source read");
+        PackConfig::default()).await;
     let (status, denied) = call(
         &world.app,
         "POST",
@@ -1197,16 +1291,8 @@ async fn saved_delivery_withholds_checkpoint_after_read_revocation_and_source_di
     assert_eq!(status, StatusCode::CONFLICT, "{denied}");
     assert!(!denied.to_string().contains(fact));
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
-            "mem8-checkpoint-replay",
-            3,
-            BLANKET,
-            PackConfig::default(),
-        )
-        .expect("restore source read");
+        .install_policy("mem8-checkpoint-replay", 3, BLANKET, PackConfig::default())
+        .await;
     // The existing scoped retention contract owns physical Session disposal;
     // Knowledge item Forget must not implicitly delete an entire source event.
     let owner = tenant_fixture::migrator_pool(&world.state.pool).await;
@@ -1353,10 +1439,7 @@ async fn checkpoint_create_read_use_and_capture_follow_current_session_policy() 
     assert_eq!(allowed_preview["restart_coverage"], "observed_window");
 
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
+        .install_policy(
             "ctx6-session-write-only",
             1,
             r#"permit (
@@ -1366,7 +1449,7 @@ async fn checkpoint_create_read_use_and_capture_follow_current_session_policy() 
                ) when { resource in principal.tenant };"#,
             PackConfig::default(),
         )
-        .expect("install write-only session policy");
+        .await;
     let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
         .expect("begin policy binding");
@@ -1411,10 +1494,7 @@ async fn checkpoint_create_read_use_and_capture_follow_current_session_policy() 
     assert_eq!(batch["event_count"], 1);
 
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
+        .install_policy(
             "ctx6-session-read-only",
             1,
             r#"permit (
@@ -1429,7 +1509,7 @@ async fn checkpoint_create_read_use_and_capture_follow_current_session_policy() 
                ) when { resource in principal.tenant };"#,
             PackConfig::default(),
         )
-        .expect("install read-only session policy");
+        .await;
     let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
         .expect("begin read-only policy binding");

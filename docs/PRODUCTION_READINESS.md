@@ -708,13 +708,14 @@ The 2026-10-14 source increment adds saved ContextRun reauthorization
 (ADR-0141), explicit typed revision claims (ADR-0142), exact
 applicability/exception passage groups (ADR-0118 amendment), and six authorized
 Inspector health dimensions with five stage observations (ADR-0143). Fresh
-ordinary-role PostgreSQL acceptance passes all 30 product scenarios and the
+ordinary-role PostgreSQL acceptance passes all 31 product scenarios and the
 unchanged six zero-tolerance trust gates. ADR-0144 adds private all-mode
 delivery proof, authored/Skill replay and addressed item-erasure copies at
 additive head `0004`; prior-head, authority/RLS and supported pgvector profile
-checks pass. The latest run measured 701/472
+checks pass. ADR-0145 adds exact immutable stored-policy replay before process
+refresh; source admission serialization remains open. The latest run measured 716/487
 off/conservative rendered-text tokens in one existing optional-content fixture
-and 12/12 declared restart facts at four-sample local p95 31.501542 ms. Absolute
+and 12/12 declared restart facts at four-sample local p95 32.929792 ms. Absolute
 token counts include generated wrapper identifiers. Source health is limited
 to visible trace observations: synchronized source coverage, physical cleanup,
 acknowledged delivery and model use/outcome remain unknown. Full scoped source

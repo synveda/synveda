@@ -73,6 +73,7 @@ use crate::workspaces::{ApiErrorBody, Decidable, subject};
 mod dependencies;
 mod graph;
 mod health;
+mod policy_snapshot;
 mod replay;
 
 pub use health::{
@@ -3206,23 +3207,27 @@ async fn replay_context_run(
     claim: &Claim,
 ) -> Result<ContextRun> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let (_, allowed, resource) =
-        crate::sessions::load(state, &mut tx, tenant_id, session_id, Action::SessionWrite).await?;
-    let run = sessions::context_run(&mut *tx, tenant_id, run_id)
-        .await?
-        .filter(|run| run.session_id == session_id)
-        .ok_or_else(|| crate::idempotency::vanished(claim, run_id.as_uuid()))?;
-    let admissible = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        replay::admissible(state, &mut tx, tenant_id, &run),
-    )
+    let (run, allowed, resource) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let current = policy_snapshot::current(state, &mut tx, tenant_id).await?;
+        let (_, allowed, resource) = crate::sessions::load(
+            &current,
+            &mut tx,
+            tenant_id,
+            session_id,
+            Action::SessionWrite,
+        )
+        .await?;
+        let run = sessions::context_run(&mut *tx, tenant_id, run_id)
+            .await?
+            .filter(|run| run.session_id == session_id)
+            .ok_or_else(|| crate::idempotency::vanished(claim, run_id.as_uuid()))?;
+        if !replay::admissible(&current, &mut tx, tenant_id, &run).await? {
+            return Err(policy_snapshot::unavailable());
+        }
+        Ok((run, allowed, resource))
+    })
     .await
-    .unwrap_or(Ok(false))?;
-    if !admissible {
-        return Err(Error::Conflict {
-            message: "Saved context delivery is unavailable under current policy or source state; use a new idempotency key to compose current context".to_owned(),
-        });
-    }
+    .map_err(|_| policy_snapshot::unavailable())??;
     crate::sessions::read_event(
         &mut tx,
         tenant_id,

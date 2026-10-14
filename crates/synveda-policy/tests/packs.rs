@@ -151,6 +151,114 @@ fn memory(
     .expect("authorize")
 }
 
+#[test]
+fn exact_frozen_policy_keeps_one_compile_and_distinguishes_same_version_sources() {
+    let fx = fixture();
+    let alice = fx.placed("alice", "alice-user");
+    let pdp = Pdp::new().expect("embedded PDP");
+    let allow = "permit (principal, action, resource) when { resource in principal.tenant };";
+    let deny = "forbid (principal, action, resource);";
+    let config = PackConfig::default();
+    pdp.install_source(fx.tenant, "snapshot-policy", 1, allow, config.clone())
+        .unwrap();
+    let frozen = pdp
+        .frozen_snapshot(fx.tenant, [("snapshot-policy", 1, allow, &config)])
+        .unwrap();
+    let assignments = [fx.assignment("org", "snapshot-policy")];
+    let allowed = |engine: &Pdp| {
+        memory(
+            engine,
+            &fx,
+            &alice,
+            Action::KnowledgeRead,
+            Some("alice-user"),
+            "team-a",
+            &assignments,
+        )
+        .allowed
+    };
+    assert!(allowed(&frozen));
+    pdp.install_source(fx.tenant, "snapshot-policy", 2, deny, config.clone())
+        .unwrap();
+    assert!(!allowed(&pdp));
+    assert!(
+        allowed(&frozen),
+        "later process refresh cannot change this evaluator"
+    );
+    assert!(
+        frozen
+            .install_source(fx.tenant, "snapshot-policy", 3, deny, config.clone())
+            .is_err()
+    );
+    assert!(!frozen.remove_pack(fx.tenant, "snapshot-policy"));
+    assert!(allowed(&frozen));
+
+    // A cleared/recreated database name may return to version 1. Source and
+    // configuration equality, rather than that label, identify the compile.
+    pdp.remove_pack(fx.tenant, "snapshot-policy");
+    pdp.install_source(fx.tenant, "snapshot-policy", 1, allow, config.clone())
+        .unwrap();
+    let replacement = pdp
+        .frozen_snapshot(fx.tenant, [("snapshot-policy", 1, deny, &config)])
+        .unwrap();
+    assert!(!allowed(&replacement));
+    let changed_config = PackConfig {
+        redaction: Some(synveda_types::RedactionConfig::REDACT_ALL),
+        ..PackConfig::default()
+    };
+    let configured = pdp
+        .frozen_snapshot(fx.tenant, [("snapshot-policy", 1, allow, &changed_config)])
+        .unwrap();
+    let scopes = fx.chain("team-a");
+    assert_eq!(
+        configured
+            .effective(
+                fx.tenant,
+                Resource::Scope(fx.node("team-a").id),
+                &AuthzContext {
+                    scopes: &scopes,
+                    assignments: &assignments,
+                    ..Default::default()
+                }
+            )
+            .redaction,
+        synveda_types::RedactionConfig::REDACT_ALL
+    );
+}
+
+#[test]
+fn exact_policy_snapshot_refuses_exhausted_or_uncompilable_sources() {
+    let pdp = Pdp::new().unwrap();
+    let tenant = TenantId::new();
+    let config = PackConfig::default();
+    let names: Vec<_> = (0..65).map(|index| format!("snapshot-{index}")).collect();
+    assert!(
+        pdp.frozen_snapshot(
+            tenant,
+            names.iter().map(|name| (
+                name.as_str(),
+                1,
+                "permit (principal, action, resource);",
+                &config
+            ))
+        )
+        .is_err()
+    );
+    let oversized = "x".repeat(1024 * 1024 + 1);
+    assert!(
+        pdp.frozen_snapshot(tenant, [("oversized", 1, oversized.as_str(), &config)])
+            .is_err()
+    );
+    assert!(
+        pdp.frozen_snapshot(tenant, [("invalid", 1, "invalid Cedar source", &config)])
+            .is_err()
+    );
+    assert!(
+        pdp.frozen_snapshot(tenant, [(STANDARD, 1, "", &config)])
+            .is_err()
+    );
+}
+
 fn read(
     pdp: &Pdp,
     fx: &Fixture,

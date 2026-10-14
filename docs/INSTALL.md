@@ -173,6 +173,10 @@ in every trace retention mode, including authored context and Skill advertisemen
 Older nonempty receipts without this proof refuse replay; fresh composition remains
 available under current policy. Exact-revision
 historical inspection retains its own authorization rules.
+Saved replay reads exact stored policy sources into an immutable request-local
+evaluator, so it can observe a committed policy change before the background
+cache converges. It refuses an unavailable or oversized policy snapshot. The
+atomic boundary for concurrent source removal remains open.
 
 The Context Inspector's **Context health** shows separate provenance,
 freshness, conflict, budget, outcome and review findings. Each observed concern

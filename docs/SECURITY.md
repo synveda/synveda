@@ -62,6 +62,12 @@ authored channels/pins and immutable Skill bindings/versions are checked as well
 Older nonempty receipts without this producer proof refuse replay. Governed item
 erasure clears addressed delivery copies through this index; the content-free
 proof remains private and immutable. This request-time check
+uses a frozen evaluator over the exact stored tenant policy sources and typed
+configurations for saved replay (ADR-0145), including a committed change not yet
+seen by the process refresher. Name/version alone cannot identify a compile.
+The snapshot is bounded to 64 packs and 1 MiB of source text, with two concurrent
+local builders and the same five-second replay deadline. It never updates the
+global policy cache. Other reads retain their current refresh contract. The check
 does not yet establish serialization against a concurrently committing removal;
 [MEM-8](backlog/MEM-8.md) owns that admission/cleanup boundary. Already delivered
 bytes and external exports retain their separate contracts.

@@ -245,6 +245,13 @@
       "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "skills", "saved_skill_advertisement_replays_exact_version_and_refuses_a_new_head", "--", "--exact"],
       "evidence": "crates/synveda-gateway/tests/skills.rs",
       "measures": ["saved_delivery_revocation", "unversioned_skill_or_tool_activation"]
+    },
+    {
+      "id": "exact_policy_saved_delivery",
+      "title": "Committed policy governs replay before process refresh, preserving an independently authorized reader",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "saved_delivery_uses_committed_policy_before_process_refresh", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": ["saved_delivery_revocation", "current_policy_snapshot"]
     }
   ]
 }

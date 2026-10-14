@@ -1345,6 +1345,19 @@ fn wrong_tenant_guc_sees_no_policy_pack_rows() {
             "policy pack rows leaked across tenants under the wrong GUC"
         );
         assert_eq!(visible_pack_rows(&mut tx, adversary).await, 1);
+        assert!(
+            policy_packs::for_snapshot(&mut *tx, victim)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            policy_packs::for_snapshot(&mut *tx, adversary)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
         drop(tx);
 
         let mut tx = app_tx(&db.pool, None).await;
@@ -1353,6 +1366,81 @@ fn wrong_tenant_guc_sees_no_policy_pack_rows() {
             0,
             "policy pack rows visible without any tenant GUC"
         );
+        assert!(
+            policy_packs::for_snapshot(&mut *tx, victim)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    });
+}
+
+#[test]
+fn exact_snapshot_inventory_bounds_do_not_modify_stored_policies() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = seed_policy_pack(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        for index in 0..63 {
+            policy_packs::apply(
+                &mut *tx,
+                tenant,
+                &format!("snapshot-{index}"),
+                "permit (principal, action, resource);",
+                &PackConfig::default(),
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            policy_packs::for_snapshot(&mut *tx, tenant)
+                .await
+                .unwrap()
+                .len(),
+            64
+        );
+        policy_packs::apply(
+            &mut *tx,
+            tenant,
+            "snapshot-extra",
+            "permit (principal, action, resource);",
+            &PackConfig::default(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            policy_packs::for_snapshot(&mut *tx, tenant).await,
+            Err(Error::Invalid { .. })
+        ));
+        assert!(
+            policy_packs::clear(&mut tx, tenant, "snapshot-extra")
+                .await
+                .unwrap()
+        );
+        let large = format!(
+            "permit (principal, action, resource);\n//{}",
+            "x".repeat(1024 * 1024)
+        );
+        let stored = policy_packs::apply(
+            &mut *tx,
+            tenant,
+            "rls-fixture",
+            &large,
+            &PackConfig::default(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            policy_packs::for_snapshot(&mut *tx, tenant).await,
+            Err(Error::Invalid { .. })
+        ));
+        assert_eq!(
+            policy_packs::get(&mut *tx, tenant, "rls-fixture")
+                .await
+                .unwrap(),
+            Some(stored)
+        );
+        tx.rollback().await.unwrap();
     });
 }
 

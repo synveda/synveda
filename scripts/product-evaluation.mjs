@@ -45,6 +45,7 @@ const REQUIRED_SCENARIOS = [
   "private_lineage_erasure",
   "authored_saved_delivery",
   "skill_saved_delivery",
+  "exact_policy_saved_delivery",
 ];
 const REQUIRED_MEASUREMENTS = [
   "retrieved",
