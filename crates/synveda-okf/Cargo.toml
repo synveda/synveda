@@ -15,7 +15,7 @@ chrono = { workspace = true }
 flate2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+noyalib = { workspace = true }
 tar = { workspace = true }
 zip = { workspace = true }
 

@@ -287,12 +287,15 @@ fn deterministic_export_round_trips_extensions_without_v01_residue() {
     let first = OkfAdapter.export(&input).unwrap();
     let second = OkfAdapter.export(&input).unwrap();
     assert_eq!(first, second);
+    let mut reordered = input.clone();
+    reordered.reverse();
+    assert_eq!(first, OkfAdapter.export(&reordered).unwrap());
     let source_file = first
         .files
         .iter()
         .find(|file| file.logical_path == "decisions/webhooks.md")
         .unwrap();
-    assert!(source_file.content.contains("vendor_extension:"));
+    assert!(source_file.content.contains("'vendor_extension':"));
     assert!(!source_file.content.contains("timestamp:"));
     assert!(source_file.content.contains("/knowledge/"));
 

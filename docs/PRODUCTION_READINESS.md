@@ -752,11 +752,13 @@ retained credential reference has not been located; expired profiles are not
 live access evidence. This changes no production, native-client, provider-usage
 or certification claim. The source code is not a new published release.
 
-The current dependency gate fails on RUSTSEC-2024-0449: existing
-`unsafe-libyaml` 0.2.11 is unmaintained, through the unchanged `serde_yaml`
-0.9.34 dependency. Bans, licences and sources pass. This work adds no advisory
-exception; replacing the parser and qualifying its OKF behavior remains required
-before a release.
+CPR-27 removes the RUSTSEC-2024-0449 dependency chain: the bounded OKF adapter
+uses `noyalib` 0.0.57, and `serde_yaml`/`unsafe-libyaml` leave the selected graph.
+The unchanged advisory, licence, ban and source gates pass. Scalar/hash,
+hostile-input and deterministic export/reimport fixtures qualify the source
+replacement under [ADR-0087](adr/adr-0087-okf-v0-2-exchange-boundary.md#yaml-dependency-remediation-2026-10-14).
+No new exception was added. This is source acceptance, not publication or new
+production qualification.
 
 
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |

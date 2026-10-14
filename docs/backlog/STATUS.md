@@ -355,10 +355,13 @@ actual Git, reviewed definitions, a real CLI receiving preview, fixed local
 runner cases, exact-root removal and an independent survivor. Local encoding
 counts do not establish provider usage, cost or live model quality.
 
-The current `cargo deny check` reports existing unmaintained dependency
-`unsafe-libyaml` 0.2.11 (RUSTSEC-2024-0449), through the unchanged `serde_yaml`
-0.9.34 dependency. Bans, licences and sources pass; the advisory gate fails and
-no exception was added. Dependency remediation remains required before release.
+CPR-27's OKF adapter uses maintained `noyalib` 0.0.57 with explicit inert-YAML
+limits under the [ADR-0087 amendment](../adr/adr-0087-okf-v0-2-exchange-boundary.md#yaml-dependency-remediation-2026-10-14).
+The selected graph removes both `serde_yaml` and `unsafe-libyaml`; all unchanged
+`cargo deny check` advisory, licence, ban and source gates pass. Focused boundary
+fixtures preserve prior artifact/bundle/Knowledge identities and scalar types,
+reject hostile expansion/tags and pin deterministic export/reimport. No advisory
+or licence exception was added; published-release qualification stays separate.
 
 MEM-9's separate live private-source check remains open. Existing secret reuse
 is owner-authorized; the saved profiles are expired and the retained inbound

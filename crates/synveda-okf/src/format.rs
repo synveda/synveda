@@ -502,39 +502,8 @@ fn split_frontmatter<'a>(text: &'a str, path: &str) -> Result<Option<(Value, &'a
         });
     }
     let yaml = &rest[..frontmatter_end];
-    reject_yaml_expansion(yaml, path)?;
-    let frontmatter: Value = serde_yaml::from_str(yaml).map_err(|_| Error::Invalid {
-        message: format!("OKF frontmatter is not a YAML mapping: {path}"),
-    })?;
-    if !frontmatter.is_object() {
-        return Err(Error::Invalid {
-            message: format!("OKF frontmatter is not a YAML mapping: {path}"),
-        });
-    }
+    let frontmatter = crate::yaml::parse(yaml, path)?;
     Ok(Some((frontmatter, &rest[body_start..])))
-}
-
-fn reject_yaml_expansion(yaml: &str, path: &str) -> Result<()> {
-    let mut previous_indent = 0usize;
-    for line in yaml.lines() {
-        let indent = line.bytes().take_while(|byte| *byte == b' ').count();
-        if indent > 40 || indent.saturating_sub(previous_indent) > 20 {
-            return Err(Error::Invalid {
-                message: format!("OKF frontmatter nesting exceeds limit: {path}"),
-            });
-        }
-        previous_indent = indent;
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("<<:")
-            || trimmed.starts_with('*')
-            || trimmed.split_whitespace().any(|part| part.starts_with('&'))
-        {
-            return Err(Error::Invalid {
-                message: format!("OKF frontmatter aliases are not supported: {path}"),
-            });
-        }
-    }
-    Ok(())
 }
 
 fn validate_known_frontmatter(frontmatter: &Value, path: &str) -> Result<()> {
@@ -884,7 +853,7 @@ pub(crate) fn preserved_frontmatter(metadata: &Value) -> BTreeMap<String, Value>
         .unwrap_or_default()
 }
 
-/// Converts a sorted map to the JSON mapping shape `serde_yaml` serialises deterministically.
+/// Converts a sorted map to the JSON mapping used by deterministic YAML export.
 pub(crate) fn object(map: BTreeMap<String, Value>) -> Value {
     Value::Object(Map::from_iter(map))
 }

@@ -145,6 +145,47 @@ credential-bearing opaque payload merely because the format is Markdown.
   computation support is designed → treat it as a separately sandboxed Skill
   or tool plane, never execute it inside import.
 
+## YAML dependency remediation (2026-10-14)
+
+CPR-27 replaces deprecated `serde_yaml` and its unmaintained `unsafe-libyaml`
+dependency with `noyalib` 0.0.57 (MIT OR Apache-2.0), using only `std`,
+`fast-int`, `fast-float` and `lossless-u64`. The accepted boundary remains a
+types-only, inert OKF v0.2 adapter. Includes, filesystem resolvers, property
+interpolation, schema-validation dependencies and comparison backends are not
+enabled.
+The licence/advisory policy and its existing exceptions remain unchanged.
+
+Parse one JSON-compatible mapping with at most 32 structural/flow levels,
+32,768 frontmatter/scalar bytes, 32,768 nodes and 65,536 events. Reject anchors,
+aliases, merge keys, duplicate keys at any depth, unsupported tags and
+non-finite numbers. Parser-enforced limits replace the whitespace heuristic,
+which missed compact flow anchors and misclassified inert ampersand text.
+Errors retain the logical path and rule without input excerpts.
+
+Use the library's scalar-resolution preset to preserve common existing JSON
+types: true/false case variants are booleans; yes/no/on/off, leading-zero decimal
+identifiers and decimal underscore spellings remain strings. Full unsigned
+64-bit values retain integer precision. Non-finite floats are refused rather
+than silently projecting to JSON null. Permit only JSON-compatible core tags,
+on matching scalar/collection kinds; binary/custom tags are refused. Ordinary
+scalar types, timestamps, nested extension metadata and multiline strings remain
+tested. No custom YAML parser or deprecated dependency is retained.
+
+Export sorted mappings with explicit two-space indentation, all string keys
+and values quoted, and no language directive or internal document opener.
+Quoting every string prevents the emitter from turning opaque binary-looking
+strings into numbers when reimported. Fresh export quoting changes;
+deterministic golden bytes and reimport tests bind this output. Existing artifact
+hashes, bundle identities and suppression aliases retain their canonical source
+byte derivation. Knowledge revision hashes include parsed metadata; their
+unchanged values are pinned for the tested scalar corpus. Finer numeric forms
+follow the maintained library's resolver. No retained content is rewritten and
+no migration is required.
+
+`serde-saphyr` was excluded because its deserializer unconditionally brings
+`encoding_rs_io`/`encoding_rs`, whose BSD-3-Clause requirement fails the existing
+core licence policy. The choice does not add a licence or advisory exception.
+
 ## Threat model and abuse cases
 
 - Archive paths, symlinks, device entries, duplicate logical paths and
