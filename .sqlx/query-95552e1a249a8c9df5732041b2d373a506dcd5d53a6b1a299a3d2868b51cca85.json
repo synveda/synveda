@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists(select 1 from source_repository_attachments\n      where tenant_id=$1 and project_id=$2 and repository_id=$3 and github_repository_id=$4) as \"bound!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bound!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "95552e1a249a8c9df5732041b2d373a506dcd5d53a6b1a299a3d2868b51cca85"
+}

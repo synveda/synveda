@@ -13,7 +13,7 @@ default-run = "synveda-gateway"
 # integration tests can assemble handlers without a process supervisor. The
 # release binaries reject this feature and the normal library does not expose
 # the behavior-only router.
-test-support = ["synveda-identity/test-support"]
+test-support = ["synveda-identity/test-support", "synveda-git/test-support"]
 
 [[bin]]
 name = "synveda-gateway"
@@ -85,6 +85,8 @@ uuid = { workspace = true }
 base64 = { workspace = true }
 
 [dev-dependencies]
+native-tls = "0.2"
+tokio-native-tls = "0.3"
 tempfile = "3"
 synveda-gateway-test-support-enabler = { path = "test-support-enabler" }
 base64 = { workspace = true }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, project_id, scope_id, workspace_id, principal_id,\n               format, format_version, specification_commit, source_kind,\n               source_locator, source_revision, bundle_digest, state,\n               artifact_count, mapping_count, candidate_count, capture_batch_id,\n               error_code, case when exists(select 1 from source_artifact_addresses address\n                 join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest\n                 where address.tenant_id=import_jobs.tenant_id and address.job_id=import_jobs.id)\n                 then '[]'::jsonb else notices end as \"notices!\", created_at, completed_at, updated_at\n        from import_jobs\n        where tenant_id = $1 and project_id = $2 and source_kind = $3\n          and source_locator = $4 and bundle_digest = $5\n          and repository_identity_digest is not distinct from (\n            select encode(sha256(convert_to(jsonb_build_array('synveda.repository.source.v1',r.tenant_id,r.project_id,lower(r.canonical_uri))::text,'UTF8')),'hex')\n            from project_repositories r where r.tenant_id=$1 and r.project_id=$2 and r.id=$6)\n          and managed_source_id is not distinct from $7\n          and managed_review_digest is not distinct from $8\n        ",
+  "query": "\n        select id, tenant_id, project_id, scope_id, workspace_id, principal_id,\n               format, format_version, specification_commit, source_kind,\n               source_locator, source_revision, bundle_digest, state,\n               artifact_count, mapping_count, candidate_count, capture_batch_id,\n               error_code, case when exists(select 1 from source_artifact_addresses address\n                 join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest\n                 where address.tenant_id=import_jobs.tenant_id and address.job_id=import_jobs.id)\n                 then '[]'::jsonb else notices end as \"notices!\", created_at, completed_at, updated_at\n        from import_jobs\n        where tenant_id = $1 and project_id = $2 and source_kind = $3\n          and ($7::text is not null or source_locator = $4) and bundle_digest = $5\n          and repository_identity_digest is not distinct from synveda_repository_source_identity($1,$2,$6)\n          and managed_source_id is not distinct from $7\n          and managed_review_digest is not distinct from $8\n        order by created_at,id limit 1\n        ",
   "describe": {
     "columns": [
       {
@@ -157,5 +157,5 @@
       false
     ]
   },
-  "hash": "fca2cb296c2a29127a02e6096035592dbd4753392c50cf7539269c2da135731f"
+  "hash": "c830473b4dca138ffd1bc4b28848f147cac4d828e01c44d3cfabcacf169827df"
 }

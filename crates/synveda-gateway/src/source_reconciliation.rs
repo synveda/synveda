@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::json;
 use synveda_audit::{Actor, AuditAction, Outcome};
-use synveda_git::{LocalSourceReader, SourcePin, SourceSnapshot};
+use synveda_git::{GitHubSourceCredential, SourcePin, SourceReaders, SourceSnapshot};
 use synveda_okf::{
     BundleInput, InputEntry, InputEntryKind, KnowledgeFormatAdapter, OkfAdapter, SourceDescriptor,
     SourceKind,
@@ -155,17 +155,71 @@ fn descriptor_hash(descriptor: &GitSourceDescriptor) -> Result<String> {
     .to_hex()
     .to_string())
 }
-fn custody(
-    reader: &LocalSourceReader,
+struct Custody {
+    digest: String,
+    revision: Option<i64>,
+    provider_id: Option<i64>,
+    repository_uri: String,
+    secret: Option<synveda_store::tenant_secrets::StoredTenantSecret>,
+}
+async fn custody(
+    readers: &SourceReaders,
+    tx: &mut sqlx::PgConnection,
     tenant: TenantId,
-    scope: synveda_types::ScopeId,
-    target: &str,
-) -> Result<String> {
-    let path = reader.repository(tenant, scope, target)?;
-    let value = json!(["synveda.git.source.local.v1", tenant, scope, target, path]);
-    Ok(blake3::hash(value.to_string().as_bytes())
-        .to_hex()
-        .to_string())
+    project: &synveda_types::workspace::Project,
+    descriptor: &GitSourceDescriptor,
+    configuration: &EffectiveConfiguration,
+) -> Result<Custody> {
+    let repository = repositories::get(&mut *tx, tenant, project.id, descriptor.repository_id)
+        .await?
+        .ok_or_else(unavailable)?;
+    let reader = readers.select(
+        tenant,
+        project.scope_id,
+        &descriptor.read_target,
+        &repository.canonical_uri,
+    )?;
+    let provider_id = reader
+        .repository_id()
+        .map(i64::try_from)
+        .transpose()
+        .map_err(|_| changed())?;
+    let secret = if let Some(id) = reader.secret_id()? {
+        if !configuration
+            .document
+            .permits_provider(synveda_types::configuration::ExternalProvider::Github)
+        {
+            return Err(changed());
+        }
+        let secret = synveda_store::tenant_secrets::get(&mut *tx, tenant, id)
+            .await?
+            .ok_or_else(changed)?;
+        if secret.scope_id != project.scope_id
+            || secret.kind != synveda_types::secret::TenantSecretKind::SourceRead
+            || secret.provider.as_deref() != Some("github")
+            || secret.state != synveda_types::secret::TenantSecretState::Active
+            || secret
+                .sealed
+                .as_ref()
+                .is_none_or(|sealed| sealed.is_empty() || sealed.len() > 8192)
+        {
+            return Err(changed());
+        }
+        Some(secret)
+    } else {
+        None
+    };
+    Ok(Custody {
+        digest: reader.custody_digest()?,
+        revision: secret
+            .as_ref()
+            .map(|s| i64::try_from(s.value_revision))
+            .transpose()
+            .map_err(|_| changed())?,
+        provider_id,
+        repository_uri: repository.canonical_uri,
+        secret,
+    })
 }
 
 pub(crate) async fn authorize_project(
@@ -347,8 +401,11 @@ pub(crate) async fn refresh(
         let reader=state.git_sources.as_deref().ok_or_else(changed)?;
         let version=configuration.version_id.ok_or_else(changed)?;
         let digest=descriptor_hash(&descriptor)?;
-        let custody=custody(reader,tenant,actual.scope_id,&descriptor.read_target)?;
-        let id=store::enqueue(&mut tx,tenant,project,actual.scope_id,&source,descriptor.repository_id,version,&digest,&custody,None,
+        let custody=custody(reader,&mut tx,tenant,&actual,&descriptor,&configuration).await?;
+        if let Some(provider_id)=custody.provider_id {
+            store::bind_github_identity(&mut tx,tenant,project,actual.scope_id,descriptor.repository_id,provider_id).await?;
+        }
+        let id=store::enqueue(&mut tx,tenant,project,actual.scope_id,&source,descriptor.repository_id,version,&digest,&custody.digest,custody.revision,
             i32::try_from(descriptor.allowed_paths.len()).map_err(|_|changed())?,identity.id,blake3::Hash::from_bytes(claim.digest).to_hex().as_ref()).await?;
         claim.remember(&mut tx,tenant,id.as_uuid()).await?;
         audit::record(&mut tx,tenant,AuditAction::OperationRequested,Resource::Scope(actual.scope_id).to_string(),Outcome::Success,
@@ -386,18 +443,25 @@ pub(crate) async fn operation_view(
 pub struct Runtime {
     pool: sqlx::PgPool,
     pdp: Arc<Pdp>,
-    reader: Arc<LocalSourceReader>,
+    reader: Arc<SourceReaders>,
+    keys: Arc<synveda_store::keys::KeyRing>,
     worker_id: String,
 }
 
 impl Runtime {
     /// Assemble a one-at-a-time producer; deployment custody remains separate.
     #[must_use]
-    pub fn new(pool: sqlx::PgPool, pdp: Arc<Pdp>, reader: Arc<LocalSourceReader>) -> Self {
+    pub fn new(
+        pool: sqlx::PgPool,
+        pdp: Arc<Pdp>,
+        reader: Arc<SourceReaders>,
+        keys: Arc<synveda_store::keys::KeyRing>,
+    ) -> Self {
         Self {
             pool,
             pdp,
             reader,
+            keys,
             worker_id: format!("{COMPONENT}:{}", Uuid::now_v7()),
         }
     }
@@ -409,6 +473,7 @@ struct Admission {
     descriptor: GitSourceDescriptor,
     identity: Identity,
     pdp: Arc<Pdp>,
+    custody: Custody,
 }
 
 async fn admit(
@@ -424,16 +489,33 @@ async fn admit(
         &target.source_id,
     )
     .await?;
+    let custody = custody(
+        &runtime.reader,
+        tx,
+        tenant,
+        &project,
+        &descriptor,
+        &configuration,
+    )
+    .await?;
     if !descriptor.enabled
         || descriptor.repository_id.as_uuid() != target.repository_id
         || configuration.version_id.map(|v| v.as_uuid()) != Some(target.configuration_version_id)
         || descriptor_hash(&descriptor)? != target.descriptor_hash
-        || custody(
-            &runtime.reader,
+        || custody.digest != target.custody_digest
+        || custody.revision != target.credential_revision
+    {
+        return Err(changed());
+    }
+    if let Some(provider_id) = custody.provider_id
+        && !store::github_identity_bound(
+            tx,
             tenant,
-            project.scope_id,
-            &descriptor.read_target,
-        )? != target.custody_digest
+            project.id,
+            descriptor.repository_id,
+            provider_id,
+        )
+        .await?
     {
         return Err(changed());
     }
@@ -473,6 +555,7 @@ async fn admit(
         descriptor,
         identity,
         pdp,
+        custody,
     })
 }
 
@@ -582,20 +665,47 @@ async fn execute_claim(
     }
     request::commit(before).await?;
     // Every Git wait is outside a database transaction and its admission gate.
+    let reader = runtime.reader.select(
+        tenant,
+        admission.project.scope_id,
+        &admission.descriptor.read_target,
+        &admission.custody.repository_uri,
+    )?;
+    let credential = if let Some(secret) = &admission.custody.secret {
+        let sealed = secret.sealed.as_deref().ok_or_else(changed)?;
+        let opened = runtime
+            .keys
+            .opening_key(
+                &runtime.pool,
+                synveda_crypto::KeyScope::Tenant(tenant),
+                sealed,
+            )
+            .await
+            .map_err(|_| Error::Dependency {
+                service: "source-key-opening".to_owned(),
+                message: "Source credential key is temporarily unavailable".to_owned(),
+            })?
+            .open(
+                synveda_crypto::Purpose::TenantSecret,
+                synveda_crypto::RowKey::Uuid(secret.id.as_uuid()),
+                sealed,
+            )
+            .map_err(|_| changed())?;
+        Some(GitHubSourceCredential::parse(
+            &opened,
+            reader.repository_id().ok_or_else(changed)?,
+        )?)
+    } else {
+        None
+    };
     let pin = match (&target.commit_oid, &target.tree_oid) {
         (Some(commit), Some(tree)) => SourcePin {
             commit: commit.clone(),
             tree: tree.clone(),
         },
         (None, None) => {
-            let pin = runtime
-                .reader
-                .resolve(
-                    tenant,
-                    admission.project.scope_id,
-                    &admission.descriptor.read_target,
-                    &admission.descriptor.git_ref,
-                )
+            let pin = reader
+                .resolve(credential.as_ref(), &admission.descriptor.git_ref)
                 .await?;
             let mut pinned = rls::begin_tenant_tx(&runtime.pool, tenant).await?;
             store::fence(&mut pinned, tenant, id, target.attempts, &runtime.worker_id).await?;
@@ -606,12 +716,9 @@ async fn execute_claim(
         }
         _ => return Err(changed()),
     };
-    let snapshot = runtime
-        .reader
+    let snapshot = reader
         .read_at_omitting(
-            tenant,
-            admission.project.scope_id,
-            &admission.descriptor.read_target,
+            credential.as_ref(),
             &pin,
             &admission.descriptor.allowed_paths,
             &omitted,

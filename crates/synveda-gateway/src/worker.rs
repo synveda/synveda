@@ -505,7 +505,7 @@ struct MaintenanceRuntime {
     relaxation_interval: Duration,
     directory_config: Option<directory_sync::SyncConfig>,
     execution_provider: ExecutionProvider,
-    source_reader: Option<Arc<synveda_git::LocalSourceReader>>,
+    source_reader: Option<Arc<synveda_git::SourceReaders>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -664,6 +664,7 @@ async fn run_authority_generation(
                         runtime.pool.clone(),
                         Arc::clone(&runtime.pdp),
                         reader,
+                        Arc::clone(&maintenance.keys),
                     ),
                     work_stop_rx.clone(),
                 ),

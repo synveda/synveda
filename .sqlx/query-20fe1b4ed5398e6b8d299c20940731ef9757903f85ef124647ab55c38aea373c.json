@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists(select 1 from artifact_suppressions\n          where tenant_id=$1 and source_key_digest=synveda_artifact_source_key($2,\n            synveda_repository_source_identity($1,$3,$4),$5,$6,\n             encode(sha256(convert_to($7,'UTF8')),'hex'),$8)) as \"suppressed!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "suppressed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "20fe1b4ed5398e6b8d299c20940731ef9757903f85ef124647ab55c38aea373c"
+}

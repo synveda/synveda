@@ -3632,6 +3632,15 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_EPOCH_TEST_ADMIN_DATABASE_URL_FILE=$lifecycle_owner_file \
       SYNVEDA_EPOCH_TEST_MIGRATOR_DATABASE_URL_FILE=$lifecycle_migrator_file \
       SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE=$lifecycle_gateway_file \
+        scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test source_upgrade -- --test-threads=1 || status=$?
+    fi
+    if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
+      SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
+      SQLX_OFFLINE=true \
+      SYNVEDA_DATABASE_ROLES_FILE=$lifecycle_roles_file \
+      SYNVEDA_EPOCH_TEST_ADMIN_DATABASE_URL_FILE=$lifecycle_owner_file \
+      SYNVEDA_EPOCH_TEST_MIGRATOR_DATABASE_URL_FILE=$lifecycle_migrator_file \
+      SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE=$lifecycle_gateway_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test observability \
           readyz_refuses_a_database_that_is_not_at_this_schema_epoch \
           -- --exact --nocapture --test-threads=1 || status=$?

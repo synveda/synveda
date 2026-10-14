@@ -2,6 +2,8 @@
 #![cfg(unix)]
 #[path = "support/context_world.rs"]
 mod context_world;
+#[path = "support/source_https.rs"]
+mod source_https;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use context_world::*;
 use std::os::unix::fs::PermissionsExt;
@@ -77,7 +79,10 @@ async fn fixture(world: &mut World) -> Fixture {
         ],
     );
     std::fs::set_permissions(&bare, std::fs::Permissions::from_mode(0o700)).unwrap();
-    world.state.git_sources = Some(Arc::clone(&reader));
+    world.state.git_sources = Some(Arc::new(synveda_git::SourceReaders::new(
+        Some((*reader).clone()),
+        None,
+    )));
     world.app = router(world.state.clone());
     let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
         .await
@@ -135,7 +140,10 @@ fn change(fixture: &Fixture, branch: &str, cap: u8) {
         ],
     );
 }
-async fn refresh(world: &World, fixture: &Fixture, source: &str, key: &str) -> Value {
+async fn refresh(world: &World, _fixture: &Fixture, source: &str, key: &str) -> Value {
+    refresh_source(world, source, key).await
+}
+async fn refresh_source(world: &World, source: &str, key: &str) -> Value {
     let path = format!("/v1/projects/{}/sources/{source}/refresh", world.project_id);
     let (status, requested) = call(
         &world.app,
@@ -150,7 +158,8 @@ async fn refresh(world: &World, fixture: &Fixture, source: &str, key: &str) -> V
     let runtime = synveda_gateway::source_reconciliation::Runtime::new(
         world.state.pool.clone(),
         Arc::clone(&world.state.pdp),
-        Arc::clone(&fixture.reader),
+        Arc::clone(world.state.git_sources.as_ref().unwrap()),
+        Arc::clone(&world.state.keys),
     );
     assert!(
         synveda_gateway::source_reconciliation::execute_page(&runtime, world.tenant_id)
@@ -583,7 +592,8 @@ async fn restarted_attempt_keeps_the_committed_pin_and_rolls_back_incomplete_wor
     let runtime = synveda_gateway::source_reconciliation::Runtime::new(
         world.state.pool.clone(),
         Arc::clone(&world.state.pdp),
-        Arc::clone(&fixture.reader),
+        Arc::clone(world.state.git_sources.as_ref().unwrap()),
+        Arc::clone(&world.state.keys),
     );
     assert!(
         synveda_gateway::source_reconciliation::execute_page(&runtime, world.tenant_id)
@@ -867,7 +877,8 @@ async fn missing_objects_cancel_disconnect_and_denial_preserve_successful_cursor
     let runtime = synveda_gateway::source_reconciliation::Runtime::new(
         world.state.pool.clone(),
         Arc::clone(&world.state.pdp),
-        Arc::clone(&fixture.reader),
+        Arc::clone(world.state.git_sources.as_ref().unwrap()),
+        Arc::clone(&world.state.keys),
     );
     assert!(
         synveda_gateway::source_reconciliation::execute_page(&runtime, world.tenant_id)
@@ -1005,4 +1016,494 @@ async fn public_upload_cannot_supply_managed_source_provenance() {
         artifact(&uploaded, "procedures/retries.md")["id"],
         artifact(&managed_job, "procedures/retries.md")["id"]
     );
+}
+
+async fn attach_remote(world: &World, name: &str, key: &str) -> RepositoryId {
+    let (status,repository)=call(&world.app,"POST",&format!("/v1/projects/{}/repositories",world.project_id),
+        &world.alice_token,Some(key),Some(json!({"remote_uri":format!("https://github.com/fixture-owner/{name}"),"default_branch":"main","metadata":{}}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{repository}");
+    repository["id"].as_str().unwrap().parse().unwrap()
+}
+async fn put_read_secret(world: &World, id: synveda_types::TenantSecretId, format: &str) {
+    let key = world
+        .state
+        .keys
+        .sealing_key(
+            &world.state.pool,
+            synveda_crypto::KeyScope::Tenant(world.tenant_id),
+        )
+        .await
+        .unwrap();
+    let document = serde_json::to_vec(
+        &json!({"format":format,"repository_id":123,"token":source_https::TOKEN}),
+    )
+    .unwrap();
+    let sealed = key
+        .seal(
+            synveda_crypto::Purpose::TenantSecret,
+            synveda_crypto::RowKey::Uuid(id.as_uuid()),
+            &document,
+        )
+        .unwrap();
+    let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    synveda_store::tenant_secrets::put(
+        &mut tx,
+        id,
+        world.tenant_id,
+        world.project_scope,
+        synveda_types::secret::TenantSecretKind::SourceRead,
+        "source.read.fixture",
+        Some("github"),
+        key.version(),
+        &sealed,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+}
+async fn configure_remote(
+    world: &mut World,
+    https: &source_https::Fixture,
+    secret: synveda_types::TenantSecretId,
+    repository: RepositoryId,
+    renamed: bool,
+) {
+    world.state.git_sources = Some(Arc::new(synveda_git::SourceReaders::new(
+        None,
+        Some(https.reader(world.tenant_id, world.project_scope, secret, renamed)),
+    )));
+    world.app = router(world.state.clone());
+    let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    configuration_support::set_git_sources(
+        &mut tx,
+        world.tenant_id,
+        world.project_scope,
+        vec![GitSourceDescriptor {
+            source_id: "private-source".to_owned(),
+            repository_id: repository,
+            read_target: "private-fixture".to_owned(),
+            git_ref: "refs/heads/main".to_owned(),
+            allowed_paths: vec!["missing.md".to_owned(), "procedures/retries.md".to_owned()],
+            enabled: true,
+        }],
+    )
+    .await;
+    tx.commit().await.unwrap();
+}
+async fn remote_fixture(
+    world: &mut World,
+) -> (
+    source_https::Fixture,
+    synveda_types::TenantSecretId,
+    RepositoryId,
+) {
+    world.state.keys = Arc::new(synveda_store::keys::KeyRing::new(
+        synveda_crypto::Kms::Local(
+            synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:fictional-source-fixture")
+                .unwrap(),
+        ),
+    ));
+    world
+        .state
+        .keys
+        .provision(
+            &world.state.pool,
+            synveda_crypto::KeyScope::Tenant(world.tenant_id),
+        )
+        .await
+        .unwrap();
+    world.app = router(world.state.clone());
+    let https = source_https::Fixture::new().await;
+    let repository = attach_remote(world, "source", "private-source-attachment").await;
+    let secret = synveda_types::TenantSecretId::new();
+    put_read_secret(world, secret, "synveda-github-source-credential-v1").await;
+    let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    configuration_support::bind_pack(
+        &mut tx,
+        world.tenant_id,
+        world.project_scope,
+        synveda_policy::STANDARD,
+    )
+    .await;
+    configuration_support::set_github_exports(&mut tx, world.tenant_id, world.project_scope, true)
+        .await;
+    tx.commit().await.unwrap();
+    configure_remote(world, &https, secret, repository, false).await;
+    (https, secret, repository)
+}
+fn runtime(world: &World) -> synveda_gateway::source_reconciliation::Runtime {
+    synveda_gateway::source_reconciliation::Runtime::new(
+        world.state.pool.clone(),
+        Arc::clone(&world.state.pdp),
+        Arc::clone(world.state.git_sources.as_ref().unwrap()),
+        Arc::clone(&world.state.keys),
+    )
+}
+async fn queue_remote(world: &World, key: &str) -> Value {
+    let (status, body) = call(
+        &world.app,
+        "POST",
+        &format!(
+            "/v1/projects/{}/sources/private-source/refresh",
+            world.project_id
+        ),
+        &world.alice_token,
+        Some(key),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    body
+}
+async fn operation(world: &World, receipt: &Value) -> Value {
+    let (status, body) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/operations/{}", receipt["id"].as_str().unwrap()),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body
+}
+async fn remote_status(world: &World) -> Value {
+    let (status, body) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/projects/{}/sources/private-source", world.project_id),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body
+}
+
+#[tokio::test]
+async fn private_https_complete_objects_and_rename_preserve_review_and_suppression_identity() {
+    let _guard = serial().await;
+    let Some(mut world) = admitted_world().await else {
+        return;
+    };
+    let (https, secret, _repository) = remote_fixture(&mut world).await;
+    let first = refresh_source(&world, "private-source", "https-initial").await;
+    assert_eq!(first["pinned_revision"], https.pin.commit);
+    let original = job(&world, &first).await;
+    let _approved = accept(&world, &original, "Iris retry policy", "https-accept").await;
+    https.set_mode(source_https::Mode::MovedRef);
+    let changed = refresh_source(&world, "private-source", "https-five").await;
+    assert_eq!(
+        retry_mapping(&job(&world, &changed).await)["classification"],
+        "update"
+    );
+    let renamed = attach_remote(&world, "renamed", "https-renamed-attachment").await;
+    configure_remote(&mut world, &https, secret, renamed, true).await;
+    https.set_mode(source_https::Mode::RenamedMovedRef);
+    let repeated = refresh_source(&world, "private-source", "https-renamed-five").await;
+    assert_eq!(
+        changed["import_job_id"], repeated["import_job_id"],
+        "rename must reuse the exact pending review"
+    );
+    let source = artifact(&original, "procedures/retries.md");
+    let (status,removed)=call(&world.app,"POST",&format!("/v1/okf/imports/{}/artifacts/{}/withdraw",original["job"]["id"].as_str().unwrap(),source["id"].as_str().unwrap()),
+        &world.alice_token,Some("https-withdraw"),Some(json!({"expected_content_hash":source["content_hash"],"reason":"Retire exact fictional source bytes"}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{removed}");
+    if removed["outcome"] == "pending_review" {
+        apply_change(&world, removed["change_id"].as_str().unwrap()).await;
+    }
+    https.set_mode(source_https::Mode::Renamed);
+    let suppressed = refresh_source(&world, "private-source", "https-renamed-suppressed").await;
+    assert!(suppressed["import_job_id"].is_null());
+    let before = https.requests.lock().unwrap().len();
+    let same = refresh_source(&world, "private-source", "https-renamed-suppressed-repeat").await;
+    assert!(same["import_job_id"].is_null());
+    assert!(
+        !https.requests.lock().unwrap()[before..]
+            .iter()
+            .any(|request| request.contains("/git/blobs/")),
+        "known suppressed bytes must not be fetched"
+    );
+    assert!(
+        !remote_status(&world)
+            .await
+            .to_string()
+            .contains(source_https::TOKEN)
+    );
+}
+
+#[tokio::test]
+async fn private_https_errors_never_advance_the_last_complete_cursor_or_infer_deletion() {
+    let _guard = serial().await;
+    let Some(mut world) = admitted_world().await else {
+        return;
+    };
+    let (https, _, _) = remote_fixture(&mut world).await;
+    let first = refresh_source(&world, "private-source", "https-error-initial").await;
+    for (index, mode) in [
+        source_https::Mode::Truncated,
+        source_https::Mode::TamperedTree,
+        source_https::Mode::TamperedBlob,
+        source_https::Mode::MissingBlob,
+        source_https::Mode::Outage,
+        source_https::Mode::Public,
+        source_https::Mode::Replaced,
+        source_https::Mode::Redirect,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        https.set_mode(mode);
+        let queued = queue_remote(&world, &format!("https-error-{index}")).await;
+        assert!(
+            synveda_gateway::source_reconciliation::execute_page(&runtime(&world), world.tenant_id)
+                .await
+                .is_err()
+        );
+        let current = operation(&world, &queued).await;
+        assert!(
+            matches!(current["state"].as_str(), Some("failed" | "blocked")),
+            "{current}"
+        );
+        assert!(current["observation_id"].is_null());
+        assert_eq!(
+            remote_status(&world).await["observation_id"],
+            first["observation_id"]
+        );
+        let (status, cancelled) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/operations/{}/cancel", queued["id"].as_str().unwrap()),
+            &world.alice_token,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{cancelled}");
+    }
+    assert!(https.requests.lock().unwrap().iter().all(|request| {
+        request.starts_with("GET /repos/fixture-owner/source") && !request.contains('?')
+    }));
+}
+
+#[tokio::test]
+async fn private_https_rotation_and_revocation_during_fetch_fence_all_source_work() {
+    let _guard = serial().await;
+    for revoke in [false, true] {
+        let Some(mut world) = admitted_world().await else {
+            return;
+        };
+        let (https, secret, _) = remote_fixture(&mut world).await;
+        https.set_mode(source_https::Mode::PauseBlob);
+        let queued = queue_remote(
+            &world,
+            if revoke {
+                "https-revoke"
+            } else {
+                "https-rotate"
+            },
+        )
+        .await;
+        let worker = runtime(&world);
+        let tenant = world.tenant_id;
+        let execution = tokio::spawn(async move {
+            synveda_gateway::source_reconciliation::execute_page(&worker, tenant).await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), https.reached.notified())
+            .await
+            .unwrap();
+        // This mutation must complete while HTTPS is paused: provider waits hold no admission gate.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            if revoke {
+                let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
+                    .await
+                    .unwrap();
+                synveda_store::tenant_secrets::revoke(&mut tx, world.tenant_id, secret)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                tx.commit().await.unwrap();
+            } else {
+                put_read_secret(&world, secret, "synveda-github-source-credential-v1").await;
+            }
+        })
+        .await
+        .unwrap();
+        https.release.notify_one();
+        assert!(execution.await.unwrap().is_err());
+        assert_eq!(operation(&world, &queued).await["state"], "blocked");
+        assert!(remote_status(&world).await["observation_id"].is_null());
+        let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+            .await
+            .unwrap();
+        let jobs:i64=sqlx::query_scalar("select count(*) from import_jobs where tenant_id=$1 and managed_source_id='private-source'")
+            .bind(world.tenant_id.as_uuid()).fetch_one(&mut *tx).await.unwrap();
+        assert_eq!(jobs, 0);
+        tx.commit().await.unwrap();
+        if revoke {
+            put_read_secret(&world, secret, "synveda-github-source-credential-v1").await;
+        }
+        https.set_mode(source_https::Mode::Normal);
+        let recovered = refresh_source(&world, "private-source", "https-custody-recovered").await;
+        assert_eq!(recovered["state"], "succeeded");
+    }
+}
+
+#[tokio::test]
+async fn transient_key_opening_retries_the_same_frozen_request_without_any_http() {
+    let _guard = serial().await;
+    let Some(mut world) = admitted_world().await else {
+        return;
+    };
+    let (https, _, _) = remote_fixture(&mut world).await;
+    let queued = queue_remote(&world, "https-key-retry").await;
+    let disabled = Arc::new(synveda_store::keys::KeyRing::new(
+        synveda_crypto::Kms::Disabled,
+    ));
+    let worker = synveda_gateway::source_reconciliation::Runtime::new(
+        world.state.pool.clone(),
+        Arc::clone(&world.state.pdp),
+        Arc::clone(world.state.git_sources.as_ref().unwrap()),
+        disabled,
+    );
+    assert!(matches!(
+        synveda_gateway::source_reconciliation::execute_page(&worker, world.tenant_id).await,
+        Err(synveda_types::Error::Dependency { .. })
+    ));
+    assert_eq!(operation(&world, &queued).await["state"], "failed");
+    assert!(https.requests.lock().unwrap().is_empty());
+    assert!(remote_status(&world).await["observation_id"].is_null());
+    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+    assert!(
+        synveda_gateway::source_reconciliation::execute_page(&runtime(&world), world.tenant_id)
+            .await
+            .unwrap()
+    );
+    let succeeded = operation(&world, &queued).await;
+    assert_eq!(succeeded["state"], "succeeded");
+    assert_eq!(succeeded["attempts"], 2);
+}
+
+#[tokio::test]
+async fn detached_legacy_uri_history_cannot_be_rebound_into_another_provider_root() {
+    let _guard = serial().await;
+    let Some(mut world) = admitted_world().await else {
+        return;
+    };
+    let local = fixture(&mut world).await;
+    let legacy = attach_remote(&world, "renamed", "legacy-uri-source").await;
+    let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    configuration_support::set_git_sources(
+        &mut tx,
+        world.tenant_id,
+        world.project_scope,
+        vec![descriptor(legacy, "source-a", "main")],
+    )
+    .await;
+    tx.commit().await.unwrap();
+    let original = refresh(&world, &local, "source-a", "legacy-root-first").await;
+    let legacy_job = job(&world, &original).await;
+    let source = artifact(&legacy_job, "procedures/retries.md");
+    let (status,removed)=call(&world.app,"POST",&format!("/v1/okf/imports/{}/artifacts/{}/withdraw",legacy_job["job"]["id"].as_str().unwrap(),source["id"].as_str().unwrap()),
+        &world.alice_token,Some("legacy-root-withdraw"),Some(json!({"expected_content_hash":source["content_hash"],"reason":"Preserve withdrawal across detached identity"}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{removed}");
+    if removed["outcome"] == "pending_review" {
+        apply_change(&world, removed["change_id"].as_str().unwrap()).await;
+    }
+    let (status, body) = call(
+        &world.app,
+        "DELETE",
+        &format!("/v1/projects/{}/repositories/{legacy}", world.project_id),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let (https, secret, _) = remote_fixture(&mut world).await;
+    let first = refresh_source(&world, "private-source", "provider-root-first").await;
+    let reattached = attach_remote(&world, "renamed", "legacy-uri-reattached").await;
+    assert_ne!(legacy, reattached);
+    configure_remote(&mut world, &https, secret, reattached, true).await;
+    https.set_mode(source_https::Mode::Renamed);
+    let (status, refused) = call(
+        &world.app,
+        "POST",
+        &format!(
+            "/v1/projects/{}/sources/private-source/refresh",
+            world.project_id
+        ),
+        &world.alice_token,
+        Some("ambiguous-root-refused"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(
+        remote_status(&world).await["observation_id"],
+        first["observation_id"]
+    );
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    let bound = synveda_store::source_reconciliation::github_identity_bound(
+        &mut tx,
+        world.tenant_id,
+        world.project_id.parse().unwrap(),
+        reattached,
+        123,
+    )
+    .await
+    .unwrap();
+    assert!(!bound, "failed rebinding must not retain a new alias");
+    tx.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn export_credentials_and_disallowed_providers_cannot_authorize_inbound_reads() {
+    let _guard = serial().await;
+    let Some(mut world) = admitted_world().await else {
+        return;
+    };
+    let (https, secret, _) = remote_fixture(&mut world).await;
+    put_read_secret(&world, secret, "synveda-github-export-credential-v1").await;
+    let queued = queue_remote(&world, "wrong-credential-purpose").await;
+    assert!(
+        synveda_gateway::source_reconciliation::execute_page(&runtime(&world), world.tenant_id)
+            .await
+            .is_err()
+    );
+    assert_eq!(operation(&world, &queued).await["state"], "blocked");
+    assert!(https.requests.lock().unwrap().is_empty());
+    put_read_secret(&world, secret, "synveda-github-source-credential-v1").await;
+    let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    configuration_support::set_github_exports(&mut tx, world.tenant_id, world.project_scope, false)
+        .await;
+    tx.commit().await.unwrap();
+    let (status, refused) = call(
+        &world.app,
+        "POST",
+        &format!(
+            "/v1/projects/{}/sources/private-source/refresh",
+            world.project_id
+        ),
+        &world.alice_token,
+        Some("provider-narrowing"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert!(https.requests.lock().unwrap().is_empty());
 }

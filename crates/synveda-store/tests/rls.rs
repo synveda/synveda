@@ -255,6 +255,8 @@ const COVERED: &[&str] = &[
     "source_observations",
     "source_reconcile_heads",
     "source_reconcile_requests",
+    "source_repository_attachments",
+    "source_repository_roots",
     "source_suppressions",
     // CPR-45 (ADR-0102): the provider group may win initial administrator
     // bootstrap once. The marker is tenant-bound and insert-only so removing

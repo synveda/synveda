@@ -409,6 +409,26 @@ pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Resul
     } else {
         None
     };
+    if plan.managed_source_id.is_some()
+        && let Some(job) = get_job_by_digest(
+            &mut *conn,
+            plan.tenant_id,
+            plan.project_id,
+            &plan.source_kind,
+            &plan.source_locator,
+            &plan.bundle_digest,
+            plan.repository_id,
+            plan.managed_source_id.as_deref(),
+            review_digest.as_deref(),
+        )
+        .await?
+    {
+        crate::artifact_control::admit_job(conn, plan.tenant_id, &job).await?;
+        return Ok(PlannedImport {
+            job,
+            created: false,
+        });
+    }
     let inserted = sqlx::query_scalar!(
         r#"
         insert into import_jobs
@@ -593,12 +613,11 @@ async fn get_job_by_digest(
                  then '[]'::jsonb else notices end as "notices!", created_at, completed_at, updated_at
         from import_jobs
         where tenant_id = $1 and project_id = $2 and source_kind = $3
-          and source_locator = $4 and bundle_digest = $5
-          and repository_identity_digest is not distinct from (
-            select encode(sha256(convert_to(jsonb_build_array('synveda.repository.source.v1',r.tenant_id,r.project_id,lower(r.canonical_uri))::text,'UTF8')),'hex')
-            from project_repositories r where r.tenant_id=$1 and r.project_id=$2 and r.id=$6)
+          and ($7::text is not null or source_locator = $4) and bundle_digest = $5
+          and repository_identity_digest is not distinct from synveda_repository_source_identity($1,$2,$6)
           and managed_source_id is not distinct from $7
           and managed_review_digest is not distinct from $8
+        order by created_at,id limit 1
         "#,
         tenant.as_uuid(),
         project.as_uuid(),

@@ -837,6 +837,7 @@ enum CatalogueHead {
     Delivery,
     Source,
     Artifact,
+    Reconcile,
     Current,
 }
 
@@ -2309,7 +2310,8 @@ async fn verify_application_acl_fingerprint(
         CatalogueHead::Delivery => (DELIVERY_ACL_FINGERPRINT, DELIVERY_ACL_ROW_COUNT),
         CatalogueHead::Source => (SOURCE_ACL_FINGERPRINT, SOURCE_ACL_ROW_COUNT),
         CatalogueHead::Artifact => (ARTIFACT_ACL_FINGERPRINT, ARTIFACT_ACL_ROW_COUNT),
-        CatalogueHead::Current => (RECONCILE_ACL_FINGERPRINT, RECONCILE_ACL_ROW_COUNT),
+        CatalogueHead::Reconcile => (RECONCILE_ACL_FINGERPRINT, RECONCILE_ACL_ROW_COUNT),
+        CatalogueHead::Current => (GITHUB_SOURCE_ACL_FINGERPRINT, GITHUB_SOURCE_ACL_ROW_COUNT),
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -2461,7 +2463,11 @@ async fn verify_routine_catalog_fingerprint(
         CatalogueHead::Delivery => (DELIVERY_ROUTINE_FINGERPRINT, DELIVERY_ROUTINE_ROW_COUNT),
         CatalogueHead::Source => (SOURCE_ROUTINE_FINGERPRINT, SOURCE_ROUTINE_ROW_COUNT),
         CatalogueHead::Artifact => (ARTIFACT_ROUTINE_FINGERPRINT, ARTIFACT_ROUTINE_ROW_COUNT),
-        CatalogueHead::Current => (RECONCILE_ROUTINE_FINGERPRINT, RECONCILE_ROUTINE_ROW_COUNT),
+        CatalogueHead::Reconcile => (RECONCILE_ROUTINE_FINGERPRINT, RECONCILE_ROUTINE_ROW_COUNT),
+        CatalogueHead::Current => (
+            GITHUB_SOURCE_ROUTINE_FINGERPRINT,
+            GITHUB_SOURCE_ROUTINE_ROW_COUNT,
+        ),
     };
     let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2615,7 +2621,11 @@ async fn verify_trigger_catalog_fingerprint(
         CatalogueHead::Delivery => (DELIVERY_TRIGGER_FINGERPRINT, DELIVERY_TRIGGER_ROW_COUNT),
         CatalogueHead::Source => (SOURCE_TRIGGER_FINGERPRINT, SOURCE_TRIGGER_ROW_COUNT),
         CatalogueHead::Artifact => (ARTIFACT_TRIGGER_FINGERPRINT, ARTIFACT_TRIGGER_ROW_COUNT),
-        CatalogueHead::Current => (RECONCILE_TRIGGER_FINGERPRINT, RECONCILE_TRIGGER_ROW_COUNT),
+        CatalogueHead::Reconcile => (RECONCILE_TRIGGER_FINGERPRINT, RECONCILE_TRIGGER_ROW_COUNT),
+        CatalogueHead::Current => (
+            GITHUB_SOURCE_TRIGGER_FINGERPRINT,
+            GITHUB_SOURCE_TRIGGER_ROW_COUNT,
+        ),
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2809,9 +2819,13 @@ async fn verify_rls_catalog_fingerprint(
             ARTIFACT_RLS_CATALOG_FINGERPRINT,
             ARTIFACT_RLS_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::Current => (
+        CatalogueHead::Reconcile => (
             RECONCILE_RLS_CATALOG_FINGERPRINT,
             RECONCILE_RLS_CATALOG_ROW_COUNT,
+        ),
+        CatalogueHead::Current => (
+            GITHUB_SOURCE_RLS_CATALOG_FINGERPRINT,
+            GITHUB_SOURCE_RLS_CATALOG_ROW_COUNT,
         ),
     };
     let actual = rls_catalog_fingerprint(connection, count).await?;
@@ -3403,6 +3417,17 @@ pub(crate) async fn verify_artifact_migrator_connection(
     verify_selected_migrator_catalog(connection, database_roles).await
 }
 
+/// Preserve the qualified local reconciliation catalogue before the next additive migration.
+pub(crate) async fn verify_reconcile_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Reconcile)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
 /// Pre-migration migrator proof used by deployment preflight.
 pub async fn verify_migrator_prerequisites_connection(
     connection: &mut PgConnection,
@@ -3493,6 +3518,17 @@ pub(crate) async fn verify_artifact_migrator_read_only_connection(
 ) -> Result<VerifiedRuntimeRole> {
     verify_read_only_primary_connection(connection).await?;
     verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Artifact).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Preserve the qualified local reconciliation catalogue before the next additive migration.
+pub(crate) async fn verify_reconcile_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Reconcile)
+        .await?;
     verify_selected_migrator_catalog(connection, database_roles).await
 }
 
@@ -3713,6 +3749,18 @@ const RECONCILE_TRIGGER_ROW_COUNT: usize = 161;
 const RECONCILE_RLS_CATALOG_FINGERPRINT: &str =
     "8d9e7407c9affc3f475d9a974ec68fd3adfa118b3068bb5ec492e1ee32940bfa";
 const RECONCILE_RLS_CATALOG_ROW_COUNT: usize = 124;
+const GITHUB_SOURCE_ACL_FINGERPRINT: &str =
+    "10a07e595a0af0c6311319a000f90f3136608ee7023365744b2295498e3239cd";
+const GITHUB_SOURCE_ACL_ROW_COUNT: usize = 414;
+const GITHUB_SOURCE_ROUTINE_FINGERPRINT: &str =
+    "8f6d15f693e301c43e0498061cb305c9efc41eda3235878db501184b0ab543a5";
+const GITHUB_SOURCE_ROUTINE_ROW_COUNT: usize = 99;
+const GITHUB_SOURCE_TRIGGER_FINGERPRINT: &str =
+    "8e5ccae0188de9dbaab66db1e8e674a433eaa4ffbdf61e9639fa304421268118";
+const GITHUB_SOURCE_TRIGGER_ROW_COUNT: usize = 163;
+const GITHUB_SOURCE_RLS_CATALOG_FINGERPRINT: &str =
+    "a7bab9341432800706f4a6ac8c17f8293ac3c23d7bceebe59ad78f52ae70c62c";
+const GITHUB_SOURCE_RLS_CATALOG_ROW_COUNT: usize = 126;
 
 #[cfg(test)]
 mod tests {

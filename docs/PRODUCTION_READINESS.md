@@ -725,8 +725,13 @@ token counts include generated wrapper identifiers. Source health is limited
 to visible trace observations: synchronized source coverage, physical cleanup,
 acknowledged delivery and model use/outcome remain unknown. ADR-0148 qualifies bounded local Git reconciliation at additive `0007` through
 six real-Git cases, 33 actual epoch cases, ordinary RLS/source regression and
-current product/client gates. Private GitHub reads, structured second-client
-handoff and verified procedure learning remain open under MEM-8/9, CTX-6 and SKIL-6. This changes no production or
+current product/client gates. ADR-0149 at additive `0008` qualifies private GitHub
+reads through controlled HTTPS, stable provider roots across rename, incomplete
+read refusal, paused-fetch credential changes and exact prior-head retention.
+All 12 source cases, 33 actual epoch cases, ordinary RLS regression, genuine
+vector profiles and 31 product scenarios pass. Live private-source reads,
+structured second-client handoff and verified procedure learning remain open
+under MEM-8/9, CTX-6 and SKIL-6. This changes no production or
 native-client qualification claim; the exact increment evidence and next action
 are in [MEM-8](backlog/MEM-8.md#first-implemented-increment-2026-10-14).
 

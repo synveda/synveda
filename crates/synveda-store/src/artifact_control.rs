@@ -68,13 +68,23 @@ pub async fn admit_plan(
     plan: &crate::imports::NewImportPlan,
 ) -> Result<()> {
     for artifact in &plan.artifacts {
-        let suppressed=sqlx::query_scalar!(r#"select exists(select 1 from artifact_suppressions
+        let suppressed = sqlx::query_scalar!(
+            r#"select exists(select 1 from artifact_suppressions
           where tenant_id=$1 and source_key_digest=synveda_artifact_source_key($2,
-            (select encode(sha256(convert_to(jsonb_build_array('synveda.repository.source.v1',r.tenant_id,r.project_id,lower(r.canonical_uri))::text,'UTF8')),'hex')
-             from project_repositories r where r.tenant_id=$1 and r.project_id=$3 and r.id=$4),$5,$6,
+            synveda_repository_source_identity($1,$3,$4),$5,$6,
              encode(sha256(convert_to($7,'UTF8')),'hex'),$8)) as "suppressed!""#,
-          plan.tenant_id.as_uuid(),plan.scope_id.as_uuid(),plan.project_id.as_uuid(),plan.repository_id.map(|id|id.as_uuid()) as Option<Uuid>,
-          plan.source_kind,plan.source_locator,artifact.logical_path,artifact.content_hash).fetch_one(&mut *conn).await.map_err(storage)?;
+            plan.tenant_id.as_uuid(),
+            plan.scope_id.as_uuid(),
+            plan.project_id.as_uuid(),
+            plan.repository_id.map(|id| id.as_uuid()) as Option<Uuid>,
+            plan.source_kind,
+            plan.source_locator,
+            artifact.logical_path,
+            artifact.content_hash
+        )
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(storage)?;
         if suppressed {
             return Err(crate::source_control::unavailable());
         }

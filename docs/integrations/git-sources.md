@@ -44,6 +44,68 @@ publish/bind flow. Configuration review and current scope authority still apply.
 Custom policy packs must explicitly permit scope-only `SourceRead`; refresh also
 requires `KnowledgeWrite`. Configuration grants neither permission.
 
+## Configure private GitHub reads
+
+Use a private, active, nonfork repository on GitHub.com. Independently obtain its
+numeric repository ID. Provision a fine-grained PAT restricted to that repository
+with Metadata read and Contents read permissions. Seal this distinct document
+through the existing tenant secret boundary:
+
+```json
+{
+  "format": "synveda-github-source-credential-v1",
+  "repository_id": 123456789,
+  "token": "github_pat_REPLACE_WITH_THE_READ_TOKEN"
+}
+```
+
+```sh
+synveda tenant secret put --tenant TENANT --scope PROJECT_SCOPE --kind source_read \
+  --label source.iris --provider github --from /private/github-source.json
+```
+
+Set `SYNVEDA_GIT_SOURCE_REMOTES_FILE` on gateway and core worker to the same
+operator-owned allowlist. It contains references and identity assertions only:
+
+```json
+{
+  "format": "synveda-github-source-targets-v1",
+  "targets": [{
+    "tenant_id": "<actual tenant UUID>",
+    "scope_id": "<actual project scope UUID>",
+    "target": "private-iris",
+    "owner": "example-owner",
+    "repository": "iris-context",
+    "repository_id": 123456789,
+    "secret_reference": "synveda-secret://<actual secret UUID>"
+  }]
+}
+```
+
+Owner/repository names are canonical lowercase ASCII, without `.git`. The
+allowlist permits at most 128 mappings/64 KiB. Its exact tenant/project scope,
+repository URI and secret scope must agree. Configure the attached repository in
+`git_sources`, use `read_target: "private-iris"`, and include `github` in the
+complete document's `allowed_external_providers`. SourceRead and KnowledgeWrite
+remain independent requirements. An export credential or a remote mapping at
+another scope cannot supply inbound authority or a local fallback.
+
+Synveda sends GETs only to `https://api.github.com`, validates repository ID/name
+and privacy before reading, ignores response URLs, and disables redirects and
+proxies. It verifies complete nonrecursive tree objects and decoded blob hashes.
+JSON framing also counts against the remote byte allowance. Failed/truncated
+reads preserve the last complete observation. Key opening and HTTPS waits hold
+no tenant transaction. Rotation/revocation during fetch blocks final commit;
+inspect its operation and request a new refresh after custody is restored.
+
+Rotate using the same secret put label/reference; revoke through `synveda tenant
+secret revoke --tenant TENANT SECRET_ID`. For a repository rename, update the
+operator mapping and attach/configure its new canonical URI with the same pinned
+numeric ID. The permanent root preserves old suppression and pending review
+identity. A different ID at an old URI or ambiguous retained roots refuses
+rebinding; retained data is preserved. Disconnect remains the Configuration
+`enabled: false` operation described below.
+
 ## Inspect, refresh and review
 
 ```sh

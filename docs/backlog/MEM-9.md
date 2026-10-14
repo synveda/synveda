@@ -104,9 +104,52 @@ triggers 161 / `4f2a6552aae921255ccf0152e9b222123131a5960982c8b4b3b032ff78d3c1c0
 forced RLS 124 / `8d9e7407c9affc3f475d9a974ec68fd3adfa118b3068bb5ec492e1ee32940bfa`.
 All earlier migration bytes and independently measured fingerprints remain pinned.
 
-The feature stays open for private GitHub reads, persistent provider identity
-across rename, credential rotation/revocation during fetch, controlled HTTPS
-acceptance and separate live qualification. Next add the immutable provider-ID
-binding and distinct source-read allowlist/credential, reuse the durable local
-commit path, then continue CTX-6 structured handoff and SKIL-6 verification.
-No credential blocks that implementation or controlled transport tests.
+### Qualified private GitHub increment (2026-10-14)
+
+Accepted ADR-0149 implements additive `0008` with immutable provider-ID/root and
+attachment/root projections. Existing aliases, case-only duplicate review plans
+and all prior migration bytes remain intact. A rename with the same configured
+provider ID retains permanent suppression and pending-review identity. Ambiguous
+detached legacy roots and repository replacement refuse admission.
+
+The distinct scoped `source_read` credential and operator allowlist feed a
+GET-only fixed-origin GitHub reader. Current Cedar and credential revision are
+checked before transport and again before commit. Key opening and HTTPS hold no
+tenant transaction. Complete parent-tree and decoded-blob hashes are verified;
+errors, truncation and bounds failures preserve the last complete cursor.
+
+All 12 source cases pass: six existing real local Git cases and six controlled
+HTTPS cases cover rename/review reuse/permanent suppression, incomplete reads,
+replacement/public/redirect refusal, rotation and revocation during a paused
+fetch, a cold-key retry, detached-root ambiguity and wrong-purpose/provider
+refusal. These TLS fixtures use real owned Git objects and the production fixed
+origin reader with a test-only CA/DNS seam. Nine artifact, 14 Session-source,
+21 ContextRun and seven lifecycle regression cases pass on a fresh current
+ordinary-role database. All 33 actual serial epoch cases and the actual
+`0007`→`0008` case-only review-plan retention test pass on isolated lifecycle
+databases. The latter is a schema fixture, not remote observation evidence.
+66 ordinary RLS cases pass; five existing administrator cases remain ignored.
+All genuine supported pgvector 0.8.2–0.8.6 profiles and 31 product scenarios pass.
+
+Fresh SQLx generation/check and all five new query hashes were reviewed, including
+three replaced queries. Six OpenAPI peer tests and generated console/SDK contract
+checks pass; no public shape changed. Formatting, changed-crate all-target strict
+Clippy, fast/dependency and 20 demo-controller checks pass.
+
+Measured `0008` authority: application ACL 414 rows /
+`10a07e595a0af0c6311319a000f90f3136608ee7023365744b2295498e3239cd`,
+routines 99 / `8f6d15f693e301c43e0498061cb305c9efc41eda3235878db501184b0ab543a5`,
+triggers 163 / `8e5ccae0188de9dbaab66db1e8e674a433eaa4ffbdf61e9639fa304421268118`,
+forced RLS 126 / `a7bab9341432800706f4a6ac8c17f8293ac3c23d7bceebe59ad78f52ae70c62c`.
+The product report records base commit `a4d2bd7abee36fe2c208b67773670bf64b3d659a`
+and dirty patch SHA-256 `fa5fc87fa2a47b74b8af23bc661d221d2319b263a2f28f9ffb3f484dba3914b7`.
+No model call or live private GitHub read is claimed.
+The three retained remote draft/regression fixtures and their private credentials
+were removed after exact container-label and immutable network-receipt checks.
+
+The feature stays open for separate live qualification. The owner authorized
+reuse of existing secrets; the retained synthetic export canary metadata is
+located, but its active read-purpose custody has not yet been selected or opened.
+Next qualify an authorized canary through distinct inbound custody while
+continuing CTX-6 structured handoff and SKIL-6 verification. This external check
+does not block the remaining implementation.

@@ -196,6 +196,52 @@ pub struct CurrentSourceItem {
     pub content_hash: String,
 }
 
+/// Adopt the configured provider ID without rewriting any retained artifact root.
+pub async fn bind_github_identity(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    project: ProjectId,
+    scope: ScopeId,
+    repository: RepositoryId,
+    provider_id: i64,
+) -> Result<()> {
+    sqlx::query_scalar!(
+        r#"select synveda_bind_github_source_identity($1,$2,$3,$4,$5) as "root_digest?""#,
+        tenant.as_uuid(),
+        project.as_uuid(),
+        scope.as_uuid(),
+        repository.as_uuid(),
+        provider_id
+    )
+    .fetch_one(conn)
+    .await
+    .map_err(|error| {
+        match error
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref()
+        {
+            Some("23514" | "23505") => conflict(),
+            _ => storage(error),
+        }
+    })?
+    .ok_or_else(conflict)?;
+    Ok(())
+}
+
+/// Validate the immutable configured provider assertion under final admission.
+pub async fn github_identity_bound(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    project: ProjectId,
+    repository: RepositoryId,
+    provider_id: i64,
+) -> Result<bool> {
+    sqlx::query_scalar!(r#"select exists(select 1 from source_repository_attachments
+      where tenant_id=$1 and project_id=$2 and repository_id=$3 and github_repository_id=$4) as "bound!""#,
+      tenant.as_uuid(),project.as_uuid(),repository.as_uuid(),provider_id).fetch_one(conn).await.map_err(storage)
+}
+
 /// Bounded exact current items carrying this configured source/path lineage.
 /// The caller still independently decides each item's scope and sensitivity.
 pub async fn current_items(

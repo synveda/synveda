@@ -161,6 +161,9 @@ pub async fn check_migration_compatibility(
             epoch::MigrationPreflight::Artifact => {
                 runtime_role::verify_artifact_migrator_read_only_connection(&mut compatibility,database_roles).await?;
             }
+            epoch::MigrationPreflight::Reconcile => {
+                runtime_role::verify_reconcile_migrator_read_only_connection(&mut compatibility,database_roles).await?;
+            }
             epoch::MigrationPreflight::Current => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
@@ -277,6 +280,11 @@ async fn migrate_locked_connection(
             epoch::MigrationPreflight::PendingStampArtifact
             | epoch::MigrationPreflight::Artifact => {
                 runtime_role::verify_artifact_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampReconcile
+            | epoch::MigrationPreflight::Reconcile => {
+                runtime_role::verify_reconcile_migrator_connection(&mut authority, database_roles)
                     .await?;
             }
             epoch::MigrationPreflight::PendingStampCurrent | epoch::MigrationPreflight::Current => {
