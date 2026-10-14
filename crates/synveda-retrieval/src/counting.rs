@@ -126,6 +126,25 @@ impl TokenCounter {
     }
 }
 
+/// Checked caller-reported host remainder. Every quantity uses the same exact
+/// encoding; unknown overhead must remain absent at the API boundary.
+pub fn host_remaining(window: u32, occupied: u32, reserved: u32, overhead: u32) -> Result<u32> {
+    let used = occupied
+        .checked_add(reserved)
+        .and_then(|used| used.checked_add(overhead))
+        .ok_or_else(|| Error::Invalid {
+            message: "Caller-reported host quantities overflow their supported bound".to_owned(),
+        })?;
+    let remaining = window.saturating_sub(used);
+    if remaining == 0 {
+        return Err(Error::InsufficientBudget {
+            required_tokens: 1,
+            budget_tokens: 0,
+        });
+    }
+    Ok(remaining)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,6 +177,13 @@ mod tests {
         assert!(counter.count("東京とالعربية") > 0);
     }
 
+    #[test]
+    fn reported_host_remainder_is_checked_and_never_assumes_missing_overhead() {
+        assert_eq!(host_remaining(8192, 6000, 1000, 192).unwrap(), 1000);
+        assert!(host_remaining(8192, 7000, 1000, 192).is_err());
+        assert!(host_remaining(8192, 8000, 1000, 192).is_err());
+        assert!(host_remaining(u32::MAX, u32::MAX, 1, 0).is_err());
+    }
     #[test]
     fn byte_ceiling_is_independent() {
         let counter = TokenCounter::legacy();

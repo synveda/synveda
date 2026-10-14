@@ -306,6 +306,30 @@ test("context health links exact evidence and keeps actual use unknown", async (
   assert.match(text, /Pipeline observations/);
 });
 
+test("source findings show separate complete-snapshot and refresh clocks with current inspection", async () => {
+  const view=detail();
+  view.health.findings[0]={dimension:"freshness",status:"unknown",observed_at:view.run.created_at,
+    explanation:"The definition changed; current synchronization is unknown.",action:"inspect_source",
+    evidence:{kind:"source",project_id:"project-1",source_id:"source-a",observed_at:null,path_state:null,changed:false,
+      definition_matches:false,operation_id:"operation-1",operation_state:"blocked"}};
+  await seed({kind:"ok",body:view});
+  const {text}=render();
+  assert.match(text,/Inspect exact evidence/);
+  assert.match(text,/Complete source observation: unknown/);
+  assert.match(text,/Refresh: blocked/);
+  assert.match(text,/Definition: changed/);
+});
+
+test("host allowance receipts remain caller reports beside local contribution counts", async () => {
+  const view=detail({run:run({host_allowance:{provenance:"caller_reported",tokenizer_encoding:"o200k_base",remaining_tokens:200,
+    report:{context_window_tokens:1000,occupied_input_tokens:600,reserved_output_tokens:150,host_overhead_tokens:50}}})});
+  await seed({kind:"ok",body:view});
+  const {text}=render();
+  assert.match(text,/200 remaining encoding tokens · caller reported/);
+  assert.match(text,/Observed provider usage/);
+  assert.match(text,/Unavailable through this context route/);
+});
+
 test("the Context workbench requests against a visible Session and lists recent exact runs", async () => {
   const session = {
     id: "session-1",

@@ -1195,6 +1195,14 @@ pub(crate) async fn authorize_snapshot(
     tenant_id: TenantId,
     snapshot: &KnowledgeSnapshot,
 ) -> Result<Authorized> {
+    authorize_historical(
+        state,
+        tx,
+        tenant_id,
+        "knowledge_revision",
+        snapshot.revision.id.as_uuid(),
+    )
+    .await?;
     authorize_item(
         state,
         tx,
@@ -1203,6 +1211,105 @@ pub(crate) async fn authorize_snapshot(
         snapshot.revision.content.sensitivity,
     )
     .await
+}
+
+/// A flattened dependency grants no permission. Recheck each exact historical
+/// item and each retained root under the caller's live Cedar policy.
+pub(crate) async fn authorize_historical(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    kind: &str,
+    id: uuid::Uuid,
+) -> Result<()> {
+    use synveda_store::procedure_learning as learning;
+    let refs = learning::historical(tx, tenant, kind, id).await?;
+    if refs.is_empty() {
+        return Ok(());
+    }
+    let hidden = || Error::NotFound {
+        entity: "Procedure evidence".to_owned(),
+    };
+    if !synveda_store::source_control::available(tx, tenant, kind, id).await? {
+        return Err(hidden());
+    }
+    for source in refs {
+        let item = KnowledgeItemId::from_uuid(source.knowledge_item_id);
+        let target = store::mutation_target(tx, tenant, item)
+            .await?
+            .ok_or_else(hidden)?;
+        let revision = store::revision(
+            &mut *tx,
+            tenant,
+            item,
+            KnowledgeRevisionId::from_uuid(source.revision_id),
+        )
+        .await?
+        .ok_or_else(hidden)?;
+        if revision.content_hash != source.content_hash {
+            return Err(hidden());
+        }
+        authorize_item(
+            state,
+            tx,
+            tenant,
+            &target.item,
+            revision.content.sensitivity,
+        )
+        .await
+        .map_err(|e| match e {
+            Error::PolicyDenied { .. } | Error::NotFound { .. } => hidden(),
+            e => e,
+        })?;
+    }
+    let skills = learning::skill_authorities(tx, tenant, kind, id).await?;
+    crate::procedure_learning::authorize_skill_versions(state, tx, tenant, &skills)
+        .await
+        .map_err(|e| match e {
+            Error::PolicyDenied { .. } | Error::NotFound { .. } => hidden(),
+            e => e,
+        })?;
+    for source in learning::session_authorities(tx, tenant, kind, id).await? {
+        let scope_id = ScopeId::from_uuid(source.scope_id);
+        let session = SessionId::from_uuid(source.session_id);
+        let scope = scopes::get(&mut *tx, tenant, scope_id)
+            .await?
+            .ok_or_else(hidden)?;
+        let selection = source
+            .project_id
+            .map(ProjectId::from_uuid)
+            .map_or_else(AnchorSelection::none, AnchorSelection::project);
+        let input = authz::gather(
+            state,
+            tx,
+            Some(&scope),
+            selection,
+            vec![ResourceEntity::Session {
+                id: session,
+                scope_id,
+            }],
+        )
+        .await?;
+        authz::decide(
+            state,
+            &input,
+            Action::SessionRead,
+            Resource::Session(session),
+        )
+        .map_err(|e| match e {
+            Error::PolicyDenied { .. } | Error::NotFound { .. } => hidden(),
+            e => e,
+        })?;
+    }
+    for source in learning::artifact_authorities(tx, tenant, kind, id).await? {
+        crate::artifact_control::authorize(state, tx, tenant, &source, Action::KnowledgeRead)
+            .await
+            .map_err(|e| match e {
+                Error::PolicyDenied { .. } | Error::NotFound { .. } => hidden(),
+                e => e,
+            })?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn authorize_item(
@@ -1872,6 +1979,19 @@ pub(crate) async fn history(
         for revision in revisions {
             considered += 1;
             last = Some(revision.revision_number);
+            match authorize_historical(
+                &state,
+                &mut tx,
+                tenant_id,
+                "knowledge_revision",
+                revision.id.as_uuid(),
+            )
+            .await
+            {
+                Ok(()) => {}
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
+                Err(e) => return Err(e),
+            }
             match authz::decide_knowledge_read(
                 &state,
                 &input,
@@ -2059,6 +2179,19 @@ pub(crate) async fn usage(
             else {
                 continue;
             };
+            match authorize_historical(
+                &state,
+                &mut tx,
+                tenant_id,
+                "knowledge_revision",
+                revision.id.as_uuid(),
+            )
+            .await
+            {
+                Ok(()) => {}
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
+                Err(e) => return Err(e),
+            }
             match crate::context_api::authorize_revision(
                 &state,
                 &mut tx,

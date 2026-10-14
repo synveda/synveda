@@ -484,6 +484,26 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
             Resource::Scope(node.id),
         )?;
         let summary = summarise(&state, &mut tx, tenant_id, &input, &proposal).await?;
+        if proposal.asset == synveda_types::AssetKind::Knowledge {
+            crate::knowledge_api::authorize_historical(
+                &state,
+                &mut tx,
+                tenant_id,
+                "knowledge_change",
+                id.as_uuid(),
+            )
+            .await?;
+        }
+        if proposal.asset == synveda_types::AssetKind::Knowledge
+            && let Some(change) =
+                synveda_store::knowledge_lifecycle::read_change(&mut *tx, tenant_id, id).await?
+            && let Some(command) = &change.payload
+        {
+            crate::procedure_learning::authorize_command_sources(
+                &state, &mut tx, tenant_id, command,
+            )
+            .await?;
+        }
         let members = member_views(&mut tx, tenant_id, &proposal).await?;
         let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
         let timeline = timeline(&proposal, &recorded);

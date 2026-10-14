@@ -55,3 +55,15 @@ Optional retention makes some dimensions unknown rather than falsely healthy.
 Health is computed after current Cedar decisions under forced RLS. Detailed
 evidence stays in the authorized response; logs, audit and metrics retain their
 existing content-free contracts. The projection adds no SQL or migrations.
+
+### Amendment 1: bounded operational evidence (2026-10-14)
+
+After exact trace authorization, inspect at most 32 visible revisions and 32
+associated outcome/evaluation receipts. Configured-source evidence independently
+requires SourceRead; conflict evidence requires every exact member to be visible.
+Use the latest complete observation's database clock for synchronization, and
+keep refresh request/state separate from that clock. Authenticate runner outcome
+custody without inferring causal credit or model use. Expose one exact authorized
+example and a supported inspection destination per dimension. Reduced/disabled
+traces gain no source addresses through enrichment. This adds static checked
+queries to existing stores, without another health aggregate or migration.

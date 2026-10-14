@@ -47,6 +47,7 @@ pub mod openapi;
 mod operations;
 mod packs;
 mod policy;
+mod procedure_learning;
 mod prompts;
 mod proposals;
 pub mod provision;

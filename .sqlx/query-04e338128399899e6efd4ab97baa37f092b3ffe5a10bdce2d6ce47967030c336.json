@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select h.event_id,h.session_id,h.outcome,h.evidence_class,h.received_at from (select event_id,session_id,outcome,evidence_class,received_at from procedure_outcome_headers where tenant_id=$1 and context_run_id=$2 order by received_at desc,event_id limit 33) h join session_events e on e.tenant_id=$1 and e.id=h.event_id order by h.received_at desc,h.event_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "evidence_class",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "received_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "04e338128399899e6efd4ab97baa37f092b3ffe5a10bdce2d6ce47967030c336"
+}

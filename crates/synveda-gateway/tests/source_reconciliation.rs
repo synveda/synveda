@@ -2,6 +2,8 @@
 #![cfg(unix)]
 #[path = "support/context_world.rs"]
 mod context_world;
+#[path = "support/procedure_world.rs"]
+mod procedure_world;
 #[path = "support/source_https.rs"]
 mod source_https;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -305,6 +307,9 @@ async fn apply_change(world: &World, change: &str) {
 }
 
 async fn replace(world: &World, job: &Value, prior: &Value, key: &str) -> Value {
+    replace_named(world, job, prior, "Iris retry policy", key).await
+}
+async fn replace_named(world: &World, job: &Value, prior: &Value, title: &str, key: &str) -> Value {
     let (status, batch) = call(
         &world.app,
         "GET",
@@ -322,7 +327,7 @@ async fn replace(world: &World, job: &Value, prior: &Value, key: &str) -> Value 
         .as_array()
         .unwrap()
         .iter()
-        .find(|c| c["content"]["title"] == "Iris retry policy")
+        .find(|c| c["content"]["title"] == title)
         .unwrap();
     let (status, result) = call(
         &world.app,
@@ -1506,4 +1511,618 @@ async fn export_credentials_and_disallowed_providers_cannot_authorize_inbound_re
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert!(https.requests.lock().unwrap().is_empty());
+}
+
+fn iris_digest(value: &Value) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(serde_json::to_vec(value).unwrap()))
+}
+async fn iris_item(world: &World, item: &str) -> Value {
+    let (status, v) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/knowledge/{item}"),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    v
+}
+async fn iris_state(world: &World, item: &Value, key: &str) -> Value {
+    let text = item["current_revision"]["body_markdown"].as_str().unwrap();
+    let (status,v)=call(&world.app,"POST",&format!("/v1/sessions/{}/task-state",world.alice_session),&world.alice_token,None,
+        Some(json!({"schema_version":1,"client_event_id":key,"expected_previous":null,"statements":[{"kind":"constraint","evidence":{"source_kind":"knowledge_revision","item_id":item["id"],"revision_id":item["current_revision"]["id"],"content_hash":item["current_revision"]["content_hash"],"span":{"start":0,"end":text.len()}}}]}))).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    v["event"].clone()
+}
+async fn iris_cli_preview(world: &World, state: &Value, required: &Value) -> Value {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let app = world.app.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let handoff = format!(
+        "{}@{}@{}",
+        world.alice_session,
+        state["id"].as_str().unwrap(),
+        state["payload_hash"].as_str().unwrap()
+    );
+    let revision = format!(
+        "{}@{}",
+        required["id"].as_str().unwrap(),
+        required["current_revision"]["id"].as_str().unwrap()
+    );
+    let binary = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/synveda");
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio::process::Command::new(binary)
+            .args([
+                "context",
+                "preview",
+                &world.bob_session,
+                "--handoff",
+                &handoff,
+                "--require-knowledge",
+                &revision,
+                "--tokenizer-encoding",
+                "o200k_base",
+                "--budget-tokens",
+                "2600",
+                "--json",
+            ])
+            .env("SYNVEDA_GATEWAY", url)
+            .env("SYNVEDA_TOKEN", &world.bob_token)
+            .env("XDG_STATE_HOME", temp.path())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    server.abort();
+    let output = output
+        .unwrap()
+        .expect("build the actual CLI before the Iris demonstration");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+// This closed local fixture interprets only the reviewed retry cap, delay and
+// unknown-commit guard. It never executes arbitrary source instructions.
+fn iris_retry_case(body: &str, unknown: bool, ack_after_ms: u32) -> Value {
+    let cap = if body.contains("5 attempts") { 5 } else { 3 };
+    let delay = if body.contains("200 ms") { 200 } else { 0 };
+    if unknown {
+        return json!({"passed":body.contains("Never retry an unknown commit outcome"),"attempts":0,"observed":"unknown_commit"});
+    }
+    let mut elapsed = 0;
+    for attempt in 1..=cap {
+        elapsed += delay;
+        if elapsed >= ack_after_ms {
+            return json!({"passed":true,"attempts":attempt,"elapsed_ms":elapsed});
+        }
+    }
+    json!({"passed":false,"attempts":cap,"elapsed_ms":elapsed})
+}
+
+#[tokio::test]
+async fn iris_domain_context_lifecycle_is_governed_end_to_end() {
+    let started = Instant::now();
+    let _guard = serial().await;
+    let Some(mut world) = admitted_world().await else {
+        return;
+    };
+    let _ = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_max_level(tracing::Level::ERROR)
+        .try_init();
+    let fixture = fixture(&mut world).await;
+    let files = [
+        ("entities/delivery.md", "Iris Delivery"),
+        ("entities/provider-event.md", "Iris ProviderEvent"),
+        (
+            "definitions/acknowledged-rate.md",
+            "Iris acknowledged delivery rate",
+        ),
+        (
+            "conventions/applicability.md",
+            "Iris applicability and relationships",
+        ),
+        (
+            "decisions/unknown-commit.md",
+            "Iris unknown commit decision",
+        ),
+        ("procedures/retries.md", "Iris retry policy"),
+    ];
+    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demos/fixtures/iris-domain");
+    let now = chrono::Utc::now();
+    let generated = now.to_rfc3339();
+    let due = (now + chrono::Duration::days(14)).to_rfc3339();
+    for (path, _) in files {
+        let dest = fixture.work.join(path);
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        let source = std::fs::read_to_string(package.join(path))
+            .unwrap()
+            .replace("2026-10-14T00:00:00Z", &generated)
+            .replace("2027-01-01T00:00:00Z", &due);
+        std::fs::write(dest, source).unwrap();
+    }
+    git(&fixture.work, &["add", "."]);
+    git(&fixture.work, &["commit", "-m", "owned Iris domain"]);
+    git(
+        &fixture.work,
+        &["push", fixture.bare.to_str().unwrap(), "main:main"],
+    );
+    let mut d = descriptor(fixture.repository, "source-a", "main");
+    d.allowed_paths = files.iter().map(|(path, _)| (*path).to_owned()).collect();
+    d.allowed_paths.sort();
+    let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    configuration_support::set_git_sources(&mut tx, world.tenant_id, world.project_scope, vec![d])
+        .await;
+    tx.commit().await.unwrap();
+    let receipt = refresh_source(&world, "source-a", "iris-domain-first").await;
+    let first = job(&world, &receipt).await;
+    assert_eq!(first["artifacts"].as_array().unwrap().len(), 6);
+    let mut items = Vec::new();
+    for (i, (_, title)) in files.iter().enumerate() {
+        let accepted = accept(&world, &first, title, &format!("iris-publish-{i}")).await;
+        items.push(
+            iris_item(
+                &world,
+                accepted["resulting_knowledge_item_id"].as_str().unwrap(),
+            )
+            .await,
+        );
+    }
+    let required:Vec<_>=[2,4,5].iter().map(|i|json!({"item_id":items[*i]["id"],"revision_id":items[*i]["current_revision"]["id"]})).collect();
+    let (status, run) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{}/context-runs", world.alice_session),
+        &world.alice_token,
+        Some("iris-domain-delivery"),
+        Some(json!({"budget_tokens":2600,"required_knowledge_revisions":required})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{run}");
+    let rendered = run["rendered"].as_str().unwrap();
+    for fact in [
+        "percentage",
+        "UTC event day",
+        "provider event time",
+        "Exclude sandbox",
+        "unknown commit outcome",
+        "3 attempts",
+    ] {
+        assert!(rendered.contains(fact), "lost domain qualifier: {fact}");
+    }
+    let handoff = iris_state(&world, &items[5], "iris-domain-state").await;
+    let cli = iris_cli_preview(&world, &handoff, &items[2]).await;
+    assert!(cli.to_string().contains("UTC event day"));
+    assert!(cli.to_string().contains("unknown commit outcome"));
+    let metric_path = fixture.work.join(files[2].0);
+    let old_metric = std::fs::read_to_string(&metric_path).unwrap();
+    std::fs::write(
+        &metric_path,
+        old_metric.replace("Exclude sandbox events", "Include sandbox events"),
+    )
+    .unwrap();
+    let retry_path = fixture.work.join(files[5].0);
+    let old_retry = std::fs::read_to_string(&retry_path).unwrap();
+    std::fs::write(&retry_path, old_retry.replace("3 attempts", "5 attempts")).unwrap();
+    git(&fixture.work, &["add", "."]);
+    git(
+        &fixture.work,
+        &["commit", "-m", "owned definitions changed"],
+    );
+    git(
+        &fixture.work,
+        &["push", fixture.bare.to_str().unwrap(), "main:main"],
+    );
+    let refreshed = refresh_source(&world, "source-a", "iris-domain-changed").await;
+    let changed = job(&world, &refreshed).await;
+    assert_eq!(
+        changed["mappings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["classification"] == "update")
+            .count(),
+        2
+    );
+    let current_metric = iris_item(&world, items[2]["id"].as_str().unwrap()).await;
+    assert_eq!(
+        current_metric["current_revision"]["id"],
+        items[2]["current_revision"]["id"]
+    );
+    assert!(
+        current_metric["current_revision"]["body_markdown"]
+            .as_str()
+            .unwrap()
+            .contains("Exclude sandbox")
+    );
+    assert!(
+        current_metric["current_revision"]["freshness_reasons"]
+            .to_string()
+            .contains("source_freshness"),
+        "{current_metric}"
+    );
+    let clean = iris_item(&world, items[0]["id"].as_str().unwrap()).await;
+    assert!(
+        !clean["current_revision"]["freshness_reasons"]
+            .to_string()
+            .contains("source_freshness")
+    );
+    let health = detail(&world, &world.alice_token, run["id"].as_str().unwrap()).await;
+    let freshness = health["health"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["dimension"] == "freshness")
+        .unwrap();
+    assert_eq!(freshness["status"], "needs_attention", "{health}");
+    assert_eq!(freshness["evidence"]["source_id"], "source-a");
+    assert_eq!(freshness["evidence"]["definition_matches"], true);
+    assert_eq!(freshness["evidence"]["changed"], true);
+    let metric_prior = json!({"resulting_knowledge_item_id":items[2]["id"],"resulting_revision_id":items[2]["current_revision"]["id"]});
+    let corrected_metric = replace_named(
+        &world,
+        &changed,
+        &metric_prior,
+        "Iris acknowledged delivery rate",
+        "iris-metric-reviewed",
+    )
+    .await;
+    let corrected_metric = iris_item(
+        &world,
+        corrected_metric["resulting_knowledge_item_id"]
+            .as_str()
+            .unwrap(),
+    )
+    .await;
+    assert!(
+        corrected_metric["current_revision"]["body_markdown"]
+            .as_str()
+            .unwrap()
+            .contains("Include sandbox")
+    );
+    let old_procedure = json!({"resulting_knowledge_item_id":items[5]["id"],"resulting_revision_id":items[5]["current_revision"]["id"]});
+    let five = replace_named(
+        &world,
+        &changed,
+        &old_procedure,
+        "Iris retry policy",
+        "iris-retry-review",
+    )
+    .await;
+    let approved = iris_item(
+        &world,
+        five["resulting_knowledge_item_id"].as_str().unwrap(),
+    )
+    .await;
+    let procedure = json!({"item_id":approved["id"],"revision_id":approved["current_revision"]["id"],"content_hash":approved["current_revision"]["content_hash"]});
+    let l = procedure_world::setup_world(world, Some(procedure)).await;
+    let baseline = approved["current_revision"]["body_markdown"]
+        .as_str()
+        .unwrap();
+    let observed = iris_retry_case(baseline, false, 120);
+    assert_eq!(observed["passed"], false);
+    let mut body = procedure_world::outcome_body(&l, "iris-executed-retry");
+    body["environment"]["environment_digest"] = json!(iris_digest(
+        &json!({"harness":"closed-iris-retry-v1","tree":refreshed["pinned_revision"]})
+    ));
+    body["result_digest"] = json!(iris_digest(&observed));
+    let (status, outcome) = call(
+        &l.world.app,
+        "POST",
+        &format!("/v1/sessions/{}/outcomes", l.world.alice_session),
+        &l.runner,
+        None,
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    let (_, candidate) = procedure_world::candidate(&l, &outcome["event"]).await;
+    let attempt = procedure_world::freeze(&l, &candidate).await;
+    let content = candidate["content"]["body_markdown"].as_str().unwrap();
+    let mut results = Vec::new();
+    for case in l.suite["cases"].as_array().unwrap() {
+        let unknown = case["case_id"] == "held-out-unknown-commit";
+        let before = iris_retry_case(baseline, unknown, 350);
+        let after = iris_retry_case(content, unknown, 350);
+        assert_eq!(after["passed"], true);
+        results.push(json!({"case_id":case["case_id"],"digest":case["digest"],"baseline":if before["passed"]==true{"passed"}else{"failed"},"candidate":"passed","result_digest":iris_digest(&json!({"baseline":before,"candidate":after}))}));
+    }
+    let (status,qualified)=call(&l.world.app,"POST",&format!("/v1/procedure-evaluations/{}/results",attempt["attempt_id"].as_str().unwrap()),&l.evaluator,None,
+        Some(json!({"candidate_hash":attempt["candidate_hash"],"specification_hash":attempt["specification_hash"],"results":results}))).await;
+    assert_eq!(status, StatusCode::OK, "{qualified}");
+    assert_eq!(qualified["qualified"], true);
+    let (status, pending) = call(
+        &l.world.app,
+        "POST",
+        &format!(
+            "/v1/capture-candidates/{}/procedure-submit",
+            candidate["id"].as_str().unwrap()
+        ),
+        &l.world.alice_token,
+        Some("iris-qualified-improvement"),
+        Some(json!({"candidate_hash":candidate["content_hash"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{pending}");
+    assert_eq!(pending["candidate"]["resulting_outcome"], "pending_review");
+    procedure_world::review(
+        &l,
+        pending["candidate"]["resulting_change_id"]
+            .as_str()
+            .unwrap(),
+    )
+    .await;
+    let learned = iris_item(&l.world, l.procedure["item_id"].as_str().unwrap()).await;
+    assert_eq!(
+        learned["current_revision"]["content_hash"],
+        candidate["content_hash"]
+    );
+    // A new Session owns the replacement head; the previous Session snapshot
+    // deliberately cannot silently fall back after exact-head advancement.
+    let (status,new_session)=call(&l.world.app,"POST","/v1/sessions",&l.world.alice_token,Some("iris-new-state-session"),Some(json!({"workspace_id":l.world.workspace_id,"project_id":l.world.project_id,"client_name":"iris-fixture"}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{new_session}");
+    let mut world = l.world;
+    world.alice_session = new_session["id"].as_str().unwrap().to_owned();
+    let new_state = iris_state(&world, &learned, "iris-learned-state").await;
+    let handoff_request = json!({"budget_tokens":2600,"handoff":{"source_session_id":world.alice_session,"snapshot_event_id":new_state["id"],"payload_hash":new_state["payload_hash"]}});
+    let receiver = format!("/v1/sessions/{}/context-runs", world.bob_session);
+    let (status, delivered) = call(
+        &world.app,
+        "POST",
+        &receiver,
+        &world.bob_token,
+        Some("iris-final-handoff"),
+        Some(handoff_request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{delivered}");
+    assert!(delivered["rendered"].as_str().unwrap().contains("200 ms"));
+    let source = artifact(&changed, "procedures/retries.md");
+    let (status,removal)=call(&world.app,"POST",&format!("/v1/okf/imports/{}/artifacts/{}/forget",changed["job"]["id"].as_str().unwrap(),source["id"].as_str().unwrap()),&world.alice_token,Some("iris-forget-retry"),Some(json!({"expected_content_hash":source["content_hash"],"reason":"Retire owned Iris retry source"}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{removal}");
+    if removal["outcome"] == "pending_review" {
+        apply_change(&world, removal["change_id"].as_str().unwrap()).await;
+    }
+    for key in ["iris-final-handoff", "iris-after-forget"] {
+        let (status, denied) = call(
+            &world.app,
+            "POST",
+            &receiver,
+            &world.bob_token,
+            Some(key),
+            Some(handoff_request.clone()),
+        )
+        .await;
+        assert!(
+            matches!(status, StatusCode::CONFLICT | StatusCode::NOT_FOUND),
+            "{denied}"
+        );
+        assert!(!denied.to_string().contains("200 ms"));
+    }
+    let (status, control) = call(
+        &world.app,
+        "GET",
+        &format!(
+            "/v1/okf/imports/{}/artifacts/{}/source-control",
+            changed["job"]["id"].as_str().unwrap(),
+            source["id"].as_str().unwrap()
+        ),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{control}");
+    for _ in 0..30 {
+        if !synveda_gateway::source_control::cleanup_page(
+            &world.state.pool,
+            world.tenant_id,
+            "iris-owned-cleanup",
+        )
+        .await
+        .unwrap()
+        {
+            break;
+        }
+    }
+    let (status, operation) = call(
+        &world.app,
+        "GET",
+        &format!(
+            "/v1/operations/{}",
+            control["operation_id"].as_str().unwrap()
+        ),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{operation}");
+    assert_eq!(operation["cleanup_state"], "succeeded");
+    let unchanged = refresh_source(&world, "source-a", "iris-no-resurrection").await;
+    assert!(unchanged["import_job_id"].is_null(), "{unchanged}");
+    let survivor = iris_item(&world, items[0]["id"].as_str().unwrap()).await;
+    assert_eq!(
+        survivor["current_revision"]["id"],
+        items[0]["current_revision"]["id"]
+    );
+    if let Ok(path) = std::env::var("SYNVEDA_IRIS_REPORT") {
+        let report = json!({"schema_version":1,"scope":"owned_iris_fixture","source_revision":refreshed["pinned_revision"],"source_items":6,"required_revisions":3,
+            "cli_preview":{"tokens":cli["tokens"],"token_count_kind":cli["token_count_kind"],"encoding":"o200k_base","budget_tokens":cli["budget_tokens"],"rendered_hash":cli["rendered_hash"]},
+            "fixed_cases_passed":2,"cleanup_state":operation["cleanup_state"],"independent_survivor":true,"elapsed_ms":started.elapsed().as_millis(),"provider_usage":"unavailable","cost":"unavailable","native_vendor_execution":"not_run"});
+        std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    }
+    println!(
+        "Iris: six source-backed items, separate review, real CLI preview, fixed local runner cases, exact-root forgetting and independent survivor; provider usage/cost unavailable"
+    );
+}
+
+#[tokio::test]
+async fn health_definition_drift_cannot_hide_a_later_changed_source_or_disclose_denied_sources() {
+    let _guard = serial().await;
+    let Some(mut world) = admitted_world().await else {
+        return;
+    };
+    let fixture = fixture(&mut world).await;
+    let a = refresh_source(&world, "source-a", "health-a").await;
+    let a = accept(
+        &world,
+        &job(&world, &a).await,
+        "Iris retry policy",
+        "health-a-accept",
+    )
+    .await;
+    let b = refresh_source(&world, "source-b", "health-b").await;
+    let b = accept(
+        &world,
+        &job(&world, &b).await,
+        "Iris tracing",
+        "health-b-accept",
+    )
+    .await;
+    let (status,run)=call(&world.app,"POST",&format!("/v1/sessions/{}/context-runs",world.alice_session),&world.alice_token,Some("health-two-sources"),Some(json!({"query":"Iris retry policy","budget_tokens":2000,"required_knowledge_revisions":[{"item_id":a["resulting_knowledge_item_id"],"revision_id":a["resulting_revision_id"]},{"item_id":b["resulting_knowledge_item_id"],"revision_id":b["resulting_revision_id"]}]}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{run}");
+    // Trace identities are minted before ranking. Freeze their actual public
+    // order, then make the first source unknown and the later source changed.
+    let before = detail(&world, &world.alice_token, run["id"].as_str().unwrap()).await;
+    let first_a = before["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|c| c["knowledge_revision_id"] == a["resulting_revision_id"])
+        .unwrap();
+    let first_b = before["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|c| c["knowledge_revision_id"] == b["resulting_revision_id"])
+        .unwrap();
+    let (drift_id, drift_branch, changed_id) = if first_a < first_b {
+        ("source-a", "main", "source-b")
+    } else {
+        ("source-b", "dev", "source-a")
+    };
+    let mut drifted = descriptor(fixture.repository, drift_id, drift_branch);
+    drifted.allowed_paths.push("missing.md".into());
+    drifted.allowed_paths.sort();
+    let mut sources = vec![
+        descriptor(fixture.repository, "source-a", "main"),
+        descriptor(fixture.repository, "source-b", "dev"),
+    ];
+    *sources
+        .iter_mut()
+        .find(|d| d.source_id == drift_id)
+        .unwrap() = drifted;
+    let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    configuration_support::set_git_sources(&mut tx, world.tenant_id, world.project_scope, sources)
+        .await;
+    tx.commit().await.unwrap();
+    if changed_id == "source-a" {
+        change(&fixture, "main", 5);
+    } else {
+        git(&fixture.work, &["checkout", "dev"]);
+        std::fs::write(fixture.work.join("conventions/trace.md"),"---\ntype: Convention\ntitle: Iris tracing\ndescription: Changed fictional tracing.\n---\n\nUse W3C traceparent and a span id for Iris requests.\n").unwrap();
+        git(&fixture.work, &["add", "."]);
+        git(
+            &fixture.work,
+            &["commit", "-m", "owned health trace change"],
+        );
+        git(
+            &fixture.work,
+            &["push", fixture.bare.to_str().unwrap(), "dev:dev"],
+        );
+    }
+    refresh_source(&world, changed_id, "health-current-changed").await;
+    let inspected = detail(&world, &world.alice_token, run["id"].as_str().unwrap()).await;
+    let first = inspected["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|c| c["knowledge_revision_id"] == a["resulting_revision_id"])
+        .unwrap();
+    let second = inspected["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|c| c["knowledge_revision_id"] == b["resulting_revision_id"])
+        .unwrap();
+    assert!(
+        (first < second) == (drift_id == "source-a"),
+        "the unknown source must precede the attention source in this regression"
+    );
+    let freshness = inspected["health"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["dimension"] == "freshness")
+        .unwrap();
+    assert_eq!(freshness["status"], "needs_attention", "{inspected}");
+    assert_eq!(freshness["evidence"]["source_id"], changed_id);
+    assert_eq!(freshness["evidence"]["definition_matches"], true);
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    let mut sources = synveda_store::configuration::effective_at_scope(
+        &mut tx,
+        world.tenant_id,
+        world.project_scope,
+    )
+    .await
+    .unwrap()
+    .document
+    .git_sources;
+    let path = if changed_id == "source-a" {
+        "procedures/retries.md"
+    } else {
+        "conventions/trace.md"
+    };
+    sources
+        .iter_mut()
+        .find(|d| d.source_id == changed_id)
+        .unwrap()
+        .allowed_paths
+        .retain(|p| p != path);
+    configuration_support::set_git_sources(&mut tx, world.tenant_id, world.project_scope, sources)
+        .await;
+    tx.commit().await.unwrap();
+    refresh_source(&world, changed_id, "health-narrower-coverage").await;
+    let narrowed = detail(&world, &world.alice_token, run["id"].as_str().unwrap()).await;
+    let freshness = narrowed["health"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["dimension"] == "freshness")
+        .unwrap();
+    assert_eq!(freshness["status"], "unknown", "{narrowed}");
+    assert!(freshness["evidence"]["path_state"].is_null());
+    world.install_policy("health-source-deny",1,&format!("{BLANKET}\nforbid (principal, action == Synveda::Action::\"SourceRead\", resource);"),PackConfig::default()).await;
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    configuration_support::set_source_policy(
+        &mut tx,
+        world.tenant_id,
+        world.project_scope,
+        "health-source-deny",
+    )
+    .await;
+    tx.commit().await.unwrap();
+    let hidden = detail(&world, &world.alice_token, run["id"].as_str().unwrap()).await;
+    assert!(!hidden["health"].to_string().contains("source-a"));
+    assert!(!hidden["health"].to_string().contains("source-b"));
 }

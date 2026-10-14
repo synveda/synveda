@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select distinct version from source_dependencies dep join procedure_outcome_headers header on header.tenant_id=dep.tenant_id and header.event_id=dep.source_event_id cross join lateral unnest(header.skill_versions) version where dep.tenant_id=$1 and dep.dependent_kind=$2 and dep.dependent_id=$3 order by version limit 65",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9467f08fdb48f52111f3ec071b59f10bb7f2d6df9c3ee8dcb2dfb368fe01cc15"
+}

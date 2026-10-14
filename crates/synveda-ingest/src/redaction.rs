@@ -121,6 +121,40 @@ pub fn scan(payload: serde_json::Value) -> ScanOutcome {
     ScanOutcome { payload, findings }
 }
 
+/// Scan every content-bearing field in a reserved, typed Procedure request.
+/// Its UUIDs, digests, timestamps and server-owned freshness proof have already
+/// passed structural/provenance checks. Scanning those protocol strings as
+/// prose can misidentify a UUID's numeric groups as a payment card. Arbitrary
+/// revision metadata and all proposed text remain subject to the same ruleset.
+pub fn scan_procedure_improvement(
+    value: &synveda_types::procedure::ProcedureImprovement,
+) -> synveda_types::Result<ScanOutcome> {
+    use serde_json::{Value, json};
+    let mut content =
+        serde_json::to_value(&value.content).map_err(|_| synveda_types::Error::Invalid {
+            message: "Invalid typed Procedure content".to_owned(),
+        })?;
+    if let Some(fields) = content.as_object_mut() {
+        for field in ["valid_from", "valid_to", "stale_after", "sensitivity"] {
+            fields.remove(field);
+        }
+    }
+    if let Some(metadata) = content.get_mut("metadata").and_then(Value::as_object_mut) {
+        metadata.remove("synveda_freshness_policy");
+        metadata.remove("synveda_procedure_improvement");
+        if let Some(learning) = metadata
+            .get_mut("procedure_learning")
+            .and_then(Value::as_object_mut)
+        {
+            learning.remove("baseline_revision");
+        }
+    }
+    Ok(scan(
+        json!({"content":content,"proposed_append":value.proposed_append,
+        "uncertainty":value.uncertainty,"development_case":value.development_case}),
+    ))
+}
+
 fn walk(value: &mut serde_json::Value, ruleset: &Ruleset, counts: &mut [usize]) {
     match value {
         serde_json::Value::String(text) => {
@@ -478,4 +512,62 @@ fn ssn_valid(candidate: &str) -> bool {
 fn phone_valid(candidate: &str) -> bool {
     let digits = candidate.chars().filter(char::is_ascii_digit).count();
     (8..=15).contains(&digits)
+}
+
+#[cfg(test)]
+mod procedure_tests {
+    #[test]
+    fn typed_protocol_uuid_is_not_pii_but_all_free_form_fields_still_are_scanned() {
+        use serde_json::json;
+        let id = "01a13be5-aaaa-7aaa-4111-111111111111";
+        let mut value:synveda_types::procedure::ProcedureImprovement=serde_json::from_value(json!({
+            "schema_version":1,"request_hash":"a".repeat(64),"identity_hash":"b".repeat(64),
+            "procedure":{"item_id":id,"revision_id":id,"content_hash":"c".repeat(64)},
+            "outcomes":[{"event_id":id,"payload_hash":"d".repeat(64)}],"proposed_append":"Keep the safe retry boundary.",
+            "uncertainty":"Controlled fixture only.","development_case":"development-retry",
+            "content":{"title":"Iris retry","body_markdown":"Never retry an unknown outcome.","summary":"Safe retry boundary.","tags":[],"sensitivity":"internal","confidence_permille":950,
+                "valid_from":"2026-10-14T00:00:00Z","valid_to":null,"stale_after":null,"verification_metadata":{},
+                "metadata":{"synveda_freshness_policy":{"scope_id":id},"synveda_procedure_improvement":"b".repeat(64),"procedure_learning":{"baseline_revision":id}}},
+            "content_hash":"e".repeat(64)})).unwrap();
+        assert!(
+            super::scan(serde_json::to_value(&value).unwrap())
+                .findings
+                .iter()
+                .any(|f| f.rule == "payment-card")
+        );
+        assert!(
+            super::scan_procedure_improvement(&value)
+                .unwrap()
+                .findings
+                .is_empty()
+        );
+        value.uncertainty = "4111111111111111".to_owned();
+        assert!(
+            !super::scan_procedure_improvement(&value)
+                .unwrap()
+                .findings
+                .is_empty()
+        );
+        value.uncertainty = "Controlled fixture only.".to_owned();
+        value.content.metadata["untrusted_metadata"] = json!("4111111111111111");
+        assert!(
+            !super::scan_procedure_improvement(&value)
+                .unwrap()
+                .findings
+                .is_empty()
+        );
+        value
+            .content
+            .metadata
+            .as_object_mut()
+            .unwrap()
+            .remove("untrusted_metadata");
+        value.proposed_append = "4111111111111111".to_owned();
+        assert!(
+            !super::scan_procedure_improvement(&value)
+                .unwrap()
+                .findings
+                .is_empty()
+        );
+    }
 }

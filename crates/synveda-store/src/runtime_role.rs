@@ -839,6 +839,7 @@ enum CatalogueHead {
     Artifact,
     Reconcile,
     GithubSource,
+    TaskState,
     Current,
 }
 
@@ -2313,7 +2314,8 @@ async fn verify_application_acl_fingerprint(
         CatalogueHead::Artifact => (ARTIFACT_ACL_FINGERPRINT, ARTIFACT_ACL_ROW_COUNT),
         CatalogueHead::Reconcile => (RECONCILE_ACL_FINGERPRINT, RECONCILE_ACL_ROW_COUNT),
         CatalogueHead::GithubSource => (GITHUB_SOURCE_ACL_FINGERPRINT, GITHUB_SOURCE_ACL_ROW_COUNT),
-        CatalogueHead::Current => (TASK_STATE_ACL_FINGERPRINT, TASK_STATE_ACL_ROW_COUNT),
+        CatalogueHead::TaskState => (TASK_STATE_ACL_FINGERPRINT, TASK_STATE_ACL_ROW_COUNT),
+        CatalogueHead::Current => (PROCEDURE_ACL_FINGERPRINT, PROCEDURE_ACL_ROW_COUNT),
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -2470,7 +2472,8 @@ async fn verify_routine_catalog_fingerprint(
             GITHUB_SOURCE_ROUTINE_FINGERPRINT,
             GITHUB_SOURCE_ROUTINE_ROW_COUNT,
         ),
-        CatalogueHead::Current => (TASK_STATE_ROUTINE_FINGERPRINT, TASK_STATE_ROUTINE_ROW_COUNT),
+        CatalogueHead::TaskState => (TASK_STATE_ROUTINE_FINGERPRINT, TASK_STATE_ROUTINE_ROW_COUNT),
+        CatalogueHead::Current => (PROCEDURE_ROUTINE_FINGERPRINT, PROCEDURE_ROUTINE_ROW_COUNT),
     };
     let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2629,7 +2632,8 @@ async fn verify_trigger_catalog_fingerprint(
             GITHUB_SOURCE_TRIGGER_FINGERPRINT,
             GITHUB_SOURCE_TRIGGER_ROW_COUNT,
         ),
-        CatalogueHead::Current => (TASK_STATE_TRIGGER_FINGERPRINT, TASK_STATE_TRIGGER_ROW_COUNT),
+        CatalogueHead::TaskState => (TASK_STATE_TRIGGER_FINGERPRINT, TASK_STATE_TRIGGER_ROW_COUNT),
+        CatalogueHead::Current => (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT),
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2831,9 +2835,13 @@ async fn verify_rls_catalog_fingerprint(
             GITHUB_SOURCE_RLS_CATALOG_FINGERPRINT,
             GITHUB_SOURCE_RLS_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::Current => (
+        CatalogueHead::TaskState => (
             TASK_STATE_RLS_CATALOG_FINGERPRINT,
             TASK_STATE_RLS_CATALOG_ROW_COUNT,
+        ),
+        CatalogueHead::Current => (
+            PROCEDURE_RLS_CATALOG_FINGERPRINT,
+            PROCEDURE_RLS_CATALOG_ROW_COUNT,
         ),
     };
     let actual = rls_catalog_fingerprint(connection, count).await?;
@@ -3436,6 +3444,27 @@ pub(crate) async fn verify_reconcile_migrator_connection(
     verify_selected_migrator_catalog(connection, database_roles).await
 }
 
+/// Preserve the immutable TaskState catalogue before adding learning custody.
+pub(crate) async fn verify_task_state_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::TaskState)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+/// Read-only proof of the immutable TaskState catalogue before migration.
+pub(crate) async fn verify_task_state_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::TaskState)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
 /// Preserve the qualified private GitHub catalogue before TaskState migration.
 pub(crate) async fn verify_github_source_migrator_connection(
     connection: &mut PgConnection,
@@ -3792,6 +3821,19 @@ const GITHUB_SOURCE_RLS_CATALOG_FINGERPRINT: &str =
     "a7bab9341432800706f4a6ac8c17f8293ac3c23d7bceebe59ad78f52ae70c62c";
 const GITHUB_SOURCE_RLS_CATALOG_ROW_COUNT: usize = 126;
 
+// Measured from an isolated raw migration; ordinary authority still verifies the complete catalogue.
+const PROCEDURE_ACL_FINGERPRINT: &str =
+    "78b4f6c9d546d81039a53b6aa21612fd75d348c4bc2a32ce60213aef2b1008ea";
+const PROCEDURE_ACL_ROW_COUNT: usize = 425;
+const PROCEDURE_ROUTINE_FINGERPRINT: &str =
+    "3debb1befaab1c6c8b0c8b126728157e8a139bf27ef7b754c95a3d2d87c85b1a";
+const PROCEDURE_ROUTINE_ROW_COUNT: usize = 106;
+const PROCEDURE_TRIGGER_FINGERPRINT: &str =
+    "1ead88e36331edac79585b1e063c759fe7abbdaa11ca87d4bb3418fddfe5ece9";
+const PROCEDURE_TRIGGER_ROW_COUNT: usize = 182;
+const PROCEDURE_RLS_CATALOG_FINGERPRINT: &str =
+    "e06e5a9bd3fce61c8268d945ff602231f7c5f04ccdc5691bec429beb8f3d0c2c";
+const PROCEDURE_RLS_CATALOG_ROW_COUNT: usize = 134;
 const TASK_STATE_ACL_FINGERPRINT: &str =
     "24aa59304e2dfea32efed0c0afb55afbaa27bc2deb441aaebffb47464bc39269";
 const TASK_STATE_ACL_ROW_COUNT: usize = 416;

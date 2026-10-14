@@ -67,10 +67,11 @@ configurations for saved replay (ADR-0145), including a committed change not yet
 seen by the process refresher. Name/version alone cannot identify a compile.
 The snapshot is bounded to 64 packs and 1 MiB of source text, with two concurrent
 local builders and the same five-second replay deadline. It never updates the
-global policy cache. Other reads retain their current refresh contract. The check
-does not yet establish serialization against a concurrently committing removal;
-[MEM-8](backlog/MEM-8.md) owns that admission/cleanup boundary. Already delivered
-bytes and external exports retain their separate contracts.
+global policy cache. Other reads retain their current refresh contract. The
+[MEM-8 lifecycle](integrations/context-memory.md) serializes governed Session and
+imported-artifact removal against tenant delivery admission, and performs bounded
+fenced cleanup of addressed copies. Already delivered bytes and external exports
+retain their separate contracts.
 
 Typed `synveda_claims` metadata is an author's declaration bound to an immutable
 revision and exact body spans. It does not establish truth, authenticated testing,

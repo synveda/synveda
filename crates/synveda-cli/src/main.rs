@@ -45,6 +45,7 @@ mod okf;
 mod pack;
 mod plugin;
 mod private_state;
+mod procedure;
 mod prompt;
 mod proposal;
 mod recall;
@@ -411,6 +412,8 @@ enum Command {
     /// looking at that spool and pushing it.
     #[command(subcommand)]
     Session(SessionCommand),
+    /// Exact Procedure outcomes, independent qualification and review submission.
+    Procedure(procedure::Options),
     /// Query current governed Knowledge for a question (CPR-20, ADR-0084).
     ///
     /// Opens an ephemeral run and performs the public session-scoped Knowledge
@@ -590,6 +593,9 @@ enum ContextCommand {
         /// Exact local text encoding, currently `o200k_base` only.
         #[arg(long)]
         tokenizer_encoding: Option<String>,
+        /// Complete caller-reported host accounting JSON file; unknown values remain omitted.
+        #[arg(long)]
+        host_allowance_file: Option<std::path::PathBuf>,
         /// Include governed compact/restart evidence for a supported Claude or Codex Session.
         #[arg(long)]
         restart: bool,
@@ -3311,6 +3317,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 query,
                 budget_tokens,
                 tokenizer_encoding,
+                host_allowance_file,
                 restart,
                 handoff,
                 required_knowledge_revisions,
@@ -3325,6 +3332,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         query: query.as_deref(),
                         budget_tokens,
                         tokenizer_encoding: tokenizer_encoding.as_deref(),
+                        host_allowance_file: host_allowance_file.as_deref(),
                         restart,
                         handoff: handoff.as_deref(),
                         required_knowledge_revisions: &required_knowledge_revisions,
@@ -3344,6 +3352,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => context::detail(&profile_name(profile)?, item, revision, json).await,
         },
+        Command::Procedure(options) => procedure::run(options).await,
         Command::Session(command) => match command {
             SessionCommand::TaskState {
                 session,

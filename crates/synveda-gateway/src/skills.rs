@@ -930,7 +930,7 @@ async fn read_skill_and_version(
     Ok((skill, version))
 }
 
-async fn authorize_skill_read(
+pub(crate) async fn authorize_skill_read(
     state: &AppState,
     tx: &mut PgConnection,
     tenant: TenantId,

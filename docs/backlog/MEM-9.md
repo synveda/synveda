@@ -5,8 +5,8 @@
 At `4729aa5d9ef6929988bf01d1a9640c7a865ca8bc`, FLOW-8 exports authored
 Prompt/ContextPack channels. It does not authorize inbound source reads. Current
 repository freshness compares repository revisions broadly, without path/hash
-dependency observations. The [implementation matrix](MEM-8.md#scope) records
-this as absent, separately from the delivered export path.
+dependency observations. The [current implementation matrix](../integrations/context-memory.md#current-implementation-matrix) records
+the qualified inbound contract separately from export and the pending live check.
 
 ## Scope
 

@@ -459,7 +459,11 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         )
         .await;
     }
-    if let Some(provider) = extractor_provider(deps.extractor.method())
+    let typed_only = events.iter().all(|event| {
+        event.event_type == synveda_types::session::SessionEventType::ProcedureImprovement
+    });
+    if !typed_only
+        && let Some(provider) = extractor_provider(deps.extractor.method())
         && (!runtime_configuration.permits_provider(provider)
             || !admitted_configuration.permits_provider(provider))
     {
@@ -522,6 +526,50 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
     let mut method = deps.extractor.method().to_owned();
     let mut model_versions = BTreeSet::new();
     for event in &events {
+        if event.event_type == synveda_types::session::SessionEventType::ProcedureImprovement {
+            let improvement: synveda_types::procedure::ProcedureImprovement =
+                serde_json::from_value(event.payload.clone()).map_err(|_| Error::Invalid {
+                    message: "Invalid typed Procedure request".to_owned(),
+                })?;
+            validate_knowledge_revision_content(&improvement.content)?;
+            if improvement.schema_version != 1
+                || knowledge::revision_content_hash(&improvement.content)
+                    != improvement.content_hash
+                || !crate::scan_procedure_improvement(&improvement)?
+                    .findings
+                    .is_empty()
+            {
+                return fail_attempt_with_lease(
+                    deps,
+                    config,
+                    &batch,
+                    "candidate_invalid",
+                    Error::Invalid {
+                        message: "Frozen Procedure content changed".to_owned(),
+                    },
+                    lease,
+                )
+                .await;
+            }
+            method = "exact-procedure-append-v1".to_owned();
+            model_versions.insert("deterministic@1".to_owned());
+            proposed.push(NewCaptureCandidate {
+                id: synveda_types::CaptureCandidateId::new(),
+                ordinal: i32::try_from(proposed.len() + 1).map_err(|_| Error::Invalid {
+                    message: "Candidate bound exceeded".to_owned(),
+                })?,
+                proposed_scope_id: batch.scope_id,
+                proposed_project_id: batch.project_id,
+                proposed_owner_principal_id: None,
+                knowledge_type: synveda_types::knowledge::KnowledgeType::Procedure,
+                origin: synveda_types::knowledge::KnowledgeOrigin::Observed,
+                content: improvement.content,
+                content_hash: improvement.content_hash,
+                source_event_ids: vec![event.id],
+                matches: Vec::new(),
+            });
+            continue;
+        }
         let input = ExtractionInput {
             event_id: event.id,
             tenant_id,
@@ -710,8 +758,9 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
             .await?
             .document;
     let configuration_allowed = current_configuration.capture.enabled
-        && extractor_provider(deps.extractor.method())
-            .is_none_or(|provider| current_configuration.permits_provider(provider));
+        && (typed_only
+            || extractor_provider(deps.extractor.method())
+                .is_none_or(|provider| current_configuration.permits_provider(provider)));
     if !fresh_session_decision.allowed || !session_read_allowed || !configuration_allowed {
         let failed = capture::fail_batch(
             &mut write,
@@ -731,6 +780,39 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         lease.stop().await;
         return Ok(ProcessOutcome::FailedAttempt);
     }
+    let mut materialized = Vec::new();
+    for candidate in proposed {
+        if let Some(identity) = candidate
+            .content
+            .metadata
+            .get("synveda_procedure_improvement")
+            .and_then(Value::as_str)
+        {
+            let header = synveda_store::procedure_learning::improvement_by_identity(
+                &mut write, tenant_id, identity,
+            )
+            .await?
+            .ok_or_else(synveda_store::source_control::unavailable)?;
+            let event = synveda_types::SessionEventId::from_uuid(header.event_id);
+            synveda_store::procedure_learning::lock_improvement(&mut write, tenant_id, event)
+                .await?;
+            if synveda_store::procedure_learning::candidate_for_request(
+                &mut write, tenant_id, event,
+            )
+            .await?
+            .is_some()
+            {
+                continue;
+            }
+            if !historical_allowed(deps, &mut write, &batch, "session_event", header.event_id)
+                .await?
+            {
+                return Err(synveda_store::source_control::unavailable());
+            }
+        }
+        materialized.push(candidate);
+    }
+    let mut proposed = materialized;
     // Preferences are personal by default. Their evidence remains governed by
     // the session's scope when it becomes a KnowledgeSource, but the proposed
     // Knowledge itself belongs to the principal scope. This is placement as
@@ -1019,6 +1101,17 @@ async fn visible_matches(
         else {
             continue;
         };
+        if !historical_allowed(
+            deps,
+            tx,
+            batch,
+            "knowledge_revision",
+            existing.revision.id.as_uuid(),
+        )
+        .await?
+        {
+            continue;
+        }
         let decision = decide_exact(
             deps,
             tx,
@@ -1194,6 +1287,139 @@ async fn decide_exact(
         message: "Capture policy snapshot unavailable".to_owned(),
     })??;
     snapshot.authorize(&principal, action, resource, &context)
+}
+
+async fn historical_allowed(
+    deps: &Deps,
+    tx: &mut sqlx::PgConnection,
+    batch: &CaptureBatch,
+    kind: &str,
+    id: uuid::Uuid,
+) -> Result<bool> {
+    use synveda_store::procedure_learning as learning;
+    let refs = learning::historical(tx, batch.tenant_id, kind, id).await?;
+    if refs.is_empty() {
+        return Ok(true);
+    }
+    for source in refs {
+        let item = synveda_types::KnowledgeItemId::from_uuid(source.knowledge_item_id);
+        let Some(target) = knowledge::mutation_target(tx, batch.tenant_id, item).await? else {
+            return Ok(false);
+        };
+        let Some(revision) = knowledge::revision(
+            &mut *tx,
+            batch.tenant_id,
+            item,
+            synveda_types::KnowledgeRevisionId::from_uuid(source.revision_id),
+        )
+        .await?
+        else {
+            return Ok(false);
+        };
+        if revision.content_hash != source.content_hash {
+            return Ok(false);
+        }
+        let decision = decide_exact(
+            deps,
+            tx,
+            batch.tenant_id,
+            &batch.principal_id,
+            target.item.scope_id,
+            target.item.project_id,
+            Action::KnowledgeRead,
+            Resource::KnowledgeItem(item),
+            vec![ResourceEntity::KnowledgeItem {
+                id: item,
+                scope_id: target.item.scope_id,
+            }],
+            Some(revision.content.sensitivity),
+        )
+        .await?;
+        if !decision.allowed {
+            return Ok(false);
+        }
+    }
+    for id in learning::skill_authorities(tx, batch.tenant_id, kind, id).await? {
+        let Some(version) = synveda_store::skills::version(&mut *tx, batch.tenant_id, id).await?
+        else {
+            return Ok(false);
+        };
+        let Some(skill) =
+            synveda_store::skills::by_id(&mut *tx, batch.tenant_id, version.skill_id).await?
+        else {
+            return Ok(false);
+        };
+        if !decide_exact(
+            deps,
+            tx,
+            batch.tenant_id,
+            &batch.principal_id,
+            skill.governing_scope_id,
+            None,
+            Action::SkillRead,
+            Resource::Scope(skill.governing_scope_id),
+            Vec::new(),
+            Some(version.sensitivity),
+        )
+        .await?
+        .allowed
+        {
+            return Ok(false);
+        }
+    }
+    for source in learning::session_authorities(tx, batch.tenant_id, kind, id).await? {
+        let scope_id = ScopeId::from_uuid(source.scope_id);
+        let session = synveda_types::SessionId::from_uuid(source.session_id);
+        if !decide_exact(
+            deps,
+            tx,
+            batch.tenant_id,
+            &batch.principal_id,
+            scope_id,
+            source.project_id.map(synveda_types::ProjectId::from_uuid),
+            Action::SessionRead,
+            Resource::Session(session),
+            vec![ResourceEntity::Session {
+                id: session,
+                scope_id,
+            }],
+            None,
+        )
+        .await?
+        .allowed
+        {
+            return Ok(false);
+        }
+    }
+    for source in learning::artifact_authorities(tx, batch.tenant_id, kind, id).await? {
+        let scope_id = ScopeId::from_uuid(source.scope_id);
+        let project = synveda_types::ProjectId::from_uuid(source.project_id);
+        // Match artifact_control::authorize and okf::authorize_project: the
+        // import container uses its exact project scope and Public tier. The
+        // historical Knowledge reads above retain each revision's real tier.
+        if !decide_exact(
+            deps,
+            tx,
+            batch.tenant_id,
+            &batch.principal_id,
+            scope_id,
+            Some(project),
+            Action::KnowledgeRead,
+            Resource::Scope(scope_id),
+            vec![ResourceEntity::Project {
+                id: project,
+                scope_id,
+                workspace_id: synveda_types::WorkspaceId::from_uuid(source.workspace_id),
+            }],
+            Some(Sensitivity::Public),
+        )
+        .await?
+        .allowed
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 async fn read_session_evidence(

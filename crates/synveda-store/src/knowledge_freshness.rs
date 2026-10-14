@@ -96,3 +96,43 @@ pub async fn evidence(
         managed_source_changed: row.managed_source_changed,
     })
 }
+
+/// Exact managed-source observation below independent SourceRead authorization.
+pub struct SourceObservationSignal {
+    /// Project whose source workflow owns this observation.
+    pub project_id: uuid::Uuid,
+    /// Exact configured source, never a inferred inventory.
+    pub source_id: String,
+    /// Last complete observation clock, separate from refresh request time.
+    pub observed_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Exact descriptor that was completely observed.
+    pub descriptor_hash: Option<String>,
+    /// Exact current configured-path state.
+    pub path_state: Option<String>,
+    /// Whether the current bytes differ from this approved source descriptor.
+    pub changed: bool,
+    /// Most recent independently inspectable refresh receipt.
+    pub operation_id: Option<uuid::Uuid>,
+    /// Refresh lifecycle; it does not establish complete synchronization.
+    pub operation_state: Option<String>,
+}
+/// Bounded exact-revision source joins; no tenant-wide source-health scan.
+pub async fn source_observations(
+    connection: &mut PgConnection,
+    tenant: TenantId,
+    revision: KnowledgeRevisionId,
+) -> Result<Vec<SourceObservationSignal>> {
+    sqlx::query_as!(SourceObservationSignal,r#"select distinct job.project_id,job.managed_source_id as "source_id!",observation.observed_at as "observed_at?",observation.descriptor_hash as "descriptor_hash?",
+    path.state as "path_state?",coalesce(path.state in ('present','missing') and path.content_hash is distinct from source.content_hash,false) as "changed!",
+    head.last_operation_id as operation_id,operation.state as "operation_state?"
+   from knowledge_revision_source_headers link
+   join knowledge_sources source on source.tenant_id=link.tenant_id and source.id=link.knowledge_source_id
+   join source_artifact_addresses address on address.tenant_id=source.tenant_id and address.artifact_id=source.import_artifact_id
+   join import_jobs job on job.tenant_id=address.tenant_id and job.id=address.job_id
+   join source_reconcile_heads head on head.tenant_id=job.tenant_id and head.project_id=job.project_id and head.source_id=job.managed_source_id
+   left join source_observations observation on observation.tenant_id=head.tenant_id and observation.id=head.observation_id
+   left join source_observation_paths path on path.tenant_id=head.tenant_id and path.observation_id=head.observation_id and path.path_digest=address.path_digest
+   left join durable_operations operation on operation.tenant_id=head.tenant_id and operation.id=head.last_operation_id
+   where link.tenant_id=$1 and link.knowledge_revision_id=$2 and job.managed_source_id is not null
+   order by job.project_id,job.managed_source_id limit 33"#,tenant.as_uuid(),revision.as_uuid()).fetch_all(connection).await.map_err(storage_error)
+}

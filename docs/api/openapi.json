@@ -1938,6 +1938,164 @@
         ]
       }
     },
+    "/v1/capture-candidates/{candidate_id}/procedure-evaluations": {
+      "post": {
+        "tags": [
+          "capture"
+        ],
+        "operationId": "freeze_procedure_evaluation",
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreezeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Frozen independently authorized suite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid suite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable candidate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed candidate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/capture-candidates/{candidate_id}/procedure-submit": {
+      "post": {
+        "tags": [
+          "capture"
+        ],
+        "operationId": "submit_procedure_improvement",
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Normal governed Capture decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureDecisionView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Qualification or review denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed candidate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/capture-candidates/{id}/accept": {
       "post": {
         "tags": [
@@ -6960,6 +7118,136 @@
         ]
       }
     },
+    "/v1/procedure-evaluations/{attempt_id}": {
+      "get": {
+        "tags": [
+          "capture"
+        ],
+        "operationId": "get_procedure_evaluation",
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Currently authorized exact evaluation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable candidate or sources",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/procedure-evaluations/{attempt_id}/results": {
+      "post": {
+        "tags": [
+          "capture"
+        ],
+        "operationId": "record_procedure_evaluation",
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResultsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated frozen-case result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid fixed cases",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Evaluator denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed frozen binding or retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/projects/{project_id}": {
       "get": {
         "tags": [
@@ -11299,6 +11587,176 @@
           },
           "404": {
             "description": "No such session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/outcomes": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "record_task_outcome",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exact independently authorized outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcedureEventView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Reporter denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/procedure-improvements": {
+      "post": {
+        "tags": [
+          "capture"
+        ],
+        "operationId": "propose_procedure_improvement",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exact deduplicated Capture request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcedureEventView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid small change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Independent review not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed evidence",
             "content": {
               "application/json": {
                 "schema": {
@@ -17012,6 +17470,13 @@
           "policy_pack": {
             "type": "string"
           },
+          "procedure_learning": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Optional approved authenticated reporters and fixed evaluation suites."
+          },
           "relaxations": {
             "$ref": "#/components/schemas/RelaxationConfigurationBody"
           }
@@ -17727,7 +18192,12 @@
           "inspect_revision",
           "inspect_candidate",
           "inspect_trace",
-          "request_current_context"
+          "request_current_context",
+          "inspect_source",
+          "inspect_conflict",
+          "inspect_proposal",
+          "inspect_outcome",
+          "inspect_evaluation"
         ]
       },
       "ContextHealthDimension": {
@@ -17741,6 +18211,173 @@
           "outcomes",
           "review"
         ]
+      },
+      "ContextHealthEvidence": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Latest independently SourceRead-authorized configured-path observation.",
+            "required": [
+              "project_id",
+              "source_id",
+              "changed",
+              "definition_matches",
+              "kind"
+            ],
+            "properties": {
+              "changed": {
+                "type": "boolean",
+                "description": "Whether approved bytes differ from the observed current bytes."
+              },
+              "definition_matches": {
+                "type": "boolean",
+                "description": "Whether the current live descriptor matches the observed definition."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "source"
+                ]
+              },
+              "observed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "Database clock of the latest complete snapshot, when one exists."
+              },
+              "operation_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Latest refresh request; separate from synchronization time."
+              },
+              "operation_state": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Closed durable refresh lifecycle."
+              },
+              "path_state": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Exact covered path state, not inferred source inventory."
+              },
+              "project_id": {
+                "type": "string",
+                "description": "Exact project."
+              },
+              "source_id": {
+                "type": "string",
+                "description": "Exact configured source."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Conflict disclosed only when every member remains visible.",
+            "required": [
+              "conflict_set_id",
+              "kind"
+            ],
+            "properties": {
+              "conflict_set_id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "conflict"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Exact existing reviewed publication workflow.",
+            "required": [
+              "proposal_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "proposal"
+                ]
+              },
+              "proposal_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Authenticated observation associated with the exact run/hash.",
+            "required": [
+              "session_id",
+              "event_id",
+              "evidence_class",
+              "outcome",
+              "kind"
+            ],
+            "properties": {
+              "event_id": {
+                "type": "string"
+              },
+              "evidence_class": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "outcome"
+                ]
+              },
+              "outcome": {
+                "type": "string"
+              },
+              "session_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Fixed-case qualification, without causal credit to included memory.",
+            "required": [
+              "attempt_id",
+              "candidate_id",
+              "kind"
+            ],
+            "properties": {
+              "attempt_id": {
+                "type": "string"
+              },
+              "candidate_id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "evaluation"
+                ]
+              },
+              "qualified": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Exact supported evidence destinations, without denied addresses or counts."
       },
       "ContextHealthFindingView": {
         "type": "object",
@@ -17765,6 +18402,17 @@
           },
           "dimension": {
             "$ref": "#/components/schemas/ContextHealthDimension"
+          },
+          "evidence": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ContextHealthEvidence",
+                "description": "One exact currently authorized operational example."
+              }
+            ]
           },
           "explanation": {
             "type": "string"
@@ -18331,6 +18979,17 @@
             },
             "description": "Retrieval degradation reasons."
           },
+          "host_allowance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HostAllowanceView",
+                "description": "Absent means host allowance is unknown."
+              }
+            ]
+          },
           "knowledge_rendered_tokens": {
             "type": "integer",
             "format": "int32",
@@ -18604,6 +19263,17 @@
               "null"
             ],
             "description": "Graph implementation version, when graph expansion ran."
+          },
+          "host_allowance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HostAllowanceView",
+                "description": "Complete caller-reported host accounting; absent means unknown."
+              }
+            ]
           },
           "id": {
             "type": "string",
@@ -18995,6 +19665,17 @@
               {
                 "$ref": "#/components/schemas/SessionHandoffBody",
                 "description": "Explicit source snapshot in another independently authorized Session.\nThis is a manual public-API handoff, separate from native local restart."
+              }
+            ]
+          },
+          "host_allowance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HostAllowanceBody",
+                "description": "Complete caller-reported host accounting in the declared exact encoding.\nOmit when any input or host overhead is unknown."
               }
             ]
           },
@@ -19744,6 +20425,58 @@
         },
         "additionalProperties": false
       },
+      "EvaluationView": {
+        "type": "object",
+        "description": "Content-free frozen suite and independently reported status.",
+        "required": [
+          "attempt_id",
+          "candidate_id",
+          "candidate_hash",
+          "configuration_hash",
+          "specification_hash",
+          "specification"
+        ],
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "description": "Exact attempt address."
+          },
+          "candidate_hash": {
+            "type": "string",
+            "description": "Exact proposed content digest."
+          },
+          "candidate_id": {
+            "type": "string",
+            "description": "Exact candidate address."
+          },
+          "configuration_hash": {
+            "type": "string",
+            "description": "Exact governing Configuration digest."
+          },
+          "qualified": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Absent before runner results; failed and unknown remain unqualified."
+          },
+          "results": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Authenticated observations, never universal quality claims."
+          },
+          "specification": {
+            "type": "object",
+            "description": "Fixed specification, without held-out answers."
+          },
+          "specification_hash": {
+            "type": "string",
+            "description": "Exact fixed suite digest."
+          }
+        }
+      },
       "ExportOkfBody": {
         "type": "object",
         "description": "Explicit current-Knowledge export selection. Empty means all visible\ncurrent active/stale Knowledge in the project, bounded at 2000 items.",
@@ -19754,6 +20487,25 @@
               "type": "string"
             },
             "description": "Stable item ids to export."
+          }
+        },
+        "additionalProperties": false
+      },
+      "FreezeBody": {
+        "type": "object",
+        "description": "Freeze one approved suite for this exact candidate before results arrive.",
+        "required": [
+          "candidate_hash",
+          "suite_id"
+        ],
+        "properties": {
+          "candidate_hash": {
+            "type": "string",
+            "description": "Exact candidate hash previously inspected."
+          },
+          "suite_id": {
+            "type": "string",
+            "description": "Suite selected from current governed Configuration."
           }
         },
         "additionalProperties": false
@@ -20393,6 +21145,73 @@
           }
         }
       },
+      "HostAllowanceBody": {
+        "type": "object",
+        "description": "Complete caller-reported host accounting; no provider or billing attestation.",
+        "required": [
+          "context_window_tokens",
+          "occupied_input_tokens",
+          "reserved_output_tokens",
+          "host_overhead_tokens"
+        ],
+        "properties": {
+          "context_window_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Input plus output window in the caller-declared exact encoding.",
+            "minimum": 0
+          },
+          "host_overhead_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Explicit host framing/tool overhead; zero is a caller assertion.",
+            "minimum": 0
+          },
+          "occupied_input_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Host input already occupied, excluding this Synveda contribution.",
+            "minimum": 0
+          },
+          "reserved_output_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Output reservation excluded from Synveda's text allowance.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "HostAllowanceView": {
+        "type": "object",
+        "description": "The exact reported accounting used to narrow this contribution.",
+        "required": [
+          "provenance",
+          "tokenizer_encoding",
+          "report",
+          "remaining_tokens"
+        ],
+        "properties": {
+          "provenance": {
+            "type": "string",
+            "description": "caller_reported; this is not measured provider usage."
+          },
+          "remaining_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Checked host remainder before requested and governed ceilings.",
+            "minimum": 0
+          },
+          "report": {
+            "$ref": "#/components/schemas/HostAllowanceBody",
+            "description": "Complete original report."
+          },
+          "tokenizer_encoding": {
+            "type": "string",
+            "description": "All reported quantities use this exact encoding."
+          }
+        }
+      },
       "ImportToolClientConfigBody": {
         "type": "object",
         "description": "Import one supported client configuration entry.",
@@ -20431,6 +21250,43 @@
           "server": {
             "type": "object",
             "description": "One client server object. Embedded env/header values are refused."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImprovementBody": {
+        "type": "object",
+        "description": "One small human supplied change justified by authenticated runner evidence.",
+        "required": [
+          "procedure",
+          "outcomes",
+          "proposed_append",
+          "uncertainty",
+          "development_case"
+        ],
+        "properties": {
+          "development_case": {
+            "type": "string",
+            "description": "Development case label; held-out cases must differ."
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "One to eight exact authenticated outcome events."
+          },
+          "procedure": {
+            "type": "object",
+            "description": "Exact baseline Procedure."
+          },
+          "proposed_append": {
+            "type": "string",
+            "description": "At most 1024 UTF-8 bytes to append atomically."
+          },
+          "uncertainty": {
+            "type": "string",
+            "description": "Explicit bounded uncertainty for independent review."
           }
         },
         "additionalProperties": false
@@ -21740,6 +22596,8 @@
               "session.compaction_boundary",
               "session.checkpoint",
               "session.task_state",
+              "task.outcome",
+              "procedure.improvement",
               "message.user",
               "message.assistant",
               "tool.invoked",
@@ -22535,6 +23393,63 @@
           }
         }
       },
+      "OutcomeBody": {
+        "type": "object",
+        "description": "Observation over exact involved sources; provenance comes from authentication.",
+        "required": [
+          "client_event_id",
+          "procedure",
+          "skill_versions",
+          "environment",
+          "outcome",
+          "supporting_events",
+          "result_digest"
+        ],
+        "properties": {
+          "client_event_id": {
+            "type": "string",
+            "description": "Stable retry address."
+          },
+          "context": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Optional exact delivery in the same Session."
+          },
+          "environment": {
+            "type": "object",
+            "description": "Bounded reported environment identity."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "succeeded, failed or unknown; no causal credit to delivered memory."
+          },
+          "procedure": {
+            "type": "object",
+            "description": "Exact involved reviewed Procedure."
+          },
+          "result_digest": {
+            "type": "string",
+            "description": "Digest of runner evidence retained outside the content-free audit plane."
+          },
+          "skill_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "At most eight exact involved Skill versions, without activation claims."
+          },
+          "supporting_events": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "At most eight exact admitted same-Session events."
+          }
+        },
+        "additionalProperties": false
+      },
       "PackSummary": {
         "type": "object",
         "required": [
@@ -22709,6 +23624,32 @@
           "subject": {
             "type": "string",
             "description": "The verified token's `sub` claim — the name every audit event, role\nbinding and idempotency key is keyed by."
+          }
+        }
+      },
+      "ProcedureEventView": {
+        "type": "object",
+        "description": "Exact receipt; disclosure always rechecks the historical sources.",
+        "required": [
+          "outcome",
+          "event"
+        ],
+        "properties": {
+          "batch_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Frozen Capture batch for an improvement request."
+          },
+          "event": {
+            "$ref": "#/components/schemas/SessionEventView",
+            "description": "Exact immutable server-derived evidence."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "appended or duplicate."
           }
         }
       },
@@ -24455,6 +25396,33 @@
         },
         "additionalProperties": false
       },
+      "ResultsBody": {
+        "type": "object",
+        "description": "Exact independently reported fixed-case observations.",
+        "required": [
+          "candidate_hash",
+          "specification_hash",
+          "results"
+        ],
+        "properties": {
+          "candidate_hash": {
+            "type": "string",
+            "description": "Exact candidate hash from the frozen receipt."
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Complete fixed case statuses and retained result digests."
+          },
+          "specification_hash": {
+            "type": "string",
+            "description": "Exact specification hash from the frozen receipt."
+          }
+        },
+        "additionalProperties": false
+      },
       "ReviseRelaxationBody": {
         "allOf": [
           {
@@ -24883,6 +25851,8 @@
               "session.compaction_boundary",
               "session.checkpoint",
               "session.task_state",
+              "task.outcome",
+              "procedure.improvement",
               "message.user",
               "message.assistant",
               "tool.invoked",
@@ -26165,6 +27135,20 @@
             "type": "string",
             "format": "uuid",
             "description": "Exact current approved version precondition."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SubmitBody": {
+        "type": "object",
+        "description": "Exact frozen candidate submitted through the normal Capture decision.",
+        "required": [
+          "candidate_hash"
+        ],
+        "properties": {
+          "candidate_hash": {
+            "type": "string",
+            "description": "Previously inspected frozen hash."
           }
         },
         "additionalProperties": false

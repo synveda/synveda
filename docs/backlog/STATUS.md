@@ -5,7 +5,7 @@ state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-114 delivered; 40 open. CI checks the counts, IDs and open-brief contract.
+116 delivered; 38 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.5 release](https://github.com/synveda/synveda/releases/tag/v0.4.5)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -313,9 +313,9 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [ ] [PRMT-3: Prompt experiment evidence](PRMT-3.md) — open
 - [ ] [SKIL-5: Authentic Skill usage reporting](SKIL-5.md) — open
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open
-- [ ] [MEM-8: Source lineage and lifecycle invalidation](MEM-8.md) — open
+- [x] MEM-8: Source lineage and lifecycle invalidation — delivered
 - [ ] [MEM-9: Inbound Git source reconciliation](MEM-9.md) — open
-- [ ] [SKIL-6: Verified procedure improvement candidates](SKIL-6.md) — open
+- [x] SKIL-6: Verified procedure improvement candidates — delivered
 
 The 2026-10-14 context increment on `codex/context-memory-improvements` repairs
 saved delivery admission (ADR-0141), adds bounded typed revision claims
@@ -330,47 +330,43 @@ work. ADR-0144 adds private all-mode delivery dependencies at additive head
 0.8.2–0.8.6 profiles and private-manifest RLS/tamper checks pass. Complete source
 withdrawal, admission ordering and durable cleanup were open at that checkpoint.
 ADR-0145 adds exact frozen stored-policy replay before process refresh.
-Accepted ADR-0146 at additive head `0005` now qualifies Session withdrawal and
-Forget, permanent scoped suppression, the tenant admission gate and bounded
-owner-fenced cleanup. Fourteen source-control cases, 21 ContextRun cases,
-7 lifecycle cases, 8 Capture cases, the 66-case ordinary RLS suite, actual
-prior-head lifecycle and genuine supported vector profiles pass. The 31-scenario
-product evaluation, generated contracts, 264 console cases/build, fresh SQLx,
-strict Clippy and fast/dependency gates pass. The MEM-8 brief records measured
-catalogue identities and the next executable artifact-root step.
-Accepted ADR-0147 at additive head `0006` now qualifies actual ImportArtifact
-lineage, permanent source/path/hash aliases, governed controls and cleanup.
-Nine artifact cases, all 32 real serial epoch cases, the 31-scenario product
-suite, current ordinary-role lifecycle/RLS, generated contracts, fresh SQLx,
-strict Clippy and every genuine supported vector profile pass. All seven retained
-artifact draft fixtures and private credential state were removed with exact
-ownership checks. MEM-8 stays open while its contract is applied to the new
-MEM-9 reconciliation, CTX-6 structured handoff and SKIL-6 outcome producers.
-Accepted ADR-0148 at additive `0007` now qualifies governed local source refresh,
-immutable complete observations and exact path/hash freshness. Six real-Git cases,
-33 actual epoch cases, current source-removal/RLS regression, the 31 product
-scenarios, genuine vector profiles, fresh SQLx and generated/client gates pass.
-Public API, CLI and console setup/status/refresh use existing Capture review.
-[MEM-9](MEM-9.md#qualified-local-source-increment-2026-10-14) records measured
-catalogues and exact evidence. Accepted ADR-0149 at additive `0008` now qualifies
-private GitHub transport and permanent provider identity through controlled TLS,
-including paused-fetch credential rotation/revocation and retained `0007` review
-plans. All 12 source cases, 33 epoch cases, ordinary RLS/source regression, genuine
-vector profiles and 31 product scenarios pass. Live private-source qualification,
-verified procedure learning and live handoff quality remain open. Existing secret
-reuse is owner-authorized; select suitable separate inbound custody for the
-retained synthetic canary; its retained credential file has not been located and
-expired login profiles do not establish live access. That check does not block
-implementation. Accepted ADR-0150 at additive `0009` now qualifies exact-source
-TaskState, complete replacement checkpoints, explicit cross-Session handoff,
-fresh reported checkout comparison and transitive cleanup. Ten handoff cases,
-21 ContextRun, 28 Session, 14 Session-source, nine artifact-source, seven
-lifecycle, 34 serial epoch and one historical source-upgrade cases pass. RLS
-reports 66 passes with five existing administrator tamper cases excluded from
-the ordinary run. Captured Claude/Codex replay and the 31 product scenarios pass;
-live vendor/model quality remains open. Next implement SKIL-6 authenticated
-outcomes and qualified Procedure improvements, followed by health, budget and
-the integrated fictional demonstration. Full A–H completion is not claimed.
+Accepted ADR-0146/0147 qualify Session and actual ImportArtifact withdrawal,
+suppression, concurrent admission and bounded fenced cleanup. ADR-0148/0149 add
+governed local/private Git reconciliation with complete observations, stable
+provider identity and targeted freshness. ADR-0150 supplies grounded TaskState,
+replacement checkpoints and explicit cross-Session handoff. ADR-0151 at additive
+`0010` completes authenticated outcome custody, exact deterministic Procedure
+appends, frozen independent qualification and separate normal publication review.
+Historical derivation is independently authorized and participates in holds,
+source suppression, erasure and interrupted receipt recovery. MEM-8 and SKIL-6
+are delivered; their current contracts and executable matrix are in
+[context memory](../integrations/context-memory.md) and
+[Procedure learning](../integrations/procedure-learning.md).
+
+Controlled acceptance passes 125 lifecycle/source/context cases, including nine
+Procedure, 24 ContextRun, two health and 14 real-Git/controlled-HTTPS cases. The
+separate serial Capture preflight fence, 66 ordinary RLS and five administrator
+tamper checks pass. Thirty-five serial epoch cases preserve exact retained
+`0009` bytes; genuine pgvector 0.8.2–0.8.6 qualification, generated
+SQLx/OpenAPI/clients, strict Clippy, Rustdoc, console and adapter regression pass.
+The 40-scenario product inventory preserves all six zero-tolerance trust gates
+and baseline floors. The fresh [Iris demo](../integrations/iris-domain.md) composes
+actual Git, reviewed definitions, a real CLI receiving preview, fixed local
+runner cases, exact-root removal and an independent survivor. Local encoding
+counts do not establish provider usage, cost or live model quality.
+
+The current `cargo deny check` reports existing unmaintained dependency
+`unsafe-libyaml` 0.2.11 (RUSTSEC-2024-0449), through the unchanged `serde_yaml`
+0.9.34 dependency. Bans, licences and sources pass; the advisory gate fails and
+no exception was added. Dependency remediation remains required before release.
+
+MEM-9's separate live private-source check remains open. Existing secret reuse
+is owner-authorized; the saved profiles are expired and the retained inbound
+credential file/deployment reference has not been located. Next provide that
+reference, provision the correct `source_read` custody through normal authority
+and qualify the owned canary without publishing its token. CTX-6/CTX-8 retain
+separate live vendor/model/deployment qualification; implementation does not
+establish those claims. No paid provider or external publication was performed.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
 OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL

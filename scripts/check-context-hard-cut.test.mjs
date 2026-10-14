@@ -10,6 +10,10 @@ import {
   deliveryDigestFindings,
   sourceControlDigestFindings,
   artifactControlDigestFindings,
+  reconcileDigestFindings,
+  githubSourceDigestFindings,
+  taskStateDigestFindings,
+  procedureDigestFindings,
   databaseBootstrapFindings,
   retiredProductionFindings,
 } from "./check-context-hard-cut.mjs";
@@ -149,5 +153,18 @@ where not exists (
     `${bootstrap}\nalter extension vector update;`,
   ]) {
     assert.notDeepEqual(databaseBootstrapFindings(mutation), []);
+  }
+});
+
+test("later source, handoff and Procedure heads retain exact migration byte pins", () => {
+  for (const [name, findings] of [
+    ["0007_inbound_git_source_reconciliation.sql", reconcileDigestFindings],
+    ["0008_private_github_source_identity.sql", githubSourceDigestFindings],
+    ["0009_grounded_task_state_and_handoff.sql", taskStateDigestFindings],
+    ["0010_verified_procedure_improvements.sql", procedureDigestFindings],
+  ]) {
+    const source=readFileSync(new URL(`../crates/synveda-store/migrations/${name}`,import.meta.url),"utf8");
+    assert.deepEqual(findings(source),[]);
+    assert.match(findings(`${source}\n-- changed after the pin\n`).join("\n"),/explicit migration and compatibility decision/u);
   }
 });

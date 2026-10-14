@@ -155,3 +155,5 @@ SQLX_OFFLINE=true cargo test -p synveda-git --lib sources::tests
 
 These are real local Git and ordinary-role PostgreSQL/protocol tests. They do not
 establish live GitHub access, native harness task success or model-quality gains.
+
+The [Iris domain walkthrough](iris-domain.md) composes actual Git refresh, separate review, exact context/handoff, fixed Procedure qualification and source forgetting.

@@ -66,6 +66,7 @@ mod sensitivity;
 // `workspace`'s reason: a "session" is an ordinary word, and the module path
 // is what says this one is an agent run recorded by Synveda rather than a
 // login session, a console session or an HTTP one.
+pub mod procedure;
 /// Stable tenant-secret references and their content-free vocabulary
 /// (CPR-35, ADR-0094).
 pub mod secret;

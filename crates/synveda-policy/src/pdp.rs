@@ -42,9 +42,9 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// its source changes; audit and decision evidence use the exact pair
 /// (ADR-0014). The accepted ADRs retain the version history.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 23),
-    (STANDARD, 23),
-    (OPEN_COLLABORATION, 23),
+    (REGULATED_STRICT, 24),
+    (STANDARD, 24),
+    (OPEN_COLLABORATION, 24),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the

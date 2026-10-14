@@ -90,3 +90,10 @@ The separate synthetic held-out corpus compares four task previews with restart 
 The combined gate separately retains the exact required Knowledge body and checkpoint source attribution with room, then omits the optional restart and its source ID when the same exact rendered-text allowance is tightened. The brief stays open for a live proprietary Claude compact/resume run and model-observed task outcome/usage evidence with an approved synthetic fixture and bounded spend. The isolated source Compose hostname handoff and resolver checks passed without resetting the retained interop project. At the 2026-09-25 checkpoint, fresh image construction was blocked by Cargo index/archive endpoint timeouts recorded in CTX-8 before browser acceptance. The original interop hosts ownership was restored. On 2026-09-29 the pinned source product image built successfully after official Cargo index/archive access recovered. The remaining next action is the fresh CTX-6 Compose/browser acceptance, then a bounded live synthetic Claude compact/resume probe when credentials and spend permission are available.
 
 The four-task public-API restart test can now opt in to exporting its paired synthetic rendered previews for an independently fixed JSON-answer rubric. The packager labels the output preparation-only and records zero model calls; the source text and answer key are kept separate. The bounded CLI runner passes a fake-client end-to-end test without provider access. This prepares a later factual task-use run, not a live Claude compact/resume or provider-usage result. `evals/product/README.md` has the exact commands.
+
+The integrated [Iris demo](../integrations/iris-domain.md) adds an actual built
+CLI receiving preview and a separate saved public-API handoff, followed by
+authenticated fixed-fixture learning and source forgetting. Historical authority
+revocation permits a fresh independent working-state replacement; it cannot
+replay denied content. This extends controlled acceptance without claiming live
+proprietary-client execution or model-observed success.

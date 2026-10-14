@@ -240,6 +240,8 @@ fn session_event_type_wire_names_are_pinned_to_the_stored_vocabulary() {
             "session.compaction_boundary",
             "session.checkpoint",
             "session.task_state",
+            "task.outcome",
+            "procedure.improvement",
             "message.user",
             "message.assistant",
             "tool.invoked",

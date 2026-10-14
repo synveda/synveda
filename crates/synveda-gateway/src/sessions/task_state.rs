@@ -265,7 +265,7 @@ fn event_text(event: &SessionEvent, field: TaskTextField, index: Option<u8>) -> 
     .ok_or_else(invalid)
 }
 
-async fn admitted_event(
+pub(crate) async fn admitted_event(
     tx: &mut PgConnection,
     tenant: TenantId,
     session: SessionId,
@@ -308,6 +308,14 @@ async fn resolve_evidence(
             tool_index,
             span,
         } => {
+            crate::knowledge_api::authorize_historical(
+                state,
+                tx,
+                tenant,
+                "session_event",
+                event_id.as_uuid(),
+            )
+            .await?;
             let event = admitted_event(tx, tenant, session, *event_id, payload_hash).await?;
             let text = copy_span(event_text(&event, *field, *tool_index)?, span)?;
             let class = if event.event_type == SessionEventType::MessageUser {
@@ -457,6 +465,14 @@ pub(crate) async fn verified(
         return Ok(None);
     }
     let result = async {
+        crate::knowledge_api::authorize_historical(
+            state,
+            tx,
+            tenant,
+            "session_event",
+            event.id.as_uuid(),
+        )
+        .await?;
         let (loaded, _, _) = super::load(state, tx, tenant, session, Action::SessionRead).await?;
         admitted_event(tx, tenant, session, event.id, &event.payload_hash).await?;
         let parsed: TaskState =

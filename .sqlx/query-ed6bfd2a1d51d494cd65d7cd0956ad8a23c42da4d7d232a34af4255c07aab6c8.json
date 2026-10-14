@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select event_id from procedure_outcome_headers where tenant_id=$1 and session_id=$2 order by event_id limit 65",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ed6bfd2a1d51d494cd65d7cd0956ad8a23c42da4d7d232a34af4255c07aab6c8"
+}

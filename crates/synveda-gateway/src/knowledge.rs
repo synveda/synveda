@@ -238,7 +238,7 @@ async fn command_inner(
 /// command before its payload is hashed and opened in VedaFlow. Explicit
 /// `stale_after` remains authoritative; an absent date receives the governed
 /// type interval when one exists.
-async fn apply_freshness_policy(
+pub(crate) async fn apply_freshness_policy(
     tx: &mut PgConnection,
     tenant_id: TenantId,
     command: &mut KnowledgeCommand,
@@ -766,7 +766,14 @@ pub async fn replay_command(
     let command = change.payload.as_ref().ok_or_else(|| Error::NotFound {
         entity: format!("Knowledge affected by change {change_id}"),
     })?;
-    authorize_command(state, &mut tx, tenant_id, command).await?;
+    authorize_command_with_learning(
+        state,
+        &mut tx,
+        tenant_id,
+        command,
+        change.applied_at.is_none(),
+    )
+    .await?;
     change_result(&mut tx, tenant_id, &proposal).await
 }
 
@@ -991,6 +998,15 @@ async fn authorize_command(
     tenant_id: TenantId,
     command: &KnowledgeCommand,
 ) -> Result<CommandAuthorization> {
+    authorize_command_with_learning(state, tx, tenant_id, command, true).await
+}
+async fn authorize_command_with_learning(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant_id: TenantId,
+    command: &KnowledgeCommand,
+    enforce_learning_publication: bool,
+) -> Result<CommandAuthorization> {
     // Capture challengers remain governed by New Learnings. Authorise both
     // their source and proposed destination before revealing that this command
     // is intentionally unavailable; otherwise a guessed conflict-set id would
@@ -1100,6 +1116,11 @@ async fn authorize_command(
                 json!({"artifact_id":artifact_id,"authz":audit::decision_context(Action::KnowledgeForget,&allowed)})).await?;
         }
     }
+    if enforce_learning_publication {
+        crate::procedure_learning::guard_command(state, tx, tenant_id, command).await?;
+    } else {
+        crate::procedure_learning::authorize_command_sources(state, tx, tenant_id, command).await?;
+    }
     let targets = load_targets(tx, tenant_id, command).await?;
     let draft_sources = match command {
         KnowledgeCommand::Create { sources, .. }
@@ -1139,6 +1160,14 @@ async fn authorize_command(
             }
         }
         if let Some(event) = source.session_event_id {
+            crate::knowledge_api::authorize_historical(
+                state,
+                tx,
+                tenant_id,
+                "session_event",
+                event.as_uuid(),
+            )
+            .await?;
             let address = source_control::address_by_event(tx, tenant_id, event)
                 .await?
                 .ok_or_else(|| Error::NotFound {
@@ -1209,6 +1238,21 @@ async fn authorize_command(
         .await?
         {
             return Err(source_control::unavailable());
+        }
+        if matches!(
+            command,
+            KnowledgeCommand::Verify { .. }
+                | KnowledgeCommand::Merge { .. }
+                | KnowledgeCommand::ResolveConflict { .. }
+        ) {
+            crate::knowledge_api::authorize_historical(
+                state,
+                tx,
+                tenant_id,
+                "knowledge_revision",
+                snapshot.revision_id.as_uuid(),
+            )
+            .await?;
         }
         if command_reads_existing(command) {
             authz::decide_knowledge_read(

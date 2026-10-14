@@ -40,6 +40,8 @@ const EPOCH_3_GITHUB_SOURCE_SHA256 =
 const EPOCH_3_TASK_STATE_SHA256 =
   "1979f8caf5f1d8bf86cef3534a8bc4beaf49d78b457fe1b377ffe94eb0eb4ef2";
 
+const EPOCH_3_PROCEDURE_SHA256 = "61de10ae5ad1cad3a57f101691eb1d8cb353765a66d6fafd79043c41da0e7ab7";
+
 const RETIRED_PATTERNS = [
   ["global runtime route", /\/v1\/(?:observe|inject|recall)\b/giu],
   ["retired aggregate or adapter DTO", /\b(?:RecordKind|RoleBinding|RecallSweepRequest|RecallIdsRequest|SearchIndex)\b/gu],
@@ -212,6 +214,13 @@ export function taskStateDigestFindings(source) {
   ];
 }
 
+export function procedureDigestFindings(source) {
+  const actual = createHash("sha256").update(source).digest("hex");
+  return actual === EPOCH_3_PROCEDURE_SHA256 ? [] : [
+    `0010_verified_procedure_improvements.sql SHA-256 changed (${actual}); SKIL-6 / ADR-0151 requires an explicit migration and compatibility decision`,
+  ];
+}
+
 export function databaseBootstrapFindings(source) {
   const findings = [];
   const normalized = source.toLowerCase().replace(/\s+/gu, " ").trim();
@@ -275,7 +284,7 @@ export function main() {
     const source = readFileSync(path, "utf8");
     findings.push(...retiredProductionFindings(source, relative(ROOT, path)));
     for (const match of source.matchAll(/migrations\/(\d{4}_[A-Za-z0-9_-]+\.sql)/gu)) {
-      if (!["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql", "0005_session_source_control.sql", "0006_import_artifact_source_control.sql", "0007_inbound_git_source_reconciliation.sql", "0008_private_github_source_identity.sql", "0009_grounded_task_state_and_handoff.sql"].includes(match[1])) {
+      if (!["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql", "0005_session_source_control.sql", "0006_import_artifact_source_control.sql", "0007_inbound_git_source_reconciliation.sql", "0008_private_github_source_identity.sql", "0009_grounded_task_state_and_handoff.sql", "0010_verified_procedure_improvements.sql"].includes(match[1])) {
         const line = source.slice(0, match.index).split("\n").length;
         findings.push(`${relative(ROOT, path)}:${line}: references absent migration ${match[1]}`);
       }
@@ -288,8 +297,8 @@ export function main() {
 
   const migrationDir = join(ROOT, "crates/synveda-store/migrations");
   const migrations = readdirSync(migrationDir).filter((name) => name.endsWith(".sql")).sort();
-  if (JSON.stringify(migrations) !== JSON.stringify(["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql", "0005_session_source_control.sql", "0006_import_artifact_source_control.sql", "0007_inbound_git_source_reconciliation.sql", "0008_private_github_source_identity.sql", "0009_grounded_task_state_and_handoff.sql"])) {
-    findings.push(`migration inventory is ${migrations.join(", ") || "empty"}; expected the released epoch-3 baseline and eight forward migrations`);
+  if (JSON.stringify(migrations) !== JSON.stringify(["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql", "0005_session_source_control.sql", "0006_import_artifact_source_control.sql", "0007_inbound_git_source_reconciliation.sql", "0008_private_github_source_identity.sql", "0009_grounded_task_state_and_handoff.sql", "0010_verified_procedure_improvements.sql"])) {
+    findings.push(`migration inventory is ${migrations.join(", ") || "empty"}; expected the released epoch-3 baseline and nine forward migrations`);
   }
   const baseline = readFileSync(join(migrationDir, "0001_context_platform.sql"), "utf8");
   findings.push(...baselineFindings(baseline));
@@ -318,6 +327,9 @@ export function main() {
   const taskState = readFileSync(join(migrationDir, "0009_grounded_task_state_and_handoff.sql"), "utf8");
   findings.push(...taskStateDigestFindings(taskState));
   findings.push(...retiredProductionFindings(taskState, "0009_grounded_task_state_and_handoff.sql").filter((finding) => finding.includes("retired table")));
+  const procedure = readFileSync(join(migrationDir, "0010_verified_procedure_improvements.sql"), "utf8");
+  findings.push(...procedureDigestFindings(procedure));
+  findings.push(...retiredProductionFindings(procedure, "0010_verified_procedure_improvements.sql").filter((finding) => finding.includes("retired table")));
   const databaseBootstrap = readFileSync(
     join(ROOT, "deploy/compose/postgres/synveda-database-bootstrap"),
     "utf8",
@@ -345,7 +357,7 @@ export function main() {
 
   if (findings.length > 0) fail(findings);
   console.log(
-    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline and eight forward migrations, ` +
+    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline and nine forward migrations, ` +
       "deployment-owned vector + btree_gin bootstrap, current OpenAPI and SQLx metadata",
   );
 }

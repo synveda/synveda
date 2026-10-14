@@ -99,8 +99,10 @@ and the [first](../crates/synveda-store/migrations/0002_context_restart_and_exce
 [third](../crates/synveda-store/migrations/0004_context_delivery_dependencies.sql),
 [fourth](../crates/synveda-store/migrations/0005_session_source_control.sql),
 [fifth](../crates/synveda-store/migrations/0006_import_artifact_source_control.sql),
-[sixth](../crates/synveda-store/migrations/0007_inbound_git_source_reconciliation.sql)
-and [seventh](../crates/synveda-store/migrations/0008_private_github_source_identity.sql)
+[sixth](../crates/synveda-store/migrations/0007_inbound_git_source_reconciliation.sql),
+[seventh](../crates/synveda-store/migrations/0008_private_github_source_identity.sql),
+[eighth](../crates/synveda-store/migrations/0009_grounded_task_state_and_handoff.sql)
+and [ninth](../crates/synveda-store/migrations/0010_verified_procedure_improvements.sql)
 forward migrations.
 
 ## Validation

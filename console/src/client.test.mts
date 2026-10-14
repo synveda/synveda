@@ -197,6 +197,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "rollback_skill_binding",
     "run_skill_test",
     "run_tool_server_test",
+    "submit_procedure_improvement",
     "supersede_knowledge",
     "update_configuration_binding",
     "update_skill",

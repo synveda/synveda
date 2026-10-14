@@ -149,6 +149,7 @@ export type CreateContextRunBody = {
     budget_tokens?: number | null;
     checkout_observation?: null | CheckoutObservationBody;
     handoff?: null | SessionHandoffBody;
+    host_allowance?: null | HostAllowanceBody;
     /**
      * Optional sensitivity narrowing.
      */
@@ -544,6 +545,7 @@ export type ContextRunView = {
      * Graph implementation version, when graph expansion ran.
      */
     graph_version?: string | null;
+    host_allowance?: null | HostAllowanceView;
     /**
      * The run's id.
      */
@@ -1081,7 +1083,7 @@ export type NewEventBody = {
      * The payload shape this client declares. Defaults to the current one.
      */
     event_schema_version?: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * When the client says it happened.
      */
@@ -1279,6 +1281,28 @@ export type SessionHandoffBody = {
   };
 
 /**
+ * Complete caller-reported host accounting; no provider or billing attestation.
+ */
+export type HostAllowanceBody = {
+    /**
+     * Input plus output window in the caller-declared exact encoding.
+     */
+    context_window_tokens: number;
+    /**
+     * Explicit host framing/tool overhead; zero is a caller assertion.
+     */
+    host_overhead_tokens: number;
+    /**
+     * Host input already occupied, excluding this Synveda contribution.
+     */
+    occupied_input_tokens: number;
+    /**
+     * Output reservation excluded from Synveda's text allowance.
+     */
+    reserved_output_tokens: number;
+  };
+
+/**
  * What one appended event did, and the row it names.
  */
 export type AppendedEventView = {
@@ -1356,6 +1380,28 @@ export type SkillVersionFileView = {
      * Relative bundle path.
      */
     path: string;
+  };
+
+/**
+ * The exact reported accounting used to narrow this contribution.
+ */
+export type HostAllowanceView = {
+    /**
+     * caller_reported; this is not measured provider usage.
+     */
+    provenance: string;
+    /**
+     * Checked host remainder before requested and governed ceilings.
+     */
+    remaining_tokens: number;
+    /**
+     * Complete original report.
+     */
+    report: HostAllowanceBody;
+    /**
+     * All reported quantities use this exact encoding.
+     */
+    tokenizer_encoding: string;
   };
 
 /**
@@ -1699,7 +1745,7 @@ export type SessionEventView = {
      * The payload shape the client declared.
      */
     event_schema_version: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * The event's id in this deployment.
      */

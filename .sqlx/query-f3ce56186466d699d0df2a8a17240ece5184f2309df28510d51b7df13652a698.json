@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select not exists(select 1 from (select knowledge_item_id,revision_id from knowledge_copy_dependencies where tenant_id=$1 and dependent_kind='session_event' and dependent_id=$2\n       union select knowledge_item_id,revision_id from historical_knowledge_dependencies where tenant_id=$1 and dependent_kind='session_event' and dependent_id=$2) copy\n       join knowledge_revision_headers header on header.tenant_id=$1 and header.revision_id=copy.revision_id\n       where case header.sensitivity when 'public' then 0 when 'internal' then 1 when 'confidential' then 2 when 'restricted' then 3 else 4 end>$3)\n       as \"allowed!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "allowed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f3ce56186466d699d0df2a8a17240ece5184f2309df28510d51b7df13652a698"
+}

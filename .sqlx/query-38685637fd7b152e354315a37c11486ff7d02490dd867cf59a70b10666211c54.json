@@ -1,0 +1,102 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select h.event_id,h.session_id,h.procedure_item_id,h.procedure_revision_id,h.procedure_hash,h.request_hash,h.reporter_id,h.evidence_class,h.outcome,h.environment_digest,h.skill_versions,h.context_run_id,h.context_block_hash,h.received_at from procedure_outcome_headers h join source_event_addresses a on a.tenant_id=h.tenant_id and a.event_id=h.event_id where h.tenant_id=$1 and h.session_id=$2 and a.client_event_id_digest=encode(sha256(convert_to($3,'UTF8')),'hex')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "procedure_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "procedure_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "procedure_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "request_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "reporter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "evidence_class",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "environment_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "skill_versions",
+        "type_info": "UuidArray"
+      },
+      {
+        "ordinal": 11,
+        "name": "context_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "context_block_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "received_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "38685637fd7b152e354315a37c11486ff7d02490dd867cf59a70b10666211c54"
+}

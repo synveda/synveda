@@ -165,6 +165,9 @@ const COVERED: &[&str] = &[
     // tenant must not learn about another.
     "group_members",
     "groups",
+    // SKIL-6 / ADR-0151: historical derivation remains private even when
+    // its baseline has advanced; disclosure still reauthorizes each source.
+    "historical_knowledge_dependencies",
     // CPR-4 (ADR-0071): the record that makes a creation retryable, and the
     // three product-level subtype tables below. `idempotency_records` is
     // tenant-bound like the rest — a key is a client's claim about a request
@@ -218,6 +221,13 @@ const COVERED: &[&str] = &[
     "policy_relaxation_changes",
     "policy_relaxation_versions",
     "policy_relaxations",
+    // SKIL-6 / ADR-0151: exact evidence and frozen quality gates must not
+    // reveal another tenant's learning attempts or observed task outcomes.
+    "procedure_candidate_headers",
+    "procedure_evaluation_attempts",
+    "procedure_evaluation_results",
+    "procedure_improvement_headers",
+    "procedure_outcome_headers",
     "project_repositories",
     "projects",
     "prompts",

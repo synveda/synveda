@@ -77,8 +77,8 @@ pub(crate) mod policy_snapshot;
 mod replay;
 
 pub use health::{
-    ContextHealthAction, ContextHealthDimension, ContextHealthFindingView, ContextHealthStatus,
-    ContextHealthView, ContextPipelineStage, ContextStageObservationView,
+    ContextHealthAction, ContextHealthDimension, ContextHealthEvidence, ContextHealthFindingView,
+    ContextHealthStatus, ContextHealthView, ContextPipelineStage, ContextStageObservationView,
 };
 
 /// Context API outcomes by operation and `ok|rejected|error`.
@@ -407,6 +407,10 @@ pub struct CreateContextRunBody {
     /// value is `o200k_base`; omission keeps an explicit estimate.
     #[serde(default)]
     pub tokenizer_encoding: Option<String>,
+    /// Complete caller-reported host accounting in the declared exact encoding.
+    /// Omit when any input or host overhead is unknown.
+    #[serde(default)]
+    pub host_allowance: Option<HostAllowanceBody>,
     /// Current immutable Knowledge revisions required verbatim by the
     /// authenticated session caller.
     #[serde(default)]
@@ -415,6 +419,50 @@ pub struct CreateContextRunBody {
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub max_sensitivity: Option<Sensitivity>,
+}
+
+/// Complete caller-reported host accounting; no provider or billing attestation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HostAllowanceBody {
+    /// Input plus output window in the caller-declared exact encoding.
+    pub context_window_tokens: u32,
+    /// Host input already occupied, excluding this Synveda contribution.
+    pub occupied_input_tokens: u32,
+    /// Output reservation excluded from Synveda's text allowance.
+    pub reserved_output_tokens: u32,
+    /// Explicit host framing/tool overhead; zero is a caller assertion.
+    pub host_overhead_tokens: u32,
+}
+impl HostAllowanceBody {
+    pub(super) fn remaining(&self) -> Result<u32> {
+        synveda_retrieval::counting::host_remaining(
+            self.context_window_tokens,
+            self.occupied_input_tokens,
+            self.reserved_output_tokens,
+            self.host_overhead_tokens,
+        )
+    }
+    pub(super) fn view(&self) -> Result<HostAllowanceView> {
+        Ok(HostAllowanceView {
+            provenance: "caller_reported".to_owned(),
+            tokenizer_encoding: "o200k_base".to_owned(),
+            report: self.clone(),
+            remaining_tokens: self.remaining()?,
+        })
+    }
+}
+/// The exact reported accounting used to narrow this contribution.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct HostAllowanceView {
+    /// caller_reported; this is not measured provider usage.
+    pub provenance: String,
+    /// All reported quantities use this exact encoding.
+    pub tokenizer_encoding: String,
+    /// Complete original report.
+    pub report: HostAllowanceBody,
+    /// Checked host remainder before requested and governed ceilings.
+    pub remaining_tokens: u32,
 }
 
 /// Exact server-derived snapshot to transfer without copying private events.
@@ -577,6 +625,9 @@ pub struct ContextPreviewView {
     pub tokenizer_encoding: Option<String>,
     /// Scope of the local count; provider framing and history are excluded.
     pub accounting_boundary: String,
+    /// Absent means host allowance is unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_allowance: Option<HostAllowanceView>,
     /// Authorised sources included in the rendered text.
     pub selected: Vec<ContextPreviewSourceView>,
     /// Authorised sources omitted from the rendered text.
@@ -845,6 +896,14 @@ pub(crate) async fn visible_sources_with_policy(
     tenant_id: TenantId,
     revision: &KnowledgeRevision,
 ) -> Result<(Vec<KnowledgeSource>, bool)> {
+    crate::knowledge_api::authorize_historical(
+        state,
+        tx,
+        tenant_id,
+        "knowledge_revision",
+        revision.id.as_uuid(),
+    )
+    .await?;
     let source_scopes = search::source_scopes(&mut *tx, tenant_id, revision.id).await?;
     let mut visible = Vec::new();
     let mut policy_exclusion = false;
@@ -897,6 +956,19 @@ async fn load_visible_revision(
     else {
         return Ok(None);
     };
+    match crate::knowledge_api::authorize_historical(
+        state,
+        tx,
+        tenant_id,
+        "knowledge_revision",
+        revision.id.as_uuid(),
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(Error::NotFound { .. } | Error::PolicyDenied { .. }) => return Ok(None),
+        Err(e) => return Err(e),
+    }
     match authorize_revision(state, tx, tenant_id, &head, revision.content.sensitivity).await {
         Ok(_) => {
             let (sources, source_policy_exclusion) = if with_sources {
@@ -1714,7 +1786,7 @@ async fn collect_planned_candidates(
     Ok((planned, denied))
 }
 
-fn rank_and_deduplicate(planned: &mut [PlannedCandidate], mode: ContextOptimizationMode) {
+fn rank_and_deduplicate(planned: &mut [PlannedCandidate], _mode: ContextOptimizationMode) {
     for candidate in planned.iter_mut() {
         if candidate.exclusion == Some(ContextReasonCode::Duplicate) {
             candidate.exclusion = None;
@@ -1734,17 +1806,12 @@ fn rank_and_deduplicate(planned: &mut [PlannedCandidate], mode: ContextOptimizat
             .then_with(|| right.content_hash().cmp(left.content_hash()))
     });
 
-    // One semantic fact appears once. The lower-ranked duplicate remains a
-    // visible, explainable candidate but cannot consume context twice.
+    // An exact governed reference consumes the allowance at most once.
     let mut content = HashSet::new();
     for candidate in planned.iter_mut() {
-        let identity = if mode == ContextOptimizationMode::Conservative {
-            // Equal bytes at two independently governed addresses may have
-            // different provenance. Only the exact revision may collapse.
-            context_reference(candidate)
-        } else {
-            candidate.content_hash().to_owned()
-        };
+        // Equal bytes at independently governed addresses keep their separate
+        // authority and provenance in both comparison modes.
+        let identity = context_reference(candidate);
         if candidate.exclusion.is_none() && !content.insert(identity) {
             candidate.exclusion = Some(ContextReasonCode::Duplicate);
             if !candidate.reasons.contains(&ContextReasonCode::Duplicate) {
@@ -2219,12 +2286,18 @@ async fn persist_trace(
     Ok(selections)
 }
 
-fn context_run_response(status: StatusCode, run: ContextRun) -> Response {
+fn context_run_response(
+    status: StatusCode,
+    run: ContextRun,
+    host_allowance: Option<HostAllowanceView>,
+) -> Response {
     let degraded = run.degraded.join(",");
     let header = (!degraded.is_empty())
         .then(|| degraded.parse::<axum::http::HeaderValue>().ok())
         .flatten();
-    let mut response = (status, Json(ContextRunView::from(run))).into_response();
+    let mut view = ContextRunView::from(run);
+    view.host_allowance = host_allowance;
+    let mut response = (status, Json(view)).into_response();
     if let Some(value) = header {
         response.headers_mut().insert("x-synveda-degraded", value);
     }
@@ -2334,7 +2407,14 @@ pub(crate) async fn create_context_run(
                     &claim,
                 )
                 .await?;
-                Ok(context_run_response(StatusCode::OK, run))
+                Ok(context_run_response(
+                    StatusCode::OK,
+                    run,
+                    body.host_allowance
+                        .as_ref()
+                        .map(HostAllowanceBody::view)
+                        .transpose()?,
+                ))
             }
             Dispatch::Create => {
                 match plan_context_run(
@@ -2347,9 +2427,14 @@ pub(crate) async fn create_context_run(
                 )
                 .await
                 {
-                    Ok(ContextPlanOutcome::Delivered(run)) => {
-                        Ok(context_run_response(StatusCode::CREATED, run))
-                    }
+                    Ok(ContextPlanOutcome::Delivered(run)) => Ok(context_run_response(
+                        StatusCode::CREATED,
+                        run,
+                        body.host_allowance
+                            .as_ref()
+                            .map(HostAllowanceBody::view)
+                            .transpose()?,
+                    )),
                     Ok(ContextPlanOutcome::Preview(_)) => Err(Error::Internal {
                         message: "delivery planner returned a preview".to_owned(),
                     }),
@@ -2369,7 +2454,14 @@ pub(crate) async fn create_context_run(
                             &claim,
                         )
                         .await?;
-                        Ok(context_run_response(StatusCode::OK, run))
+                        Ok(context_run_response(
+                            StatusCode::OK,
+                            run,
+                            body.host_allowance
+                                .as_ref()
+                                .map(HostAllowanceBody::view)
+                                .transpose()?,
+                        ))
                     }
                     Err(error) => Err(error),
                 }
@@ -2398,6 +2490,9 @@ fn context_run_request_identity(session_id: SessionId, body: &CreateContextRunBo
     }
     if let Some(checkout) = &body.checkout_observation {
         identity["checkout_observation"] = json!(checkout);
+    }
+    if let Some(report) = &body.host_allowance {
+        identity["host_allowance"] = json!(report);
     }
     if let Some(encoding) = &body.tokenizer_encoding {
         identity["tokenizer_encoding"] = json!(encoding);
@@ -2474,6 +2569,7 @@ enum ContextPlanOutcome {
 }
 
 struct PreviewInputs<'a> {
+    host_allowance: Option<HostAllowanceView>,
     session_id: SessionId,
     rendered: &'a str,
     rendered_hash: &'a str,
@@ -2544,6 +2640,7 @@ fn context_preview_view(input: PreviewInputs<'_>) -> ContextPreviewView {
         token_count_kind: input.counter.method().certainty().to_owned(),
         tokenizer_encoding: input.counter.method().encoding().map(str::to_owned),
         accounting_boundary: "rendered_synveda_text_only".to_owned(),
+        host_allowance:input.host_allowance,
         selected,
         omitted,
         authored_packs: if show_refs {
@@ -2626,7 +2723,7 @@ async fn plan_context_run(
     }
     let embedding_model = vector.as_ref().map(|_| state.embedder.model().to_owned());
     let requested = body.budget_tokens;
-    let budget = requested
+    let mut budget = requested
         .map(|value| value.min(prepared.plan.budget_tokens))
         .unwrap_or(prepared.plan.budget_tokens);
     let mode = prepared.configuration.document.context.optimization_mode;
@@ -2640,6 +2737,21 @@ async fn plan_context_run(
             });
         }
     };
+    let host_allowance = body
+        .host_allowance
+        .as_ref()
+        .map(|report| {
+            if body.tokenizer_encoding.as_deref() != Some("o200k_base") {
+                return Err(Error::Invalid {
+                    message: "Host allowance requires compatible explicit o200k_base encoding"
+                        .to_owned(),
+                });
+            }
+            let view = report.view()?;
+            budget = budget.min(view.remaining_tokens);
+            Ok(view)
+        })
+        .transpose()?;
     let at = Utc::now();
     let semantic = vector
         .as_deref()
@@ -2953,6 +3065,7 @@ async fn plan_context_run(
             sensitivity_ceiling: body.max_sensitivity,
             counter: &counter,
             handoff: handoff.clone(),
+            host_allowance: body.host_allowance.clone(),
             receiver_checkout_hash: body
                 .checkout_observation
                 .as_ref()
@@ -2979,6 +3092,7 @@ async fn plan_context_run(
     }
     let Some(claim) = claim else {
         let preview = context_preview_view(PreviewInputs {
+            host_allowance,
             session_id,
             rendered: &rendered,
             rendered_hash: &block_hash,
@@ -3864,7 +3978,13 @@ async fn detail_view(
         Some(manifest) => !manifest.restart_matches(state, tx, tenant_id, &run).await?,
         None => !run.rendered.is_empty(),
     };
+    let host_allowance = dependencies::Manifest::load(tx, tenant_id, &run)
+        .await?
+        .and_then(|m| m.host_allowance)
+        .map(|r| r.view())
+        .transpose()?;
     let mut run_view = ContextRunView::for_trace(run);
+    run_view.host_allowance = host_allowance;
     run_view.candidate_count = i32::try_from(candidates.len()).unwrap_or(i32::MAX);
     run_view.selection_count = i32::try_from(selections.len()).unwrap_or(i32::MAX);
     // A full historical block may contain a selection whose current policy no
@@ -3877,8 +3997,10 @@ async fn detail_view(
         run_view.tokens = 0;
         run_view.entry_count = run_view.selection_count;
         run_view.skills = json!([]);
+        run_view.host_allowance = None;
     }
-    let health = health::assess(&run_view, &candidates, &selections, &feedback);
+    let mut health = health::assess(&run_view, &candidates, &selections, &feedback);
+    health::enrich(state, tx, tenant_id, &run_view, &candidates, &mut health).await?;
     Ok(ContextRunDetailView {
         run: run_view,
         candidates,
@@ -4652,4 +4774,26 @@ pub(crate) async fn knowledge_evaluation(
     }
     .await;
     respond(&state, "context.knowledge_evaluation", result).await
+}
+
+/// The first historical Procedure producer admits a bounded Knowledge-only
+/// delivery. Authored channel/Skill ancestry needs its own historical contract.
+pub(crate) async fn procedure_snapshot_available(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    session: SessionId,
+    snapshot: &synveda_types::task_state::TaskContextSnapshot,
+) -> Result<bool> {
+    if !task_snapshot_available(state, tx, tenant, session, snapshot).await? {
+        return Ok(false);
+    }
+    let Some(run) = sessions::context_run(&mut *tx, tenant, snapshot.context_run_id).await? else {
+        return Ok(false);
+    };
+    let Some(manifest) = dependencies::Manifest::load(tx, tenant, &run).await? else {
+        return Ok(false);
+    };
+    Ok(!manifest.has_non_knowledge_authorities()
+        && manifest.knowledge.len() + manifest.candidates.len() <= 64)
 }

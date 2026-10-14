@@ -733,10 +733,31 @@ vector profiles and 31 product scenarios pass. ADR-0150 at `0009` separately
 qualifies grounded TaskState, v2 checkpoints, explicit second-Session handoff,
 classification narrowing and cleanup through ten public-API cases, 34 epoch
 cases and the existing lifecycle/source suites. Captured Claude/Codex protocol
-replay passes. Live private-source reads, proprietary loading, model task quality
-and verified Procedure learning remain open under MEM-8/9, CTX-6 and SKIL-6. This changes no production or
-native-client qualification claim; the exact increment evidence and next action
-are in [MEM-8](backlog/MEM-8.md#first-implemented-increment-2026-10-14).
+replay passes. ADR-0151 at `0010` adds authenticated scoped outcomes, small
+exact Procedure edits, frozen independent cases, normal separate review and
+historical-source holds/erasure. Nine controlled Procedure cases, 35 serial epoch
+cases and the 40-scenario product/trust inventory qualify this deterministic
+source slice. Six owned Git domain records, a real CLI handoff preview, two fixed
+retry variants and bounded source cleanup compose the Iris demonstration.
+Health findings inspect currently authorized source/conflict/proposal/outcome
+and evaluation evidence; private offline oracle diagnosis does not measure
+production recall or causality. Complete optional host accounting only narrows
+Synveda's local encoding allowance and remains caller reported. See the
+[current contract and matrix](integrations/context-memory.md) and
+[Iris walkthrough](integrations/iris-domain.md).
+
+Live private-source reads, proprietary-client execution and model task quality
+remain open under MEM-9 and CTX-6/8. Existing secret reuse is authorized, but the
+retained credential reference has not been located; expired profiles are not
+live access evidence. This changes no production, native-client, provider-usage
+or certification claim. The source code is not a new published release.
+
+The current dependency gate fails on RUSTSEC-2024-0449: existing
+`unsafe-libyaml` 0.2.11 is unmaintained, through the unchanged `serde_yaml`
+0.9.34 dependency. Bans, licences and sources pass. This work adds no advisory
+exception; replacing the parser and qualifying its OKF behavior remains required
+before a release.
+
 
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |
 |---|---|---|---|---|---|---|---|---|

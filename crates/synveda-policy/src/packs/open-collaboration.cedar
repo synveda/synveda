@@ -748,3 +748,8 @@ permit (
     resource in principal.tenant
         && context.roles.contains("administrator")
 };
+
+
+permit (principal, action == Synveda::Action::"OutcomeAttest", resource)
+when { resource in principal.tenant && principal has token_scope
+    && context.roles.containsAny(["member", "curator", "owner", "administrator"]) };

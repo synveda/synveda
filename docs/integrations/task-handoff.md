@@ -115,3 +115,5 @@ bash scripts/db-test.sh -p synveda-gateway --test task_handoff \
 Captured protocol tests and ordinary-role database acceptance qualify these
 public paths. A new proprietary-client loading run, model task correctness and
 provider usage remain separate qualifications; see `evals/product/README.md`.
+
+The [Iris domain walkthrough](iris-domain.md) exercises a real built CLI receiving preview beside a separate saved public-API handoff. [Host accounting and lifecycle](context-memory.md#bounds-and-inspection) retain explicit unknown quantities and exact source-removal behavior.

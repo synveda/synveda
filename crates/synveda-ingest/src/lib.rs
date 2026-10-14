@@ -14,7 +14,7 @@ mod redaction;
 mod skillrubric;
 mod skillscan;
 
-pub use redaction::{Finding, FindingCategory, ScanOutcome, scan};
+pub use redaction::{Finding, FindingCategory, ScanOutcome, scan, scan_procedure_improvement};
 pub use skillrubric::{
     CheckResult, MANIFEST_BUDGET_CHARS, MAX_SCORE, MIN_DESCRIPTION_CHARS, RUBRIC_VERSION,
     RubricScore, score_bundle,

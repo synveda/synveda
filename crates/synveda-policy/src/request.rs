@@ -176,6 +176,8 @@ pub enum Action {
     ScopeRead,
     /// Read a separately configured inbound Git source at its actual project.
     SourceRead,
+    /// Record an authenticated bounded execution observation at a scope.
+    OutcomeAttest,
     /// Rename, re-describe, archive or **move** the resource scope. A move
     /// is decided against the destination and audited with both ends.
     ///
@@ -530,10 +532,11 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 48] = [
+    pub const ALL: [Action; 49] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::SourceRead,
+        Action::OutcomeAttest,
         Action::ScopeUpdate,
         Action::WorkspaceRead,
         Action::WorkspaceCreate,
@@ -596,10 +599,11 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 39] = [
+    pub const PROBED_AT_SCOPE: [Action; 40] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::SourceRead,
+        Action::OutcomeAttest,
         Action::ScopeUpdate,
         Action::WorkspaceRead,
         Action::WorkspaceCreate,
@@ -691,6 +695,7 @@ impl Action {
             Action::ScopeCreate => "scope.create",
             Action::ScopeRead => "scope.read",
             Action::SourceRead => "source.read",
+            Action::OutcomeAttest => "outcome.attest",
             Action::ScopeUpdate => "scope.update",
             Action::WorkspaceRead => "workspace.read",
             Action::WorkspaceCreate => "workspace.create",
@@ -745,6 +750,7 @@ impl Action {
             Action::ScopeCreate => "ScopeCreate",
             Action::ScopeRead => "ScopeRead",
             Action::SourceRead => "SourceRead",
+            Action::OutcomeAttest => "OutcomeAttest",
             Action::ScopeUpdate => "ScopeUpdate",
             Action::WorkspaceRead => "WorkspaceRead",
             Action::WorkspaceCreate => "WorkspaceCreate",

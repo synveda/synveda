@@ -141,3 +141,28 @@ is lexical-only. `make eval-retrieval` remains the BGE-M3 semantic run;
 `make eval-extraction-live` remains the credentialled model-extraction run;
 `make eval-security` remains the 10,000-variant boundary run. Their reports and
 baselines are not interchangeable with this product gate.
+
+### Context and memory qualification
+
+The 40-scenario inventory includes grounded cross-interface handoff, complete
+caller-reported host allowance, explicit keep-separate review for equal-byte
+independent references, authenticated/frozen Procedure qualification, baseline
+erasure, the eight-attempt bound, source-health precedence and the integrated
+[Iris domain lifecycle](../../docs/integrations/iris-domain.md). Existing six
+zero-tolerance trust gates and baseline floors remain unchanged.
+
+`health-diagnosis.mjs` is a separate owned-fixture oracle. Its public-API test
+freezes delivery before exact-ID inspection, retains actual retrieval limitations,
+injects qualifier loss only into a diagnostic in-memory copy and observes a
+controlled failure despite correct context. Production representation coverage,
+recall and causal attribution remain unknown. Oracle labels are never retrieval
+inputs. Run `node --test evals/product/health-diagnosis.test.mjs` for the oracle
+boundary and the exact-role `context_health` suite for its actual source evidence.
+
+`iris-domain-evidence.json` records a real CLI preview's local `o200k_base` count,
+owned Git revision, six published source records, three required revisions, two
+fixed passing cases, successful cleanup and the independent survivor. It does
+not record source content, credentials or private reasoning. Provider usage,
+cost and native vendor execution are explicit unavailable/not-run fields. The
+runner refuses a missing Iris receipt or a changed qualification/accounting
+boundary; a silently skipped database test cannot pass.

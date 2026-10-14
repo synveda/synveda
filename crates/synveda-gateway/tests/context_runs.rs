@@ -3062,3 +3062,263 @@ async fn retention_modes_and_diagnostic_query_have_distinct_disclosure() {
     assert!(!world.workspace_id.is_empty());
     assert_ne!(world.workspace_scope, world.project_scope);
 }
+
+#[tokio::test]
+async fn complete_host_report_only_narrows_context_and_binds_delivery_retries() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let (item, revision) = create_knowledge(
+        &world,
+        "host-accounting-source",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Iris host allowance",
+        "Use a bounded Iris retry guard.",
+        None,
+    )
+    .await;
+    let report = json!({"context_window_tokens":8192,"occupied_input_tokens":6000,"reserved_output_tokens":1000,"host_overhead_tokens":192});
+    let body = json!({"query":"Iris retry guard","tokenizer_encoding":"o200k_base","budget_tokens":2000,"host_allowance":report,"required_knowledge_revisions":[{"item_id":item,"revision_id":revision}]});
+    let (status, preview) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{}/context-preview", world.alice_session),
+        &world.alice_token,
+        None,
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert!(preview["tokens"].as_u64().unwrap() <= 1000);
+    assert!(preview["budget_tokens"].as_u64().unwrap() <= 1000);
+    assert_eq!(preview["host_allowance"]["remaining_tokens"], 1000);
+    assert_eq!(preview["host_allowance"]["provenance"], "caller_reported");
+    let path = format!("/v1/sessions/{}/context-runs", world.alice_session);
+    let (status, run) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("host-accounting-retry"),
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{run}");
+    assert_eq!(run["host_allowance"], preview["host_allowance"]);
+    let (status, detail) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/context-runs/{}", run["id"].as_str().unwrap()),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["run"]["host_allowance"], run["host_allowance"]);
+    let mut changed = body.clone();
+    changed["host_allowance"]["host_overhead_tokens"] = json!(193);
+    let (status, error) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("host-accounting-retry"),
+        Some(changed),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+    let mut unknown = body;
+    unknown.as_object_mut().unwrap().remove("host_allowance");
+    let (status, unknown) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{}/context-preview", world.alice_session),
+        &world.alice_token,
+        None,
+        Some(unknown),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unknown}");
+    assert!(unknown.get("host_allowance").is_none());
+}
+#[tokio::test]
+async fn host_accounting_refuses_unknown_units_missing_overhead_and_exhaustion() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let path = format!("/v1/sessions/{}/context-preview", world.alice_session);
+    let base = json!({"tokenizer_encoding":"o200k_base","host_allowance":{"context_window_tokens":8192,"occupied_input_tokens":6000,"reserved_output_tokens":1000,"host_overhead_tokens":192}});
+    for case in [
+        "missing-overhead",
+        "unknown-encoding",
+        "no-encoding",
+        "overflow",
+    ] {
+        let mut body = base.clone();
+        match case {
+            "missing-overhead" => {
+                body["host_allowance"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("host_overhead_tokens");
+            }
+            "unknown-encoding" => body["tokenizer_encoding"] = json!("another-model"),
+            "no-encoding" => {
+                body.as_object_mut().unwrap().remove("tokenizer_encoding");
+            }
+            _ => {
+                body["host_allowance"]["occupied_input_tokens"] = json!(u32::MAX);
+                body["host_allowance"]["reserved_output_tokens"] = json!(1);
+            }
+        }
+        let (status, error) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            None,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{case}: {error}");
+    }
+    let mut exhausted = base;
+    exhausted["host_allowance"]["occupied_input_tokens"] = json!(7000);
+    let (status, error) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        None,
+        Some(exhausted),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["kind"], "insufficient_budget");
+}
+#[tokio::test]
+async fn off_mode_keeps_independent_identical_governed_references() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let valid_from = chrono::Utc::now();
+    let due = (valid_from + chrono::Duration::days(1)).to_rfc3339();
+    let mut identical = content(
+        "Independent provenance",
+        "Iris identical-byte authority remains independently governed.",
+        Some(&due),
+    );
+    identical["valid_from"] = json!(valid_from);
+    let (a, ar) = create_knowledge_with_content(
+        &world,
+        "off-identical-a",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        identical.clone(),
+    )
+    .await;
+    let (b, br) = create_knowledge_with_content(
+        &world,
+        "off-identical-b",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        identical,
+    )
+    .await;
+    // Equal same-scope assertions enter duplicate review. Explicitly keep
+    // both independent records through the governed resolution before testing
+    // planner dedup; bypassing that lifecycle would invalidate this fixture.
+    let (status, conflicts) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/knowledge-conflicts?scope_id={}", world.project_scope),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{conflicts}");
+    let conflict = conflicts["conflicts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| {
+            c["members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["knowledge_item_id"] == b)
+        })
+        .unwrap();
+    let (status,resolved)=call(&world.app,"POST",&format!("/v1/knowledge-conflicts/{}/resolve",conflict["id"].as_str().unwrap()),&world.alice_token,Some("off-independent-review"),Some(json!({"expected_revision":conflict["revision"],"resolution":"keep_separate","reason":"Retain these independently governed equal-byte fixture records with both provenances"}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{resolved}");
+    if resolved["outcome"] == "pending_review" {
+        let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+            .await
+            .unwrap();
+        seed_grant(
+            &mut tx,
+            world.tenant_id,
+            world.project_scope,
+            BOB,
+            RoleKey::Curator,
+        )
+        .await;
+        tx.commit().await.unwrap();
+        let change = resolved["change_id"].as_str().unwrap();
+        let (status, p) = call(
+            &world.app,
+            "GET",
+            &format!("/v1/proposals/{change}"),
+            &world.bob_token,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{p}");
+        let (status, p) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/proposals/{change}/approve"),
+            &world.bob_token,
+            None,
+            Some(json!({"expected_commit":p["commit"]})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{p}");
+        let (status, p) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/proposals/{change}/apply"),
+            &world.alice_token,
+            None,
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{p}");
+    }
+    let (status,preview)=call(&world.app,"POST",&format!("/v1/sessions/{}/context-preview",world.alice_session),&world.alice_token,None,Some(json!({"tokenizer_encoding":"o200k_base","budget_tokens":2000,"required_knowledge_revisions":[{"item_id":a,"revision_id":ar},{"item_id":b,"revision_id":br}]}))).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["optimization_mode"], "off");
+    let selected = preview["selected"].as_array().unwrap();
+    assert!(selected.iter().any(|e| e["knowledge_item_id"] == a));
+    assert!(selected.iter().any(|e| e["knowledge_item_id"] == b));
+    assert_eq!(
+        selected
+            .iter()
+            .find(|e| e["knowledge_item_id"] == a)
+            .unwrap()["source_content_hash"],
+        selected
+            .iter()
+            .find(|e| e["knowledge_item_id"] == b)
+            .unwrap()["source_content_hash"]
+    );
+}

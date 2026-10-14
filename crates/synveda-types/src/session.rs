@@ -235,6 +235,12 @@ pub enum SessionEventType {
     /// Server-derived, exact-source working state (CTX-6, ADR-0150).
     #[serde(rename = "session.task_state")]
     TaskState,
+    /// Server-reserved outcome report with derived reporter provenance.
+    #[serde(rename = "task.outcome")]
+    TaskOutcome,
+    /// Server-reserved bounded human Procedure improvement request.
+    #[serde(rename = "procedure.improvement")]
+    ProcedureImprovement,
     /// A person said something.
     #[serde(rename = "message.user")]
     MessageUser,
@@ -295,6 +301,8 @@ impl SessionEventType {
         SessionEventType::CompactionBoundary,
         SessionEventType::Checkpoint,
         SessionEventType::TaskState,
+        SessionEventType::TaskOutcome,
+        SessionEventType::ProcedureImprovement,
         SessionEventType::MessageUser,
         SessionEventType::MessageAssistant,
         SessionEventType::ToolInvoked,
@@ -323,6 +331,8 @@ impl SessionEventType {
             SessionEventType::CompactionBoundary => "session.compaction_boundary",
             SessionEventType::Checkpoint => "session.checkpoint",
             SessionEventType::TaskState => "session.task_state",
+            SessionEventType::TaskOutcome => "task.outcome",
+            SessionEventType::ProcedureImprovement => "procedure.improvement",
             SessionEventType::MessageUser => "message.user",
             SessionEventType::MessageAssistant => "message.assistant",
             SessionEventType::ToolInvoked => "tool.invoked",
@@ -352,7 +362,8 @@ impl SessionEventType {
     #[must_use]
     pub const fn capture_eligible(&self) -> bool {
         match self {
-            SessionEventType::MessageUser
+            SessionEventType::ProcedureImprovement
+            | SessionEventType::MessageUser
             | SessionEventType::MessageAssistant
             | SessionEventType::ToolInvoked
             | SessionEventType::ToolResult
@@ -370,6 +381,7 @@ impl SessionEventType {
             | SessionEventType::CompactionBoundary
             | SessionEventType::Checkpoint
             | SessionEventType::TaskState
+            | SessionEventType::TaskOutcome
             | SessionEventType::FileRead
             | SessionEventType::SkillLoaded
             | SessionEventType::ContextRequested
@@ -387,7 +399,9 @@ impl SessionEventType {
             | SessionEventType::SessionEnded
             | SessionEventType::CompactionBoundary
             | SessionEventType::Checkpoint => "lifecycle",
-            SessionEventType::TaskState => "task",
+            SessionEventType::TaskState
+            | SessionEventType::TaskOutcome
+            | SessionEventType::ProcedureImprovement => "task",
             SessionEventType::MessageUser | SessionEventType::MessageAssistant => "message",
             SessionEventType::ToolInvoked | SessionEventType::ToolResult => "tool",
             SessionEventType::FileRead | SessionEventType::FileChanged => "file",

@@ -62,6 +62,7 @@ pub mod operations;
 pub mod packs;
 pub mod policy_assignments;
 pub mod policy_packs;
+pub mod procedure_learning;
 pub mod projects;
 pub mod prompts;
 pub mod quarantine;
@@ -168,6 +169,7 @@ pub async fn check_migration_compatibility(
             epoch::MigrationPreflight::GithubSource => {
                 runtime_role::verify_github_source_migrator_read_only_connection(&mut compatibility, database_roles).await?;
             }
+            epoch::MigrationPreflight::TaskState=>{runtime_role::verify_task_state_migrator_read_only_connection(&mut compatibility,database_roles).await?;}
             epoch::MigrationPreflight::Current => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
@@ -298,6 +300,11 @@ async fn migrate_locked_connection(
                     database_roles,
                 )
                 .await?;
+            }
+            epoch::MigrationPreflight::PendingStampTaskState
+            | epoch::MigrationPreflight::TaskState => {
+                runtime_role::verify_task_state_migrator_connection(&mut authority, database_roles)
+                    .await?;
             }
             epoch::MigrationPreflight::PendingStampCurrent | epoch::MigrationPreflight::Current => {
                 if matches!(preflight, epoch::MigrationPreflight::Current) {

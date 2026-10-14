@@ -383,6 +383,13 @@ namespace Synveda {
             context: { roles: Set<String> }
         };
 
+    action OutcomeAttest
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> }
+        };
+
     action KnowledgeWrite, KnowledgeForget
         appliesTo {
             principal: [Principal],

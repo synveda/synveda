@@ -40,6 +40,8 @@ pub(super) struct Manifest {
     pub(super) handoff: Option<synveda_types::task_state::SessionHandoff>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     receiver_checkout_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) host_allowance: Option<super::HostAllowanceBody>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -118,9 +120,13 @@ pub(super) struct Inputs<'a> {
     pub counter: &'a TokenCounter,
     pub handoff: Option<synveda_types::task_state::SessionHandoff>,
     pub receiver_checkout_hash: Option<String>,
+    pub host_allowance: Option<super::HostAllowanceBody>,
 }
 
 impl Manifest {
+    pub(super) fn has_non_knowledge_authorities(&self) -> bool {
+        !self.authored.is_empty() || !self.skills.is_empty() || !self.channels.is_empty()
+    }
     pub(super) fn has_restart_ancestry(&self) -> bool {
         self.restart_contributed
             || self.handoff.is_some()
@@ -201,6 +207,7 @@ impl Manifest {
             },
             handoff: inputs.handoff,
             receiver_checkout_hash: inputs.receiver_checkout_hash,
+            host_allowance: inputs.host_allowance,
         };
         manifest.encode()?;
         Ok(manifest)
@@ -209,7 +216,9 @@ impl Manifest {
     fn encode(&self) -> Result<(Value, String)> {
         if !matches!(self.schema_version, 2 | 3)
             || (self.schema_version == 2
-                && (self.handoff.is_some() || self.receiver_checkout_hash.is_some()))
+                && (self.handoff.is_some()
+                    || self.receiver_checkout_hash.is_some()
+                    || self.host_allowance.is_some()))
             || (self.handoff.is_some()
                 && (!self.restart_contributed
                     || self.checkpoint.is_some()
@@ -230,6 +239,9 @@ impl Manifest {
             })
         {
             return Err(limit_exceeded());
+        }
+        if let Some(report) = &self.host_allowance {
+            report.remaining()?;
         }
         let hashes = [self.block_hash.as_str(), self.configuration_hash.as_str()]
             .into_iter()

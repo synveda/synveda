@@ -53,3 +53,17 @@ still uses its whole body and fails explicitly if it does not fit. Untyped prose
 can have unrecognized dependencies, so these deterministic rules do not establish
 general semantic compression quality. Off mode, the shared final counter and the
 learned-backend no-go remain unchanged.
+
+### Amendment 2: caller-reported host allowance (2026-10-14)
+
+Accept an optional complete report of the host window, already occupied input,
+output reservation and explicit framing/tool overhead, all in the declared
+supported exact encoding. Checked arithmetic derives the remainder and only
+narrows the requested/governed Synveda contribution. Missing quantities leave
+host accounting unknown; zero overhead is an explicit caller assertion.
+Preserve the report in the private immutable delivery manifest and expose a
+separate authorized accounting receipt. Omitted reports preserve existing
+request and manifest hashes. This establishes a bound against caller-reported
+inputs, without provider measurement, whole-request fit or billing claims.
+Both optimization modes deduplicate exact governed references; independently
+sourced equal bodies retain their distinct authority and provenance.

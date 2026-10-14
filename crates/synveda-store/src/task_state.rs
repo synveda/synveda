@@ -122,10 +122,10 @@ pub async fn within_ceiling(
         Sensitivity::Confidential => 2,
         Sensitivity::Restricted => 3,
     };
-    sqlx::query_scalar!(r#"select not exists(select 1 from knowledge_copy_dependencies copy
-       join knowledge_revision_headers header on header.tenant_id=copy.tenant_id and header.revision_id=copy.revision_id
-       where copy.tenant_id=$1 and copy.dependent_kind='session_event' and copy.dependent_id=$2
-       and case header.sensitivity when 'public' then 0 when 'internal' then 1 when 'confidential' then 2 when 'restricted' then 3 else 4 end>$3)
+    sqlx::query_scalar!(r#"select not exists(select 1 from (select knowledge_item_id,revision_id from knowledge_copy_dependencies where tenant_id=$1 and dependent_kind='session_event' and dependent_id=$2
+       union select knowledge_item_id,revision_id from historical_knowledge_dependencies where tenant_id=$1 and dependent_kind='session_event' and dependent_id=$2) copy
+       join knowledge_revision_headers header on header.tenant_id=$1 and header.revision_id=copy.revision_id
+       where case header.sensitivity when 'public' then 0 when 'internal' then 1 when 'confidential' then 2 when 'restricted' then 3 else 4 end>$3)
        as "allowed!""#,tenant.as_uuid(),event.as_uuid(),rank).fetch_one(tx).await.map_err(storage)
 }
 fn storage(error: sqlx::Error) -> Error {

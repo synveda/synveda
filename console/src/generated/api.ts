@@ -1316,6 +1316,10 @@ export type ConfigurationDocumentBody = {
      */
     git_sources?: GitSourceDescriptorBody[];
     policy_pack: string;
+    /**
+     * Optional approved authenticated reporters and fixed evaluation suites.
+     */
+    procedure_learning?: Record<string, unknown> | null;
     relaxations: RelaxationConfigurationBody;
   };
 
@@ -1650,12 +1654,68 @@ export type ContextGraphStepView = {
 /**
  * Supported existing workflow destinations; following one reauthorizes it.
  */
-export type ContextHealthAction = "inspect_revision" | "inspect_candidate" | "inspect_trace" | "request_current_context";
+export type ContextHealthAction = "inspect_revision" | "inspect_candidate" | "inspect_trace" | "request_current_context" | "inspect_source" | "inspect_conflict" | "inspect_proposal" | "inspect_outcome" | "inspect_evaluation";
 
 /**
  * Separate observable dimensions; there is deliberately no aggregate score.
  */
 export type ContextHealthDimension = "provenance" | "freshness" | "conflicts" | "budget" | "outcomes" | "review";
+
+/**
+ * Exact supported evidence destinations, without denied addresses or counts.
+ */
+export type ContextHealthEvidence = {
+    /**
+     * Whether approved bytes differ from the observed current bytes.
+     */
+    changed: boolean;
+    /**
+     * Whether the current live descriptor matches the observed definition.
+     */
+    definition_matches: boolean;
+    kind: "source";
+    /**
+     * Database clock of the latest complete snapshot, when one exists.
+     */
+    observed_at?: string | null;
+    /**
+     * Latest refresh request; separate from synchronization time.
+     */
+    operation_id?: string | null;
+    /**
+     * Closed durable refresh lifecycle.
+     */
+    operation_state?: string | null;
+    /**
+     * Exact covered path state, not inferred source inventory.
+     */
+    path_state?: string | null;
+    /**
+     * Exact project.
+     */
+    project_id: string;
+    /**
+     * Exact configured source.
+     */
+    source_id: string;
+  } | {
+    conflict_set_id: string;
+    kind: "conflict";
+  } | {
+    kind: "proposal";
+    proposal_id: string;
+  } | {
+    event_id: string;
+    evidence_class: string;
+    kind: "outcome";
+    outcome: string;
+    session_id: string;
+  } | {
+    attempt_id: string;
+    candidate_id: string;
+    kind: "evaluation";
+    qualified?: boolean | null;
+  };
 
 /**
  * One bounded finding with at most one already authorized evidence example.
@@ -1664,6 +1724,7 @@ export type ContextHealthFindingView = {
     action: ContextHealthAction;
     capture_candidate_id?: string | null;
     dimension: ContextHealthDimension;
+    evidence?: null | ContextHealthEvidence;
     explanation: string;
     knowledge_item_id?: string | null;
     knowledge_revision_id?: string | null;
@@ -1964,6 +2025,7 @@ export type ContextPreviewView = {
      * Retrieval degradation reasons.
      */
     degraded: string[];
+    host_allowance?: null | HostAllowanceView;
     /**
      * Standalone Knowledge component count; not additive with other components.
      */
@@ -2140,6 +2202,7 @@ export type ContextRunView = {
      * Graph implementation version, when graph expansion ran.
      */
     graph_version?: string | null;
+    host_allowance?: null | HostAllowanceView;
     /**
      * The run's id.
      */
@@ -2358,6 +2421,7 @@ export type CreateContextRunBody = {
     budget_tokens?: number | null;
     checkout_observation?: null | CheckoutObservationBody;
     handoff?: null | SessionHandoffBody;
+    host_allowance?: null | HostAllowanceBody;
     /**
      * Optional sensitivity narrowing.
      */
@@ -2768,6 +2832,44 @@ export type EndSessionBody = {
   };
 
 /**
+ * Content-free frozen suite and independently reported status.
+ */
+export type EvaluationView = {
+    /**
+     * Exact attempt address.
+     */
+    attempt_id: string;
+    /**
+     * Exact proposed content digest.
+     */
+    candidate_hash: string;
+    /**
+     * Exact candidate address.
+     */
+    candidate_id: string;
+    /**
+     * Exact governing Configuration digest.
+     */
+    configuration_hash: string;
+    /**
+     * Absent before runner results; failed and unknown remain unqualified.
+     */
+    qualified?: boolean | null;
+    /**
+     * Authenticated observations, never universal quality claims.
+     */
+    results?: Record<string, unknown> | null;
+    /**
+     * Fixed specification, without held-out answers.
+     */
+    specification: Record<string, unknown>;
+    /**
+     * Exact fixed suite digest.
+     */
+    specification_hash: string;
+  };
+
+/**
  * Explicit current-Knowledge export selection. Empty means all visible
  * current active/stale Knowledge in the project, bounded at 2000 items.
  */
@@ -2776,6 +2878,20 @@ export type ExportOkfBody = {
      * Stable item ids to export.
      */
     item_ids?: string[];
+  };
+
+/**
+ * Freeze one approved suite for this exact candidate before results arrive.
+ */
+export type FreezeBody = {
+    /**
+     * Exact candidate hash previously inspected.
+     */
+    candidate_hash: string;
+    /**
+     * Suite selected from current governed Configuration.
+     */
+    suite_id: string;
   };
 
 /**
@@ -3100,6 +3216,50 @@ export type GroupView = {
   };
 
 /**
+ * Complete caller-reported host accounting; no provider or billing attestation.
+ */
+export type HostAllowanceBody = {
+    /**
+     * Input plus output window in the caller-declared exact encoding.
+     */
+    context_window_tokens: number;
+    /**
+     * Explicit host framing/tool overhead; zero is a caller assertion.
+     */
+    host_overhead_tokens: number;
+    /**
+     * Host input already occupied, excluding this Synveda contribution.
+     */
+    occupied_input_tokens: number;
+    /**
+     * Output reservation excluded from Synveda's text allowance.
+     */
+    reserved_output_tokens: number;
+  };
+
+/**
+ * The exact reported accounting used to narrow this contribution.
+ */
+export type HostAllowanceView = {
+    /**
+     * caller_reported; this is not measured provider usage.
+     */
+    provenance: string;
+    /**
+     * Checked host remainder before requested and governed ceilings.
+     */
+    remaining_tokens: number;
+    /**
+     * Complete original report.
+     */
+    report: HostAllowanceBody;
+    /**
+     * All reported quantities use this exact encoding.
+     */
+    tokenizer_encoding: string;
+  };
+
+/**
  * Import one supported client configuration entry.
  */
 export type ImportToolClientConfigBody = {
@@ -3127,6 +3287,32 @@ export type ImportToolClientConfigBody = {
      * One client server object. Embedded env/header values are refused.
      */
     server: Record<string, unknown>;
+  };
+
+/**
+ * One small human supplied change justified by authenticated runner evidence.
+ */
+export type ImprovementBody = {
+    /**
+     * Development case label; held-out cases must differ.
+     */
+    development_case: string;
+    /**
+     * One to eight exact authenticated outcome events.
+     */
+    outcomes: Record<string, unknown>[];
+    /**
+     * Exact baseline Procedure.
+     */
+    procedure: Record<string, unknown>;
+    /**
+     * At most 1024 UTF-8 bytes to append atomically.
+     */
+    proposed_append: string;
+    /**
+     * Explicit bounded uncertainty for independent review.
+     */
+    uncertainty: string;
   };
 
 /**
@@ -3882,7 +4068,7 @@ export type NewEventBody = {
      * The payload shape this client declares. Defaults to the current one.
      */
     event_schema_version?: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * When the client says it happened.
      */
@@ -4383,6 +4569,44 @@ export type OriginView = {
     scope_id?: string | null;
   };
 
+/**
+ * Observation over exact involved sources; provenance comes from authentication.
+ */
+export type OutcomeBody = {
+    /**
+     * Stable retry address.
+     */
+    client_event_id: string;
+    /**
+     * Optional exact delivery in the same Session.
+     */
+    context?: Record<string, unknown> | null;
+    /**
+     * Bounded reported environment identity.
+     */
+    environment: Record<string, unknown>;
+    /**
+     * succeeded, failed or unknown; no causal credit to delivered memory.
+     */
+    outcome: string;
+    /**
+     * Exact involved reviewed Procedure.
+     */
+    procedure: Record<string, unknown>;
+    /**
+     * Digest of runner evidence retained outside the content-free audit plane.
+     */
+    result_digest: string;
+    /**
+     * At most eight exact involved Skill versions, without activation claims.
+     */
+    skill_versions: string[];
+    /**
+     * At most eight exact admitted same-Session events.
+     */
+    supporting_events: Record<string, unknown>[];
+  };
+
 export type PackSummary = {
     kind: string;
     name: string;
@@ -4481,6 +4705,24 @@ export type PrincipalView = {
      * binding and idempotency key is keyed by.
      */
     subject: string;
+  };
+
+/**
+ * Exact receipt; disclosure always rechecks the historical sources.
+ */
+export type ProcedureEventView = {
+    /**
+     * Frozen Capture batch for an improvement request.
+     */
+    batch_id?: string | null;
+    /**
+     * Exact immutable server-derived evidence.
+     */
+    event: SessionEventView;
+    /**
+     * appended or duplicate.
+     */
+    outcome: string;
   };
 
 /**
@@ -5327,6 +5569,24 @@ export type ResolveConflictBody = {
     transition_at?: string | null;
   };
 
+/**
+ * Exact independently reported fixed-case observations.
+ */
+export type ResultsBody = {
+    /**
+     * Exact candidate hash from the frozen receipt.
+     */
+    candidate_hash: string;
+    /**
+     * Complete fixed case statuses and retained result digests.
+     */
+    results: Record<string, unknown>[];
+    /**
+     * Exact specification hash from the frozen receipt.
+     */
+    specification_hash: string;
+  };
+
 export type ReviseRelaxationBody = {
     action: "knowledge.read";
     max_sensitivity: string;
@@ -5504,7 +5764,7 @@ export type SessionEventView = {
      * The payload shape the client declared.
      */
     event_schema_version: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * The event's id in this deployment.
      */
@@ -6260,6 +6520,16 @@ export type StageToolVersionBody = {
      * Exact current approved version precondition.
      */
     expected_current_version_id: string;
+  };
+
+/**
+ * Exact frozen candidate submitted through the normal Capture decision.
+ */
+export type SubmitBody = {
+    /**
+     * Previously inspected frozen hash.
+     */
+    candidate_hash: string;
   };
 
 /**
@@ -7431,6 +7701,19 @@ export type Operations = {
     readonly method: "GET";
     readonly response: CaptureCandidateListView;
   };
+  readonly freeze_procedure_evaluation: {
+    readonly path: "/v1/capture-candidates/{candidate_id}/procedure-evaluations";
+    readonly method: "POST";
+    readonly body: FreezeBody;
+    readonly response: EvaluationView;
+  };
+  readonly submit_procedure_improvement: {
+    readonly path: "/v1/capture-candidates/{candidate_id}/procedure-submit";
+    readonly method: "POST";
+    readonly body: SubmitBody;
+    readonly idempotent: true;
+    readonly response: CaptureDecisionView;
+  };
   /**
    * `POST /v1/capture-candidates/{id}/accept`.
    */
@@ -7970,6 +8253,17 @@ export type Operations = {
     readonly method: "GET";
     readonly response: PacksResponse;
   };
+  readonly get_procedure_evaluation: {
+    readonly path: "/v1/procedure-evaluations/{attempt_id}";
+    readonly method: "GET";
+    readonly response: EvaluationView;
+  };
+  readonly record_procedure_evaluation: {
+    readonly path: "/v1/procedure-evaluations/{attempt_id}/results";
+    readonly method: "POST";
+    readonly body: ResultsBody;
+    readonly response: EvaluationView;
+  };
   /**
    * `GET /v1/projects/{project_id}`.
    */
@@ -8453,6 +8747,18 @@ export type Operations = {
     readonly body: KnowledgeQueryBody;
     readonly response: ContextKnowledgeQueryView;
   };
+  readonly record_task_outcome: {
+    readonly path: "/v1/sessions/{session_id}/outcomes";
+    readonly method: "POST";
+    readonly body: OutcomeBody;
+    readonly response: ProcedureEventView;
+  };
+  readonly propose_procedure_improvement: {
+    readonly path: "/v1/sessions/{session_id}/procedure-improvements";
+    readonly method: "POST";
+    readonly body: ImprovementBody;
+    readonly response: ProcedureEventView;
+  };
   readonly derive_session_task_state: {
     readonly path: "/v1/sessions/{session_id}/task-state";
     readonly method: "POST";
@@ -8904,6 +9210,8 @@ export const OPERATIONS = {
   get_capture_batch: { path: "/v1/capture-batches/{id}", method: "GET" },
   accept_capture_batch: { path: "/v1/capture-batches/{id}/accept", method: "POST", idempotent: true },
   list_capture_candidates: { path: "/v1/capture-candidates", method: "GET" },
+  freeze_procedure_evaluation: { path: "/v1/capture-candidates/{candidate_id}/procedure-evaluations", method: "POST" },
+  submit_procedure_improvement: { path: "/v1/capture-candidates/{candidate_id}/procedure-submit", method: "POST", idempotent: true },
   accept_capture_candidate: { path: "/v1/capture-candidates/{id}/accept", method: "POST", idempotent: true },
   dismiss_capture_candidate: { path: "/v1/capture-candidates/{id}/dismiss", method: "POST", idempotent: true },
   merge_capture_candidate: { path: "/v1/capture-candidates/{id}/merge", method: "POST", idempotent: true },
@@ -8965,6 +9273,8 @@ export const OPERATIONS = {
   get_operation: { path: "/v1/operations/{id}", method: "GET" },
   cancel_operation: { path: "/v1/operations/{id}/cancel", method: "POST" },
   list_policy_packs: { path: "/v1/policy/packs", method: "GET" },
+  get_procedure_evaluation: { path: "/v1/procedure-evaluations/{attempt_id}", method: "GET" },
+  record_procedure_evaluation: { path: "/v1/procedure-evaluations/{attempt_id}/results", method: "POST" },
   get_project: { path: "/v1/projects/{project_id}", method: "GET" },
   update_project: { path: "/v1/projects/{project_id}", method: "PATCH" },
   list_project_members: { path: "/v1/projects/{project_id}/members", method: "GET" },
@@ -9020,6 +9330,8 @@ export const OPERATIONS = {
   withdraw_session_source: { path: "/v1/sessions/{session_id}/events/{event_id}/withdraw", method: "POST", idempotent: true },
   evaluate_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-evaluation", method: "POST" },
   query_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-query", method: "POST" },
+  record_task_outcome: { path: "/v1/sessions/{session_id}/outcomes", method: "POST" },
+  propose_procedure_improvement: { path: "/v1/sessions/{session_id}/procedure-improvements", method: "POST" },
   derive_session_task_state: { path: "/v1/sessions/{session_id}/task-state", method: "POST" },
   get_session_timeline: { path: "/v1/sessions/{session_id}/timeline", method: "GET" },
   list_skill_bindings: { path: "/v1/skill-bindings", method: "GET" },

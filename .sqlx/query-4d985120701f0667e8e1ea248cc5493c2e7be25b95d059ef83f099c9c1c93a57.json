@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id,candidate_id,candidate_hash,request_hash,suite_id,evaluator_id,configuration_hash,specification_hash,specification from procedure_evaluation_attempts where tenant_id=$1 and candidate_id=$2 order by created_at,id limit 9",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "candidate_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "request_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "suite_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "evaluator_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "configuration_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "specification_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "specification",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4d985120701f0667e8e1ea248cc5493c2e7be25b95d059ef83f099c9c1c93a57"
+}

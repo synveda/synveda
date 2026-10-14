@@ -171,6 +171,10 @@ pub(crate) struct ConfigurationDocumentBody {
     /// Inbound descriptors; setup and disconnect use the Configuration workflow.
     #[serde(default)]
     pub git_sources: Vec<GitSourceDescriptorBody>,
+    /// Optional approved authenticated reporters and fixed evaluation suites.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type=Option<Object>)]
+    pub procedure_learning: Option<synveda_types::procedure::ProcedureLearningConfiguration>,
 }
 
 /// Exact project repository and bounded inert paths for inbound refresh.
@@ -192,6 +196,7 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
     fn try_from(value: ConfigurationDocumentBody) -> Result<Self> {
         let document = Self {
             policy_pack: value.policy_pack,
+            procedure_learning: value.procedure_learning,
             capture: CaptureConfiguration {
                 enabled: value.capture.enabled,
                 on_session_end: value.capture.on_session_end,
@@ -271,6 +276,7 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
     fn from(value: ConfigurationDocument) -> Self {
         Self {
             policy_pack: value.policy_pack,
+            procedure_learning: value.procedure_learning,
             capture: CaptureConfigurationBody {
                 enabled: value.capture.enabled,
                 on_session_end: value.capture.on_session_end,

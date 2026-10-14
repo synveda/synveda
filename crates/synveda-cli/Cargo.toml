@@ -18,6 +18,7 @@ name = "synveda"
 path = "src/main.rs"
 
 [dependencies]
+uuid = { workspace = true }
 # Store + identity for the dev-bootstrap commands only (db migrate, tenant
 # create, token issue — ADR-0008); everything a running gateway can serve
 # goes through its API instead. Policy for the apply-time compile check

@@ -145,7 +145,7 @@ fn unavailable() -> Error {
 fn changed() -> Error {
     Error::Conflict {message:"Source refresh configuration or custody changed; inspect current configuration and request a new refresh".to_owned()}
 }
-fn descriptor_hash(descriptor: &GitSourceDescriptor) -> Result<String> {
+pub(crate) fn descriptor_hash(descriptor: &GitSourceDescriptor) -> Result<String> {
     let value = serde_json::to_value(descriptor).map_err(|_| changed())?;
     Ok(blake3::hash(
         synveda_types::json::canonicalise(&value)
@@ -243,7 +243,7 @@ pub(crate) async fn authorize_project(
     Ok(project)
 }
 
-async fn configured(
+pub(crate) async fn configured(
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
     project: ProjectId,

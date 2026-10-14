@@ -52,7 +52,8 @@ pub const CURRENT_EPOCH: i32 = 3;
 pub const CURRENT_BASELINE_REVISION: i32 = 3;
 
 /// The forward head needed before the current binary may serve requests.
-pub const CURRENT_MIGRATION_HEAD: &str = "0009";
+pub const CURRENT_MIGRATION_HEAD: &str = "0010";
+const TASK_STATE_MIGRATION_HEAD: &str = "0009";
 const GITHUB_SOURCE_MIGRATION_HEAD: &str = "0008";
 const RECONCILE_MIGRATION_HEAD: &str = "0007";
 const ARTIFACT_MIGRATION_HEAD: &str = "0006";
@@ -363,7 +364,8 @@ pub async fn verify_connection(
         | SOURCE_MIGRATION_HEAD
         | ARTIFACT_MIGRATION_HEAD
         | RECONCILE_MIGRATION_HEAD
-        | GITHUB_SOURCE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
+        | GITHUB_SOURCE_MIGRATION_HEAD
+        | TASK_STATE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
             found: metadata.migration_head,
         }),
         found if found > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
@@ -404,6 +406,7 @@ pub(crate) async fn verify_embedded_head_connection(
             | MigrationPreflight::Artifact
             | MigrationPreflight::Reconcile
             | MigrationPreflight::GithubSource
+            | MigrationPreflight::TaskState
             | MigrationPreflight::Current
     ) {
         return Err(SchemaEpochError::IncompatibleMigration);
@@ -461,6 +464,8 @@ pub(crate) enum MigrationPreflight {
     /// Private GitHub identity committed before its head stamp.
     PendingStampGithubSource,
     /// Grounded TaskState committed before its head stamp.
+    PendingStampTaskState,
+    /// Verified Procedure learning committed before its head stamp.
     PendingStampCurrent,
     /// The published v0.4.3 baseline and its exact SQLx row are present.
     Prior,
@@ -474,6 +479,7 @@ pub(crate) enum MigrationPreflight {
     Artifact,
     Reconcile,
     GithubSource,
+    TaskState,
     Current,
 }
 
@@ -521,6 +527,7 @@ pub(crate) async fn migration_preflight_connection(
                 EmbeddedPrefix::Artifact => MigrationPreflight::PendingStampArtifact,
                 EmbeddedPrefix::Reconcile => MigrationPreflight::PendingStampReconcile,
                 EmbeddedPrefix::GithubSource => MigrationPreflight::PendingStampGithubSource,
+                EmbeddedPrefix::TaskState => MigrationPreflight::PendingStampTaskState,
                 EmbeddedPrefix::Current => MigrationPreflight::PendingStampCurrent,
             }),
             Err(error) => Err(error),
@@ -601,6 +608,21 @@ pub(crate) async fn migration_preflight_connection(
                     | ARTIFACT_MIGRATION_HEAD
                     | RECONCILE_MIGRATION_HEAD
                     | GITHUB_SOURCE_MIGRATION_HEAD,
+                    EmbeddedPrefix::TaskState,
+                ) => Ok(MigrationPreflight::PendingStampTaskState),
+                (TASK_STATE_MIGRATION_HEAD, EmbeddedPrefix::TaskState) => {
+                    Ok(MigrationPreflight::TaskState)
+                }
+                (
+                    V043_MIGRATION_HEAD
+                    | FORWARD_MIGRATION_HEAD
+                    | LOGIN_MIGRATION_HEAD
+                    | DELIVERY_MIGRATION_HEAD
+                    | SOURCE_MIGRATION_HEAD
+                    | ARTIFACT_MIGRATION_HEAD
+                    | RECONCILE_MIGRATION_HEAD
+                    | GITHUB_SOURCE_MIGRATION_HEAD
+                    | TASK_STATE_MIGRATION_HEAD,
                     EmbeddedPrefix::Current,
                 ) => Ok(MigrationPreflight::PendingStampCurrent),
                 (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current) => {
@@ -631,6 +653,7 @@ enum EmbeddedPrefix {
     Artifact,
     Reconcile,
     GithubSource,
+    TaskState,
     Current,
 }
 
@@ -649,6 +672,7 @@ async fn exact_applied_prefix_connection(
         reconciliation,
         github_identity,
         task_state,
+        procedure_learning,
     ] = crate::MIGRATOR.migrations.as_ref()
     else {
         return Err(SchemaEpochError::IncompatibleMigration);
@@ -660,6 +684,7 @@ async fn exact_applied_prefix_connection(
         || source.no_tx
         || artifact.no_tx
         || reconciliation.no_tx
+        || procedure_learning.no_tx
         || task_state.no_tx
         || github_identity.no_tx
         || baseline.version != 1
@@ -669,6 +694,7 @@ async fn exact_applied_prefix_connection(
         || source.version != 5
         || artifact.version != 6
         || reconciliation.version != 7
+        || procedure_learning.version != 10
         || task_state.version != 9
         || github_identity.version != 8
     {
@@ -679,7 +705,7 @@ async fn exact_applied_prefix_connection(
         select version, description, success, checksum, execution_time
           from public._sqlx_migrations
          order by version
-         limit 10
+         limit 11
         "#
     )
     .fetch_all(&mut *connection)
@@ -690,7 +716,7 @@ async fn exact_applied_prefix_connection(
         SchemaEpochError::Missing => SchemaEpochError::IncompatibleMigration,
         other => other,
     })?;
-    if rows.is_empty() || rows.len() > 9 {
+    if rows.is_empty() || rows.len() > 10 {
         return Ok(None);
     }
     for (row, migration) in rows.iter().zip([
@@ -703,6 +729,7 @@ async fn exact_applied_prefix_connection(
         reconciliation,
         github_identity,
         task_state,
+        procedure_learning,
     ]) {
         if row.version != migration.version
             || row.description != migration.description.as_ref()
@@ -722,7 +749,8 @@ async fn exact_applied_prefix_connection(
         6 => EmbeddedPrefix::Artifact,
         7 => EmbeddedPrefix::Reconcile,
         8 => EmbeddedPrefix::GithubSource,
-        9 => EmbeddedPrefix::Current,
+        9 => EmbeddedPrefix::TaskState,
+        10 => EmbeddedPrefix::Current,
         _ => return Ok(None),
     }))
 }

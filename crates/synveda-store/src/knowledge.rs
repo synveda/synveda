@@ -182,7 +182,7 @@ pub async fn erasure_hold(
     item: KnowledgeItemId,
 ) -> Result<Option<&'static str>> {
     let holds = sqlx::query!(
-        "select coalesce(bool_or(legal_hold),false) as \"legal!\", coalesce(bool_or(retention_hold),false) as \"retention!\" from knowledge_revision_headers where tenant_id=$1 and knowledge_item_id=$2",
+        "select coalesce(bool_or(legal_hold),false) as \"legal!\", coalesce(bool_or(retention_hold),false) as \"retention!\" from knowledge_revision_headers header where tenant_id=$1 and (knowledge_item_id=$2 or exists(select 1 from historical_knowledge_dependencies dep where dep.tenant_id=header.tenant_id and dep.knowledge_item_id=$2 and dep.dependent_kind='knowledge_revision' and dep.dependent_id=header.revision_id))",
         tenant.as_uuid(),
         item.as_uuid()
     )

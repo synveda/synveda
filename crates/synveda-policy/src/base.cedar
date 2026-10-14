@@ -222,3 +222,9 @@ permit (
         && resource is Synveda::KnowledgeItem
         && resource.scope.kind != "principal"
 };
+
+
+// Only a registered confined service can attest execution. A permissive pack
+// cannot upgrade an ordinary caller's report into authenticated observation.
+forbid (principal, action == Synveda::Action::"OutcomeAttest", resource)
+unless { principal has token_scope };

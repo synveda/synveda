@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select event_id,session_id,procedure_item_id,procedure_revision_id,procedure_hash,request_hash,reporter_id,evidence_class,outcome,environment_digest,skill_versions,context_run_id,context_block_hash,received_at from procedure_outcome_headers where tenant_id=$1 and event_id=$2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "procedure_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "procedure_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "procedure_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "request_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "reporter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "evidence_class",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "environment_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "skill_versions",
+        "type_info": "UuidArray"
+      },
+      {
+        "ordinal": 11,
+        "name": "context_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "context_block_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "received_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "ca8a7666d72aedabbb379604f1b84e38f35a4489d468dc2d89321d3cacc10489"
+}
