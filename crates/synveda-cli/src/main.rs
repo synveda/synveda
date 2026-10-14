@@ -641,6 +641,36 @@ enum SessionCommand {
     /// The spool itself: what is held and what has been delivered.
     #[command(subcommand)]
     Spool(SpoolCommand),
+    /// Govern exact service-held source evidence through the public API.
+    #[command(subcommand)]
+    Source(SessionSourceCommand),
+}
+
+#[derive(Subcommand)]
+enum SessionSourceCommand {
+    /// Inspect logical removal and durable physical cleanup separately.
+    Status {
+        session: synveda_types::SessionId,
+        event: synveda_types::SessionEventId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Propose withdrawal or forgetting of the exact inspected payload.
+    Control {
+        session: synveda_types::SessionId,
+        event: synveda_types::SessionEventId,
+        #[arg(long,value_parser=["withdraw","forget"])]
+        mode: String,
+        #[arg(long)]
+        expected_payload_hash: String,
+        #[arg(long)]
+        reason: String,
+        /// Reuse this exact key and body on a retry.
+        #[arg(long)]
+        idempotency_key: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2641,7 +2671,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             });
             let scan = scan_block_at.map(|block_at| SkillScanConfig { block_at });
             let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+            let mut tx = synveda_store::rls::begin_tenant_write_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
             let pack = synveda_store::policy_packs::apply(
@@ -2686,7 +2716,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Policy(PolicyCommand::Clear { tenant, name }) => {
             let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+            let mut tx = synveda_store::rls::begin_tenant_write_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
             let removed = synveda_store::policy_packs::clear(&mut tx, tenant, &name)
@@ -3205,6 +3235,33 @@ async fn run(cli: Cli) -> Result<(), String> {
             SessionCommand::Spool(command) => match command {
                 SpoolCommand::Status { dir, json } => session::status(dir, json),
                 SpoolCommand::Purge { acknowledged, dir } => session::purge(dir, acknowledged),
+            },
+            SessionCommand::Source(command) => match command {
+                SessionSourceCommand::Status {
+                    session,
+                    event,
+                    profile,
+                } => session::source_status(&profile_name(profile)?, session, event).await,
+                SessionSourceCommand::Control {
+                    session,
+                    event,
+                    mode,
+                    expected_payload_hash,
+                    reason,
+                    idempotency_key,
+                    profile,
+                } => {
+                    session::control_source(
+                        &profile_name(profile)?,
+                        session,
+                        event,
+                        &mode,
+                        &expected_payload_hash,
+                        &reason,
+                        &idempotency_key,
+                    )
+                    .await
+                }
             },
         },
         Command::Recall {

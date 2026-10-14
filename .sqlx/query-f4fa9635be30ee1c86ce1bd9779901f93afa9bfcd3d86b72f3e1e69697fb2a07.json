@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id,tenant_id,scope_id,project_id,owner_principal_id,\n        knowledge_type,origin,lifecycle_state,current_revision_id,created_by,updated_by,\n        created_at,updated_at,tx_from from knowledge_items where tenant_id=$1 and id=$2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "knowledge_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "origin",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "lifecycle_state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "current_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "tx_from",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f4fa9635be30ee1c86ce1bd9779901f93afa9bfcd3d86b72f3e1e69697fb2a07"
+}

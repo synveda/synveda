@@ -1184,11 +1184,27 @@ pub(crate) async fn authorize_snapshot(
     tenant_id: TenantId,
     snapshot: &KnowledgeSnapshot,
 ) -> Result<Authorized> {
-    let scope = scopes::get(&mut *tx, tenant_id, snapshot.item.scope_id)
+    authorize_item(
+        state,
+        tx,
+        tenant_id,
+        &snapshot.item,
+        snapshot.revision.content.sensitivity,
+    )
+    .await
+}
+
+pub(crate) async fn authorize_item(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    item: &synveda_types::knowledge::KnowledgeItem,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    let scope = scopes::get(&mut *tx, tenant_id, item.scope_id)
         .await?
-        .ok_or_else(|| item_not_found(snapshot.item.id))?;
-    let selection = snapshot
-        .item
+        .ok_or_else(|| item_not_found(item.id))?;
+    let selection = item
         .project_id
         .map_or_else(AnchorSelection::none, AnchorSelection::project);
     let input = authz::gather(
@@ -1197,17 +1213,12 @@ pub(crate) async fn authorize_snapshot(
         Some(&scope),
         selection,
         vec![ResourceEntity::KnowledgeItem {
-            id: snapshot.item.id,
-            scope_id: snapshot.item.scope_id,
+            id: item.id,
+            scope_id: item.scope_id,
         }],
     )
     .await?;
-    authz::decide_knowledge_read(
-        state,
-        &input,
-        Resource::KnowledgeItem(snapshot.item.id),
-        snapshot.revision.content.sensitivity,
-    )
+    authz::decide_knowledge_read(state, &input, Resource::KnowledgeItem(item.id), sensitivity)
 }
 
 pub(crate) async fn listing_gate(
@@ -1813,8 +1824,9 @@ pub(crate) async fn history(
             .transpose()?;
         let at = Utc::now();
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let current = snapshot(&mut tx, tenant_id, id).await?;
-        let allowed = authorize_snapshot(&state, &mut tx, tenant_id, &current).await?;
+        let current = store::mutation_target(&mut tx, tenant_id, id)
+            .await?
+            .ok_or_else(|| item_not_found(id))?;
         let scope = scopes::get(&mut *tx, tenant_id, current.item.scope_id)
             .await?
             .ok_or_else(|| item_not_found(id))?;
@@ -1832,6 +1844,12 @@ pub(crate) async fn history(
             }],
         )
         .await?;
+        let allowed = authz::decide_knowledge_read(
+            &state,
+            &input,
+            Resource::KnowledgeItem(id),
+            current.sensitivity,
+        )?;
         let mut revisions = store::revisions(&mut *tx, tenant_id, id).await?;
         revisions.reverse();
         if let Some(cursor) = cursor {

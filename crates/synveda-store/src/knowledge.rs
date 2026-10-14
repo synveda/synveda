@@ -25,7 +25,7 @@ use synveda_types::knowledge::{
 };
 use synveda_types::{
     Error, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProjectId,
-    Result, ScopeId, SessionEventId, TenantId,
+    Result, ScopeId, Sensitivity, SessionEventId, TenantId,
 };
 use uuid::Uuid;
 
@@ -120,6 +120,80 @@ pub struct KnowledgeSnapshot {
     pub revision: KnowledgeRevision,
     /// End of the aggregate-state transaction interval; `None` is current.
     pub transaction_to: Option<DateTime<Utc>>,
+}
+
+/// Content-free target for independently authored replacement commands. A
+/// removed body cannot block correcting the item or be read through this seam.
+pub struct KnowledgeTarget {
+    /// Stable aggregate and its current lifecycle/placement.
+    pub item: KnowledgeItem,
+    /// Exact current revision address.
+    pub revision_id: KnowledgeRevisionId,
+    /// Original immutable classification for Cedar and review requirements.
+    pub sensitivity: Sensitivity,
+}
+
+/// Read a current mutation target without resolving revision plaintext.
+pub async fn mutation_target(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    item: KnowledgeItemId,
+) -> Result<Option<KnowledgeTarget>> {
+    let item = sqlx::query_as!(
+        ItemRow,
+        r#"select id,tenant_id,scope_id,project_id,owner_principal_id,
+        knowledge_type,origin,lifecycle_state,current_revision_id,created_by,updated_by,
+        created_at,updated_at,tx_from from knowledge_items where tenant_id=$1 and id=$2"#,
+        tenant.as_uuid(),
+        item.as_uuid()
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    let Some(item) = item else { return Ok(None) };
+    let header = sqlx::query!(
+        "select sensitivity from knowledge_revision_headers where tenant_id=$1 and revision_id=$2",
+        tenant.as_uuid(),
+        item.current_revision_id
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    let Some(header) = header else {
+        return Err(Error::Storage {
+            message: "current Knowledge revision has no immutable header".to_owned(),
+        });
+    };
+    let revision_id = KnowledgeRevisionId::from_uuid(item.current_revision_id);
+    Ok(Some(KnowledgeTarget {
+        item: item.try_into()?,
+        revision_id,
+        sensitivity: stored(&header.sensitivity)?,
+    }))
+}
+
+/// Content-free hold evidence across every retained revision of an item.
+/// A suppressed current body must not prevent item Forget or hide an older hold.
+pub async fn erasure_hold(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    item: KnowledgeItemId,
+) -> Result<Option<&'static str>> {
+    let holds = sqlx::query!(
+        "select coalesce(bool_or(legal_hold),false) as \"legal!\", coalesce(bool_or(retention_hold),false) as \"retention!\" from knowledge_revision_headers where tenant_id=$1 and knowledge_item_id=$2",
+        tenant.as_uuid(),
+        item.as_uuid()
+    )
+    .fetch_one(conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(if holds.legal {
+        Some("legal_hold")
+    } else if holds.retention {
+        Some("retention_hold")
+    } else {
+        None
+    })
 }
 
 /// Content-free immutable timing evidence for an exact Knowledge revision.
@@ -672,10 +746,10 @@ pub async fn append_revision(
         select item.current_revision_id as "current_revision_id!",
                current.revision_number as "revision_number!"
         from knowledge_items item
-        join knowledge_revisions current
+        join knowledge_revision_headers current
           on current.tenant_id = item.tenant_id
          and current.knowledge_item_id = item.id
-         and current.id = item.current_revision_id
+         and current.revision_id = item.current_revision_id
         where item.tenant_id = $1 and item.id = $2
         for update of item
         "#,

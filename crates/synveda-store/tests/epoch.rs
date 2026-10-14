@@ -851,7 +851,7 @@ fn released_v043_prefix_upgrades_without_resetting_tenant_data() {
         assert_eq!(upgraded.migration_head, epoch::CURRENT_MIGRATION_HEAD);
         assert_eq!(upgraded.created_by_version, "0.4.3");
         assert_eq!(upgraded.created_at, metadata_before.created_at);
-        assert_eq!(migration_ledger(&pool).await.len(), 4);
+        assert_eq!(migration_ledger(&pool).await.len(), 5);
         assert_eq!(migration_ledger(&pool).await[0], ledger_before[0]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -1039,7 +1039,7 @@ fn exact_forward_prefix_adds_login_state_without_rewriting_existing_rows() {
             epoch::CURRENT_MIGRATION_HEAD
         );
         let after = migration_ledger(&pool).await;
-        assert_eq!(after.len(), 4);
+        assert_eq!(after.len(), 5);
         assert_eq!(&after[..2], &before[..]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -1089,7 +1089,7 @@ fn exact_login_prefix_adds_delivery_proof_without_rewriting_existing_rows() {
             epoch::CURRENT_MIGRATION_HEAD
         );
         let after = migration_ledger(&pool).await;
-        assert_eq!(after.len(), 4);
+        assert_eq!(after.len(), 5);
         assert_eq!(&after[..3], &before[..]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -1098,6 +1098,44 @@ fn exact_login_prefix_adds_delivery_proof_without_rewriting_existing_rows() {
                 .is_some()
         );
         pool.close().await;
+    });
+}
+
+#[test]
+fn exact_delivery_prefix_backfills_source_addresses_without_rewriting_events() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool=connect_pool(&scratch.options).await;
+        let mut connection=pool.acquire().await.unwrap();
+        sqlx::migrate::Migrator{migrations:std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..4].to_vec()),
+            ..sqlx::migrate::Migrator::DEFAULT}.run(&mut *connection).await.unwrap();
+        epoch::stamp_connection(&mut connection,"0.4.3").await.unwrap();drop(connection);
+        let tenant=admit_a_tenant(&pool).await;
+        let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
+        let workspace=synveda_store::workspaces::create(&mut tx,&synveda_store::workspaces::NewWorkspace{
+            id:synveda_types::WorkspaceId::new(),tenant_id:tenant,slug:"source-prefix".to_owned(),display_name:"Source prefix".to_owned(),description:None,created_by:None}).await.unwrap();
+        let session=synveda_store::sessions::create(&mut tx,&synveda_store::sessions::NewSession{
+            id:synveda_types::SessionId::new(),tenant_id:tenant,workspace_id:workspace.id,project_id:None,
+            principal_id:"source-prefix-reader".to_owned(),client_name:"claude-code".to_owned(),client_version:None,
+            client_installation_id:None,external_session_id:None,agent_name:None,model_name:None,repository_id:None,
+            branch:None,task_summary:None,metadata:serde_json::json!({})}).await.unwrap();
+        let event=synveda_types::SessionEventId::new();
+        let payload=serde_json::json!({"text":"retained prefix evidence"});
+        let hash=blake3::hash(payload.to_string().as_bytes()).to_hex().to_string();
+        sqlx::query("insert into session_events(id,tenant_id,session_id,event_type,client_event_id,sequence,occurred_at,payload,payload_hash,source_payload_hash) values($1,$2,$3,'message.user','source-prefix',1,clock_timestamp(),$4,$5,$5)")
+            .bind(event.as_uuid()).bind(tenant.as_uuid()).bind(session.id.as_uuid()).bind(&payload).bind(&hash).execute(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let before=migration_ledger(&pool).await;assert_eq!(before.len(),4);
+        synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap();
+        synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
+        let after=migration_ledger(&pool).await;assert_eq!(after.len(),5);assert_eq!(&after[..4],&before[..]);
+        let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
+        let address=synveda_store::source_control::address(&mut tx,tenant,session.id,event).await.unwrap().unwrap();
+        assert_eq!(address.payload_hash,hash);assert_eq!(address.scope_id,session.scope_id.as_uuid());assert_eq!(address.sequence,1);
+        let retained=synveda_store::sessions::event(&mut *tx,tenant,session.id,event).await.unwrap().unwrap();
+        assert_eq!(retained.payload,payload);assert_eq!(retained.payload_hash,hash);
+        tx.commit().await.unwrap();pool.close().await;
     });
 }
 
@@ -1123,7 +1161,7 @@ fn an_unstamped_released_baseline_resumes_from_its_exact_sqlx_prefix() {
             epoch::verify(&pool).await.unwrap().migration_head,
             epoch::CURRENT_MIGRATION_HEAD
         );
-        assert_eq!(migration_ledger(&pool).await.len(), 4);
+        assert_eq!(migration_ledger(&pool).await.len(), 5);
         pool.close().await;
     });
 }
@@ -1152,7 +1190,7 @@ fn a_committed_forward_migration_with_old_stamp_repairs_only_the_stamp() {
             .expect("commit forward DDL and SQLx row without marker stamp");
         drop(connection);
         let ledger_before = migration_ledger(&pool).await;
-        assert_eq!(ledger_before.len(), 4);
+        assert_eq!(ledger_before.len(), 5);
         assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0001");
         assert!(matches!(
             epoch::verify(&pool).await,
@@ -2015,9 +2053,10 @@ fn no_old_to_new_data_migrator_exists() {
             "0001_context_platform.sql",
             "0002_context_restart_and_excerpt.sql",
             "0003_one_time_login_ledger.sql",
-            "0004_context_delivery_dependencies.sql"
+            "0004_context_delivery_dependencies.sql",
+            "0005_session_source_control.sql"
         ],
-        "epoch 3 has the released baseline and three forward migrations"
+        "epoch 3 has the released baseline and four forward migrations"
     );
 
     let down: Vec<_> = names

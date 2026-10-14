@@ -652,6 +652,14 @@ async fn run_authority_generation(
         );
         spawn_governed_named(
             &mut tasks,
+            "source-cleanup",
+            gate.clone(),
+            generation,
+            health.policy_ready.clone(),
+            crate::source_control::run(runtime.pool.clone(), work_stop_rx.clone()),
+        );
+        spawn_governed_named(
+            &mut tasks,
             "knowledge-index",
             gate.clone(),
             generation,

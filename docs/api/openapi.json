@@ -6589,7 +6589,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationView"
+                  "$ref": "#/components/schemas/PublicOperationView"
                 }
               }
             }
@@ -10426,6 +10426,291 @@
           },
           "404": {
             "description": "No such session or event in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/events/{event_id}/forget": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "forget_session_source",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceControlBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exact change replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Governed applied or pending change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid precondition or reason",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current Cedar denied source control",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable Session or source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source changed or key conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/events/{event_id}/source-control": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "get_session_source_control",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Applied logical removal and cleanup state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceControlView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current Cedar denied the Session read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable Session or applied source control",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/events/{event_id}/withdraw": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "withdraw_session_source",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceControlBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exact change replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Governed applied or pending change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid precondition or reason",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current Cedar denied source control",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable Session or source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source changed or key conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -22569,6 +22854,19 @@
           }
         }
       },
+      "PublicOperationView": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/OperationView",
+            "description": "Existing controlled Skill validation."
+          },
+          {
+            "$ref": "#/components/schemas/SourceCleanupOperationView",
+            "description": "Governed source cleanup."
+          }
+        ],
+        "description": "Kind-specific public operation contract. Source cleanup does not require a\nSkill version or a retained Session body to inspect its content-free receipt."
+      },
       "PublishConfigurationBody": {
         "type": "object",
         "description": "Publish another complete immutable version.",
@@ -24723,6 +25021,136 @@
             "type": "string",
             "format": "uuid",
             "description": "Principal that last advanced the current pointer."
+          }
+        }
+      },
+      "SourceCleanupOperationView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SourceControlView",
+            "description": "Source removal and physical cleanup are separate states."
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind",
+              "operation_version"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable Synveda operation id."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "source_cleanup"
+                ]
+              },
+              "operation_version": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Domain contract version.",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "Safe durable source cleanup receipt."
+      },
+      "SourceControlBody": {
+        "type": "object",
+        "description": "Exact source precondition, reviewed through VedaFlow.",
+        "required": [
+          "expected_payload_hash",
+          "reason"
+        ],
+        "properties": {
+          "expected_payload_hash": {
+            "type": "string",
+            "description": "Public redacted payload hash previously inspected."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Human reason, 1–1000 characters, never copied to ordinary audit."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SourceControlView": {
+        "type": "object",
+        "description": "Logical removal and physical cleanup are independently observable.",
+        "required": [
+          "event_id",
+          "removed_at",
+          "change_id",
+          "operation_id",
+          "mode",
+          "cleanup_state",
+          "cleanup_stage"
+        ],
+        "properties": {
+          "change_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Applied VedaFlow source-control effect."
+          },
+          "cleanup_stage": {
+            "type": "string",
+            "enum": [
+              "retention_check",
+              "delivery_copies",
+              "capture_copies",
+              "command_copies",
+              "knowledge_copies",
+              "embedding_copies",
+              "relation_metadata",
+              "source_descriptors",
+              "session_copies"
+            ]
+          },
+          "cleanup_state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed",
+              "blocked",
+              "cancelled",
+              "dead_lettered"
+            ]
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable content-free hold/failure reason."
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Original event address."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "withdraw",
+              "forget"
+            ]
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Durable source-cleanup operation."
+          },
+          "removed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Committed logical removal time."
           }
         }
       },

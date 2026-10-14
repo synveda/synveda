@@ -99,7 +99,7 @@ pub async fn create(
     let member_ids = member_ids(&body.members)?;
     let tenant_id = auth.tenant.id;
     let id = GroupId::new();
-    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = synveda_store::rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let identities = member_identity_ids(&mut tx, tenant_id, &member_ids).await?;
     let group = access::sync_directory_group(
         &mut tx,
@@ -137,7 +137,7 @@ pub async fn replace(
     let id = parse_id(&id)?;
     let tenant_id = auth.tenant.id;
     let member_ids = member_ids(&body.members)?;
-    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = synveda_store::rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let current = scim_group(&mut tx, tenant_id, id).await?;
     let identities = member_identity_ids(&mut tx, tenant_id, &member_ids).await?;
     let display_name = body
@@ -180,7 +180,7 @@ pub async fn patch(
     let id = parse_id(&id)?;
     super::require_patch_schema(&body)?;
     let tenant_id = auth.tenant.id;
-    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = synveda_store::rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let current = scim_group(&mut tx, tenant_id, id).await?;
     let current_members = scim_members(&mut tx, tenant_id, id).await?;
     let mut members: BTreeSet<DirectoryUserId> =
@@ -270,7 +270,7 @@ pub async fn delete(
 ) -> Result<Response, ScimError> {
     let id = parse_id(&id)?;
     let tenant_id = auth.tenant.id;
-    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = synveda_store::rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let current = scim_group(&mut tx, tenant_id, id).await?;
     let resource_id = current_directory_resource(&current)?.to_owned();
     let group = access::retire_directory_group(&mut tx, tenant_id, DIRECTORY_SOURCE, &resource_id)

@@ -41,6 +41,53 @@ use crate::spool::{self, Spool};
 /// events is delivered as five requests rather than one refusal.
 const MAX_BATCH: usize = 200;
 
+/// Inspect the independently governed source-control receipt.
+pub async fn source_status(
+    profile: &str,
+    session: synveda_types::SessionId,
+    event: synveda_types::SessionEventId,
+) -> Result<(), String> {
+    let (api, _) = Api::connect(profile).await?;
+    let view = api
+        .get(&format!(
+            "/v1/sessions/{session}/events/{event}/source-control"
+        ))
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&view).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+/// Submit an exact source intent; the server owns Cedar, review and cleanup.
+pub async fn control_source(
+    profile: &str,
+    session: synveda_types::SessionId,
+    event: synveda_types::SessionEventId,
+    mode: &str,
+    expected_hash: &str,
+    reason: &str,
+    key: &str,
+) -> Result<(), String> {
+    if !matches!(mode, "withdraw" | "forget") {
+        return Err("source mode must be withdraw or forget".to_owned());
+    }
+    let (api, _) = Api::connect(profile).await?;
+    let result: serde_json::Value = api
+        .post_idempotent_as(
+            &format!("/v1/sessions/{session}/events/{event}/{mode}"),
+            Some(json!({"expected_payload_hash":expected_hash,"reason":reason})),
+            key,
+        )
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
 /// What the gateway answers for one event of an append.
 #[derive(Deserialize)]
 struct AppendedEvent {

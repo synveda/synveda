@@ -8,11 +8,12 @@ import {
   forwardDigestFindings,
   loginDigestFindings,
   deliveryDigestFindings,
+  sourceControlDigestFindings,
   databaseBootstrapFindings,
   retiredProductionFindings,
 } from "./check-context-hard-cut.mjs";
 
-test("the released epoch-3 baseline and three forward migrations are byte-pinned", () => {
+test("the released epoch-3 baseline and four forward migrations are byte-pinned", () => {
   const baseline = readFileSync(
     new URL("../crates/synveda-store/migrations/0001_context_platform.sql", import.meta.url),
     "utf8",
@@ -41,6 +42,9 @@ test("the released epoch-3 baseline and three forward migrations are byte-pinned
     /explicit migration and compatibility decision/u,
   );
   const delivery = readFileSync(new URL("../crates/synveda-store/migrations/0004_context_delivery_dependencies.sql", import.meta.url), "utf8");
+  const sourceControl = readFileSync(new URL("../crates/synveda-store/migrations/0005_session_source_control.sql", import.meta.url), "utf8");
+  assert.deepEqual(sourceControlDigestFindings(sourceControl), []);
+  assert.match(sourceControlDigestFindings(`${sourceControl}\n-- changed after the pin\n`).join("\n"), /explicit migration and compatibility decision/u);
   assert.deepEqual(deliveryDigestFindings(delivery), []);
   assert.match(deliveryDigestFindings(`${delivery}\n-- changed after the pin\n`).join("\n"), /explicit migration and compatibility decision/u);
 });

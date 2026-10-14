@@ -180,6 +180,8 @@ const COVERED: &[&str] = &[
     // VedaFlow effects and content-free erasure/index evidence. Neither
     // provenance, governance state nor the fact that erasure happened may
     // become a cross-tenant side channel.
+    // MEM-8 / ADR-0146: immutable source intent remains tenant-bound.
+    "knowledge_change_headers",
     "knowledge_changes",
     // CPR-37 (ADR-0096): even the existence, cardinality and classification
     // of a conflict can reveal denied Knowledge, so sets and exact members
@@ -192,6 +194,8 @@ const COVERED: &[&str] = &[
     "knowledge_items_history",
     "knowledge_relations",
     "knowledge_revision_embeddings",
+    "knowledge_revision_headers",
+    "knowledge_revision_source_headers",
     "knowledge_revision_sources",
     "knowledge_revisions",
     "knowledge_sources",
@@ -239,6 +243,11 @@ const COVERED: &[&str] = &[
     "skill_version_files",
     "skill_versions",
     "skills",
+    // MEM-8 / ADR-0146: suppression and cleanup proofs disclose tenant state.
+    "source_cleanup_targets",
+    "source_dependencies",
+    "source_event_addresses",
+    "source_suppressions",
     // CPR-45 (ADR-0102): the provider group may win initial administrator
     // bootstrap once. The marker is tenant-bound and insert-only so removing
     // that grant cannot silently reopen an IdP-controlled authority path.
@@ -255,6 +264,7 @@ const COVERED: &[&str] = &[
     "tool_server_versions",
     "tool_servers",
     "tool_test_runs",
+    "unproven_context_deliveries",
     "vedaflow_commit_parents",
     "vedaflow_commits",
     "vedaflow_objects",

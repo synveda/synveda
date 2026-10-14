@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update operation_attempts set state='retry_scheduled',safe_error_code='lease_expired',completed_at=clock_timestamp()\n        where tenant_id=$1 and operation_id=$2 and state='running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "de623fa12a45e862465e8c5df01d9fa599fad2f31cec83216055aa69400ce6b6"
+}

@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select s.removed_at,t.change_id,t.operation_id,o.state,t.phase,o.last_error_code,\n        (s.forget_change_id is not null) as \"forgetting!\"\n        from source_suppressions s join source_cleanup_targets t on t.tenant_id=s.tenant_id and t.event_id=s.event_id\n        join durable_operations o on o.tenant_id=t.tenant_id and o.id=t.operation_id\n        where s.tenant_id=$1 and s.session_id=$2 and s.event_id=$3\n        order by (t.change_id=coalesce(s.forget_change_id,s.change_id)) desc,o.created_at desc limit 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "removed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "change_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "operation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "phase",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "forgetting!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "406fb4aac0a699438c6ef58a624a8b9850516ed510320ccec0bf79b287f473ee"
+}

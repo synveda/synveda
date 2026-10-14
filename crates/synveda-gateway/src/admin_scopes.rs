@@ -311,7 +311,7 @@ async fn create_scope(
     body: &CreateScopeBody,
     claim: &crate::idempotency::Claim,
 ) -> Result<Scope> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     // Creation is decided at the parent — the scope it would land in
     // (CPR-4's shape). Ownership check first: a foreign parent is a 404,
     // never a policy denial oracle.
@@ -502,7 +502,7 @@ pub(crate) async fn update(
     let result = async {
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
         let scope = found(
             scopes::get(&mut *tx, tenant_id, scope_id).await?,
             tenant_id,

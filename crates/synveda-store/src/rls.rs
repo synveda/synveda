@@ -53,6 +53,24 @@ pub async fn begin_tenant_tx(
     pool: &PgPool,
     tenant_id: TenantId,
 ) -> Result<Transaction<'static, Postgres>> {
+    begin_admission_tx(pool, tenant_id, false).await
+}
+
+/// Begins an exclusive tenant admission transaction before authorization and
+/// domain locks. Invalidation writers must choose this at entry, never upgrade
+/// a shared transaction. No provider/network wait may hold either gate.
+pub async fn begin_tenant_write_tx(
+    pool: &PgPool,
+    tenant_id: TenantId,
+) -> Result<Transaction<'static, Postgres>> {
+    begin_admission_tx(pool, tenant_id, true).await
+}
+
+async fn begin_admission_tx(
+    pool: &PgPool,
+    tenant_id: TenantId,
+    exclusive: bool,
+) -> Result<Transaction<'static, Postgres>> {
     let mut tx = pool.begin().await.map_err(|err| Error::Storage {
         message: format!("begin tenant transaction: {err}"),
     })?;
@@ -65,6 +83,36 @@ pub async fn begin_tenant_tx(
     .map_err(|err| Error::Storage {
         message: format!("set tenant GUC: {err}"),
     })?;
+    sqlx::query!("select set_config('lock_timeout', '5s', true)")
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| Error::Storage {
+            message: format!("bound tenant admission lock wait: {err}"),
+        })?;
+    // Hash collisions can only add contention, never weaken tenant isolation.
+    // Acquire before reading product state so a waiter gets a fresh snapshot
+    // on its subsequent READ COMMITTED statements.
+    if exclusive {
+        sqlx::query!(
+            "select pg_advisory_xact_lock(hashtextextended('synveda.admission:' || $1::text, 0))",
+            tenant_id.as_uuid().to_string(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| Error::Storage {
+            message: format!("acquire exclusive tenant admission: {err}"),
+        })?;
+    } else {
+        sqlx::query!(
+            "select pg_advisory_xact_lock_shared(hashtextextended('synveda.admission:' || $1::text, 0))",
+            tenant_id.as_uuid().to_string(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| Error::Storage {
+            message: format!("acquire shared tenant admission: {err}"),
+        })?;
+    }
     Ok(tx)
 }
 

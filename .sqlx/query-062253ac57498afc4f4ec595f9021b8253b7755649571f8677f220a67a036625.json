@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update durable_operations set state='dead_lettered',completed_at=clock_timestamp(),updated_at=clock_timestamp(),\n            lease_owner=null,lease_expires_at=null,next_attempt_at=null,last_error_code='lease_expired_retry_exhausted'\n            where tenant_id=$1 and id=$2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "062253ac57498afc4f4ec595f9021b8253b7755649571f8677f220a67a036625"
+}

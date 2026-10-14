@@ -10,7 +10,7 @@ use crate::app::AppState;
 
 static SNAPSHOT_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
-pub(super) async fn current(
+pub(crate) async fn current(
     state: &AppState,
     tx: &mut PgConnection,
     tenant: TenantId,

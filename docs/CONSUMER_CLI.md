@@ -307,3 +307,54 @@ setup/lifecycle and both new and older plugin/MCP mutations. Do not remove its
 `operations.lock` file: the OS releases the lock on process exit. Direct vendor
 commands and editors do not participate; keep them idle during configuration
 edits. Changed files are refused when detected before atomic replacement.
+
+
+## Session source controls in the current source build
+
+The source build adds governed withdrawal and forgetting for one inspected
+Session event. Obtain the event id and full `payload_hash` from the authorized
+Session event API or console payload inspector. Use the public API through the
+CLI; an installed v0.4.5 release does not contain these new commands.
+
+```sh
+synveda session source control SESSION_UUID EVENT_UUID \
+  --mode withdraw --expected-payload-hash ORIGINAL_PUBLIC_HASH \
+  --reason 'Retire this source evidence' --idempotency-key SOURCE_REQUEST_KEY
+synveda session source status SESSION_UUID EVENT_UUID
+```
+
+Reuse the same key and body on a retry. A pending review removes nothing. An
+applied withdrawal makes the event and its dependent copies unavailable to
+future delivery while retaining their storage contents. Its durable receipt is
+`blocked` with `source_retained`. Upgrade the same source to `--mode forget`
+with a new request key to queue physical cleanup; forgetting also requires the
+current KnowledgeForget permission. Review and apply use the existing VedaFlow
+workflow and current approval matrix.
+
+Inspect logical removal separately from cleanup: `removed_at`, `mode`,
+`cleanup_state`, `cleanup_stage` and the content-free `error_code` are returned
+by source status. `/v1/operations/OPERATION_UUID` retains the addressed receipt,
+including after a later Forget upgrade or Session disposal. It requires current
+SessionRead authority reconstructed from the immutable source address. No
+Skill-specific target or plaintext is included.
+
+The worker checks holds before scrubbing and processes at most 100 indexed
+targets per page. Retries retain suppression; a live fifth attempt may finish
+multiple pages. A hold reports `blocked/retention_hold` and leaves content
+inaccessible but retained. A legacy nonempty delivery without producer proof
+reports `blocked/lineage_unproven`. Blocked operations remain terminal; further
+retention disposal belongs to the owning workflow and does not make the source
+eligible again. This build does not silently clear a permanent source suppression.
+
+Suppression binds the original tenant/Session, client-event-id digest and raw
+payload hash. Retrying the original event, changing only its client id, or
+returning an old worker result cannot restore its old derivatives. A separate
+new Session and deliberately authored new Knowledge are separate governed
+materializations; they do not restore the old source, receipts or approvals.
+Independent later revisions remain available. Flat multi-source revisions are
+withheld when any supporting root is withdrawn because that model cannot prove
+which statement remains independently supported.
+
+Already admitted responses may finish after removal. External harness history,
+independent exports, remote Git history and backups follow their own retention
+contracts. Source controls do not retract bytes already delivered there.

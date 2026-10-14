@@ -73,7 +73,7 @@ use crate::workspaces::{ApiErrorBody, Decidable, subject};
 mod dependencies;
 mod graph;
 mod health;
-mod policy_snapshot;
+pub(crate) mod policy_snapshot;
 mod replay;
 
 pub use health::{
@@ -1026,7 +1026,7 @@ async fn prepare_context_in_tx(
         })
         .collect();
     let mut plan = composition_plan(
-        &state.pdp,
+        input.pdp.as_deref().unwrap_or(&state.pdp),
         &AuthoredReadInputs {
             principal: &input.principal,
             chain: &own_chain,
@@ -2512,6 +2512,36 @@ async fn plan_context_run(
     let prepared = prepare_context(state, tenant_id, session_id).await?;
     metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "authorize")
         .record(started.elapsed().as_secs_f64());
+    let query = body.query.as_deref().map(query_text).transpose()?;
+
+    let embed_started = std::time::Instant::now();
+    let semantic_allowed = state.embedder.method() != "tei"
+        || prepared
+            .configuration
+            .document
+            .permits_provider(ExternalProvider::Tei);
+    let (mut vector, mut semantic_degradation) = if semantic_allowed {
+        semantic_vector(state, query.as_deref()).await
+    } else {
+        (None, Some("semantic_provider_disallowed".to_owned()))
+    };
+    metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "embed")
+        .record(embed_started.elapsed().as_secs_f64());
+    let retrieve_started = std::time::Instant::now();
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let frozen = policy_snapshot::current(state, &mut tx, tenant_id).await?;
+    let state = &frozen;
+    let prepared = prepare_context_in_tx(state, &mut tx, tenant_id, session_id).await?;
+    if state.embedder.method() == "tei"
+        && !prepared
+            .configuration
+            .document
+            .permits_provider(ExternalProvider::Tei)
+    {
+        vector = None;
+        semantic_degradation = Some("semantic_provider_disallowed".to_owned());
+    }
+    let embedding_model = vector.as_ref().map(|_| state.embedder.model().to_owned());
     let requested = body.budget_tokens;
     let budget = requested
         .map(|value| value.min(prepared.plan.budget_tokens))
@@ -2528,25 +2558,6 @@ async fn plan_context_run(
         }
     };
     let at = Utc::now();
-    let query = body.query.as_deref().map(query_text).transpose()?;
-
-    let embed_started = std::time::Instant::now();
-    let semantic_allowed = state.embedder.method() != "tei"
-        || prepared
-            .configuration
-            .document
-            .permits_provider(ExternalProvider::Tei);
-    let (vector, mut semantic_degradation) = if semantic_allowed {
-        semantic_vector(state, query.as_deref()).await
-    } else {
-        (None, Some("semantic_provider_disallowed".to_owned()))
-    };
-    metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "embed")
-        .record(embed_started.elapsed().as_secs_f64());
-    let embedding_model = vector.as_ref().map(|_| state.embedder.model().to_owned());
-
-    let retrieve_started = std::time::Instant::now();
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let semantic = vector
         .as_deref()
         .map(|value| (state.embedder.model(), value));
@@ -2618,6 +2629,7 @@ async fn plan_context_run(
     let mut checkpoint_event_id = None;
     let mut restart_coverage = None;
     let mut restart_event_ids = Vec::new();
+    let mut restart_source_event_ids = Vec::new();
     if body.restart {
         if prepared.session.client_name != "claude-code" {
             return Err(Error::Invalid {
@@ -2629,14 +2641,16 @@ async fn plan_context_run(
         {
             Ok(_) => {
                 let allowance = budget.saturating_div(2).min(2_048);
-                let (text, id, coverage, tail_ids) = crate::sessions::checkpoint::restart_context(
-                    &mut tx, tenant_id, session_id, allowance, &counter,
-                )
-                .await?;
+                let (text, id, coverage, tail_ids, source_ids) =
+                    crate::sessions::checkpoint::restart_context(
+                        &mut tx, tenant_id, session_id, allowance, &counter,
+                    )
+                    .await?;
                 restart_text = text;
                 checkpoint_event_id = id.filter(|_| !restart_text.is_empty());
                 restart_coverage = Some(coverage);
                 restart_event_ids = tail_ids;
+                restart_source_event_ids = source_ids;
             }
             Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
                 restart_coverage = Some("unavailable".to_owned());
@@ -2802,6 +2816,7 @@ async fn plan_context_run(
             checkpoint: checkpoint_event_id,
             tail: &restart_event_ids,
             restart_contributed: !restart_text.is_empty(),
+            restart_source_event_ids: &restart_source_event_ids,
             authored_budget: authored_request.budget_tokens,
             sensitivity_ceiling: body.max_sensitivity,
             counter: &counter,

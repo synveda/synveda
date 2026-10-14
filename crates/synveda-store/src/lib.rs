@@ -72,6 +72,7 @@ pub mod runtime_role;
 pub mod scopes;
 pub mod sessions;
 pub mod skills;
+pub mod source_control;
 pub mod tenant_secrets;
 pub mod tenants;
 pub mod tool_registry;
@@ -148,6 +149,9 @@ pub async fn check_migration_compatibility(
             }
             epoch::MigrationPreflight::Login => {
                 runtime_role::verify_login_migrator_read_only_connection(&mut compatibility, database_roles).await?;
+            }
+            epoch::MigrationPreflight::Delivery => {
+                runtime_role::verify_delivery_migrator_read_only_connection(&mut compatibility,database_roles).await?;
             }
             epoch::MigrationPreflight::Current => {
                 runtime_role::verify_migrator_read_only_connection(
@@ -251,6 +255,11 @@ async fn migrate_locked_connection(
             }
             epoch::MigrationPreflight::PendingStampLogin | epoch::MigrationPreflight::Login => {
                 runtime_role::verify_login_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampDelivery
+            | epoch::MigrationPreflight::Delivery => {
+                runtime_role::verify_delivery_migrator_connection(&mut authority, database_roles)
                     .await?;
             }
             epoch::MigrationPreflight::PendingStampCurrent | epoch::MigrationPreflight::Current => {

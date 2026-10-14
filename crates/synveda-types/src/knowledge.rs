@@ -27,7 +27,7 @@ use crate::{
     CaptureCandidateId, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId,
     ConflictMemberId, ConflictSetId, DurableOperationId, Error, KnowledgeItemId,
     KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, Result,
-    ScopeId, Sensitivity, SessionEventId, TenantId,
+    ScopeId, Sensitivity, SessionEventId, SessionId, TenantId,
 };
 
 /// Longest Knowledge title, in characters.
@@ -1172,6 +1172,8 @@ fn knowledge_has_negation(value: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KnowledgeCommandKind {
+    /// Govern withdrawal or forgetting of exact Session evidence.
+    ControlSource,
     /// Create a stable aggregate and first revision.
     Create,
     /// Append a new immutable revision.
@@ -1195,6 +1197,7 @@ pub enum KnowledgeCommandKind {
 impl KnowledgeCommandKind {
     /// Every command kind in storage order.
     pub const ALL: &'static [Self] = &[
+        Self::ControlSource,
         Self::Create,
         Self::Edit,
         Self::Verify,
@@ -1210,6 +1213,7 @@ impl KnowledgeCommandKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::ControlSource => "control_source",
             Self::Create => "create",
             Self::Edit => "edit",
             Self::Verify => "verify",
@@ -1285,6 +1289,22 @@ pub struct KnowledgeExpectedRevision {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum KnowledgeCommand {
+    /// Withdraw exact Session evidence; forgetting additionally authorizes
+    /// durable service-owned plaintext cleanup. This never erases a whole item.
+    ControlSource {
+        /// Original Session identity.
+        session_id: SessionId,
+        /// Original immutable source event.
+        event_id: SessionEventId,
+        /// Actual Session governing scope, independently verified at apply.
+        scope_id: ScopeId,
+        /// Public payload hash the caller inspected.
+        expected_payload_hash: String,
+        /// Closed removal contract.
+        mode: SourceControlMode,
+        /// Bounded human reason; cleanup retains only its hash.
+        reason: String,
+    },
     /// Create an aggregate.
     Create {
         /// Stable item id.
@@ -1427,6 +1447,7 @@ impl KnowledgeCommand {
     #[must_use]
     pub const fn kind(&self) -> KnowledgeCommandKind {
         match self {
+            Self::ControlSource { .. } => KnowledgeCommandKind::ControlSource,
             Self::Create { .. } => KnowledgeCommandKind::Create,
             Self::Edit { .. } => KnowledgeCommandKind::Edit,
             Self::Verify { .. } => KnowledgeCommandKind::Verify,
@@ -1467,7 +1488,28 @@ impl KnowledgeCommand {
                 .map(|input| input.item_id)
                 .chain(std::iter::once(*result_item_id))
                 .collect(),
-            Self::ResolveConflict { .. } => Vec::new(),
+            Self::ResolveConflict { .. } | Self::ControlSource { .. } => Vec::new(),
+        }
+    }
+}
+
+/// Distinct logical source-removal and physical cleanup contracts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceControlMode {
+    /// Retain source plaintext under its retention contract, withhold delivery.
+    Withdraw,
+    /// Withhold immediately and queue governed service-owned erasure.
+    Forget,
+}
+
+impl SourceControlMode {
+    /// Stable wire and storage name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Withdraw => "withdraw",
+            Self::Forget => "forget",
         }
     }
 }

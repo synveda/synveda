@@ -1649,7 +1649,7 @@ async fn decide_candidate(
         },
     };
 
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     // A decision intent is durable, but it is not cached authority: repeat the
     // exact source decision immediately before finalising it.
     let (fresh_allowed, fresh_resource, fresh_action) = authorize_source(

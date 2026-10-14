@@ -64,9 +64,11 @@ pub(crate) async fn resolve(
         sensitivity,
         entries,
     } = *requested;
-    let pack = state
-        .pdp
-        .effective(tenant_id, Resource::Scope(target.id), &input.context());
+    let pack = input.pdp.as_deref().unwrap_or(&state.pdp).effective(
+        tenant_id,
+        Resource::Scope(target.id),
+        &input.context(),
+    );
     // The floor is merged inside `resolve`; there is no way to ask for a
     // requirement without it (ADR-0032 decision 4).
     let mut requirement = pack.approvals.resolve(asset, sensitivity, target.kind);

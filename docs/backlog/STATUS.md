@@ -328,20 +328,20 @@ work. ADR-0144 adds private all-mode delivery dependencies at additive head
 `0004`, exact authored/Skill replay and addressed item-erasure copies. The expanded
 31-scenario suite, prior-head migration/authority checks, genuine pgvector
 0.8.2–0.8.6 profiles and private-manifest RLS/tamper checks pass. Complete source
-withdrawal, admission ordering and durable cleanup remain open. ADR-0145 adds
-exact frozen stored-policy replay before process refresh; independent readers
-retain their receipts. Inbound reconciliation, structured
-second-client handoff, procedure learning and the integrated domain demo are
-not delivered. Next implement a separately governed Session-event withdrawal
-with exact source locks, permanent suppression and all derivative disclosure/
-Capture fences; no external credential blocks that local work.
-The exact implementation checkpoint is
-`6a8d2c7bf632a6bedeec76341d9e088f6916b0d7`; the follow-up changes only this
-inventory and MEM-8 documentation. Rebuilt 31-scenario product and ten-case demo
-qualification passes after invalidating shared-baseline Cargo artifacts. The
-open brief records modified areas, passing/failing commands, source identity,
-actual blocker and the next executable source-withdrawal step. Full A–H remains
-unfinished; no new persistent procedure-learning path is enabled.
+withdrawal, admission ordering and durable cleanup were open at that checkpoint.
+ADR-0145 adds exact frozen stored-policy replay before process refresh.
+Accepted ADR-0146 at additive head `0005` now qualifies Session withdrawal and
+Forget, permanent scoped suppression, the tenant admission gate and bounded
+owner-fenced cleanup. Fourteen source-control cases, 21 ContextRun cases,
+7 lifecycle cases, 8 Capture cases, the 66-case ordinary RLS suite, actual
+prior-head lifecycle and genuine supported vector profiles pass. The 31-scenario
+product evaluation, generated contracts, 264 console cases/build, fresh SQLx,
+strict Clippy and fast/dependency gates pass. The MEM-8 brief records measured
+catalogue identities and the next executable artifact-root step.
+ImportArtifact lineage/suppression remains open before inbound reconciliation,
+structured second-client handoff, procedure learning and the integrated domain
+demo. No new persistent procedure-learning producer is enabled. No external
+credential blocks the next local increment; full A–H remains unfinished.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
 OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL

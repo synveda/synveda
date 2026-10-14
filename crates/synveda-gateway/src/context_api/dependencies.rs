@@ -29,6 +29,7 @@ pub(super) struct Manifest {
     checkpoint: Option<EventDependency>,
     tail: Vec<EventDependency>,
     restart_contributed: bool,
+    restart_source_event_ids: Vec<SessionEventId>,
     authored: Vec<AuthoredDependency>,
     channels: Vec<ChannelDependency>,
     skills: Vec<SkillDependency>,
@@ -107,6 +108,7 @@ pub(super) struct Inputs<'a> {
     pub checkpoint: Option<SessionEventId>,
     pub tail: &'a [SessionEventId],
     pub restart_contributed: bool,
+    pub restart_source_event_ids: &'a [SessionEventId],
     pub authored_budget: u32,
     pub sensitivity_ceiling: Option<Sensitivity>,
     pub counter: &'a TokenCounter,
@@ -165,7 +167,7 @@ impl Manifest {
             }
         }
         let manifest = Self {
-            schema_version: 1,
+            schema_version: 2,
             block_hash: inputs.block_hash.to_owned(),
             configuration_hash: inputs.configuration_hash.to_owned(),
             knowledge,
@@ -174,6 +176,7 @@ impl Manifest {
             checkpoint,
             tail,
             restart_contributed: inputs.restart_contributed,
+            restart_source_event_ids: inputs.restart_source_event_ids.to_vec(),
             authored: authored_dependencies(inputs.authored),
             channels: channel_dependencies(inputs.authored),
             skills: skill_dependencies(inputs.authored),
@@ -190,13 +193,14 @@ impl Manifest {
     }
 
     fn encode(&self) -> Result<(Value, String)> {
-        if self.schema_version != 1
+        if self.schema_version != 2
             || self.knowledge.len() + self.candidates.len() > 1024
             || self.graph.len() > 2048
             || self.authored.len() > 1024
             || self.channels.len() > 64
             || self.skills.len() > 32
             || self.tail.len() > 16
+            || self.restart_source_event_ids.len() > 256
             || self
                 .knowledge
                 .iter()
@@ -284,7 +288,7 @@ impl Manifest {
         let Some(stored) = context_dependencies::for_run(&mut *tx, tenant, run.id).await? else {
             return Ok(None);
         };
-        if stored.dependency_version != 1 || manifest_hash(&stored.manifest) != stored.manifest_hash
+        if stored.dependency_version != 2 || manifest_hash(&stored.manifest) != stored.manifest_hash
         {
             return Ok(None);
         }
@@ -454,9 +458,9 @@ mod tests {
     use serde_json::json;
 
     fn empty() -> Value {
-        json!({"schema_version":1, "block_hash":"a".repeat(64), "configuration_hash":"b".repeat(64),
+        json!({"schema_version":2, "block_hash":"a".repeat(64), "configuration_hash":"b".repeat(64),
             "knowledge":[], "candidates":[], "graph":[], "checkpoint":null, "tail":[],
-            "restart_contributed":false, "authored":[], "channels":[], "skills":[],
+            "restart_contributed":false,"restart_source_event_ids":[], "authored":[], "channels":[], "skills":[],
             "authored_budget":1500, "sensitivity_ceiling":null, "counter":"legacy"})
     }
 
@@ -476,7 +480,7 @@ mod tests {
         value["counter"] = json!("external_model");
         assert!(serde_json::from_value::<Manifest>(value).is_err());
         for (key, mutation) in [
-            ("schema_version", json!(2)),
+            ("schema_version", json!(3)),
             ("block_hash", json!("plaintext is not a digest")),
             (
                 "tail",

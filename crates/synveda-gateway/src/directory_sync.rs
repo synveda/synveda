@@ -389,7 +389,7 @@ async fn record_presence(
             family_name: record.family_name.clone(),
             work_email: record.work_email.clone(),
         };
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant.id).await?;
         let existing =
             directory::user_by_external_id(&mut *tx, tenant.id, connector, &record.external_id)
                 .await?;
@@ -406,7 +406,7 @@ async fn record_presence(
         seen.push(user.id);
 
         reconcile::reconcile_runtime(state, tenant, source, &user).await?;
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant.id).await?;
         let projected = directory::user(&mut *tx, tenant.id, connector, user.id).await?;
         tx.commit().await.map_err(storage)?;
         if let Some(identity_id) = projected.and_then(|row| row.identity_id) {
@@ -439,7 +439,7 @@ async fn sync_groups(
     enumeration: &Enumeration,
     identities_by_external_id: &HashMap<String, IdentityId>,
 ) -> Result<(usize, usize)> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant.id).await?;
     let mut seen_resources = HashSet::new();
     for record in &enumeration.snapshot().groups {
         let existing = access::directory_group_by_resource(
@@ -560,7 +560,7 @@ async fn seal(
         family_name: user.family_name.clone(),
         work_email: user.work_email.clone(),
     };
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant.id).await?;
     let deactivated = directory::replace_user(&mut tx, tenant.id, user.id, &attributes).await?;
     tx.commit().await.map_err(storage)?;
     if let Some(deactivated) = deactivated {

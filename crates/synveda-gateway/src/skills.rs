@@ -813,11 +813,16 @@ async fn prepare_bundle(
             });
         }
     }
-    let effective = state.pdp.effective(
-        tenant,
-        Resource::Scope(authorization.target.id),
-        &authorization.input.context(),
-    );
+    let effective = authorization
+        .input
+        .pdp
+        .as_deref()
+        .unwrap_or(&state.pdp)
+        .effective(
+            tenant,
+            Resource::Scope(authorization.target.id),
+            &authorization.input.context(),
+        );
     let security = scan_security(&bundle.files).await?;
     if security.blocked_by(&effective.scan) {
         let worst = security.worst().unwrap_or(ScanSeverity::Critical);
@@ -1505,11 +1510,16 @@ async fn verify_bundle_effect(
         });
     }
 
-    let effective = state.pdp.effective(
-        tenant,
-        Resource::Scope(governing_scope_id),
-        &authorization.input.context(),
-    );
+    let effective = authorization
+        .input
+        .pdp
+        .as_deref()
+        .unwrap_or(&state.pdp)
+        .effective(
+            tenant,
+            Resource::Scope(governing_scope_id),
+            &authorization.input.context(),
+        );
     let scan = scan_security(&bundle.files).await?;
     if scan.blocked_by(&effective.scan) {
         return Err(Error::Invalid {
@@ -1633,7 +1643,7 @@ async fn change_result(
 /// Apply an approved Skill change. Called only by the generic proposal route.
 pub async fn apply_reviewed(state: &AppState, id: ProposalId) -> Result<SkillMutationResult> {
     let tenant = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     let proposal = vedaflow::proposals::read(&mut tx, tenant, id)
         .await?
         .filter(|proposal| {
@@ -1779,7 +1789,7 @@ async fn submit_bundle(
         ));
     }
 
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     let (scope_id, name, sensitivity, supplied, provenance, expected) =
         match (install, update, skill_id) {
             (Some(body), None, None) => (
@@ -1894,7 +1904,7 @@ async fn submit_binding_command(
             Json(result(state, ProposalId::from_uuid(id)).await?.into()),
         ));
     }
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     let authorization = authorize_command(state, &mut tx, tenant, &command).await?;
     let created = open_command(
         state,

@@ -1599,8 +1599,10 @@ pub(crate) async fn append_events(
         // which is the same resolution the `SessionWrite` decision above
         // performed. `SessionWrite` is not `PolicyAssign`, so there is no
         // skip-self divergence to worry about.
-        let config = state
+        let config = input
             .pdp
+            .as_deref()
+            .unwrap_or(&state.pdp)
             .effective(
                 tenant_id,
                 Resource::Scope(session.scope_id),

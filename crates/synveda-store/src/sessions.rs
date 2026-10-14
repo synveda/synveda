@@ -867,13 +867,24 @@ pub async fn append_events(
         });
     }
 
+    for event in events {
+        crate::source_control::append_available(
+            conn,
+            tenant_id,
+            session_id,
+            &event.client_event_id,
+            &event.source_payload_hash,
+        )
+        .await?;
+    }
+
     // The head, read *under* the lock above — which is the whole reason the
     // lock is taken. `max + 1` is only safe while nobody else can be choosing
     // a position for this session at the same time.
     let head = sqlx::query_scalar!(
         r#"
         select coalesce(max(sequence), 0) as "head!"
-        from session_events
+        from source_event_addresses
         where tenant_id = $1 and session_id = $2
         "#,
         tenant_id.as_uuid(),
@@ -1351,10 +1362,13 @@ pub async fn withheld_event_ids(
     let ids: Vec<Uuid> = event_ids.iter().map(|id| id.as_uuid()).collect();
     let rows = sqlx::query_scalar!(
         r#"
-        select event_id
+        select event_id as "event_id!"
         from session_event_quarantine
         where tenant_id = $1 and session_id = $2
           and event_id = any($3::uuid[]) and state <> 'released'
+        union
+        select event_id from source_suppressions
+        where tenant_id=$1 and session_id=$2 and event_id=any($3::uuid[])
         "#,
         tenant_id.as_uuid(),
         session_id.as_uuid(),

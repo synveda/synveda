@@ -768,6 +768,15 @@ pub async fn complete_batch(
         });
     }
     let session_id = batch.session_id.expect("session source checked above");
+    // The frozen count is part of the immutable input. Restrictive source RLS
+    // may hide a withdrawn event; an empty extractor result cannot turn that
+    // shortened input into a successful batch.
+    let admitted = frozen_events(&mut *conn, batch.tenant_id, batch.id).await?;
+    if admitted.len() != batch.event_count as usize {
+        return Err(Error::Conflict {
+            message: "Capture source is unavailable".to_owned(),
+        });
+    }
     for candidate in candidates {
         validate_knowledge_principal(
             candidate.proposed_owner_principal_id.as_deref(),
@@ -923,7 +932,7 @@ pub async fn fail_batch(
     error_code: &str,
 ) -> Result<CaptureBatch> {
     validate_lease_owner(lease_owner)?;
-    let terminal = batch.attempts >= MAX_CAPTURE_ATTEMPTS;
+    let terminal = batch.attempts >= MAX_CAPTURE_ATTEMPTS || error_code == "source_unavailable";
     let row = sqlx::query_as!(
         BatchRow,
         r#"

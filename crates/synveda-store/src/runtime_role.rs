@@ -834,6 +834,7 @@ enum CatalogueHead {
     V043,
     Forward,
     Login,
+    Delivery,
     Current,
 }
 
@@ -2005,7 +2006,11 @@ async fn verify_application_acl(
                         and object.relowner = migrator.oid
                         and object.relkind in ('r', 'p')
                         and acl.grantor = migrator.oid
-                        and acl.privilege_type = 'UPDATE'
+                        and (acl.privilege_type = 'UPDATE' or (
+                          acl.privilege_type = 'INSERT'
+                          and object.relname = 'source_cleanup_targets'
+                          and attribute.attname in ('tenant_id','operation_id','event_id','change_id','input_hash')
+                        ))
                         and not acl.is_grantable
                       )
                  )
@@ -2299,7 +2304,8 @@ async fn verify_application_acl_fingerprint(
             (APPLICATION_ACL_FINGERPRINT, APPLICATION_ACL_ROW_COUNT)
         }
         CatalogueHead::Login => (LOGIN_ACL_FINGERPRINT, LOGIN_ACL_ROW_COUNT),
-        CatalogueHead::Current => (DELIVERY_ACL_FINGERPRINT, DELIVERY_ACL_ROW_COUNT),
+        CatalogueHead::Delivery => (DELIVERY_ACL_FINGERPRINT, DELIVERY_ACL_ROW_COUNT),
+        CatalogueHead::Current => (SOURCE_ACL_FINGERPRINT, SOURCE_ACL_ROW_COUNT),
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -2448,7 +2454,8 @@ async fn verify_routine_catalog_fingerprint(
         CatalogueHead::Forward | CatalogueHead::Login => {
             (ROUTINE_CATALOG_FINGERPRINT, ROUTINE_CATALOG_ROW_COUNT)
         }
-        CatalogueHead::Current => (DELIVERY_ROUTINE_FINGERPRINT, DELIVERY_ROUTINE_ROW_COUNT),
+        CatalogueHead::Delivery => (DELIVERY_ROUTINE_FINGERPRINT, DELIVERY_ROUTINE_ROW_COUNT),
+        CatalogueHead::Current => (SOURCE_ROUTINE_FINGERPRINT, SOURCE_ROUTINE_ROW_COUNT),
     };
     let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2599,7 +2606,8 @@ async fn verify_trigger_catalog_fingerprint(
         CatalogueHead::Forward | CatalogueHead::Login => {
             (TRIGGER_CATALOG_FINGERPRINT, TRIGGER_CATALOG_ROW_COUNT)
         }
-        CatalogueHead::Current => (DELIVERY_TRIGGER_FINGERPRINT, DELIVERY_TRIGGER_ROW_COUNT),
+        CatalogueHead::Delivery => (DELIVERY_TRIGGER_FINGERPRINT, DELIVERY_TRIGGER_ROW_COUNT),
+        CatalogueHead::Current => (SOURCE_TRIGGER_FINGERPRINT, SOURCE_TRIGGER_ROW_COUNT),
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2784,10 +2792,11 @@ async fn verify_rls_catalog_fingerprint(
             (RLS_CATALOG_FINGERPRINT, RLS_CATALOG_ROW_COUNT)
         }
         CatalogueHead::Login => (LOGIN_RLS_CATALOG_FINGERPRINT, LOGIN_RLS_CATALOG_ROW_COUNT),
-        CatalogueHead::Current => (
+        CatalogueHead::Delivery => (
             DELIVERY_RLS_CATALOG_FINGERPRINT,
             DELIVERY_RLS_CATALOG_ROW_COUNT,
         ),
+        CatalogueHead::Current => (SOURCE_RLS_CATALOG_FINGERPRINT, SOURCE_RLS_CATALOG_ROW_COUNT),
     };
     let actual = rls_catalog_fingerprint(connection, count).await?;
     if actual != expected {
@@ -3348,6 +3357,16 @@ pub(crate) async fn verify_login_migrator_connection(
     verify_selected_migrator_catalog(connection, database_roles).await
 }
 
+/// Exact 0004 catalogue proof before Session source control.
+pub(crate) async fn verify_delivery_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Delivery).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
 /// Pre-migration migrator proof used by deployment preflight.
 pub async fn verify_migrator_prerequisites_connection(
     connection: &mut PgConnection,
@@ -3408,6 +3427,16 @@ pub(crate) async fn verify_login_migrator_read_only_connection(
 ) -> Result<VerifiedRuntimeRole> {
     verify_read_only_primary_connection(connection).await?;
     verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Login).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Exact 0004 catalogue proof before Session source control.
+pub(crate) async fn verify_delivery_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Delivery).await?;
     verify_selected_migrator_catalog(connection, database_roles).await
 }
 
@@ -3585,6 +3614,22 @@ async fn verify_selected_migrator_catalog(
     verify_no_global_or_default_acl(connection, std::slice::from_ref(&facts.name)).await?;
     Ok(VerifiedRuntimeRole { name: facts.name })
 }
+
+const SOURCE_ACL_FINGERPRINT: &str =
+    "dabe07a6c9cb563fd6c8e32eb878a3e9dcf1357df43eeffff2f49964c0f00a8b";
+const SOURCE_ACL_ROW_COUNT: usize = 383;
+
+const SOURCE_ROUTINE_FINGERPRINT: &str =
+    "a9293d4ed4135a39929b0c24423c9c60b0d6df52502b22c15e9e84ac375eb47b";
+const SOURCE_ROUTINE_ROW_COUNT: usize = 83;
+
+const SOURCE_TRIGGER_FINGERPRINT: &str =
+    "626789db3036c5c5c1f563cd599bd109885b8acfa764cebe72267c2e40b06f49";
+const SOURCE_TRIGGER_ROW_COUNT: usize = 138;
+
+const SOURCE_RLS_CATALOG_FINGERPRINT: &str =
+    "99d158d3906a9e574c7a5238f70ded0ddfccf139f29df3d2c28ddc6d87053a6b";
+const SOURCE_RLS_CATALOG_ROW_COUNT: usize = 113;
 
 #[cfg(test)]
 mod tests {

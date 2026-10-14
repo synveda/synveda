@@ -1404,7 +1404,7 @@ pub(crate) async fn apply_reviewed(
     id: ProposalId,
 ) -> Result<ConfigurationMutationResult> {
     let tenant = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     let proposal = vedaflow::proposals::read(&mut tx, tenant, id)
         .await?
         .filter(|proposal| {
@@ -1479,7 +1479,7 @@ async fn submit_command(
             Json(result(state, ProposalId::from_uuid(id)).await?.into()),
         ));
     }
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     let authorization = authorize_command(state, &mut tx, tenant, &command).await?;
     let opened = open_command(state, &mut tx, tenant, &command, &authorization, &claim).await;
     match opened {

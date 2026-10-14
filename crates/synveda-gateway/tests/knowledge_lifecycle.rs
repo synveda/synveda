@@ -2458,6 +2458,31 @@ async fn forget_scrubs_later_context_import_and_conflict_references() {
     )
     .await
     .expect("record fixture context run");
+    let source_ids = stored::revision_source_ids(&mut *tx, tenant.id, target_revision_id)
+        .await
+        .unwrap();
+    let manifest = json!({"schema_version":2,
+        "block_hash":blake3::hash(context_plaintext.as_bytes()).to_hex().to_string(),
+        "configuration_hash":effective.content_hash,
+        "knowledge":[{"item_id":target_id,"revision_id":target_revision_id,"content_hash":target.revision.content_hash,"source_ids":source_ids}],
+        "candidates":[],"graph":[],"checkpoint":null,"tail":[],"restart_contributed":false,"restart_source_event_ids":[],
+        "authored":[],"channels":[],"skills":[],"authored_budget":0,"sensitivity_ceiling":null,"counter":"legacy"});
+    let mut proof_hash = blake3::Hasher::new();
+    proof_hash.update(b"synveda.context.delivery.v1\0");
+    proof_hash.update(
+        synveda_types::json::canonicalise(&manifest)
+            .to_string()
+            .as_bytes(),
+    );
+    synveda_store::context_dependencies::record(
+        &mut tx,
+        tenant.id,
+        run_id,
+        proof_hash.finalize().to_hex().as_str(),
+        &manifest,
+    )
+    .await
+    .unwrap();
     context_store::insert_candidate(
         &mut tx,
         tenant.id,

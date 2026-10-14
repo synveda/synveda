@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select event_id,session_id,scope_id,workspace_id,project_id,sequence,client_event_id_digest,source_payload_hash,payload_hash\n      from source_event_addresses where tenant_id=$1 and event_id=$2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "sequence",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "client_event_id_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "source_payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "payload_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "05c0214117191fbb169d0398d67f5174062c291cdd01c409caf4758932a7790b"
+}

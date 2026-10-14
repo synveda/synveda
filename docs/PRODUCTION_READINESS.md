@@ -713,14 +713,15 @@ unchanged six zero-tolerance trust gates. ADR-0144 adds private all-mode
 delivery proof, authored/Skill replay and addressed item-erasure copies at
 additive head `0004`; prior-head, authority/RLS and supported pgvector profile
 checks pass. ADR-0145 adds exact immutable stored-policy replay before process
-refresh; source admission serialization remains open. The latest run measured 716/487
+refresh. ADR-0146 adds Session withdrawal/Forget, permanent suppression and
+a tenant admission boundary at additive head `0005`; fourteen source-control
+cases, current RLS, prior-head migration and bounded cleanup acceptance pass.
+ImportArtifact roots remain open. The earlier paired fixture measured 716/487
 off/conservative rendered-text tokens in one existing optional-content fixture
 and 12/12 declared restart facts at four-sample local p95 32.929792 ms. Absolute
 token counts include generated wrapper identifiers. Source health is limited
 to visible trace observations: synchronized source coverage, physical cleanup,
-acknowledged delivery and model use/outcome remain unknown. Full scoped source
-withdrawal, final admission ordering,
-inbound reconciliation, structured second-client handoff and verified procedure
+acknowledged delivery and model use/outcome remain unknown. Artifact source control, inbound reconciliation, structured second-client handoff and verified procedure
 learning are open under MEM-8/9, CTX-6 and SKIL-6. This changes no production or
 native-client qualification claim; the exact increment evidence and next action
 are in [MEM-8](backlog/MEM-8.md#first-implemented-increment-2026-10-14).

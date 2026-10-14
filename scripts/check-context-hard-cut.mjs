@@ -26,6 +26,9 @@ const EPOCH_3_LOGIN_SHA256 =
 const EPOCH_3_DELIVERY_SHA256 =
   "6339e5518f08807ce7cf509e9c2e1644fb9536ebe17d2c0b4677062f41247631";
 
+const EPOCH_3_SOURCE_SHA256 =
+  "f170d4a295844c83ca5a33723586aaa0c68a10c88217afdea7f1f884672d7ab4";
+
 const RETIRED_PATTERNS = [
   ["global runtime route", /\/v1\/(?:observe|inject|recall)\b/giu],
   ["retired aggregate or adapter DTO", /\b(?:RecordKind|RoleBinding|RecallSweepRequest|RecallIdsRequest|SearchIndex)\b/gu],
@@ -163,6 +166,13 @@ export function deliveryDigestFindings(source) {
   ];
 }
 
+export function sourceControlDigestFindings(source) {
+  const actual = createHash("sha256").update(source).digest("hex");
+  return actual === EPOCH_3_SOURCE_SHA256 ? [] : [
+    `0005_session_source_control.sql SHA-256 changed (${actual}); MEM-8 / ADR-0146 requires an explicit migration and compatibility decision`,
+  ];
+}
+
 export function databaseBootstrapFindings(source) {
   const findings = [];
   const normalized = source.toLowerCase().replace(/\s+/gu, " ").trim();
@@ -226,7 +236,7 @@ export function main() {
     const source = readFileSync(path, "utf8");
     findings.push(...retiredProductionFindings(source, relative(ROOT, path)));
     for (const match of source.matchAll(/migrations\/(\d{4}_[A-Za-z0-9_-]+\.sql)/gu)) {
-      if (!["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql"].includes(match[1])) {
+      if (!["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql", "0005_session_source_control.sql"].includes(match[1])) {
         const line = source.slice(0, match.index).split("\n").length;
         findings.push(`${relative(ROOT, path)}:${line}: references absent migration ${match[1]}`);
       }
@@ -239,8 +249,8 @@ export function main() {
 
   const migrationDir = join(ROOT, "crates/synveda-store/migrations");
   const migrations = readdirSync(migrationDir).filter((name) => name.endsWith(".sql")).sort();
-  if (JSON.stringify(migrations) !== JSON.stringify(["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql"])) {
-    findings.push(`migration inventory is ${migrations.join(", ") || "empty"}; expected the released epoch-3 baseline and three forward migrations`);
+  if (JSON.stringify(migrations) !== JSON.stringify(["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql", "0005_session_source_control.sql"])) {
+    findings.push(`migration inventory is ${migrations.join(", ") || "empty"}; expected the released epoch-3 baseline and four forward migrations`);
   }
   const baseline = readFileSync(join(migrationDir, "0001_context_platform.sql"), "utf8");
   findings.push(...baselineFindings(baseline));
@@ -254,6 +264,9 @@ export function main() {
   const delivery = readFileSync(join(migrationDir, "0004_context_delivery_dependencies.sql"), "utf8");
   findings.push(...retiredProductionFindings(delivery, "0004_context_delivery_dependencies.sql").filter((finding) => finding.includes("retired table")));
   findings.push(...deliveryDigestFindings(delivery));
+  const sourceControl = readFileSync(join(migrationDir, "0005_session_source_control.sql"), "utf8");
+  findings.push(...sourceControlDigestFindings(sourceControl));
+  findings.push(...retiredProductionFindings(sourceControl, "0005_session_source_control.sql").filter((finding) => finding.includes("retired table")));
   const databaseBootstrap = readFileSync(
     join(ROOT, "deploy/compose/postgres/synveda-database-bootstrap"),
     "utf8",
@@ -281,7 +294,7 @@ export function main() {
 
   if (findings.length > 0) fail(findings);
   console.log(
-    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline and three forward migrations, ` +
+    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline and four forward migrations, ` +
       "deployment-owned vector + btree_gin bootstrap, current OpenAPI and SQLx metadata",
   );
 }

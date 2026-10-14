@@ -519,7 +519,7 @@ function PayloadBody({ eventId, sessionId }: { eventId: string; sessionId: strin
         <div className="diagnostic">
           <p className="muted">
             {event.client_event_id} · sequence {event.sequence} · schema v
-            {event.event_schema_version} · blake3 {event.payload_hash.slice(0, 16)}…
+            {event.event_schema_version} · payload hash <code>{event.payload_hash}</code>
           </p>
           <pre>{JSON.stringify(event.payload, null, 2)}</pre>
         </div>

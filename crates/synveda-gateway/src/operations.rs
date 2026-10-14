@@ -95,6 +95,37 @@ pub struct OperationView {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
+/// Kind-specific public operation contract. Source cleanup does not require a
+/// Skill version or a retained Session body to inspect its content-free receipt.
+#[derive(Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum PublicOperationView {
+    /// Existing controlled Skill validation.
+    SkillValidation(OperationView),
+    /// Governed source cleanup.
+    SourceCleanup(SourceCleanupOperationView),
+}
+
+/// Safe durable source cleanup receipt.
+#[derive(Serialize, ToSchema)]
+pub struct SourceCleanupOperationView {
+    /// Stable Synveda operation id.
+    #[schema(value_type=String,format="uuid")]
+    pub id: DurableOperationId,
+    /// Closed source operation family.
+    #[schema(schema_with=source_operation_kind_schema)]
+    pub kind: String,
+    /// Domain contract version.
+    pub operation_version: u16,
+    /// Source removal and physical cleanup are separate states.
+    #[serde(flatten)]
+    pub source_control: crate::source_control::SourceControlView,
+}
+
+fn source_operation_kind_schema() -> utoipa::openapi::schema::Object {
+    string_enum([OperationKind::SourceCleanup.as_str()].into_iter())
+}
+
 impl TryFrom<StoredSkillValidationOperation> for OperationView {
     type Error = Error;
 
@@ -421,7 +452,7 @@ pub(crate) async fn list(
     tag = "operations",
     params(("id" = String, Path, format = "uuid")),
     responses(
-        (status = 200, description = "Operation", body = OperationView),
+        (status = 200, description = "Operation", body = PublicOperationView),
         (status = 404, description = "Absent or denied", body = ApiErrorBody)
     ),
     security(("bearer" = []))
@@ -434,6 +465,35 @@ pub(crate) async fn get(
     let result = async {
         let tenant = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        if let Some(address) = synveda_store::source_control::operation_source(&mut tx,tenant,operation_id).await? {
+            let scope = scopes::get(&mut *tx,tenant,ScopeId::from_uuid(address.scope_id)).await?
+                .ok_or_else(||operation_not_found(operation_id))?;
+            let session = synveda_types::SessionId::from_uuid(address.session_id);
+            let input = authz::gather(&state,&mut tx,Some(&scope),
+                address.project_id.map_or_else(||AnchorSelection::workspace(synveda_types::WorkspaceId::from_uuid(address.workspace_id)),
+                    |id|AnchorSelection::project(ProjectId::from_uuid(id))),
+                vec![ResourceEntity::Session{id:session,scope_id:scope.id}]).await?;
+            let allowed = match authz::decide(&state,&input,Action::SessionRead,Resource::Session(session)) {
+                Ok(allowed)=>allowed,
+                Err(error @ Error::PolicyDenied{..})=>{
+                    drop(tx);audit::record_rejection(&state,"get_operation",&error).await;
+                    return Err(operation_not_found(operation_id));
+                }
+                Err(error)=>return Err(error),
+            };
+            let status=synveda_store::source_control::operation_status(&mut tx,tenant,operation_id).await?
+                .ok_or_else(||operation_not_found(operation_id))?;
+            let lifecycle:OperationState=status.state.parse()?;
+            let view=SourceCleanupOperationView {id:operation_id,kind:OperationKind::SourceCleanup.as_str().to_owned(),operation_version:1,
+                source_control:crate::source_control::SourceControlView {event_id:synveda_types::SessionEventId::from_uuid(address.event_id),
+                    removed_at:status.removed_at,change_id:synveda_types::ProposalId::from_uuid(status.change_id),operation_id,
+                    mode:if status.forgetting {"forget"}else{"withdraw"}.to_owned(),cleanup_state:lifecycle.as_str().to_owned(),
+                    cleanup_stage:crate::source_control::stage(status.phase)?.to_owned(),error_code:status.last_error_code}};
+            audit::record(&mut tx,tenant,AuditAction::AuthzDecision,Resource::Session(session).to_string(),Outcome::Allow,
+                json!({"op":"operations.get","operation_id":operation_id,"authz":audit::decision_context(Action::SessionRead,&allowed)})).await?;
+            commit(tx).await?;
+            return Ok(Json(PublicOperationView::SourceCleanup(view)));
+        }
         let stored = store::read_skill_validation_operation(&mut *tx, tenant, operation_id)
             .await?
             .ok_or_else(|| operation_not_found(operation_id))?;
@@ -452,7 +512,7 @@ pub(crate) async fn get(
         )
         .await?;
         commit(tx).await?;
-        Ok(Json(OperationView::try_from(stored)?))
+        Ok(Json(PublicOperationView::SkillValidation(OperationView::try_from(stored)?)))
     }
     .await;
     crate::response::finish(&state, "get_operation", result).await

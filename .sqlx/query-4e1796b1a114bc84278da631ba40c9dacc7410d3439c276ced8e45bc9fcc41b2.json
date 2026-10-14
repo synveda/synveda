@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into context_run_delivery_dependencies\n              (tenant_id, context_run_id, dependency_version, manifest_hash, manifest)\n           values ($1, $2, 2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4e1796b1a114bc84278da631ba40c9dacc7410d3439c276ced8e45bc9fcc41b2"
+}

@@ -4876,6 +4876,12 @@ export type ProposalTimelineEvent = {
   };
 
 /**
+ * Kind-specific public operation contract. Source cleanup does not require a
+ * Skill version or a retained Session body to inspect its content-free receipt.
+ */
+export type PublicOperationView = OperationView | SourceCleanupOperationView;
+
+/**
  * Publish another complete immutable version.
  */
 export type PublishConfigurationBody = {
@@ -5953,6 +5959,64 @@ export type SkillView = {
      * Principal that last advanced the current pointer.
      */
     updated_by: string;
+  };
+
+/**
+ * Safe durable source cleanup receipt.
+ */
+export type SourceCleanupOperationView = SourceControlView & {
+    /**
+     * Stable Synveda operation id.
+     */
+    id: string;
+    kind: "source_cleanup";
+    /**
+     * Domain contract version.
+     */
+    operation_version: number;
+  };
+
+/**
+ * Exact source precondition, reviewed through VedaFlow.
+ */
+export type SourceControlBody = {
+    /**
+     * Public redacted payload hash previously inspected.
+     */
+    expected_payload_hash: string;
+    /**
+     * Human reason, 1–1000 characters, never copied to ordinary audit.
+     */
+    reason: string;
+  };
+
+/**
+ * Logical removal and physical cleanup are independently observable.
+ */
+export type SourceControlView = {
+    /**
+     * Applied VedaFlow source-control effect.
+     */
+    change_id: string;
+    cleanup_stage: "retention_check" | "delivery_copies" | "capture_copies" | "command_copies" | "knowledge_copies" | "embedding_copies" | "relation_metadata" | "source_descriptors" | "session_copies";
+    cleanup_state: "pending" | "running" | "succeeded" | "failed" | "blocked" | "cancelled" | "dead_lettered";
+    /**
+     * Stable content-free hold/failure reason.
+     */
+    error_code?: string | null;
+    /**
+     * Original event address.
+     */
+    event_id: string;
+    mode: "withdraw" | "forget";
+    /**
+     * Durable source-cleanup operation.
+     */
+    operation_id: string;
+    /**
+     * Committed logical removal time.
+     */
+    removed_at: string;
   };
 
 /**
@@ -7475,7 +7539,7 @@ export type Operations = {
   readonly get_operation: {
     readonly path: "/v1/operations/{id}";
     readonly method: "GET";
-    readonly response: OperationView;
+    readonly response: PublicOperationView;
   };
   /**
    * Request idempotent cancellation of one operation.
@@ -7922,6 +7986,25 @@ export type Operations = {
     readonly path: "/v1/sessions/{session_id}/events/{event_id}";
     readonly method: "GET";
     readonly response: SessionEventView;
+  };
+  readonly forget_session_source: {
+    readonly path: "/v1/sessions/{session_id}/events/{event_id}/forget";
+    readonly method: "POST";
+    readonly body: SourceControlBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  readonly get_session_source_control: {
+    readonly path: "/v1/sessions/{session_id}/events/{event_id}/source-control";
+    readonly method: "GET";
+    readonly response: SourceControlView;
+  };
+  readonly withdraw_session_source: {
+    readonly path: "/v1/sessions/{session_id}/events/{event_id}/withdraw";
+    readonly method: "POST";
+    readonly body: SourceControlBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
   };
   /**
    * `POST /v1/sessions/{session_id}/knowledge-evaluation` — diagnostics lens.
@@ -8491,6 +8574,9 @@ export const OPERATIONS = {
   end_session: { path: "/v1/sessions/{session_id}/end", method: "POST" },
   append_session_events: { path: "/v1/sessions/{session_id}/events", method: "POST" },
   get_session_event: { path: "/v1/sessions/{session_id}/events/{event_id}", method: "GET" },
+  forget_session_source: { path: "/v1/sessions/{session_id}/events/{event_id}/forget", method: "POST", idempotent: true },
+  get_session_source_control: { path: "/v1/sessions/{session_id}/events/{event_id}/source-control", method: "GET" },
+  withdraw_session_source: { path: "/v1/sessions/{session_id}/events/{event_id}/withdraw", method: "POST", idempotent: true },
   evaluate_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-evaluation", method: "POST" },
   query_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-query", method: "POST" },
   get_session_timeline: { path: "/v1/sessions/{session_id}/timeline", method: "GET" },

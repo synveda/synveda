@@ -288,14 +288,42 @@ async fn verified_checkpoint(
         parsed.sources.len() as i64,
     )
     .await?;
-    if held.len() != parsed.sources.len()
-        || !held.iter().zip(&parsed.sources).all(|(held, source)| {
-            held.id == source.event_id
-                && held.sequence == source.sequence
-                && held.payload_hash == source.payload_hash
-        })
-    {
-        return Ok(None);
+    for source in &parsed.sources {
+        if let Some(event) = held.iter().find(|event| event.id == source.event_id) {
+            if event.sequence != source.sequence || event.payload_hash != source.payload_hash {
+                return Ok(None);
+            }
+        } else {
+            // Coverage is bookkeeping, not copied evidence. A permanently
+            // suppressed coverage-only event may be checked by its immutable
+            // header; retention loss without suppression still fails closed.
+            if parsed
+                .labelled_excerpts
+                .iter()
+                .any(|excerpt| excerpt.source_event_id == source.event_id)
+            {
+                return Ok(None);
+            }
+            let address = synveda_store::source_control::address(
+                &mut *tx,
+                tenant_id,
+                session_id,
+                source.event_id,
+            )
+            .await?;
+            if !address.is_some_and(|address| {
+                address.sequence == source.sequence && address.payload_hash == source.payload_hash
+            }) || synveda_store::source_control::available(
+                &mut *tx,
+                tenant_id,
+                "session_event",
+                source.event_id.as_uuid(),
+            )
+            .await?
+            {
+                return Ok(None);
+            }
+        }
     }
     for excerpt in &parsed.labelled_excerpts {
         if excerpt.assertion_class != "user_authored"
@@ -382,6 +410,7 @@ pub(crate) async fn restart_context(
     Option<synveda_types::SessionEventId>,
     String,
     Vec<synveda_types::SessionEventId>,
+    Vec<synveda_types::SessionEventId>,
 )> {
     const MAX_TAIL_EVENTS: usize = 16;
     const MAX_RESTART_BYTES: usize = 16 * 1024;
@@ -443,11 +472,12 @@ pub(crate) async fn restart_context(
         checkpoint_id.map_or_else(|| "none".to_owned(), |id| id.to_string()),
     );
     if header.len() > MAX_RESTART_BYTES || counter.count(&header) > budget {
-        return Ok((String::new(), checkpoint_id, status, Vec::new()));
+        return Ok((String::new(), checkpoint_id, status, Vec::new(), Vec::new()));
     }
     let header_bytes = header.len();
     let mut rendered = header;
     let mut tail_ids = Vec::new();
+    let mut delivered_roots = Vec::new();
     if let Some(chain) = checkpoint {
         for (checkpoint, parsed) in chain.iter().rev() {
             for evidence in parsed.labelled_excerpts.iter().rev() {
@@ -465,6 +495,7 @@ pub(crate) async fn restart_context(
                     && counter.count(&format!("{rendered}{line}")) <= budget
                 {
                     rendered.push_str(&line);
+                    delivered_roots.push(evidence.source_event_id);
                 }
             }
         }
@@ -493,10 +524,13 @@ pub(crate) async fn restart_context(
         {
             rendered.push_str(&line);
             tail_ids.push(event.id);
+            delivered_roots.push(event.id);
         }
     }
     if rendered.len() == header_bytes {
-        return Ok((String::new(), None, status, Vec::new()));
+        return Ok((String::new(), None, status, Vec::new(), Vec::new()));
     }
-    Ok((rendered, checkpoint_id, status, tail_ids))
+    delivered_roots.sort_unstable();
+    delivered_roots.dedup();
+    Ok((rendered, checkpoint_id, status, tail_ids, delivered_roots))
 }

@@ -421,6 +421,17 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
     };
     let session_id = capture_session_id(&batch)?;
     let events = capture::frozen_events(&mut *claim_tx, tenant_id, batch.id).await?;
+    if i32::try_from(events.len()).ok() != Some(batch.event_count) {
+        claim_tx.commit().await.map_err(commit_error)?;
+        return fail_attempt(
+            deps,
+            config,
+            &batch,
+            "source_unavailable",
+            synveda_store::source_control::unavailable(),
+        )
+        .await;
+    }
     let runtime_configuration = exact_configuration(&mut claim_tx, &batch).await;
     let runtime_configuration = match runtime_configuration {
         Ok(document) => document,
@@ -429,7 +440,11 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
             return fail_attempt(deps, config, &batch, "configuration_invalid", error).await;
         }
     };
-    if !runtime_configuration.capture.enabled {
+    let admitted_configuration =
+        configuration::effective_at_scope(&mut claim_tx, tenant_id, batch.scope_id)
+            .await?
+            .document;
+    if !runtime_configuration.capture.enabled || !admitted_configuration.capture.enabled {
         claim_tx.commit().await.map_err(commit_error)?;
         return fail_attempt(
             deps,
@@ -445,7 +460,8 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         .await;
     }
     if let Some(provider) = extractor_provider(deps.extractor.method())
-        && !runtime_configuration.permits_provider(provider)
+        && (!runtime_configuration.permits_provider(provider)
+            || !admitted_configuration.permits_provider(provider))
     {
         claim_tx.commit().await.map_err(commit_error)?;
         return fail_attempt(
@@ -477,12 +493,17 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         None,
     )
     .await?;
-    if !session_decision.allowed {
+    let session_read_allowed = read_session_evidence(deps, &mut claim_tx, &batch).await?;
+    if !session_decision.allowed || !session_read_allowed {
         let failed = capture::fail_batch(
             &mut claim_tx,
             &batch,
             &config.lease_owner,
-            "session_write_denied",
+            if session_decision.allowed {
+                "session_read_denied"
+            } else {
+                "session_write_denied"
+            },
         )
         .await?;
         append_batch_event(&mut claim_tx, &failed, &session_decision, "failed", 0, 0).await?;
@@ -643,6 +664,30 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
     }
 
     let mut write = rls::begin_tenant_tx(&deps.pool, tenant_id).await?;
+    let current_events = capture::frozen_events(&mut *write, tenant_id, batch.id).await?;
+    if current_events.len() != events.len()
+        || !current_events
+            .iter()
+            .zip(&events)
+            .all(|(current, original)| {
+                current.id == original.id
+                    && current.payload == original.payload
+                    && current.event_type == original.event_type
+                    && current.ordinal == original.ordinal
+            })
+    {
+        let failed = capture::fail_batch(
+            &mut write,
+            &batch,
+            &config.lease_owner,
+            "source_unavailable",
+        )
+        .await?;
+        append_system_failure(&mut write, &failed, "source_unavailable").await?;
+        write.commit().await.map_err(commit_error)?;
+        lease.stop().await;
+        return Ok(ProcessOutcome::FailedAttempt);
+    }
     let fresh_session_decision = decide_exact(
         deps,
         &mut write,
@@ -659,12 +704,26 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         None,
     )
     .await?;
-    if !fresh_session_decision.allowed {
+    let session_read_allowed = read_session_evidence(deps, &mut write, &batch).await?;
+    let current_configuration =
+        configuration::effective_at_scope(&mut write, tenant_id, batch.scope_id)
+            .await?
+            .document;
+    let configuration_allowed = current_configuration.capture.enabled
+        && extractor_provider(deps.extractor.method())
+            .is_none_or(|provider| current_configuration.permits_provider(provider));
+    if !fresh_session_decision.allowed || !session_read_allowed || !configuration_allowed {
         let failed = capture::fail_batch(
             &mut write,
             &batch,
             &config.lease_owner,
-            "session_write_revoked",
+            if !fresh_session_decision.allowed {
+                "session_write_revoked"
+            } else if !session_read_allowed {
+                "session_read_revoked"
+            } else {
+                "configuration_revoked"
+            },
         )
         .await?;
         append_batch_event(&mut write, &failed, &fresh_session_decision, "failed", 0, 0).await?;
@@ -688,6 +747,17 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
             candidate.proposed_owner_principal_id = Some(batch.principal_id.clone());
         }
     }
+    proposed.retain(|candidate| {
+        candidate.content.confidence_permille
+            >= i32::from(current_configuration.capture.minimum_confidence_permille)
+    });
+    proposed.truncate(
+        usize::try_from(current_configuration.capture.maximum_candidates_per_batch).map_err(
+            |_| Error::Invalid {
+                message: "Capture candidate bound exceeds platform capacity".to_owned(),
+            },
+        )?,
+    );
     let mut visible_match_count = 0usize;
     for candidate in &mut proposed {
         candidate.matches = visible_matches(deps, &mut write, &batch, candidate).await?;
@@ -1099,7 +1169,61 @@ async fn decide_exact(
         sensitivity,
         relaxations: &[],
     };
-    deps.pdp.authorize(&principal, action, resource, &context)
+    let sources = synveda_store::policy_packs::for_snapshot(tx, tenant_id).await?;
+    static SNAPSHOT_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+    let slot = SNAPSHOT_SLOTS.try_acquire().map_err(|_| Error::Conflict {
+        message: "Capture policy snapshot unavailable".to_owned(),
+    })?;
+    let pdp = Arc::clone(&deps.pdp);
+    let snapshot = tokio::task::spawn_blocking(move || {
+        let _slot = slot;
+        pdp.frozen_snapshot(
+            tenant_id,
+            sources.iter().map(|pack| {
+                (
+                    pack.name.as_str(),
+                    pack.version,
+                    pack.source.as_str(),
+                    &pack.config,
+                )
+            }),
+        )
+    })
+    .await
+    .map_err(|_| Error::Conflict {
+        message: "Capture policy snapshot unavailable".to_owned(),
+    })??;
+    snapshot.authorize(&principal, action, resource, &context)
+}
+
+async fn read_session_evidence(
+    deps: &Deps,
+    tx: &mut sqlx::PgConnection,
+    batch: &CaptureBatch,
+) -> Result<bool> {
+    let session = capture_session_id(batch)?;
+    let decision = decide_exact(
+        deps,
+        tx,
+        batch.tenant_id,
+        &batch.principal_id,
+        batch.scope_id,
+        batch.project_id,
+        Action::SessionRead,
+        Resource::Session(session),
+        vec![ResourceEntity::Session {
+            id: session,
+            scope_id: batch.scope_id,
+        }],
+        None,
+    )
+    .await?;
+    synveda_audit::append(tx,batch.tenant_id,&AuditEvent {occurred_at:Utc::now(),actor:Actor::system(ACTOR_COMPONENT),
+        action:AuditAction::AuthzDecision,resource:Resource::Session(session).to_string(),
+        outcome:if decision.allowed {Outcome::Allow}else{Outcome::Deny},
+        payload:json!({"batch_id":batch.id,"attempt":batch.attempts,"authz":{"action":Action::SessionRead.as_str(),
+            "pack":decision.pack_name,"pack_version":decision.pack_version,"allowed":decision.allowed,"determining":decision.determining}}),trace_id:None}).await?;
+    Ok(decision.allowed)
 }
 
 async fn fail_attempt(

@@ -133,7 +133,7 @@ pub(crate) async fn reconcile_runtime(
     source: DirectorySource,
     user: &DirectoryUser,
 ) -> Result<Reconciled> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant.id).await?;
     // Correspondence is one tenant-wide predicate across provider rows. Take
     // its fence before identity placement can mint principal grants; login
     // adoption uses the same directory -> principal lock order.
@@ -172,7 +172,7 @@ pub async fn create_and_reconcile(
     attributes: &UserAttributes,
 ) -> Result<DirectoryUser> {
     let runtime = state.directory_runtime();
-    let mut tx = rls::begin_tenant_tx(&runtime.pool, tenant.id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&runtime.pool, tenant.id).await?;
     directory::lock_correspondence(&mut tx, tenant.id).await?;
     let created = directory::create_user(&mut tx, id, tenant.id, attributes).await?;
     let (outcome, structural) = reconcile_locked(&mut tx, tenant, source, &created).await?;

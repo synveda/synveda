@@ -323,7 +323,7 @@ async fn publish_inner(
     let body = body(payload)?;
     validate(&body)?;
     let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let node = found(
         scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
@@ -921,7 +921,7 @@ async fn rollback_inner(
     let to: vedaflow::CommitHash = body.to_commit.parse()?;
 
     let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let node = found(
         scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
@@ -1106,7 +1106,7 @@ async fn pin_inner(
     let commit_hash: vedaflow::CommitHash = body.commit.parse()?;
 
     let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let node = found(
         scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
@@ -1202,7 +1202,7 @@ async fn unpin_inner(
     let channel = channel_of(body.asset, body.channel)?;
 
     let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let node = found(
         scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,

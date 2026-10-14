@@ -87,6 +87,8 @@ impl ActorKind {
 /// stands alone only for denials and allowed admin-plane reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditAction {
+    /// One governed, fenced source cleanup page committed.
+    SourceCleanupPage,
     /// A PDP decision with no semantic event of its own: every denial, and
     /// every allowed admin-plane read.
     AuthzDecision,
@@ -523,7 +525,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 99] = [
+    pub const ALL: [AuditAction; 100] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -590,6 +592,7 @@ impl AuditAction {
         AuditAction::ProposalRejected,
         AuditAction::ProposalWithdrawn,
         AuditAction::KnowledgeChangeOpened,
+        AuditAction::SourceCleanupPage,
         AuditAction::KnowledgeChangeApplied,
         AuditAction::KnowledgeChangeRejected,
         AuditAction::KnowledgeConflictOpened,
@@ -696,6 +699,7 @@ impl AuditAction {
             AuditAction::ProposalRejected => "vedaflow.proposal.rejected",
             AuditAction::ProposalWithdrawn => "vedaflow.proposal.withdrawn",
             AuditAction::KnowledgeChangeOpened => "knowledge.change.opened",
+            AuditAction::SourceCleanupPage => "source.cleanup.page",
             AuditAction::KnowledgeChangeApplied => "knowledge.change.applied",
             AuditAction::KnowledgeChangeRejected => "knowledge.change.rejected",
             AuditAction::KnowledgeConflictOpened => "knowledge.conflict.opened",

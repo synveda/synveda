@@ -43,7 +43,7 @@ The requested implementation matrix records the existing contracts and gaps:
 | B: health/diagnosis | CPR-21 Inspector and feedback delivered | CPR-21/40: authorized findings, actionable links, stage diagnosis and unknown outcomes | Distinguish uncaptured evidence, retrieval miss, qualifier loss and wrong downstream answer without denied counts | ContextRun tests, console tests, `make eval-product` |
 | C: values/applicability | CPR-37 conflict review/freshness delivered; lexical classifier retains both propositions | CPR-37: bounded typed revision metadata, significant values/case, applicability overlap | Retry 3 vs 5 is reviewable contradiction; production vs development is separate applicability | Types tests, lifecycle/capture database tests, `demos/cpr-37-conflict-freshness.sh` |
 | D: inbound reconciliation | Repository identity and outbound FLOW-8 exist; inbound absent | [MEM-9](MEM-9.md): separately governed local/private Git reads and path/hash observations | Relevant path change proposes review once; unrelated change does not stale everything; crash does not advance cursor | New source-reconciliation database suite, Git tests, dependency/contract gates |
-| E: structured handoff | CTX-6 deterministic excerpt checkpoint implemented, live task quality open | [CTX-6](CTX-6.md): new verified method, structured evidence, explicit second-client receiving contract | Resume through Claude and manual Codex public API with exact evidence and unknown operation outcomes | Session/context database tests, both adapters, registry checks; separate live qualification |
+| E: structured handoff | CTX-6 deterministic excerpt checkpoint implemented, live task quality open | [CTX-6](CTX-6.md): new verified method, structured evidence, explicit second-client receiving contract | Resume through Claude and the genuine Codex SessionStart/PreCompact interface with exact evidence and unknown operation outcomes | Session/context database tests, both adapters, registry checks; separate live qualification |
 | F: task selection | CTX-8 off/conservative, exact local counter, source spans and shared budget implemented; quality open | [CTX-8](CTX-8.md): preserve cross-paragraph qualifiers and bounded task needs | Tight budget preserves value/unit/negation/exception or reports insufficiency | Retrieval/context/pack tests, `make eval-product`; CTX-7 real 1024-dimensional evidence only if ranking SQL changes |
 | G: procedure learning | Skill versions/usage and feedback exist; outcome-to-proposal path absent | [SKIL-6](SKIL-6.md), [SKIL-5](SKIL-5.md): exact outcome evidence and deterministic review candidates after A | Verified outcome proposes one small edit; unsupported tests-passed claim stays unverified; removal invalidates proposal | New procedure-learning database suite, Skill/Capture/context tests and frozen held-out cases |
 | H: domain example/demo | CPR-41 public-API fictional demo and CPR-40 evaluation delivered | CPR-41/40: glossary, metric definition, approved ambiguity and integrated source-change/handoff/outcome/remove replay | Applicable approved definition with provenance; changed definition opens targeted review | `make eval-product`, `make check-demos`; separate real-harness command |
@@ -296,56 +296,52 @@ already delivered external content.
 
 ## Dependencies
 
-### Implementation checkpoint (2026-10-14)
+### Qualified Session source-control increment (2026-10-14)
 
-Exact implementation HEAD:
-`6a8d2c7bf632a6bedeec76341d9e088f6916b0d7` on
-`codex/context-memory-improvements`; preceding increments are
-`f8e8fdb9a5d0987c9357189fb45e09791f694eb7` and
-`d59ad7d12753dd00ab8971c6cec63cd0096d6d67`.
-This checkpoint's follow-up changes only MEM-8/STATUS documentation; no
-implementation edit is outstanding. Modified implementation areas are typed
-claims, passage selection, ContextRun replay/private dependencies/health,
-immutable policy snapshots, store migration-head/authority proof and generated
-SQLx/API/client contracts. No branch was pushed or release published.
+Sol 6.1 implementation follows read-only Astra 6 max planning and review.
+Accepted ADR-0146 and additive head `0005` implement Session withdrawal/Forget
+as typed VedaFlow effects, a shared/exclusive tenant admission gate, exact
+current stored Cedar decisions, permanent non-cascading event/alias hashes,
+private normalized dependencies, immutable revision/change headers and bounded
+durable cleanup. ImportArtifact roots remain the next Phase A prerequisite for
+inbound reconciliation and learning; MEM-8 remains open.
 
-Passing commands include formatting, strict Clippy for changed crates,
-`make check-fast check-deps check-demos`, current generated-contract/SDK checks,
-the genuine supported vector profiles, fresh SQLx generation/check, the real
-ordinary-role API/RLS/epoch acceptance, rebuilt `make eval-product` (31 scenarios)
-and `bash demos/mem-8-saved-delivery.sh` (ten focused cases). The exact source and
-patch identities, individual counts and metric boundaries are recorded above.
-The baseline stale-policy regression intentionally failed at 200/409. Runs that
-reused its Cargo artifacts are invalidated; rebuilt qualification passes. The
-comparison checkout is archived; owned failed fixture containers/volumes and
-receipt-verified networks are cleaned after qualification. Private temporary
-logs/state are recovery evidence, not project authority.
+Fourteen ordinary-role `source_withdrawals` cases pass: raw/history/saved
+withdrawal, independent clean replacement, source cleanup followed by item
+Forget, exact withdrawal/Forget operation receipts, denial masking with retained
+audit, both admission orderings, all four trace modes, paused late embedding and
+Capture providers, more than 100 targets with fifth-attempt continuation,
+stale-owner/valid-GUC/NULL-bound checks, a second-page hold, retention disposal
+and incident suppressed relations. The 21 ContextRun cases, 7 Knowledge lifecycle
+cases and 8 Capture cases pass; Capture retains its existing ignored case.
+The fresh RLS suite has 66 passing and 5 existing ignored cases. Thirty actual
+serial lifecycle cases pass, plus the exact `0004` source backfill upgrade case.
+The 31-scenario product evaluation, 264 console cases, console build, changed-
+crate strict Clippy, fast/dependency gates and generated OpenAPI/console/SDK
+checks pass. Fresh SQLx prepare/check and independently measured authority
+preflight pass. Genuine pgvector 0.8.2–0.8.5 functional profiles pass alongside
+current 0.8.6. Earlier migration bytes and catalogue checks remain unchanged.
 
-The remaining blocker is unimplemented source control and atomic admission:
-every disclosure/derivation path must share suppression and fence checks before
-new persistent learning can proceed. No external credential blocks deterministic
-A/D/E work. Real provider/harness quality remains separately unqualified.
+Current-head catalogue measurement:
+ACL 383 `dabe07a6c9cb563fd6c8e32eb878a3e9dcf1357df43eeffff2f49964c0f00a8b`;
+routines 83 `a9293d4ed4135a39929b0c24423c9c60b0d6df52502b22c15e9e84ac375eb47b`;
+triggers 138 `626789db3036c5c5c1f563cd599bd109885b8acfa764cebe72267c2e40b06f49`;
+RLS 113 `99d158d3906a9e574c7a5238f70ded0ddfccf139f29df3d2c28ddc6d87053a6b`.
 
-Next executable action: use `docs/adr/adr-0000-template.md` to record the complete
-Session-source withdrawal/forgetting decision from the architecture seam above,
-then implement additive `0005`, the typed VedaFlow commands/public routes,
-authority/source fences, per-source eligibility and domain-specific bounded
-cleanup. Add deterministic `source_withdrawals` barriers and run
-`bash scripts/db-test.sh -p synveda-gateway --test source_withdrawals -- --test-threads=1`,
-then the existing Session/Capture/Knowledge/context/quarantine/worker suites.
-Measure new authority fingerprints and regenerate SQLx/public contracts using
-the documented fresh commands. Continue MEM-9, structured CTX-6, SKIL-6 and the
-integrated CPR-41 domain demonstration after the required source safeguards.
+Operator commands are source-build CLI commands in `docs/CONSUMER_CLI.md`.
+All ten retained disposable fixtures were removed after checking their exact
+Docker labels and immutable network ownership receipts, including private
+credential state. Demo command checks and source CLI help pass.
+Blocked or exhausted cleanup remains inspectable and terminal; suppression
+remains effective. Holds retain inaccessible content. Already delivered bytes,
+exports, remote history and backups retain their separate retention contracts.
+No new provider/model quality, host-token usage or cost measurement is claimed.
 
-No external credential is needed for deterministic work. New source authority,
-suppression and delivery-admission ordering require accepted decisions before
-schema implementation. Real harness/model quality and inbound private-provider
-qualification require a named authorized environment and explicit spend if any.
-Next executable increment: accept a Session-event source-withdrawal contract,
-using exact source-event row locks and permanent scoped suppression. Implement
-the typed governed operation, final admission checks, per-revision/all-source
-eligibility and Capture completion/acceptance fences before enabling bounded
-cleanup or persistent outcome learning. Preserve the distinction between an
-undisclosed private descriptor's access revocation and explicit withdrawal of
-the source content supporting a conclusion. No external credential blocks this
-local source-family implementation.
+Next executable increment: record the ImportArtifact-root extension decision,
+add typed normalized artifact provenance and additive `0006`, and qualify
+withdrawal, permanent alias suppression, precise dependent cleanup and import/
+Capture concurrency using actual OKF artifacts. Then continue MEM-9 local and
+pinned-private Git reconciliation, structured CTX-6 handoff, SKIL-6 outcome
+candidates and the integrated CPR-41 domain demo. No external credential blocks
+that local work. Real private GitHub and native-model qualification require
+their named authorized environment; no A–H completion is claimed.
