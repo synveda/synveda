@@ -207,6 +207,68 @@ the new catalogue independently. Item forget and source forget are distinct;
 one event may support unrelated Knowledge. Current authority is rechecked at
 disclosure; historical queries rewind data, never permissions.
 
+### Remaining source-control implementation seam
+
+GPT-6 Astra's final read-only review identifies this next complete vertical
+slice; these choices still need a source-control ADR before implementation:
+
+- Reuse typed Knowledge/VedaFlow Apply for separate Session-source withdrawal
+  and forgetting, deriving scope from the actual Session, independently
+  authorizing source control and resolving current approval requirements.
+  Pending review has no removal effect. Existing item `Forget` keeps its meaning.
+- Choose shared/exclusive tenant authority mode before authorization or domain
+  locks. Cover Configuration, stored policies, grants/groups/membership, identity
+  departure, scope status/moves and relaxation changes, including directory
+  wrappers. After lock waits, gather current anchors and use one exact frozen
+  policy evaluator for all decisions and thresholds; read fresh database time.
+- Lock ordered Session/source identities before descendant/operation rows.
+  Ordinary `FOR SHARE` on immutable event rows requires unavailable UPDATE
+  privileges. Use a narrowly checked bounded definer fence or a short coarse
+  Session-row fence; never broaden event UPDATE rights. Append already locks
+  Session first, so an event-then-Session order would create a cycle.
+- Check suppression in a second statement after acquiring the fence, avoiding
+  a pre-wait READ COMMITTED snapshot. Retain a non-cascading alias over tenant,
+  original Session, client-event-ID digest and original raw source-payload hash,
+  plus the public payload hash and approved effect identities. Check it before
+  duplicate payload return and new append, even after scoped event retention.
+  Explicit governed reimport creates a new materialization; it does not clear
+  the old decision or resurrect old receipts/approvals.
+- Check every exact revision's normalized source links, including undisclosed
+  descriptors. Access revocation of an undisclosed descriptor differs from
+  explicit withdrawal of its content. Flat multiple-source provenance does not
+  prove independent support: preserve unaffected revisions/candidates and require
+  review for ambiguous mixed support.
+- Apply per-revision/per-event eligibility to raw Session diagnostics, append,
+  summaries, timeline, quarantine list/release/reject, checkpoint verification
+  and chains, Capture input/results/acceptance, Knowledge history/source/usage,
+  conflict expansion, OKF export, Context previews/delivery/replay/detail/graph,
+  and proposal command diffs. Item authorization alone cannot filter historical
+  revisions independently. Quarantine release cannot lift suppression.
+- Admit extractor input before releasing the connection for provider work;
+  reacquire authority/source fences and check exact frozen input before candidate
+  commit. Repeat the check inside publication and delayed apply, including
+  inherited Verify/Merge evidence and embedding completion. A late extractor
+  cannot change the old batch's input hash to pretend it processed new evidence.
+- Add a domain-specific `source_cleanup` path over existing operations, attempts
+  and outbox. Current dispatch/claim/complete methods hardcode Skill joins; do
+  not pass a new kind through them. Run it under the existing worker generation,
+  shutdown and authority supervisors. Each bounded chunk checks a live lease/
+  attempt, applies idempotent work and commits cursor/progress/audit together.
+  Suppression remains authoritative while cleanup is blocked or retrying.
+- Discover and clear affected delivery copies before disposing checkpoint
+  excerpts or lineage. Narrow one-way erasure primitives must verify the approved
+  effect and exact attempt, not a caller-set GUC. Source/history retained under
+  hold is inaccessible, not physically erased. Preserve export receipts and
+  remote history. Manually copied authored/Skill prose without exact lineage
+  cannot be inferred as an automatic source derivative.
+
+Acceptance needs deterministic barriers for both admission/removal orders,
+stale extractor/indexer completion, unchanged append after retention, crash/
+reclaim between cleanup chunks, exact current policy after waits, every trace
+mode and independent remaining evidence. Additive head `0005` must preserve
+head-0004 authority checks, independently measure its catalogue and regenerate
+metadata/contracts before enabling the complete source-control path.
+
 ## Acceptance criteria
 
 - Saved delivery never bypasses current source authority or removal checks.
@@ -233,6 +295,47 @@ claim that the first replay repair provides complete source removal or retracts
 already delivered external content.
 
 ## Dependencies
+
+### Implementation checkpoint (2026-10-14)
+
+Exact implementation HEAD:
+`6a8d2c7bf632a6bedeec76341d9e088f6916b0d7` on
+`codex/context-memory-improvements`; preceding increments are
+`f8e8fdb9a5d0987c9357189fb45e09791f694eb7` and
+`d59ad7d12753dd00ab8971c6cec63cd0096d6d67`.
+This checkpoint's follow-up changes only MEM-8/STATUS documentation; no
+implementation edit is outstanding. Modified implementation areas are typed
+claims, passage selection, ContextRun replay/private dependencies/health,
+immutable policy snapshots, store migration-head/authority proof and generated
+SQLx/API/client contracts. No branch was pushed or release published.
+
+Passing commands include formatting, strict Clippy for changed crates,
+`make check-fast check-deps check-demos`, current generated-contract/SDK checks,
+the genuine supported vector profiles, fresh SQLx generation/check, the real
+ordinary-role API/RLS/epoch acceptance, rebuilt `make eval-product` (31 scenarios)
+and `bash demos/mem-8-saved-delivery.sh` (ten focused cases). The exact source and
+patch identities, individual counts and metric boundaries are recorded above.
+The baseline stale-policy regression intentionally failed at 200/409. Runs that
+reused its Cargo artifacts are invalidated; rebuilt qualification passes. The
+comparison checkout is archived; owned failed fixture containers/volumes and
+receipt-verified networks are cleaned after qualification. Private temporary
+logs/state are recovery evidence, not project authority.
+
+The remaining blocker is unimplemented source control and atomic admission:
+every disclosure/derivation path must share suppression and fence checks before
+new persistent learning can proceed. No external credential blocks deterministic
+A/D/E work. Real provider/harness quality remains separately unqualified.
+
+Next executable action: use `docs/adr/adr-0000-template.md` to record the complete
+Session-source withdrawal/forgetting decision from the architecture seam above,
+then implement additive `0005`, the typed VedaFlow commands/public routes,
+authority/source fences, per-source eligibility and domain-specific bounded
+cleanup. Add deterministic `source_withdrawals` barriers and run
+`bash scripts/db-test.sh -p synveda-gateway --test source_withdrawals -- --test-threads=1`,
+then the existing Session/Capture/Knowledge/context/quarantine/worker suites.
+Measure new authority fingerprints and regenerate SQLx/public contracts using
+the documented fresh commands. Continue MEM-9, structured CTX-6, SKIL-6 and the
+integrated CPR-41 domain demonstration after the required source safeguards.
 
 No external credential is needed for deterministic work. New source authority,
 suppression and delivery-admission ordering require accepted decisions before

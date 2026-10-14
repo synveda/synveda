@@ -335,6 +335,13 @@ second-client handoff, procedure learning and the integrated domain demo are
 not delivered. Next implement a separately governed Session-event withdrawal
 with exact source locks, permanent suppression and all derivative disclosure/
 Capture fences; no external credential blocks that local work.
+The exact implementation checkpoint is
+`6a8d2c7bf632a6bedeec76341d9e088f6916b0d7`; the follow-up changes only this
+inventory and MEM-8 documentation. Rebuilt 31-scenario product and ten-case demo
+qualification passes after invalidating shared-baseline Cargo artifacts. The
+open brief records modified areas, passing/failing commands, source identity,
+actual blocker and the next executable source-withdrawal step. Full A–H remains
+unfinished; no new persistent procedure-learning path is enabled.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
 OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL
