@@ -135,7 +135,15 @@ with target_database as (
      and namespace.nspname = 'public'
      and acl.grantor = target.owner_oid
      and acl.grantee = app.oid
-     and acl.privilege_type = 'UPDATE'
+     and (
+       acl.privilege_type = 'UPDATE'
+       or acl.privilege_type = 'INSERT' and (
+         object.relname = 'source_cleanup_targets'
+         and attribute.attname in ('tenant_id', 'operation_id', 'event_id', 'change_id', 'input_hash')
+         or object.relname = 'artifact_cleanup_targets'
+         and attribute.attname in ('tenant_id', 'operation_id', 'artifact_id', 'source_key_digest', 'change_id', 'input_hash')
+       )
+     )
      and not acl.is_grantable
   union
   select target.database_oid,

@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const version = JSON.parse(readFileSync(join(root, "adapters/codex/package.json"), "utf8")).version;
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-plugin-package-")));
+const sharedModules = ["checkpoint-capability", "client", "config", "credentials", "deliver", "events", "git",
+  "install-id", "log", "paths", "private-state", "session-runtime", "session-start", "spool", "transcript", "turn"];
 function run(command, args, cwd, extra = {}) {
   return execFileSync(command, args, { cwd, encoding: "utf8", timeout: 120_000,
     maxBuffer: 8 * 1024 * 1024, env: { ...process.env, NODE_PATH: "" }, ...extra });
@@ -34,6 +36,9 @@ try {
   assert.equal(consumer.config_sha256, createHash("sha256").update(readFileSync(join(scratch, "plugin/synveda/dist/config.mjs"))).digest("hex"));
   const claude = join(scratch, "plugin/synveda/dist");
   const claudeFiles = readdirSync(claude, { withFileTypes: true });
+  assert.deepEqual(claudeFiles.map((file) => file.name).sort(),
+    [...sharedModules, "hook", "mcp-server", "skills"].map((name) => `${name}.mjs`).sort(),
+    "Claude archive must contain the complete closed runtime");
   assert.ok(claudeFiles.every((file) => file.isFile() && file.name.endsWith(".mjs") &&
     !file.name.includes(".test.") && !["mock-gateway.mjs", "driver.mjs", "types.mjs"].includes(file.name)),
   "Claude must carry ordinary runtime modules only");
@@ -50,6 +55,8 @@ try {
     const runtime = join(scratch, "plugin", client);
     const shared = join(runtime, "node_modules/@synveda/claude-code-adapter");
     const files = readdirSync(runtime, { recursive: true, withFileTypes: true });
+    assert.deepEqual(readdirSync(join(shared, "dist")).sort(), sharedModules.map((name) => `${name}.mjs`).sort(),
+      "private adapters must carry the complete shared runtime");
     assert.ok(files.every((file) => file.isDirectory() || file.isFile()), "archive must not carry symlinks");
     assert.ok(files.every((file) => !file.name.includes(".test.") && !["src", "fixtures"].includes(file.name)));
     for (const directory of [runtime, shared]) {

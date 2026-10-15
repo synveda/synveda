@@ -3494,6 +3494,77 @@ for _ in 1 2; do
 done
 echo "db-test: isolated exact-role database bootstrapped and migrated"
 
+# MEM-8/CPR-45: retained bootstrap must recognize the exact column grants
+# installed by source cleanup, without admitting caller-chosen progress or
+# grantable authority. No product test runs while these owned controls exist.
+current_migration_ledger() {
+  compose exec -T postgres-main \
+    psql -X -qAt -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda \
+    --command 'select jsonb_agg(to_jsonb(m) order by version) from _sqlx_migrations m'
+}
+cleanup_ledger_before=$(current_migration_ledger)
+compose run --rm --no-deps database-bootstrap-main
+[ "$(current_migration_ledger)" = "$cleanup_ledger_before" ] || {
+  echo "db-test: retained bootstrap changed the migration ledger" >&2
+  exit 1
+}
+for cleanup_control in \
+    source_cleanup_targets:phase:synveda_app:plain \
+    artifact_cleanup_targets:phase:synveda_app:plain \
+    session_events:tenant_id:synveda_app:plain \
+    source_cleanup_targets:tenant_id:synveda_gateway:plain \
+    source_cleanup_targets:tenant_id:synveda_app:grantable; do
+  IFS=: read -r cleanup_table cleanup_column cleanup_grantee cleanup_option <<EOF
+$cleanup_control
+EOF
+  cleanup_grant_option=
+  [ "$cleanup_option" != grantable ] || cleanup_grant_option='with grant option'
+  compose exec -T postgres-main \
+    psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda \
+    --command "set role synveda_migrator; grant insert ($cleanup_column) on public.$cleanup_table to $cleanup_grantee $cleanup_grant_option"
+  cleanup_stdout=$state_dir/cleanup-column.stdout
+  cleanup_stderr=$state_dir/cleanup-column.stderr
+  private_evidence_file "$cleanup_stdout"
+  private_evidence_file "$cleanup_stderr"
+  cleanup_before=$(catalog_fingerprint postgres-main synveda)
+  if compose run --rm --no-deps database-bootstrap-main \
+      > "$cleanup_stdout" 2> "$cleanup_stderr"; then
+    echo "db-test: retained bootstrap accepted unapproved cleanup column authority" >&2
+    exit 1
+  fi
+  LC_ALL=C grep -Fq \
+    'database-bootstrap: Synveda local authority preflight was refused' \
+    "$cleanup_stderr" || {
+      echo "db-test: cleanup column authority missed the pre-mutation guard" >&2
+      exit 1
+    }
+  assert_database_secrets_absent "$cleanup_stdout"
+  assert_database_secrets_absent "$cleanup_stderr"
+  cleanup_after=$(catalog_fingerprint postgres-main synveda)
+  [ "$cleanup_before" = "$cleanup_after" ] || {
+    echo "db-test: refused cleanup column authority changed catalog state" >&2
+    exit 1
+  }
+  cleanup_revoke_option=
+  [ "$cleanup_option" != grantable ] || cleanup_revoke_option='grant option for'
+  compose exec -T postgres-main \
+    psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda \
+    --command "set role synveda_migrator; revoke $cleanup_revoke_option insert ($cleanup_column) on public.$cleanup_table from $cleanup_grantee"
+  rm -f "$cleanup_stdout" "$cleanup_stderr"
+done
+[ "$(current_migration_ledger)" = "$cleanup_ledger_before" ] || {
+  echo "db-test: cleanup column controls changed the migration ledger" >&2
+  exit 1
+}
+SQLX_OFFLINE=true \
+DATABASE_URL_FILE=$main_migrator_file \
+SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+  cargo run -q -p synveda-cli --bin synveda -- db migrate
+unset cleanup_ledger_before cleanup_control cleanup_table cleanup_column cleanup_grantee \
+  cleanup_option cleanup_grant_option cleanup_revoke_option cleanup_stdout cleanup_stderr \
+  cleanup_before cleanup_after
+echo "db-test: retained source-cleanup column authority passed positive and refusal controls"
+
 status=0
 case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
   workspace)

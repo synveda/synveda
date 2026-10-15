@@ -4,6 +4,63 @@ mod context_world;
 use context_world::*;
 
 #[tokio::test]
+async fn four_concurrent_readers_create_and_replay_exact_context() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let fact = "Concurrent readers retain the iris-41 release evidence.";
+    create_knowledge(
+        &world,
+        "mem8-concurrent-context-source",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Iris concurrent context",
+        fact,
+        None,
+    )
+    .await;
+    let path = format!("/v1/sessions/{}/context-runs", world.alice_session);
+    let request = json!({"query":"iris-41 release", "budget_tokens":1500});
+    let create = |key: &'static str| {
+        call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(key),
+            Some(request.clone()),
+        )
+    };
+    let (first, second, third, fourth) = tokio::join!(
+        create("mem8-concurrent-1"),
+        create("mem8-concurrent-2"),
+        create("mem8-concurrent-3"),
+        create("mem8-concurrent-4"),
+    );
+    for (index, (status, run)) in [first, second, third, fourth].into_iter().enumerate() {
+        assert_eq!(status, StatusCode::CREATED, "reader {index}: {run}");
+        assert!(run["rendered"].as_str().unwrap().contains(fact));
+        let key = format!("mem8-concurrent-{}", index + 1);
+        let (status, replay) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(&key),
+            Some(request.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{replay}");
+        assert_eq!(
+            replay, run,
+            "reader {index} must replay its original receipt"
+        );
+    }
+}
+
+#[tokio::test]
 async fn saved_delivery_uses_committed_policy_before_process_refresh() {
     let _guard = serial().await;
     let Some(world) = admitted_world().await else {

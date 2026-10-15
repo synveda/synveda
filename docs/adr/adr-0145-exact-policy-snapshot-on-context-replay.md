@@ -27,7 +27,11 @@ cache from a request or rely on name/version alone.
 Limit the inventory to 64 packs and 1 MiB of source text. The store bounds rows
 before returning text, and withholds text when the aggregate source bound is
 exhausted. Limit concurrent snapshot construction to two per process and include
-it within replay's five-second deadline. Cache hits reuse immutable compiles;
+it within replay's five-second deadline. Wait asynchronously for a construction
+slot for at most five seconds rather than refusing ordinary short contention;
+the outer replay deadline still bounds the complete proof. Retain the slot in
+the CPU task until construction finishes, including after request cancellation.
+Cache hits reuse immutable compiles;
 misses use bounded local CPU work. No network, model or second database pool is
 introduced. Unavailable, malformed or over-limit current policy yields the
 existing content-free saved-delivery conflict, retaining the original receipt.

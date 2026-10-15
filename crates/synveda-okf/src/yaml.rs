@@ -70,6 +70,9 @@ fn invalid(path: &str) -> Error {
 }
 
 pub(crate) fn emit(value: &Value) -> Result<String> {
+    // Cargo feature unification can make JSON maps preserve insertion order.
+    // Sort at every depth so export bytes do not depend on the build graph.
+    let value = synveda_types::json::canonicalise(value);
     // Quote every string: the emitter's numeric heuristics do not cover all
     // binary forms the parser recognizes. Frontmatter owns its delimiters.
     let config = noyalib::SerializerConfig::new()
@@ -81,7 +84,7 @@ pub(crate) fn emit(value: &Value) -> Result<String> {
         .prefer_single_quotes(true)
         .max_depth(32);
     let mut output =
-        noyalib::to_string_with_config(value, &config).map_err(|_| Error::Internal {
+        noyalib::to_string_with_config(&value, &config).map_err(|_| Error::Internal {
             message: "deterministic OKF frontmatter serialization failed".to_owned(),
         })?;
     // The emitter need not end a document with LF when markers are disabled;
@@ -90,4 +93,26 @@ pub(crate) fn emit(value: &Value) -> Result<String> {
         output.push('\n');
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn object_order_does_not_change_export_bytes_at_any_depth() {
+        let first: Value =
+            serde_json::from_str(r#"{"z":{"last":true,"first":3},"a":[{"z":"0b11","a":false},2]}"#)
+                .unwrap();
+        let reordered: Value =
+            serde_json::from_str(r#"{"a":[{"a":false,"z":"0b11"},2],"z":{"first":3,"last":true}}"#)
+                .unwrap();
+        let rendered = emit(&first).unwrap();
+        assert_eq!(rendered, emit(&reordered).unwrap());
+        assert_eq!(parse(&rendered, "fixture:object-order").unwrap(), first);
+        let reversed: Value =
+            serde_json::from_str(r#"{"a":[2,{"a":false,"z":"0b11"}],"z":{"first":3,"last":true}}"#)
+                .unwrap();
+        assert_ne!(rendered, emit(&reversed).unwrap(), "array order is content");
+    }
 }
